@@ -120,6 +120,42 @@ describe("bootstrapRibs", () => {
     ).toThrow(/manifest key 'alpha' declares id 'beta'/);
   });
 
+  test("malformed manifest key throws (embedder bug, not operator typo)", () => {
+    // Unset KEELSON_RIBS — active list comes from Object.keys(available),
+    // so a bad key would otherwise be silently skipped. Throwing surfaces
+    // the embedder's typo at boot instead of leaving the rib inactive.
+    delete process.env.KEELSON_RIBS;
+    expect(() =>
+      bootstrapRibs({
+        available: { Alpha: fakeRib("Alpha") },
+      }),
+    ).toThrow(/manifest key 'Alpha' is invalid/);
+  });
+
+  test("disposeAll awaits async disposers in order", async () => {
+    delete process.env.KEELSON_RIBS;
+    const calls: string[] = [];
+    const asyncRib = (id: string, delayMs: number): Rib => ({
+      id,
+      displayName: id,
+      registerTools: () => ({ registered: [] }),
+      dispose: async () => {
+        await new Promise((r) => setTimeout(r, delayMs));
+        calls.push(id);
+      },
+    });
+    const { disposeAll } = bootstrapRibs({
+      available: {
+        // alpha sleeps longer; sequential await means alpha lands first
+        // even though beta's wait is shorter.
+        alpha: asyncRib("alpha", 30),
+        beta: asyncRib("beta", 5),
+      },
+    });
+    await disposeAll();
+    expect(calls).toEqual(["alpha", "beta"]);
+  });
+
   test("disposeAll invokes each rib's dispose hook in order", async () => {
     delete process.env.KEELSON_RIBS;
     const calls: string[] = [];

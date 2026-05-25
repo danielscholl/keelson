@@ -140,7 +140,7 @@ export function bootstrapRibs(options: BootstrapRibsOptions): RibBootstrap {
     async disposeAll() {
       for (const d of disposers) {
         try {
-          d.dispose();
+          await d.dispose();
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(`[keelson] rib '${d.id}' dispose() threw: ${msg}`);

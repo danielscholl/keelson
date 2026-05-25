@@ -34,7 +34,7 @@ export interface RibManifest {
 
 export interface RibDisposer {
   readonly id: string;
-  dispose(): void;
+  dispose(): void | Promise<void>;
 }
 
 export interface ApplyRibsResult {
@@ -60,10 +60,14 @@ export interface ApplyRibsOptions {
  * Apply each active rib's `registerTools` hook against the shared context.
  * Returns one manifest entry per rib that successfully registered.
  *
- * - Ids that fail `ribIdSchema` (lowercase kebab-case, ≤64 chars) are
- *   rejected with a warning so a typo in `KEELSON_RIBS` never silently
- *   matches a malformed manifest key.
- * - Unknown ids in `active` produce a console.warn and are skipped.
+ * Validation is split by *source* of error:
+ * - The `available` map comes from the embedder's code. A malformed key
+ *   there is a bug in the rib package or the composition root — throw
+ *   eagerly so it surfaces in tests / dev, never silently leave a rib
+ *   inactive in production.
+ * - The `active` list comes from `KEELSON_RIBS` (operator input). A
+ *   typo there is a runtime misconfiguration — warn and skip so a bad
+ *   env value can't take the whole server down.
  * - A rib whose self-declared `id` doesn't match its manifest key, or
  *   whose `id` / `displayName` fail the shared schemas, throws — those
  *   are bugs in the rib package itself, not operator misconfiguration.
@@ -71,6 +75,17 @@ export interface ApplyRibsOptions {
  *   invariant protects the tool registry from ambiguous ownership.
  */
 export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
+  // Eager check on the embedder-supplied map keys. Anything malformed
+  // here is a code bug; a thrown error in test/dev is strictly better
+  // than a silently inactive rib in production.
+  for (const key of Object.keys(opts.available)) {
+    const keyCheck = ribIdSchema.safeParse(key);
+    if (!keyCheck.success) {
+      throw new Error(
+        `Rib manifest key '${key}' is invalid: ${keyCheck.error.issues[0]?.message ?? "schema violation"}`,
+      );
+    }
+  }
   const manifests: RibManifest[] = [];
   const disposers: RibDisposer[] = [];
   const seen = new Set<string>();

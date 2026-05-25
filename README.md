@@ -75,8 +75,12 @@ The workflow engine — YAML schema, DAG node taxonomy (`prompt` / `bash` /
 `command` / `loop` / `script` / `approval` / `cancel` / `subprocess`), and
 the `$nodeId.output` substitution model — borrows concepts from
 [Archon](https://github.com/coleam00/Archon) by Cole Medin, used under the
-MIT license. Workflows authored against Archon's spec parse cleanly here;
-the on-disk YAML format stays compatible.
+MIT license. Keelson implements a compatible subset of Archon's spec: most
+workflows authored against Archon load directly, and the loader emits
+warnings (rather than hard errors) when it encounters fields or loop
+forms it doesn't yet support — see
+[`packages/workflows/src/loader.ts`](packages/workflows/src/loader.ts)
+for the current edge cases.
 
 Keelson re-types the schema in TypeScript and adapts the executor to
 Bun + SQLite — the conceptual credit belongs upstream. Full attribution
@@ -86,13 +90,20 @@ lives in [NOTICE](NOTICE).
 ## Install
 
 Keelson is currently developed and run from the workspace — there's no
-standalone binary yet. The only tool you need is [Bun](https://bun.sh/).
+standalone binary yet. The only tool you need for the golden path is
+[Bun](https://bun.sh/).
 
 ```bash
 git clone https://github.com/danielscholl/keelson.git
 cd keelson
 bun install
 ```
+
+**Optional**: install [uv](https://docs.astral.sh/uv/) if you want to run
+the Python `runtime: uv` script-node path. The bundled
+[`python-smoke-test`](.keelson/workflows/python-smoke-test.yaml) workflow
+exercises it; the regular [`smoke-test`](.keelson/workflows/smoke-test.yaml)
+is Bun-only.
 
 Alias the workspace bin while developing:
 

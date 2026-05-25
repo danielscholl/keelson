@@ -90,5 +90,8 @@ export interface Rib {
   displayName: string;
   registerTools?(ctx: RibContext): { registered: string[] };
   composeBundle?(ctx: RibContext): Promise<unknown>;
-  dispose?(): void;
+  // Sync or async — the harness awaits the returned promise (if any)
+  // during shutdown so ribs holding sockets, watchers, or child
+  // processes can tear down cleanly before db close.
+  dispose?(): void | Promise<void>;
 }

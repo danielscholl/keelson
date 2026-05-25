@@ -1,14 +1,17 @@
-# E2E smoke test — every CI-compatible node type
-# Covers: prompt, command, loop (AI node types) + bash, script bun/uv
+# E2E smoke test — every CI-compatible node type that runs on Bun alone.
+# Covers: prompt, command, loop (AI node types) + bash, script bun
 #   (deterministic node types) + depends_on / when / trigger_rule / $nodeId.output
 #   (DAG features).
 # Skipped: `approval:` — pauses for human input, incompatible with CI.
+# Skipped: `runtime: uv` — see python-smoke-test.yaml for the Python demo;
+#   keeping this workflow Bun-only means the README quick-start has zero
+#   non-Bun prerequisites.
 # No provider pin — runs against whichever provider the server has registered
 # as default (stub / claude / copilot). Adjust per-node `model:` if you want
 # to exercise a specific backend.
 
 name: smoke-test
-description: End-to-end smoke covering every CI-compatible node type.
+description: End-to-end smoke covering every CI-compatible node type (Bun-only).
 
 nodes:
   # ─── AI node types ──────────────────────────────────────────────────────
@@ -52,36 +55,30 @@ nodes:
     runtime: bun
     timeout: 30000
 
-  # 6. script: uv (Python runtime). Requires `uv` on PATH.
-  - id: script-python-node
-    script: echo-py
-    runtime: uv
-    timeout: 30000
-
   # ─── DAG features ───────────────────────────────────────────────────────
 
-  # 7. depends_on + safe env-channel access to upstream output. The bash
+  # 6. depends_on + safe env-channel access to upstream output. The bash
   # handler runs the raw body (pre-substitution) to dodge command injection
   # via upstream text; authors reach upstream output through KEELSON_NODE_*.
   - id: downstream
     bash: 'echo "downstream got: $KEELSON_NODE_prompt_node_OUTPUT"'
     depends_on: [prompt-node]
 
-  # 8. when: conditional (JSON dot-access on bash JSON output)
+  # 7. when: conditional (JSON dot-access on bash JSON output)
   - id: gated
     bash: "echo 'gated-ok'"
     depends_on: [bash-json-node]
     when: "$bash-json-node.output.status == 'ok'"
 
-  # 9. trigger_rule: merge multiple deps (all_success semantics)
+  # 8. trigger_rule: merge multiple deps (all_success semantics)
   - id: merge
     bash: "echo 'merge-ok'"
-    depends_on: [downstream, gated, script-bun-node, script-python-node]
+    depends_on: [downstream, gated, script-bun-node]
     trigger_rule: all_success
 
   # ─── Final assertion ────────────────────────────────────────────────────
 
-  # 10. Verify every upstream node produced non-empty output. Upstream values
+  # 9. Verify every upstream node produced non-empty output. Upstream values
   #     are read through the KEELSON_NODE_<id>_OUTPUT env channel: the bash
   #     handler runs the raw body (pre-substitution) on purpose, so the
   #     `$nodeId.output` form would not expand at all here. The `when:` gates
@@ -97,15 +94,14 @@ nodes:
           fail=1
         fi
       }
-      check prompt-node        "$KEELSON_NODE_prompt_node_OUTPUT"
-      check command-node       "$KEELSON_NODE_command_node_OUTPUT"
-      check loop-node          "$KEELSON_NODE_loop_node_OUTPUT"
-      check bash-json-node     "$KEELSON_NODE_bash_json_node_OUTPUT"
-      check script-bun-node    "$KEELSON_NODE_script_bun_node_OUTPUT"
-      check script-python-node "$KEELSON_NODE_script_python_node_OUTPUT"
-      check downstream         "$KEELSON_NODE_downstream_OUTPUT"
-      check gated              "$KEELSON_NODE_gated_OUTPUT"
-      check merge              "$KEELSON_NODE_merge_OUTPUT"
+      check prompt-node      "$KEELSON_NODE_prompt_node_OUTPUT"
+      check command-node     "$KEELSON_NODE_command_node_OUTPUT"
+      check loop-node        "$KEELSON_NODE_loop_node_OUTPUT"
+      check bash-json-node   "$KEELSON_NODE_bash_json_node_OUTPUT"
+      check script-bun-node  "$KEELSON_NODE_script_bun_node_OUTPUT"
+      check downstream       "$KEELSON_NODE_downstream_OUTPUT"
+      check gated            "$KEELSON_NODE_gated_OUTPUT"
+      check merge            "$KEELSON_NODE_merge_OUTPUT"
 
       if [ "$fail" -eq 1 ]; then exit 1; fi
       echo "PASS: all node types verified"
