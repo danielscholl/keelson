@@ -139,7 +139,7 @@ describe("snapshots WS", () => {
       NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>
     >[0];
 
-    const handlers = snapshotWebSocketHandlers({ subscribers, manager });
+    const handlers = snapshotWebSocketHandlers({ subscribers });
     handlers.open?.(fakeWs);
 
     await manager.recompose("counter");
@@ -168,7 +168,7 @@ describe("snapshots WS", () => {
       NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>
     >[0];
 
-    const handlers = snapshotWebSocketHandlers({ subscribers, manager });
+    const handlers = snapshotWebSocketHandlers({ subscribers });
     handlers.open?.(fakeWs);
     await manager.recompose("k");
     expect(sent).toHaveLength(1);
@@ -210,7 +210,7 @@ describe("snapshots WS", () => {
       NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>
     >[0];
 
-    const handlers = snapshotWebSocketHandlers({ subscribers, manager });
+    const handlers = snapshotWebSocketHandlers({ subscribers });
     handlers.open?.(fakeWs);
 
     // Initial compose — rib's onboot warm-up call would do this. WS receives.

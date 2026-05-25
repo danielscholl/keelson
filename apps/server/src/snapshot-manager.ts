@@ -105,6 +105,7 @@ class SnapshotManagerImpl implements SnapshotManager {
     this.disposed = true;
     // Drain in-flight composes so a broadcast doesn't race the close.
     await Promise.allSettled(Array.from(this.inflight.values()));
+    this.inflight.clear();
     this.composers.clear();
     this.cache.clear();
     this.versions.clear();

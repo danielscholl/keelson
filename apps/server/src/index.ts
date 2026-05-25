@@ -179,7 +179,6 @@ const workflowRunHandlers = workflowRunWebSocketHandlers({
 });
 const snapshotHandlers = snapshotWebSocketHandlers({
   subscribers: snapshotSubscribers,
-  manager: snapshotManager,
 });
 
 // Single WebSocketHandler that dispatches by `ws.data.kind`. All per-kind

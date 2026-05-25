@@ -27,9 +27,10 @@ export function snapshotsRoutes(app: Hono, deps: SnapshotsRoutesDeps): void {
     return c.json({ keys: manager.keys() });
   });
 
-  // Latest cached frame for a key. 404 distinguishes "never composed" from
-  // "registered but stale" — both surface as undefined here because v0.2
-  // doesn't lazy-compose on read (deterministic by design).
+  // Latest cached frame for a key. 404 means "no cached snapshot" — that
+  // covers both unregistered keys and registered-but-never-composed keys.
+  // The /api/snapshots index endpoint is the way to introspect registration.
+  // v0.2 intentionally does not lazy-compose on read; recompose is explicit.
   app.get("/api/snapshots/:key", (c) => {
     const key = c.req.param("key");
     const frame = manager.latest(key);
@@ -66,22 +67,14 @@ export function handleSnapshotUpgrade(
 
 export function snapshotWebSocketHandlers(deps: {
   subscribers: SnapshotSubscribers;
-  manager: SnapshotManager;
 }): WebSocketHandler<WsData> {
-  const { subscribers, manager } = deps;
+  const { subscribers } = deps;
   return {
     open(ws: ServerWebSocket<WsData>) {
       const key = ws.data.snapshotKey;
       if (!key) return;
       subscribers.subscribe(key, ws);
-      // No on-connect replay frame: clients are expected to GET
-      // `/api/snapshots/:key` to hydrate, then subscribe for live updates.
-      // This mirrors the workflow-run REST-then-WS pattern in
-      // apps/web/src/hooks/useWorkflowRun.ts. Sending the cached frame here
-      // anyway is harmless (clients dedupe by `version`) so future work may
-      // add it as a "warm start" optimization — leaving it off for v0.2
-      // keeps the wire shape minimal and deterministic.
-      void manager;
+      // No on-connect replay: clients GET /api/snapshots/:key to hydrate, then upgrade.
     },
     message() {
       // Snapshot WS is pure-broadcast; clients don't send frames. Ignore.

@@ -82,10 +82,13 @@ export interface RibContext {
 //
 // All lifecycle hooks are optional; a rib can implement any subset.
 //
-// If `composeBundle` is declared, the harness calls it AFTER `registerTools`
-// and registers the returned value under `rib.id` in the snapshot manager.
-// Ribs can also subscribe additional snapshots imperatively from inside
-// `registerTools` via `ctx.getSnapshotManager?.().register(key, …)`.
+// If `composeBundle` is declared, the harness registers it as the snapshot
+// composer under `rib.id` after `registerTools` returns. The closure is
+// invoked LAZILY — only when something calls `SnapshotManager.recompose(rib.id)`,
+// not eagerly at boot. Ribs that want a warm initial snapshot should call
+// `ctx.getSnapshotManager?.().recompose(rib.id)` from inside `registerTools`.
+// Ribs can also register additional snapshots imperatively via
+// `ctx.getSnapshotManager?.().register(key, …)`.
 export interface Rib {
   // Stable identifier matching the package basename
   // (e.g. "my-rib" → @keelson/rib-my-rib). Gated by KEELSON_RIBS.
