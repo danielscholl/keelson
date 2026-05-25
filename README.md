@@ -259,8 +259,8 @@ Every command supports `--json` for piping. Stable exit codes: `0` success,
 | Phase | Deliverable | Status |
 |---|---|---|
 | v0.1 | Skeleton, providers, workflow engine, CLI, Chat + Workflows SPA, Rib contract | ✅ |
-| v0.2 | Snapshot infrastructure (generic `SnapshotManager` + WS streaming) | next |
-| v0.3 | Agent memory layer (governed recall/writeback) | — |
+| v0.2 | Snapshot infrastructure (generic `SnapshotManager` + WS streaming) | ✅ |
+| v0.3 | Agent memory layer (governed recall/writeback) | next |
 | v0.4 | Dynamic rib discovery from `node_modules/@keelson/rib-*` | — |
 
 
