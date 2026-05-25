@@ -9,6 +9,7 @@
 export * from "./chat.ts";
 export type { MemoryTools } from "./memory.ts";
 export * from "./rib.ts";
+export * from "./snapshots.ts";
 export * from "./tools.ts";
 export * from "./workflows.ts";
 
