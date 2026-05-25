@@ -278,6 +278,10 @@ function LayoutButton({ icon, label, active, onClick }: LayoutButtonProps) {
 // 14px inline SVGs — pictograms of each layout. `currentColor` so the
 // active/inactive color cascades from the button's text color.
 function LayoutGlyph({ icon }: { icon: Layout }) {
+  // SVGs are decorative — every caller pairs them with a visible <span>
+  // label inside the same <button>, so aria-hidden keeps assistive tech
+  // from announcing them twice. Inlined on each <svg> (rather than spread
+  // through `common`) so the linter can see it.
   const common = {
     width: 14,
     height: 14,
@@ -287,11 +291,10 @@ function LayoutGlyph({ icon }: { icon: Layout }) {
     strokeWidth: 1.5,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
-    "aria-hidden": true,
   };
   if (icon === "split") {
     return (
-      <svg {...common}>
+      <svg {...common} aria-hidden="true">
         <rect x="1.5" y="2.5" width="5.5" height="11" rx="1.2" />
         <rect x="9" y="2.5" width="5.5" height="11" rx="1.2" />
       </svg>
@@ -299,7 +302,7 @@ function LayoutGlyph({ icon }: { icon: Layout }) {
   }
   if (icon === "trace") {
     return (
-      <svg {...common}>
+      <svg {...common} aria-hidden="true">
         <line x1="2.5" y1="4.5" x2="13.5" y2="4.5" />
         <line x1="2.5" y1="8" x2="13.5" y2="8" />
         <line x1="2.5" y1="11.5" x2="13.5" y2="11.5" />
@@ -308,7 +311,7 @@ function LayoutGlyph({ icon }: { icon: Layout }) {
   }
   // graph
   return (
-    <svg {...common}>
+    <svg {...common} aria-hidden="true">
       <circle cx="8" cy="3.2" r="1.6" />
       <circle cx="8" cy="8" r="1.6" />
       <circle cx="8" cy="12.8" r="1.6" />

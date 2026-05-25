@@ -82,5 +82,5 @@ Open an issue at https://github.com/danielscholl/keelson/issues with:
 
 ## Security
 
-For security-sensitive reports, email the maintainer directly rather than
-opening a public issue. See the SECURITY notice in the repo root if present.
+For security-sensitive reports, see [SECURITY.md](SECURITY.md). Please do
+not file public GitHub issues for vulnerabilities.

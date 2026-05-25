@@ -248,6 +248,7 @@ Every command supports `--json` for piping. Stable exit codes: `0` success,
 ## Documentation
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, required checks, PR hygiene
+- [SECURITY.md](SECURITY.md) — supported versions, threat model, how to report
 - [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) — the `Rib` contract
 - [`packages/workflows/src/schema/`](packages/workflows/src/schema/) — YAML schema (Archon-compatible)
 - [`.keelson/workflows/`](.keelson/workflows/) — bundled starter workflows

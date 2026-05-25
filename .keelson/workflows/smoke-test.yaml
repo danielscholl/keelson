@@ -16,11 +16,11 @@ description: End-to-end smoke covering every CI-compatible node type (Bun-only).
 nodes:
   # ─── AI node types ──────────────────────────────────────────────────────
 
-  # 1. prompt: inline prompt + effort + allowed_tools (no tool calls).
-  #    Verifies reasoningEffort and availableTools=[] reach the SDK.
+  # 1. prompt: inline prompt + effort. Verifies reasoningEffort reaches the
+  #    SDK. `allowed_tools` is intentionally omitted — it's a Claude-only
+  #    field and the smoke-test has to validate cleanly under every provider.
   - id: prompt-node
     prompt: "Reply with exactly the single word 'ok' and nothing else."
-    allowed_tools: []
     effort: low
     idle_timeout: 30000
 
@@ -28,7 +28,6 @@ nodes:
   #    The command echoes back $ARGUMENTS (the workflow invocation message).
   - id: command-node
     command: e2e-echo-command
-    allowed_tools: []
     idle_timeout: 30000
 
   # 3. loop: iterative AI prompt until completion signal. Bounded by

@@ -70,7 +70,7 @@ interface RunRow extends WorkflowRunSummary {}
 export function RecentRuns({
   workflows,
   onOpenRun,
-  refreshKey: _refreshKey = 0,
+  refreshKey = 0,
   onRunDeleted,
 }: RecentRunsProps) {
   const [rows, setRows] = useState<RunRow[] | null>(null);
@@ -85,6 +85,7 @@ export function RecentRuns({
     [],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a deliberate refetch trigger from the parent (bumped after run kick / delete); see comment at the dep array below
   useEffect(() => {
     let cancelled = false;
     setError(null);
@@ -125,7 +126,12 @@ export function RecentRuns({
     return () => {
       cancelled = true;
     };
-  }, [workflows]);
+    // `refreshKey` is in the dep list intentionally — the parent bumps it
+    // to force a refetch after a run kick or delete, even when the
+    // workflows array identity hasn't changed. Biome flags it as "more
+    // dependencies than necessary" because the value isn't read inside
+    // the effect; we want it watched, not consumed (suppressed above).
+  }, [workflows, refreshKey]);
 
   if (rows === null) {
     return (
@@ -200,48 +206,55 @@ export function RecentRuns({
           <span>Started</span>
           <span style={{ textAlign: "right" }}>Actions</span>
         </div>
-        {rows.map((r) => (
-          <button
-            key={r.runId}
-            type="button"
-            className="runs-row"
-            onClick={() => onOpenRun(r.runId, r.workflowName)}
-          >
-            <span />
-            <span className="run-name">
-              {r.workflowName}
-              <small>{r.runId.slice(0, 8)}</small>
-            </span>
-            <span>
-              <StatusBadge status={badgeStatusFor(r.status)} />
-            </span>
-            <span className="run-dur">{formatDuration(r.startedAt, r.completedAt)}</span>
-            <span className="run-time">{formatStarted(r.startedAt)}</span>
-            <span className="actions">
-              {/* span role=button avoids nesting <button> inside the row <button>. */}
-              <span
-                className="icon-btn danger"
-                role="button"
-                tabIndex={0}
-                aria-label={`Delete ${r.workflowName} run ${r.runId.slice(0, 8)}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPendingDelete(r);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
+        {rows.map((r) => {
+          const openRun = () => onOpenRun(r.runId, r.workflowName);
+          return (
+            // The row is a <div role="button"> rather than a <button> so the
+            // delete action inside can be a real nested <button> — nesting
+            // interactive elements inside a <button> is invalid HTML.
+            // biome-ignore lint/a11y/useSemanticElements: row contains a nested button (delete), so it can't itself be a <button>
+            <div
+              key={r.runId}
+              className="runs-row"
+              role="button"
+              tabIndex={0}
+              onClick={openRun}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openRun();
+                }
+              }}
+            >
+              <span />
+              <span className="run-name">
+                {r.workflowName}
+                <small>{r.runId.slice(0, 8)}</small>
+              </span>
+              <span>
+                <StatusBadge status={badgeStatusFor(r.status)} />
+              </span>
+              <span className="run-dur">{formatDuration(r.startedAt, r.completedAt)}</span>
+              <span className="run-time">{formatStarted(r.startedAt)}</span>
+              <span className="actions">
+                <button
+                  type="button"
+                  className="icon-btn danger"
+                  aria-label={`Delete ${r.workflowName} run ${r.runId.slice(0, 8)}`}
+                  onClick={(e) => {
                     e.stopPropagation();
                     setPendingDelete(r);
-                  }
-                }}
-              >
-                🗑
+                  }}
+                >
+                  🗑
+                </button>
+                <span className="icon-btn" aria-hidden="true">
+                  View →
+                </span>
               </span>
-              <span className="icon-btn">View →</span>
-            </span>
-          </button>
-        ))}
+            </div>
+          );
+        })}
       </div>
       <ConfirmModal
         open={pendingDelete !== null}
