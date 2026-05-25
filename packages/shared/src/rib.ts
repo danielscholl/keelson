@@ -69,16 +69,26 @@ export interface RibExec {
 // `getSidecar` resolver intentionally returns `unknown` — each rib declares
 // its own structural narrowing and casts at the registration boundary.
 // This keeps @keelson/shared free of back-deps on host packages.
+//
+// `getSnapshotManager` is optional so test contexts that don't care about
+// snapshots can construct a minimal RibContext.
 export interface RibContext {
   getSidecar?: () => Promise<unknown> | unknown;
   getExec: () => RibExec;
+  getSnapshotManager?: () => import("./snapshots.ts").SnapshotManager;
 }
 
 // The harness/rib contract. Implementations live in @keelson/rib-* packages.
 //
 // All lifecycle hooks are optional; a rib can implement any subset.
-// `composeBundle` is reserved for the future snapshot-infra capability and
-// is a no-op today — declare it on your rib if you want forward-compat.
+//
+// If `composeBundle` is declared, the harness registers it as the snapshot
+// composer under `rib.id` after `registerTools` returns. The closure is
+// invoked LAZILY — only when something calls `SnapshotManager.recompose(rib.id)`,
+// not eagerly at boot. Ribs that want a warm initial snapshot should call
+// `ctx.getSnapshotManager?.().recompose(rib.id)` from inside `registerTools`.
+// Ribs can also register additional snapshots imperatively via
+// `ctx.getSnapshotManager?.().register(key, …)`.
 export interface Rib {
   // Stable identifier matching the package basename
   // (e.g. "my-rib" → @keelson/rib-my-rib). Gated by KEELSON_RIBS.

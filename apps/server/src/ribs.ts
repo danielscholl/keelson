@@ -19,7 +19,13 @@
  * unit tests stay deterministic and there's no implicit filesystem walk.
  */
 
-import { type Rib, type RibContext, ribDisplayNameSchema, ribIdSchema } from "@keelson/shared";
+import {
+  type Rib,
+  type RibContext,
+  ribDisplayNameSchema,
+  ribIdSchema,
+  type SnapshotManager,
+} from "@keelson/shared";
 
 export interface RibManifest {
   readonly id: string;
@@ -49,6 +55,10 @@ export interface ApplyRibsOptions {
   readonly active: readonly string[];
   readonly available: Readonly<Record<string, Rib>>;
   readonly ctx: RibContext;
+  // Optional so test rigs without snapshot infrastructure stay deterministic.
+  // When present, ribs declaring `composeBundle` are auto-registered under
+  // their `rib.id`.
+  readonly snapshotManager?: SnapshotManager;
 }
 
 /**
@@ -115,6 +125,14 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       displayName: rib.displayName,
       registered: result?.registered ?? [],
     });
+    // Auto-register the rib's composeBundle (if any) under its id. The
+    // manager's `dispose()` clears every registration on shutdown, so we
+    // don't track per-rib unregister handles here. Ribs that want multiple
+    // snapshots call `ctx.getSnapshotManager?.().register(key, …)` from
+    // inside `registerTools`.
+    if (rib.composeBundle && opts.snapshotManager) {
+      opts.snapshotManager.register(rib.id, () => rib.composeBundle!(opts.ctx));
+    }
     if (rib.dispose) {
       disposers.push({ id: rib.id, dispose: rib.dispose.bind(rib) });
     }

@@ -202,6 +202,53 @@ describe("bootstrapRibs", () => {
     await disposeAll();
     expect(survived).toEqual(["beta"]);
   });
+
+  test("rib with composeBundle is auto-registered under its id in the snapshot manager", async () => {
+    delete process.env.KEELSON_RIBS;
+    const { createSnapshotManager } = await import("../src/snapshot-manager.ts");
+    const snapshotManager = createSnapshotManager();
+    let composeCalls = 0;
+    const ribWithBundle: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: () => ({ registered: [] }),
+      composeBundle: async () => {
+        composeCalls++;
+        return { generation: composeCalls };
+      },
+    };
+    bootstrapRibs({ available: { alpha: ribWithBundle }, snapshotManager });
+    expect(snapshotManager.keys()).toEqual(["alpha"]);
+    const frame = await snapshotManager.recompose<{ generation: number }>("alpha");
+    expect(frame?.data).toEqual({ generation: 1 });
+    expect(composeCalls).toBe(1);
+  });
+
+  test("ribs without composeBundle are not registered in the snapshot manager", async () => {
+    delete process.env.KEELSON_RIBS;
+    const { createSnapshotManager } = await import("../src/snapshot-manager.ts");
+    const snapshotManager = createSnapshotManager();
+    bootstrapRibs({ available: { alpha: fakeRib("alpha") }, snapshotManager });
+    expect(snapshotManager.keys()).toEqual([]);
+  });
+
+  test("rib can imperatively register additional snapshots from registerTools via RibContext.getSnapshotManager", async () => {
+    delete process.env.KEELSON_RIBS;
+    const { createSnapshotManager } = await import("../src/snapshot-manager.ts");
+    const snapshotManager = createSnapshotManager();
+    const multiSnapshotRib: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        const mgr = ctx.getSnapshotManager?.();
+        mgr?.register("alpha.partitions", () => ({ count: 3 }));
+        mgr?.register("alpha.users", () => ({ count: 12 }));
+        return { registered: [] };
+      },
+    };
+    bootstrapRibs({ available: { alpha: multiSnapshotRib }, snapshotManager });
+    expect(snapshotManager.keys().sort()).toEqual(["alpha.partitions", "alpha.users"]);
+  });
 });
 
 describe("parseProviderList", () => {
