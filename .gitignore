@@ -8,6 +8,10 @@ build/
 *.log
 .DS_Store
 
+# Prepack backup of package.json (created by packages/shared/scripts/prepare-publish.ts
+# and removed by restore-package-json.ts; only on disk during an in-flight publish).
+package.json.bak
+
 # Workflow run state (per-context history, event logs).
 .keelson/runs/
 

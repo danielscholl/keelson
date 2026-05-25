@@ -12,6 +12,8 @@ import type { HighlighterCore } from "shiki/core";
 // caller asks for a language we didn't preload, so the chat never errors on
 // an unknown ```rust ``` fence — it just renders unhighlighted.
 
+const SHELL_ALIASES: ReadonlySet<string> = new Set(["bash", "sh", "shell", "zsh"]);
+
 let cached: Promise<HighlighterCore> | null = null;
 
 export function getHighlighter(): Promise<HighlighterCore> {
@@ -53,9 +55,11 @@ export function highlightCodeToHtml(
   lang: string,
 ): string {
   const loaded = highlighter.getLoadedLanguages();
-  // `shell` and `bash` alias `shellscript`; the loaded-languages list returns
-  // the canonical id, so a fence written as ```shell still hits the same grammar.
-  const requested = lang === "shell" ? "bash" : lang;
+  // `bash`, `sh`, `shell`, and `zsh` are all Shiki aliases for `shellscript` —
+  // `getLoadedLanguages()` returns the canonical id, so any aliased fence has
+  // to resolve through `requested` before the `loaded.includes` guard or it
+  // falls through to plain text.
+  const requested = SHELL_ALIASES.has(lang) ? "shellscript" : lang;
   const effectiveLang = loaded.includes(requested) ? requested : "text";
   return highlighter.codeToHtml(code, {
     lang: effectiveLang,

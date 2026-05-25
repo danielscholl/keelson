@@ -194,7 +194,18 @@ function deriveCopilotParameters(tool: ToolDefinition): Record<string, unknown> 
   // `$schema` is the JSON Schema draft URI; the SDK doesn't need it.
   delete jsonSchema.$schema;
   const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-  if (!properties || Object.keys(properties).length === 0) return undefined;
+  const hasNamedProps = !!properties && Object.keys(properties).length > 0;
+  // `z.object({}).passthrough()` / `z.object({}).catchall(...)` project to a
+  // schema with no named properties but `additionalProperties: true` (or a
+  // schema). Omitting `parameters` for those would advertise a zero-arg tool
+  // and silently drop the dynamic keys the rib intends to accept.
+  const additional = jsonSchema.additionalProperties;
+  const patternProps = jsonSchema.patternProperties as Record<string, unknown> | undefined;
+  const allowsDynamicKeys =
+    additional === true ||
+    (typeof additional === "object" && additional !== null) ||
+    (!!patternProps && Object.keys(patternProps).length > 0);
+  if (!hasNamedProps && !allowsDynamicKeys) return undefined;
   return jsonSchema;
 }
 

@@ -42,7 +42,9 @@ export const myRib: Rib = {
   id: "my-rib",
   displayName: "My Rib",
   registerTools(ctx: RibContext) {
-    // ctx.registerTool({ name: ..., description: ..., handler: ... })
+    // Use ctx.getExec() / ctx.getSidecar?.() to wire your tool implementations
+    // into the harness's tool registry (the harness owns registration; this
+    // hook returns the names of tools the rib intends to expose).
     return { registered: [] };
   },
 };
