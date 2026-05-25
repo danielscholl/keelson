@@ -44,12 +44,12 @@ installRedactedConsole();
 
 const bootstrap = bootstrapProviders({ getCredential });
 
-// v0: no built-in ribs. Operators wire their own ribs by setting
-// `KEELSON_RIBS=<id1>,<id2>` and importing the rib packages here. Until
-// that's done, the tool registry stays empty and only the SDK's built-ins
-// (Read/Write/Bash on Claude) are available to chat and workflow `prompt`
-// nodes.
-bootstrapRibs({ available: {} });
+// v0.1: no built-in ribs. Operators wire their own ribs by importing the
+// rib packages here and adding them to the `available` map; `KEELSON_RIBS`
+// (when set) filters that map to a subset. Until something is wired up,
+// the tool registry stays empty and only the SDK's built-ins (Read/Write/
+// Bash on Claude) are available to chat and workflow `prompt` nodes.
+const ribs = bootstrapRibs({ available: {} });
 
 const PORT = Number(process.env.PORT ?? 7878);
 const HOSTNAME = "127.0.0.1";
@@ -83,7 +83,8 @@ const credentialStore = createKeyringStore();
 
 // Async shutdown: drain workflow runs first (the executor's onEvent run_done
 // branch writes terminal state to SQLite, and that must happen before
-// db.close()), then close the database.
+// db.close()), then dispose any activated ribs (which may hold sockets or
+// child processes), then close the database.
 const shutdown = async (): Promise<void> => {
   try {
     await activeWorkflowRuns.abortAll();
@@ -91,6 +92,7 @@ const shutdown = async (): Promise<void> => {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[keelson] workflow run drain during shutdown failed: ${msg}`);
   }
+  await ribs.disposeAll();
   db.close();
   process.exit(0);
 };

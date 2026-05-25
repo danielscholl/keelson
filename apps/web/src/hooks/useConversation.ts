@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-const STORAGE_KEY = "bridge.conversationId";
+const STORAGE_KEY = "keelson.conversationId";
 
 function readStored(): string | null {
   try {

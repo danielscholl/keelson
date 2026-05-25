@@ -67,12 +67,12 @@ describe("bootstrapRibs", () => {
 
   test("returns empty manifest when no ribs are available", () => {
     delete process.env.KEELSON_RIBS;
-    expect(bootstrapRibs({ available: {} })).toEqual([]);
+    expect(bootstrapRibs({ available: {} }).manifests).toEqual([]);
   });
 
   test("when KEELSON_RIBS is unset, every available rib registers", () => {
     delete process.env.KEELSON_RIBS;
-    const manifests = bootstrapRibs({
+    const { manifests } = bootstrapRibs({
       available: {
         alpha: fakeRib("alpha", ["alpha_one"]),
         beta: fakeRib("beta", ["beta_one", "beta_two"]),
@@ -83,7 +83,7 @@ describe("bootstrapRibs", () => {
 
   test("KEELSON_RIBS restricts to listed ids", () => {
     process.env.KEELSON_RIBS = "alpha";
-    const manifests = bootstrapRibs({
+    const { manifests } = bootstrapRibs({
       available: {
         alpha: fakeRib("alpha", ["alpha_one"]),
         beta: fakeRib("beta", ["beta_one"]),
@@ -95,10 +95,76 @@ describe("bootstrapRibs", () => {
 
   test("unknown ids in KEELSON_RIBS are skipped (warn-and-continue)", () => {
     process.env.KEELSON_RIBS = "alpha,missing";
-    const manifests = bootstrapRibs({
+    const { manifests } = bootstrapRibs({
       available: { alpha: fakeRib("alpha") },
     });
     expect(manifests.map((m) => m.id)).toEqual(["alpha"]);
+  });
+
+  test("malformed ids in KEELSON_RIBS are rejected by the schema", () => {
+    process.env.KEELSON_RIBS = "Alpha,al_pha,alpha";
+    const { manifests } = bootstrapRibs({
+      available: { alpha: fakeRib("alpha") },
+    });
+    // Only 'alpha' survives — 'Alpha' (uppercase) and 'al_pha' (underscore)
+    // both fail ribIdSchema's lowercase-kebab regex.
+    expect(manifests.map((m) => m.id)).toEqual(["alpha"]);
+  });
+
+  test("rib whose self-id diverges from its manifest key throws", () => {
+    process.env.KEELSON_RIBS = "alpha";
+    expect(() =>
+      bootstrapRibs({
+        available: { alpha: fakeRib("beta") },
+      }),
+    ).toThrow(/manifest key 'alpha' declares id 'beta'/);
+  });
+
+  test("disposeAll invokes each rib's dispose hook in order", async () => {
+    delete process.env.KEELSON_RIBS;
+    const calls: string[] = [];
+    const ribWithDispose = (id: string): Rib => ({
+      id,
+      displayName: id,
+      registerTools: () => ({ registered: [] }),
+      dispose: () => {
+        calls.push(id);
+      },
+    });
+    const { disposeAll } = bootstrapRibs({
+      available: {
+        alpha: ribWithDispose("alpha"),
+        beta: ribWithDispose("beta"),
+      },
+    });
+    await disposeAll();
+    expect(calls.sort()).toEqual(["alpha", "beta"]);
+  });
+
+  test("disposeAll continues past a throwing disposer", async () => {
+    delete process.env.KEELSON_RIBS;
+    const survived: string[] = [];
+    const { disposeAll } = bootstrapRibs({
+      available: {
+        alpha: {
+          id: "alpha",
+          displayName: "alpha",
+          dispose: () => {
+            throw new Error("boom");
+          },
+        },
+        beta: {
+          id: "beta",
+          displayName: "beta",
+          dispose: () => {
+            survived.push("beta");
+          },
+        },
+      },
+    });
+    // Should not reject even though alpha's disposer threw.
+    await disposeAll();
+    expect(survived).toEqual(["beta"]);
   });
 });
 

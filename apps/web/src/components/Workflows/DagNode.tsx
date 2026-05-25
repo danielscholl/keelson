@@ -22,7 +22,7 @@ function typeChip(type: string): { className: string; label: string } {
 }
 
 // Custom xyflow node. xyflow gives us `data` already shaped by `dagLayout`;
-// the visual rules (border tint, glyph) live in bridge.css under `.dag-node`.
+// the visual rules (border tint, glyph) live in app.css under `.dag-node`.
 export function DagNode({ data }: NodeProps<DagFlowNode>) {
   const status = data.status;
   const chip = typeChip(data.type);

@@ -195,7 +195,7 @@ describe("SQLite WorkflowStore", () => {
   });
 
   test("DB reset (DELETE WHERE status != 'running') preserves in-flight runs", () => {
-    // Mirrors what bridge-handler's RESET_TABLES path does for workflow_runs.
+    // Mirrors what a future db-reset path would do for workflow_runs.
     // A reset must not orphan a still-running executeRunInBackground caller;
     // it should clear terminal history (and the FK cascade trims node rows
     // for the deleted runs).

@@ -20,7 +20,7 @@ import { CodeBlock } from "./CodeBlock.tsx";
 // browser tooltip showing the URL on hover). For a dashboard chat where
 // MR/CVE/Sonar links are the primary interaction, that regression hurts
 // more than the modal helps. Instead, we accept http(s) URLs at face
-// value (the primer instruction forbids URL invention; bridge tool
+// value (the primer instruction forbids URL invention; rib tool
 // responses come from trusted collectors) and refuse to render any other
 // scheme as a clickable link — javascript:, data:, file: etc. collapse
 // to plain text so they can't auto-execute on click.

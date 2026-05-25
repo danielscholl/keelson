@@ -112,7 +112,7 @@ export class ClaudeProvider implements IAgentProvider {
     if (options?.abortSignal?.aborted) return;
 
     const controller = new AbortController();
-    const detachAbort = bridgeAbort(options?.abortSignal, controller);
+    const detachAbort = forwardAbort(options?.abortSignal, controller);
 
     // Shared queue interleaves SDK-derived chunks (text/thinking deltas,
     // tool blocks) with chunks pushed by in-process tool handlers via
@@ -343,7 +343,7 @@ function stringifyToolResultContent(
   return parts.join("");
 }
 
-function bridgeAbort(
+function forwardAbort(
   signal: AbortSignal | undefined,
   controller: AbortController,
 ): () => void {

@@ -204,8 +204,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 			// not just our MCP-projected tool catalog.
 			//
 			// `allow_tools` / `denied_tools` may list either the bare registry
-			// name (`bridge_cluster`) or the SDK-qualified MCP form
-			// (`mcp__keelson__bridge_cluster`). Normalize to bare names
+			// name (`osdu_list_partitions`) or the SDK-qualified MCP form
+			// (`mcp__keelson__osdu_list_partitions`). Normalize to bare names
 			// before the set membership check so workflow authors can use
 			// either form and our MCP catalog filter still matches.
 			const nodeAllowedBare =
@@ -420,11 +420,11 @@ function readStringArray(
 
 // SDK convention: MCP tools are exposed to the model as
 // `mcp__<serverName>__<toolName>`. Workflow authors may use either the bare
-// registry name (`bridge_cluster`) or the SDK-qualified form
-// (`mcp__keelson__bridge_cluster`) in allow / deny lists; this strips the
-// wrapper so the MCP catalog filter matches against bare registry names. The
-// server name part is consumed greedily up to the next `__` so this stays
-// robust to any server name we (or a fork) might pick.
+// registry name (`osdu_list_partitions`) or the SDK-qualified form
+// (`mcp__keelson__osdu_list_partitions`) in allow / deny lists; this strips
+// the wrapper so the MCP catalog filter matches against bare registry names.
+// The server name part is consumed greedily up to the next `__` so this
+// stays robust to any server name we (or a fork) might pick.
 function stripMcpPrefix(name: string): string {
 	if (!name.startsWith("mcp__")) return name;
 	const serverEnd = name.indexOf("__", 5);

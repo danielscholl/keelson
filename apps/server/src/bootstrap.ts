@@ -117,7 +117,15 @@ export interface BootstrapRibsOptions {
   available: Readonly<Record<string, Rib>>;
 }
 
-export function bootstrapRibs(options: BootstrapRibsOptions): RibManifest[] {
+export interface RibBootstrap {
+  readonly manifests: RibManifest[];
+  // Invoke every activated rib's optional `dispose()` hook. Errors from one
+  // disposer log a warning and never block the rest — shutdown must
+  // make forward progress.
+  disposeAll(): Promise<void>;
+}
+
+export function bootstrapRibs(options: BootstrapRibsOptions): RibBootstrap {
   const requested = parseRibList(process.env.KEELSON_RIBS);
   const available = options.available;
   const active = requested.length > 0
@@ -126,7 +134,20 @@ export function bootstrapRibs(options: BootstrapRibsOptions): RibManifest[] {
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
   };
-  return applyRibs({ active, available, ctx });
+  const { manifests, disposers } = applyRibs({ active, available, ctx });
+  return {
+    manifests,
+    async disposeAll() {
+      for (const d of disposers) {
+        try {
+          d.dispose();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[keelson] rib '${d.id}' dispose() threw: ${msg}`);
+        }
+      }
+    },
+  };
 }
 
 export interface BootstrapWorkflowsOptions {

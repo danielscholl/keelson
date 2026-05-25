@@ -28,8 +28,8 @@ const ToastContext = createContext<ToastApi | null>(null);
 export function useToast(): ToastApi {
   const ctx = useContext(ToastContext);
   if (!ctx) {
-    // Falling back instead of throwing keeps non-Chat surfaces (Bridge) safe
-    // even if someone calls useToast() outside the provider tree.
+    // Falling back instead of throwing keeps non-Chat surfaces safe even
+    // if someone calls useToast() outside the provider tree.
     return {
       push: () => 0,
       dismiss: () => undefined,
@@ -94,7 +94,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
       {children}
       <div className="toast-host" role="status" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`bridge-toast bridge-toast-${t.kind}`}>
+          <div key={t.id} className={`keelson-toast keelson-toast-${t.kind}`}>
             <span className="toast-message">{t.message}</span>
             <button
               type="button"

@@ -853,7 +853,7 @@ export function Chat({
       // send prompt — so a later unrelated send doesn't pick up a stale
       // lane seed and accidentally tag a new chat as "Features" / etc.
       // Tradeoff: a user who tweaks the kickoff loses the lane seed for
-      // that send, but the model can still call bridge_* tools to refetch.
+      // that send, but the model can still call rib tools to refetch.
       autoSendPromptRef.current = null;
       pendingSeedRef.current = null;
       pendingNameRef.current = null;

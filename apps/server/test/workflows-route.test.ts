@@ -1249,11 +1249,11 @@ nodes:
   });
 
   test("W4.6 — /api/db/reset preserves paused workflow_runs alongside running", async () => {
-    // bridge-handler.ts wipes terminal rows on reset. Paused rows are
-    // in-flight (the route's pendingApprovals map holds the live resolver);
-    // dropping the parent row would cascade-delete the awaiting node and
-    // strand POST /resume against a missing run. This test pokes the
-    // same SQL the reset handler runs and asserts paused rows survive.
+    // A db-reset path wipes terminal rows. Paused rows are in-flight (the
+    // route's pendingApprovals map holds the live resolver); dropping the
+    // parent row would cascade-delete the awaiting node and strand POST
+    // /resume against a missing run. This test pokes the same SQL the
+    // reset handler would run and asserts paused rows survive.
     const { store } = makeRig();
     const db = openDatabase({ path: dbPath });
     const now = new Date().toISOString();

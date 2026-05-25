@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 
 interface SkeletonProps {
   // CSS dimensions — passed through as inline styles so callers don't have
-  // to touch bridge.css for one-off sizes. Default is a single text line.
+  // to touch app.css for one-off sizes. Default is a single text line.
   height?: string;
   width?: string;
   radius?: string;

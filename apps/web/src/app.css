@@ -28,7 +28,7 @@
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
 
-  /* Single source of truth for the centered Bridge/Chat column. Right-side
+  /* Single source of truth for the centered Chat column. Right-side
      drawers anchor to this so they slide in from the panel's right edge
      (not the viewport edge) on wide displays. Below cap+padding, the panel
      fills the body content area and the drawer pins to the body padding. */
@@ -124,9 +124,10 @@ body {
   flex: 1;
   min-height: 0;
 }
-/* Single centered column shared by the TopBar, Bridge body, and Chat
-   surface. Width is `--max-content-width` (default 1600px); changing that
-   variable also re-anchors the right-side drawers via `--panel-right-gap`. */
+/* Single centered column shared by the TopBar and the Chat / Workflows
+   surfaces. Width is `--max-content-width` (default 1600px); changing
+   that variable also re-anchors the right-side drawers via
+   `--panel-right-gap`. */
 .wrap {
   max-width: var(--max-content-width);
   margin: 0 auto;
@@ -616,72 +617,11 @@ body {
 
 
 /* --------------------------------------------------------------------- */
-/* Server-mode (cimpl bridge --serve) state                              */
+/* Action toast                                                          */
 /* --------------------------------------------------------------------- */
-/* Two states the SSE client surfaces on <body>:                         */
-/*                                                                       */
-/*   .bridge-reconnecting -- transient connection failure. The browser   */
-/*   auto-retries; the page stays usable on last-known-good data.        */
-/*                                                                       */
-/*   .bridge-disconnected -- explicit server-side disconnect (idle       */
-/*   timeout or Ctrl-C). EventSource keeps retrying so a restart of      */
-/*   `cimpl bridge --serve` reconnects without a manual reload.          */
-.bridge-reconnecting {
-  position: relative;
-}
-.bridge-reconnecting::before {
-  content: "Reconnecting to bridge server…";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 9999;
-  background: var(--yellow);
-  color: var(--bg);
-  font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  text-align: center;
-  padding: 8px 12px;
-  box-shadow: var(--shadow-card);
-}
-.bridge-reconnecting .wrap {
-  margin-top: 32px;
-}
-
-.bridge-disconnected {
-  position: relative;
-}
-.bridge-disconnected::before {
-  content: "Bridge server stopped — restart `cimpl bridge --serve` to reconnect.";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 9999;
-  background: var(--red);
-  color: var(--bg);
-  font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  text-align: center;
-  padding: 8px 12px;
-  box-shadow: var(--shadow-card);
-}
-.bridge-disconnected .wrap {
-  filter: grayscale(0.6);
-  opacity: 0.55;
-  pointer-events: none;
-  margin-top: 32px;
-}
-
-
-/* --------------------------------------------------------------------- */
-/* Action toast (Phase 6)                                                */
-/* --------------------------------------------------------------------- */
-/* Tiny non-blocking notification appended to <body> by bridge JS when  */
-/* an action POST returns. Auto-removes after a few seconds.            */
-.bridge-toast {
+/* Tiny non-blocking notification rendered by <ToastHost>. Auto-removes  */
+/* after a few seconds; the host (below) stacks multiple toasts.         */
+.keelson-toast {
   position: fixed;
   bottom: 16px;
   right: 16px;
@@ -695,10 +635,10 @@ body {
   font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   box-shadow: var(--shadow-popover);
 }
-.bridge-toast-ok {
+.keelson-toast-ok {
   border-color: rgba(109, 210, 141, 0.4);
 }
-.bridge-toast-error {
+.keelson-toast-error {
   border-color: rgba(240, 135, 147, 0.5);
 }
 
@@ -1632,7 +1572,7 @@ button.tab:focus-visible {
 .skeleton-pill-content { display: inline-block; height: 14px; width: 64px; }
 .skeleton-train { display: inline-block; height: 16px; width: 120px; }
 
-/* --- Toast host (F9 stacks them; .bridge-toast already styles the body) --- */
+/* --- Toast host (stacks them; .keelson-toast styles the body) --- */
 
 .toast-host {
   position: fixed;
@@ -1645,7 +1585,7 @@ button.tab:focus-visible {
   pointer-events: none;
 }
 
-.toast-host .bridge-toast {
+.toast-host .keelson-toast {
   position: static;
   display: flex;
   align-items: center;
@@ -1654,7 +1594,7 @@ button.tab:focus-visible {
   animation: toast-slide-in 180ms ease-out;
 }
 
-.bridge-toast-info {
+.keelson-toast-info {
   border-color: rgba(124, 192, 255, 0.4);
 }
 
@@ -2049,8 +1989,11 @@ button.tab:focus-visible {
   letter-spacing: 0.04em;
 }
 
-/* F10.9: tool-source chip next to each tool-call row name. Disambiguates
- * skill catalog vs Bridge tile vs provider-native built-in at a glance. */
+/* Tool-source chip next to each tool-call row name. Disambiguates which
+ * rib's family (or the provider-native built-in bucket) a tool belongs
+ * to at a glance. Family classes (.tool-source-<id>) are added by ribs
+ * as needed — keelson core only ships the neutral `.tool-source-other`
+ * fallback. */
 .tool-source-chip {
   margin-left: 8px;
   padding: 1px 6px;
@@ -2063,12 +2006,6 @@ button.tab:focus-visible {
   letter-spacing: 0.04em;
 }
 
-.tool-source-bridge {
-  color: var(--cyan);
-}
-.tool-source-osdu {
-  color: var(--accent);
-}
 .tool-source-other {
   color: var(--muted);
 }
@@ -4484,10 +4421,9 @@ button.tab:focus-visible {
 .release-health-subpanel + .release-health-subpanel {
   border-left: 1px solid var(--border);
 }
-/* Phase 3.8 N7 — three-lane body shells (Features · Quality · Security).
-   Class names mirror mockups/bridge-page.html lines 314-500. Lanes mount
+/* Three-lane body shells (Features · Quality · Security). Lanes mount
    between the cross-strip and the legacy two-column body; lane bodies
-   carry placeholder slots until the N8 section renderers land. */
+   carry placeholder slots until the section renderers land. */
 .lanes {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

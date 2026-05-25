@@ -49,12 +49,38 @@ Ribs ship as their own packages and repos:
 |---|---|
 | GitHub repo | `keelson-rib-<name>` (e.g., `keelson-rib-osdu`) |
 | npm package | `@keelson/rib-<name>` |
-| Env activation | `KEELSON_RIBS=<id1>,<id2>` |
 | TypeScript contract | `Rib` interface from `@keelson/shared` |
+| Activation | embedder-wired manifest, filtered by `KEELSON_RIBS` |
 
-v0 ships **no in-tree ribs** — the harness is the deliverable. See
-[`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) for the
-contract.
+v0.1 ships **no in-tree ribs** and **no dynamic discovery** — the harness
+is the deliverable. To activate a rib today you fork or wrap the server's
+composition root (`apps/server/src/index.ts`), import the rib package, and
+hand it to `bootstrapRibs` in its `available` map:
+
+```ts
+import { osduRib } from "@keelson/rib-osdu";
+bootstrapRibs({ available: { osdu: osduRib } });
+```
+
+`KEELSON_RIBS=<id1>,<id2>` then filters which entries from that manifest
+actually activate. When unset, every entry in the manifest activates.
+Dynamic discovery from `node_modules/@keelson/rib-*` is on the roadmap
+(see Status, v0.4). See [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts)
+for the contract.
+
+
+## Concepts from Archon
+
+The workflow engine — YAML schema, DAG node taxonomy (`prompt` / `bash` /
+`command` / `loop` / `script` / `approval` / `cancel` / `subprocess`), and
+the `$nodeId.output` substitution model — borrows concepts from
+[Archon](https://github.com/coleam00/Archon) by Cole Medin, used under the
+MIT license. Workflows authored against Archon's spec parse cleanly here;
+the on-disk YAML format stays compatible.
+
+Keelson re-types the schema in TypeScript and adapts the executor to
+Bun + SQLite — the conceptual credit belongs upstream. Full attribution
+lives in [NOTICE](NOTICE).
 
 
 ## Install
@@ -147,7 +173,7 @@ in-tree — bring your own and activate them with `KEELSON_RIBS`.
 | **Surface** | React 19 + Vite SPA (Chat / Workflows) and the `keelson` CLI |
 | **Provider** | Pluggable coding-agent SDKs behind one `IAgentProvider` (Copilot, Claude, stub) |
 | **Tools** | Native TS skills registered by ribs through the manifest |
-| **Workflows** | Archon-compatible YAML DAG engine — `prompt`, `bash`, `command`, `loop`, `script`, `approval` nodes with `depends_on`, `when:`, `trigger_rule:` |
+| **Workflows** | DAG engine — concepts from [Archon](https://github.com/coleam00/Archon) (MIT); `prompt`, `bash`, `command`, `loop`, `script`, `approval` nodes with `depends_on`, `when:`, `trigger_rule:` |
 | **State** | SQLite (sessions, runs, node outputs) + keytar (credentials) |
 
 </details>
@@ -157,7 +183,7 @@ in-tree — bring your own and activate them with `KEELSON_RIBS`.
 
 | Variable | Effect |
 |---|---|
-| `KEELSON_RIBS=cimpl,osdu` | Activate one or more ribs (comma-separated ids) |
+| `KEELSON_RIBS=osdu,…` | Filter which ribs from the embedder-supplied manifest activate (comma-separated ids; unset = all) |
 | `KEELSON_PROVIDERS=stub,copilot,claude` | Restrict which agent providers register |
 | `KEELSON_WORKFLOW_PROVIDER=claude` | Pin the provider workflows use for `prompt` nodes |
 | `KEELSON_WORKFLOW_TOOL_DENYLIST=tool_a,tool_b` | Operator floor: per-node tool denylist |
@@ -229,6 +255,6 @@ Every command supports `--json` for piping. Stable exit codes: `0` success,
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for
-third-party attribution — the workflow YAML schema is derived from
-[Archon](https://github.com/dynamous-community/archon) (MIT) and remains
-wire-compatible with the upstream specification.
+third-party attribution — the workflow YAML schema borrows concepts from
+[Archon](https://github.com/coleam00/Archon) (MIT) and remains compatible
+with the upstream specification.

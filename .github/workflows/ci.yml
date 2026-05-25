@@ -38,3 +38,6 @@ jobs:
         run: bun --filter '*' test
         env:
           KEELSON_USE_STUBS: "1"
+
+      - name: Build
+        run: bun --filter '*' build

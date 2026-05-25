@@ -121,9 +121,9 @@ export const conversationSchema = z
     model: z.string().optional(),
     providerSessionId: z.string().optional(),
     name: z.string().optional(),
-    // Conversation-scoped system prompt seeded at creation (e.g. lane
-    // snapshot from the Bridge). Write-once; concatenated with the
-    // per-turn identity prompt on every send.
+    // Conversation-scoped system prompt seeded at creation (e.g. by a
+    // workflow that handed off into chat). Write-once; concatenated with
+    // the per-turn identity prompt on every send.
     seedSystemPrompt: z.string().optional(),
     messages: z.array(messageSchema),
     createdAt: z.string().datetime(),
