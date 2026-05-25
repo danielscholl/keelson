@@ -53,13 +53,16 @@ export function isAllowedOrigin(origin: string | null | undefined): boolean {
 }
 
 // Discriminated by `kind` so the single Bun.serve `websocket` field can
-// route chat and workflow-run frames.
+// route chat, workflow-run, and snapshot frames.
 export interface WsData {
   abort: AbortController;
-  kind?: "chat" | "workflowRun";
+  kind?: "chat" | "workflowRun" | "snapshot";
   // Set on workflowRun upgrades so the per-runId subscriber set can be looked
   // up at message/close time.
   runId?: string;
+  // Set on snapshot upgrades so the per-key subscriber set can be looked up
+  // at message/close time.
+  snapshotKey?: string;
 }
 
 const createConversationBodySchema = z
