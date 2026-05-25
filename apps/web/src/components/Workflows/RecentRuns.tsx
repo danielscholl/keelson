@@ -220,6 +220,11 @@ export function RecentRuns({
               tabIndex={0}
               onClick={openRun}
               onKeyDown={(e) => {
+                // Bail if a nested interactive (the delete <button>, or any
+                // future inline action) bubbled this keydown up to us — the
+                // native button activation has its own Enter/Space handling
+                // and calling preventDefault() here would suppress it.
+                if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   openRun();
