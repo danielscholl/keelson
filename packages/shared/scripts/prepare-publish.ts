@@ -2,12 +2,19 @@
 // published tarball ships a pure dist/-only contract. Paired with
 // restore-package-json.ts which `postpack` runs to put package.json back.
 //
-// What gets stripped:
-//   - `bun` condition from every exports entry (points at ./src/*.ts which
-//     isn't in the published `files` allowlist; leaving it in would break
-//     Bun consumers of the tarball)
-//   - The `prepack` and `postpack` scripts themselves (consumers of the
-//     installed package shouldn't re-trigger these on their own packs)
+// Strips the `bun` condition from every exports entry (it points at
+// ./src/*.ts, which isn't in the published `files` allowlist; leaving it
+// in would break Bun consumers of the tarball).
+//
+// We deliberately DO NOT strip `scripts.prepack` / `scripts.postpack`. npm
+// reads lifecycle scripts once at the start of the pack/publish flow, so
+// removing `postpack` here would not actually skip the restore for the
+// current run — but it would risk the published manifest losing the script
+// that's load-bearing for the restore step if the pack ever races with a
+// re-read. The scripts reference `./scripts/*.ts` which isn't in the
+// tarball's `files` allowlist, so a consumer who tries `npm pack` on the
+// installed package fails loudly with a file-not-found rather than silently
+// mutating their copy.
 //
 // If a previous publish failed between prepack and postpack, the .bak file
 // is still on disk. We restore from it first so the prepack is idempotent.
@@ -37,12 +44,6 @@ if (exportsField) {
       exportsField[key] = rest;
     }
   }
-}
-
-const scripts = pkg.scripts as Record<string, string> | undefined;
-if (scripts) {
-  delete scripts.prepack;
-  delete scripts.postpack;
 }
 
 fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
