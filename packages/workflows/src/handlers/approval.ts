@@ -33,9 +33,7 @@ export interface MakeApprovalHandlerOptions {
   awaitApproval: AwaitApproval;
 }
 
-export function makeApprovalHandler(
-  opts: MakeApprovalHandlerOptions,
-): NodeHandler {
+export function makeApprovalHandler(opts: MakeApprovalHandlerOptions): NodeHandler {
   return {
     type: "approval",
     async handle(node, ctx): Promise<NodeResult> {
@@ -43,9 +41,7 @@ export function makeApprovalHandler(
       // at load time. `isApprovalNode` narrows to the typed shape; the
       // fallback to resolvedBody keeps tests that pass a stub DagNode working
       // without forcing them to construct a full approval node.
-      const message = isApprovalNode(node)
-        ? node.approval.message
-        : (ctx.resolvedBody ?? "");
+      const message = isApprovalNode(node) ? node.approval.message : (ctx.resolvedBody ?? "");
 
       // Honour an already-aborted signal — the run was cancelled between
       // dispatch and entry to the handler; don't open a pause that nobody
@@ -59,12 +55,7 @@ export function makeApprovalHandler(
       }
 
       try {
-        const reply = await opts.awaitApproval(
-          ctx.runId,
-          ctx.nodeId,
-          message,
-          ctx.abortSignal,
-        );
+        const reply = await opts.awaitApproval(ctx.runId, ctx.nodeId, message, ctx.abortSignal);
         return {
           status: "succeeded",
           output: { kind: "text", text: reply },

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import {
-  WIRE_PROTOCOL_VERSION,
   chatEventSchema,
   chatFrameSchema,
   clientFrameSchema,
@@ -10,6 +9,7 @@ import {
   messageChunkSchema,
   messageSchema,
   modelInfoSchema,
+  WIRE_PROTOCOL_VERSION,
 } from "../src/chat.ts";
 
 describe("WIRE_PROTOCOL_VERSION", () => {
@@ -25,7 +25,12 @@ describe("conversationSchema", () => {
       providerId: "stub",
       messages: [
         { id: "msg-1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" },
-        { id: "msg-2", role: "assistant", content: "hello ", createdAt: "2026-01-01T00:00:01.000Z" },
+        {
+          id: "msg-2",
+          role: "assistant",
+          content: "hello ",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
       ],
       createdAt: "2026-01-01T00:00:00.000Z",
     };
@@ -62,12 +67,18 @@ describe("conversationSchema", () => {
 
 describe("chatEventSchema", () => {
   it("parses chunk with text payload", () => {
-    const event = chatEventSchema.parse({ type: "chunk", payload: { type: "text", content: "hi" } });
+    const event = chatEventSchema.parse({
+      type: "chunk",
+      payload: { type: "text", content: "hi" },
+    });
     expect(event.type).toBe("chunk");
   });
 
   it("parses chunk with system payload", () => {
-    const event = chatEventSchema.parse({ type: "chunk", payload: { type: "system", content: "started" } });
+    const event = chatEventSchema.parse({
+      type: "chunk",
+      payload: { type: "system", content: "started" },
+    });
     expect(event.type).toBe("chunk");
   });
 
@@ -77,9 +88,7 @@ describe("chatEventSchema", () => {
   });
 
   it("rejects top-level system event (must travel as chunk payload)", () => {
-    expect(() =>
-      chatEventSchema.parse({ type: "system", message: "connected" }),
-    ).toThrow();
+    expect(() => chatEventSchema.parse({ type: "system", message: "connected" })).toThrow();
   });
 
   it("parses error event", () => {
@@ -201,19 +210,21 @@ describe("clientMessageSchema", () => {
     ).toThrow();
   });
 
-  it.each(["low", "medium", "high", "xhigh"] as const)(
-    "accepts reasoningEffort=%s (F10.6)",
-    (level) => {
-      const msg = clientMessageSchema.parse({
-        type: "request",
-        providerId: "copilot",
-        prompt: "hi",
-        reasoningEffort: level,
-      });
-      if (msg.type !== "request") throw new Error("expected request");
-      expect(msg.reasoningEffort).toBe(level);
-    },
-  );
+  it.each([
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+  ] as const)("accepts reasoningEffort=%s (F10.6)", (level) => {
+    const msg = clientMessageSchema.parse({
+      type: "request",
+      providerId: "copilot",
+      prompt: "hi",
+      reasoningEffort: level,
+    });
+    if (msg.type !== "request") throw new Error("expected request");
+    expect(msg.reasoningEffort).toBe(level);
+  });
 
   it("rejects unknown reasoningEffort tiers (F10.6)", () => {
     expect(() =>
@@ -446,9 +457,7 @@ describe("contentBlockSchema (Phase 3 prep)", () => {
   });
 
   it("rejects unknown variant (strict union)", () => {
-    expect(() =>
-      contentBlockSchema.parse({ type: "thinking", text: "x" }),
-    ).toThrow();
+    expect(() => contentBlockSchema.parse({ type: "thinking", text: "x" })).toThrow();
   });
 
   it("rejects unknown keys on a block (strict)", () => {
@@ -564,9 +573,7 @@ describe("modelInfoSchema", () => {
   });
 
   it("rejects unknown costTier values", () => {
-    expect(() =>
-      modelInfoSchema.parse({ id: "x", costTier: "ultra" }),
-    ).toThrow();
+    expect(() => modelInfoSchema.parse({ id: "x", costTier: "ultra" })).toThrow();
   });
 
   it("rejects unknown keys on the supports block (strict)", () => {
@@ -587,12 +594,7 @@ describe("modelInfoSchema", () => {
       defaultReasoningEffort: "medium",
     });
     expect(info.supports?.reasoningEffort).toBe(true);
-    expect(info.supportedReasoningEfforts).toEqual([
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ]);
+    expect(info.supportedReasoningEfforts).toEqual(["low", "medium", "high", "xhigh"]);
     expect(info.defaultReasoningEffort).toBe("medium");
   });
 
@@ -606,8 +608,6 @@ describe("modelInfoSchema", () => {
   });
 
   it("rejects unknown defaultReasoningEffort values (F10.6)", () => {
-    expect(() =>
-      modelInfoSchema.parse({ id: "x", defaultReasoningEffort: "ultra" }),
-    ).toThrow();
+    expect(() => modelInfoSchema.parse({ id: "x", defaultReasoningEffort: "ultra" })).toThrow();
   });
 });

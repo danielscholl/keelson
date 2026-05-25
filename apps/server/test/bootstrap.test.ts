@@ -4,22 +4,22 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  clearRegistry as clearProviderRegistry,
+  type IAgentProvider,
+  type MessageChunk,
+  type ProviderCapabilities,
+  registerProvider,
+} from "@keelson/providers";
+import type { Rib } from "@keelson/shared";
+import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
+import {
   bootstrapPromptHandler,
   bootstrapRibs,
   parsePromptTimeoutMs,
   parseProviderList,
   parseToolDenylist,
 } from "../src/bootstrap.ts";
-import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
-import {
-  clearRegistry as clearProviderRegistry,
-  registerProvider,
-  type IAgentProvider,
-  type MessageChunk,
-  type ProviderCapabilities,
-} from "@keelson/providers";
 import { parseRibList } from "../src/ribs.ts";
-import type { Rib } from "@keelson/shared";
 
 describe("parseRibList", () => {
   test("unset returns an empty list (no ribs loaded by default)", () => {
@@ -281,14 +281,11 @@ describe("bootstrapPromptHandler", () => {
 
   afterEach(() => {
     clearProviderRegistry();
-    if (envSnapshot.provider === undefined)
-      delete process.env.KEELSON_WORKFLOW_PROVIDER;
+    if (envSnapshot.provider === undefined) delete process.env.KEELSON_WORKFLOW_PROVIDER;
     else process.env.KEELSON_WORKFLOW_PROVIDER = envSnapshot.provider;
-    if (envSnapshot.denylist === undefined)
-      delete process.env.KEELSON_WORKFLOW_TOOL_DENYLIST;
+    if (envSnapshot.denylist === undefined) delete process.env.KEELSON_WORKFLOW_TOOL_DENYLIST;
     else process.env.KEELSON_WORKFLOW_TOOL_DENYLIST = envSnapshot.denylist;
-    if (envSnapshot.timeout === undefined)
-      delete process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S;
+    if (envSnapshot.timeout === undefined) delete process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S;
     else process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S = envSnapshot.timeout;
   });
 

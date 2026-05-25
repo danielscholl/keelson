@@ -1,15 +1,11 @@
-import { useEffect, useState } from "react";
-
-import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
-import {
-  ToolCallsBlock,
-  toolCallsFromContentParts,
-} from "../Chat/ToolCallsBlock.tsx";
-import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
-import { ApprovalComposer } from "./ApprovalComposer.tsx";
-import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { WorkflowNodeSummary } from "@keelson/shared";
+import { useEffect, useState } from "react";
+import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
+import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
+import { ToolCallsBlock, toolCallsFromContentParts } from "../Chat/ToolCallsBlock.tsx";
+import { ApprovalComposer } from "./ApprovalComposer.tsx";
 
 // When the run has reached terminal status, downstream nodes the hook
 // never observed (no node_started, no node_done) must not stay "pending".
@@ -39,8 +35,7 @@ function chipForType(type?: string): { className: string; label: string } | null
   const lower = type.toLowerCase();
   if (lower === "bash") return { className: "bash", label: "BASH" };
   if (lower === "prompt") return { className: "prompt", label: "PROMPT" };
-  if (lower === "approval")
-    return { className: "approval", label: "APPROVAL" };
+  if (lower === "approval") return { className: "approval", label: "APPROVAL" };
   return { className: "generic", label: lower.toUpperCase() };
 }
 
@@ -56,13 +51,7 @@ interface TraceRowProps {
   onAbandon?: () => Promise<void>;
 }
 
-function TraceRow({
-  schema,
-  view,
-  streaming,
-  onSubmitApproval,
-  onAbandon,
-}: TraceRowProps) {
+function TraceRow({ schema, view, streaming, onSubmitApproval, onAbandon }: TraceRowProps) {
   // Collapse by default for terminal nodes (much easier to scan a finished
   // run); auto-open live states so the user sees streaming output and
   // approval prompts without clicking.
@@ -106,9 +95,7 @@ function TraceRow({
           {open ? "▾" : "▸"}
         </button>
         <span>{schema.id}</span>
-        {chip && (
-          <span className={`node-type ${chip.className}`}>{chip.label}</span>
-        )}
+        {chip && <span className={`node-type ${chip.className}`}>{chip.label}</span>}
         {status === "running" && (
           <span className="typing-dots" aria-label="streaming">
             <span />
@@ -138,10 +125,7 @@ function TraceRow({
           )}
           {view.error && <div className="trace-error">{view.error}</div>}
           {view.thinkingText.length > 0 && (
-            <ThinkingBlock
-              content={view.thinkingText}
-              streaming={status === "running"}
-            />
+            <ThinkingBlock content={view.thinkingText} streaming={status === "running"} />
           )}
           {textBlocks.length > 0 && isPromptish && (
             <MarkdownContent
@@ -150,20 +134,13 @@ function TraceRow({
           )}
           {textBlocks.length > 0 && !isPromptish && (
             <pre className="code-block">
-              {textBlocks
-                .map((b) => (b.type === "text" ? b.text : ""))
-                .join("")}
+              {textBlocks.map((b) => (b.type === "text" ? b.text : "")).join("")}
             </pre>
           )}
           {toolCalls.length > 0 && (
-            <ToolCallsBlock
-              toolCalls={toolCalls}
-              streaming={streaming && status === "running"}
-            />
+            <ToolCallsBlock toolCalls={toolCalls} streaming={streaming && status === "running"} />
           )}
-          {view.logLines.length > 0 && (
-            <pre className="code-block">{view.logLines.join("\n")}</pre>
-          )}
+          {view.logLines.length > 0 && <pre className="code-block">{view.logLines.join("\n")}</pre>}
         </div>
       )}
     </div>

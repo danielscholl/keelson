@@ -1,12 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
 import type { ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 export type ToastKind = "ok" | "error" | "info";
 
@@ -49,9 +42,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
   const idRef = useRef(0);
   // Track timeouts so dismiss() can clear them; otherwise a ttl fire after
   // manual dismiss would call setToasts on a stale id (no-op, but noisy).
-  const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(
-    new Map(),
-  );
+  const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   const dismiss = useCallback((id: number) => {
     const timer = timersRef.current.get(id);
@@ -62,22 +53,19 @@ export function ToastHost({ children }: { children: ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const push = useCallback<ToastApi["push"]>(
-    ({ kind, message, ttlMs }) => {
-      const id = ++idRef.current;
-      const ttl = ttlMs ?? DEFAULT_TTL_BY_KIND[kind];
-      setToasts((prev) => [...prev, { id, kind, message, ttlMs: ttl }]);
-      if (ttl > 0) {
-        const timer = setTimeout(() => {
-          timersRef.current.delete(id);
-          setToasts((prev) => prev.filter((t) => t.id !== id));
-        }, ttl);
-        timersRef.current.set(id, timer);
-      }
-      return id;
-    },
-    [],
-  );
+  const push = useCallback<ToastApi["push"]>(({ kind, message, ttlMs }) => {
+    const id = ++idRef.current;
+    const ttl = ttlMs ?? DEFAULT_TTL_BY_KIND[kind];
+    setToasts((prev) => [...prev, { id, kind, message, ttlMs: ttl }]);
+    if (ttl > 0) {
+      const timer = setTimeout(() => {
+        timersRef.current.delete(id);
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, ttl);
+      timersRef.current.set(id, timer);
+    }
+    return id;
+  }, []);
 
   // Cleanup on unmount — orphaned timers would call setToasts after the
   // component is gone (warns in strict mode).

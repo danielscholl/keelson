@@ -1,7 +1,7 @@
 {
   "name": "keelson",
   "version": "0.1.0",
-  "description": "Local agent harness — multi-provider chat surface, deterministic YAML workflows, typed extension contract",
+  "description": "Local agent harness — multi-provider chat surface, deterministic YAML workflows, typed Rib extension contract",
   "license": "Apache-2.0",
   "author": "Daniel Scholl",
   "private": true,
@@ -16,9 +16,15 @@
     "dev:web": "bun --filter @keelson/web dev",
     "build": "bun --filter '*' build",
     "typecheck": "bun --filter '*' typecheck",
-    "test": "bun --filter '*' test"
+    "test": "bun --filter '*' test",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check .",
+    "check:fix": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.2"
   }

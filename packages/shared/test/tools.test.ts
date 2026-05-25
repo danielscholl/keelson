@@ -61,9 +61,9 @@ describe("ToolDefinition contract", () => {
       description: "echo",
       inputSchema: z.object({ msg: z.string() }),
       async execute(input, ctx) {
-        const parsed = (
-          this as { inputSchema: z.ZodTypeAny }
-        ).inputSchema.parse(input) as { msg: string };
+        const parsed = (this as { inputSchema: z.ZodTypeAny }).inputSchema.parse(input) as {
+          msg: string;
+        };
         ctx.emit({
           type: "tool_use",
           id: "call_1",

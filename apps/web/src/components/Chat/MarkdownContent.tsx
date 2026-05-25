@@ -1,6 +1,6 @@
-import { Streamdown, defaultRemarkPlugins } from "streamdown";
-import type { Components } from "streamdown";
 import remarkBreaks from "remark-breaks";
+import type { Components } from "streamdown";
+import { defaultRemarkPlugins, Streamdown } from "streamdown";
 import { CodeBlock } from "./CodeBlock.tsx";
 
 // Streamdown handles the streaming + memoization wins (unterminated fences,

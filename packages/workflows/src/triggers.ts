@@ -28,38 +28,36 @@ import type { DagNode, NodeOutput, TriggerRule } from "./schema/index.ts";
  * as failed so the trigger rule fails closed.
  */
 export function checkTriggerRule(
-	node: DagNode,
-	nodeOutputs: Map<string, NodeOutput>,
+  node: DagNode,
+  nodeOutputs: Map<string, NodeOutput>,
 ): "run" | "skip" {
-	const nodeDeps = node.depends_on ?? [];
-	if (nodeDeps.length === 0) return "run";
+  const nodeDeps = node.depends_on ?? [];
+  if (nodeDeps.length === 0) return "run";
 
-	const upstreams = nodeDeps.map(
-		(id) =>
-			nodeOutputs.get(id) ??
-			({
-				state: "failed",
-				output: "",
-				error: `upstream '${id}' missing from outputs`,
-			} as NodeOutput),
-	);
-	const rule: TriggerRule = node.trigger_rule ?? "all_success";
+  const upstreams = nodeDeps.map(
+    (id) =>
+      nodeOutputs.get(id) ??
+      ({
+        state: "failed",
+        output: "",
+        error: `upstream '${id}' missing from outputs`,
+      } as NodeOutput),
+  );
+  const rule: TriggerRule = node.trigger_rule ?? "all_success";
 
-	switch (rule) {
-		case "all_success":
-			return upstreams.every((u) => u.state === "completed") ? "run" : "skip";
-		case "one_success":
-			return upstreams.some((u) => u.state === "completed") ? "run" : "skip";
-		case "none_failed_min_one_success": {
-			const anyFailed = upstreams.some((u) => u.state === "failed");
-			const anySucceeded = upstreams.some((u) => u.state === "completed");
-			return !anyFailed && anySucceeded ? "run" : "skip";
-		}
-		case "all_done":
-			return upstreams.every(
-				(u) => u.state !== "pending" && u.state !== "running",
-			)
-				? "run"
-				: "skip";
-	}
+  switch (rule) {
+    case "all_success":
+      return upstreams.every((u) => u.state === "completed") ? "run" : "skip";
+    case "one_success":
+      return upstreams.some((u) => u.state === "completed") ? "run" : "skip";
+    case "none_failed_min_one_success": {
+      const anyFailed = upstreams.some((u) => u.state === "failed");
+      const anySucceeded = upstreams.some((u) => u.state === "completed");
+      return !anyFailed && anySucceeded ? "run" : "skip";
+    }
+    case "all_done":
+      return upstreams.every((u) => u.state !== "pending" && u.state !== "running")
+        ? "run"
+        : "skip";
+  }
 }

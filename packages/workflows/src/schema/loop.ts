@@ -1,7 +1,7 @@
 /**
  * Zod schema for loop node configuration.
  */
-import { z } from 'zod';
+import { z } from "zod";
 
 export const loopNodeConfigSchema = z
   .object({
@@ -25,7 +25,7 @@ export const loopNodeConfigSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "interactive loop requires 'loop.gate_message' (non-empty string)",
-        path: ['gate_message'],
+        path: ["gate_message"],
       });
     }
   });

@@ -2,14 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
 import type { ModelInfo, ProviderInfo } from "@keelson/shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelRef } from "../../hooks/useSettings.ts";
 
 interface ModelPickerPopoverProps {
@@ -71,10 +65,7 @@ export function ModelPickerPopover({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
 
-  const favoritesKey = useMemo(
-    () => new Set(favorites.map(refKey)),
-    [favorites],
-  );
+  const favoritesKey = useMemo(() => new Set(favorites.map(refKey)), [favorites]);
   const providerLabels = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of providers) m.set(p.id, p.displayName);
@@ -96,8 +87,7 @@ export function ModelPickerPopover({
   }, [modelsByProvider]);
 
   const lookupInfo = useCallback(
-    (ref: ModelRef): ModelInfo =>
-      infoByRef.get(refKey(ref)) ?? { id: ref.modelId },
+    (ref: ModelRef): ModelInfo => infoByRef.get(refKey(ref)) ?? { id: ref.modelId },
     [infoByRef],
   );
 
@@ -111,9 +101,7 @@ export function ModelPickerPopover({
   const reposition = useCallback(() => {
     const popoverEl = popoverRef.current;
     if (!popoverEl) return;
-    const trigger = document.querySelector<HTMLElement>(
-      `[popovertarget="${popoverId}"]`,
-    );
+    const trigger = document.querySelector<HTMLElement>(`[popovertarget="${popoverId}"]`);
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
@@ -277,10 +265,7 @@ export function ModelPickerPopover({
                     activeRef.modelId === ref.modelId
                   }
                   isFavorite={true}
-                  disabled={
-                    lockedProviderId !== null &&
-                    lockedProviderId !== ref.providerId
-                  }
+                  disabled={lockedProviderId !== null && lockedProviderId !== ref.providerId}
                   showProviderPrefix={true}
                   onSelect={() => handleRowSelect(ref)}
                   onToggleFavorite={() => onToggleFavorite(ref)}
@@ -291,9 +276,7 @@ export function ModelPickerPopover({
 
         {providers.map((provider) => {
           const models = modelsByProvider[provider.id] ?? [];
-          const visible = models.filter((info) =>
-            filterMatches(provider.id, info.id),
-          );
+          const visible = models.filter((info) => filterMatches(provider.id, info.id));
           if (visible.length === 0) return null;
           return (
             <Section key={provider.id} title={provider.displayName}>
@@ -312,10 +295,7 @@ export function ModelPickerPopover({
                       activeRef.modelId === info.id
                     }
                     isFavorite={favoritesKey.has(refKey(ref))}
-                    disabled={
-                      lockedProviderId !== null &&
-                      lockedProviderId !== provider.id
-                    }
+                    disabled={lockedProviderId !== null && lockedProviderId !== provider.id}
                     showProviderPrefix={false}
                     onSelect={() => handleRowSelect(ref)}
                     onToggleFavorite={() => onToggleFavorite(ref)}
@@ -334,13 +314,7 @@ export function ModelPickerPopover({
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="model-picker-popover-section">
       <div className="model-picker-popover-section-title">{title}</div>
@@ -431,9 +405,7 @@ function Row({
         title={buttonTitle}
       >
         {showProviderPrefix && (
-          <span className="model-picker-popover-pick-prefix">
-            {providerLabel}
-          </span>
+          <span className="model-picker-popover-pick-prefix">{providerLabel}</span>
         )}
         <span className="model-picker-popover-pick-id">{label}</span>
         {info.costTier && (

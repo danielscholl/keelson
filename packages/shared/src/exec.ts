@@ -44,7 +44,10 @@ export async function runText(
       if (opts.acceptNonZeroExit) {
         return { ok: true, data: stdout, exitCode: code };
       }
-      const firstLine = stderr.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+      const firstLine = stderr
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 0);
       const reason = firstLine ?? `exit ${code}`;
       return { ok: false, error: reason.slice(0, 200), code };
     }

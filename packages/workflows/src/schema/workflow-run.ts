@@ -7,34 +7,34 @@
  * carries optional runtime fields (`usage`, `startedAt`, `completedAt`,
  * `durationMs`) used by the executor's lifecycle hooks.
  */
-import { z } from 'zod';
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // WorkflowRunStatus
 // ---------------------------------------------------------------------------
 
 export const workflowRunStatusSchema = z.enum([
-  'pending',
-  'running',
-  'completed',
-  'failed',
-  'cancelled',
-  'paused',
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "paused",
 ]);
 
 export type WorkflowRunStatus = z.infer<typeof workflowRunStatusSchema>;
 
 /** Statuses that indicate a run has finished and cannot transition further. */
 export const TERMINAL_WORKFLOW_STATUSES: readonly WorkflowRunStatus[] = [
-  'completed',
-  'failed',
-  'cancelled',
+  "completed",
+  "failed",
+  "cancelled",
 ] as const;
 
 /** Statuses that allow a user to resume execution. */
 export const RESUMABLE_WORKFLOW_STATUSES: readonly WorkflowRunStatus[] = [
-  'failed',
-  'paused',
+  "failed",
+  "paused",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -42,11 +42,11 @@ export const RESUMABLE_WORKFLOW_STATUSES: readonly WorkflowRunStatus[] = [
 // ---------------------------------------------------------------------------
 
 export const workflowStepStatusSchema = z.enum([
-  'pending',
-  'running',
-  'completed',
-  'failed',
-  'skipped',
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "skipped",
 ]);
 
 export type WorkflowStepStatus = z.infer<typeof workflowStepStatusSchema>;
@@ -55,7 +55,7 @@ export type WorkflowStepStatus = z.infer<typeof workflowStepStatusSchema>;
 // NodeState
 // ---------------------------------------------------------------------------
 
-export const nodeStateSchema = z.enum(['pending', 'running', 'completed', 'failed', 'skipped']);
+export const nodeStateSchema = z.enum(["pending", "running", "completed", "failed", "skipped"]);
 
 export type NodeState = z.infer<typeof nodeStateSchema>;
 
@@ -95,9 +95,9 @@ export type TokenUsage = z.infer<typeof tokenUsageSchema>;
  * `usage` / `startedAt` / `completedAt` / `durationMs` are Keelson-only
  * runtime extras (see file header). All optional and additive.
  */
-export const nodeOutputSchema = z.discriminatedUnion('state', [
+export const nodeOutputSchema = z.discriminatedUnion("state", [
   z.object({
-    state: z.enum(['completed', 'running']),
+    state: z.enum(["completed", "running"]),
     output: z.string(),
     sessionId: z.string().optional(),
     usage: tokenUsageSchema.optional(),
@@ -106,7 +106,7 @@ export const nodeOutputSchema = z.discriminatedUnion('state', [
     durationMs: z.number().optional(),
   }),
   z.object({
-    state: z.literal('failed'),
+    state: z.literal("failed"),
     output: z.string(),
     sessionId: z.string().optional(),
     error: z.string(),
@@ -116,7 +116,7 @@ export const nodeOutputSchema = z.discriminatedUnion('state', [
     durationMs: z.number().optional(),
   }),
   z.object({
-    state: z.enum(['pending', 'skipped']),
+    state: z.enum(["pending", "skipped"]),
     output: z.string(),
   }),
 ]);
@@ -154,7 +154,7 @@ export interface ApprovalContext {
   nodeId: string;
   message: string;
   /** Distinguishes approval-gate pauses from interactive-loop pauses. */
-  type?: 'approval' | 'interactive_loop';
+  type?: "approval" | "interactive_loop";
   /** Current loop iteration when paused (interactive loops only). */
   iteration?: number;
   /** Session ID to restore on resume (interactive loops only). */
@@ -172,10 +172,10 @@ export interface ApprovalContext {
  */
 export function isApprovalContext(val: unknown): val is ApprovalContext {
   return (
-    typeof val === 'object' &&
+    typeof val === "object" &&
     val !== null &&
-    typeof (val as Record<string, unknown>).nodeId === 'string' &&
-    typeof (val as Record<string, unknown>).message === 'string'
+    typeof (val as Record<string, unknown>).nodeId === "string" &&
+    typeof (val as Record<string, unknown>).message === "string"
   );
 }
 
@@ -184,11 +184,11 @@ export function isApprovalContext(val: unknown): val is ApprovalContext {
 // ---------------------------------------------------------------------------
 
 export const artifactTypeSchema = z.enum([
-  'pr',
-  'commit',
-  'file_created',
-  'file_modified',
-  'branch',
+  "pr",
+  "commit",
+  "file_created",
+  "file_modified",
+  "branch",
 ]);
 
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
@@ -197,8 +197,8 @@ export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 // Compile-time assertion: NodeOutput must cover all NodeState values.
 // ---------------------------------------------------------------------------
 
-type AssertNodeOutputCoversNodeState = NodeOutput['state'] extends NodeState
-  ? NodeState extends NodeOutput['state']
+type AssertNodeOutputCoversNodeState = NodeOutput["state"] extends NodeState
+  ? NodeState extends NodeOutput["state"]
     ? true
     : never
   : never;

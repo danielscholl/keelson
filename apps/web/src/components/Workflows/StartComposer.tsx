@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import { useState, type KeyboardEvent } from "react";
+import { type KeyboardEvent, useState } from "react";
 
 export interface StartComposerProps {
   // Empty → run with no args. The input remains optional even after W6

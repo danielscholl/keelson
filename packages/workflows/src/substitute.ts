@@ -20,7 +20,7 @@ import type { NodeOutput } from "./schema/index.ts";
  * matches Archon's behavior byte-for-byte.
  */
 export function shellQuote(value: string): string {
-	return `'${value.replaceAll("'", "'\\''")}'`;
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /**
@@ -35,16 +35,16 @@ export function shellQuote(value: string): string {
  * downstream substitution may fill them, or the user can spot the leak.
  */
 export function substituteWorkflowVariables(text: string, args: string[]): string {
-	let result = text;
+  let result = text;
 
-	args.forEach((arg, index) => {
-		result = result.replace(new RegExp(`\\$${String(index + 1)}`, "g"), arg);
-	});
+  args.forEach((arg, index) => {
+    result = result.replace(new RegExp(`\\$${String(index + 1)}`, "g"), arg);
+  });
 
-	result = result.replace(/\$ARGUMENTS/g, args.join(" "));
-	result = result.replace(/\\\$/g, "$");
+  result = result.replace(/\$ARGUMENTS/g, args.join(" "));
+  result = result.replace(/\\\$/g, "$");
 
-	return result;
+  return result;
 }
 
 /**
@@ -67,33 +67,33 @@ export function substituteWorkflowVariables(text: string, args: string[]): strin
  *   for bash node substitution; AI/prompt substitution should pass false.
  */
 export function substituteNodeOutputRefs(
-	prompt: string,
-	nodeOutputs: Map<string, NodeOutput>,
-	escapedForBash = false,
+  prompt: string,
+  nodeOutputs: Map<string, NodeOutput>,
+  escapedForBash = false,
 ): string {
-	return prompt.replace(
-		/\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?/g,
-		(_match, nodeId: string, field: string | undefined) => {
-			const nodeOutput = nodeOutputs.get(nodeId);
-			if (!nodeOutput) return escapedForBash ? "''" : "";
-			if (!field) {
-				return escapedForBash ? shellQuote(nodeOutput.output) : nodeOutput.output;
-			}
-			try {
-				const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
-				const value = parsed[field];
-				if (typeof value === "string") {
-					return escapedForBash ? shellQuote(value) : value;
-				}
-				// JSON disallows NaN/Infinity, so String(number) is shell-safe.
-				// String(boolean) is 'true' or 'false' — also shell-safe.
-				if (typeof value === "number" || typeof value === "boolean") {
-					return String(value);
-				}
-				return escapedForBash ? "''" : "";
-			} catch {
-				return escapedForBash ? "''" : "";
-			}
-		},
-	);
+  return prompt.replace(
+    /\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?/g,
+    (_match, nodeId: string, field: string | undefined) => {
+      const nodeOutput = nodeOutputs.get(nodeId);
+      if (!nodeOutput) return escapedForBash ? "''" : "";
+      if (!field) {
+        return escapedForBash ? shellQuote(nodeOutput.output) : nodeOutput.output;
+      }
+      try {
+        const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
+        const value = parsed[field];
+        if (typeof value === "string") {
+          return escapedForBash ? shellQuote(value) : value;
+        }
+        // JSON disallows NaN/Infinity, so String(number) is shell-safe.
+        // String(boolean) is 'true' or 'false' — also shell-safe.
+        if (typeof value === "number" || typeof value === "boolean") {
+          return String(value);
+        }
+        return escapedForBash ? "''" : "";
+      } catch {
+        return escapedForBash ? "''" : "";
+      }
+    },
+  );
 }

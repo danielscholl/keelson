@@ -7,18 +7,11 @@ import { describe, expect, test } from "bun:test";
 import type { ExecResult } from "@keelson/shared/exec";
 
 import { runAuthCheck } from "../src/checks/auth.ts";
-import {
-  LATEST_MIGRATION_VERSION,
-  runDbCheck,
-  type DbReader,
-} from "../src/checks/db.ts";
+import { type DbReader, LATEST_MIGRATION_VERSION, runDbCheck } from "../src/checks/db.ts";
 import { runServerCheck } from "../src/checks/server.ts";
 import { runToolchainCheck } from "../src/checks/toolchain.ts";
 import { runWorkflowsCheck } from "../src/checks/workflows.ts";
-import {
-  buildDoctorReport,
-  exitCodeFor,
-} from "../src/commands/doctor.ts";
+import { buildDoctorReport, exitCodeFor } from "../src/commands/doctor.ts";
 import { EXIT_FAIL, EXIT_OK } from "../src/exit.ts";
 import type { ServerInfo } from "../src/server-probe.ts";
 

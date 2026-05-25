@@ -48,9 +48,7 @@ export function createKeyringStore(): CredentialStore {
         return value ?? undefined;
       } catch (err) {
         if (isNoEntryError(err)) return undefined;
-        throw new Error(
-          `keyring get failed for '${serviceId}': ${(err as Error).message}`,
-        );
+        throw new Error(`keyring get failed for '${serviceId}': ${(err as Error).message}`);
       }
     },
     async set(serviceId, value) {
@@ -60,9 +58,7 @@ export function createKeyringStore(): CredentialStore {
         const entry = new mod.Entry(KEYRING_SERVICE, serviceId);
         entry.setPassword(value);
       } catch (err) {
-        throw new Error(
-          `keyring set failed for '${serviceId}': ${(err as Error).message}`,
-        );
+        throw new Error(`keyring set failed for '${serviceId}': ${(err as Error).message}`);
       }
     },
     async delete(serviceId) {
@@ -73,9 +69,7 @@ export function createKeyringStore(): CredentialStore {
         return entry.deleteCredential();
       } catch (err) {
         if (isNoEntryError(err)) return false;
-        throw new Error(
-          `keyring delete failed for '${serviceId}': ${(err as Error).message}`,
-        );
+        throw new Error(`keyring delete failed for '${serviceId}': ${(err as Error).message}`);
       }
     },
   };

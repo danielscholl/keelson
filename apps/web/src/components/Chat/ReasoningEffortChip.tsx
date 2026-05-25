@@ -17,11 +17,7 @@ interface ReasoningEffortChipProps {
   disabled?: boolean;
 }
 
-export function ReasoningEffortChip({
-  level,
-  popoverId,
-  disabled,
-}: ReasoningEffortChipProps) {
+export function ReasoningEffortChip({ level, popoverId, disabled }: ReasoningEffortChipProps) {
   const label = level.toUpperCase();
   return (
     <button
@@ -34,7 +30,9 @@ export function ReasoningEffortChip({
     >
       <LightbulbIcon />
       <span className="chat-reasoning-effort-chip-label">{label}</span>
-      <span className="chat-reasoning-effort-chip-caret" aria-hidden="true">▾</span>
+      <span className="chat-reasoning-effort-chip-caret" aria-hidden="true">
+        ▾
+      </span>
     </button>
   );
 }

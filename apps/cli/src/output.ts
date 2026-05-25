@@ -18,9 +18,9 @@ export type EmitPayload<T = unknown> =
 
 function write(line: string, stream: "stdout" | "stderr"): void {
   if (stream === "stderr") {
-    process.stderr.write(line + "\n");
+    process.stderr.write(`${line}\n`);
   } else {
-    process.stdout.write(line + "\n");
+    process.stdout.write(`${line}\n`);
   }
 }
 
@@ -31,12 +31,12 @@ function renderHuman(value: unknown, indent = ""): string {
     return String(value);
   }
   if (Array.isArray(value)) {
-    return value.map((v) => `${indent}- ${renderHuman(v, indent + "  ")}`).join("\n");
+    return value.map((v) => `${indent}- ${renderHuman(v, `${indent}  `)}`).join("\n");
   }
   if (typeof value === "object") {
     return Object.entries(value as Record<string, unknown>)
       .map(([k, v]) => {
-        const rendered = renderHuman(v, indent + "  ");
+        const rendered = renderHuman(v, `${indent}  `);
         return rendered.includes("\n")
           ? `${indent}${k}:\n${rendered}`
           : `${indent}${k}: ${rendered}`;

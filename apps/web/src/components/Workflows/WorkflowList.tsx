@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
+import { useMemo, useState } from "react";
 
 import { WorkflowCard } from "./WorkflowCard.tsx";
 
@@ -10,10 +10,7 @@ function nodeTypesSet(detail: WorkflowDetail | undefined): Set<string> {
   return new Set(detail.nodes.map((n) => n.type));
 }
 
-function matchesFilter(
-  filter: FilterKind,
-  types: Set<string>,
-): boolean {
+function matchesFilter(filter: FilterKind, types: Set<string>): boolean {
   if (filter === "all") return true;
   if (filter === "bash") return types.size === 1 && types.has("bash");
   if (filter === "prompt") return types.size === 1 && types.has("prompt");
@@ -49,8 +46,7 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
         <div className="empty-state-icon">⊘</div>
         <div className="empty-state-title">No workflows discovered</div>
         <div className="empty-state-body">
-          Drop YAML files into <code>.keelson/workflows/</code> and restart
-          the server.
+          Drop YAML files into <code>.keelson/workflows/</code> and restart the server.
         </div>
       </div>
     );
@@ -60,7 +56,9 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
     <>
       <div className="toolbar">
         <div className="search">
-          <span className="search-icon" aria-hidden="true">⌕</span>
+          <span className="search-icon" aria-hidden="true">
+            ⌕
+          </span>
           <input
             type="search"
             placeholder="Search workflows"

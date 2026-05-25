@@ -11,9 +11,7 @@ export class UnknownProviderError extends Error {
     public readonly requestedProvider: string,
     public readonly registeredProviders: string[],
   ) {
-    super(
-      `Unknown provider: '${requestedProvider}'. Available: ${registeredProviders.join(", ")}`,
-    );
+    super(`Unknown provider: '${requestedProvider}'. Available: ${registeredProviders.join(", ")}`);
     this.name = "UnknownProviderError";
   }
 }

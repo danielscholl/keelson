@@ -1,6 +1,6 @@
 import dagre from "@dagrejs/dagre";
+import type { WorkflowNodeStatus, WorkflowNodeSummary } from "@keelson/shared";
 import type { Edge, Node as RFNode } from "@xyflow/react";
-import type { WorkflowNodeSummary, WorkflowNodeStatus } from "@keelson/shared";
 
 // Box dims match Archon's recipe — keeps fan-outs/convergence laying out
 // the same way operators see in workflow editors they've seen elsewhere.
@@ -90,11 +90,10 @@ export interface DagLayoutInput {
 // Build positioned xyflow nodes + edges from the shared schema. Edges adopt
 // the *target* node's status so an edge into a failed node turns red even
 // while the source already succeeded — matches the mockup.
-export function dagLayout({
-  nodes,
-  statusByNode,
-  durationByNode,
-}: DagLayoutInput): { nodes: DagFlowNode[]; edges: DagFlowEdge[] } {
+export function dagLayout({ nodes, statusByNode, durationByNode }: DagLayoutInput): {
+  nodes: DagFlowNode[];
+  edges: DagFlowEdge[];
+} {
   const rfNodes: DagFlowNode[] = nodes.map((n, i) => ({
     id: n.id,
     type: "dagNode",
@@ -140,11 +139,7 @@ export function hasCycle(
     adjacency.set(id, []);
   }
   for (const edge of edges) {
-    if (
-      nodeIds.has(edge.source) &&
-      nodeIds.has(edge.target) &&
-      edge.source !== edge.target
-    ) {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target) && edge.source !== edge.target) {
       inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
       adjacency.get(edge.source)?.push(edge.target);
     }

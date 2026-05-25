@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
 import type { Conversation } from "@keelson/shared";
+import type { KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SkeletonStack } from "../Skeleton.tsx";
 
 interface SidebarProps {
@@ -134,13 +134,9 @@ export function Sidebar({
   const buckets = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = q
-      ? conversations.filter((c) =>
-          (c.name ?? "Untitled").toLowerCase().includes(q),
-        )
+      ? conversations.filter((c) => (c.name ?? "Untitled").toLowerCase().includes(q))
       : conversations;
-    const sorted = filtered.slice().sort((a, b) =>
-      timestampOf(b).localeCompare(timestampOf(a)),
-    );
+    const sorted = filtered.slice().sort((a, b) => timestampOf(b).localeCompare(timestampOf(a)));
     const buckets: Record<Bucket, Conversation[]> = {
       today: [],
       yesterday: [],
@@ -242,9 +238,7 @@ export function Sidebar({
         if (list.length === 0) return null;
         return (
           <div key={bucket} className="chat-sidebar-group">
-            <div className="chat-sidebar-group-label">
-              {BUCKET_LABEL[bucket]}
-            </div>
+            <div className="chat-sidebar-group-label">{BUCKET_LABEL[bucket]}</div>
             <ul className="chat-sidebar-list">
               {list.map((conv) => renderConversationItem(conv))}
             </ul>
@@ -259,13 +253,9 @@ export function Sidebar({
     const isStreaming = conv.id === streamingId;
     const isRenaming = conv.id === renamingId;
     const label = conv.name ?? "Untitled";
-    const providerLabel =
-      providerLabels.get(conv.providerId) ?? conv.providerId;
+    const providerLabel = providerLabels.get(conv.providerId) ?? conv.providerId;
     return (
-      <li
-        key={conv.id}
-        className={`chat-sidebar-item${isActive ? " active" : ""}`}
-      >
+      <li key={conv.id} className={`chat-sidebar-item${isActive ? " active" : ""}`}>
         {isRenaming ? (
           <input
             ref={renameInputRef}
@@ -288,17 +278,10 @@ export function Sidebar({
           >
             <span className="chat-sidebar-name">
               {label}
-              {isStreaming && (
-                <span
-                  className="chat-sidebar-streaming-dot"
-                  aria-label="active"
-                />
-              )}
+              {isStreaming && <span className="chat-sidebar-streaming-dot" aria-label="active" />}
             </span>
             <span className="chat-sidebar-meta">
-              <span className="pill chat-sidebar-provider">
-                {providerLabel}
-              </span>
+              <span className="pill chat-sidebar-provider">{providerLabel}</span>
             </span>
           </button>
         )}

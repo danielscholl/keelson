@@ -5,20 +5,17 @@
 // Credentials POST inbound only — never round-trip the value back to the
 // browser. The status endpoint returns only the bit `signedIn`.
 
-import type { Hono } from "hono";
+import type { ClaudeAuthProbe, CopilotAuthProbe } from "@keelson/providers";
 import {
+  type ClaudeCliStatus,
+  type CopilotCliStatus,
   claudeCliStatusSchema,
   copilotCliStatusSchema,
   credentialServiceIdSchema,
   credentialStatusSchema,
   setCredentialBodySchema,
-  type ClaudeCliStatus,
-  type CopilotCliStatus,
 } from "@keelson/shared";
-import type {
-  ClaudeAuthProbe,
-  CopilotAuthProbe,
-} from "@keelson/providers";
+import type { Hono } from "hono";
 import { isAllowedOrigin } from "./chat-handler.ts";
 import type { CredentialStore } from "./credentials.ts";
 

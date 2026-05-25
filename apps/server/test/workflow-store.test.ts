@@ -13,8 +13,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConversationStore } from "../src/conversation-store.ts";
-import { createWorkflowStore } from "../src/workflow-store.ts";
 import { openDatabase } from "../src/db/init.ts";
+import { createWorkflowStore } from "../src/workflow-store.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -103,7 +103,13 @@ describe("SQLite WorkflowStore", () => {
   test("upsertNodeOutput is idempotent on (run_id, node_id)", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
-    store.createRun({ runId: "r1", workflowName: "x", inputs: {}, startedAt: "ts", conversationId: mintConv(db) });
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "ts",
+      conversationId: mintConv(db),
+    });
 
     // First write: failed.
     store.upsertNodeOutput({
@@ -138,7 +144,13 @@ describe("SQLite WorkflowStore", () => {
   test("deleting a workflow_runs row cascades to its node outputs", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
-    store.createRun({ runId: "r1", workflowName: "x", inputs: {}, startedAt: "ts", conversationId: mintConv(db) });
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "ts",
+      conversationId: mintConv(db),
+    });
     store.upsertNodeOutput({
       runId: "r1",
       nodeId: "n",
@@ -160,9 +172,27 @@ describe("SQLite WorkflowStore", () => {
   test("listRuns returns newest-first globally and scoped by name", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
-    store.createRun({ runId: "r1", workflowName: "a", inputs: {}, startedAt: "2025-01-01T00:00:00.000Z", conversationId: mintConv(db) });
-    store.createRun({ runId: "r2", workflowName: "b", inputs: {}, startedAt: "2025-01-01T00:00:01.000Z", conversationId: mintConv(db) });
-    store.createRun({ runId: "r3", workflowName: "a", inputs: {}, startedAt: "2025-01-01T00:00:02.000Z", conversationId: mintConv(db) });
+    store.createRun({
+      runId: "r1",
+      workflowName: "a",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    store.createRun({
+      runId: "r2",
+      workflowName: "b",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:01.000Z",
+      conversationId: mintConv(db),
+    });
+    store.createRun({
+      runId: "r3",
+      workflowName: "a",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:02.000Z",
+      conversationId: mintConv(db),
+    });
 
     expect(store.listRuns().map((r) => r.runId)).toEqual(["r3", "r2", "r1"]);
     expect(store.listRuns("a").map((r) => r.runId)).toEqual(["r3", "r1"]);
@@ -181,7 +211,13 @@ describe("SQLite WorkflowStore", () => {
     // 'failed' so the row doesn't stay in 'running' forever.
     const db1 = openDatabase({ path: dbPath });
     const s1 = createWorkflowStore(db1);
-    s1.createRun({ runId: "ghost", workflowName: "wf", inputs: {}, startedAt: "2025-01-01T00:00:00.000Z", conversationId: mintConv(db1) });
+    s1.createRun({
+      runId: "ghost",
+      workflowName: "wf",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db1),
+    });
     db1.close();
 
     // Reopen — boot reconcile fires inside createWorkflowStore.
@@ -202,7 +238,13 @@ describe("SQLite WorkflowStore", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
 
-    store.createRun({ runId: "live", workflowName: "wf", inputs: {}, startedAt: "2025-01-01T00:00:00.000Z", conversationId: mintConv(db) });
+    store.createRun({
+      runId: "live",
+      workflowName: "wf",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
     store.upsertNodeOutput({
       runId: "live",
       nodeId: "n",
@@ -214,7 +256,13 @@ describe("SQLite WorkflowStore", () => {
       error: null,
     });
 
-    store.createRun({ runId: "old", workflowName: "wf", inputs: {}, startedAt: "2025-01-01T00:00:01.000Z", conversationId: mintConv(db) });
+    store.createRun({
+      runId: "old",
+      workflowName: "wf",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:01.000Z",
+      conversationId: mintConv(db),
+    });
     store.upsertNodeOutput({
       runId: "old",
       nodeId: "n",

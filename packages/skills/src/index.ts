@@ -6,14 +6,6 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-export {
-  clearRegistry,
-  getRegisteredTools,
-  getToolByName,
-  isRegisteredTool,
-  registerTool,
-} from "./registry.ts";
-
 // Re-exported for ergonomic single-import — skill authors and tool adapters
 // pull the contract types and the registry API from one place.
 export type {
@@ -21,3 +13,10 @@ export type {
   ToolContext,
   ToolDefinition,
 } from "@keelson/shared";
+export {
+  clearRegistry,
+  getRegisteredTools,
+  getToolByName,
+  isRegisteredTool,
+  registerTool,
+} from "./registry.ts";

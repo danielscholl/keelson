@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { isRegisteredProvider, registerProvider } from "../registry.ts";
-import { CopilotClientFactory, type CopilotAuthStatus } from "./factory.ts";
+import { type CopilotAuthStatus, CopilotClientFactory } from "./factory.ts";
 import {
   COPILOT_CAPABILITIES,
   COPILOT_CREDENTIAL_SERVICE_ID,

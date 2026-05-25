@@ -25,11 +25,7 @@ export function buildFriendlyClaudeError(err: unknown, hint?: string): string {
   ) {
     return `Claude authentication failed. Run \`claude auth login\` in a terminal, or save an ANTHROPIC_API_KEY via the Chat panel.${detail}`;
   }
-  if (
-    lower.includes("forbidden") ||
-    lower.includes("403") ||
-    lower.includes("billing_error")
-  ) {
+  if (lower.includes("forbidden") || lower.includes("403") || lower.includes("billing_error")) {
     return `Claude rejected the request. Your account may not have access to this model or feature.${detail}`;
   }
   if (

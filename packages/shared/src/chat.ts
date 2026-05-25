@@ -18,12 +18,7 @@ export const SCHEMA_VERSION = "0.1" as const;
 // Copilot reasoning tier. Sibling of `thinking` (Anthropic's boolean
 // adaptive-thinking) rather than a polymorphic merge — both providers stream
 // through the same `thinking` MessageChunk channel.
-export const reasoningEffortLevelSchema = z.enum([
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]);
+export const reasoningEffortLevelSchema = z.enum(["low", "medium", "high", "xhigh"]);
 export type ReasoningEffortLevel = z.infer<typeof reasoningEffortLevelSchema>;
 
 export const messageChunkSchema = z.discriminatedUnion("type", [
@@ -110,9 +105,7 @@ export const conversationWorkflowProjectionSchema = z
     status: z.enum(["running", "paused", "succeeded", "failed", "cancelled"]),
   })
   .strict();
-export type ConversationWorkflowProjection = z.infer<
-  typeof conversationWorkflowProjectionSchema
->;
+export type ConversationWorkflowProjection = z.infer<typeof conversationWorkflowProjectionSchema>;
 
 export const conversationSchema = z
   .object({
@@ -244,27 +237,16 @@ export const credentialServiceIdSchema = z
   .regex(/^[a-z][a-z0-9-]*$/);
 export type CredentialServiceId = z.infer<typeof credentialServiceIdSchema>;
 
-export const setCredentialBodySchema = z
-  .object({ value: z.string().min(1) })
-  .strict();
+export const setCredentialBodySchema = z.object({ value: z.string().min(1) }).strict();
 export type SetCredentialBody = z.infer<typeof setCredentialBodySchema>;
 
-export const credentialStatusSchema = z
-  .object({ signedIn: z.boolean() })
-  .strict();
+export const credentialStatusSchema = z.object({ signedIn: z.boolean() }).strict();
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 
 // Proxies SDK.getAuthStatus() so SignIn never round-trips the token.
 // `authenticated` renamed from the SDK's `isAuthenticated` for consistency
 // with credentialStatusSchema.signedIn.
-export const copilotAuthTypeSchema = z.enum([
-  "user",
-  "env",
-  "gh-cli",
-  "hmac",
-  "api-key",
-  "token",
-]);
+export const copilotAuthTypeSchema = z.enum(["user", "env", "gh-cli", "hmac", "api-key", "token"]);
 export type CopilotAuthType = z.infer<typeof copilotAuthTypeSchema>;
 
 export const copilotCliStatusSchema = z

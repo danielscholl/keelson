@@ -12,21 +12,21 @@
  * z.union() is NOT used here — YAML nodes lack an explicit `type` discriminant,
  * so a flat schema with superRefine is cleaner than a z.union() with implicit discriminants.
  */
-import { z } from 'zod';
-import { stepRetryConfigSchema } from './retry.ts';
-import { loopNodeConfigSchema } from './loop.ts';
-import { workflowNodeHooksSchema } from './hooks.ts';
-import { isValidCommandName } from './command-validation.ts';
+import { z } from "zod";
+import { isValidCommandName } from "./command-validation.ts";
+import { workflowNodeHooksSchema } from "./hooks.ts";
+import { loopNodeConfigSchema } from "./loop.ts";
+import { stepRetryConfigSchema } from "./retry.ts";
 
 // ---------------------------------------------------------------------------
 // TriggerRule
 // ---------------------------------------------------------------------------
 
 export const triggerRuleSchema = z.enum([
-  'all_success',
-  'one_success',
-  'none_failed_min_one_success',
-  'all_done',
+  "all_success",
+  "one_success",
+  "none_failed_min_one_success",
+  "all_done",
 ]);
 
 export type TriggerRule = z.infer<typeof triggerRuleSchema>;
@@ -39,7 +39,7 @@ export const TRIGGER_RULES: readonly TriggerRule[] = triggerRuleSchema.options;
 // ---------------------------------------------------------------------------
 
 /** Claude Agent SDK effort level — controls reasoning depth. Different from Codex modelReasoningEffort. */
-export const effortLevelSchema = z.enum(['low', 'medium', 'high', 'max']);
+export const effortLevelSchema = z.enum(["low", "medium", "high", "max"]);
 
 export type EffortLevel = z.infer<typeof effortLevelSchema>;
 
@@ -48,19 +48,19 @@ export type EffortLevel = z.infer<typeof effortLevelSchema>;
  * Shorthand: 'adaptive' → { type: 'adaptive' }, 'enabled' → { type: 'enabled' }, 'disabled' → { type: 'disabled' }.
  */
 export const thinkingConfigSchema = z.preprocess(
-  val => {
-    if (typeof val === 'string') {
-      if (val === 'adaptive') return { type: 'adaptive' };
-      if (val === 'enabled') return { type: 'enabled' };
-      if (val === 'disabled') return { type: 'disabled' };
+  (val) => {
+    if (typeof val === "string") {
+      if (val === "adaptive") return { type: "adaptive" };
+      if (val === "enabled") return { type: "enabled" };
+      if (val === "disabled") return { type: "disabled" };
     }
     return val;
   },
-  z.discriminatedUnion('type', [
-    z.object({ type: z.literal('adaptive') }),
-    z.object({ type: z.literal('enabled'), budgetTokens: z.number().int().positive().optional() }),
-    z.object({ type: z.literal('disabled') }),
-  ])
+  z.discriminatedUnion("type", [
+    z.object({ type: z.literal("adaptive") }),
+    z.object({ type: z.literal("enabled"), budgetTokens: z.number().int().positive().optional() }),
+    z.object({ type: z.literal("disabled") }),
+  ]),
 );
 
 export type ThinkingConfig = z.infer<typeof thinkingConfigSchema>;
@@ -138,7 +138,7 @@ export const dagNodeBaseSchema = z.object({
   trigger_rule: triggerRuleSchema.optional(),
   model: z.string().optional(),
   provider: z.string().trim().min(1).optional(),
-  context: z.enum(['fresh', 'shared']).optional(),
+  context: z.enum(["fresh", "shared"]).optional(),
   output_format: z.record(z.unknown()).optional(),
   allowed_tools: z.array(z.string()).optional(),
   denied_tools: z.array(z.string()).optional(),
@@ -147,15 +147,15 @@ export const dagNodeBaseSchema = z.object({
   hooks: workflowNodeHooksSchema.optional(),
   mcp: z.string().min(1, "'mcp' must be a non-empty string path").optional(),
   skills: z
-    .array(z.string().min(1, 'each skill must be a non-empty string'))
+    .array(z.string().min(1, "each skill must be a non-empty string"))
     .nonempty("'skills' must be a non-empty array")
     .optional(),
   agents: z
     .record(
-      z.string().regex(AGENT_ID_REGEX, 'agent IDs must be kebab-case (a-z, 0-9, hyphen)'),
-      agentDefinitionSchema
+      z.string().regex(AGENT_ID_REGEX, "agent IDs must be kebab-case (a-z, 0-9, hyphen)"),
+      agentDefinitionSchema,
     )
-    .refine(map => Object.keys(map).length > 0, "'agents' must have at least one entry")
+    .refine((map) => Object.keys(map).length > 0, "'agents' must have at least one entry")
     .optional(),
   effort: effortLevelSchema.optional(),
   thinking: thinkingConfigSchema.optional(),
@@ -225,9 +225,9 @@ export type BashNode = z.infer<typeof bashNodeSchema> & {
  * AI-specific fields from the base are present in the type but ignored at runtime with a warning.
  */
 export const scriptNodeSchema = dagNodeBaseSchema.extend({
-  script: z.string().min(1, 'script cannot be empty'),
-  runtime: z.enum(['bun', 'uv']),
-  deps: z.array(z.string().min(1, 'each dep must be a non-empty string')).optional(),
+  script: z.string().min(1, "script cannot be empty"),
+  runtime: z.enum(["bun", "uv"]),
+  deps: z.array(z.string().min(1, "each dep must be a non-empty string")).optional(),
   timeout: z.number().optional(),
 });
 
@@ -324,23 +324,23 @@ export type DagNode =
 
 /** AI-specific fields that are meaningless on bash nodes — exported for loader warnings */
 export const BASH_NODE_AI_FIELDS: readonly string[] = [
-  'provider',
-  'model',
-  'context',
-  'output_format',
-  'allowed_tools',
-  'denied_tools',
-  'hooks',
-  'mcp',
-  'skills',
-  'agents',
-  'effort',
-  'thinking',
-  'maxBudgetUsd',
-  'systemPrompt',
-  'fallbackModel',
-  'betas',
-  'sandbox',
+  "provider",
+  "model",
+  "context",
+  "output_format",
+  "allowed_tools",
+  "denied_tools",
+  "hooks",
+  "mcp",
+  "skills",
+  "agents",
+  "effort",
+  "thinking",
+  "maxBudgetUsd",
+  "systemPrompt",
+  "fallbackModel",
+  "betas",
+  "sandbox",
 ];
 
 /** AI-specific fields that are meaningless on script nodes — same as bash nodes */
@@ -352,7 +352,7 @@ export const SCRIPT_NODE_AI_FIELDS: readonly string[] = BASH_NODE_AI_FIELDS;
  * forwards them to each iteration's AI call.
  */
 export const LOOP_NODE_AI_FIELDS: readonly string[] = BASH_NODE_AI_FIELDS.filter(
-  f => f !== 'model' && f !== 'provider'
+  (f) => f !== "model" && f !== "provider",
 );
 
 // ---------------------------------------------------------------------------
@@ -391,8 +391,8 @@ export const dagNodeSchema = dagNodeBaseSchema
     cancel: z.string().optional(),
     // Script-only
     script: z.string().optional(),
-    runtime: z.enum(['bun', 'uv']).optional(),
-    deps: z.array(z.string().min(1, 'each dep must be a non-empty string')).optional(),
+    runtime: z.enum(["bun", "uv"]).optional(),
+    deps: z.array(z.string().min(1, "each dep must be a non-empty string")).optional(),
     // Bash/Script shared
     timeout: z.number().optional(),
   })
@@ -404,18 +404,18 @@ export const dagNodeSchema = dagNodeBaseSchema
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "missing required field 'id'",
-        path: ['id'],
+        path: ["id"],
       });
       return z.NEVER;
     }
 
-    const hasCommand = typeof data.command === 'string' && data.command.trim().length > 0;
-    const hasPrompt = typeof data.prompt === 'string' && data.prompt.trim().length > 0;
-    const hasBash = typeof data.bash === 'string' && data.bash.trim().length > 0;
+    const hasCommand = typeof data.command === "string" && data.command.trim().length > 0;
+    const hasPrompt = typeof data.prompt === "string" && data.prompt.trim().length > 0;
+    const hasBash = typeof data.bash === "string" && data.bash.trim().length > 0;
     const hasLoop = data.loop !== undefined;
     const hasApproval = data.approval !== undefined;
-    const hasCancel = typeof data.cancel === 'string' && data.cancel.trim().length > 0;
-    const hasScript = typeof data.script === 'string' && data.script.trim().length > 0;
+    const hasCancel = typeof data.cancel === "string" && data.cancel.trim().length > 0;
+    const hasScript = typeof data.script === "string" && data.script.trim().length > 0;
 
     const modeCount = [
       hasCommand,
@@ -436,27 +436,27 @@ export const dagNodeSchema = dagNodeBaseSchema
       return z.NEVER;
     }
     if (modeCount === 0) {
-      if (typeof data.bash === 'string') {
+      if (typeof data.bash === "string") {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'bash script cannot be empty',
-          path: ['bash'],
+          message: "bash script cannot be empty",
+          path: ["bash"],
         });
         return z.NEVER;
       }
-      if (typeof data.prompt === 'string') {
+      if (typeof data.prompt === "string") {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'prompt cannot be empty',
-          path: ['prompt'],
+          message: "prompt cannot be empty",
+          path: ["prompt"],
         });
         return z.NEVER;
       }
-      if (typeof data.script === 'string') {
+      if (typeof data.script === "string") {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'script cannot be empty',
-          path: ['script'],
+          message: "script cannot be empty",
+          path: ["script"],
         });
         return z.NEVER;
       }
@@ -469,21 +469,21 @@ export const dagNodeSchema = dagNodeBaseSchema
     }
 
     // Command name validation
-    if (hasCommand && !isValidCommandName((data.command ?? '').trim())) {
+    if (hasCommand && !isValidCommandName((data.command ?? "").trim())) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `invalid command name "${(data.command ?? '').trim()}"`,
-        path: ['command'],
+        message: `invalid command name "${(data.command ?? "").trim()}"`,
+        path: ["command"],
       });
     }
 
     // Bash node validations
     if (hasBash) {
-      if (data.timeout !== undefined && (data.timeout <= 0 || !isFinite(data.timeout))) {
+      if (data.timeout !== undefined && (data.timeout <= 0 || !Number.isFinite(data.timeout))) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "'timeout' must be a positive number (ms)",
-          path: ['timeout'],
+          path: ["timeout"],
         });
       }
     }
@@ -494,14 +494,14 @@ export const dagNodeSchema = dagNodeBaseSchema
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "'runtime' is required for script nodes ('bun' or 'uv')",
-          path: ['runtime'],
+          path: ["runtime"],
         });
       }
-      if (data.timeout !== undefined && (data.timeout <= 0 || !isFinite(data.timeout))) {
+      if (data.timeout !== undefined && (data.timeout <= 0 || !Number.isFinite(data.timeout))) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "'timeout' must be a positive number (ms)",
-          path: ['timeout'],
+          path: ["timeout"],
         });
       }
     }
@@ -511,19 +511,19 @@ export const dagNodeSchema = dagNodeBaseSchema
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "'retry' is not supported on loop nodes (loop manages its own iteration)",
-        path: ['retry'],
+        path: ["retry"],
       });
     }
 
     // idle_timeout must be finite and positive
     if (
       data.idle_timeout !== undefined &&
-      (data.idle_timeout <= 0 || !isFinite(data.idle_timeout))
+      (data.idle_timeout <= 0 || !Number.isFinite(data.idle_timeout))
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "'idle_timeout' must be a finite positive number (ms)",
-        path: ['idle_timeout'],
+        path: ["idle_timeout"],
       });
     }
   })
@@ -556,7 +556,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.denied_tools !== undefined ? { denied_tools: data.denied_tools } : {}),
       ...(data.hooks !== undefined ? { hooks: data.hooks } : {}),
       ...(data.mcp !== undefined ? { mcp: data.mcp.trim() } : {}),
-      ...(data.skills !== undefined ? { skills: data.skills.map(s => s.trim()) } : {}),
+      ...(data.skills !== undefined ? { skills: data.skills.map((s) => s.trim()) } : {}),
       ...(data.agents !== undefined ? { agents: data.agents } : {}),
       ...(data.effort !== undefined ? { effort: data.effort } : {}),
       ...(data.thinking !== undefined ? { thinking: data.thinking } : {}),
@@ -583,7 +583,7 @@ export const dagNodeSchema = dagNodeBaseSchema
     }
     if (data.script !== undefined && data.script.trim().length > 0) {
       // runtime is guaranteed by superRefine to be defined at this point
-      if (!data.runtime) throw new Error('unreachable: runtime must be defined for script nodes');
+      if (!data.runtime) throw new Error("unreachable: runtime must be defined for script nodes");
       return {
         ...base,
         ...shared,
@@ -600,7 +600,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       return { ...base, ...shared, cancel: data.cancel.trim() } as CancelNode;
     }
     // loop — guaranteed by superRefine to be defined at this point
-    if (!data.loop) throw new Error('unreachable: loop must be defined after superRefine');
+    if (!data.loop) throw new Error("unreachable: loop must be defined after superRefine");
     return { ...base, loop: data.loop } as LoopNode;
   });
 
@@ -610,30 +610,30 @@ export const dagNodeSchema = dagNodeBaseSchema
 
 /** Type guard: check if a DAG node is a bash (shell script) node */
 export function isBashNode(node: DagNode): node is BashNode {
-  return 'bash' in node && typeof node.bash === 'string';
+  return "bash" in node && typeof node.bash === "string";
 }
 
 /** Type guard: check if a DAG node is a loop (iterative) node */
 export function isLoopNode(node: DagNode): node is LoopNode {
-  return 'loop' in node && typeof node.loop === 'object' && node.loop !== null;
+  return "loop" in node && typeof node.loop === "object" && node.loop !== null;
 }
 
 /** Type guard: check if a DAG node is an approval (human-in-the-loop) node */
 export function isApprovalNode(node: DagNode): node is ApprovalNode {
-  return 'approval' in node && typeof node.approval === 'object' && node.approval !== null;
+  return "approval" in node && typeof node.approval === "object" && node.approval !== null;
 }
 
 /** Type guard: check if a DAG node is a cancel (workflow termination) node */
 export function isCancelNode(node: DagNode): node is CancelNode {
-  return 'cancel' in node && typeof node.cancel === 'string';
+  return "cancel" in node && typeof node.cancel === "string";
 }
 
 /** Type guard: check if a DAG node is a script node */
 export function isScriptNode(node: DagNode): node is ScriptNode {
-  return 'script' in node && typeof node.script === 'string';
+  return "script" in node && typeof node.script === "string";
 }
 
 /** Type guard: validates a value is a known TriggerRule */
 export function isTriggerRule(value: unknown): value is TriggerRule {
-  return typeof value === 'string' && (TRIGGER_RULES as readonly string[]).includes(value);
+  return typeof value === "string" && (TRIGGER_RULES as readonly string[]).includes(value);
 }

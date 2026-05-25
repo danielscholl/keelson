@@ -7,21 +7,17 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import {
-  type Rib,
-  type RibContext,
-  type WorkflowDiscoveryNotice,
-} from "@keelson/shared";
-import { runJSON, runText } from "@keelson/shared/exec";
-import {
+  type ClaudeAuthProbe,
+  type CopilotAuthProbe,
   getAgentProvider,
   getProviderInfoList,
   registerClaudeProvider,
   registerCopilotProvider,
   registerStubProvider,
   registerWorkflowProvider,
-  type ClaudeAuthProbe,
-  type CopilotAuthProbe,
 } from "@keelson/providers";
+import type { Rib, RibContext, WorkflowDiscoveryNotice } from "@keelson/shared";
+import { runJSON, runText } from "@keelson/shared/exec";
 import { getRegisteredTools } from "@keelson/skills";
 import {
   DEFAULT_TOOL_DENYLIST,
@@ -48,9 +44,7 @@ export interface BootstrapProvidersResult {
 const BUILT_IN_IDS = ["stub", "copilot", "claude"] as const;
 type BuiltInId = (typeof BUILT_IN_IDS)[number];
 
-export function bootstrapProviders(
-  options: BootstrapProvidersOptions,
-): BootstrapProvidersResult {
+export function bootstrapProviders(options: BootstrapProvidersOptions): BootstrapProvidersResult {
   const requested = parseProviderList(process.env.KEELSON_PROVIDERS);
   const result: BootstrapProvidersResult = {};
   for (const id of requested) {
@@ -99,9 +93,7 @@ export function parseProviderList(raw: string | undefined): BuiltInId[] {
     if (isBuiltIn(id)) {
       out.push(id);
     } else {
-      console.warn(
-        `[keelson] KEELSON_PROVIDERS contains unknown provider '${id}'; ignoring.`,
-      );
+      console.warn(`[keelson] KEELSON_PROVIDERS contains unknown provider '${id}'; ignoring.`);
     }
   }
   return out;
@@ -128,9 +120,7 @@ export interface RibBootstrap {
 export function bootstrapRibs(options: BootstrapRibsOptions): RibBootstrap {
   const requested = parseRibList(process.env.KEELSON_RIBS);
   const available = options.available;
-  const active = requested.length > 0
-    ? requested
-    : Object.keys(available);
+  const active = requested.length > 0 ? requested : Object.keys(available);
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
   };
@@ -167,9 +157,7 @@ export interface WorkflowCatalog {
 // Scans `workflowDir`, parses each *.yaml via the workflows loader, and
 // returns a name → definition lookup. Parse errors log a warning and skip
 // the file so a single broken workflow doesn't take the catalog down.
-export function bootstrapWorkflows(
-  opts: BootstrapWorkflowsOptions,
-): WorkflowCatalog {
+export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCatalog {
   const result = discoverWorkflows([{ dir: opts.workflowDir, source: "project" }]);
   const notices: WorkflowDiscoveryNotice[] = [];
   for (const error of result.errors) {
@@ -265,8 +253,7 @@ export function bootstrapPromptHandler(): NodeHandler | undefined {
   const timeoutMs = parsePromptTimeoutMs(process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S);
   return makePromptHandler({
     getProvider,
-    getRegisteredTools: () =>
-      getRegisteredTools() as unknown as readonly { name: string }[],
+    getRegisteredTools: () => getRegisteredTools() as unknown as readonly { name: string }[],
     denylist,
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
@@ -285,9 +272,7 @@ export function parseToolDenylist(raw: string | undefined): readonly string[] {
 }
 
 // Exported for tests; not public.
-export function parsePromptTimeoutMs(
-  raw: string | undefined,
-): number | undefined {
+export function parsePromptTimeoutMs(raw: string | undefined): number | undefined {
   if (raw === undefined || raw.trim() === "") return undefined;
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) {

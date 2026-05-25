@@ -27,15 +27,12 @@ describe("buildSubprocessEnv", () => {
         },
       ],
     ]);
-    const env = buildSubprocessEnv(
-      { ARGUMENTS: "hi", flag: "yes" },
-      upstream,
-    );
+    const env = buildSubprocessEnv({ ARGUMENTS: "hi", flag: "yes" }, upstream);
     expect(env.KEELSON_ARGUMENTS).toBe("hi");
     expect(env.KEELSON_INPUTS_ARGUMENTS).toBe("hi");
     expect(env.KEELSON_INPUTS_flag).toBe("yes");
     // dashes in node ids normalize to underscores (POSIX env-var ident rule).
-    expect(env["KEELSON_NODE_fetch_stats_OUTPUT"]).toBe("ok");
+    expect(env.KEELSON_NODE_fetch_stats_OUTPUT).toBe("ok");
   });
 
   test("sets both KEELSON_ARTIFACTS_DIR and ARTIFACTS_DIR when options.artifactsDir is provided", () => {
@@ -44,11 +41,9 @@ describe("buildSubprocessEnv", () => {
     // bash/script `ctx.rawBody` shells expand against — those handlers
     // skip executor substitution for command-injection safety, so the
     // unprefixed env var is the only way `cd "$ARTIFACTS_DIR"` resolves.
-    const env = buildSubprocessEnv(
-      {},
-      new Map<string, NodeOutput>(),
-      { artifactsDir: "/tmp/keelson-run-abc" },
-    );
+    const env = buildSubprocessEnv({}, new Map<string, NodeOutput>(), {
+      artifactsDir: "/tmp/keelson-run-abc",
+    });
     expect(env.KEELSON_ARTIFACTS_DIR).toBe("/tmp/keelson-run-abc");
     expect(env.ARTIFACTS_DIR).toBe("/tmp/keelson-run-abc");
   });
@@ -60,8 +55,8 @@ describe("buildSubprocessEnv", () => {
     // can leak into a workflow subprocess that wasn't given a per-run
     // scratch dir.
     const env = buildSubprocessEnv({}, new Map<string, NodeOutput>());
-    expect(Object.prototype.hasOwnProperty.call(env, "KEELSON_ARTIFACTS_DIR")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(env, "ARTIFACTS_DIR")).toBe(false);
+    expect(Object.hasOwn(env, "KEELSON_ARTIFACTS_DIR")).toBe(false);
+    expect(Object.hasOwn(env, "ARTIFACTS_DIR")).toBe(false);
   });
 
   test("omits both ARTIFACTS_DIR vars when options is provided but artifactsDir is undefined", () => {
@@ -69,8 +64,8 @@ describe("buildSubprocessEnv", () => {
     // when ctx.artifactsDir is undefined, but defensive: an empty options
     // object should not write either env var.
     const env = buildSubprocessEnv({}, new Map<string, NodeOutput>(), {});
-    expect(Object.prototype.hasOwnProperty.call(env, "KEELSON_ARTIFACTS_DIR")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(env, "ARTIFACTS_DIR")).toBe(false);
+    expect(Object.hasOwn(env, "KEELSON_ARTIFACTS_DIR")).toBe(false);
+    expect(Object.hasOwn(env, "ARTIFACTS_DIR")).toBe(false);
   });
 
   test("ARGUMENTS defaults to '' when not provided in inputs", () => {

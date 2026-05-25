@@ -3,13 +3,13 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { join, resolve } from "node:path";
+import { SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
+import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { Server } from "bun";
-import { SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
 import {
-  bootstrapProviders,
   bootstrapPromptHandler,
+  bootstrapProviders,
   bootstrapRibs,
   bootstrapWorkflows,
 } from "./bootstrap.ts";
@@ -57,8 +57,7 @@ const HOSTNAME = "127.0.0.1";
 // typical latency. 60s gives a per-request budget that's tolerant of slow
 // SDK turns without holding sockets open forever.
 const IDLE_TIMEOUT_S = 60;
-const DB_PATH =
-  process.env.KEELSON_DB ?? join(REPO_ROOT, ".keelson", "keelson.db");
+const DB_PATH = process.env.KEELSON_DB ?? join(REPO_ROOT, ".keelson", "keelson.db");
 const db = openDatabase({ path: DB_PATH });
 const store = createConversationStore(db);
 const workflowStore = createWorkflowStore(db);
@@ -107,10 +106,7 @@ export const app = new Hono();
 
 // Reflect any loopback origin so Vite port shifts (5174/5175/…) don't break
 // CORS preflight. The per-route gates use the same predicate.
-app.use(
-  "/api/*",
-  cors({ origin: (o) => (isAllowedOrigin(o) ? o : "") }),
-);
+app.use("/api/*", cors({ origin: (o) => (isAllowedOrigin(o) ? o : "") }));
 
 app.get("/api/health", (c) =>
   c.json({
@@ -176,17 +172,11 @@ const wsHandlers = {
     ws: Parameters<NonNullable<typeof chatHandlers.message>>[0],
     raw: Parameters<NonNullable<typeof chatHandlers.message>>[1],
   ) {
-    if (ws.data.kind === "workflowRun")
-      return workflowRunHandlers.message?.(ws, raw);
+    if (ws.data.kind === "workflowRun") return workflowRunHandlers.message?.(ws, raw);
     return chatHandlers.message?.(ws, raw);
   },
-  close(
-    ws: Parameters<NonNullable<typeof chatHandlers.close>>[0],
-    code: number,
-    reason: string,
-  ) {
-    if (ws.data.kind === "workflowRun")
-      return workflowRunHandlers.close?.(ws, code, reason);
+  close(ws: Parameters<NonNullable<typeof chatHandlers.close>>[0], code: number, reason: string) {
+    if (ws.data.kind === "workflowRun") return workflowRunHandlers.close?.(ws, code, reason);
     return chatHandlers.close?.(ws, code, reason);
   },
 };
@@ -204,11 +194,7 @@ export default {
     }
     const runMatch = WORKFLOW_RUN_WS_RE.exec(url.pathname);
     if (runMatch) {
-      return handleWorkflowRunUpgrade(
-        req,
-        srv,
-        decodeURIComponent(runMatch[1]!),
-      );
+      return handleWorkflowRunUpgrade(req, srv, decodeURIComponent(runMatch[1]!));
     }
     return app.fetch(req);
   },

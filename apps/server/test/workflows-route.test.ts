@@ -9,23 +9,23 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Hono } from "hono";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
 
 import { makePromptHandler } from "@keelson/workflows";
-import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
+import { Hono } from "hono";
 
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
+import { openDatabase } from "../src/db/init.ts";
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
 import {
   createActiveRuns,
   createWorkflowSubscribers,
   workflowsRoutes,
 } from "../src/workflows-handler.ts";
-import { openDatabase } from "../src/db/init.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -65,11 +65,7 @@ function writeWorkflow(filename: string, body: string): void {
 // POSTs without it (CSRF guard).
 const ORIGIN = "http://127.0.0.1:5173";
 
-function postRun(
-  url: string,
-  body: unknown,
-  init: RequestInit = {},
-): Request {
+function postRun(url: string, body: unknown, init: RequestInit = {}): Request {
   return new Request(url, {
     method: "POST",
     ...init,
@@ -94,9 +90,7 @@ async function pollUntilTerminal(
 ): Promise<Record<string, unknown>> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const res = await app.fetch(
-      new Request(`http://test/api/workflows/runs/${runId}`),
-    );
+    const res = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
     const body = (await res.json()) as { run: { status: string } };
     if (TERMINAL_STATUSES.has(body.run.status)) {
       return body.run as Record<string, unknown>;
@@ -176,9 +170,7 @@ nodes:
     };
     expect(body.workflows.find((w) => w.name === "ok")).toBeDefined();
     expect(body.workflows.find((w) => w.name === "broken")).toBeUndefined();
-    const brokenNotice = body.discoveryNotices.find((n) =>
-      n.filename.endsWith("broken.yaml"),
-    );
+    const brokenNotice = body.discoveryNotices.find((n) => n.filename.endsWith("broken.yaml"));
     expect(brokenNotice).toBeDefined();
     expect(brokenNotice!.level).toBe("error");
   });
@@ -314,9 +306,7 @@ nodes:
     const store = createWorkflowStore(db);
     const catalog = bootstrapWorkflows({ workflowDir: wfDir });
     const app = new Hono();
-    const { createActiveRuns, workflowsRoutes } = await import(
-      "../src/workflows-handler.ts"
-    );
+    const { createActiveRuns, workflowsRoutes } = await import("../src/workflows-handler.ts");
     const activeRuns = createActiveRuns();
     workflowsRoutes(
       app,
@@ -344,9 +334,7 @@ nodes:
 
   test("GET /api/workflows/runs/:id returns 404 for unknown run", async () => {
     const { app } = makeRig();
-    const res = await app.fetch(
-      new Request("http://test/api/workflows/runs/no-such-run"),
-    );
+    const res = await app.fetch(new Request("http://test/api/workflows/runs/no-such-run"));
     expect(res.status).toBe(404);
   });
 
@@ -411,9 +399,7 @@ nodes:
 `,
     );
     const { app, store } = makeRig();
-    const res = await app.fetch(
-      postRun("http://test/api/workflows/j/runs", "{not json"),
-    );
+    const res = await app.fetch(postRun("http://test/api/workflows/j/runs", "{not json"));
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("invalid json body");
@@ -468,7 +454,7 @@ nodes:
         yield {
           type: "tool_result",
           toolUseId: "tu-1",
-          content: "{\"phase\":\"Healthy\"}",
+          content: '{"phase":"Healthy"}',
         };
         yield { type: "text", content: "all clear" };
         yield { type: "done" };
@@ -508,12 +494,7 @@ nodes:
     // contentParts captures the structured shape: collapsed text → tool_use → tool_result → text.
     const parts = summarize?.contentParts ?? [];
     expect(parts).toHaveLength(4);
-    expect(parts.map((p) => p.type)).toEqual([
-      "text",
-      "tool_use",
-      "tool_result",
-      "text",
-    ]);
+    expect(parts.map((p) => p.type)).toEqual(["text", "tool_use", "tool_result", "text"]);
   });
 
   test("DELETE /api/workflows/runs/:runId cancels an in-flight prompt run", async () => {
@@ -533,7 +514,12 @@ nodes:
     // before any chunk lands. AbortSignal must propagate from the run's
     // AbortController through the prompt handler into the provider's stream.
     const slowProvider = {
-      async *sendQuery(_p: string, _c: string, _r: unknown, options: { abortSignal?: AbortSignal }) {
+      async *sendQuery(
+        _p: string,
+        _c: string,
+        _r: unknown,
+        options: { abortSignal?: AbortSignal },
+      ) {
         for (let i = 0; i < 100; i++) {
           await new Promise<void>((resolve, reject) => {
             const t = setTimeout(resolve, 50);
@@ -587,7 +573,7 @@ nodes:
       }),
     );
     expect(delRes.status).toBe(200);
-    expect((await delRes.json())).toEqual({ cancelled: true });
+    expect(await delRes.json()).toEqual({ cancelled: true });
 
     const run = (await pollUntilTerminal(app, runId)) as { status: string };
     expect(run.status).toBe("cancelled");
@@ -696,9 +682,7 @@ nodes:
       .get(runId) as { c: number };
     expect(nodeCount.c).toBe(0);
 
-    const getRes = await app.fetch(
-      new Request(`http://test/api/workflows/runs/${runId}`),
-    );
+    const getRes = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
     expect(getRes.status).toBe(404);
   });
 
@@ -717,7 +701,12 @@ nodes:
     const conversationStore = createConversationStore(db);
     const catalog = bootstrapWorkflows({ workflowDir: wfDir });
     const slowProvider = {
-      async *sendQuery(_p: string, _c: string, _r: unknown, options: { abortSignal?: AbortSignal }) {
+      async *sendQuery(
+        _p: string,
+        _c: string,
+        _r: unknown,
+        options: { abortSignal?: AbortSignal },
+      ) {
         for (let i = 0; i < 100; i++) {
           await new Promise<void>((resolve, reject) => {
             const t = setTimeout(resolve, 50);
@@ -839,9 +828,7 @@ nodes:
     // client can open the WS would otherwise leave the socket idle with no
     // terminal signal. Reconciling against the persisted store at open time
     // closes the gap with a synthetic run_done frame.
-    const { workflowRunWebSocketHandlers } = await import(
-      "../src/workflows-handler.ts"
-    );
+    const { workflowRunWebSocketHandlers } = await import("../src/workflows-handler.ts");
     writeWorkflow(
       "instant.yaml",
       `name: instant
@@ -893,9 +880,7 @@ nodes:
   });
 
   test("workflowRunWebSocketHandlers.open closes with 1008 for unknown runId", async () => {
-    const { workflowRunWebSocketHandlers } = await import(
-      "../src/workflows-handler.ts"
-    );
+    const { workflowRunWebSocketHandlers } = await import("../src/workflows-handler.ts");
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
     const subscribers = createWorkflowSubscribers();
@@ -1006,17 +991,13 @@ nodes:
 `,
     );
     const { app, store } = makeRig();
-    const startRes = await app.fetch(
-      postRun("http://test/api/workflows/pa/runs", { inputs: {} }),
-    );
+    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
     const { runId } = (await startRes.json()) as { runId: string };
     // Wait for the executor to actually open the pause — the persisted run
     // row flips from 'running' to 'paused' inside awaitApproval.
     await pollUntilStoreStatus(store, runId, (s) => s === "paused");
     expect(store.getRun(runId)?.status).toBe("paused");
-    const awaitingNode = store
-      .getRun(runId)
-      ?.nodes.find((n) => n.status === "awaiting");
+    const awaitingNode = store.getRun(runId)?.nodes.find((n) => n.status === "awaiting");
     expect(awaitingNode?.nodeId).toBe("review");
     expect(awaitingNode?.outputText).toBe("please approve");
 
@@ -1087,9 +1068,7 @@ nodes:
 `,
     );
     const { app, store } = makeRig();
-    const startRes = await app.fetch(
-      postRun("http://test/api/workflows/pa/runs", { inputs: {} }),
-    );
+    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilStoreStatus(store, runId, (s) => s === "paused");
     const res = await app.fetch(
@@ -1121,9 +1100,7 @@ nodes:
 `,
     );
     const { app, store } = makeRig();
-    const startRes = await app.fetch(
-      postRun("http://test/api/workflows/pa/runs", { inputs: {} }),
-    );
+    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilStoreStatus(store, runId, (s) => s === "paused");
     const res = await app.fetch(
@@ -1162,9 +1139,7 @@ nodes:
 `,
     );
     const { app, store } = makeRig();
-    const startRes = await app.fetch(
-      postRun("http://test/api/workflows/pa/runs", { inputs: {} }),
-    );
+    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilStoreStatus(store, runId, (s) => s === "paused");
     expect(store.getRun(runId)?.status).toBe("paused");
@@ -1224,9 +1199,7 @@ nodes:
       undefined,
       subscribers,
     );
-    const startRes = await app.fetch(
-      postRun("http://test/api/workflows/pa/runs", { inputs: {} }),
-    );
+    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
     const { runId } = (await startRes.json()) as { runId: string };
     subscribers.subscribe(runId, fakeWs);
     const pausedDeadline = Date.now() + 2000;
@@ -1289,19 +1262,14 @@ nodes:
       }
     }
     // Same SQL the reset handler runs.
-    db.exec(
-      `DELETE FROM workflow_runs WHERE status NOT IN ('running', 'paused');`,
-    );
+    db.exec(`DELETE FROM workflow_runs WHERE status NOT IN ('running', 'paused');`);
     const remaining = (
       db.query("SELECT id, status FROM workflow_runs ORDER BY id").all() as {
         id: string;
         status: string;
       }[]
     ).map((r) => `${r.id}:${r.status}`);
-    expect(remaining).toEqual([
-      "run-paused:paused",
-      "run-running:running",
-    ]);
+    expect(remaining).toEqual(["run-paused:paused", "run-running:running"]);
   });
 
   test("W4.6 — sibling approvals: server stays paused until ALL pending resolvers settle", async () => {
@@ -1329,9 +1297,7 @@ nodes:
 `,
     );
     const { app, store } = makeRig();
-    const startRes = await app.fetch(
-      postRun("http://test/api/workflows/pa2/runs", { inputs: {} }),
-    );
+    const startRes = await app.fetch(postRun("http://test/api/workflows/pa2/runs", { inputs: {} }));
     const { runId } = (await startRes.json()) as { runId: string };
     // Wait until BOTH approvals have registered (the run row flips paused
     // on the first handler open; we additionally want both node rows in
@@ -1346,9 +1312,7 @@ nodes:
       await new Promise((r) => setTimeout(r, 25));
     }
     const beforeNodes = store.getRun(runId)?.nodes ?? [];
-    expect(
-      beforeNodes.filter((n) => n.status === "awaiting").length,
-    ).toBe(2);
+    expect(beforeNodes.filter((n) => n.status === "awaiting").length).toBe(2);
 
     // Resume the first approval. Run row must remain 'paused' because
     // review-b is still open.
@@ -1397,9 +1361,7 @@ nodes:
     ).json()) as { runId: string };
     await pollUntilTerminal(app, r2.runId);
 
-    const listRes = await app.fetch(
-      new Request("http://test/api/workflows/two/runs"),
-    );
+    const listRes = await app.fetch(new Request("http://test/api/workflows/two/runs"));
     expect(listRes.status).toBe(200);
     const body = (await listRes.json()) as {
       runs: Array<{ runId: string; status: string }>;
@@ -1423,13 +1385,9 @@ nodes:
     const { app, store } = makeRig();
 
     // No paused runs yet — endpoint returns an empty list, not 404.
-    const emptyRes = await app.fetch(
-      new Request("http://test/api/workflows/runs?status=paused"),
-    );
+    const emptyRes = await app.fetch(new Request("http://test/api/workflows/runs?status=paused"));
     expect(emptyRes.status).toBe(200);
-    expect(((await emptyRes.json()) as { runs: unknown[] }).runs).toHaveLength(
-      0,
-    );
+    expect(((await emptyRes.json()) as { runs: unknown[] }).runs).toHaveLength(0);
 
     const startRes = await app.fetch(
       postRun("http://test/api/workflows/pause-list/runs", { inputs: {} }),
@@ -1437,9 +1395,7 @@ nodes:
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilStoreStatus(store, runId, (s) => s === "paused");
 
-    const listRes = await app.fetch(
-      new Request("http://test/api/workflows/runs?status=paused"),
-    );
+    const listRes = await app.fetch(new Request("http://test/api/workflows/runs?status=paused"));
     expect(listRes.status).toBe(200);
     const body = (await listRes.json()) as {
       runs: Array<{ runId: string; status: string }>;
@@ -1460,13 +1416,9 @@ nodes:
 
   test("GET /api/workflows/runs rejects missing or invalid status query (400)", async () => {
     const { app } = makeRig();
-    const missing = await app.fetch(
-      new Request("http://test/api/workflows/runs"),
-    );
+    const missing = await app.fetch(new Request("http://test/api/workflows/runs"));
     expect(missing.status).toBe(400);
-    const invalid = await app.fetch(
-      new Request("http://test/api/workflows/runs?status=running"),
-    );
+    const invalid = await app.fetch(new Request("http://test/api/workflows/runs?status=running"));
     expect(invalid.status).toBe(400);
   });
 });

@@ -2,8 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { useCallback, useEffect, useRef } from "react";
 import type { RegisteredToolInfo } from "@keelson/shared";
+import { useCallback, useEffect, useRef } from "react";
 import { displayToolName } from "./toolNames.ts";
 
 interface ToolsPopoverProps {
@@ -48,9 +48,7 @@ export function ToolsPopover({ popoverId, tools }: ToolsPopoverProps) {
   const reposition = useCallback(() => {
     const popoverEl = popoverRef.current;
     if (!popoverEl) return;
-    const trigger = document.querySelector<HTMLElement>(
-      `[popovertarget="${popoverId}"]`,
-    );
+    const trigger = document.querySelector<HTMLElement>(`[popovertarget="${popoverId}"]`);
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
@@ -61,17 +59,11 @@ export function ToolsPopover({ popoverId, tools }: ToolsPopoverProps) {
     if (openDown) {
       popoverEl.style.top = `${Math.round(rect.bottom + margin)}px`;
       popoverEl.style.bottom = "auto";
-      popoverEl.style.maxHeight = `${Math.max(
-        200,
-        Math.round(spaceBelow - margin * 2),
-      )}px`;
+      popoverEl.style.maxHeight = `${Math.max(200, Math.round(spaceBelow - margin * 2))}px`;
     } else {
       popoverEl.style.bottom = `${Math.round(viewportH - rect.top + margin)}px`;
       popoverEl.style.top = "auto";
-      popoverEl.style.maxHeight = `${Math.max(
-        200,
-        Math.round(spaceAbove - margin * 2),
-      )}px`;
+      popoverEl.style.maxHeight = `${Math.max(200, Math.round(spaceAbove - margin * 2))}px`;
     }
     popoverEl.style.left = `${Math.round(rect.left)}px`;
     popoverEl.style.minWidth = `${Math.max(320, Math.round(rect.width))}px`;
@@ -128,20 +120,12 @@ export function ToolsPopover({ popoverId, tools }: ToolsPopoverProps) {
           return (
             <section key={family} className="tools-popover-section">
               <div className="tools-popover-section-title">
-                <span className="tools-popover-section-label">
-                  {familyLabel(family)}
-                </span>
+                <span className="tools-popover-section-label">{familyLabel(family)}</span>
               </div>
               <div className="tools-popover-section-rows">
                 {items.map((tool) => (
-                  <div
-                    key={tool.name}
-                    className="tools-popover-row"
-                    title={tool.description}
-                  >
-                    <span className="tools-popover-row-name">
-                      {displayToolName(tool.name)}
-                    </span>
+                  <div key={tool.name} className="tools-popover-row" title={tool.description}>
+                    <span className="tools-popover-row-name">{displayToolName(tool.name)}</span>
                     <span className="tools-popover-row-desc">
                       {previewDescription(tool.description)}
                     </span>
@@ -151,9 +135,7 @@ export function ToolsPopover({ popoverId, tools }: ToolsPopoverProps) {
             </section>
           );
         })}
-        {tools.length === 0 && (
-          <div className="tools-popover-empty">No tools registered.</div>
-        )}
+        {tools.length === 0 && <div className="tools-popover-empty">No tools registered.</div>}
       </div>
     </div>
   );

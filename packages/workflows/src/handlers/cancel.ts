@@ -21,44 +21,44 @@ import { substituteNodeOutputRefs } from "../substitute.ts";
 export type RequestCancel = (runId: string, reason: string) => void | Promise<void>;
 
 export interface MakeCancelHandlerOptions {
-	requestCancel: RequestCancel;
+  requestCancel: RequestCancel;
 }
 
 export function makeCancelHandler(opts: MakeCancelHandlerOptions): NodeHandler {
-	return {
-		type: "cancel",
-		async handle(node, ctx): Promise<NodeResult> {
-			// The executor's resolveBody already substituted $ARGUMENTS,
-			// $inputs.*, and $node.output[.field] in the typed cancel body.
-			// Stub tests that don't go through the executor populate node.cancel
-			// without setting ctx.resolvedBody — fall back to a one-shot
-			// substituteNodeOutputRefs over node.cancel so those still work.
-			const reason = (
-				ctx.resolvedBody && ctx.resolvedBody.length > 0
-					? ctx.resolvedBody
-					: substituteNodeOutputRefs(
-							isCancelNode(node) ? node.cancel : "",
-							ctx.upstreamOutputs as Map<string, NodeOutput>,
-							false,
-						)
-			).trim();
+  return {
+    type: "cancel",
+    async handle(node, ctx): Promise<NodeResult> {
+      // The executor's resolveBody already substituted $ARGUMENTS,
+      // $inputs.*, and $node.output[.field] in the typed cancel body.
+      // Stub tests that don't go through the executor populate node.cancel
+      // without setting ctx.resolvedBody — fall back to a one-shot
+      // substituteNodeOutputRefs over node.cancel so those still work.
+      const reason = (
+        ctx.resolvedBody && ctx.resolvedBody.length > 0
+          ? ctx.resolvedBody
+          : substituteNodeOutputRefs(
+              isCancelNode(node) ? node.cancel : "",
+              ctx.upstreamOutputs as Map<string, NodeOutput>,
+              false,
+            )
+      ).trim();
 
-			try {
-				await opts.requestCancel(ctx.runId, reason);
-			} catch (err) {
-				const detail = err instanceof Error ? err.message : String(err);
-				return {
-					status: "failed",
-					output: { kind: "text", text: reason },
-					error: `cancel signalling failed: ${detail}`,
-				};
-			}
+      try {
+        await opts.requestCancel(ctx.runId, reason);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return {
+          status: "failed",
+          output: { kind: "text", text: reason },
+          error: `cancel signalling failed: ${detail}`,
+        };
+      }
 
-			return {
-				status: "failed",
-				output: { kind: "text", text: reason },
-				error: `cancelled: ${reason}`,
-			};
-		},
-	};
+      return {
+        status: "failed",
+        output: { kind: "text", text: reason },
+        error: `cancelled: ${reason}`,
+      };
+    },
+  };
 }

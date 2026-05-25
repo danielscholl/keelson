@@ -2,19 +2,14 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { useCallback, useEffect, useRef } from "react";
 import type { ReasoningEffortLevel } from "@keelson/shared";
+import { useCallback, useEffect, useRef } from "react";
 
 // All four tiers in the order users expect them surfaced. When the active
 // model declares a narrowed `supportedReasoningEfforts`, the popover filters
 // against this canonical order so a model offering ["high","xhigh"] still
 // renders "HIGH" above "XHIGH".
-const ALL_LEVELS: readonly ReasoningEffortLevel[] = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-] as const;
+const ALL_LEVELS: readonly ReasoningEffortLevel[] = ["low", "medium", "high", "xhigh"] as const;
 
 interface ReasoningEffortPopoverProps {
   // Element id the chip's popoverTarget attribute references. Anchoring is
@@ -44,9 +39,7 @@ export function ReasoningEffortPopover({
   const reposition = useCallback(() => {
     const popoverEl = popoverRef.current;
     if (!popoverEl) return;
-    const trigger = document.querySelector<HTMLElement>(
-      `[popovertarget="${popoverId}"]`,
-    );
+    const trigger = document.querySelector<HTMLElement>(`[popovertarget="${popoverId}"]`);
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
@@ -60,17 +53,11 @@ export function ReasoningEffortPopover({
     if (openDown) {
       popoverEl.style.top = `${Math.round(rect.bottom + margin)}px`;
       popoverEl.style.bottom = "auto";
-      popoverEl.style.maxHeight = `${Math.max(
-        140,
-        Math.round(spaceBelow - margin * 2),
-      )}px`;
+      popoverEl.style.maxHeight = `${Math.max(140, Math.round(spaceBelow - margin * 2))}px`;
     } else {
       popoverEl.style.bottom = `${Math.round(viewportH - rect.top + margin)}px`;
       popoverEl.style.top = "auto";
-      popoverEl.style.maxHeight = `${Math.max(
-        140,
-        Math.round(spaceAbove - margin * 2),
-      )}px`;
+      popoverEl.style.maxHeight = `${Math.max(140, Math.round(spaceAbove - margin * 2))}px`;
     }
     popoverEl.style.left = `${Math.round(rect.left)}px`;
     popoverEl.style.minWidth = `${Math.max(160, Math.round(rect.width))}px`;
@@ -125,9 +112,7 @@ export function ReasoningEffortPopover({
             <button
               key={level}
               type="button"
-              className={`reasoning-effort-popover-row${
-                isActive ? " active" : ""
-              }`}
+              className={`reasoning-effort-popover-row${isActive ? " active" : ""}`}
               onClick={() => handlePick(level)}
               // Native close-on-click — the browser hides the popover after
               // our onClick handler runs.
@@ -135,9 +120,7 @@ export function ReasoningEffortPopover({
               popoverTargetAction="hide"
               aria-pressed={isActive}
             >
-              <span className="reasoning-effort-popover-row-label">
-                {level.toUpperCase()}
-              </span>
+              <span className="reasoning-effort-popover-row-label">{level.toUpperCase()}</span>
             </button>
           );
         })}

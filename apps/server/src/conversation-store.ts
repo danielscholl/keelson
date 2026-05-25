@@ -105,14 +105,8 @@ function rowToMessage(row: MessageRow): Message {
 // Conservative coercion — projection only flows when JOIN returned all three
 // run columns AND the status string matches the durable enum. Anything else
 // surfaces as `undefined` (chat conversation) rather than a malformed row.
-function workflowProjection(
-  row: ConvRow,
-): ConversationWorkflowProjection | undefined {
-  if (
-    row.workflow_run_id === null ||
-    row.workflow_name === null ||
-    row.workflow_status === null
-  ) {
+function workflowProjection(row: ConvRow): ConversationWorkflowProjection | undefined {
+  if (row.workflow_run_id === null || row.workflow_name === null || row.workflow_status === null) {
     return undefined;
   }
   const status = row.workflow_status;
@@ -186,18 +180,10 @@ export function createConversationStore(db: Database): ConversationStore {
   const insertMsg = db.prepare(
     "INSERT INTO messages(id, conversationId, role, content, content_parts, truncated, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
-  const touchConv = db.prepare(
-    "UPDATE conversations SET updatedAt = ? WHERE id = ?",
-  );
-  const setSession = db.prepare(
-    "UPDATE conversations SET providerSessionId = ? WHERE id = ?",
-  );
-  const setName = db.prepare(
-    "UPDATE conversations SET name = ?, updatedAt = ? WHERE id = ?",
-  );
-  const setModel = db.prepare(
-    "UPDATE conversations SET model = ?, updatedAt = ? WHERE id = ?",
-  );
+  const touchConv = db.prepare("UPDATE conversations SET updatedAt = ? WHERE id = ?");
+  const setSession = db.prepare("UPDATE conversations SET providerSessionId = ? WHERE id = ?");
+  const setName = db.prepare("UPDATE conversations SET name = ?, updatedAt = ? WHERE id = ?");
+  const setModel = db.prepare("UPDATE conversations SET model = ?, updatedAt = ? WHERE id = ?");
   // Messages cascade via the FK ON DELETE CASCADE on the messages table —
   // PRAGMA foreign_keys is enabled at openDatabase().
   const deleteConv = db.prepare("DELETE FROM conversations WHERE id = ?");
@@ -245,9 +231,7 @@ export function createConversationStore(db: Database): ConversationStore {
         const conv = selectConv.get(id) as ConvRow | null;
         if (!conv) return;
         const partsJson =
-          message.contentParts !== undefined
-            ? JSON.stringify(message.contentParts)
-            : null;
+          message.contentParts !== undefined ? JSON.stringify(message.contentParts) : null;
         insertMsg.run(
           message.id,
           id,
@@ -271,7 +255,7 @@ export function createConversationStore(db: Database): ConversationStore {
       const existing = selectConv.get(id) as ConvRow | null;
       if (!existing) return undefined;
       const now = new Date().toISOString();
-      if (Object.prototype.hasOwnProperty.call(patch, "name")) {
+      if (Object.hasOwn(patch, "name")) {
         setName.run(patch.name ?? null, now, id);
       }
       if (patch.model !== undefined) {

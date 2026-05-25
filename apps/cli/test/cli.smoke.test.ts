@@ -76,8 +76,7 @@ describe("keelson CLI smoke", () => {
     expect(data.strict).toBe(false);
     const categories = data.categories.map((c) => c.category).sort();
     expect(categories).toEqual(["auth", "db", "server", "toolchain", "workflows"]);
-    const summed =
-      data.summary.ok + data.summary.warn + data.summary.fail + data.summary.skip;
+    const summed = data.summary.ok + data.summary.warn + data.summary.fail + data.summary.skip;
     expect(summed).toBe(data.summary.total);
   });
 
@@ -184,10 +183,10 @@ describe("keelson CLI smoke", () => {
   test("chat with stub provider on a pipe emits only the assistant text", async () => {
     // Non-TTY + no --json must produce just the answer so pipes like
     // `keelson chat ... | pbcopy` copy the response, not metadata.
-    const { stdout, exitCode } = await runCli(
-      ["chat", "hello world", "--provider", "stub"],
-      { KEELSON_PROVIDERS: "stub", KEELSON_USE_STUBS: "1" },
-    );
+    const { stdout, exitCode } = await runCli(["chat", "hello world", "--provider", "stub"], {
+      KEELSON_PROVIDERS: "stub",
+      KEELSON_USE_STUBS: "1",
+    });
     expect(exitCode).toBe(0);
     expect(stdout.trim()).toBe("hello world");
     // No metadata leak: no "mode:" or "providerId:" lines.
@@ -225,13 +224,7 @@ describe("keelson CLI smoke", () => {
       ["--base-url", "--base-url must not be empty"],
     ];
     for (const [flag, expectedError] of cases) {
-      const { stdout, exitCode } = await runCli([
-        "--json",
-        "chat",
-        "hi",
-        flag,
-        "",
-      ]);
+      const { stdout, exitCode } = await runCli(["--json", "chat", "hi", flag, ""]);
       expect(exitCode).toBe(2);
       const envelope = JSON.parse(stdout.trim());
       expect(envelope.ok).toBe(false);

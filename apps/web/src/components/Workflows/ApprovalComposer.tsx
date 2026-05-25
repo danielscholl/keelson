@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import { useState, type KeyboardEvent } from "react";
+import { type KeyboardEvent, useState } from "react";
 
 export interface ApprovalComposerProps {
   // Just for callers that want a stable key per pause; not used internally.
@@ -19,11 +19,7 @@ export interface ApprovalComposerProps {
 // run is paused on an `approval` node. Send routes the typed text through;
 // the "Approve & continue" shortcut sends the literal "approve" so downstream
 // `when:` rules can branch on it.
-export function ApprovalComposer({
-  nodeId,
-  onSubmit,
-  onAbandon,
-}: ApprovalComposerProps) {
+export function ApprovalComposer({ nodeId, onSubmit, onAbandon }: ApprovalComposerProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -89,20 +85,10 @@ export function ApprovalComposer({
         >
           Send
         </button>
-        <button
-          type="button"
-          className="btn approve"
-          onClick={onApproveClick}
-          disabled={busy}
-        >
+        <button type="button" className="btn approve" onClick={onApproveClick} disabled={busy}>
           ✓ Approve &amp; continue
         </button>
-        <button
-          type="button"
-          className="btn danger"
-          onClick={onAbandonClick}
-          disabled={busy}
-        >
+        <button type="button" className="btn danger" onClick={onAbandonClick} disabled={busy}>
           ✕ Abandon run
         </button>
       </div>

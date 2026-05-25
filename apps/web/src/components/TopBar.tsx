@@ -1,5 +1,5 @@
-import { ThemePicker } from "./ThemePicker.tsx";
 import type { ThemePreference } from "../hooks/useSettings.ts";
+import { ThemePicker } from "./ThemePicker.tsx";
 
 export type ActiveTab = "chat" | "workflows";
 
@@ -18,14 +18,8 @@ export interface TopBarProps {
 }
 
 export function TopBar(props: TopBarProps) {
-  const {
-    activeTab,
-    onTabChange,
-    themePreference,
-    onThemeChange,
-    pausedRunCount,
-    onNewChat,
-  } = props;
+  const { activeTab, onTabChange, themePreference, onThemeChange, pausedRunCount, onNewChat } =
+    props;
   const pausedCount = pausedRunCount ?? 0;
 
   return (

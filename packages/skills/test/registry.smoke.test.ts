@@ -32,9 +32,7 @@ describe("skills/registry", () => {
 
   test("duplicate registration throws", () => {
     registerTool(makeTool("beta"));
-    expect(() => registerTool(makeTool("beta"))).toThrow(
-      /already registered/i,
-    );
+    expect(() => registerTool(makeTool("beta"))).toThrow(/already registered/i);
   });
 
   test("missing tool reports the available set", () => {

@@ -186,9 +186,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );
   const deleteRunStmt = db.prepare("DELETE FROM workflow_runs WHERE id = ?");
-  const selectRunIdByConv = db.prepare(
-    "SELECT id FROM workflow_runs WHERE conversation_id = ?",
-  );
+  const selectRunIdByConv = db.prepare("SELECT id FROM workflow_runs WHERE conversation_id = ?");
 
   return {
     createRun(input) {
@@ -240,9 +238,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     },
     listRuns(workflowName) {
       const rows = (
-        workflowName !== undefined
-          ? listRunsByName.all(workflowName)
-          : listRunsAll.all()
+        workflowName !== undefined ? listRunsByName.all(workflowName) : listRunsAll.all()
       ) as RunRow[];
       return rows.map(rowToRunSummary);
     },
@@ -254,9 +250,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
       return deleteRunStmt.run(runId).changes > 0;
     },
     getRunIdByConversationId(conversationId) {
-      const row = selectRunIdByConv.get(conversationId) as
-        | { id: string }
-        | null;
+      const row = selectRunIdByConv.get(conversationId) as { id: string } | null;
       return row?.id ?? null;
     },
   };

@@ -46,10 +46,7 @@ function isSettings(v: unknown): v is Settings {
   if (!Array.isArray(o.favorites) || !o.favorites.every(isModelRef)) return false;
   if (o.lastUsed !== null && !isModelRef(o.lastUsed)) return false;
   // Reject present-but-wrong-type so a bad payload doesn't flip the rail.
-  if (
-    o.sidebarCollapsed !== undefined &&
-    typeof o.sidebarCollapsed !== "boolean"
-  ) {
+  if (o.sidebarCollapsed !== undefined && typeof o.sidebarCollapsed !== "boolean") {
     return false;
   }
   if (o.theme !== undefined && !isThemePreference(o.theme)) return false;
@@ -128,26 +125,19 @@ export interface UseSettingsResult {
 }
 
 export function useSettings(): UseSettingsResult {
-  const settings = useSyncExternalStore(
-    subscribe,
-    getSnapshot,
-    getServerSnapshot,
-  );
+  const settings = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const toggleFavorite = useCallback((ref: ModelRef) => {
     update((prev) => {
       const idx = prev.favorites.findIndex((f) => sameRef(f, ref));
       const favorites =
-        idx === -1
-          ? [...prev.favorites, ref]
-          : prev.favorites.filter((_, i) => i !== idx);
+        idx === -1 ? [...prev.favorites, ref] : prev.favorites.filter((_, i) => i !== idx);
       return { ...prev, favorites };
     });
   }, []);
 
   const isFavorite = useCallback(
-    (ref: ModelRef): boolean =>
-      settings.favorites.some((f) => sameRef(f, ref)),
+    (ref: ModelRef): boolean => settings.favorites.some((f) => sameRef(f, ref)),
     [settings.favorites],
   );
 

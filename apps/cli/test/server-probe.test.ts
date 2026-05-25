@@ -4,11 +4,7 @@
 
 import { afterAll, describe, expect, test } from "bun:test";
 
-import {
-  DEFAULT_PROBE_TIMEOUT_MS,
-  probeServer,
-  type ServerInfo,
-} from "../src/server-probe.ts";
+import { DEFAULT_PROBE_TIMEOUT_MS, probeServer, type ServerInfo } from "../src/server-probe.ts";
 
 const TEST_SCHEMA_VERSION = "2.7";
 

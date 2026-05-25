@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ContentBlock,
   MessageChunk,
@@ -7,13 +6,11 @@ import type {
   WorkflowRunDetail,
   WorkflowRunStatus,
 } from "@keelson/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cancelWorkflowRun, getWorkflowRun, submitApproval } from "../api.ts";
-import {
-  createReconnectingWorkflowRunWs,
-  type ReconnectingWsState,
-} from "../ws.ts";
 import type { NodeViewStatus } from "../lib/dagLayout.ts";
+import { createReconnectingWorkflowRunWs, type ReconnectingWsState } from "../ws.ts";
 
 // Per-node view shape. `status` is the UI-level surface (pending → running
 // → terminal); `contentParts` is the accumulator the prompt handler emits
@@ -137,9 +134,7 @@ function applyChunkToNode(node: NodeView, chunk: MessageChunk): NodeView {
             type: "tool_use",
             id: chunk.id ?? crypto.randomUUID(),
             toolName: chunk.toolName,
-            ...(chunk.toolInput !== undefined
-              ? { toolInput: chunk.toolInput }
-              : {}),
+            ...(chunk.toolInput !== undefined ? { toolInput: chunk.toolInput } : {}),
           },
         ],
       };
@@ -166,9 +161,10 @@ function applyChunkToNode(node: NodeView, chunk: MessageChunk): NodeView {
 // Hydrates the hook state from the persisted run snapshot. Used on mount and
 // on every WS reconnect so a client that joined late catches up to whatever
 // the server has written, before the live stream resumes.
-function hydrateFromSnapshot(
-  snapshot: WorkflowRunDetail,
-): { run: RunView; nodes: Record<string, NodeView> } {
+function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
+  run: RunView;
+  nodes: Record<string, NodeView>;
+} {
   const nodes: Record<string, NodeView> = {};
   for (const row of snapshot.nodes) {
     const status = mapNodeTerminalStatus(row.status);
@@ -183,8 +179,7 @@ function hydrateFromSnapshot(
     // is the approval message (not stdout), so it lifts into awaitingMessage
     // and NOT into logLines.
     const isAwaiting = status === "awaiting";
-    const hasContentParts =
-      row.contentParts !== null && row.contentParts.length > 0;
+    const hasContentParts = row.contentParts !== null && row.contentParts.length > 0;
     const hydratedLogLines =
       !isAwaiting && !hasContentParts && row.outputText && row.outputText.length > 0
         ? row.outputText.split(/\r?\n/)
@@ -197,16 +192,12 @@ function hydrateFromSnapshot(
       // if the snapshot happened to have one (it shouldn't, but defensive).
       completedAt: isAwaiting ? undefined : completed,
       durationMs:
-        !isAwaiting && started && completed
-          ? Math.max(0, completed - started)
-          : undefined,
+        !isAwaiting && started && completed ? Math.max(0, completed - started) : undefined,
       error: row.error,
       contentParts: row.contentParts ?? [],
       thinkingText: "",
       logLines: hydratedLogLines,
-      ...(isAwaiting && row.outputText
-        ? { awaitingMessage: row.outputText }
-        : {}),
+      ...(isAwaiting && row.outputText ? { awaitingMessage: row.outputText } : {}),
     };
   }
   // awaitingNodeId is derived from the nodes map at the hook boundary;
@@ -216,9 +207,7 @@ function hydrateFromSnapshot(
     workflowName: snapshot.workflowName,
     status: snapshot.status,
     startedAt: Date.parse(snapshot.startedAt),
-    completedAt: snapshot.completedAt
-      ? Date.parse(snapshot.completedAt)
-      : undefined,
+    completedAt: snapshot.completedAt ? Date.parse(snapshot.completedAt) : undefined,
     error: snapshot.error,
     warnings: [],
     conversationId: snapshot.conversationId ?? null,
@@ -242,10 +231,7 @@ const TERMINAL_RUN_STATUSES_LOCAL: ReadonlySet<string> = new Set([
 //                            would otherwise leave UI thinking it's running)
 //   live loading/unknown  → snapshot (live hasn't progressed past mount)
 //   live in any other     → live    (WS frames newer than the REST fetch)
-function chooseRunStatus(
-  live: RunView["status"],
-  snapshot: RunView["status"],
-): RunView["status"] {
+function chooseRunStatus(live: RunView["status"], snapshot: RunView["status"]): RunView["status"] {
   if (TERMINAL_RUN_STATUSES_LOCAL.has(snapshot)) return snapshot;
   if (snapshot === "paused") return snapshot;
   if (live === "loading" || live === "unknown") return snapshot;
@@ -258,10 +244,7 @@ function chooseRunStatus(
 // awaiting approval). Terminal stored values always win — a server-emitted
 // `run_done` cannot be retroactively un-terminated by a stale snapshot
 // still showing an awaiting node.
-function deriveExposedRun(
-  stored: RunView,
-  nodes: Record<string, NodeView>,
-): RunView {
+function deriveExposedRun(stored: RunView, nodes: Record<string, NodeView>): RunView {
   let awaitingNodeId: string | undefined;
   for (const id of Object.keys(nodes)) {
     if (nodes[id]!.status === "awaiting") {
@@ -270,17 +253,11 @@ function deriveExposedRun(
     }
   }
   let status = stored.status;
-  if (
-    status !== "loading" &&
-    status !== "unknown" &&
-    !TERMINAL_RUN_STATUSES_LOCAL.has(status)
-  ) {
+  if (status !== "loading" && status !== "unknown" && !TERMINAL_RUN_STATUSES_LOCAL.has(status)) {
     if (awaitingNodeId) status = "paused";
     else if (status === "paused") status = "running";
   }
-  return awaitingNodeId
-    ? { ...stored, status, awaitingNodeId }
-    : { ...stored, status };
+  return awaitingNodeId ? { ...stored, status, awaitingNodeId } : { ...stored, status };
 }
 
 // Subscribes to a workflow run's live stream + persists view state. Used by
@@ -468,9 +445,7 @@ const TERMINAL_NODE_STATUSES: ReadonlySet<NodeViewStatus> = new Set([
 function isLiveNodeEmpty(node: NodeView | undefined): boolean {
   if (!node) return true;
   return (
-    node.contentParts.length === 0 &&
-    node.logLines.length === 0 &&
-    node.thinkingText.length === 0
+    node.contentParts.length === 0 && node.logLines.length === 0 && node.thinkingText.length === 0
   );
 }
 
@@ -500,10 +475,7 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   // on that row. Choosing snapshot here keeps persisted completions
   // from being overwritten by inferred cancellation.
   if (snapTerminal) winningStatus = snapshotSide.status;
-  else if (
-    snapshotSide.status === "awaiting" &&
-    !TERMINAL_NODE_STATUSES.has(liveSide.status)
-  ) {
+  else if (snapshotSide.status === "awaiting" && !TERMINAL_NODE_STATUSES.has(liveSide.status)) {
     // W4.6 — snapshot says the server has the node paused. Live's
     // pre-pause `running` (or `pending`) must NOT clobber that.
     winningStatus = snapshotSide.status;
@@ -600,9 +572,7 @@ function applyFrame(
           ...prev,
           [frame.nodeId]: {
             ...folded,
-            status: NODE_TERMINAL_STATUSES.has(base.status)
-              ? base.status
-              : "running",
+            status: NODE_TERMINAL_STATUSES.has(base.status) ? base.status : "running",
             startedAt: base.startedAt ?? Date.now(),
           },
         };
@@ -616,9 +586,7 @@ function applyFrame(
           ...prev,
           [frame.nodeId]: {
             ...base,
-            status: NODE_TERMINAL_STATUSES.has(base.status)
-              ? base.status
-              : "running",
+            status: NODE_TERMINAL_STATUSES.has(base.status) ? base.status : "running",
             startedAt: base.startedAt ?? Date.now(),
             logLines: [...base.logLines, frame.line],
           },
@@ -639,9 +607,7 @@ function applyFrame(
             ...base,
             status: mapNodeTerminalStatus(frame.status),
             completedAt: completed,
-            durationMs: base.startedAt
-              ? Math.max(0, completed - base.startedAt)
-              : undefined,
+            durationMs: base.startedAt ? Math.max(0, completed - base.startedAt) : undefined,
             error: frame.error,
             // Approval node resolved — clear its message so the callout
             // doesn't linger after resume.
@@ -654,10 +620,7 @@ function applyFrame(
     case "run_warning":
       setRun((prev) => ({
         ...prev,
-        warnings: [
-          ...prev.warnings,
-          { nodeId: frame.nodeId, message: frame.message },
-        ],
+        warnings: [...prev.warnings, { nodeId: frame.nodeId, message: frame.message }],
       }));
       return;
 

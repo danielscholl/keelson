@@ -9,40 +9,39 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Hono } from "hono";
-import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import {
+  type ContentBlock,
+  listWorkflowsResponseSchema,
+  type MessageChunk,
+  resumeWorkflowRunBodySchema,
+  startWorkflowRunBodySchema,
+  type WorkflowFrame,
+  type WorkflowNodeStatus,
+  type WorkflowRunStatus,
+  type WorkflowSummary,
+  workflowDetailSchema,
+  workflowFrameSchema,
+  workflowRunDetailSchema,
+  workflowRunSummarySchema,
+} from "@keelson/shared";
+import {
+  type AwaitApproval,
   bashHandler,
+  type DagNode,
   makeApprovalHandler,
   makeCancelHandler,
   makeCommandHandler,
   makeLoopHandler,
   makeScriptHandler,
-  runWorkflow,
-  type AwaitApproval,
-  type DagNode,
   type NodeHandler,
   type NodeResult,
   type RequestCancel,
   type RunStreamEvent,
+  runWorkflow,
   type WorkflowDefinition,
 } from "@keelson/workflows";
-import {
-  listWorkflowsResponseSchema,
-  resumeWorkflowRunBodySchema,
-  workflowDetailSchema,
-  workflowFrameSchema,
-  workflowRunDetailSchema,
-  workflowRunSummarySchema,
-  workflowSummarySchema,
-  startWorkflowRunBodySchema,
-  type ContentBlock,
-  type MessageChunk,
-  type WorkflowFrame,
-  type WorkflowNodeStatus,
-  type WorkflowRunStatus,
-  type WorkflowSummary,
-} from "@keelson/shared";
+import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
+import type { Hono } from "hono";
 import { z } from "zod";
 
 import type { WorkflowCatalog } from "./bootstrap.ts";
@@ -51,11 +50,10 @@ import { createContentPartsAccumulator } from "./content-parts.ts";
 
 // CSRF defense for state-changing routes — reject cross-origin POSTs that
 // the browser would otherwise send with the user's cookies.
-function originForbidden(c: {
-  req: { header: (n: string) => string | undefined };
-}): boolean {
+function originForbidden(c: { req: { header: (n: string) => string | undefined } }): boolean {
   return !isAllowedOrigin(c.req.header("origin"));
 }
+
 import type { ConversationStore } from "./conversation-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
@@ -80,10 +78,7 @@ export interface WorkflowsHandlerOptions {
 // the user types/clicks-to-start a workflow and that intent becomes the first
 // (and, in W4.5, only persisted) message in the conversation. The chat view
 // renders this plus virtual system messages synthesized from useWorkflowRun.
-function formatDispatchMessage(
-  workflowName: string,
-  inputs: Record<string, string>,
-): string {
+function formatDispatchMessage(workflowName: string, inputs: Record<string, string>): string {
   const args = inputs.ARGUMENTS?.trim();
   return args && args.length > 0 ? `${workflowName}: ${args}` : workflowName;
 }
@@ -345,9 +340,7 @@ class RunArtifactsDir {
 
   static async create(runId: string): Promise<RunArtifactsDir> {
     try {
-      return new RunArtifactsDir(
-        await mkdtemp(join(tmpdir(), `keelson-run-${runId}-`)),
-      );
+      return new RunArtifactsDir(await mkdtemp(join(tmpdir(), `keelson-run-${runId}-`)));
     } catch (err) {
       console.warn(
         `[workflows] failed to create artifacts dir for ${runId}: ${
@@ -404,10 +397,7 @@ export function workflowsRoutes(
   app.get("/api/workflows/runs", (c) => {
     const status = c.req.query("status");
     if (status !== "paused") {
-      return c.json(
-        { error: "status query is required and must be 'paused'" },
-        400,
-      );
+      return c.json({ error: "status query is required and must be 'paused'" }, 400);
     }
     return c.json({ runs: store.listRunsByStatus("paused") });
   });
@@ -601,10 +591,7 @@ export function workflowsRoutes(
       // 409 — the run exists but no approval is open for that node. Could be
       // a stale client retrying after a successful resume, or the user typed
       // a nodeId that isn't currently paused.
-      return c.json(
-        { error: `no pending approval for node '${parsed.data.nodeId}'` },
-        409,
-      );
+      return c.json({ error: `no pending approval for node '${parsed.data.nodeId}'` }, 409);
     }
     // Flip the run status back to running BEFORE we hand the text to the
     // executor — otherwise the snapshot could briefly report 'paused' after
@@ -634,9 +621,7 @@ export function workflowsRoutes(
       // the client knows the run state diverged.
       return c.json(
         {
-          error: `resume failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          error: `resume failed: ${err instanceof Error ? err.message : String(err)}`,
         },
         409,
       );
@@ -674,10 +659,7 @@ export function workflowRunWebSocketHandlers(deps: {
 }): WebSocketHandler<WsData> {
   const { subscribers, store } = deps;
 
-  function sendTerminal(
-    ws: ServerWebSocket<WsData>,
-    status: WorkflowRunStatus,
-  ): void {
+  function sendTerminal(ws: ServerWebSocket<WsData>, status: WorkflowRunStatus): void {
     const frame: WorkflowFrame = { type: "run_done", status };
     try {
       ws.send(JSON.stringify(workflowFrameSchema.parse(frame)));
@@ -727,11 +709,7 @@ export function workflowRunWebSocketHandlers(deps: {
       // activeRuns clearing (see executeRunInBackground's finally), so a
       // second read closes the remaining race.
       const after = store.getRun(runId);
-      if (
-        after &&
-        after.status !== "running" &&
-        after.status !== "paused"
-      ) {
+      if (after && after.status !== "running" && after.status !== "paused") {
         sendTerminal(ws, after.status);
       }
     },
@@ -783,10 +761,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // Declared before awaitApproval so the closure's `nodeStart.get(nodeId)`
   // reference is a normal lexical capture, not a TDZ-dependent hoist.
   const nodeStart = new Map<string, string>();
-  const nodeAccumulators = new Map<
-    string,
-    ReturnType<typeof createContentPartsAccumulator>
-  >();
+  const nodeAccumulators = new Map<string, ReturnType<typeof createContentPartsAccumulator>>();
 
   // W4.6 — pause-and-await callback for the approval handler. Writes the
   // 'paused' run status + 'awaiting' node row so a page-reload mid-pause
@@ -938,10 +913,7 @@ interface DispatchArgs {
   store: WorkflowStore;
   subscribers: WorkflowSubscribers;
   nodeStart: Map<string, string>;
-  nodeAccumulators: Map<
-    string,
-    ReturnType<typeof createContentPartsAccumulator>
-  >;
+  nodeAccumulators: Map<string, ReturnType<typeof createContentPartsAccumulator>>;
 }
 
 function dispatchRunEvent(args: DispatchArgs): void {
@@ -996,8 +968,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
           ? event.result.output.text
           : JSON.stringify(event.result.output.value);
       const acc = nodeAccumulators.get(event.nodeId);
-      const parts: ContentBlock[] | null =
-        acc && acc.parts().length > 0 ? acc.parts() : null;
+      const parts: ContentBlock[] | null = acc && acc.parts().length > 0 ? acc.parts() : null;
       store.upsertNodeOutput({
         runId,
         nodeId: event.nodeId,

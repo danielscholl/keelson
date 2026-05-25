@@ -6,6 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import type { ToolContext } from "@keelson/shared";
+import { ChunkQueue } from "../chunk-queue.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -13,16 +15,14 @@ import type {
   ProviderCapabilities,
   SendQueryOptions,
 } from "../types.ts";
+import { buildFriendlyClaudeError } from "./errors.ts";
 import {
-  ClaudeQueryFactory,
   type ClaudeContentBlock,
+  ClaudeQueryFactory,
   type ClaudeQueryHandle,
   type ClaudeSdkMessage,
   type ClaudeToolProjectionContext,
 } from "./factory.ts";
-import type { ToolContext } from "@keelson/shared";
-import { ChunkQueue } from "../chunk-queue.ts";
-import { buildFriendlyClaudeError } from "./errors.ts";
 
 export const CLAUDE_CREDENTIAL_SERVICE_ID = "claude" as const;
 
@@ -65,9 +65,7 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
   defaultModel: CLAUDE_DEFAULT_MODEL,
 };
 
-export interface GetCredentialFn {
-  (serviceId: string): Promise<string | undefined>;
-}
+export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;
 
 export interface ClaudeProviderOptions {
   getCredential: GetCredentialFn;
@@ -138,18 +136,12 @@ export class ClaudeProvider implements IAgentProvider {
         abortController: controller,
         ...(resumeSessionId !== undefined ? { sessionId: resumeSessionId } : {}),
         ...(options?.model !== undefined ? { model: options.model } : {}),
-        ...(options?.systemPrompt !== undefined
-          ? { systemPrompt: options.systemPrompt }
-          : {}),
-        ...(options?.thinking !== undefined
-          ? { thinking: options.thinking }
-          : {}),
+        ...(options?.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
+        ...(options?.thinking !== undefined ? { thinking: options.thinking } : {}),
         ...(options?.tools && options.tools.length > 0
           ? { tools: options.tools, toolProjection }
           : {}),
-        ...(options?.allowedTools !== undefined
-          ? { allowedTools: options.allowedTools }
-          : {}),
+        ...(options?.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),
         ...(options?.disallowedTools !== undefined
           ? { disallowedTools: options.disallowedTools }
           : {}),
@@ -192,10 +184,7 @@ export class ClaudeProvider implements IAgentProvider {
 
           if (msg.type === "result") {
             if (msg.is_error || (msg.subtype && msg.subtype !== "success")) {
-              const errs =
-                msg.errors && msg.errors.length > 0
-                  ? msg.errors.join("; ")
-                  : undefined;
+              const errs = msg.errors && msg.errors.length > 0 ? msg.errors.join("; ") : undefined;
               const errMsg = buildFriendlyClaudeError(
                 new Error(`Claude turn ended: ${msg.subtype ?? "error"}`),
                 errs,
@@ -327,9 +316,7 @@ function mapToolResultBlock(block: ClaudeContentBlock): MessageChunk | null {
   };
 }
 
-function stringifyToolResultContent(
-  content: ClaudeContentBlock["content"],
-): string {
+function stringifyToolResultContent(content: ClaudeContentBlock["content"]): string {
   if (content === undefined || content === null) return "";
   if (typeof content === "string") return content;
   // Drop image / search-result / document blocks; chunk channel + persisted
@@ -343,10 +330,7 @@ function stringifyToolResultContent(
   return parts.join("");
 }
 
-function forwardAbort(
-  signal: AbortSignal | undefined,
-  controller: AbortController,
-): () => void {
+function forwardAbort(signal: AbortSignal | undefined, controller: AbortController): () => void {
   if (!signal) return () => {};
   if (signal.aborted) {
     controller.abort();

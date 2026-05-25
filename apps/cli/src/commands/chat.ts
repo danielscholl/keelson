@@ -4,7 +4,7 @@
 
 import { UnknownProviderError } from "@keelson/providers";
 import type { MessageChunk, ReasoningEffortLevel } from "@keelson/shared";
-
+import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import {
   chatViaServer,
   createConversation,
@@ -14,15 +14,8 @@ import {
 } from "../http/chat-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { chatHeadless } from "../in-process/chat.ts";
-import { probeServer } from "../server-probe.ts";
-import {
-  EXIT_BAD_ARGS,
-  EXIT_FAIL,
-  EXIT_NOT_FOUND,
-  EXIT_NO_SERVER,
-  EXIT_OK,
-} from "../exit.ts";
 import { emit } from "../output.ts";
+import { probeServer } from "../server-probe.ts";
 
 export interface ChatOptions {
   json: boolean;
@@ -69,11 +62,7 @@ function pickDefaultHttpProvider(providers: readonly ProviderInfoRow[]): string 
   );
 }
 
-async function runChatViaHttp(
-  baseUrl: string,
-  message: string,
-  opts: ChatOptions,
-): Promise<never> {
+async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOptions): Promise<never> {
   let conversationId = opts.conversationId;
   let providerId: string;
   // Inherit the conversation's stored model only when the provider did NOT
@@ -150,9 +139,7 @@ async function runChatViaHttp(
     message,
     ...(effectiveModel ? { model: effectiveModel } : {}),
     ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
-    ...(opts.reasoningEffort !== undefined
-      ? { reasoningEffort: opts.reasoningEffort }
-      : {}),
+    ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
     onChunk: (chunk) => {
       chunks.push(chunk);
       if (live) writeChunkLive(chunk);
@@ -205,9 +192,7 @@ async function runChatInProcess(message: string, opts: ChatOptions): Promise<nev
       ...(opts.provider ? { provider: opts.provider } : {}),
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
-      ...(opts.reasoningEffort !== undefined
-        ? { reasoningEffort: opts.reasoningEffort }
-        : {}),
+      ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
       onChunk: (chunk) => {
         chunks.push(chunk);
         if (live) writeChunkLive(chunk);
@@ -248,10 +233,7 @@ async function runChatInProcess(message: string, opts: ChatOptions): Promise<nev
 
 export async function runChat(message: string, opts: ChatOptions): Promise<never> {
   if (!message || message.trim().length === 0) {
-    emit(
-      { error: "chat <message> must be non-empty", code: "BAD_INPUTS" },
-      { json: opts.json },
-    );
+    emit({ error: "chat <message> must be non-empty", code: "BAD_INPUTS" }, { json: opts.json });
     process.exit(EXIT_BAD_ARGS);
   }
 

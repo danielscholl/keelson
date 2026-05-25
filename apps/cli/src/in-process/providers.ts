@@ -59,9 +59,7 @@ async function getCredential(serviceId: string): Promise<string | undefined> {
     return entry.getPassword() ?? undefined;
   } catch (err) {
     if (noEntry(err)) return undefined;
-    throw new Error(
-      `keyring get failed for '${serviceId}': ${(err as Error).message}`,
-    );
+    throw new Error(`keyring get failed for '${serviceId}': ${(err as Error).message}`);
   }
 }
 
@@ -89,7 +87,6 @@ export function bootstrapCliProviders(): BootstrapResult {
     if (id === "claude") {
       registerClaudeProvider({ getCredential });
       registered.push("claude");
-      continue;
     }
   }
   return { registered };

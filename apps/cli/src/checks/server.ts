@@ -16,9 +16,7 @@ export interface ServerDeps {
   baseUrl?: string;
 }
 
-export async function runServerCheck(
-  deps: ServerDeps = {},
-): Promise<CategoryResult> {
+export async function runServerCheck(deps: ServerDeps = {}): Promise<CategoryResult> {
   const probe = deps.probeServer ?? defaultProbeServer;
   const info = await probe(deps.baseUrl ? { baseUrl: deps.baseUrl } : {});
 

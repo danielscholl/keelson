@@ -3,9 +3,9 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
-  discoverWorkflows as defaultDiscoverWorkflows,
   type DiscoveryResult,
   type DiscoveryRoot,
+  discoverWorkflows as defaultDiscoverWorkflows,
 } from "@keelson/workflows";
 
 import { defaultWorkflowsDir } from "../paths.ts";
@@ -18,9 +18,7 @@ export interface WorkflowsDeps {
   workflowsDir?: string;
 }
 
-export async function runWorkflowsCheck(
-  deps: WorkflowsDeps = {},
-): Promise<CategoryResult> {
+export async function runWorkflowsCheck(deps: WorkflowsDeps = {}): Promise<CategoryResult> {
   const dir = deps.workflowsDir ?? defaultWorkflowsDir();
   const discover = deps.discoverWorkflows ?? defaultDiscoverWorkflows;
   const result = discover([{ dir, source: "project" }]);

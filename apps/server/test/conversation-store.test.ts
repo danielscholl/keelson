@@ -100,9 +100,7 @@ describe("SQLite ConversationStore", () => {
     expect(stored.messages[1].role).toBe("assistant");
     // updatedAt is monotonic but may equal createdAt when appends land in
     // the same millisecond as create (very fast tests).
-    expect(stored.updatedAt!.localeCompare(stored.createdAt)).toBeGreaterThanOrEqual(
-      0,
-    );
+    expect(stored.updatedAt!.localeCompare(stored.createdAt)).toBeGreaterThanOrEqual(0);
 
     db.close();
   });
@@ -117,9 +115,7 @@ describe("SQLite ConversationStore", () => {
     const stored = store.get(real.id)!;
     expect(stored.messages).toHaveLength(0);
 
-    const count = (
-      db.query("SELECT COUNT(*) AS c FROM messages").get() as { c: number }
-    ).c;
+    const count = (db.query("SELECT COUNT(*) AS c FROM messages").get() as { c: number }).c;
     expect(count).toBe(0);
 
     db.close();
@@ -133,9 +129,7 @@ describe("SQLite ConversationStore", () => {
     store.setProviderSessionId(conv.id, "sess-xyz");
     expect(store.get(conv.id)!.providerSessionId).toBe("sess-xyz");
 
-    expect(() =>
-      store.setProviderSessionId("ghost-id", "sess-nope"),
-    ).not.toThrow();
+    expect(() => store.setProviderSessionId("ghost-id", "sess-nope")).not.toThrow();
 
     db.close();
   });
@@ -284,8 +278,9 @@ describe("SQLite ConversationStore", () => {
     expect(store.get(conv.id)).toBeUndefined();
 
     const remaining = (
-      db.query("SELECT COUNT(*) AS c FROM messages WHERE conversationId = ?")
-        .get(conv.id) as { c: number }
+      db.query("SELECT COUNT(*) AS c FROM messages WHERE conversationId = ?").get(conv.id) as {
+        c: number;
+      }
     ).c;
     expect(remaining).toBe(0);
     db.close();
@@ -391,10 +386,7 @@ describe("SQLite ConversationStore", () => {
       conv.id,
       makeMessage({ id: "m1", role: "assistant", content: "partial", truncated: true }),
     );
-    store.appendMessage(
-      conv.id,
-      makeMessage({ id: "m2", role: "assistant", content: "complete" }),
-    );
+    store.appendMessage(conv.id, makeMessage({ id: "m2", role: "assistant", content: "complete" }));
 
     const stored = store.get(conv.id)!;
     expect(stored.messages[0].truncated).toBe(true);

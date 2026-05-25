@@ -1,13 +1,13 @@
-import { useMemo } from "react";
 import {
   Background,
   BackgroundVariant,
   Controls,
-  ReactFlow,
-  ReactFlowProvider,
   type Edge,
   type NodeTypes,
+  ReactFlow,
+  ReactFlowProvider,
 } from "@xyflow/react";
+import { useMemo } from "react";
 import "@xyflow/react/dist/style.css";
 import type { WorkflowNodeSummary } from "@keelson/shared";
 
@@ -24,9 +24,7 @@ const nodeTypes: NodeTypes = { dagNode: DagNode };
 
 // Maps a node's status onto its incoming edges so a fan-in that's half-
 // terminal looks half-complete at a glance.
-function decorateEdges(
-  edges: ReadonlyArray<Edge<{ status: NodeViewStatus }>>,
-): Edge[] {
+function decorateEdges(edges: ReadonlyArray<Edge<{ status: NodeViewStatus }>>): Edge[] {
   return edges.map((e) => ({
     ...e,
     className: `dag-edge ${e.data?.status ?? "pending"}`,

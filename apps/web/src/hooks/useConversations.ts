@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
 import type { Conversation } from "@keelson/shared";
+import { useCallback, useEffect, useState } from "react";
 import {
   deleteConversation as apiDeleteConversation,
-  listConversations,
   renameConversation as apiRenameConversation,
+  listConversations,
 } from "../api.ts";
 
 export interface UseConversationsResult {
@@ -63,14 +63,9 @@ export function useConversations(): UseConversationsResult {
     });
   }, []);
 
-  const patchLocal = useCallback(
-    (id: string, patch: Partial<Conversation>) => {
-      setConversations((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-      );
-    },
-    [],
-  );
+  const patchLocal = useCallback((id: string, patch: Partial<Conversation>) => {
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }, []);
 
   return { conversations, loading, error, refresh, rename, remove, upsertLocal, patchLocal };
 }

@@ -6,12 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type {
-  IAgentProvider,
-  ProviderInfo,
-  ProviderRegistration,
-} from "./types.ts";
 import { UnknownProviderError } from "./errors.ts";
+import type { IAgentProvider, ProviderInfo, ProviderRegistration } from "./types.ts";
 
 const registry = new Map<string, ProviderRegistration>();
 

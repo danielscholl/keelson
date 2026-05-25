@@ -6,6 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import type { ToolContext } from "@keelson/shared";
+import { ChunkQueue } from "../chunk-queue.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -13,17 +15,15 @@ import type {
   ProviderCapabilities,
   SendQueryOptions,
 } from "../types.ts";
+import { buildFriendlyCopilotError } from "./errors.ts";
 import {
   CopilotClientFactory,
-  projectToolsForCopilot,
   type CopilotClientLike,
   type CopilotPermissionHandler,
   type CopilotSessionLike,
   type CopilotToolProjectionContext,
+  projectToolsForCopilot,
 } from "./factory.ts";
-import type { ToolContext } from "@keelson/shared";
-import { ChunkQueue } from "../chunk-queue.ts";
-import { buildFriendlyCopilotError } from "./errors.ts";
 
 export const COPILOT_CREDENTIAL_SERVICE_ID = "copilot" as const;
 
@@ -42,9 +42,7 @@ export const COPILOT_CAPABILITIES: ProviderCapabilities = {
   defaultModel: COPILOT_DEFAULT_MODEL,
 };
 
-export interface GetCredentialFn {
-  (serviceId: string): Promise<string | undefined>;
-}
+export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;
 
 export interface CopilotProviderOptions {
   getCredential: GetCredentialFn;
@@ -163,12 +161,7 @@ export class CopilotProvider implements IAgentProvider {
       }
 
       try {
-        const sessionConfig = buildSessionConfig(
-          options,
-          permissionHandler,
-          cwd,
-          toolProjection,
-        );
+        const sessionConfig = buildSessionConfig(options, permissionHandler, cwd, toolProjection);
         session = resumeSessionId
           ? await client.resumeSession(resumeSessionId, sessionConfig)
           : await client.createSession(sessionConfig);
@@ -262,8 +255,7 @@ export class CopilotProvider implements IAgentProvider {
           const args = readObject(event, "arguments");
           // Forward the SDK's toolCallId so persisted contentParts and the
           // UI <ToolCallsBlock> can pair this tool_use with its tool_result.
-          const id =
-            readString(event, "toolCallId") ?? crypto.randomUUID();
+          const id = readString(event, "toolCallId") ?? crypto.randomUUID();
           queue.push(
             args
               ? { type: "tool_use", id, toolName, toolInput: args }
@@ -380,10 +372,7 @@ function readString(event: unknown, key: string): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-function readObject(
-  event: unknown,
-  key: string,
-): Record<string, unknown> | undefined {
+function readObject(event: unknown, key: string): Record<string, unknown> | undefined {
   if (!event || typeof event !== "object") return undefined;
   const data = (event as { data?: unknown }).data;
   if (!data || typeof data !== "object") return undefined;
@@ -393,4 +382,3 @@ function readObject(
   }
   return undefined;
 }
-

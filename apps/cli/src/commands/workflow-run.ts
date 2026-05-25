@@ -4,12 +4,11 @@
 
 import type { WorkflowFrame } from "@keelson/shared";
 import type { RunStreamEvent } from "@keelson/workflows";
-
+import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { attachRun, HttpError, isServerDownError, startRun } from "../http/workflow-client.ts";
 import { runHeadless, WorkflowNotFoundError } from "../in-process/run-workflow.ts";
-import { probeServer } from "../server-probe.ts";
-import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NOT_FOUND, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import { emit } from "../output.ts";
+import { probeServer } from "../server-probe.ts";
 
 export interface WorkflowRunOptions {
   json: boolean;
@@ -56,7 +55,8 @@ function formatHumanEvent(event: RunStreamEvent): string {
     case "node_started":
       return `  · ${event.nodeId} …`;
     case "node_done": {
-      const icon = event.result.status === "succeeded" ? "✓" : event.result.status === "skipped" ? "○" : "✗";
+      const icon =
+        event.result.status === "succeeded" ? "✓" : event.result.status === "skipped" ? "○" : "✗";
       const err = event.result.error ? ` — ${event.result.error}` : "";
       return `  ${icon} ${event.nodeId}${err}`;
     }
@@ -67,7 +67,7 @@ function formatHumanEvent(event: RunStreamEvent): string {
     case "run_warning":
       return `! ${event.message}`;
     case "run_done":
-      return `■ ${event.status} (${(event.summary.completedAtMs - event.summary.startedAtMs)}ms)`;
+      return `■ ${event.status} (${event.summary.completedAtMs - event.summary.startedAtMs}ms)`;
     default:
       return "";
   }
@@ -128,7 +128,7 @@ async function runViaHttp(
       if (frame.type === "run_done") terminalStatus = frame.status;
       if (watch && !json) {
         const line = formatWorkflowFrame(frame);
-        if (line) process.stdout.write(line + "\n");
+        if (line) process.stdout.write(`${line}\n`);
       }
     },
   });
@@ -182,7 +182,7 @@ async function runInProcess(
         if (watch) events.push(ev);
         if (!opts.json && watch) {
           const line = formatHumanEvent(ev);
-          if (line) process.stdout.write(line + "\n");
+          if (line) process.stdout.write(`${line}\n`);
         }
       },
     });

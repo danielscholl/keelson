@@ -78,12 +78,10 @@ const migrations: Migration[] = [
 ];
 
 export function runMigrations(db: Database): void {
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);",
-  );
-  const row = db
-    .query("SELECT MAX(version) AS v FROM schema_version")
-    .get() as { v: number | null } | null;
+  db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);");
+  const row = db.query("SELECT MAX(version) AS v FROM schema_version").get() as {
+    v: number | null;
+  } | null;
   const current = row?.v ?? 0;
   const pending = migrations
     .filter((m) => m.version > current)
@@ -91,9 +89,7 @@ export function runMigrations(db: Database): void {
   for (const m of pending) {
     db.transaction(() => {
       m.up(db);
-      db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(
-        m.version,
-      );
+      db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(m.version);
     })();
   }
 }

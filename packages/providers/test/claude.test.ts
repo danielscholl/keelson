@@ -8,23 +8,23 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { z } from "zod";
-import {
-  CLAUDE_CAPABILITIES,
-  CLAUDE_CREDENTIAL_SERVICE_ID,
-  CLAUDE_DEFAULT_MODEL,
-  ClaudeProvider,
-  ClaudeQueryFactory,
-  buildFriendlyClaudeError,
-  clearRegistry,
-  getProviderInfoList,
-  isRegisteredProvider,
-  registerClaudeProvider,
-} from "../src/index.ts";
 import type {
   ClaudeQueryOptions,
   ClaudeSdkMessage,
   ClaudeSdkModule,
   MessageChunk,
+} from "../src/index.ts";
+import {
+  buildFriendlyClaudeError,
+  CLAUDE_CAPABILITIES,
+  CLAUDE_CREDENTIAL_SERVICE_ID,
+  CLAUDE_DEFAULT_MODEL,
+  ClaudeProvider,
+  ClaudeQueryFactory,
+  clearRegistry,
+  getProviderInfoList,
+  isRegisteredProvider,
+  registerClaudeProvider,
 } from "../src/index.ts";
 
 // --- Mock SDK harness ---
@@ -146,9 +146,7 @@ async function drain<T>(gen: AsyncGenerator<T>): Promise<T[]> {
 
 // Common assistant-end pattern: yield a successful result message that
 // terminates the provider's drain loop.
-async function pushSuccess(
-  push: (msg: ClaudeSdkMessage) => Promise<void>,
-): Promise<void> {
+async function pushSuccess(push: (msg: ClaudeSdkMessage) => Promise<void>): Promise<void> {
   await push({
     type: "result",
     subtype: "success",
@@ -271,9 +269,7 @@ describe("ClaudeProvider — happy path stream translation", () => {
 
     expect(chunks).toHaveLength(3);
     expect(chunks.every((c) => c.type === "text")).toBe(true);
-    expect(chunks.map((c) => (c as { content: string }).content).join("")).toBe(
-      "hello world",
-    );
+    expect(chunks.map((c) => (c as { content: string }).content).join("")).toBe("hello world");
     expect(sdk.lastPrompt()).toBe("hello");
   });
 
@@ -579,9 +575,7 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
 
     expect(chunks).toHaveLength(2);
     expect(chunks.every((c) => c.type === "thinking")).toBe(true);
-    const joined = chunks
-      .map((c) => (c as { content: string }).content)
-      .join("");
+    const joined = chunks.map((c) => (c as { content: string }).content).join("");
     expect(joined).toBe("Let me think.");
   });
 
@@ -645,9 +639,7 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
     });
 
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { thinking: true }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { thinking: true }));
 
     const options = sdk.lastOptions()!;
     expect(options.thinking).toEqual({
@@ -663,9 +655,7 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
     });
 
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { thinking: false }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { thinking: false }));
 
     const options = sdk.lastOptions()!;
     expect(options.thinking).toEqual({ type: "disabled" });
@@ -708,9 +698,7 @@ describe("ClaudeProvider — error paths", () => {
     expect(collected).toHaveLength(1);
     const first = collected[0]!;
     expect(first.type).toBe("system");
-    expect((first as { content: string }).content).toContain(
-      "Claude Agent SDK is not installed",
-    );
+    expect((first as { content: string }).content).toContain("Claude Agent SDK is not installed");
   });
 
   it("classifies a 401-style auth failure", () => {
@@ -792,9 +780,7 @@ describe("ClaudeProvider — error paths", () => {
     expect(collected).toHaveLength(1);
     const first = collected[0]!;
     expect(first.type).toBe("error");
-    expect((first as { message: string }).message).toContain(
-      "Claude authentication failed",
-    );
+    expect((first as { message: string }).message).toContain("Claude authentication failed");
   });
 });
 
@@ -886,16 +872,12 @@ describe("ClaudeProvider — abort", () => {
       if (args[0] === "abort") attached++;
       return origAdd(...args);
     }) as typeof origAdd;
-    ac.signal.removeEventListener = ((
-      ...args: Parameters<typeof origRemove>
-    ) => {
+    ac.signal.removeEventListener = ((...args: Parameters<typeof origRemove>) => {
       if (args[0] === "abort") detached++;
       return origRemove(...args);
     }) as typeof origRemove;
 
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { abortSignal: ac.signal }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { abortSignal: ac.signal }));
 
     expect(attached).toBe(1);
     expect(detached).toBe(1);
@@ -938,12 +920,12 @@ describe("ClaudeProvider — additional error paths", () => {
   });
 
   it("classifies max_turns / budget limits with a dedicated friendly message", () => {
-    expect(
-      buildFriendlyClaudeError(new Error("error_max_turns")),
-    ).toContain("hit a configured turn or budget limit");
-    expect(
-      buildFriendlyClaudeError(new Error("error_max_budget_usd")),
-    ).toContain("hit a configured turn or budget limit");
+    expect(buildFriendlyClaudeError(new Error("error_max_turns"))).toContain(
+      "hit a configured turn or budget limit",
+    );
+    expect(buildFriendlyClaudeError(new Error("error_max_budget_usd"))).toContain(
+      "hit a configured turn or budget limit",
+    );
   });
 
   it("classifies invalid_request with prompt-shape guidance", () => {
@@ -1070,21 +1052,17 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
     });
 
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [fakeTool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [fakeTool] }));
 
     expect(receivedServerOptions).not.toBeNull();
     expect(receivedServerOptions!.name).toBe("keelson");
     expect(receivedServerOptions!.tools).toHaveLength(1);
     expect(receivedServerOptions!.tools![0]!.name).toBe("cluster");
-    expect(receivedServerOptions!.tools![0]!.description).toBe(
-      "Cluster status collector",
-    );
+    expect(receivedServerOptions!.tools![0]!.description).toBe("Cluster status collector");
 
     const options = sdk.lastOptions()!;
     expect(options.mcpServers).toBeDefined();
-    expect(options.mcpServers!["keelson"]).toBe(mcpInstance);
+    expect(options.mcpServers!.keelson).toBe(mcpInstance);
   });
 
   it("projects ZodObject input schemas via .shape (Codex P2: required-arg tools)", async () => {
@@ -1119,9 +1097,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
       getCredential: async () => "k",
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
     });
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [realTool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [realTool] }));
 
     // The projected shape is z.object(...).shape — a record keyed by the
     // schema's field names. The SDK wraps this in z.object(shape) and
@@ -1160,10 +1136,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
       "repo_get_kube",
       "mcp__keelson__repo_get_kube",
     ]);
-    expect(options.disallowedTools).toEqual([
-      "Bash",
-      "mcp__keelson__Bash",
-    ]);
+    expect(options.disallowedTools).toEqual(["Bash", "mcp__keelson__Bash"]);
   });
 
   it("forwards allowedTools to SDK Options.tools (built-in catalog gate) AND Options.allowedTools (auto-allow hint), with MCP names filtered out of Options.tools", async () => {
@@ -1276,9 +1249,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
     // Per SDK docs: `tools: []` disables all built-in tools. Combined with
     // an empty mcpServers projection at the prompt-handler layer, the model
     // has zero tools — text-only generation.
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { allowedTools: [] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { allowedTools: [] }));
     const options = sdk.lastOptions()!;
     expect(options.tools).toEqual([]);
     expect(options.allowedTools).toEqual([]);
@@ -1332,9 +1303,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
     });
     // `[]` is meaningful (forbids every tool); the conditional spread in the
     // provider checks `!== undefined`, not truthy, so it must reach the SDK.
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { allowedTools: [] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { allowedTools: [] }));
     const options = sdk.lastOptions()!;
     expect(options.allowedTools).toEqual([]);
     expect(options.disallowedTools).toBeUndefined();
@@ -1433,9 +1402,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
     // With the producer-consumer queue refactor, a chunk pushed via
     // ctx.emit reaches the consumer immediately, regardless of where the
     // SDK iterable is parked.
-    let projectedHandler:
-      | ((args: unknown, extra: unknown) => Promise<unknown>)
-      | null = null;
+    let projectedHandler: ((args: unknown, extra: unknown) => Promise<unknown>) | null = null;
 
     let releaseTool: (() => void) | null = null;
     const toolBlock = new Promise<void>((r) => {
@@ -1468,9 +1435,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
         await push({
           type: "assistant",
           message: {
-            content: [
-              { type: "tool_use", id: "tu_slow", name: "slow", input: {} },
-            ],
+            content: [{ type: "tool_use", id: "tu_slow", name: "slow", input: {} }],
           },
           uuid: "a1",
           session_id: "sess-id",
@@ -1557,9 +1522,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
       getCredential: async () => "k",
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
     });
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [primitiveTool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [primitiveTool] }));
 
     expect(receivedSchema).toEqual({});
   });
@@ -1591,9 +1554,7 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
     });
 
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [fakeTool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [fakeTool] }));
 
     // Without createSdkMcpServer, the projection is a no-op — turn proceeds
     // without tools rather than crashing on the missing capability.

@@ -25,9 +25,7 @@ export function getToolByName(name: string): ToolDefinition {
   if (!tool) {
     const available = [...registry.keys()];
     const list = available.length > 0 ? available.join(", ") : "<none>";
-    throw new Error(
-      `Unknown tool '${name}'. Available tools: ${list}`,
-    );
+    throw new Error(`Unknown tool '${name}'. Available tools: ${list}`);
   }
   return tool;
 }

@@ -2,13 +2,13 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import {
+  type ReasoningEffortLevel,
+  reasoningEffortLevelSchema,
+  SCHEMA_VERSION,
+} from "@keelson/shared";
 import { Command } from "commander";
-
-import { SCHEMA_VERSION } from "@keelson/shared";
-
 import pkg from "../package.json" with { type: "json" };
-
-import { reasoningEffortLevelSchema, type ReasoningEffortLevel } from "@keelson/shared";
 
 import { runChat } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
@@ -42,10 +42,7 @@ function requireNonEmpty(
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   if (trimmed.length === 0) {
-    emit(
-      { error: `${name} must not be empty`, code: "BAD_INPUTS" },
-      { json },
-    );
+    emit({ error: `${name} must not be empty`, code: "BAD_INPUTS" }, { json });
     process.exit(EXIT_BAD_ARGS);
   }
   return trimmed;
@@ -163,15 +160,14 @@ export function buildProgram(): Command {
 
   program
     .command("chat <message>")
-    .description("one-shot chat turn (server-up: HTTP+SPA-visible; server-down: in-process to stdout)")
+    .description(
+      "one-shot chat turn (server-up: HTTP+SPA-visible; server-down: in-process to stdout)",
+    )
     .option("--provider <id>", "provider id (default: mirror server / pick first non-stub)")
     .option("--model <id>", "model id passed to the provider (default: provider default)")
     .option("--conversation <id>", "continue an existing conversation (server-up only)")
     .option("--thinking", "enable Claude extended thinking for this turn")
-    .option(
-      "--reasoning-effort <level>",
-      "Copilot reasoning tier (low|medium|high|xhigh)",
-    )
+    .option("--reasoning-effort <level>", "Copilot reasoning tier (low|medium|high|xhigh)")
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .action(async function chatAction(
       this: Command,
@@ -193,11 +189,7 @@ export function buildProgram(): Command {
       // conversation.
       const provider = requireNonEmpty(json, "--provider", chatOpts.provider);
       const model = requireNonEmpty(json, "--model", chatOpts.model);
-      const conversationId = requireNonEmpty(
-        json,
-        "--conversation",
-        chatOpts.conversation,
-      );
+      const conversationId = requireNonEmpty(json, "--conversation", chatOpts.conversation);
       const baseUrl = requireNonEmpty(json, "--base-url", chatOpts.baseUrl);
       // Validate --reasoning-effort against the locked Zod enum so an
       // invalid tier exits 2 cleanly instead of creating an orphan
@@ -207,9 +199,7 @@ export function buildProgram(): Command {
       // provider default.
       let reasoningEffort: ReasoningEffortLevel | undefined;
       if (chatOpts.reasoningEffort !== undefined) {
-        const parsed = reasoningEffortLevelSchema.safeParse(
-          chatOpts.reasoningEffort,
-        );
+        const parsed = reasoningEffortLevelSchema.safeParse(chatOpts.reasoningEffort);
         if (!parsed.success) {
           emit(
             {
@@ -271,9 +261,15 @@ function isCommanderError(err: unknown): err is CommanderLikeError {
   return typeof code === "string" && code.startsWith("commander.");
 }
 
-function commandSummary(cmd: Command): Array<{ name: string; description: string; commands?: ReturnType<typeof commandSummary> }> {
+function commandSummary(
+  cmd: Command,
+): Array<{ name: string; description: string; commands?: ReturnType<typeof commandSummary> }> {
   return cmd.commands.map((c) => {
-    const entry: { name: string; description: string; commands?: ReturnType<typeof commandSummary> } = {
+    const entry: {
+      name: string;
+      description: string;
+      commands?: ReturnType<typeof commandSummary>;
+    } = {
       name: c.name(),
       description: c.description(),
     };

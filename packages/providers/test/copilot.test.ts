@@ -1,24 +1,24 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { z } from "zod";
-import {
-  COPILOT_CAPABILITIES,
-  COPILOT_CREDENTIAL_SERVICE_ID,
-  COPILOT_DEFAULT_MODEL,
-  CopilotClientFactory,
-  CopilotProvider,
-  buildFriendlyCopilotError,
-  clearRegistry,
-  getAgentProvider,
-  getProviderInfoList,
-  isRegisteredProvider,
-  registerCopilotProvider,
-} from "../src/index.ts";
 import type {
   CopilotClientLike,
   CopilotModelInfo,
   CopilotSdkModule,
   CopilotSessionLike,
   MessageChunk,
+} from "../src/index.ts";
+import {
+  buildFriendlyCopilotError,
+  COPILOT_CAPABILITIES,
+  COPILOT_CREDENTIAL_SERVICE_ID,
+  COPILOT_DEFAULT_MODEL,
+  CopilotClientFactory,
+  CopilotProvider,
+  clearRegistry,
+  getAgentProvider,
+  getProviderInfoList,
+  isRegisteredProvider,
+  registerCopilotProvider,
 } from "../src/index.ts";
 
 // --- Mock SDK harness ---
@@ -180,10 +180,7 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       lastSession = session;
       return session;
     }
-    async resumeSession(
-      _sessionId: string,
-      config?: unknown,
-    ): Promise<CopilotSessionLike> {
+    async resumeSession(_sessionId: string, config?: unknown): Promise<CopilotSessionLike> {
       lastSessionConfig = (config as Record<string, unknown> | null) ?? null;
       if (opts.createSessionError) throw opts.createSessionError;
       const session = makeSession();
@@ -197,21 +194,17 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       login?: string;
       statusMessage?: string;
     }> {
-      return opts.authStatus ?? {
-        isAuthenticated: true,
-        authType: "user",
-        login: "test-user",
-      };
+      return (
+        opts.authStatus ?? {
+          isAuthenticated: true,
+          authType: "user",
+          login: "test-user",
+        }
+      );
     }
     async listModels(): Promise<CopilotModelInfo[]> {
       if (opts.listModelsError) throw opts.listModelsError;
-      return (
-        opts.models ?? [
-          { id: "auto" },
-          { id: "gpt-5" },
-          { id: "claude-sonnet-4.5" },
-        ]
-      );
+      return opts.models ?? [{ id: "auto" }, { id: "gpt-5" }, { id: "claude-sonnet-4.5" }];
     }
   }
 
@@ -337,9 +330,7 @@ describe("CopilotProvider — happy path stream translation", () => {
     expect(loader.count()).toBe(1);
     expect(chunks).toHaveLength(3);
     expect(chunks.every((c) => c.type === "text")).toBe(true);
-    expect(chunks.map((c) => (c as { content: string }).content).join("")).toBe(
-      "2 + 2 = 4",
-    );
+    expect(chunks.map((c) => (c as { content: string }).content).join("")).toBe("2 + 2 = 4");
     expect(sdk.lastSession()!.sent[0]!.prompt).toBe("hello");
     expect(sdk.lastSession()!.disconnected).toBe(true);
     expect(sdk.lastClient()!.stopped).toBe(true);
@@ -412,9 +403,7 @@ describe("CopilotProvider — error paths", () => {
     expect(thrown).toBeInstanceOf(Error);
     expect(chunks).toHaveLength(1);
     expect(chunks[0]!.type).toBe("system");
-    expect((chunks[0] as { content: string }).content.toLowerCase()).toContain(
-      "authentication",
-    );
+    expect((chunks[0] as { content: string }).content.toLowerCase()).toContain("authentication");
     // Client was started, so cleanup should have called stop.
     expect(sdk.lastClient()!.stopped).toBe(true);
   });
@@ -472,9 +461,7 @@ describe("CopilotProvider — error paths", () => {
     expect(thrown).toBeInstanceOf(Error);
     expect(chunks).toHaveLength(1);
     expect(chunks[0]!.type).toBe("system");
-    expect((chunks[0] as { content: string }).content.toLowerCase()).toContain(
-      "network",
-    );
+    expect((chunks[0] as { content: string }).content.toLowerCase()).toContain("network");
     // start() failure must not leak the spawned CLI process — the factory
     // is required to call stop() on the client before rethrowing.
     expect(sdk.lastClient()).not.toBeNull();
@@ -671,7 +658,6 @@ describe("CopilotProvider — abort", () => {
     expect(sdk.lastClient()!.stopped).toBe(true);
     expect(sdk.lastSession()).toBeNull();
   });
-
 });
 
 describe("buildFriendlyCopilotError", () => {
@@ -691,9 +677,7 @@ describe("buildFriendlyCopilotError", () => {
   });
 
   it("classifies module-not-found as SDK missing", () => {
-    const msg = buildFriendlyCopilotError(
-      new Error("Cannot find module '@github/copilot-sdk'"),
-    );
+    const msg = buildFriendlyCopilotError(new Error("Cannot find module '@github/copilot-sdk'"));
     expect(msg.toLowerCase()).toContain("sdk is not installed");
   });
 
@@ -763,9 +747,7 @@ describe("CopilotProvider — SDK option wiring (P1 regression guards)", () => {
       getCredential: async () => "real-token",
       clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
     });
-    await drain(
-      provider.sendQuery("hi", "/tmp", "prior-session-id"),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", "prior-session-id"));
     const cfg = sdk.lastSessionConfig();
     expect(cfg).not.toBeNull();
     expect(cfg!.onPermissionRequest).toBe(sdk.approveAll);
@@ -934,11 +916,7 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     expect(loader.count).toBe(2);
     // Default mock returns the standard trio when no `models` is set —
     // those project to bare-id ModelInfo entries.
-    expect(second.map((m) => m.id)).toEqual([
-      "auto",
-      "gpt-5",
-      "claude-sonnet-4.5",
-    ]);
+    expect(second.map((m) => m.id)).toEqual(["auto", "gpt-5", "claude-sonnet-4.5"]);
   });
 
   it("copilotCostTier maps the multiplier ranges (regression guard)", async () => {
@@ -994,12 +972,7 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     expect(models[0]!.supports?.reasoningEffort).toBeUndefined();
     expect(models[0]!.supportedReasoningEfforts).toBeUndefined();
     expect(models[1]!.supports?.reasoningEffort).toBe(true);
-    expect(models[1]!.supportedReasoningEfforts).toEqual([
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ]);
+    expect(models[1]!.supportedReasoningEfforts).toEqual(["low", "medium", "high", "xhigh"]);
     expect(models[1]!.defaultReasoningEffort).toBe("medium");
   });
 });
@@ -1056,12 +1029,8 @@ describe("CopilotProvider — reasoning effort (F10.6)", () => {
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
     const thinking = chunks.filter((c) => c.type === "thinking");
     const text = chunks.filter((c) => c.type === "text");
-    expect(thinking.map((c) => (c as { content: string }).content).join("")).toBe(
-      "Let me think",
-    );
-    expect(text.map((c) => (c as { content: string }).content).join("")).toBe(
-      "answer",
-    );
+    expect(thinking.map((c) => (c as { content: string }).content).join("")).toBe("Let me think");
+    expect(text.map((c) => (c as { content: string }).content).join("")).toBe("answer");
   });
 
   it("falls back to assistant.reasoning when streaming was missed", async () => {
@@ -1084,9 +1053,7 @@ describe("CopilotProvider — reasoning effort (F10.6)", () => {
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
     const thinking = chunks.filter((c) => c.type === "thinking");
     expect(thinking).toHaveLength(1);
-    expect((thinking[0] as { content: string }).content).toBe(
-      "the full reasoning",
-    );
+    expect((thinking[0] as { content: string }).content).toBe("the full reasoning");
   });
 
   it("emits only the unstreamed tail when assistant.reasoning follows deltas", async () => {
@@ -1132,9 +1099,7 @@ describe("CopilotProvider — reasoning effort (F10.6)", () => {
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
     const thinking = chunks.filter((c) => c.type === "thinking");
     expect(thinking).toHaveLength(2);
-    expect(
-      thinking.map((c) => (c as { content: string }).content).join(""),
-    ).toBe("hello world");
+    expect(thinking.map((c) => (c as { content: string }).content).join("")).toBe("hello world");
   });
 
   it("ignores empty reasoning deltaContent", async () => {
@@ -1153,10 +1118,7 @@ describe("CopilotProvider — reasoning effort (F10.6)", () => {
     });
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
     expect(chunks.filter((c) => c.type === "thinking")).toHaveLength(1);
-    expect(
-      (chunks.find((c) => c.type === "thinking") as { content: string })
-        .content,
-    ).toBe("hi");
+    expect((chunks.find((c) => c.type === "thinking") as { content: string }).content).toBe("hi");
   });
 
   it("calls session.setModel on resume when reasoningEffort + model are supplied", async () => {
@@ -1221,9 +1183,7 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
       getCredential: async () => "real-token",
       clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
     });
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [fakeTool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [fakeTool] }));
     const cfg = sdk.lastSessionConfig()!;
     expect(cfg.tools).toBeDefined();
     const tools = cfg.tools as Array<{
@@ -1257,10 +1217,7 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
           .max(50)
           .optional()
           .describe("How many recent pipelines per project."),
-        allProviders: z
-          .boolean()
-          .optional()
-          .describe("Include every provider."),
+        allProviders: z.boolean().optional().describe("Include every provider."),
       })
       .strict();
     const filterTool = {
@@ -1278,9 +1235,7 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
       getCredential: async () => "real-token",
       clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
     });
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [filterTool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [filterTool] }));
 
     const cfg = sdk.lastSessionConfig()!;
     const tools = cfg.tools as Array<{
@@ -1343,9 +1298,7 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
       getCredential: async () => "real-token",
       clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
     });
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [tool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [tool] }));
 
     const cfg = sdk.lastSessionConfig()!;
     const tools = cfg.tools as Array<{
@@ -1373,9 +1326,7 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
       getCredential: async () => "real-token",
       clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
     });
-    await drain(
-      provider.sendQuery("hi", "/tmp", undefined, { tools: [tool] }),
-    );
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { tools: [tool] }));
 
     const cfg = sdk.lastSessionConfig()!;
     const tools = cfg.tools as Array<{ parameters?: unknown }>;

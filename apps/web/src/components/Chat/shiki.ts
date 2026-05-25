@@ -39,11 +39,7 @@ export function getHighlighter(): Promise<Highlighter> {
   return cached;
 }
 
-export function highlightCodeToHtml(
-  highlighter: Highlighter,
-  code: string,
-  lang: string,
-): string {
+export function highlightCodeToHtml(highlighter: Highlighter, code: string, lang: string): string {
   const loaded = highlighter.getLoadedLanguages();
   const effectiveLang = loaded.includes(lang as BundledLanguage)
     ? (lang as BundledLanguage)

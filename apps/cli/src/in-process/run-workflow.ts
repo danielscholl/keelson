@@ -6,11 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  getAgentProvider,
-  isRegisteredProvider,
-  registerStubProvider,
-} from "@keelson/providers";
+import { getAgentProvider, isRegisteredProvider, registerStubProvider } from "@keelson/providers";
 import { getRegisteredTools } from "@keelson/skills";
 import {
   bashHandler,
@@ -21,12 +17,12 @@ import {
   makeLoopHandler,
   makePromptHandler,
   makeScriptHandler,
-  parseWorkflow,
-  runWorkflow,
   type NodeHandler,
   type PromptHandlerProvider,
+  parseWorkflow,
   type RunStreamEvent,
   type RunSummary,
+  runWorkflow,
   type WorkflowDefinition,
 } from "@keelson/workflows";
 
@@ -48,7 +44,10 @@ export interface RunHeadlessResult {
 }
 
 export class WorkflowNotFoundError extends Error {
-  constructor(public readonly name: string, public readonly searched: string) {
+  constructor(
+    public readonly name: string,
+    public readonly searched: string,
+  ) {
     super(`no workflow named '${name}' under ${searched}`);
     this.name = "WorkflowNotFoundError";
   }
@@ -81,8 +80,8 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const providerId = opts.provider ?? "stub";
   if (!isRegisteredProvider(providerId)) {
     throw new Error(
-      `provider '${providerId}' is not registered. Use --provider stub for headless runs, or `
-        + `start the server with credentials configured (\`keelson serve\`) and route this run through it.`,
+      `provider '${providerId}' is not registered. Use --provider stub for headless runs, or ` +
+        `start the server with credentials configured (\`keelson serve\`) and route this run through it.`,
     );
   }
   // @keelson/workflows declares `PromptHandlerProvider` structurally to keep

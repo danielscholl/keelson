@@ -43,7 +43,7 @@ function listYaml(dir: string): string[] {
 // which would hide the very failure they were trying to diagnose.
 function findByName(dir: string, target: string): string | null {
   const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const nameLine = new RegExp(`^name:\\s*['\"]?${escaped}['\"]?\\s*$`, "m");
+  const nameLine = new RegExp(`^name:\\s*['"]?${escaped}['"]?\\s*$`, "m");
   for (const filename of listYaml(dir)) {
     let content: string;
     try {
@@ -63,7 +63,9 @@ export async function runWorkflowValidate(
   opts: WorkflowValidateOptions,
 ): Promise<never> {
   const dir = opts.dir ?? defaultWorkflowsDir();
-  const files = name ? [findByName(dir, name)].filter((f): f is string => f !== null) : listYaml(dir);
+  const files = name
+    ? [findByName(dir, name)].filter((f): f is string => f !== null)
+    : listYaml(dir);
 
   if (name && files.length === 0) {
     emit(

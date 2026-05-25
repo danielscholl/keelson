@@ -1,16 +1,12 @@
+import type { WorkflowRunStatus, WorkflowRunSummary, WorkflowSummary } from "@keelson/shared";
 import { useEffect, useState } from "react";
-import type {
-  WorkflowRunStatus,
-  WorkflowRunSummary,
-  WorkflowSummary,
-} from "@keelson/shared";
 
 import { deleteWorkflowRun, listRuns } from "../../api.ts";
+import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
+import { SkeletonStack } from "../Skeleton.tsx";
 import { useToast } from "../Toast.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
-import { SkeletonStack } from "../Skeleton.tsx";
-import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 
 // Map the wire-schema run status onto the badge's NodeViewStatus surface.
 // W4.6 — `paused` maps to `awaiting` (same magenta accent the per-node
@@ -71,7 +67,12 @@ export interface RecentRunsProps {
 
 interface RunRow extends WorkflowRunSummary {}
 
-export function RecentRuns({ workflows, onOpenRun, refreshKey = 0, onRunDeleted }: RecentRunsProps) {
+export function RecentRuns({
+  workflows,
+  onOpenRun,
+  refreshKey = 0,
+  onRunDeleted,
+}: RecentRunsProps) {
   const [rows, setRows] = useState<RunRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<RunRow | null>(null);
@@ -80,9 +81,9 @@ export function RecentRuns({ workflows, onOpenRun, refreshKey = 0, onRunDeleted 
   // Per-workflow fanout failures. We don't bail the whole panel for one
   // bad workflow (other workflows' history is still useful) but the
   // operator needs to know which entries are partial vs. authoritative.
-  const [failedWorkflows, setFailedWorkflows] = useState<
-    Array<{ name: string; error: string }>
-  >([]);
+  const [failedWorkflows, setFailedWorkflows] = useState<Array<{ name: string; error: string }>>(
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -99,30 +100,32 @@ export function RecentRuns({ workflows, onOpenRun, refreshKey = 0, onRunDeleted 
           }),
         ),
       ),
-    ).then((perWorkflow) => {
-      if (cancelled) return;
-      const merged: RunRow[] = [];
-      const failed: Array<{ name: string; error: string }> = [];
-      for (const r of perWorkflow) {
-        if (r.kind === "ok") merged.push(...r.runs);
-        else failed.push({ name: r.name, error: r.error });
-      }
-      merged.sort((a, b) => {
-        // Newest first by startedAt; the column is ISO so string sort works.
-        return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0;
+    )
+      .then((perWorkflow) => {
+        if (cancelled) return;
+        const merged: RunRow[] = [];
+        const failed: Array<{ name: string; error: string }> = [];
+        for (const r of perWorkflow) {
+          if (r.kind === "ok") merged.push(...r.runs);
+          else failed.push({ name: r.name, error: r.error });
+        }
+        merged.sort((a, b) => {
+          // Newest first by startedAt; the column is ISO so string sort works.
+          return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0;
+        });
+        // v1 keeps the table small — top 20 entries by recency, matching
+        // mockup density. Phase 4.x adds sortable columns + pagination per W6.
+        setRows(merged.slice(0, 20));
+        setFailedWorkflows(failed);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
       });
-      // v1 keeps the table small — top 20 entries by recency, matching
-      // mockup density. Phase 4.x adds sortable columns + pagination per W6.
-      setRows(merged.slice(0, 20));
-      setFailedWorkflows(failed);
-    }).catch((err) => {
-      if (cancelled) return;
-      setError(err instanceof Error ? err.message : String(err));
-    });
     return () => {
       cancelled = true;
     };
-  }, [workflows, refreshKey]);
+  }, [workflows]);
 
   if (rows === null) {
     return (
@@ -140,7 +143,9 @@ export function RecentRuns({ workflows, onOpenRun, refreshKey = 0, onRunDeleted 
       <div className="run-warnings" role="status">
         {failedWorkflows.map((f) => (
           <div key={f.name} className="run-warning-row">
-            <span className="run-warning-glyph" aria-hidden="true">⚠</span>
+            <span className="run-warning-glyph" aria-hidden="true">
+              ⚠
+            </span>
             <span>
               <strong>{f.name}</strong> history failed to load: {f.error}
             </span>
@@ -187,56 +192,56 @@ export function RecentRuns({ workflows, onOpenRun, refreshKey = 0, onRunDeleted 
     <>
       {failureBanner}
       <div className="runs-table">
-      <div className="runs-row head">
-        <span />
-        <span>Workflow</span>
-        <span>Status</span>
-        <span>Duration</span>
-        <span>Started</span>
-        <span style={{ textAlign: "right" }}>Actions</span>
-      </div>
-      {rows.map((r) => (
-        <button
-          key={r.runId}
-          type="button"
-          className="runs-row"
-          onClick={() => onOpenRun(r.runId, r.workflowName)}
-        >
+        <div className="runs-row head">
           <span />
-          <span className="run-name">
-            {r.workflowName}
-            <small>{r.runId.slice(0, 8)}</small>
-          </span>
-          <span>
-            <StatusBadge status={badgeStatusFor(r.status)} />
-          </span>
-          <span className="run-dur">{formatDuration(r.startedAt, r.completedAt)}</span>
-          <span className="run-time">{formatStarted(r.startedAt)}</span>
-          <span className="actions">
-            {/* span role=button avoids nesting <button> inside the row <button>. */}
-            <span
-              className="icon-btn danger"
-              role="button"
-              tabIndex={0}
-              aria-label={`Delete ${r.workflowName} run ${r.runId.slice(0, 8)}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setPendingDelete(r);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
+          <span>Workflow</span>
+          <span>Status</span>
+          <span>Duration</span>
+          <span>Started</span>
+          <span style={{ textAlign: "right" }}>Actions</span>
+        </div>
+        {rows.map((r) => (
+          <button
+            key={r.runId}
+            type="button"
+            className="runs-row"
+            onClick={() => onOpenRun(r.runId, r.workflowName)}
+          >
+            <span />
+            <span className="run-name">
+              {r.workflowName}
+              <small>{r.runId.slice(0, 8)}</small>
+            </span>
+            <span>
+              <StatusBadge status={badgeStatusFor(r.status)} />
+            </span>
+            <span className="run-dur">{formatDuration(r.startedAt, r.completedAt)}</span>
+            <span className="run-time">{formatStarted(r.startedAt)}</span>
+            <span className="actions">
+              {/* span role=button avoids nesting <button> inside the row <button>. */}
+              <span
+                className="icon-btn danger"
+                role="button"
+                tabIndex={0}
+                aria-label={`Delete ${r.workflowName} run ${r.runId.slice(0, 8)}`}
+                onClick={(e) => {
                   e.stopPropagation();
                   setPendingDelete(r);
-                }
-              }}
-            >
-              🗑
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPendingDelete(r);
+                  }
+                }}
+              >
+                🗑
+              </span>
+              <span className="icon-btn">View →</span>
             </span>
-            <span className="icon-btn">View →</span>
-          </span>
-        </button>
-      ))}
+          </button>
+        ))}
       </div>
       <ConfirmModal
         open={pendingDelete !== null}
@@ -245,9 +250,8 @@ export function RecentRuns({ workflows, onOpenRun, refreshKey = 0, onRunDeleted 
           pendingDelete ? (
             <>
               Delete the <strong>{pendingDelete.workflowName}</strong> run{" "}
-              <code>{pendingDelete.runId.slice(0, 8)}</code>? This removes it from
-              history and deletes its linked chat conversation. A still-running
-              run is cancelled first.
+              <code>{pendingDelete.runId.slice(0, 8)}</code>? This removes it from history and
+              deletes its linked chat conversation. A still-running run is cancelled first.
             </>
           ) : null
         }

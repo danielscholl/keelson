@@ -2,19 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { runAuthCheck, type AuthDeps } from "../checks/auth.ts";
-import { runDbCheck, type DbDeps } from "../checks/db.ts";
+import { type AuthDeps, runAuthCheck } from "../checks/auth.ts";
+import { type DbDeps, runDbCheck } from "../checks/db.ts";
 import { runServerCheck, type ServerDeps } from "../checks/server.ts";
 import { runToolchainCheck, type ToolchainDeps } from "../checks/toolchain.ts";
-import {
-  tally,
-  type CategoryResult,
-  type DoctorReport,
-} from "../checks/types.ts";
-import {
-  runWorkflowsCheck,
-  type WorkflowsDeps,
-} from "../checks/workflows.ts";
+import { type CategoryResult, type DoctorReport, tally } from "../checks/types.ts";
+import { runWorkflowsCheck, type WorkflowsDeps } from "../checks/workflows.ts";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { emit } from "../output.ts";
 

@@ -34,12 +34,15 @@ const PROBES: Probe[] = [
 ];
 
 function firstLine(text: string): string {
-  return text.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  return (
+    text
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? ""
+  );
 }
 
-export async function runToolchainCheck(
-  deps: ToolchainDeps = {},
-): Promise<CategoryResult> {
+export async function runToolchainCheck(deps: ToolchainDeps = {}): Promise<CategoryResult> {
   const exec = deps.runText ?? defaultRunText;
   const checks: CheckResult[] = await Promise.all(
     PROBES.map(async (p): Promise<CheckResult> => {

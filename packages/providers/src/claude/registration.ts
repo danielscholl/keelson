@@ -7,10 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { isRegisteredProvider, registerProvider } from "../registry.ts";
-import {
-  ClaudeQueryFactory,
-  type ClaudeCliAuthResult,
-} from "./factory.ts";
+import { type ClaudeCliAuthResult, ClaudeQueryFactory } from "./factory.ts";
 import {
   CLAUDE_CAPABILITIES,
   CLAUDE_CREDENTIAL_SERVICE_ID,

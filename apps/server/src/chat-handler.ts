@@ -2,30 +2,30 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { Hono } from "hono";
-import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
-import { z } from "zod";
 import {
-  WIRE_PROTOCOL_VERSION,
-  chatFrameSchema,
-  clientFrameSchema,
-  inferToolFamily,
-  modelInfoSchema,
-  registeredToolInfoSchema,
-  renameConversationBodySchema,
-  type ChatFrame,
-  type ClientFrame,
-  type MessageChunk,
-} from "@keelson/shared";
-import {
-  UnknownProviderError,
   getAgentProvider,
   getProviderInfoList,
   isRegisteredProvider,
+  UnknownProviderError,
 } from "@keelson/providers";
+import {
+  type ChatFrame,
+  type ClientFrame,
+  chatFrameSchema,
+  clientFrameSchema,
+  inferToolFamily,
+  type MessageChunk,
+  modelInfoSchema,
+  registeredToolInfoSchema,
+  renameConversationBodySchema,
+  WIRE_PROTOCOL_VERSION,
+} from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
-import type { ConversationStore } from "./conversation-store.ts";
+import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
+import type { Hono } from "hono";
+import { z } from "zod";
 import { createContentPartsAccumulator } from "./content-parts.ts";
+import type { ConversationStore } from "./conversation-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 import type { ActiveRuns } from "./workflows-handler.ts";
 import { purgeWorkflowRun } from "./workflows-handler.ts";
@@ -85,9 +85,7 @@ export function chatRoutes(
   store: ConversationStore,
   workflowDeps: ChatRoutesWorkflowDeps,
 ): void {
-  app.get("/api/providers", (c) =>
-    c.json({ providers: getProviderInfoList() }),
-  );
+  app.get("/api/providers", (c) => c.json({ providers: getProviderInfoList() }));
 
   // Picker calls this on provider select. Providers never throw — signed-out
   // states return their curated fallback — so this just propagates.
@@ -123,9 +121,7 @@ export function chatRoutes(
     // surfaced only via the Workflows tab; hide them from the chat sidebar so
     // the two mental models stay separated.
     c.json({
-      conversations: store
-        .list()
-        .filter((conv) => conv.providerId !== "workflow"),
+      conversations: store.list().filter((conv) => conv.providerId !== "workflow"),
     }),
   );
 
@@ -141,10 +137,7 @@ export function chatRoutes(
       return c.json({ error: parsed.error.message }, 400);
     }
     if (!isRegisteredProvider(parsed.data.providerId)) {
-      return c.json(
-        { error: `unknown provider '${parsed.data.providerId}'` },
-        400,
-      );
+      return c.json({ error: `unknown provider '${parsed.data.providerId}'` }, 400);
     }
     // The synthetic `workflow` provider is registered for run-as-conversation
     // (Phase 4 W4.5) but is non-chat. Reject manual creation so a stray client
@@ -153,8 +146,7 @@ export function chatRoutes(
     if (parsed.data.providerId === "workflow") {
       return c.json(
         {
-          error:
-            "workflow conversations are created via POST /api/workflows/:name/runs",
+          error: "workflow conversations are created via POST /api/workflows/:name/runs",
         },
         400,
       );
@@ -216,13 +208,10 @@ export function deriveConversationName(prompt: string): string | undefined {
   const cleaned = prompt.trim().replace(/\s+/g, " ");
   if (cleaned.length === 0) return undefined;
   const MAX = 60;
-  return cleaned.length <= MAX ? cleaned : cleaned.slice(0, MAX - 1) + "…";
+  return cleaned.length <= MAX ? cleaned : `${cleaned.slice(0, MAX - 1)}…`;
 }
 
-export function handleChatUpgrade(
-  req: Request,
-  server: Server<WsData>,
-): Response | undefined {
+export function handleChatUpgrade(req: Request, server: Server<WsData>): Response | undefined {
   const origin = req.headers.get("origin");
   if (!isAllowedOrigin(origin)) {
     return new Response("forbidden origin", { status: 403 });
@@ -233,9 +222,7 @@ export function handleChatUpgrade(
   return new Response("expected websocket", { status: 426 });
 }
 
-export function chatWebSocketHandlers(
-  store: ConversationStore,
-): WebSocketHandler<WsData> {
+export function chatWebSocketHandlers(store: ConversationStore): WebSocketHandler<WsData> {
   return {
     open(_ws) {},
     async message(ws, raw) {
@@ -270,10 +257,7 @@ export interface ChatDeps {
   abortSignal: AbortSignal;
 }
 
-export async function handleChatRequest(
-  frame: ClientFrame,
-  deps: ChatDeps,
-): Promise<void> {
+export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Promise<void> {
   const { conversationId } = frame;
   const message = frame.message;
   if (message.type !== "request") return;
@@ -331,11 +315,7 @@ export async function handleChatRequest(
 
   if (!isRegisteredProvider(message.providerId)) {
     deps.send(
-      errorFrame(
-        conversationId,
-        `unknown provider '${message.providerId}'`,
-        "UNKNOWN_PROVIDER",
-      ),
+      errorFrame(conversationId, `unknown provider '${message.providerId}'`, "UNKNOWN_PROVIDER"),
     );
     deps.send(doneFrame(conversationId));
     return;
@@ -346,8 +326,7 @@ export async function handleChatRequest(
     provider = getAgentProvider(message.providerId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const code =
-      err instanceof UnknownProviderError ? "UNKNOWN_PROVIDER" : "PROVIDER_ERROR";
+    const code = err instanceof UnknownProviderError ? "UNKNOWN_PROVIDER" : "PROVIDER_ERROR";
     deps.send(errorFrame(conversationId, msg, code));
     deps.send(doneFrame(conversationId));
     return;
@@ -365,8 +344,7 @@ export async function handleChatRequest(
   const systemPromptParts = [conv.seedSystemPrompt].filter(
     (s): s is string => typeof s === "string" && s.length > 0,
   );
-  const systemPrompt =
-    systemPromptParts.length > 0 ? systemPromptParts.join("\n\n") : undefined;
+  const systemPrompt = systemPromptParts.length > 0 ? systemPromptParts.join("\n\n") : undefined;
 
   try {
     for await (const chunk of provider.sendQuery(
@@ -377,9 +355,7 @@ export async function handleChatRequest(
         model: message.model ?? conv.model,
         abortSignal: deps.abortSignal,
         // Omit unset fields so providers see their SDK defaults.
-        ...(message.thinking !== undefined
-          ? { thinking: message.thinking }
-          : {}),
+        ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
         ...(message.reasoningEffort !== undefined
           ? { reasoningEffort: message.reasoningEffort }
           : {}),
@@ -403,8 +379,7 @@ export async function handleChatRequest(
     // these rows.
     const assistantContent = acc.text();
     const contentParts = acc.parts();
-    const hasPersistable =
-      assistantContent.length > 0 || contentParts.length > 0;
+    const hasPersistable = assistantContent.length > 0 || contentParts.length > 0;
     if (hasPersistable) {
       const truncated = deps.abortSignal.aborted || streamFailed;
       deps.store.appendMessage(conversationId, {
@@ -425,7 +400,6 @@ export async function handleChatRequest(
   }
 }
 
-
 // --- Frame builders ---
 
 function chunkFrame(conversationId: string, chunk: MessageChunk): ChatFrame {
@@ -436,11 +410,7 @@ function chunkFrame(conversationId: string, chunk: MessageChunk): ChatFrame {
   };
 }
 
-function errorFrame(
-  conversationId: string,
-  message: string,
-  code?: string,
-): ChatFrame {
+function errorFrame(conversationId: string, message: string, code?: string): ChatFrame {
   return {
     version: WIRE_PROTOCOL_VERSION,
     conversationId,

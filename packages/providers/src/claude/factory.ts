@@ -10,16 +10,9 @@
 // point. Structural types keep this file free of a typeof-import on the SDK,
 // so tests can pass any compatible shape via sdkLoader.
 
-import type {
-  MessageChunk,
-  ToolDefinition,
-} from "../types.ts";
 import type { ToolContext } from "@keelson/shared";
-import {
-  buildSDKHooksFromYAML,
-  mergeSDKHooks,
-  type YAMLHookMatcher,
-} from "./hooks-projection.ts";
+import type { MessageChunk, ToolDefinition } from "../types.ts";
+import { buildSDKHooksFromYAML, mergeSDKHooks, type YAMLHookMatcher } from "./hooks-projection.ts";
 
 // Single source of truth for the MCP server name we register our skill
 // catalog under (see options.mcpServers below). The SDK exposes registered
@@ -33,9 +26,7 @@ const MCP_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 // both bare names (SDK built-ins like Read/Bash) and our MCP-wrapped names
 // (registered skills exposed under `mcp__<server>__<name>`). Already-wrapped
 // names pass through unchanged.
-function expandToolNamesForClaudeSdk(
-  names: readonly string[],
-): string[] {
+function expandToolNamesForClaudeSdk(names: readonly string[]): string[] {
   const out: string[] = [];
   for (const name of names) {
     out.push(name);
@@ -136,10 +127,7 @@ export interface ClaudeSdkToolDefinition {
   name: string;
   description: string;
   inputSchema: unknown;
-  handler: (
-    args: unknown,
-    extra: unknown,
-  ) => Promise<ClaudeCallToolResult>;
+  handler: (args: unknown, extra: unknown) => Promise<ClaudeCallToolResult>;
 }
 
 export interface ClaudeCallToolResult {
@@ -148,10 +136,7 @@ export interface ClaudeCallToolResult {
 }
 
 export interface ClaudeSdkModule {
-  query(args: {
-    prompt: string;
-    options?: ClaudeQueryOptions;
-  }): ClaudeQueryHandle;
+  query(args: { prompt: string; options?: ClaudeQueryOptions }): ClaudeQueryHandle;
   // Optional so mock SDKs in tests don't have to implement it.
   createSdkMcpServer?: (options: {
     name: string;
@@ -229,16 +214,9 @@ export function projectToolsForClaude(
     name: tool.name,
     description: tool.description,
     inputSchema: extractZodObjectShape(tool.inputSchema),
-    handler: async (
-      rawArgs: unknown,
-      _extra: unknown,
-    ): Promise<ClaudeCallToolResult> => {
+    handler: async (rawArgs: unknown, _extra: unknown): Promise<ClaudeCallToolResult> => {
       const ctx = projection.contextFactory();
-      const { content, isError } = await runClaudeToolHandler(
-        tool,
-        rawArgs,
-        ctx,
-      );
+      const { content, isError } = await runClaudeToolHandler(tool, rawArgs, ctx);
       return isError
         ? { content: [{ type: "text", text: content }], isError: true }
         : { content: [{ type: "text", text: content }] };
@@ -249,9 +227,7 @@ export function projectToolsForClaude(
 // SDK expects AnyZodRawShape (`{ key: ZodType }`), NOT a full z.object().
 // Duck-typed via `_def.typeName === "ZodObject"` + `.shape` to keep this
 // file zod-runtime-free. Non-object schemas fall back to an empty shape.
-function extractZodObjectShape(
-  schema: ToolDefinition["inputSchema"],
-): Record<string, unknown> {
+function extractZodObjectShape(schema: ToolDefinition["inputSchema"]): Record<string, unknown> {
   const def = (schema as { _def?: { typeName?: string } })._def;
   if (def?.typeName !== "ZodObject") return {};
   const shape = (schema as { shape?: Record<string, unknown> }).shape;
@@ -337,9 +313,7 @@ export class ClaudeQueryFactory {
   private readonly loadSdk: ClaudeSdkLoader;
   private readonly cliRunner: ClaudeCliRunner;
 
-  constructor(
-    options: ClaudeQueryFactoryOptions & { cliRunner?: ClaudeCliRunner } = {},
-  ) {
+  constructor(options: ClaudeQueryFactoryOptions & { cliRunner?: ClaudeCliRunner } = {}) {
     this.loadSdk = options.sdkLoader ?? defaultSdkLoader;
     this.cliRunner = options.cliRunner ?? defaultClaudeCliRunner;
   }
@@ -354,9 +328,7 @@ export class ClaudeQueryFactory {
       return { loggedIn: false, error: msg };
     }
     if (result.exitCode !== 0) {
-      const msg =
-        result.stderr.trim() ||
-        `claude auth status exited ${result.exitCode}`;
+      const msg = result.stderr.trim() || `claude auth status exited ${result.exitCode}`;
       return { loggedIn: false, error: msg };
     }
     let parsed: unknown;
@@ -372,9 +344,7 @@ export class ClaudeQueryFactory {
     const obj = parsed as Record<string, unknown>;
     return {
       loggedIn: obj.loggedIn === true,
-      ...(typeof obj.authMethod === "string"
-        ? { authMethod: obj.authMethod }
-        : {}),
+      ...(typeof obj.authMethod === "string" ? { authMethod: obj.authMethod } : {}),
       ...(typeof obj.email === "string" ? { email: obj.email } : {}),
       ...(typeof obj.orgName === "string" ? { orgName: obj.orgName } : {}),
     };
@@ -427,8 +397,7 @@ export class ClaudeQueryFactory {
       // an MCP name we know about".
       const mcpNames = new Set(params.registeredMcpToolNames ?? []);
       for (const t of params.tools ?? []) mcpNames.add(t.name);
-      const isMcpName = (n: string): boolean =>
-        n.startsWith("mcp__") || mcpNames.has(n);
+      const isMcpName = (n: string): boolean => n.startsWith("mcp__") || mcpNames.has(n);
       options.tools = params.allowedTools.filter((n) => !isMcpName(n));
       options.allowedTools = expandToolNamesForClaudeSdk(params.allowedTools);
     }
@@ -455,10 +424,7 @@ export class ClaudeQueryFactory {
       params.toolProjection &&
       typeof sdk.createSdkMcpServer === "function"
     ) {
-      const toolDefs = projectToolsForClaude(
-        params.tools,
-        params.toolProjection,
-      );
+      const toolDefs = projectToolsForClaude(params.tools, params.toolProjection);
       const serverInstance = sdk.createSdkMcpServer({
         name: MCP_SERVER_NAME,
         version: "0.0.0",

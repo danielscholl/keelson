@@ -64,8 +64,7 @@ export function ConfirmModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
-  const confirmEnabled =
-    mode.kind === "simple" ? true : typed === mode.expectedValue;
+  const confirmEnabled = mode.kind === "simple" ? true : typed === mode.expectedValue;
 
   const handleConfirm = useCallback(() => {
     if (!confirmEnabled) return;
@@ -121,11 +120,7 @@ export function ConfirmModal({
           </div>
         )}
         <footer className="confirm-modal-footer">
-          <button
-            type="button"
-            className="confirm-modal-cancel"
-            onClick={onCancel}
-          >
+          <button type="button" className="confirm-modal-cancel" onClick={onCancel}>
             {cancelLabel}
           </button>
           <button

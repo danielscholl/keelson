@@ -1,5 +1,5 @@
-import { Children, isValidElement, useCallback, useEffect, useMemo, useState } from "react";
 import type { HTMLAttributes, ReactNode } from "react";
+import { Children, isValidElement, useCallback, useEffect, useMemo, useState } from "react";
 import { getHighlighter, highlightCodeToHtml } from "./shiki.ts";
 
 // Custom code-block renderer injected into Streamdown via components.pre.
@@ -30,9 +30,7 @@ function extractCode(children: ReactNode): ExtractedCode {
   };
   if (typeof props.code === "string") {
     const lang =
-      typeof props.language === "string" && props.language.length > 0
-        ? props.language
-        : "text";
+      typeof props.language === "string" && props.language.length > 0 ? props.language : "text";
     return { text: props.code.replace(/\n$/, ""), lang };
   }
   const match = /language-([^\s]+)/.exec(props.className ?? "");
@@ -93,10 +91,7 @@ export function CodeBlock({ children }: HTMLAttributes<HTMLPreElement>) {
         </button>
       </div>
       {html ? (
-        <div
-          className="code-block-body"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        <div className="code-block-body" dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
         <pre className="code-block-body code-block-body--plain">
           <code>{text}</code>

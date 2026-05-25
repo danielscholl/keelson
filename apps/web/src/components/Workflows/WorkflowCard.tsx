@@ -1,5 +1,5 @@
-import { useMemo } from "react";
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
+import { useMemo } from "react";
 
 import { parseWorkflowDescription } from "../../lib/parseWorkflowDescription.ts";
 
@@ -48,7 +48,9 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
   return (
     <article className="workflow-card">
       <div className="wc-head">
-        <div className="wc-icon" aria-hidden="true">{initial}</div>
+        <div className="wc-icon" aria-hidden="true">
+          {initial}
+        </div>
         <div>
           <div className="wc-title">{humanTitle(workflow.name)}</div>
           <div className="wc-slug">{workflow.name}</div>

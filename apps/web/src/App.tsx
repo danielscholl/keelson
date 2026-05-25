@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { ToastHost } from "./components/Toast.tsx";
+import { type ActiveTab, TopBar } from "./components/TopBar.tsx";
 import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
 import { useSettings } from "./hooks/useSettings.ts";
-import { TopBar, type ActiveTab } from "./components/TopBar.tsx";
 import { Chat } from "./views/Chat.tsx";
 import { Workflows } from "./views/Workflows.tsx";
-import { ToastHost } from "./components/Toast.tsx";
 
 export function App() {
   return (
@@ -25,11 +25,7 @@ function AppInner() {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
       const resolved =
-        themePreference === "system"
-          ? mql.matches
-            ? "dark"
-            : "light"
-          : themePreference;
+        themePreference === "system" ? (mql.matches ? "dark" : "light") : themePreference;
       document.documentElement.setAttribute("data-theme", resolved);
     };
     apply();

@@ -3,11 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import {
-  runWithRedaction,
-  scrubArg,
-  wrapConsole,
-} from "../src/redact.ts";
+import { runWithRedaction, scrubArg, wrapConsole } from "../src/redact.ts";
 
 type ConsoleMethod = "log" | "warn" | "error" | "info" | "debug";
 
@@ -16,9 +12,11 @@ function makeFakeConsole(): {
   captured: Array<{ method: ConsoleMethod; args: unknown[] }>;
 } {
   const captured: Array<{ method: ConsoleMethod; args: unknown[] }> = [];
-  const make = (method: ConsoleMethod) => (...args: unknown[]) => {
-    captured.push({ method, args });
-  };
+  const make =
+    (method: ConsoleMethod) =>
+    (...args: unknown[]) => {
+      captured.push({ method, args });
+    };
   return {
     captured,
     console: {
@@ -33,15 +31,11 @@ function makeFakeConsole(): {
 
 describe("scrubArg", () => {
   test("replaces every occurrence of every value", () => {
-    expect(scrubArg("token=s3cret bar=s3cret", ["s3cret"])).toBe(
-      "token=[REDACTED] bar=[REDACTED]",
-    );
+    expect(scrubArg("token=s3cret bar=s3cret", ["s3cret"])).toBe("token=[REDACTED] bar=[REDACTED]");
   });
 
   test("supports multiple values", () => {
-    expect(scrubArg("a=AAA b=BBB", ["AAA", "BBB"])).toBe(
-      "a=[REDACTED] b=[REDACTED]",
-    );
+    expect(scrubArg("a=AAA b=BBB", ["AAA", "BBB"])).toBe("a=[REDACTED] b=[REDACTED]");
   });
 
   test("non-string args pass through unchanged (objects, numbers, null)", () => {
@@ -57,9 +51,7 @@ describe("scrubArg", () => {
   });
 
   test("ignores empty / non-string entries in the values list", () => {
-    expect(scrubArg("token=secret", ["", "secret"])).toBe(
-      "token=[REDACTED]",
-    );
+    expect(scrubArg("token=secret", ["", "secret"])).toBe("token=[REDACTED]");
   });
 });
 
@@ -101,9 +93,7 @@ describe("runWithRedaction + wrapConsole", () => {
       fake.error("alpha then beta");
     });
 
-    expect(captured).toEqual([
-      { method: "error", args: ["[REDACTED] then [REDACTED]"] },
-    ]);
+    expect(captured).toEqual([{ method: "error", args: ["[REDACTED] then [REDACTED]"] }]);
   });
 
   test("non-string args bypass scrubbing", () => {

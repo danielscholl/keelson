@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import {
   getRun,
   HttpError,
@@ -9,9 +10,8 @@ import {
   listPausedRuns,
   listRunsByName,
 } from "../http/workflow-client.ts";
-import { probeServer } from "../server-probe.ts";
-import { EXIT_FAIL, EXIT_NOT_FOUND, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import { emit } from "../output.ts";
+import { probeServer } from "../server-probe.ts";
 
 export interface WorkflowStatusOptions {
   json: boolean;

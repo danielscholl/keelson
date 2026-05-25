@@ -7,8 +7,8 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 export * from "./chat.ts";
-export * from "./rib.ts";
 export type { MemoryTools } from "./memory.ts";
+export * from "./rib.ts";
 export * from "./tools.ts";
 export * from "./workflows.ts";
 

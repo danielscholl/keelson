@@ -42,7 +42,7 @@ export function parseWorkflowDescription(
   const lines = text.split(/\r?\n/);
   const sections: Partial<Record<keyof ParsedWorkflowDescription, string[]>> = {};
   let current: keyof ParsedWorkflowDescription | null = null;
-  let pre: string[] = [];
+  const pre: string[] = [];
 
   for (const line of lines) {
     const label = matchLabel(line);

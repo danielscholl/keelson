@@ -2,11 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import {
-  getAgentProvider,
-  getProviderInfoList,
-  UnknownProviderError,
-} from "@keelson/providers";
+import { getAgentProvider, getProviderInfoList, UnknownProviderError } from "@keelson/providers";
 import type { MessageChunk, ReasoningEffortLevel } from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
 
@@ -71,8 +67,7 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
   // the "let the SDK decide" sentinel — leave the wire field unset for
   // that case.
   const providerDefault = provider.getCapabilities().defaultModel;
-  const effectiveModel =
-    opts.model ?? (providerDefault.length > 0 ? providerDefault : undefined);
+  const effectiveModel = opts.model ?? (providerDefault.length > 0 ? providerDefault : undefined);
 
   let text = "";
   for await (const chunk of provider.sendQuery(opts.message, opts.cwd, undefined, {

@@ -1,4 +1,4 @@
-import { inferToolFamily, type ContentBlock } from "@keelson/shared";
+import { type ContentBlock, inferToolFamily } from "@keelson/shared";
 import { displayToolName } from "./toolNames.ts";
 
 // Per-row source chip. Family is inferred from the tool name prefix
@@ -21,9 +21,7 @@ export interface LiveToolCall {
 // Rebuild LiveToolCall[] from persisted `contentParts` so reloaded turns
 // render identically to the live path. Orphan tool_result blocks are
 // dropped, mirroring the live handler's defensive shape.
-export function toolCallsFromContentParts(
-  parts: readonly ContentBlock[],
-): LiveToolCall[] {
+export function toolCallsFromContentParts(parts: readonly ContentBlock[]): LiveToolCall[] {
   const calls: LiveToolCall[] = [];
   const byId = new Map<string, LiveToolCall>();
   for (const block of parts) {
@@ -31,9 +29,7 @@ export function toolCallsFromContentParts(
       const call: LiveToolCall = {
         id: block.id,
         toolName: block.toolName,
-        ...(block.toolInput !== undefined
-          ? { toolInput: block.toolInput }
-          : {}),
+        ...(block.toolInput !== undefined ? { toolInput: block.toolInput } : {}),
       };
       calls.push(call);
       byId.set(block.id, call);
@@ -98,31 +94,21 @@ export function ToolCallsBlock({ toolCalls, streaming }: ToolCallsBlockProps) {
                   {familyLabel(family)}
                 </span>
                 {isRunning ? (
-                  <span
-                    className="tool-calls-running-dot"
-                    aria-label="running"
-                  />
+                  <span className="tool-calls-running-dot" aria-label="running" />
                 ) : null}
                 {tc.isError ? (
-                  <span
-                    className="tool-calls-error-badge"
-                    title={errorPreview}
-                  >
+                  <span className="tool-calls-error-badge" title={errorPreview}>
                     failed
                   </span>
                 ) : null}
               </summary>
               <pre className="tool-calls-args">
-                {tc.toolInput
-                  ? JSON.stringify(tc.toolInput, null, 2)
-                  : "(no args)"}
+                {tc.toolInput ? JSON.stringify(tc.toolInput, null, 2) : "(no args)"}
               </pre>
               {tc.result !== undefined ? (
                 <pre
                   className={
-                    tc.isError
-                      ? "tool-calls-result tool-calls-result-error"
-                      : "tool-calls-result"
+                    tc.isError ? "tool-calls-result tool-calls-result-error" : "tool-calls-result"
                   }
                 >
                   {tc.result}

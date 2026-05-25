@@ -9,15 +9,11 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-
-import { makeApprovalHandler, type AwaitApproval } from "./approval.ts";
 import type { NodeContext } from "../executor.ts";
 import type { DagNode, WorkflowDefinition } from "../schema/index.ts";
+import { type AwaitApproval, makeApprovalHandler } from "./approval.ts";
 
-function buildCtx(opts: {
-  abortSignal?: AbortSignal;
-  resolvedBody?: string;
-}): NodeContext {
+function buildCtx(opts: { abortSignal?: AbortSignal; resolvedBody?: string }): NodeContext {
   return {
     runId: "run-1",
     nodeId: "review-plan",
@@ -58,9 +54,7 @@ describe("makeApprovalHandler", () => {
     const handler = makeApprovalHandler({ awaitApproval: await_ });
     const result = await handler.handle(approvalNode, buildCtx({}));
     expect(result.status).toBe("succeeded");
-    expect(result.output.kind === "text" ? result.output.text : "").toBe(
-      "narrow the regex first",
-    );
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("narrow the regex first");
   });
 
   test("propagates the runId / nodeId / abortSignal into the resolver", async () => {
@@ -77,10 +71,7 @@ describe("makeApprovalHandler", () => {
       return "ok";
     };
     const handler = makeApprovalHandler({ awaitApproval: await_ });
-    await handler.handle(
-      approvalNode,
-      buildCtx({ abortSignal: abort.signal }),
-    );
+    await handler.handle(approvalNode, buildCtx({ abortSignal: abort.signal }));
     expect(captured.runId).toBe("run-1");
     expect(captured.nodeId).toBe("review-plan");
     expect(captured.sig).toBe(abort.signal);
@@ -95,10 +86,7 @@ describe("makeApprovalHandler", () => {
       return "should-not-happen";
     };
     const handler = makeApprovalHandler({ awaitApproval: await_ });
-    const result = await handler.handle(
-      approvalNode,
-      buildCtx({ abortSignal: abort.signal }),
-    );
+    const result = await handler.handle(approvalNode, buildCtx({ abortSignal: abort.signal }));
     expect(called).toBe(false);
     expect(result.status).toBe("failed");
     expect(result.error).toBe("aborted");
@@ -111,10 +99,7 @@ describe("makeApprovalHandler", () => {
         sig.addEventListener("abort", () => reject(new Error("cancelled")));
       });
     const handler = makeApprovalHandler({ awaitApproval: await_ });
-    const promise = handler.handle(
-      approvalNode,
-      buildCtx({ abortSignal: abort.signal }),
-    );
+    const promise = handler.handle(approvalNode, buildCtx({ abortSignal: abort.signal }));
     abort.abort("cancelled via DELETE");
     const result = await promise;
     expect(result.status).toBe("failed");
@@ -146,10 +131,7 @@ describe("makeApprovalHandler", () => {
     // surfaces the executor's resolvedBody so test rigs don't need to build
     // a full ApprovalNode just to exercise the resolver wiring.
     const bareNode = { id: "review" } as unknown as DagNode;
-    await handler.handle(
-      bareNode,
-      buildCtx({ resolvedBody: "plz approve" }),
-    );
+    await handler.handle(bareNode, buildCtx({ resolvedBody: "plz approve" }));
     expect(seenMessage).toBe("plz approve");
   });
 });

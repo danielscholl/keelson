@@ -5,34 +5,34 @@
  * that workflows declaring hooks load cleanly, and the loader can warn
  * about ignored hook fields.
  */
-import { z } from 'zod';
+import { z } from "zod";
 
 /**
  * Supported hook events for per-node hooks.
  * Uses the same event names as the Claude Agent SDK's HookEvent type.
  */
 export const workflowHookEventSchema = z.enum([
-  'PreToolUse',
-  'PostToolUse',
-  'PostToolUseFailure',
-  'Notification',
-  'UserPromptSubmit',
-  'SessionStart',
-  'SessionEnd',
-  'Stop',
-  'SubagentStart',
-  'SubagentStop',
-  'PreCompact',
-  'PermissionRequest',
-  'Setup',
-  'TeammateIdle',
-  'TaskCompleted',
-  'Elicitation',
-  'ElicitationResult',
-  'ConfigChange',
-  'WorktreeCreate',
-  'WorktreeRemove',
-  'InstructionsLoaded',
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "Notification",
+  "UserPromptSubmit",
+  "SessionStart",
+  "SessionEnd",
+  "Stop",
+  "SubagentStart",
+  "SubagentStop",
+  "PreCompact",
+  "PermissionRequest",
+  "Setup",
+  "TeammateIdle",
+  "TaskCompleted",
+  "Elicitation",
+  "ElicitationResult",
+  "ConfigChange",
+  "WorktreeCreate",
+  "WorktreeRemove",
+  "InstructionsLoaded",
 ]);
 
 export type WorkflowHookEvent = z.infer<typeof workflowHookEventSchema>;

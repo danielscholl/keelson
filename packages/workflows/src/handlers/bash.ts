@@ -19,77 +19,77 @@
 
 import type { NodeHandler, NodeResult } from "../executor.ts";
 import {
-	buildSubprocessEnv,
-	runSubprocess,
-	SUBPROCESS_DEFAULT_TIMEOUT_MS,
-	SubprocessSpawnError,
+  buildSubprocessEnv,
+  runSubprocess,
+  SUBPROCESS_DEFAULT_TIMEOUT_MS,
+  SubprocessSpawnError,
 } from "./subprocess.ts";
 
 export interface MakeBashHandlerOptions {
-	timeoutMs?: number;
+  timeoutMs?: number;
 }
 
 export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler {
-	const factoryTimeoutMs = opts.timeoutMs ?? SUBPROCESS_DEFAULT_TIMEOUT_MS;
-	return {
-		type: "bash",
-		async handle(node, ctx): Promise<NodeResult> {
-			const nodeTimeout = (node as { timeout?: unknown }).timeout;
-			const timeoutMs =
-				typeof nodeTimeout === "number" && Number.isFinite(nodeTimeout) && nodeTimeout > 0
-					? nodeTimeout
-					: factoryTimeoutMs;
+  const factoryTimeoutMs = opts.timeoutMs ?? SUBPROCESS_DEFAULT_TIMEOUT_MS;
+  return {
+    type: "bash",
+    async handle(node, ctx): Promise<NodeResult> {
+      const nodeTimeout = (node as { timeout?: unknown }).timeout;
+      const timeoutMs =
+        typeof nodeTimeout === "number" && Number.isFinite(nodeTimeout) && nodeTimeout > 0
+          ? nodeTimeout
+          : factoryTimeoutMs;
 
-			let outcome;
-			try {
-				outcome = await runSubprocess({
-					cmd: "bash",
-					args: ["-c", ctx.rawBody],
-					cwd: ctx.cwd,
-					env: buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
-						...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
-					}),
-					timeoutMs,
-					abortSignal: ctx.abortSignal,
-					emit: ctx.emit,
-				});
-			} catch (err) {
-				if (err instanceof SubprocessSpawnError) {
-					return {
-						status: "failed",
-						output: { kind: "text", text: "" },
-						error: `bash spawn failed: ${err.message}`,
-					};
-				}
-				throw err;
-			}
+      let outcome;
+      try {
+        outcome = await runSubprocess({
+          cmd: "bash",
+          args: ["-c", ctx.rawBody],
+          cwd: ctx.cwd,
+          env: buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
+            ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+          }),
+          timeoutMs,
+          abortSignal: ctx.abortSignal,
+          emit: ctx.emit,
+        });
+      } catch (err) {
+        if (err instanceof SubprocessSpawnError) {
+          return {
+            status: "failed",
+            output: { kind: "text", text: "" },
+            error: `bash spawn failed: ${err.message}`,
+          };
+        }
+        throw err;
+      }
 
-			const { stdoutText, stderrTail, exitCode, killReason } = outcome;
+      const { stdoutText, stderrTail, exitCode, killReason } = outcome;
 
-			if (killReason === "abort") {
-				return {
-					status: "failed",
-					output: { kind: "text", text: stdoutText },
-					error: "aborted",
-				};
-			}
-			if (killReason === "timeout") {
-				return {
-					status: "failed",
-					output: { kind: "text", text: stdoutText },
-					error: `bash timeout after ${Math.round(timeoutMs / 1000)}s`,
-				};
-			}
-			if (exitCode !== 0) {
-				return {
-					status: "failed",
-					output: { kind: "text", text: stdoutText },
-					error: stderrTail ? `exit code ${exitCode}: ${stderrTail}` : `exit code ${exitCode}`,
-				};
-			}
-			return { status: "succeeded", output: { kind: "text", text: stdoutText } };
-		},
-	};
+      if (killReason === "abort") {
+        return {
+          status: "failed",
+          output: { kind: "text", text: stdoutText },
+          error: "aborted",
+        };
+      }
+      if (killReason === "timeout") {
+        return {
+          status: "failed",
+          output: { kind: "text", text: stdoutText },
+          error: `bash timeout after ${Math.round(timeoutMs / 1000)}s`,
+        };
+      }
+      if (exitCode !== 0) {
+        return {
+          status: "failed",
+          output: { kind: "text", text: stdoutText },
+          error: stderrTail ? `exit code ${exitCode}: ${stderrTail}` : `exit code ${exitCode}`,
+        };
+      }
+      return { status: "succeeded", output: { kind: "text", text: stdoutText } };
+    },
+  };
 }
 
 export const bashHandler: NodeHandler = makeBashHandler();

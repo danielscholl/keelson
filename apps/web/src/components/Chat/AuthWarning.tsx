@@ -78,7 +78,9 @@ export function AuthWarning({ providerId }: AuthWarningProps) {
   if (!copy) return null;
   return (
     <span className="auth-warning" role="status">
-      <span className="auth-warning-icon" aria-hidden="true">⚠</span>
+      <span className="auth-warning-icon" aria-hidden="true">
+        ⚠
+      </span>
       <span className="auth-warning-text">
         Not signed in to {copy.label}. {copy.hint}
       </span>

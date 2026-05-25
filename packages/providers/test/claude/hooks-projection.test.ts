@@ -10,10 +10,7 @@
 // @ts-ignore
 import { describe, expect, it } from "bun:test";
 
-import {
-  buildSDKHooksFromYAML,
-  mergeSDKHooks,
-} from "../../src/claude/hooks-projection.ts";
+import { buildSDKHooksFromYAML, mergeSDKHooks } from "../../src/claude/hooks-projection.ts";
 
 describe("buildSDKHooksFromYAML", () => {
   it("projects a single YAML matcher into one SDK matcher whose hook returns the canned response", async () => {

@@ -122,7 +122,8 @@ export async function getRun(baseUrl: string, runId: string): Promise<unknown> {
     headers: defaultHeaders(baseUrl),
   });
   if (res.status === 404) throw new HttpError(404, `run '${runId}' not found`);
-  if (!res.ok) throw new HttpError(res.status, `GET /workflows/runs/${runId} failed: ${res.status}`);
+  if (!res.ok)
+    throw new HttpError(res.status, `GET /workflows/runs/${runId} failed: ${res.status}`);
   return await res.json();
 }
 
@@ -130,11 +131,11 @@ export async function listRunsByName(
   baseUrl: string,
   workflowName: string,
 ): Promise<ListRunsResponse> {
-  const res = await fetch(
-    url(baseUrl, `/api/workflows/${encodeURIComponent(workflowName)}/runs`),
-    { headers: defaultHeaders(baseUrl) },
-  );
-  if (!res.ok) throw new HttpError(res.status, `GET /workflows/${workflowName}/runs failed: ${res.status}`);
+  const res = await fetch(url(baseUrl, `/api/workflows/${encodeURIComponent(workflowName)}/runs`), {
+    headers: defaultHeaders(baseUrl),
+  });
+  if (!res.ok)
+    throw new HttpError(res.status, `GET /workflows/${workflowName}/runs failed: ${res.status}`);
   return (await res.json()) as ListRunsResponse;
 }
 
@@ -142,7 +143,8 @@ export async function listPausedRuns(baseUrl: string): Promise<ListRunsResponse>
   const res = await fetch(url(baseUrl, "/api/workflows/runs?status=paused"), {
     headers: defaultHeaders(baseUrl),
   });
-  if (!res.ok) throw new HttpError(res.status, `GET /workflows/runs?status=paused failed: ${res.status}`);
+  if (!res.ok)
+    throw new HttpError(res.status, `GET /workflows/runs?status=paused failed: ${res.status}`);
   return (await res.json()) as ListRunsResponse;
 }
 

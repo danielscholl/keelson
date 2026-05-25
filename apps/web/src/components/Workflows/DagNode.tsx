@@ -1,4 +1,4 @@
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, type NodeProps, Position } from "@xyflow/react";
 import type { DagFlowNode } from "../../lib/dagLayout.ts";
 
 function formatDuration(ms?: number | null): string {
@@ -33,12 +33,7 @@ export function DagNode({ data }: NodeProps<DagFlowNode>) {
   // hidden visually — the edge stroke meets the box edge naturally.
   return (
     <div className={`dag-node ${status}`}>
-      <Handle
-        type="target"
-        position={Position.Top}
-        isConnectable={false}
-        className="dag-handle"
-      />
+      <Handle type="target" position={Position.Top} isConnectable={false} className="dag-handle" />
       <div className="dn-row">
         <span className={`dn-type ${chip.className}`}>{chip.label}</span>
         <span className="dn-name">{data.nodeId}</span>

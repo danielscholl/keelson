@@ -62,11 +62,7 @@ export interface RibExec {
     args: string[],
     opts?: RibExecOptions,
   ): Promise<RibExecResult<T>>;
-  runText(
-    cmd: string,
-    args: string[],
-    opts?: RibExecOptions,
-  ): Promise<RibExecResult<string>>;
+  runText(cmd: string, args: string[], opts?: RibExecOptions): Promise<RibExecResult<string>>;
 }
 
 // Dependency-injection surface the harness passes to every rib. The

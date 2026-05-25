@@ -40,9 +40,13 @@ export function ModelChip({
       title="Change model"
     >
       <span className="chat-model-chip-provider">{providerLabel}</span>
-      <span className="chat-model-chip-sep" aria-hidden="true">·</span>
+      <span className="chat-model-chip-sep" aria-hidden="true">
+        ·
+      </span>
       <span className="chat-model-chip-name">{display}</span>
-      <span className="chat-model-chip-caret" aria-hidden="true">▾</span>
+      <span className="chat-model-chip-caret" aria-hidden="true">
+        ▾
+      </span>
     </button>
   );
 }

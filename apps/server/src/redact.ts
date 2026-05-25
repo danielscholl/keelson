@@ -18,10 +18,7 @@ const als = new AsyncLocalStorage<RedactionContext>();
 // `fn` runs with the redaction context active. Async work that awaits inside
 // `fn` inherits the same context (this is the load-bearing AsyncLocalStorage
 // guarantee), so the wrap survives `await c.json(...)` and friends.
-export function runWithRedaction<T>(
-  values: readonly string[],
-  fn: () => T,
-): T {
+export function runWithRedaction<T>(values: readonly string[], fn: () => T): T {
   const filtered = values.filter((v) => typeof v === "string" && v.length > 0);
   return als.run({ values: filtered }, fn);
 }
@@ -44,13 +41,7 @@ export function scrubArg(arg: unknown, values: readonly string[]): unknown {
 }
 
 type ConsoleMethod = "log" | "warn" | "error" | "info" | "debug";
-const METHODS: readonly ConsoleMethod[] = [
-  "log",
-  "warn",
-  "error",
-  "info",
-  "debug",
-] as const;
+const METHODS: readonly ConsoleMethod[] = ["log", "warn", "error", "info", "debug"] as const;
 
 const INSTALLED_MARKER = "__keelsonRedactInstalled" as const;
 

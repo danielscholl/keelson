@@ -1,23 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  getWorkflowDetail,
-  listWorkflows,
-  startWorkflowRun,
-} from "../api.ts";
-import { WorkflowList } from "../components/Workflows/WorkflowList.tsx";
-import { RecentRuns } from "../components/Workflows/RecentRuns.tsx";
-import { RunView } from "../components/Workflows/RunView.tsx";
+import { getWorkflowDetail, listWorkflows, startWorkflowRun } from "../api.ts";
 import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
+import { RecentRuns } from "../components/Workflows/RecentRuns.tsx";
+import { RunView } from "../components/Workflows/RunView.tsx";
+import { WorkflowList } from "../components/Workflows/WorkflowList.tsx";
 
 // `runId: null` is the pre-start state — RunView paints the DAG with all
 // nodes pending and pins the StartComposer to the bottom; the API call
 // only fires when the user submits the composer.
-type Screen =
-  | { kind: "catalog" }
-  | { kind: "run"; workflow: WorkflowDetail; runId: string | null };
+type Screen = { kind: "catalog" } | { kind: "run"; workflow: WorkflowDetail; runId: string | null };
 
 // Module-scoped so it survives the view re-mounting on every tab switch.
 // Without this, navigating back to Workflows fires the same loader-notice
@@ -84,7 +78,7 @@ export function Workflows() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [toast.push]);
 
   const handleRunRequest = useCallback(
     async (workflow: WorkflowSummary) => {

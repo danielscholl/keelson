@@ -13,11 +13,7 @@ interface ThinkingChipProps {
   disabled?: boolean;
 }
 
-export function ThinkingChip({
-  enabled,
-  onToggle,
-  disabled,
-}: ThinkingChipProps) {
+export function ThinkingChip({ enabled, onToggle, disabled }: ThinkingChipProps) {
   return (
     <button
       type="button"

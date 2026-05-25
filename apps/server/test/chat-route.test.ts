@@ -3,30 +3,30 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { Hono } from "hono";
-import type { Server, ServerWebSocket } from "bun";
-import {
-  WIRE_PROTOCOL_VERSION,
-  chatFrameSchema,
-  conversationSchema,
-  type ChatFrame,
-  type ClientFrame,
-} from "@keelson/shared";
 import {
   isRegisteredProvider,
-  registerProvider,
-  registerStubProvider,
   type MessageChunk,
   type ProviderCapabilities,
   type ProviderRegistration,
+  registerProvider,
+  registerStubProvider,
   type SendQueryOptions,
 } from "@keelson/providers";
-import { z } from "zod";
+import {
+  type ChatFrame,
+  type ClientFrame,
+  chatFrameSchema,
+  conversationSchema,
+  WIRE_PROTOCOL_VERSION,
+} from "@keelson/shared";
 import {
   clearRegistry as clearToolRegistry,
   registerTool,
   type ToolDefinition,
 } from "@keelson/skills";
+import type { Server, ServerWebSocket } from "bun";
+import { Hono } from "hono";
+import { z } from "zod";
 import {
   chatRoutes,
   chatWebSocketHandlers,
@@ -34,10 +34,7 @@ import {
   handleChatUpgrade,
   type WsData,
 } from "../src/chat-handler.ts";
-import {
-  createConversationStore,
-  type ConversationStore,
-} from "../src/conversation-store.ts";
+import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { createActiveRuns } from "../src/workflows-handler.ts";
@@ -114,9 +111,7 @@ describe("REST chat endpoints", () => {
 
   test("GET /api/providers/:id/models returns the provider's live list as ModelInfo[]", async () => {
     const { app } = makeRig();
-    const res = await app.fetch(
-      new Request("http://test/api/providers/stub/models"),
-    );
+    const res = await app.fetch(new Request("http://test/api/providers/stub/models"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { models: Array<{ id: string }> };
     expect(body.models).toEqual([{ id: "stub-echo" }]);
@@ -124,9 +119,7 @@ describe("REST chat endpoints", () => {
 
   test("GET /api/providers/:id/models 404 for unknown provider", async () => {
     const { app } = makeRig();
-    const res = await app.fetch(
-      new Request("http://test/api/providers/does-not-exist/models"),
-    );
+    const res = await app.fetch(new Request("http://test/api/providers/does-not-exist/models"));
     expect(res.status).toBe(404);
   });
 
@@ -199,9 +192,7 @@ describe("REST chat endpoints", () => {
     const created = conversationSchema.parse(await postRes.json());
     expect(created.seedSystemPrompt).toBe(seed);
 
-    const getRes = await app.fetch(
-      new Request(`http://test/api/conversations/${created.id}`),
-    );
+    const getRes = await app.fetch(new Request(`http://test/api/conversations/${created.id}`));
     expect(getRes.status).toBe(200);
     const fetched = conversationSchema.parse(await getRes.json());
     expect(fetched.seedSystemPrompt).toBe(seed);
@@ -274,9 +265,7 @@ describe("REST chat endpoints", () => {
 
   test("GET /api/conversations/:id returns 404 for missing", async () => {
     const { app } = makeRig();
-    const res = await app.fetch(
-      new Request("http://test/api/conversations/missing-id"),
-    );
+    const res = await app.fetch(new Request("http://test/api/conversations/missing-id"));
     expect(res.status).toBe(404);
   });
 
@@ -349,11 +338,7 @@ describe("REST chat endpoints", () => {
 });
 
 describe("handleChatRequest dispatch", () => {
-  function makeFrame(
-    conversationId: string,
-    providerId: string,
-    prompt: string,
-  ): ClientFrame {
+  function makeFrame(conversationId: string, providerId: string, prompt: string): ClientFrame {
     return {
       version: WIRE_PROTOCOL_VERSION,
       conversationId,
@@ -437,14 +422,11 @@ describe("handleChatRequest dispatch", () => {
     const store = makeMemStore();
     const conv = store.create({ providerId: "stub" });
     const sent: ChatFrame[] = [];
-    await handleChatRequest(
-      makeFrame(conv.id, "does-not-exist", "hi"),
-      {
-        send: (f) => sent.push(f),
-        store,
-        abortSignal: new AbortController().signal,
-      },
-    );
+    await handleChatRequest(makeFrame(conv.id, "does-not-exist", "hi"), {
+      send: (f) => sent.push(f),
+      store,
+      abortSignal: new AbortController().signal,
+    });
 
     expect(sent).toHaveLength(2);
     expect(sent[0].event.type).toBe("error");
@@ -580,7 +562,11 @@ describe("handleChatRequest dispatch", () => {
   test("F10.4: forwards request.thinking into provider.sendQuery options", async () => {
     let capturedOptions: SendQueryOptions | undefined;
     const spyId = "spy-thinking-forward";
-    registerProvider(makeSpyProvider(spyId, (opts) => { capturedOptions = opts; }));
+    registerProvider(
+      makeSpyProvider(spyId, (opts) => {
+        capturedOptions = opts;
+      }),
+    );
 
     const store = makeMemStore();
     const conv = store.create({ providerId: spyId });
@@ -607,7 +593,11 @@ describe("handleChatRequest dispatch", () => {
   test("F10.4: omits thinking from provider options when not in request", async () => {
     let capturedOptions: SendQueryOptions | undefined;
     const spyId = "spy-thinking-omitted";
-    registerProvider(makeSpyProvider(spyId, (opts) => { capturedOptions = opts; }));
+    registerProvider(
+      makeSpyProvider(spyId, (opts) => {
+        capturedOptions = opts;
+      }),
+    );
 
     const store = makeMemStore();
     const conv = store.create({ providerId: spyId });
@@ -796,9 +786,7 @@ describe("handleChatRequest dispatch", () => {
     const assistant = stored.messages[1]!;
     expect(assistant.role).toBe("assistant");
     // Denormalized text projection still merges the two text deltas.
-    expect(assistant.content).toBe(
-      "Computing answer… Computation complete.",
-    );
+    expect(assistant.content).toBe("Computing answer… Computation complete.");
     // Structured turn: [text, tool_use, tool_result, text].
     expect(assistant.contentParts).toBeDefined();
     expect(assistant.contentParts).toEqual([
@@ -836,9 +824,7 @@ describe("handleChatRequest dispatch", () => {
     const stored = store.get(conv.id)!;
     const assistant = stored.messages[1]!;
     expect(assistant.content).toBe("Hello, world.");
-    expect(assistant.contentParts).toEqual([
-      { type: "text", text: "Hello, world." },
-    ]);
+    expect(assistant.contentParts).toEqual([{ type: "text", text: "Hello, world." }]);
   });
 
   test("Phase 3 S2: synthesizes tool_use id when chunk omits one", async () => {
@@ -965,9 +951,7 @@ describe("handleChatRequest dispatch", () => {
     const abort = new AbortController();
     abort.abort(); // pre-aborted; provider yields, handler returns on first iteration check
     const spyId = "spy-abort-empty";
-    registerProvider(
-      makeScriptedProvider(spyId, [{ type: "text", content: "never processed" }]),
-    );
+    registerProvider(makeScriptedProvider(spyId, [{ type: "text", content: "never processed" }]));
     const store = makeMemStore();
     const conv = store.create({ providerId: spyId });
     await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
@@ -1035,11 +1019,7 @@ describe("handleChatRequest dispatch", () => {
   test("F10.7b: clean completion does NOT set truncated", async () => {
     clearToolRegistry();
     const spyId = "spy-clean-no-truncate";
-    registerProvider(
-      makeScriptedProvider(spyId, [
-        { type: "text", content: "All good." },
-      ]),
-    );
+    registerProvider(makeScriptedProvider(spyId, [{ type: "text", content: "All good." }]));
     const store = makeMemStore();
     const conv = store.create({ providerId: spyId });
     await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
@@ -1089,14 +1069,11 @@ describe("handleChatRequest dispatch", () => {
 
     const store = makeMemStore();
     const conv = store.create({ providerId: spyId });
-    await handleChatRequest(
-      makeFrame(conv.id, spyId, "show me the open MRs for the last 4 days"),
-      {
-        send: () => {},
-        store,
-        abortSignal: new AbortController().signal,
-      },
-    );
+    await handleChatRequest(makeFrame(conv.id, spyId, "show me the open MRs for the last 4 days"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+    });
 
     const stored = store.get(conv.id)!;
     const assistant = stored.messages[1]!;
@@ -1121,7 +1098,7 @@ describe("handleChatRequest dispatch", () => {
   // originals afterwards. Tests run sequentially within a file so we don't
   // need a lock, but we still must restore so neighboring tests see the
   // ambient env they were written against.
-  async function withEnv(
+  async function _withEnv(
     overrides: Record<string, string | undefined>,
     fn: () => Promise<void>,
   ): Promise<void> {

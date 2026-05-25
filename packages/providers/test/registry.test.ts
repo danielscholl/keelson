@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import type { IAgentProvider, ProviderCapabilities } from "../src/index.ts";
 import {
-  UnknownProviderError,
   clearRegistry,
   getAgentProvider,
   getProviderInfoList,
@@ -8,8 +8,8 @@ import {
   isRegisteredProvider,
   registerProvider,
   registerStubProvider,
+  UnknownProviderError,
 } from "../src/index.ts";
-import type { IAgentProvider, ProviderCapabilities } from "../src/index.ts";
 
 const FAKE_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,

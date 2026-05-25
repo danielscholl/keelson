@@ -62,9 +62,7 @@ function appendTextBlock(parts: ContentBlock[], text: string): void {
 
 // `id` is optional on the chunk but required on the persisted block;
 // synthesize when absent so reload still pairs the row.
-function toolUseBlockFromChunk(
-  chunk: Extract<MessageChunk, { type: "tool_use" }>,
-): ContentBlock {
+function toolUseBlockFromChunk(chunk: Extract<MessageChunk, { type: "tool_use" }>): ContentBlock {
   return {
     type: "tool_use",
     id: chunk.id ?? crypto.randomUUID(),

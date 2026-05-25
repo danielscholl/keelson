@@ -19,12 +19,7 @@
  * tests stay deterministic and there's no implicit filesystem walk.
  */
 
-import {
-  ribDisplayNameSchema,
-  ribIdSchema,
-  type Rib,
-  type RibContext,
-} from "@keelson/shared";
+import { type Rib, type RibContext, ribDisplayNameSchema, ribIdSchema } from "@keelson/shared";
 
 export interface RibManifest {
   readonly id: string;
@@ -106,9 +101,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     // id is what the harness records. Catch divergence at the boundary so
     // a renamed export can't masquerade under a stale key.
     if (rib.id !== id) {
-      throw new Error(
-        `Rib registered under manifest key '${id}' declares id '${rib.id}'`,
-      );
+      throw new Error(`Rib registered under manifest key '${id}' declares id '${rib.id}'`);
     }
     ribIdSchema.parse(rib.id);
     ribDisplayNameSchema.parse(rib.displayName);

@@ -26,24 +26,24 @@ import type { NodeOutput } from "./schema/index.ts";
  * Returns empty string for unknown nodes, empty outputs, or failed JSON access.
  */
 function resolveOutputRef(
-	nodeId: string,
-	field: string | undefined,
-	nodeOutputs: Map<string, NodeOutput>,
+  nodeId: string,
+  field: string | undefined,
+  nodeOutputs: Map<string, NodeOutput>,
 ): string {
-	const nodeOutput = nodeOutputs.get(nodeId);
-	if (!nodeOutput) return "";
-	if (!nodeOutput.output) return "";
-	if (!field) return nodeOutput.output;
+  const nodeOutput = nodeOutputs.get(nodeId);
+  if (!nodeOutput) return "";
+  if (!nodeOutput.output) return "";
+  if (!field) return nodeOutput.output;
 
-	try {
-		const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
-		const value = parsed[field];
-		if (typeof value === "string") return value;
-		if (typeof value === "number" || typeof value === "boolean") return String(value);
-		return "";
-	} catch {
-		return "";
-	}
+  try {
+    const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
+    const value = parsed[field];
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -51,61 +51,61 @@ function resolveOutputRef(
  * Returns at least one element (the full trimmed string if no split occurs).
  */
 function splitOutsideQuotes(expr: string, sep: string): string[] {
-	const parts: string[] = [];
-	let current = "";
-	let inQuote = false;
-	let i = 0;
-	while (i < expr.length) {
-		if (expr[i] === "'") {
-			inQuote = !inQuote;
-			current += expr[i++];
-		} else if (!inQuote && expr.startsWith(sep, i)) {
-			parts.push(current.trim());
-			current = "";
-			i += sep.length;
-		} else {
-			current += expr[i++];
-		}
-	}
-	parts.push(current.trim());
-	return parts;
+  const parts: string[] = [];
+  let current = "";
+  let inQuote = false;
+  let i = 0;
+  while (i < expr.length) {
+    if (expr[i] === "'") {
+      inQuote = !inQuote;
+      current += expr[i++];
+    } else if (!inQuote && expr.startsWith(sep, i)) {
+      parts.push(current.trim());
+      current = "";
+      i += sep.length;
+    } else {
+      current += expr[i++];
+    }
+  }
+  parts.push(current.trim());
+  return parts;
 }
 
 /** Pattern matching a single condition atom: $nodeId.output[.field] OPERATOR 'value' */
 const ATOM_PATTERN =
-	/^\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?\s*(==|!=|<=|>=|<|>)\s*'([^']*)'$/;
+  /^\$([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?\s*(==|!=|<=|>=|<|>)\s*'([^']*)'$/;
 
 function evaluateAtom(
-	expr: string,
-	nodeOutputs: Map<string, NodeOutput>,
+  expr: string,
+  nodeOutputs: Map<string, NodeOutput>,
 ): { result: boolean; parsed: boolean } {
-	const trimmed = expr.trim();
-	const match = ATOM_PATTERN.exec(trimmed);
-	if (!match) return { result: false, parsed: false };
+  const trimmed = expr.trim();
+  const match = ATOM_PATTERN.exec(trimmed);
+  if (!match) return { result: false, parsed: false };
 
-	const [, nodeId, field, operator, expected] = match;
-	if (nodeId === undefined || operator === undefined || expected === undefined) {
-		return { result: false, parsed: false };
-	}
+  const [, nodeId, field, operator, expected] = match;
+  if (nodeId === undefined || operator === undefined || expected === undefined) {
+    return { result: false, parsed: false };
+  }
 
-	const actual = resolveOutputRef(nodeId, field, nodeOutputs);
+  const actual = resolveOutputRef(nodeId, field, nodeOutputs);
 
-	let result: boolean;
-	if (operator === "==" || operator === "!=") {
-		result = operator === "==" ? actual === expected : actual !== expected;
-	} else {
-		const actualNum = parseFloat(actual);
-		const expectedNum = parseFloat(expected);
-		if (!Number.isFinite(actualNum) || !Number.isFinite(expectedNum)) {
-			return { result: false, parsed: false };
-		}
-		if (operator === "<") result = actualNum < expectedNum;
-		else if (operator === ">") result = actualNum > expectedNum;
-		else if (operator === "<=") result = actualNum <= expectedNum;
-		else result = actualNum >= expectedNum; // '>='
-	}
+  let result: boolean;
+  if (operator === "==" || operator === "!=") {
+    result = operator === "==" ? actual === expected : actual !== expected;
+  } else {
+    const actualNum = parseFloat(actual);
+    const expectedNum = parseFloat(expected);
+    if (!Number.isFinite(actualNum) || !Number.isFinite(expectedNum)) {
+      return { result: false, parsed: false };
+    }
+    if (operator === "<") result = actualNum < expectedNum;
+    else if (operator === ">") result = actualNum > expectedNum;
+    else if (operator === "<=") result = actualNum <= expectedNum;
+    else result = actualNum >= expectedNum; // '>='
+  }
 
-	return { result, parsed: true };
+  return { result, parsed: true };
 }
 
 /**
@@ -120,28 +120,28 @@ function evaluateAtom(
  * Quoted regions (single quotes) are not split on.
  */
 export function evaluateCondition(
-	expr: string,
-	nodeOutputs: Map<string, NodeOutput>,
+  expr: string,
+  nodeOutputs: Map<string, NodeOutput>,
 ): { result: boolean; parsed: boolean } {
-	const trimmed = expr.trim();
+  const trimmed = expr.trim();
 
-	const orClauses = splitOutsideQuotes(trimmed, "||");
+  const orClauses = splitOutsideQuotes(trimmed, "||");
 
-	for (const orClause of orClauses) {
-		const andAtoms = splitOutsideQuotes(orClause, "&&");
-		let orClauseResult = true;
+  for (const orClause of orClauses) {
+    const andAtoms = splitOutsideQuotes(orClause, "&&");
+    let orClauseResult = true;
 
-		for (const atom of andAtoms) {
-			const { result, parsed } = evaluateAtom(atom, nodeOutputs);
-			if (!parsed) return { result: false, parsed: false };
-			if (!result) {
-				orClauseResult = false;
-				break; // short-circuit AND
-			}
-		}
+    for (const atom of andAtoms) {
+      const { result, parsed } = evaluateAtom(atom, nodeOutputs);
+      if (!parsed) return { result: false, parsed: false };
+      if (!result) {
+        orClauseResult = false;
+        break; // short-circuit AND
+      }
+    }
 
-		if (orClauseResult) return { result: true, parsed: true }; // short-circuit OR
-	}
+    if (orClauseResult) return { result: true, parsed: true }; // short-circuit OR
+  }
 
-	return { result: false, parsed: true };
+  return { result: false, parsed: true };
 }

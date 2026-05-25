@@ -46,7 +46,7 @@ export class StubProvider implements IAgentProvider {
     yield { type: "system", content: "stub provider started" };
     const tokens = prompt.split(/\s+/).filter(Boolean);
     for (const token of tokens) {
-      yield { type: "text", content: token + " " };
+      yield { type: "text", content: `${token} ` };
     }
     yield { type: "done" };
   }

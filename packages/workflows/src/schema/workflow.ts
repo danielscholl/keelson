@@ -4,23 +4,23 @@
  * unions). The on-disk YAML format is compatible with the upstream
  * specification credited in the repo NOTICE.
  */
-import { z } from 'zod';
+import { z } from "zod";
 import {
   dagNodeSchema,
   effortLevelSchema,
-  thinkingConfigSchema,
   sandboxSettingsSchema,
-} from './dag-node.ts';
+  thinkingConfigSchema,
+} from "./dag-node.ts";
 
 // ---------------------------------------------------------------------------
 // Shared enum schemas
 // ---------------------------------------------------------------------------
 
-export const modelReasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
+export const modelReasoningEffortSchema = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
 
 export type ModelReasoningEffort = z.infer<typeof modelReasoningEffortSchema>;
 
-export const webSearchModeSchema = z.enum(['disabled', 'cached', 'live']);
+export const webSearchModeSchema = z.enum(["disabled", "cached", "live"]);
 
 export type WebSearchMode = z.infer<typeof webSearchModeSchema>;
 
@@ -102,7 +102,7 @@ export type LoadCommandResult =
   | { success: true; content: string }
   | {
       success: false;
-      reason: 'invalid_name' | 'empty_file' | 'not_found' | 'permission_denied' | 'read_error';
+      reason: "invalid_name" | "empty_file" | "not_found" | "permission_denied" | "read_error";
       message: string;
     };
 
@@ -130,7 +130,7 @@ export type WorkflowExecutionResult =
  *
  * Precedence for same-named files: `bundled` < `global` < `project`.
  */
-export type WorkflowSource = 'bundled' | 'global' | 'project';
+export type WorkflowSource = "bundled" | "global" | "project";
 
 /** A workflow definition paired with its discovery source. */
 export interface WorkflowWithSource {
@@ -146,7 +146,7 @@ export interface WorkflowWithSource {
 export interface WorkflowLoadError {
   readonly filename: string;
   readonly error: string;
-  readonly errorType: 'read_error' | 'parse_error' | 'validation_error';
+  readonly errorType: "read_error" | "parse_error" | "validation_error";
 }
 
 /**

@@ -3,12 +3,12 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
-  chatFrameSchema,
-  WIRE_PROTOCOL_VERSION,
   type ChatEvent,
   type ClientFrame,
+  chatFrameSchema,
   type MessageChunk,
   type ReasoningEffortLevel,
+  WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 
 import { HttpError } from "./workflow-client.ts";
@@ -83,14 +83,10 @@ export async function createConversation(
 // Resolve an existing conversation so `keelson chat --conversation <id>`
 // routes turns through the same provider/model the SPA recorded when the
 // row was created, instead of the CLI's CLI-side guess.
-export async function getConversation(
-  baseUrl: string,
-  id: string,
-): Promise<ConversationRow> {
-  const res = await fetch(
-    `${normalizeBase(baseUrl)}/api/conversations/${encodeURIComponent(id)}`,
-    { headers: { accept: "application/json", origin: originHeader(baseUrl) } },
-  );
+export async function getConversation(baseUrl: string, id: string): Promise<ConversationRow> {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/conversations/${encodeURIComponent(id)}`, {
+    headers: { accept: "application/json", origin: originHeader(baseUrl) },
+  });
   if (res.status === 404) {
     throw new HttpError(404, `unknown conversation '${id}'`);
   }
@@ -138,8 +134,7 @@ export interface ChatViaServerResult {
 // Mirrors the SPA's chat client (apps/web/src/api/chat.ts) but bounded to
 // one turn — no follow-up sends.
 export function chatViaServer(opts: ChatViaServerOptions): Promise<ChatViaServerResult> {
-  const wsUrl =
-    `${normalizeBase(opts.baseUrl).replace(/^http/, "ws")}/api/chat/ws`;
+  const wsUrl = `${normalizeBase(opts.baseUrl).replace(/^http/, "ws")}/api/chat/ws`;
   const frame: ClientFrame = {
     version: WIRE_PROTOCOL_VERSION,
     conversationId: opts.conversationId,
@@ -149,9 +144,7 @@ export function chatViaServer(opts: ChatViaServerOptions): Promise<ChatViaServer
       prompt: opts.message,
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
-      ...(opts.reasoningEffort !== undefined
-        ? { reasoningEffort: opts.reasoningEffort }
-        : {}),
+      ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
     },
   };
 
@@ -231,8 +224,7 @@ export function chatViaServer(opts: ChatViaServerOptions): Promise<ChatViaServer
       // workflow runner's WS_NO_TERMINAL check guards against.
       if (!sawDone && !errored && !aborted) {
         errored = true;
-        errorMessage =
-          "chat stream ended without a terminal frame (server unreachable mid-turn?)";
+        errorMessage = "chat stream ended without a terminal frame (server unreachable mid-turn?)";
       }
       resolve({ errored, ...(errorMessage ? { errorMessage } : {}) });
     });

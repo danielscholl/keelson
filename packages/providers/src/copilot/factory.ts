@@ -10,12 +10,8 @@
 // for tests. Lazy SDK import keeps providers/ importable without spawning a
 // native binary (docs/architecture.md §4 provider rules).
 
-import type {
-  MessageChunk,
-  ModelInfo,
-  ToolDefinition,
-} from "../types.ts";
 import type { ToolContext } from "@keelson/shared";
+import type { MessageChunk, ModelInfo, ToolDefinition } from "../types.ts";
 
 // Structural — captures only what the provider drives. Keeps this file off a
 // typeof-import on the SDK so tests can pass any compatible shape.
@@ -23,10 +19,7 @@ export interface CopilotClientLike {
   start(): Promise<void>;
   stop(): Promise<unknown>;
   createSession(config?: unknown): Promise<CopilotSessionLike>;
-  resumeSession(
-    sessionId: string,
-    config?: unknown,
-  ): Promise<CopilotSessionLike>;
+  resumeSession(sessionId: string, config?: unknown): Promise<CopilotSessionLike>;
   // `authType` is "user" / "gh-cli" for local OAuth, "token" / "env" for
   // explicit credentials. Used so SignIn never round-trips the token.
   getAuthStatus(): Promise<CopilotAuthStatus>;
@@ -57,9 +50,7 @@ export interface CopilotModelInfo {
 }
 
 // Buckets per GitHub's Copilot premium-request scale.
-function copilotCostTier(
-  multiplier: number | undefined,
-): ModelInfo["costTier"] {
+function copilotCostTier(multiplier: number | undefined): ModelInfo["costTier"] {
   if (multiplier === undefined) return undefined;
   if (multiplier === 0) return "free";
   if (multiplier <= 1) return "low";
@@ -176,10 +167,7 @@ export function projectToolsForCopilot(
     parameters: deriveCopilotParameters(tool),
     // First-party tools; no interactive approval gate.
     skipPermission: true,
-    handler: async (
-      args: unknown,
-      invocation: { toolCallId: string },
-    ): Promise<string> => {
+    handler: async (args: unknown, invocation: { toolCallId: string }): Promise<string> => {
       const ctx = projection.contextFactory(invocation.toolCallId);
       return runToolHandler(tool, args, invocation.toolCallId, ctx);
     },
@@ -192,15 +180,12 @@ export function projectToolsForCopilot(
 // SDK omits the parameters block entirely. Non-ZodObject schemas fall back
 // to a permissive shape; runtime validation in runToolHandler is the actual
 // enforcement layer.
-function deriveCopilotParameters(
-  tool: ToolDefinition,
-): Record<string, unknown> | undefined {
+function deriveCopilotParameters(tool: ToolDefinition): Record<string, unknown> | undefined {
   const def = (tool.inputSchema as { _def?: { typeName?: string } })._def;
   if (def?.typeName !== "ZodObject") {
     return { type: "object", additionalProperties: true };
   }
-  const shape = (tool.inputSchema as { shape?: Record<string, unknown> })
-    .shape;
+  const shape = (tool.inputSchema as { shape?: Record<string, unknown> }).shape;
   if (!shape || typeof shape !== "object") {
     return { type: "object", additionalProperties: true };
   }
@@ -211,9 +196,7 @@ function deriveCopilotParameters(
   const required: string[] = [];
   for (const [name, fieldSchema] of Object.entries(shape)) {
     const fieldDef = (fieldSchema as { _def?: { typeName?: string } })._def;
-    const isOptional =
-      fieldDef?.typeName === "ZodOptional" ||
-      fieldDef?.typeName === "ZodDefault";
+    const isOptional = fieldDef?.typeName === "ZodOptional" || fieldDef?.typeName === "ZodDefault";
     const jsonField = zodFieldToJsonSchema(fieldSchema);
     if (jsonField) properties[name] = jsonField;
     if (!isOptional) required.push(name);
@@ -232,9 +215,7 @@ function deriveCopilotParameters(
 // ZodOptional / ZodDefault / ZodNullable and carries the outermost
 // `.describe()` so both `.optional().describe()` and `.describe().optional()`
 // land on the projected field.
-function zodFieldToJsonSchema(
-  schema: unknown,
-): Record<string, unknown> | undefined {
+function zodFieldToJsonSchema(schema: unknown): Record<string, unknown> | undefined {
   if (!schema || typeof schema !== "object") return undefined;
 
   let current: unknown = schema;
@@ -250,11 +231,7 @@ function zodFieldToJsonSchema(
       description = currentDef.description;
     }
     typeName = currentDef.typeName;
-    if (
-      typeName === "ZodOptional" ||
-      typeName === "ZodDefault" ||
-      typeName === "ZodNullable"
-    ) {
+    if (typeName === "ZodOptional" || typeName === "ZodDefault" || typeName === "ZodNullable") {
       current = currentDef.innerType;
       if (!current) return undefined;
       continue;
@@ -395,10 +372,7 @@ export class CopilotClientFactory {
   // Bundles construction + start so sendQuery has one failure point to wrap.
   // Surfaces approveAll so the provider can satisfy the session's required
   // onPermissionRequest without reloading the SDK module.
-  async createClient(
-    gitHubToken: string | undefined,
-    cwd: string,
-  ): Promise<CreateClientResult> {
+  async createClient(gitHubToken: string | undefined, cwd: string): Promise<CreateClientResult> {
     const sdk = await this.loadSdk();
     // Two auth modes: explicit gitHubToken (paste token) suppresses the SDK
     // CLI-OAuth fallback; absence opts into `copilot auth login` credentials.
@@ -434,10 +408,7 @@ export class CopilotClientFactory {
 
   // One-shot probe using the same dual-auth path createClient uses, so the
   // answer matches what sendQuery would do.
-  async checkAuthStatus(
-    gitHubToken: string | undefined,
-    cwd: string,
-  ): Promise<CopilotAuthStatus> {
+  async checkAuthStatus(gitHubToken: string | undefined, cwd: string): Promise<CopilotAuthStatus> {
     let client: CopilotClientLike | null = null;
     try {
       const created = await this.createClient(gitHubToken, cwd);
@@ -459,18 +430,13 @@ export class CopilotClientFactory {
 
   // Throwaway-client probe symmetric to checkAuthStatus. Returns null on
   // any failure so the provider can fall back to its curated baseline.
-  async listModels(
-    gitHubToken: string | undefined,
-    cwd: string,
-  ): Promise<ModelInfo[] | null> {
+  async listModels(gitHubToken: string | undefined, cwd: string): Promise<ModelInfo[] | null> {
     let client: CopilotClientLike | null = null;
     try {
       const created = await this.createClient(gitHubToken, cwd);
       client = created.client;
       const models = await client.listModels();
-      return models
-        .filter((m) => typeof m.id === "string")
-        .map(projectCopilotModel);
+      return models.filter((m) => typeof m.id === "string").map(projectCopilotModel);
     } catch {
       return null;
     } finally {

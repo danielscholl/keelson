@@ -30,9 +30,7 @@ export function useConversation(): {
   conversationId: string | null;
   setConversationId: (id: string | null) => void;
 } {
-  const [conversationId, setConversationIdState] = useState<string | null>(
-    () => readStored(),
-  );
+  const [conversationId, setConversationIdState] = useState<string | null>(() => readStored());
 
   const setConversationId = useCallback((id: string | null) => {
     setConversationIdState(id);

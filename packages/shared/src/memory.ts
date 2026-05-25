@@ -17,5 +17,5 @@
  */
 
 export interface MemoryTools {
-	readonly __phase: "4.5-pending";
+  readonly __phase: "4.5-pending";
 }

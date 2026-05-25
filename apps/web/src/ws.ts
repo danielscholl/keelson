@@ -1,8 +1,8 @@
 import {
-  workflowFrameSchema,
   type ChatFrame,
   type ClientFrame,
   type WorkflowFrame,
+  workflowFrameSchema,
 } from "@keelson/shared";
 
 // Use the page origin so chat travels through the same proxy/host as REST.
@@ -72,11 +72,7 @@ export function openChatWs(callbacks: ChatWsCallbacks): ChatWsHandle {
 
 // --- Reconnecting wrappers ---
 
-export type ReconnectingWsState =
-  | "connecting"
-  | "open"
-  | "reconnecting"
-  | "closed";
+export type ReconnectingWsState = "connecting" | "open" | "reconnecting" | "closed";
 
 export interface ReconnectingChatWsCallbacks {
   onFrame: (frame: ChatFrame) => void;

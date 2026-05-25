@@ -38,12 +38,7 @@ export const TERMINAL_RUN_STATUSES: readonly WorkflowRunStatus[] = [
 // The `node_done` frame's status is terminal-only — the executor never emits
 // `awaiting` through that path; the awaiting state is broadcast via the
 // dedicated `approval_awaiting` frame instead.
-export const workflowNodeStatusSchema = z.enum([
-  "succeeded",
-  "failed",
-  "skipped",
-  "awaiting",
-]);
+export const workflowNodeStatusSchema = z.enum(["succeeded", "failed", "skipped", "awaiting"]);
 export type WorkflowNodeStatus = z.infer<typeof workflowNodeStatusSchema>;
 
 // One entry per node returned in GET /api/workflows/:name. `type` is the
@@ -113,10 +108,12 @@ export const workflowRunSummarySchema = z
 export type WorkflowRunSummary = z.infer<typeof workflowRunSummarySchema>;
 
 // Full run detail (GET /api/workflows/runs/:runId).
-export const workflowRunDetailSchema = workflowRunSummarySchema.extend({
-  inputs: z.record(z.string(), z.string()),
-  nodes: z.array(nodeOutputRowSchema),
-}).strict();
+export const workflowRunDetailSchema = workflowRunSummarySchema
+  .extend({
+    inputs: z.record(z.string(), z.string()),
+    nodes: z.array(nodeOutputRowSchema),
+  })
+  .strict();
 export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>;
 
 // POST /api/workflows/:name/runs request body.
@@ -128,9 +125,7 @@ export const startWorkflowRunBodySchema = z
 export type StartWorkflowRunBody = z.infer<typeof startWorkflowRunBodySchema>;
 
 // POST /api/workflows/:name/runs response body.
-export const startWorkflowRunResponseSchema = z
-  .object({ runId: z.string() })
-  .strict();
+export const startWorkflowRunResponseSchema = z.object({ runId: z.string() }).strict();
 export type StartWorkflowRunResponse = z.infer<typeof startWorkflowRunResponseSchema>;
 
 // Non-fatal loader notices surfaced to the UI as toasts (W6). `error`-level
@@ -167,9 +162,7 @@ export const listRunsResponseSchema = z
   .strict();
 export type ListRunsResponse = z.infer<typeof listRunsResponseSchema>;
 
-export const getWorkflowRunResponseSchema = z
-  .object({ run: workflowRunDetailSchema })
-  .strict();
+export const getWorkflowRunResponseSchema = z.object({ run: workflowRunDetailSchema }).strict();
 export type GetWorkflowRunResponse = z.infer<typeof getWorkflowRunResponseSchema>;
 
 // Per-run WebSocket frame envelope (W3). Sibling of chatFrameSchema, not a
@@ -185,9 +178,7 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       workflowName: z.string(),
     })
     .strict(),
-  z
-    .object({ type: z.literal("node_started"), nodeId: z.string() })
-    .strict(),
+  z.object({ type: z.literal("node_started"), nodeId: z.string() }).strict(),
   z
     .object({
       type: z.literal("node_chunk"),
@@ -250,7 +241,5 @@ export const resumeWorkflowRunBodySchema = z
   .strict();
 export type ResumeWorkflowRunBody = z.infer<typeof resumeWorkflowRunBodySchema>;
 
-export const resumeWorkflowRunResponseSchema = z
-  .object({ resumed: z.literal(true) })
-  .strict();
+export const resumeWorkflowRunResponseSchema = z.object({ resumed: z.literal(true) }).strict();
 export type ResumeWorkflowRunResponse = z.infer<typeof resumeWorkflowRunResponseSchema>;

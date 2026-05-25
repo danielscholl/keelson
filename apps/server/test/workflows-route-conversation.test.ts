@@ -14,29 +14,18 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Hono } from "hono";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
+import { clearRegistry, registerStubProvider, registerWorkflowProvider } from "@keelson/providers";
+import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
+import { Hono } from "hono";
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { chatRoutes } from "../src/chat-handler.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
-import {
-  createWorkflowStore,
-  type WorkflowStore,
-} from "../src/workflow-store.ts";
-import {
-  createActiveRuns,
-  workflowsRoutes,
-} from "../src/workflows-handler.ts";
-import {
-  clearRegistry,
-  registerStubProvider,
-  registerWorkflowProvider,
-} from "@keelson/providers";
-import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
+import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
+import { createActiveRuns, workflowsRoutes } from "../src/workflows-handler.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -82,9 +71,7 @@ async function pollUntilTerminal(
 ): Promise<{ status: string; conversationId: string | null }> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const res = await app.fetch(
-      new Request(`http://test/api/workflows/runs/${runId}`),
-    );
+    const res = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
     const body = (await res.json()) as {
       run: { status: string; conversationId: string | null };
     };
@@ -127,11 +114,7 @@ function makeRig(): Rig {
   // Share the activeRuns instance so chat-delete can cancel in-flight runs
   // that workflowsRoutes registered.
   chatRoutes(app, conversationStore, { workflowStore: store, activeRuns });
-  workflowsRoutes(
-    app,
-    { catalog, store, conversationStore, cwd: tmpDir },
-    activeRuns,
-  );
+  workflowsRoutes(app, { catalog, store, conversationStore, cwd: tmpDir }, activeRuns);
   return { app, store, conversationStore };
 }
 
@@ -157,9 +140,7 @@ nodes:
     const { runId } = (await startRes.json()) as { runId: string };
 
     // Run detail surfaces the conversationId immediately (before terminal).
-    const detailRes = await app.fetch(
-      new Request(`http://test/api/workflows/runs/${runId}`),
-    );
+    const detailRes = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
     const { run } = (await detailRes.json()) as {
       run: { conversationId: string | null };
     };
@@ -168,9 +149,7 @@ nodes:
 
     // The conversation exists with providerId="workflow" and the dispatch
     // message captured the user's intent.
-    const convRes = await app.fetch(
-      new Request(`http://test/api/conversations/${convId}`),
-    );
+    const convRes = await app.fetch(new Request(`http://test/api/conversations/${convId}`));
     expect(convRes.status).toBe(200);
     const conv = (await convRes.json()) as {
       providerId: string;
@@ -209,9 +188,7 @@ nodes:
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilTerminal(app, runId);
 
-    const listRes = await app.fetch(
-      new Request("http://test/api/conversations"),
-    );
+    const listRes = await app.fetch(new Request("http://test/api/conversations"));
     const listBody = (await listRes.json()) as {
       conversations: Array<{
         id: string;
@@ -219,15 +196,11 @@ nodes:
         workflow?: { runId: string };
       }>;
     };
-    const linked = listBody.conversations.find(
-      (c) => c.workflow?.runId === runId,
-    );
+    const linked = listBody.conversations.find((c) => c.workflow?.runId === runId);
     // Workflow runs persist as conversations but only surface in the
     // Workflows tab; the chat-sidebar list filters them out.
     expect(linked).toBeUndefined();
-    expect(
-      listBody.conversations.some((c) => c.providerId === "workflow"),
-    ).toBe(false);
+    expect(listBody.conversations.some((c) => c.providerId === "workflow")).toBe(false);
   });
 
   test("GET /api/conversations/:id still resolves a workflow conversation directly", async () => {
@@ -251,9 +224,7 @@ nodes:
     const conversationId = detail!.conversationId!;
     // Direct lookups stay open so cascade-delete and the linked-run helpers
     // can resolve the row even though the chat list excludes it.
-    const getRes = await app.fetch(
-      new Request(`http://test/api/conversations/${conversationId}`),
-    );
+    const getRes = await app.fetch(new Request(`http://test/api/conversations/${conversationId}`));
     expect(getRes.status).toBe(200);
     const body = (await getRes.json()) as { providerId: string };
     expect(body.providerId).toBe("workflow");
@@ -271,21 +242,15 @@ nodes:
 `,
     );
     const { app, store } = makeRig();
-    const startRes = await app.fetch(
-      postRun("http://test/api/workflows/pa/runs", { inputs: {} }),
-    );
+    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilStoreStatus(store, runId, (s) => s === "paused");
 
-    const listRes = await app.fetch(
-      new Request("http://test/api/conversations"),
-    );
+    const listRes = await app.fetch(new Request("http://test/api/conversations"));
     const body = (await listRes.json()) as {
       conversations: Array<{ providerId: string }>;
     };
-    expect(body.conversations.some((c) => c.providerId === "workflow")).toBe(
-      false,
-    );
+    expect(body.conversations.some((c) => c.providerId === "workflow")).toBe(false);
 
     // Resume to drain the run so the test doesn't leak a paused run.
     await app.fetch(
@@ -324,9 +289,7 @@ nodes:
     expect(delRes.status).toBe(204);
 
     // Run row is gone too — no orphan in the Workflows list.
-    const detailRes = await app.fetch(
-      new Request(`http://test/api/workflows/runs/${runId}`),
-    );
+    const detailRes = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
     expect(detailRes.status).toBe(404);
   });
 
@@ -367,9 +330,7 @@ nodes:
     });
 
     const before = conversationStore.list().length;
-    const res = await app.fetch(
-      postRun("http://test/api/workflows/anything/runs", { inputs: {} }),
-    );
+    const res = await app.fetch(postRun("http://test/api/workflows/anything/runs", { inputs: {} }));
     // Hono propagates the throw to a 500 (default error handler). We don't
     // assert the body shape here — the point is the conversation should not
     // have leaked into the store.

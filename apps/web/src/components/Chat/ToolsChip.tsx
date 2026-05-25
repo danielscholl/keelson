@@ -31,7 +31,9 @@ export function ToolsChip({ count, popoverId, disabled }: ToolsChipProps) {
     >
       <WrenchIcon />
       <span className="chat-tools-chip-count">{count}</span>
-      <span className="chat-tools-chip-caret" aria-hidden="true">▾</span>
+      <span className="chat-tools-chip-caret" aria-hidden="true">
+        ▾
+      </span>
     </button>
   );
 }

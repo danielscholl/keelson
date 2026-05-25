@@ -11,59 +11,52 @@
  * and delegates to the prompt handler with a synthesized `PromptNode`.
  */
 
-import { resolveBody, type NodeHandler, type NodeResult } from "../executor.ts";
+import { type NodeHandler, type NodeResult, resolveBody } from "../executor.ts";
 import { isValidCommandName, resolveCommand } from "./discovery.ts";
 import { failed, synthesizePromptNode } from "./helpers.ts";
 
 export interface MakeCommandHandlerOptions {
-	promptHandler: NodeHandler;
+  promptHandler: NodeHandler;
 }
 
 export function makeCommandHandler(opts: MakeCommandHandlerOptions): NodeHandler {
-	const { promptHandler } = opts;
-	return {
-		type: "command",
-		async handle(node, ctx): Promise<NodeResult> {
-			const name = ((node as { command?: unknown }).command ?? "").toString().trim();
-			if (!isValidCommandName(name)) {
-				return failed(
-					`Command node '${node.id}': invalid command name '${name}' (path traversal blocked)`,
-				);
-			}
+  const { promptHandler } = opts;
+  return {
+    type: "command",
+    async handle(node, ctx): Promise<NodeResult> {
+      const name = ((node as { command?: unknown }).command ?? "").toString().trim();
+      if (!isValidCommandName(name)) {
+        return failed(
+          `Command node '${node.id}': invalid command name '${name}' (path traversal blocked)`,
+        );
+      }
 
-			const resolved = await resolveCommand(name, ctx.cwd);
-			if (!resolved) {
-				return failed(
-					`Command node '${node.id}': command '${name}.md' not found in .keelson/commands/`,
-				);
-			}
+      const resolved = await resolveCommand(name, ctx.cwd);
+      if (!resolved) {
+        return failed(
+          `Command node '${node.id}': command '${name}.md' not found in .keelson/commands/`,
+        );
+      }
 
-			// Apply the executor's substitution pipeline to the file body —
-			// the executor only resolved the original `command` field (the
-			// command name), so $ARGUMENTS / $inputs.* / $X.output inside the
-			// file would otherwise reach the model literally.
-			const resolvedPrompt = resolveBody(
-				resolved.content,
-				ctx.inputs,
-				ctx.upstreamOutputs,
-				{
-					...(ctx.artifactsDir !== undefined
-						? { artifactsDir: ctx.artifactsDir }
-						: {}),
-				},
-			);
-			const synthesized = synthesizePromptNode(node, {
-				id: node.id,
-				prompt: resolvedPrompt,
-			});
+      // Apply the executor's substitution pipeline to the file body —
+      // the executor only resolved the original `command` field (the
+      // command name), so $ARGUMENTS / $inputs.* / $X.output inside the
+      // file would otherwise reach the model literally.
+      const resolvedPrompt = resolveBody(resolved.content, ctx.inputs, ctx.upstreamOutputs, {
+        ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+      });
+      const synthesized = synthesizePromptNode(node, {
+        id: node.id,
+        prompt: resolvedPrompt,
+      });
 
-			const promptCtx = {
-				...ctx,
-				resolvedBody: resolvedPrompt,
-				rawBody: resolved.content,
-			};
+      const promptCtx = {
+        ...ctx,
+        resolvedBody: resolvedPrompt,
+        rawBody: resolved.content,
+      };
 
-			return promptHandler.handle(synthesized, promptCtx);
-		},
-	};
+      return promptHandler.handle(synthesized, promptCtx);
+    },
+  };
 }

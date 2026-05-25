@@ -1,20 +1,20 @@
 import {
+  type ClaudeCliStatus,
+  type Conversation,
+  type CopilotCliStatus,
+  type CredentialStatus,
   claudeCliStatusSchema,
   copilotCliStatusSchema,
   credentialStatusSchema,
   getWorkflowDetailResponseSchema,
   getWorkflowRunResponseSchema,
+  type ListWorkflowsResponse,
   listRunsResponseSchema,
   listWorkflowsResponseSchema,
-  startWorkflowRunResponseSchema,
-  type ClaudeCliStatus,
-  type Conversation,
-  type CopilotCliStatus,
-  type CredentialStatus,
-  type ListWorkflowsResponse,
   type ModelInfo,
   type ProviderInfo,
   type RegisteredToolInfo,
+  startWorkflowRunResponseSchema,
   type WorkflowDetail,
   type WorkflowRunDetail,
   type WorkflowRunSummary,
@@ -55,15 +55,12 @@ async function apiRequest<T, TAllowed = never>(
   }
   if (!res.ok) {
     if (errorBody === "json-error") {
-      const body = (await res.json().catch(() => null)) as
-        | { error?: string }
-        | null;
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
       const msg = body?.error ?? `${res.status} ${res.statusText}`;
       throw new Error(`${label}: ${msg}`);
     }
     const text = await res.text().catch(() => "");
-    const detail =
-      text || (emptyTextFallback === "statusText" ? res.statusText : "");
+    const detail = text || (emptyTextFallback === "statusText" ? res.statusText : "");
     throw new Error(`${label} ${res.status}: ${detail}`);
   }
   if (responseBody === "void") {
@@ -91,9 +88,7 @@ export async function fetchProviders(): Promise<ProviderInfo[]> {
   return body.providers;
 }
 
-export async function fetchProviderModels(
-  providerId: string,
-): Promise<ModelInfo[]> {
+export async function fetchProviderModels(providerId: string): Promise<ModelInfo[]> {
   const body = await apiRequest<{ models: ModelInfo[] }>(
     `/api/providers/${encodeURIComponent(providerId)}/models`,
     { label: `/api/providers/${providerId}/models` },
@@ -109,27 +104,19 @@ export async function fetchTools(): Promise<RegisteredToolInfo[]> {
 // Returns null on 404 so callers can distinguish "server lost the conversation"
 // from a real network/server error.
 export async function getConversation(id: string): Promise<Conversation | null> {
-  return apiRequest<Conversation, null>(
-    `/api/conversations/${encodeURIComponent(id)}`,
-    {
-      label: `/api/conversations/${id}`,
-      allowedStatuses: [404],
-      allowedStatusValue: null,
-    },
-  );
+  return apiRequest<Conversation, null>(`/api/conversations/${encodeURIComponent(id)}`, {
+    label: `/api/conversations/${id}`,
+    allowedStatuses: [404],
+    allowedStatusValue: null,
+  });
 }
 
 export async function listConversations(): Promise<Conversation[]> {
-  const body = await apiRequest<{ conversations: Conversation[] }>(
-    "/api/conversations",
-  );
+  const body = await apiRequest<{ conversations: Conversation[] }>("/api/conversations");
   return body.conversations;
 }
 
-export async function renameConversation(
-  id: string,
-  name: string,
-): Promise<Conversation> {
+export async function renameConversation(id: string, name: string): Promise<Conversation> {
   return apiRequest<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -164,41 +151,29 @@ export async function createConversation(
   });
 }
 
-export async function setCredential(
-  serviceId: string,
-  value: string,
-): Promise<void> {
-  await apiRequest<void>(
-    `/api/credentials/${encodeURIComponent(serviceId)}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ value }),
-      responseBody: "void",
-      label: `/api/credentials/${serviceId}`,
-    },
-  );
+export async function setCredential(serviceId: string, value: string): Promise<void> {
+  await apiRequest<void>(`/api/credentials/${encodeURIComponent(serviceId)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ value }),
+    responseBody: "void",
+    label: `/api/credentials/${serviceId}`,
+  });
 }
 
 export async function deleteCredential(serviceId: string): Promise<void> {
-  await apiRequest<void>(
-    `/api/credentials/${encodeURIComponent(serviceId)}`,
-    {
-      method: "DELETE",
-      responseBody: "void",
-      label: `/api/credentials/${serviceId}`,
-    },
-  );
+  await apiRequest<void>(`/api/credentials/${encodeURIComponent(serviceId)}`, {
+    method: "DELETE",
+    responseBody: "void",
+    label: `/api/credentials/${serviceId}`,
+  });
 }
 
-export async function getCredentialStatus(
-  serviceId: string,
-): Promise<CredentialStatus> {
+export async function getCredentialStatus(serviceId: string): Promise<CredentialStatus> {
   return credentialStatusSchema.parse(
-    await apiRequest<unknown>(
-      `/api/credentials/${encodeURIComponent(serviceId)}/status`,
-      { label: `/api/credentials/${serviceId}/status` },
-    ),
+    await apiRequest<unknown>(`/api/credentials/${encodeURIComponent(serviceId)}/status`, {
+      label: `/api/credentials/${serviceId}/status`,
+    }),
   );
 }
 
@@ -217,9 +192,7 @@ export async function getClaudeCliStatus(): Promise<ClaudeCliStatus> {
 // --- Workflow surface ---
 
 export async function listWorkflows(): Promise<ListWorkflowsResponse> {
-  return listWorkflowsResponseSchema.parse(
-    await apiRequest<unknown>("/api/workflows"),
-  );
+  return listWorkflowsResponseSchema.parse(await apiRequest<unknown>("/api/workflows"));
 }
 
 export async function getWorkflowDetail(name: string): Promise<WorkflowDetail> {
@@ -232,10 +205,9 @@ export async function getWorkflowDetail(name: string): Promise<WorkflowDetail> {
 
 export async function listRuns(workflowName: string): Promise<WorkflowRunSummary[]> {
   return listRunsResponseSchema.parse(
-    await apiRequest<unknown>(
-      `/api/workflows/${encodeURIComponent(workflowName)}/runs`,
-      { label: `/api/workflows/${workflowName}/runs` },
-    ),
+    await apiRequest<unknown>(`/api/workflows/${encodeURIComponent(workflowName)}/runs`, {
+      label: `/api/workflows/${workflowName}/runs`,
+    }),
   ).runs;
 }
 
@@ -251,16 +223,13 @@ export async function startWorkflowRun(
   inputs: Record<string, string> = {},
 ): Promise<{ runId: string }> {
   return startWorkflowRunResponseSchema.parse(
-    await apiRequest<unknown>(
-      `/api/workflows/${encodeURIComponent(workflowName)}/runs`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ inputs }),
-        errorBody: "json-error",
-        label: `/api/workflows/${workflowName}/runs`,
-      },
-    ),
+    await apiRequest<unknown>(`/api/workflows/${encodeURIComponent(workflowName)}/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ inputs }),
+      errorBody: "json-error",
+      label: `/api/workflows/${workflowName}/runs`,
+    }),
   );
 }
 
@@ -287,36 +256,26 @@ export async function cancelWorkflowRun(runId: string): Promise<void> {
 // Hard-delete a run row + its linked conversation. Cancels in-flight runs
 // first as part of the same call.
 export async function deleteWorkflowRun(runId: string): Promise<void> {
-  await apiRequest<void, void>(
-    `/api/workflows/runs/${encodeURIComponent(runId)}?purge=1`,
-    {
-      method: "DELETE",
-      responseBody: "void",
-      allowedStatuses: [404],
-      allowedStatusValue: undefined,
-      label: `/api/workflows/runs/${runId}?purge=1 DELETE`,
-    },
-  );
+  await apiRequest<void, void>(`/api/workflows/runs/${encodeURIComponent(runId)}?purge=1`, {
+    method: "DELETE",
+    responseBody: "void",
+    allowedStatuses: [404],
+    allowedStatusValue: undefined,
+    label: `/api/workflows/runs/${runId}?purge=1 DELETE`,
+  });
 }
 
 // Resume a paused approval node. Text becomes $<nodeId>.output. 404/409
 // means "no longer pending" — soft no-op so a double-click doesn't toast.
-export async function submitApproval(
-  runId: string,
-  nodeId: string,
-  text: string,
-): Promise<void> {
-  await apiRequest<void, void>(
-    `/api/workflows/runs/${encodeURIComponent(runId)}/resume`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ nodeId, text }),
-      responseBody: "void",
-      errorBody: "json-error",
-      allowedStatuses: [404, 409],
-      allowedStatusValue: undefined,
-      label: `/api/workflows/runs/${runId}/resume`,
-    },
-  );
+export async function submitApproval(runId: string, nodeId: string, text: string): Promise<void> {
+  await apiRequest<void, void>(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ nodeId, text }),
+    responseBody: "void",
+    errorBody: "json-error",
+    allowedStatuses: [404, 409],
+    allowedStatusValue: undefined,
+    label: `/api/workflows/runs/${runId}/resume`,
+  });
 }

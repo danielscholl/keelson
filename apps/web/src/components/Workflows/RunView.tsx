@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
 import type { WorkflowDetail } from "@keelson/shared";
-
-import { StatusBadge } from "./StatusBadge.tsx";
-import { DagGraph } from "./DagGraph.tsx";
-import { RunTrace, fallbackStatusFromRun } from "./RunTrace.tsx";
-import { StartComposer } from "./StartComposer.tsx";
-import { useWorkflowRun, type NodeView } from "../../hooks/useWorkflowRun.ts";
+import { useEffect, useMemo, useState } from "react";
+import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { DagGraph } from "./DagGraph.tsx";
+import { fallbackStatusFromRun, RunTrace } from "./RunTrace.tsx";
+import { StartComposer } from "./StartComposer.tsx";
+import { StatusBadge } from "./StatusBadge.tsx";
 
 function formatDuration(ms?: number | null): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return "";
@@ -18,14 +17,7 @@ function formatDuration(ms?: number | null): string {
 }
 
 function statusBadgeStatus(
-  s:
-    | "loading"
-    | "unknown"
-    | "running"
-    | "paused"
-    | "succeeded"
-    | "failed"
-    | "cancelled",
+  s: "loading" | "unknown" | "running" | "paused" | "succeeded" | "failed" | "cancelled",
 ): NodeViewStatus | "pending" | "running" {
   if (s === "loading" || s === "unknown") return "pending";
   // Run-level `paused` (W4.6) reuses the node-level `awaiting` badge color
@@ -55,13 +47,7 @@ export interface RunViewProps {
 // the single-pane modes for focused reading.
 type Layout = "split" | "trace" | "graph";
 
-export function RunView({
-  workflow,
-  runId,
-  onBack,
-  onStart,
-  starting = false,
-}: RunViewProps) {
+export function RunView({ workflow, runId, onBack, onStart, starting = false }: RunViewProps) {
   const preStart = runId === null;
   const { run, nodes, status, error, cancel, resume } = useWorkflowRun(runId);
   const [layout, setLayout] = useState<Layout>("split");
@@ -73,10 +59,7 @@ export function RunView({
   // running here keeps the Cancel button visible, the elapsed clock
   // ticking, and the trace's `streaming` flag true so the run surface
   // matches its real lifecycle.
-  const isRunning =
-    run.status === "running" ||
-    run.status === "paused" ||
-    run.status === "loading";
+  const isRunning = run.status === "running" || run.status === "paused" || run.status === "loading";
   useEffect(() => {
     if (preStart || !isRunning) return;
     const id = window.setInterval(() => setNow(Date.now()), 500);
@@ -87,10 +70,7 @@ export function RunView({
   // emitted a frame must not stay "pending" — they're either cancelled
   // (run was aborted) or skipped (run terminated without reaching them).
   // fallbackStatusFromRun reconciles run.status into the right default.
-  const missingNodeFallback = useMemo(
-    () => fallbackStatusFromRun(run.status),
-    [run.status],
-  );
+  const missingNodeFallback = useMemo(() => fallbackStatusFromRun(run.status), [run.status]);
   const statusByNode = useMemo<ReadonlyMap<string, NodeViewStatus>>(() => {
     const map = new Map<string, NodeViewStatus>();
     for (const sn of workflow.nodes) {
@@ -165,11 +145,7 @@ export function RunView({
               )}
             </>
           )}
-          <div
-            className="layout-toggle"
-            role="radiogroup"
-            aria-label="Run view layout"
-          >
+          <div className="layout-toggle" role="radiogroup" aria-label="Run view layout">
             <LayoutButton
               icon="split"
               label="Split"
@@ -202,7 +178,9 @@ export function RunView({
         <div className="run-warnings" role="status">
           {run.warnings.map((w, i) => (
             <div key={i} className="run-warning-row">
-              <span className="run-warning-glyph" aria-hidden="true">⚠</span>
+              <span className="run-warning-glyph" aria-hidden="true">
+                ⚠
+              </span>
               <span>
                 {w.nodeId ? <strong>{w.nodeId}: </strong> : null}
                 {w.message}
@@ -212,9 +190,7 @@ export function RunView({
         </div>
       )}
 
-      {preStart && onStart && (
-        <StartComposer onStart={onStart} starting={starting} />
-      )}
+      {preStart && onStart && <StartComposer onStart={onStart} starting={starting} />}
 
       {layout === "split" && (
         <div className="run-body">

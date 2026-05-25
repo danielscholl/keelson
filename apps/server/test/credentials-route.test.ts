@@ -3,13 +3,10 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { ClaudeAuthProbe, CopilotAuthProbe } from "@keelson/providers";
 import { Hono } from "hono";
-import type {
-  ClaudeAuthProbe,
-  CopilotAuthProbe,
-} from "@keelson/providers";
-import { credentialsRoutes } from "../src/credentials-handler.ts";
 import type { CredentialStore } from "../src/credentials.ts";
+import { credentialsRoutes } from "../src/credentials-handler.ts";
 
 function makeFakeStore(): CredentialStore {
   const map = new Map<string, string>();
@@ -142,27 +139,21 @@ describe("GET /api/credentials/:serviceId/status", () => {
   test("returns signedIn: true after set", async () => {
     const { app, store } = makeRig();
     await store.set("copilot", "tok");
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/copilot/status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/copilot/status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ signedIn: true });
   });
 
   test("returns signedIn: false for unset", async () => {
     const { app } = makeRig();
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/copilot/status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/copilot/status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ signedIn: false });
   });
 
   test("400 on invalid serviceId", async () => {
     const { app } = makeRig();
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/BadId/status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/BadId/status"));
     expect(res.status).toBe(400);
   });
 });
@@ -249,9 +240,7 @@ describe("GET /api/credentials/copilot/cli-status", () => {
       };
     };
     const { app } = makeRig({ copilotAuthProbe: probe, cwd: () => "/fake/cwd" });
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/copilot/cli-status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/copilot/cli-status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       authenticated: true,
@@ -268,9 +257,7 @@ describe("GET /api/credentials/copilot/cli-status", () => {
       statusMessage: "no auth configured",
     });
     const { app } = makeRig({ copilotAuthProbe: probe });
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/copilot/cli-status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/copilot/cli-status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       authenticated: false,
@@ -280,9 +267,7 @@ describe("GET /api/credentials/copilot/cli-status", () => {
 
   test("returns provider-not-registered fallback when probe is absent", async () => {
     const { app } = makeRig(); // no probe wired
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/copilot/cli-status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/copilot/cli-status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       authenticated: false,
@@ -324,9 +309,7 @@ describe("GET /api/credentials/claude/cli-status", () => {
       email: "octo@example.com",
     });
     const { app } = makeRig({ claudeAuthProbe: probe });
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/claude/cli-status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/claude/cli-status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       authenticated: true,
@@ -341,9 +324,7 @@ describe("GET /api/credentials/claude/cli-status", () => {
       error: "claude not on PATH",
     });
     const { app } = makeRig({ claudeAuthProbe: probe });
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/claude/cli-status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/claude/cli-status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       authenticated: false,
@@ -353,9 +334,7 @@ describe("GET /api/credentials/claude/cli-status", () => {
 
   test("returns provider-not-registered fallback when probe is absent", async () => {
     const { app } = makeRig(); // no probe wired
-    const res = await app.fetch(
-      new Request("http://test/api/credentials/claude/cli-status"),
-    );
+    const res = await app.fetch(new Request("http://test/api/credentials/claude/cli-status"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       authenticated: false,
@@ -369,9 +348,7 @@ describe("GET /api/credentials/claude/cli-status", () => {
       // No probe wired — the handler should answer from env alone, not
       // fall through to the "Claude provider not registered" fallback.
       const { app } = makeRig();
-      const res = await app.fetch(
-        new Request("http://test/api/credentials/claude/cli-status"),
-      );
+      const res = await app.fetch(new Request("http://test/api/credentials/claude/cli-status"));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         authenticated: true,
@@ -409,9 +386,7 @@ describe("credentials never round-trip via responses", () => {
     expect(post.status).toBe(204);
     expect(await post.text()).not.toContain(SENTINEL);
 
-    const status = await app.fetch(
-      new Request("http://test/api/credentials/copilot/status"),
-    );
+    const status = await app.fetch(new Request("http://test/api/credentials/copilot/status"));
     expect(await status.text()).not.toContain(SENTINEL);
 
     const del = await app.fetch(

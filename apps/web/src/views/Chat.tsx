@@ -1,12 +1,4 @@
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import type { KeyboardEvent } from "react";
-import {
   type ChatFrame,
   type Conversation,
   type ModelInfo,
@@ -15,6 +7,8 @@ import {
   type RegisteredToolInfo,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
+import type { KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createConversation,
   fetchProviderModels,
@@ -22,6 +16,8 @@ import {
   fetchTools,
   getConversation,
 } from "../api.ts";
+import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
+import { Sidebar } from "../components/Chat/Sidebar.tsx";
 import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
 import {
@@ -29,31 +25,30 @@ import {
   type ReconnectingChatWsHandle,
   type ReconnectingWsState,
 } from "../ws.ts";
-import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
-import { Sidebar } from "../components/Chat/Sidebar.tsx";
 
 // Sentinel used to hide a seeded-conversation kickoff turn that the SPA
 // auto-sends. v0 has no seed flows yet — this stays as an exact-match
 // sentinel for the legacy `seeded` check; a real value would override it
 // once seed flows ship.
 const OPENING_PROMPT = "__keelson_seeded_opening_prompt__";
+
+import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";
 import { ModelChip } from "../components/Chat/ModelChip.tsx";
 import { ModelPickerPopover } from "../components/Chat/ModelPickerPopover.tsx";
-import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";
-import {
-  ToolCallsBlock,
-  toolCallsFromContentParts,
-  type LiveToolCall,
-} from "../components/Chat/ToolCallsBlock.tsx";
-import { ThinkingBlock } from "../components/Chat/ThinkingBlock.tsx";
-import { ThinkingChip } from "../components/Chat/ThinkingChip.tsx";
 import { ReasoningEffortChip } from "../components/Chat/ReasoningEffortChip.tsx";
 import { ReasoningEffortPopover } from "../components/Chat/ReasoningEffortPopover.tsx";
+import { ThinkingBlock } from "../components/Chat/ThinkingBlock.tsx";
+import { ThinkingChip } from "../components/Chat/ThinkingChip.tsx";
+import {
+  type LiveToolCall,
+  ToolCallsBlock,
+  toolCallsFromContentParts,
+} from "../components/Chat/ToolCallsBlock.tsx";
 import { ToolsChip } from "../components/Chat/ToolsChip.tsx";
 import { ToolsPopover } from "../components/Chat/ToolsPopover.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
-import { useSettings, type ModelRef } from "../hooks/useSettings.ts";
+import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
 
 type Role = "user" | "assistant" | "system";
 
@@ -90,19 +85,22 @@ const CANONICAL_REASONING_LEVELS: readonly ReasoningEffortLevel[] = [
 // Never leave an unsupported tier selected: `doSend` forwards whatever is in
 // state, so we honor the SDK's per-model default, falling back to the lowest
 // supported tier and finally "medium".
-function pickEffortSeed(info: {
-  defaultReasoningEffort?: ReasoningEffortLevel;
-  supportedReasoningEfforts?: readonly ReasoningEffortLevel[];
-} | null | undefined): ReasoningEffortLevel {
+function pickEffortSeed(
+  info:
+    | {
+        defaultReasoningEffort?: ReasoningEffortLevel;
+        supportedReasoningEfforts?: readonly ReasoningEffortLevel[];
+      }
+    | null
+    | undefined,
+): ReasoningEffortLevel {
   const allowed = info?.supportedReasoningEfforts;
   const def = info?.defaultReasoningEffort;
   const isAllowed = (level: ReasoningEffortLevel): boolean =>
     !allowed?.length || allowed.includes(level);
   if (def && isAllowed(def)) return def;
   if (allowed?.length) {
-    const lowestSupported = CANONICAL_REASONING_LEVELS.find((l) =>
-      allowed.includes(l),
-    );
+    const lowestSupported = CANONICAL_REASONING_LEVELS.find((l) => allowed.includes(l));
     if (lowestSupported) return lowestSupported;
   }
   return DEFAULT_REASONING_EFFORT;
@@ -169,10 +167,7 @@ export interface ChatProps {
   onSeedConsumed?: () => void;
 }
 
-export function Chat({
-  pendingSeed,
-  onSeedConsumed,
-}: ChatProps = {}) {
+export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   const { conversationId, setConversationId } = useConversation();
   const conversationIdRef = useRef<string | null>(conversationId);
   useEffect(() => {
@@ -181,8 +176,7 @@ export function Chat({
 
   const conversationsList = useConversations();
   const toast = useToast();
-  const { settings, toggleFavorite, setLastUsed, setSidebarCollapsed } =
-    useSettings();
+  const { settings, toggleFavorite, setLastUsed, setSidebarCollapsed } = useSettings();
 
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState<string>("");
@@ -192,9 +186,7 @@ export function Chat({
   const [tools, setTools] = useState<RegisteredToolInfo[]>([]);
   // Falls back to a bare-id projection of provider.capabilities.models when
   // the live fetch hasn't resolved yet (or failed).
-  const [dynamicModels, setDynamicModels] = useState<
-    Record<string, ModelInfo[]>
-  >({});
+  const [dynamicModels, setDynamicModels] = useState<Record<string, ModelInfo[]>>({});
 
   const selectedProvider = useMemo(
     () => providers.find((p) => p.id === selectedProviderId) ?? null,
@@ -238,14 +230,11 @@ export function Chat({
   const [thinkingEnabled, setThinkingEnabled] = useState(true);
   // Sticky per-conversation: four valid tiers with no neutral default, so
   // resetting after each send would surprise the user.
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel>(
-    DEFAULT_REASONING_EFFORT,
-  );
+  const [reasoningEffort, setReasoningEffort] =
+    useState<ReasoningEffortLevel>(DEFAULT_REASONING_EFFORT);
   // Sending during transcript hydration would reuse the stored conversationId
   // with the fallback providerId, mixing providers in one conversation.
-  const [hydrating, setHydrating] = useState<boolean>(
-    () => conversationIdRef.current !== null,
-  );
+  const [hydrating, setHydrating] = useState<boolean>(() => conversationIdRef.current !== null);
   // Single-slot queue for follow-ups typed during a live turn. Ref is the
   // canonical value; state drives pill re-render. Cleared on Stop/Esc/switch;
   // flushed only on a clean `done` frame.
@@ -330,7 +319,7 @@ export function Chat({
     setInput(pendingSeed.openingPrompt);
     onSeedConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSeed]);
+  }, [pendingSeed, onSeedConsumed]);
 
   // Fan-out fetch so the popover renders the full set immediately; curated
   // baseline keeps it usable when a per-provider fetch fails.
@@ -373,7 +362,7 @@ export function Chat({
     });
     // settings reads intentionally only at provider-load time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers, conversationId]);
+  }, [providers, settings.lastUsed, settings.favorites, modelsByProvider]);
 
   // Replay a stored conversation's messages on mount. Stale-resolution guard:
   // a sidebar click during this load bumps conversationIdRef, so compare on
@@ -427,9 +416,7 @@ export function Chat({
               id: m.id,
               role: m.role,
               content: m.content,
-              ...(m.contentParts
-                ? { toolCalls: toolCallsFromContentParts(m.contentParts) }
-                : {}),
+              ...(m.contentParts ? { toolCalls: toolCallsFromContentParts(m.contentParts) } : {}),
               ...(m.truncated ? { truncated: true } : {}),
               ...(hide ? { hidden: true } : {}),
             };
@@ -469,9 +456,7 @@ export function Chat({
   // tier would leak. Caller invokes this explicitly after setting the model.
   const resetEffortForModel = useCallback(
     (providerId: string, modelId: string) => {
-      const info = (modelsByProvider[providerId] ?? []).find(
-        (m) => m.id === modelId,
-      );
+      const info = (modelsByProvider[providerId] ?? []).find((m) => m.id === modelId);
       setReasoningEffort(pickEffortSeed(info));
     },
     [modelsByProvider],
@@ -480,19 +465,15 @@ export function Chat({
   // Auto-scroll on new message content.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages]);
+  }, []);
 
   const handleFrame = useCallback(
     (frame: ChatFrame) => {
       // Drop frames for non-active conversations, except UNKNOWN_CONVERSATION
       // errors — those are how we detect the stale id and trigger retry.
       const isUnknownConvError =
-        frame.event.type === "error" &&
-        frame.event.code === "UNKNOWN_CONVERSATION";
-      if (
-        !isUnknownConvError &&
-        frame.conversationId !== conversationIdRef.current
-      ) {
+        frame.event.type === "error" && frame.event.code === "UNKNOWN_CONVERSATION";
+      if (!isUnknownConvError && frame.conversationId !== conversationIdRef.current) {
         return;
       }
       if (frame.event.type === "chunk") {
@@ -502,9 +483,7 @@ export function Chat({
           if (!assistantId) return;
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: m.content + payload.content }
-                : m,
+              m.id === assistantId ? { ...m, content: m.content + payload.content } : m,
             ),
           );
         } else if (payload.type === "system") {
@@ -539,9 +518,7 @@ export function Chat({
           };
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, toolCalls: [...(m.toolCalls ?? []), call] }
-                : m,
+              m.id === assistantId ? { ...m, toolCalls: [...(m.toolCalls ?? []), call] } : m,
             ),
           );
         } else if (payload.type === "tool_result") {
@@ -559,9 +536,7 @@ export function Chat({
                         ? {
                             ...tc,
                             result: payload.content,
-                            ...(payload.isError !== undefined
-                              ? { isError: payload.isError }
-                              : {}),
+                            ...(payload.isError !== undefined ? { isError: payload.isError } : {}),
                           }
                         : tc,
                     ),
@@ -574,9 +549,7 @@ export function Chat({
           if (!assistantId) return;
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, thinking: (m.thinking ?? "") + payload.content }
-                : m,
+              m.id === assistantId ? { ...m, thinking: (m.thinking ?? "") + payload.content } : m,
             ),
           );
         }
@@ -625,9 +598,7 @@ export function Chat({
         setError(frame.event.message);
         setStreaming(false);
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, streaming: false } : m,
-          ),
+          prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
         );
         if (isAuthError(frame.event.message)) {
           toast.push({ kind: "error", message: frame.event.message, ttlMs: 0 });
@@ -640,9 +611,7 @@ export function Chat({
         pendingSendRef.current = null;
         setStreaming(false);
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, streaming: false } : m,
-          ),
+          prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
         );
         // Clean `done` flushes the queue. Provider errors leave it parked so
         // the user can recover the prompt via the pill.
@@ -688,9 +657,7 @@ export function Chat({
             setStreaming(false);
             setError("Connection dropped during response");
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, streaming: false } : m,
-              ),
+              prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
             );
           }
         } else if (state === "open" && prior === "reconnecting") {
@@ -775,10 +742,8 @@ export function Chat({
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
       // Avoid shipping a no-op flag when the model doesn't support it.
-      const supportsThinking =
-        selectedModelInfo?.supports?.thinking === true;
-      const supportsEffort =
-        selectedModelInfo?.supports?.reasoningEffort === true;
+      const supportsThinking = selectedModelInfo?.supports?.thinking === true;
+      const supportsEffort = selectedModelInfo?.supports?.reasoningEffort === true;
 
       const ws = ensureWs();
       ws.send({
@@ -921,9 +886,7 @@ export function Chat({
     setStreaming(false);
     if (assistantId) {
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId ? { ...m, streaming: false } : m,
-        ),
+        prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
       );
     }
     // Interruption drops the queue — auto-firing after Stop would surprise.
@@ -985,9 +948,7 @@ export function Chat({
                 id: m.id,
                 role: m.role,
                 content: m.content,
-                ...(m.contentParts
-                  ? { toolCalls: toolCallsFromContentParts(m.contentParts) }
-                  : {}),
+                ...(m.contentParts ? { toolCalls: toolCallsFromContentParts(m.contentParts) } : {}),
                 ...(m.truncated ? { truncated: true } : {}),
                 ...(hide ? { hidden: true } : {}),
               };
@@ -1024,12 +985,7 @@ export function Chat({
     pendingNameRef.current = null;
     // Re-seed from latest settings so a fresh chat picks up changes since
     // this view mounted (starring, sending on a different provider).
-    const ref = pickInitialRef(
-      providers,
-      modelsByProvider,
-      settings.lastUsed,
-      settings.favorites,
-    );
+    const ref = pickInitialRef(providers, modelsByProvider, settings.lastUsed, settings.favorites);
     if (ref) {
       setSelectedProviderId(ref.providerId);
       setSelectedModel(ref.modelId);
@@ -1096,9 +1052,7 @@ export function Chat({
   const sidebarCollapsed = settings.sidebarCollapsed ?? false;
 
   return (
-    <div
-      className={`chat-layout${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
-    >
+    <div className={`chat-layout${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <Sidebar
         conversations={conversationsList.conversations as Conversation[]}
         loading={conversationsList.loading}
@@ -1134,40 +1088,35 @@ export function Chat({
                   </div>
                 )}
                 {!hydrating && visibleMessages.length === 0 && (
-                  <div className="empty-state">
-                    Send a message to start a conversation.
-                  </div>
+                  <div className="empty-state">Send a message to start a conversation.</div>
                 )}
                 {visibleMessages.map((m) => (
-            <div key={m.id} className={`chat-message ${m.role}`}>
-              <span className="chat-role">{ROLE_LABEL[m.role]}</span>
-              <div className={`chat-bubble${m.streaming ? " streaming" : ""}`}>
-                {m.role === "assistant" ? (
-                  <>
-                    {m.thinking && m.thinking.length > 0 && (
-                      <ThinkingBlock
-                        content={m.thinking}
-                        streaming={m.streaming ?? false}
-                      />
-                    )}
-                    {m.toolCalls && m.toolCalls.length > 0 && (
-                      <ToolCallsBlock
-                        toolCalls={m.toolCalls}
-                        streaming={m.streaming ?? false}
-                      />
-                    )}
-                    <MarkdownContent source={m.content} />
-                    {m.truncated && (
-                      <div className="chat-truncated-marker">
-                        Turn stopped — partial result.
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  m.content
-                )}
-              </div>
-            </div>
+                  <div key={m.id} className={`chat-message ${m.role}`}>
+                    <span className="chat-role">{ROLE_LABEL[m.role]}</span>
+                    <div className={`chat-bubble${m.streaming ? " streaming" : ""}`}>
+                      {m.role === "assistant" ? (
+                        <>
+                          {m.thinking && m.thinking.length > 0 && (
+                            <ThinkingBlock content={m.thinking} streaming={m.streaming ?? false} />
+                          )}
+                          {m.toolCalls && m.toolCalls.length > 0 && (
+                            <ToolCallsBlock
+                              toolCalls={m.toolCalls}
+                              streaming={m.streaming ?? false}
+                            />
+                          )}
+                          <MarkdownContent source={m.content} />
+                          {m.truncated && (
+                            <div className="chat-truncated-marker">
+                              Turn stopped — partial result.
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        m.content
+                      )}
+                    </div>
+                  </div>
                 ))}
               </>
             );
@@ -1189,9 +1138,7 @@ export function Chat({
           />
           <div className="chat-composer-chips">
             <ModelChip
-              providerLabel={
-                selectedProvider?.displayName ?? "Loading…"
-              }
+              providerLabel={selectedProvider?.displayName ?? "Loading…"}
               modelId={selectedModel}
               modelDisplayName={selectedModelInfo?.displayName}
               popoverId={MODEL_PICKER_POPOVER_ID}
@@ -1212,11 +1159,7 @@ export function Chat({
               />
             )}
             {selectedProvider?.capabilities.tools === true && tools.length > 0 && (
-              <ToolsChip
-                count={tools.length}
-                popoverId={TOOLS_POPOVER_ID}
-                disabled={streaming}
-              />
+              <ToolsChip count={tools.length} popoverId={TOOLS_POPOVER_ID} disabled={streaming} />
             )}
             <span className="chat-composer-spacer" />
             {queued !== null && (
@@ -1243,11 +1186,7 @@ export function Chat({
                 type="button"
                 className="chat-send"
                 onClick={onSubmit}
-                disabled={
-                  hydrating ||
-                  !selectedProviderId ||
-                  input.trim().length === 0
-                }
+                disabled={hydrating || !selectedProviderId || input.trim().length === 0}
               >
                 {hydrating ? "Loading…" : "Send"}
               </button>

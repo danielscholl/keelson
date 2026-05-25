@@ -6,12 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type {
-  IAgentProvider,
-  MessageChunk,
-  ModelInfo,
-  ProviderCapabilities,
-} from "../types.ts";
+import type { IAgentProvider, MessageChunk, ModelInfo, ProviderCapabilities } from "../types.ts";
 
 // Capabilities lock-down: this is a non-chat provider used only as the
 // providerId stamp on workflow-linked conversations (Phase 4 W4.5). It exists
@@ -43,9 +38,7 @@ export class WorkflowProvider implements IAgentProvider {
   async *sendQuery(): AsyncGenerator<MessageChunk> {
     // Defense-in-depth: the chat-handler POST also rejects this providerId,
     // but if anything slips through, fail loudly rather than silently echoing.
-    throw new Error(
-      "workflow provider is non-chat; use POST /api/workflows/:name/runs",
-    );
+    throw new Error("workflow provider is non-chat; use POST /api/workflows/:name/runs");
     yield { type: "done" }; // unreachable; satisfies AsyncGenerator return type
   }
 }
