@@ -224,7 +224,13 @@ export default {
     }
     const snapMatch = SNAPSHOT_WS_RE.exec(url.pathname);
     if (snapMatch) {
-      return handleSnapshotUpgrade(req, srv, decodeURIComponent(snapMatch[1]!));
+      let snapshotKey: string;
+      try {
+        snapshotKey = decodeURIComponent(snapMatch[1]!);
+      } catch {
+        return new Response("invalid snapshot key", { status: 400 });
+      }
+      return handleSnapshotUpgrade(req, srv, snapshotKey);
     }
     return app.fetch(req);
   },

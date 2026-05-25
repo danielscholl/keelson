@@ -30,6 +30,7 @@ class SnapshotManagerImpl implements SnapshotManager {
       // Identity check guards against double-unregister and against a stale
       // handle calling after the key was re-registered with a new composer.
       if (this.composers.get(key) === erased) {
+        this.inflight.delete(key);
         this.composers.delete(key);
         this.cache.delete(key);
         this.versions.delete(key);
@@ -49,6 +50,10 @@ class SnapshotManagerImpl implements SnapshotManager {
     const promise = (async (): Promise<SnapshotFrame<unknown> | undefined> => {
       try {
         const data = await compose();
+        // Drop stale completion if key was unregistered/re-registered.
+        if (this.disposed || this.composers.get(key) !== compose) {
+          return undefined;
+        }
         const nextVersion = (this.versions.get(key) ?? -1) + 1;
         const frame: SnapshotFrame<unknown> = {
           type: "snapshot_update",

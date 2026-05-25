@@ -103,6 +103,41 @@ describe("SnapshotManager", () => {
       off1();
       expect(mgr.keys()).toEqual(["foo"]);
     });
+
+    test("stale in-flight compose from a prior registration does not overwrite the new composer's frame", async () => {
+      const { subscribers } = recordingSubscribers();
+      const mgr = createSnapshotManager(subscribers);
+
+      // 1. Register "foo" with a composer whose resolution we control manually.
+      let resolveCompose!: (value: string) => void;
+      const off1 = mgr.register("foo", () => new Promise<string>((r) => (resolveCompose = r)));
+
+      // 2. Kick off the in-flight compose — do NOT await yet.
+      const originalRecompose = mgr.recompose<string>("foo");
+
+      // 3. Unregister "foo" while compose is still in flight.
+      off1();
+
+      // 4. Re-register "foo" with a different composer.
+      mgr.register("foo", () => "second");
+
+      // 5. Recompose with the new composer and await it.
+      const newFrame = await mgr.recompose<string>("foo");
+      expect(newFrame?.data).toBe("second");
+      expect(newFrame?.version).toBe(0);
+
+      // 6. Resolve the original stale in-flight compose.
+      resolveCompose("first");
+
+      // 7. Await the original recompose — must bail out (identity mismatch) and return undefined.
+      const staleResult = await originalRecompose;
+      expect(staleResult).toBeUndefined();
+
+      // 8. Assert the new composer's frame is still intact — the stale compose did NOT overwrite it.
+      expect(mgr.latest<string>("foo")?.data).toBe("second");
+      expect(mgr.latest<string>("foo")?.version).toBe(0);
+      expect(mgr.keys()).toContain("foo");
+    });
   });
 
   describe("recompose", () => {
