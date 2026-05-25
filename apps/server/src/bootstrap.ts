@@ -16,7 +16,7 @@ import {
   registerStubProvider,
   registerWorkflowProvider,
 } from "@keelson/providers";
-import type { Rib, RibContext, WorkflowDiscoveryNotice } from "@keelson/shared";
+import type { Rib, RibContext, SnapshotManager, WorkflowDiscoveryNotice } from "@keelson/shared";
 import { runJSON, runText } from "@keelson/shared/exec";
 import { getRegisteredTools } from "@keelson/skills";
 import {
@@ -107,6 +107,10 @@ export interface BootstrapRibsOptions {
   // Operator-supplied manifest mapping rib id → Rib implementation. Typically
   // the embedder imports `@keelson/rib-<name>` packages here.
   available: Readonly<Record<string, Rib>>;
+  // Shared SnapshotManager passed into RibContext and used to auto-register
+  // each rib's `composeBundle`. Optional so unit tests for parseRibList /
+  // applyRibs don't need to spin up a manager.
+  snapshotManager?: SnapshotManager;
 }
 
 export interface RibBootstrap {
@@ -121,10 +125,17 @@ export function bootstrapRibs(options: BootstrapRibsOptions): RibBootstrap {
   const requested = parseRibList(process.env.KEELSON_RIBS);
   const available = options.available;
   const active = requested.length > 0 ? requested : Object.keys(available);
+  const snapshotManager = options.snapshotManager;
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
+    ...(snapshotManager ? { getSnapshotManager: () => snapshotManager } : {}),
   };
-  const { manifests, disposers } = applyRibs({ active, available, ctx });
+  const { manifests, disposers } = applyRibs({
+    active,
+    available,
+    ctx,
+    ...(snapshotManager ? { snapshotManager } : {}),
+  });
   return {
     manifests,
     async disposeAll() {

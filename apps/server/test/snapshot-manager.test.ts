@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import "./test-setup.ts";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { SnapshotFrame } from "@keelson/shared";
 import { createSnapshotManager } from "../src/snapshot-manager.ts";
 import type { SnapshotSubscribers } from "../src/snapshot-subscribers.ts";

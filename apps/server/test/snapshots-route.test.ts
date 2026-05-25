@@ -135,7 +135,9 @@ describe("snapshots WS", () => {
         sent.push(JSON.parse(raw));
       },
       close: () => {},
-    } as unknown as Parameters<NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>>[0];
+    } as unknown as Parameters<
+      NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>
+    >[0];
 
     const handlers = snapshotWebSocketHandlers({ subscribers, manager });
     handlers.open?.(fakeWs);
@@ -162,7 +164,9 @@ describe("snapshots WS", () => {
         sent.push(JSON.parse(raw));
       },
       close: () => {},
-    } as unknown as Parameters<NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>>[0];
+    } as unknown as Parameters<
+      NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>
+    >[0];
 
     const handlers = snapshotWebSocketHandlers({ subscribers, manager });
     handlers.open?.(fakeWs);
@@ -202,7 +206,9 @@ describe("snapshots WS", () => {
         sent.push(JSON.parse(raw));
       },
       close: () => {},
-    } as unknown as Parameters<NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>>[0];
+    } as unknown as Parameters<
+      NonNullable<ReturnType<typeof snapshotWebSocketHandlers>["open"]>
+    >[0];
 
     const handlers = snapshotWebSocketHandlers({ subscribers, manager });
     handlers.open?.(fakeWs);

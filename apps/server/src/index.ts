@@ -25,6 +25,13 @@ import { createKeyringStore, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
 import { installRedactedConsole } from "./redact.ts";
+import { createSnapshotManager } from "./snapshot-manager.ts";
+import { createSnapshotSubscribers } from "./snapshot-subscribers.ts";
+import {
+  handleSnapshotUpgrade,
+  snapshotsRoutes,
+  snapshotWebSocketHandlers,
+} from "./snapshots-handler.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
 import {
   createActiveRuns,
@@ -44,12 +51,20 @@ installRedactedConsole();
 
 const bootstrap = bootstrapProviders({ getCredential });
 
+// Generic snapshot infrastructure — owned at the composition root alongside
+// the workflow subscriber registry. Ribs declaring `composeBundle` are
+// auto-registered under their `rib.id` by `applyRibs`. Constructed BEFORE
+// bootstrapRibs so the rib's RibContext.getSnapshotManager resolver is
+// already bindable.
+const snapshotSubscribers = createSnapshotSubscribers();
+const snapshotManager = createSnapshotManager(snapshotSubscribers);
+
 // No built-in ribs ship. Operators wire their own ribs by importing the
 // rib packages here and adding them to the `available` map; `KEELSON_RIBS`
 // (when set) filters that map to a subset. Until something is wired up,
 // the tool registry stays empty and only the SDK's built-ins (Read/Write/
 // Bash on Claude) are available to chat and workflow `prompt` nodes.
-const ribs = bootstrapRibs({ available: {} });
+const ribs = bootstrapRibs({ available: {}, snapshotManager });
 
 const PORT = Number(process.env.PORT ?? 7878);
 const HOSTNAME = "127.0.0.1";
@@ -83,7 +98,8 @@ const credentialStore = createKeyringStore();
 // Async shutdown: drain workflow runs first (the executor's onEvent run_done
 // branch writes terminal state to SQLite, and that must happen before
 // db.close()), then dispose any activated ribs (which may hold sockets or
-// child processes), then close the database.
+// child processes), close the snapshot manager (closes lingering WS
+// subscribers and drains in-flight composes), then close the database.
 const shutdown = async (): Promise<void> => {
   try {
     await activeWorkflowRuns.abortAll();
@@ -92,6 +108,7 @@ const shutdown = async (): Promise<void> => {
     console.warn(`[keelson] workflow run drain during shutdown failed: ${msg}`);
   }
   await ribs.disposeAll();
+  await snapshotManager.dispose();
   db.close();
   process.exit(0);
 };
@@ -139,6 +156,7 @@ workflowsRoutes(
   activeWorkflowRuns,
   workflowSubscribers,
 );
+snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
 credentialsRoutes(app, credentialStore, {
   copilotAuthProbe: bootstrap.copilotAuthProbe,
   claudeAuthProbe: bootstrap.claudeAuthProbe,
@@ -159,13 +177,18 @@ const workflowRunHandlers = workflowRunWebSocketHandlers({
   subscribers: workflowSubscribers,
   store: workflowStore,
 });
+const snapshotHandlers = snapshotWebSocketHandlers({
+  subscribers: snapshotSubscribers,
+  manager: snapshotManager,
+});
 
-// Single WebSocketHandler that dispatches by `ws.data.kind`. Both per-kind
+// Single WebSocketHandler that dispatches by `ws.data.kind`. All per-kind
 // handler sets carry the same Bun.serve types so the union flows through
 // without casts.
 const wsHandlers = {
   open(ws: Parameters<NonNullable<typeof chatHandlers.open>>[0]) {
     if (ws.data.kind === "workflowRun") workflowRunHandlers.open?.(ws);
+    else if (ws.data.kind === "snapshot") snapshotHandlers.open?.(ws);
     else chatHandlers.open?.(ws);
   },
   message(
@@ -173,15 +196,18 @@ const wsHandlers = {
     raw: Parameters<NonNullable<typeof chatHandlers.message>>[1],
   ) {
     if (ws.data.kind === "workflowRun") return workflowRunHandlers.message?.(ws, raw);
+    if (ws.data.kind === "snapshot") return snapshotHandlers.message?.(ws, raw);
     return chatHandlers.message?.(ws, raw);
   },
   close(ws: Parameters<NonNullable<typeof chatHandlers.close>>[0], code: number, reason: string) {
     if (ws.data.kind === "workflowRun") return workflowRunHandlers.close?.(ws, code, reason);
+    if (ws.data.kind === "snapshot") return snapshotHandlers.close?.(ws, code, reason);
     return chatHandlers.close?.(ws, code, reason);
   },
 };
 
 const WORKFLOW_RUN_WS_RE = /^\/api\/workflows\/runs\/([^/]+)\/ws$/;
+const SNAPSHOT_WS_RE = /^\/api\/snapshots\/([^/]+)\/ws$/;
 
 export default {
   port: PORT,
@@ -195,6 +221,10 @@ export default {
     const runMatch = WORKFLOW_RUN_WS_RE.exec(url.pathname);
     if (runMatch) {
       return handleWorkflowRunUpgrade(req, srv, decodeURIComponent(runMatch[1]!));
+    }
+    const snapMatch = SNAPSHOT_WS_RE.exec(url.pathname);
+    if (snapMatch) {
+      return handleSnapshotUpgrade(req, srv, decodeURIComponent(snapMatch[1]!));
     }
     return app.fetch(req);
   },
