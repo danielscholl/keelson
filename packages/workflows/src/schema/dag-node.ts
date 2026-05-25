@@ -92,7 +92,7 @@ export const sandboxSettingsSchema = z
         denyRead: z.array(z.string()).optional(),
       })
       .optional(),
-    ignoreViolations: z.record(z.array(z.string())).optional(),
+    ignoreViolations: z.record(z.string(), z.array(z.string())).optional(),
     enableWeakerNestedSandbox: z.boolean().optional(),
     enableWeakerNetworkIsolation: z.boolean().optional(),
     excludedCommands: z.array(z.string()).optional(),
@@ -139,7 +139,7 @@ export const dagNodeBaseSchema = z.object({
   model: z.string().optional(),
   provider: z.string().trim().min(1).optional(),
   context: z.enum(["fresh", "shared"]).optional(),
-  output_format: z.record(z.unknown()).optional(),
+  output_format: z.record(z.string(), z.unknown()).optional(),
   allowed_tools: z.array(z.string()).optional(),
   denied_tools: z.array(z.string()).optional(),
   idle_timeout: z.number().optional(),

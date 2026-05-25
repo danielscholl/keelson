@@ -11,8 +11,7 @@ import { listPausedRuns } from "../api.ts";
 
 // 10s polling cadence. The per-run WS already broadcasts `approval_awaiting`
 // to whichever client is watching that run; this poll is the cross-tab badge
-// signal only. A global WS topic would replace this entirely (tracked as
-// follow-up — see docs/phase-4-prd.md §W4.x).
+// signal only. A global WS topic would replace this entirely.
 const POLL_MS = 10_000;
 
 export function usePausedRunCount(): number {

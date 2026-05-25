@@ -15,8 +15,8 @@
  * filters which manifest entries activate; unset means activate all.
  *
  * Dynamic discovery from `node_modules/@keelson/rib-*` is reserved for a
- * follow-up release. v0.1 takes the manifest from the caller so unit
- * tests stay deterministic and there's no implicit filesystem walk.
+ * follow-up release. Today the loader takes the manifest from the caller so
+ * unit tests stay deterministic and there's no implicit filesystem walk.
  */
 
 import { type Rib, type RibContext, ribDisplayNameSchema, ribIdSchema } from "@keelson/shared";

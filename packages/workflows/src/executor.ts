@@ -3,10 +3,8 @@
  * layering, the `when:` evaluator, the substitution helpers, and the trigger-
  * rule evaluator with a caller-supplied handler map.
  *
- * No IO. No SQLite. No provider calls. Side effects live in handlers (W2 bash,
- * W3 prompt) and in the `onEvent` consumer.
- *
- * Implements the W1 slice of docs/phase-4-prd.md.
+ * No IO. No SQLite. No provider calls. Side effects live in handlers (bash,
+ * prompt, etc.) and in the `onEvent` consumer.
  */
 
 import { evaluateCondition } from "./conditions.ts";
@@ -28,14 +26,14 @@ export type NodeOutputBody =
   | { kind: "structured"; value: unknown };
 
 /**
- * Memory layer seam (W5). Loosely typed to avoid pulling `@keelson/shared`
- * into this package's dep graph (same pattern as `PromptHandlerProvider` in
+ * Memory layer seam. Loosely typed to avoid pulling `@keelson/shared` into
+ * this package's dep graph (same pattern as `PromptHandlerProvider` in
  * `handlers/prompt.ts`). The structural shape matches the `MemoryTools`
- * declaration exported from `@keelson/shared/memory.ts`; Phase 4.5 fills
- * the contract in. Consumers cast at the boundary.
+ * declaration exported from `@keelson/shared/memory.ts`; the future memory
+ * layer fills the contract in. Consumers cast at the boundary.
  */
 export interface MemoryTools {
-  readonly __phase: "4.5-pending";
+  readonly __phase: "pending";
 }
 
 export interface NodeContext {
@@ -58,7 +56,7 @@ export interface NodeContext {
    * prompt / command nodes get it via `$ARTIFACTS_DIR` text substitution.
    */
   artifactsDir?: string;
-  /** Phase 4.5 memory layer. Always undefined in v1; W5 seam only. */
+  /** Memory layer seam. Always undefined today; reserved for future. */
   memory?: MemoryTools;
 }
 
@@ -78,11 +76,11 @@ export interface NodeHandler {
 /**
  * Per-node streaming event emitted by handlers via `ctx.emit`.
  *
- * `node_chunk.chunk` is intentionally `unknown`: the W3 prompt handler will
- * emit `MessageChunk` values (defined in `@keelson/shared`), but
- * `@keelson/workflows` has no upstream deps in the architecture graph
- * (docs/architecture.md §3). Consumers that need the chunk's shape cast it to
- * `MessageChunk` at the boundary.
+ * `node_chunk.chunk` is intentionally `unknown`: the prompt handler emits
+ * `MessageChunk` values (defined in `@keelson/shared`), but
+ * `@keelson/workflows` has no upstream deps in the architecture graph.
+ * Consumers that need the chunk's shape cast it to `MessageChunk` at the
+ * boundary.
  */
 export type NodeStreamEvent =
   | { type: "node_chunk"; chunk: unknown }
@@ -163,9 +161,9 @@ function nodeTypeOf(node: DagNode): NodeTypeField {
 function nodeBodyOf(node: DagNode): string {
   const t = nodeTypeOf(node);
   const body = (node as Record<string, unknown>)[t];
-  // loop/approval/cancel/script have non-string bodies; v1 doesn't dispatch
-  // those — the missing-handler path fires before substitution. Return ""
-  // for them so substitution helpers receive a safe input.
+  // loop/approval/cancel/script have non-string bodies and don't go through
+  // substitution — the missing-handler path fires before this. Return "" for
+  // them so substitution helpers receive a safe input.
   return typeof body === "string" ? body : "";
 }
 
@@ -192,9 +190,10 @@ function nodeBodyOf(node: DagNode): string {
 //   <id>.output[.field]       — upstream node output (raw)
 //   (none — bare `$` or `\$`) — preserves existing pure-module unescape semantics
 //
-// `$1..$9` are NOT substituted — v1 has no real positional-args plumbing, and
-// substituting them would corrupt bash idioms like `awk '{print $1}'`. If a
-// future version adds real positional args, the digit branch can be re-added.
+// `$1..$9` are NOT substituted — there's no positional-args plumbing today,
+// and substituting them would corrupt bash idioms like `awk '{print $1}'`.
+// If a future version adds real positional args, the digit branch can be
+// re-added.
 //
 // All substitutions are RAW. Author owns quoting — for bash, wrap substitutions
 // in single quotes in the YAML. Bash command-injection safety against hostile

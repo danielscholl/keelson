@@ -278,7 +278,9 @@ export function Sidebar({
           >
             <span className="chat-sidebar-name">
               {label}
-              {isStreaming && <span className="chat-sidebar-streaming-dot" aria-label="active" />}
+              {isStreaming && (
+                <span className="chat-sidebar-streaming-dot" role="img" aria-label="active" />
+              )}
             </span>
             <span className="chat-sidebar-meta">
               <span className="pill chat-sidebar-provider">{providerLabel}</span>

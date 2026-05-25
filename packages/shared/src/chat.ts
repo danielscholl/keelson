@@ -91,17 +91,17 @@ export const messageSchema = z
   .strict();
 export type Message = z.infer<typeof messageSchema>;
 
-// Denormalized workflow projection for run-as-conversation (Phase 4 W4.5).
-// Server populates this via LEFT JOIN workflow_runs in ConversationStore.list/get
-// so the sidebar can partition workflow runs into their own section without an
-// N+1. Absent for regular chat conversations.
+// Denormalized workflow projection for run-as-conversation. Server populates
+// this via LEFT JOIN workflow_runs in ConversationStore.list/get so the
+// sidebar can partition workflow runs into their own section without an N+1.
+// Absent for regular chat conversations.
 export const conversationWorkflowProjectionSchema = z
   .object({
     runId: z.string(),
     workflowName: z.string(),
     // Duplicates workflowRunStatusSchema literally — can't import workflows.ts
     // here without a cycle (workflows.ts imports contentBlockSchema from chat).
-    // `paused` is W4.6 (HITL approval node) — keep this enum in lockstep.
+    // Keep `paused` (HITL approval node) in lockstep with the source enum.
     status: z.enum(["running", "paused", "succeeded", "failed", "cancelled"]),
   })
   .strict();

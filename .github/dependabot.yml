@@ -1,0 +1,145 @@
+# Dependabot configuration.
+#
+# Bun monorepo: Dependabot's "npm" ecosystem doesn't natively understand
+# bun.lock, but it CAN bump versions in each workspace's package.json. CI
+# (bun install --frozen-lockfile) will reject any PR whose package.json
+# updates don't match the committed bun.lock — so Dependabot's PRs will
+# fail CI until the lockfile is refreshed locally with `bun install` and
+# pushed onto the PR branch. That's the pragmatic workflow today.
+#
+# One npm entry per workspace because Dependabot scans the `directory`
+# only, not the workspace tree.
+
+version: 2
+updates:
+  # Root workspace (Biome, TypeScript, @types/node)
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      types:
+        patterns:
+          - "@types/*"
+      dev-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/apps/cli"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - apps/cli
+    groups:
+      dev-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/apps/server"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - apps/server
+    groups:
+      dev-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/apps/web"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - apps/web
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+      dev-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/packages/shared"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - packages/shared
+
+  - package-ecosystem: npm
+    directory: "/packages/workflows"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - packages/workflows
+
+  - package-ecosystem: npm
+    directory: "/packages/providers"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - packages/providers
+    # Vendor SDKs: pin commits via the lockfile, take majors deliberately.
+    ignore:
+      - dependency-name: "@anthropic-ai/claude-agent-sdk"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@github/copilot-sdk"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: npm
+    directory: "/packages/skills"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - packages/skills
+
+  # GitHub Actions used in .github/workflows/ci.yml
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions

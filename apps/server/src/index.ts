@@ -44,7 +44,7 @@ installRedactedConsole();
 
 const bootstrap = bootstrapProviders({ getCredential });
 
-// v0.1: no built-in ribs. Operators wire their own ribs by importing the
+// No built-in ribs ship. Operators wire their own ribs by importing the
 // rib packages here and adding them to the `available` map; `KEELSON_RIBS`
 // (when set) filters that map to a subset. Until something is wired up,
 // the tool registry stays empty and only the SDK's built-ins (Read/Write/

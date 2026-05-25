@@ -197,7 +197,7 @@ function toDiscoveryNotice(w: WorkflowLoadWarning): WorkflowDiscoveryNotice {
 // Workflow prompt-node handler. Env-gated:
 //   KEELSON_WORKFLOW_PROVIDER         - provider id (default: first non-stub)
 //   KEELSON_WORKFLOW_TOOL_DENYLIST    - comma-separated tool names. Unset →
-//                                       DEFAULT_TOOL_DENYLIST (empty in v0).
+//                                       DEFAULT_TOOL_DENYLIST (empty today).
 //                                       Empty string ("") → allow all tools.
 //   KEELSON_WORKFLOW_PROMPT_TIMEOUT_S - per-node timeout in seconds (default 600).
 //
@@ -261,7 +261,7 @@ export function bootstrapPromptHandler(): NodeHandler | undefined {
 
 // Exported for tests; not public.
 export function parseToolDenylist(raw: string | undefined): readonly string[] {
-  // Unset → default denylist (empty in v0).
+  // Unset → default denylist (empty today).
   if (raw === undefined) return DEFAULT_TOOL_DENYLIST;
   // Explicit empty string is "allow everything" — same as the default today.
   if (raw.trim() === "") return [];

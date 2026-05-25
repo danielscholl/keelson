@@ -9,11 +9,11 @@
 import type { IAgentProvider, MessageChunk, ModelInfo, ProviderCapabilities } from "../types.ts";
 
 // Capabilities lock-down: this is a non-chat provider used only as the
-// providerId stamp on workflow-linked conversations (Phase 4 W4.5). It exists
-// so the existing NOT NULL conversations.providerId column + sidebar
-// provider-badge lookup keep working without a schema relaxation; the chat
-// surface never instantiates it for a turn (the workflow conversation renders
-// via the existing useWorkflowRun hook instead).
+// providerId stamp on workflow-linked conversations. It exists so the
+// existing NOT NULL conversations.providerId column + sidebar provider-badge
+// lookup keep working without a schema relaxation; the chat surface never
+// instantiates it for a turn (the workflow conversation renders via the
+// existing useWorkflowRun hook instead).
 export const WORKFLOW_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,
   streaming: false,

@@ -7,16 +7,15 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 /**
- * `approval` NodeHandler (W4.6). Pauses the workflow until the route layer
- * resolves the approval — the user's reply (or the "Approve & continue"
- * quick action) becomes the node's `output.text` and the downstream nodes
- * decide flow via `when:` rules.
+ * `approval` NodeHandler. Pauses the workflow until the route layer resolves
+ * the approval — the user's reply (or the "Approve & continue" quick action)
+ * becomes the node's `output.text` and the downstream nodes decide flow via
+ * `when:` rules.
  *
  * The handler does no IO of its own. The route layer's `awaitApproval`
- * callback is what writes `paused` to SQLite, registers the pending
- * promise, and resolves it when POST /api/workflows/runs/:runId/resume
- * arrives. v1 ignores the schema's `on_reject` re-prompt loop — that's a
- * follow-up slice.
+ * callback is what writes `paused` to SQLite, registers the pending promise,
+ * and resolves it when POST /api/workflows/runs/:runId/resume arrives. The
+ * schema's `on_reject` re-prompt loop is not yet wired up — follow-up slice.
  */
 
 import type { NodeHandler, NodeResult } from "../executor.ts";

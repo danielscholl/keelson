@@ -194,7 +194,7 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
     });
   }
 
-  // Interactive loops tie into W4.6's metadata-approval flow and are not yet
+  // Interactive loops tie into the metadata-approval flow and are not yet
   // wired in this engine. Flag at load so the user sees it before run.
   if (isLoopNode(node) && node.loop.interactive === true) {
     ctx.warnings.push({

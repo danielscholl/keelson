@@ -139,7 +139,7 @@ export const workflowRunSchema = z.object({
   codebase_id: z.string().nullable().optional(),
   status: workflowRunStatusSchema,
   user_message: z.string(),
-  metadata: z.record(z.unknown()),
+  metadata: z.record(z.string(), z.unknown()),
   // Dates serialize to ISO strings on disk; the schema accepts both shapes for round-trip.
   started_at: z.union([z.date(), z.string()]),
   completed_at: z.union([z.date(), z.string()]).nullable().optional(),

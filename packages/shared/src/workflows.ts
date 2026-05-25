@@ -11,8 +11,8 @@ import { contentBlockSchema, messageChunkSchema } from "./chat.ts";
 
 // Run-level status. `running` is the value the store writes on POST; the
 // executor's RunStatus union ("succeeded" | "failed" | "cancelled") flows in
-// on completion. `paused` is W4.6 — the route layer writes it when an
-// approval node opens and flips back to `running` on resume.
+// on completion. `paused` is written by the route layer when an approval
+// node opens; flips back to `running` on resume.
 export const workflowRunStatusSchema = z.enum([
   "running",
   "paused",
@@ -33,9 +33,9 @@ export const TERMINAL_RUN_STATUSES: readonly WorkflowRunStatus[] = [
 ] as const;
 
 // Node-level status as persisted to workflow_node_outputs.status. Rows are
-// written on completion AND on approval pause (`awaiting`, W4.6) so a
-// page-reload mid-pause can rehydrate the approval callout from the snapshot.
-// The `node_done` frame's status is terminal-only — the executor never emits
+// written on completion AND on approval pause (`awaiting`) so a page-reload
+// mid-pause can rehydrate the approval callout from the snapshot. The
+// `node_done` frame's status is terminal-only — the executor never emits
 // `awaiting` through that path; the awaiting state is broadcast via the
 // dedicated `approval_awaiting` frame instead.
 export const workflowNodeStatusSchema = z.enum(["succeeded", "failed", "skipped", "awaiting"]);
@@ -76,7 +76,7 @@ export const workflowDetailSchema = z
 export type WorkflowDetail = z.infer<typeof workflowDetailSchema>;
 
 // One row of workflow_node_outputs. `contentParts` is null for bash nodes
-// and populated by W3's prompt handler with the assistant's structured turn.
+// and populated by the prompt handler with the assistant's structured turn.
 export const nodeOutputRowSchema = z
   .object({
     nodeId: z.string(),
@@ -91,9 +91,9 @@ export const nodeOutputRowSchema = z
 export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
 
 // Run header (list view). Mirrors workflow_runs row shape minus inputs.
-// `conversationId` is the FK added in migration 12 (Phase 4 W4.5); nullable
-// because pre-migration rows + post-FK orphans (conversation deleted) carry no
-// link, but every newly-created run sets it.
+// `conversationId` is the FK added in migration 12; nullable because
+// pre-migration rows + post-FK orphans (conversation deleted) carry no link,
+// but every newly-created run sets it.
 export const workflowRunSummarySchema = z
   .object({
     runId: z.string(),
@@ -128,7 +128,7 @@ export type StartWorkflowRunBody = z.infer<typeof startWorkflowRunBodySchema>;
 export const startWorkflowRunResponseSchema = z.object({ runId: z.string() }).strict();
 export type StartWorkflowRunResponse = z.infer<typeof startWorkflowRunResponseSchema>;
 
-// Non-fatal loader notices surfaced to the UI as toasts (W6). `error`-level
+// Non-fatal loader notices surfaced to the UI as toasts. `error`-level
 // notices map to dropped workflows (file failed to load); `warning`-level
 // notices map to per-node ignored capabilities / adapted fields. The loader
 // already returns these via `discoverWorkflows`; this is the wire shape.
@@ -165,8 +165,8 @@ export type ListRunsResponse = z.infer<typeof listRunsResponseSchema>;
 export const getWorkflowRunResponseSchema = z.object({ run: workflowRunDetailSchema }).strict();
 export type GetWorkflowRunResponse = z.infer<typeof getWorkflowRunResponseSchema>;
 
-// Per-run WebSocket frame envelope (W3). Sibling of chatFrameSchema, not a
-// reuse — chat is conversation-keyed; workflows are run-keyed and node-scoped.
+// Per-run WebSocket frame envelope. Sibling of chatFrameSchema, not a reuse
+// — chat is conversation-keyed; workflows are run-keyed and node-scoped.
 // `node_chunk` wraps `messageChunkSchema` verbatim so the existing
 // <ToolCallsBlock> / markdown / <ThinkingBlock> components can render prompt
 // nodes natively. `node_log` is the bash handler's per-line stdout channel.
@@ -214,9 +214,9 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       status: workflowRunStatusSchema,
     })
     .strict(),
-  // W4.6 — broadcast when an approval node opens. Flips the client's run
-  // status to `paused` and surfaces the inline approval callout. The user's
-  // reply (or quick-action) lands via POST /api/workflows/runs/:runId/resume;
+  // Broadcast when an approval node opens. Flips the client's run status
+  // to `paused` and surfaces the inline approval callout. The user's reply
+  // (or quick-action) lands via POST /api/workflows/runs/:runId/resume;
   // resume emits the usual `node_done` for the approval node so no separate
   // `approval_resolved` frame is needed.
   z
@@ -229,10 +229,10 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
 ]);
 export type WorkflowFrame = z.infer<typeof workflowFrameSchema>;
 
-// W4.6 — POST /api/workflows/runs/:runId/resume body. Text is bounded so a
-// runaway reply (paste of a 50KB diff, etc.) can't blow up the route's memory;
-// 16 KiB is far larger than any plausible approval reply but small enough to
-// reject obvious abuse.
+// POST /api/workflows/runs/:runId/resume body. Text is bounded so a runaway
+// reply (paste of a 50KB diff, etc.) can't blow up the route's memory; 16 KiB
+// is far larger than any plausible approval reply but small enough to reject
+// obvious abuse.
 export const resumeWorkflowRunBodySchema = z
   .object({
     nodeId: z.string().min(1),

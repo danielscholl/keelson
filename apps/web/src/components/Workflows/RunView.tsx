@@ -20,8 +20,8 @@ function statusBadgeStatus(
   s: "loading" | "unknown" | "running" | "paused" | "succeeded" | "failed" | "cancelled",
 ): NodeViewStatus | "pending" | "running" {
   if (s === "loading" || s === "unknown") return "pending";
-  // Run-level `paused` (W4.6) reuses the node-level `awaiting` badge color
-  // since the mockup paints both with the same magenta accent.
+  // Run-level `paused` reuses the node-level `awaiting` badge color since
+  // both use the same magenta accent.
   if (s === "paused") return "awaiting";
   return s;
 }
@@ -262,6 +262,7 @@ interface LayoutButtonProps {
 
 function LayoutButton({ icon, label, active, onClick }: LayoutButtonProps) {
   return (
+    // biome-ignore lint/a11y/useSemanticElements: custom-styled radio inside the parent role="radiogroup"; <input type="radio"> can't carry the inline SVG glyph + label the design needs
     <button
       type="button"
       role="radio"

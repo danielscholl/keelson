@@ -60,24 +60,23 @@ import type { WorkflowStore } from "./workflow-store.ts";
 export interface WorkflowsHandlerOptions {
   catalog: WorkflowCatalog;
   store: WorkflowStore;
-  // Phase 4 W4.5: every run is paired with a synthetic chat conversation
-  // created in the start-run route so the run can be opened from the Chat
-  // sidebar. Required, not optional — without it the run row's NOT NULL
-  // conversation_id FK has nowhere to point.
+  // Every run is paired with a synthetic chat conversation created in the
+  // start-run route so the run can be opened from the Chat sidebar. Required,
+  // not optional — without it the run row's NOT NULL conversation_id FK has
+  // nowhere to point.
   conversationStore: ConversationStore;
   cwd: string;
   // Real prompt handler injected from the composition root. When omitted
   // (tests, env where no provider is registered), the placeholder fires and
-  // prompt nodes fail with the W3-pending sentinel. Keeps the route construction
-  // testable without standing up a provider rig.
+  // prompt nodes fail with a "not registered" sentinel. Keeps the route
+  // construction testable without standing up a provider rig.
   promptHandler?: NodeHandler;
 }
 
 // Renders the user-facing dispatch bubble that anchors the workflow run inside
-// its conversation. Mirrors the mockup at `mockups/workflows-page.html:1162` —
-// the user types/clicks-to-start a workflow and that intent becomes the first
-// (and, in W4.5, only persisted) message in the conversation. The chat view
-// renders this plus virtual system messages synthesized from useWorkflowRun.
+// its conversation. The user types/clicks-to-start a workflow and that intent
+// becomes the first (and only persisted) message in the conversation. The chat
+// view renders this plus virtual system messages synthesized from useWorkflowRun.
 function formatDispatchMessage(workflowName: string, inputs: Record<string, string>): string {
   const args = inputs.ARGUMENTS?.trim();
   return args && args.length > 0 ? `${workflowName}: ${args}` : workflowName;
@@ -124,8 +123,8 @@ function workflowToDetail(workflow: WorkflowDefinition) {
 }
 
 // Placeholder fires only when the composition root didn't inject a real prompt
-// handler (tests, or a deployment with no provider registered). W3 keeps this
-// as a safety net so the failure mode is structured rather than a crash.
+// handler (tests, or a deployment with no provider registered). Kept as a
+// safety net so the failure mode is structured rather than a crash.
 const placeholderPromptHandler: NodeHandler = {
   type: "prompt",
   async handle(): Promise<NodeResult> {
@@ -142,9 +141,9 @@ const placeholderPromptHandler: NodeHandler = {
 //   2. The composition root can drain them on SIGINT — otherwise an
 //      active bash subtree outlives the server and the persisted row
 //      stays `running` indefinitely.
-//   3. W4.6 — pending approval resolvers piggyback so POST /resume can
-//      find the right pending entry and POST resolve(text) into the
-//      executor's awaited Promise.
+//   3. Pending approval resolvers piggyback so POST /resume can find the
+//      right pending entry and POST resolve(text) into the executor's
+//      awaited Promise.
 //
 // `done` is the executeRunInBackground promise; abortAll awaits each so the
 // onEvent → store.updateRunStatus("cancelled") write lands before db.close().
@@ -157,8 +156,8 @@ export interface PendingApproval {
 export interface ActiveRunEntry {
   abort: AbortController;
   done: Promise<void>;
-  // W4.6 — keyed by nodeId so two parallel approval nodes in one layer
-  // can pause and resume independently.
+  // Keyed by nodeId so two parallel approval nodes in one layer can pause
+  // and resume independently.
   pendingApprovals: Map<string, PendingApproval>;
 }
 
@@ -171,8 +170,8 @@ export interface ActiveRuns {
 }
 
 // Idempotent: abort the controller and unblock any paused approval node.
-// W4.6 — clearing pendingApprovals is load-bearing; the handler awaits on
-// those promises and would otherwise sit forever after the abort fires.
+// Clearing pendingApprovals is load-bearing; the handler awaits on those
+// promises and would otherwise sit forever after the abort fires.
 export function cancelActiveRun(entry: ActiveRunEntry): void {
   try {
     entry.abort.abort();
@@ -490,8 +489,8 @@ export function workflowsRoutes(
       throw err;
     }
     const abort = new AbortController();
-    // W4.6 — per-run pending approval map. The approval handler awaits a
-    // Promise the route writes here; POST /resume resolves it.
+    // Per-run pending approval map. The approval handler awaits a Promise
+    // the route writes here; POST /resume resolves it.
     const pendingApprovals = new Map<string, PendingApproval>();
     // Capture the executeRun promise so shutdown can await settlement
     // (the executor writes the run's terminal status to SQLite inside
@@ -566,10 +565,10 @@ export function workflowsRoutes(
     return c.json({ cancelled: true });
   });
 
-  // W4.6 — resume a paused approval node. The body's `text` becomes the
-  // node's $output (per the approval-handler's capture_response semantics),
-  // so the downstream `when:` rules see whatever the user typed (or the
-  // canonical "approve" from the quick-action button).
+  // Resume a paused approval node. The body's `text` becomes the node's
+  // $output (per the approval-handler's capture_response semantics), so the
+  // downstream `when:` rules see whatever the user typed (or the canonical
+  // "approve" from the quick-action button).
   app.post("/api/workflows/runs/:runId/resume", async (c) => {
     if (originForbidden(c)) {
       return c.json({ error: "forbidden origin" }, 403);
@@ -693,12 +692,12 @@ export function workflowRunWebSocketHandlers(deps: {
         }
         return;
       }
-      // W4.6 — `paused` is a non-terminal state too. The run is still in
-      // flight, waiting on POST /resume; a late subscriber needs the WS
-      // open so the resumed node's `node_done` reaches them. Snapshot
-      // rehydration (handled in the hook) already paints the approval
-      // callout from `getWorkflowRun`, so we don't need to replay the
-      // approval_awaiting frame on reconnect.
+      // `paused` is a non-terminal state too. The run is still in flight,
+      // waiting on POST /resume; a late subscriber needs the WS open so the
+      // resumed node's `node_done` reaches them. Snapshot rehydration
+      // (handled in the hook) already paints the approval callout from
+      // `getWorkflowRun`, so we don't need to replay the approval_awaiting
+      // frame on reconnect.
       if (run.status !== "running" && run.status !== "paused") {
         sendTerminal(ws, run.status);
         return;
@@ -713,7 +712,7 @@ export function workflowRunWebSocketHandlers(deps: {
         sendTerminal(ws, after.status);
       }
     },
-    // v1: clients are pure subscribers; ignore any inbound frames. A future
+    // Clients are pure subscribers; ignore any inbound frames. A future
     // resume / replay protocol would parse here.
     message(_ws, _raw) {},
     close(ws) {
@@ -734,9 +733,9 @@ interface ExecuteRunArgs {
   activeRuns: ActiveRuns;
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
-  // W4.6 — per-run pending approval map shared with the route's POST /resume
-  // and DELETE handlers. The route owns the lifecycle; this function builds
-  // the closures that populate / drain it as the executor pauses and resumes.
+  // Per-run pending approval map shared with the route's POST /resume and
+  // DELETE handlers. The route owns the lifecycle; this function builds the
+  // closures that populate / drain it as the executor pauses and resumes.
   pendingApprovals: Map<string, PendingApproval>;
 }
 
@@ -763,11 +762,11 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   const nodeStart = new Map<string, string>();
   const nodeAccumulators = new Map<string, ReturnType<typeof createContentPartsAccumulator>>();
 
-  // W4.6 — pause-and-await callback for the approval handler. Writes the
-  // 'paused' run status + 'awaiting' node row so a page-reload mid-pause
-  // rehydrates the approval callout from the snapshot, broadcasts the
-  // approval_awaiting WS frame for live clients, and returns a Promise the
-  // route's POST /resume (or DELETE / abortAll) settles.
+  // Pause-and-await callback for the approval handler. Writes the 'paused'
+  // run status + 'awaiting' node row so a page-reload mid-pause rehydrates
+  // the approval callout from the snapshot, broadcasts the approval_awaiting
+  // WS frame for live clients, and returns a Promise the route's POST /resume
+  // (or DELETE / abortAll) settles.
   const awaitApproval: AwaitApproval = (nodeRunId, nodeId, message, signal) =>
     new Promise<string>((resolve, reject) => {
       const settle = {
@@ -835,9 +834,9 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       });
     });
 
-  // W4.7 — cancel-node side effect. The handler returns `failed` for the
-  // cancel node itself; this callback writes 'cancelled' onto the run row
-  // and trips the AbortController so downstream layers skip.
+  // Cancel-node side effect. The handler returns `failed` for the cancel
+  // node itself; this callback writes 'cancelled' onto the run row and
+  // trips the AbortController so downstream layers skip.
   const requestCancel: RequestCancel = async (cancelRunId, reason) => {
     try {
       store.updateRunStatus({

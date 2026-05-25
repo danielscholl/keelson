@@ -45,8 +45,8 @@ interface TraceRowProps {
   // Live = workflow run not yet terminal. Drives the typing dots + the
   // "tools block stays open while streaming" behavior shared with chat.
   streaming: boolean;
-  // W4.6 — submit/abandon callbacks; only set on the awaiting node so the
-  // composer renders inline. Both undefined → no composer (terminal node).
+  // Submit/abandon callbacks; only set on the awaiting node so the composer
+  // renders inline. Both undefined → no composer (terminal node).
   onSubmitApproval?: (text: string) => Promise<void>;
   onAbandon?: () => Promise<void>;
 }
@@ -97,7 +97,7 @@ function TraceRow({ schema, view, streaming, onSubmitApproval, onAbandon }: Trac
         <span>{schema.id}</span>
         {chip && <span className={`node-type ${chip.className}`}>{chip.label}</span>}
         {status === "running" && (
-          <span className="typing-dots" aria-label="streaming">
+          <span className="typing-dots" role="img" aria-label="streaming">
             <span />
             <span />
             <span />
@@ -152,8 +152,8 @@ export interface RunTraceProps {
   nodes: Record<string, NodeView>;
   // True while the run is still streaming; flips false on run_done.
   streaming: boolean;
-  // W4.6 — paused approval node id + interaction callbacks. When the
-  // awaiting node renders, its row gets the inline ApprovalComposer.
+  // Paused approval node id + interaction callbacks. When the awaiting
+  // node renders, its row gets the inline ApprovalComposer.
   awaitingNodeId?: string;
   onSubmitApproval?: (text: string) => Promise<void>;
   onAbandon?: () => Promise<void>;

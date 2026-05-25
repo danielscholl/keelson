@@ -27,9 +27,9 @@ import {
 } from "../ws.ts";
 
 // Sentinel used to hide a seeded-conversation kickoff turn that the SPA
-// auto-sends. v0 has no seed flows yet — this stays as an exact-match
-// sentinel for the legacy `seeded` check; a real value would override it
-// once seed flows ship.
+// auto-sends. No seed flows ship yet — this stays as an exact-match sentinel
+// for the legacy `seeded` check; a real value would override it once seed
+// flows ship.
 const OPENING_PROMPT = "__keelson_seeded_opening_prompt__";
 
 import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";

@@ -22,11 +22,11 @@ import { z } from "zod";
  *   - GitHub: `keelson-rib-<name>`
  *   - path:   `packages/rib-<name>/` (in-tree, when bundled)
  *
- * Activation in v0.1 is embedder-wired: the composition root imports the
- * rib package and passes it to `bootstrapRibs({ available })`. The
- * `KEELSON_RIBS` env var (comma-separated) filters which manifest entries
- * actually activate; unset means activate all of them. Dynamic discovery
- * from `node_modules/@keelson/rib-*` is reserved for a follow-up release.
+ * Activation is embedder-wired: the composition root imports the rib package
+ * and passes it to `bootstrapRibs({ available })`. The `KEELSON_RIBS` env var
+ * (comma-separated) filters which manifest entries actually activate; unset
+ * means activate all of them. Dynamic discovery from
+ * `node_modules/@keelson/rib-*` is reserved for a follow-up release.
  */
 
 // Rib IDs cross process boundaries via the KEELSON_RIBS env var and the
@@ -78,7 +78,7 @@ export interface RibContext {
 //
 // All lifecycle hooks are optional; a rib can implement any subset.
 // `composeBundle` is reserved for the future snapshot-infra capability and
-// is a no-op in v0 — declare it on your rib if you want forward-compat.
+// is a no-op today — declare it on your rib if you want forward-compat.
 export interface Rib {
   // Stable identifier matching the package basename
   // (e.g. "my-rib" → @keelson/rib-my-rib). Gated by KEELSON_RIBS.

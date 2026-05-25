@@ -21,9 +21,9 @@ export interface CreateRunInput {
   workflowName: string;
   inputs: Record<string, string>;
   startedAt: string;
-  // Phase 4 W4.5: every run is linked to a chat conversation at create-time.
-  // Nullable on the row to tolerate FK SET NULL after the user deletes the
-  // conversation, but the create path always sets it.
+  // Every run is linked to a chat conversation at create-time. Nullable on
+  // the row to tolerate FK SET NULL after the user deletes the conversation,
+  // but the create path always sets it.
   conversationId: string;
 }
 
@@ -54,9 +54,9 @@ export interface WorkflowStore {
   // Drives the Workflows-nav badge: caller polls for `paused` rows so other
   // tabs can show a pending-input count without subscribing to every run's WS.
   listRunsByStatus(status: WorkflowRunStatus): WorkflowRunSummary[];
-  // Phase 4.x — hard-delete a terminal run. FK CASCADE on
-  // workflow_node_outputs handles the per-node rows. The route layer is
-  // responsible for the linked conversation (FK is SET NULL, not CASCADE).
+  // Hard-delete a terminal run. FK CASCADE on workflow_node_outputs handles
+  // the per-node rows. The route layer is responsible for the linked
+  // conversation (FK is SET NULL, not CASCADE).
   deleteRun(runId: string): boolean;
   // Used by the chat-side cascade: when a conversation is deleted, the
   // handler looks up the linked run (1:1 via the UNIQUE index) so it can
@@ -133,8 +133,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   // prior process that crashed or was killed before the shutdown drain could
   // mark them terminal. Without this sweep they'd be stuck indefinitely
   // (graceful shutdown only catches the current process; /api/db/reset
-  // is opt-in). W4.6 — `paused` is in-memory only; a server restart loses
-  // the AwaitApproval promise, so we mark those failed too with a clear
+  // is opt-in). `paused` is in-memory only — a server restart loses the
+  // AwaitApproval promise, so we mark those failed too with a clear
   // breadcrumb. Same sweep also lifts the related `workflow_node_outputs`
   // rows out of 'awaiting' so the snapshot stays internally consistent.
   db.exec(

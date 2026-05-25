@@ -11,6 +11,7 @@
 // native binary (docs/architecture.md §4 provider rules).
 
 import type { ToolContext } from "@keelson/shared";
+import { z } from "zod";
 import type { MessageChunk, ModelInfo, ToolDefinition } from "../types.ts";
 
 // Structural — captures only what the provider drives. Keeps this file off a
@@ -174,122 +175,38 @@ export function projectToolsForCopilot(
   }));
 }
 
-// Duck-types the ZodObject and projects each field's type + `.describe()`
-// text + enum / integer / min / max constraints into the JSON Schema the
-// SDK ships to the model. Returns undefined for truly zero-arg tools so the
-// SDK omits the parameters block entirely. Non-ZodObject schemas fall back
-// to a permissive shape; runtime validation in runToolHandler is the actual
-// enforcement layer.
+// Projects a tool's ZodObject input schema into the JSON Schema the SDK ships
+// to the model, using Zod 4's built-in `z.toJSONSchema()`. Returns undefined
+// for truly zero-arg tools so the SDK omits the parameters block entirely.
+// Non-object / non-Zod schemas fall back to a permissive shape; runtime
+// validation in runToolHandler is the actual enforcement layer.
 function deriveCopilotParameters(tool: ToolDefinition): Record<string, unknown> | undefined {
-  const def = (tool.inputSchema as { _def?: { typeName?: string } })._def;
-  if (def?.typeName !== "ZodObject") {
+  const def = (tool.inputSchema as { _def?: { type?: string } })._def;
+  if (def?.type !== "object") {
     return { type: "object", additionalProperties: true };
   }
-  const shape = (tool.inputSchema as { shape?: Record<string, unknown> }).shape;
-  if (!shape || typeof shape !== "object") {
+  let jsonSchema: Record<string, unknown>;
+  try {
+    jsonSchema = z.toJSONSchema(tool.inputSchema as z.ZodType) as Record<string, unknown>;
+  } catch {
     return { type: "object", additionalProperties: true };
   }
-  const fieldNames = Object.keys(shape);
-  if (fieldNames.length === 0) return undefined;
-
-  const properties: Record<string, unknown> = {};
-  const required: string[] = [];
-  for (const [name, fieldSchema] of Object.entries(shape)) {
-    const fieldDef = (fieldSchema as { _def?: { typeName?: string } })._def;
-    const isOptional = fieldDef?.typeName === "ZodOptional" || fieldDef?.typeName === "ZodDefault";
-    const jsonField = zodFieldToJsonSchema(fieldSchema);
-    if (jsonField) properties[name] = jsonField;
-    if (!isOptional) required.push(name);
-  }
-
-  const out: Record<string, unknown> = {
-    type: "object",
-    properties,
-    additionalProperties: false,
-  };
-  if (required.length > 0) out.required = required;
-  return out;
-}
-
-// Minimal Zod → JSON Schema for the field shapes our skills use. Unwraps
-// ZodOptional / ZodDefault / ZodNullable and carries the outermost
-// `.describe()` so both `.optional().describe()` and `.describe().optional()`
-// land on the projected field.
-function zodFieldToJsonSchema(schema: unknown): Record<string, unknown> | undefined {
-  if (!schema || typeof schema !== "object") return undefined;
-
-  let current: unknown = schema;
-  let description: string | undefined;
-  let typeName: string | undefined;
-  let currentDef: ZodDef | undefined;
-
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  while (true) {
-    currentDef = (current as { _def?: ZodDef })._def;
-    if (!currentDef) return undefined;
-    if (description === undefined && currentDef.description) {
-      description = currentDef.description;
-    }
-    typeName = currentDef.typeName;
-    if (typeName === "ZodOptional" || typeName === "ZodDefault" || typeName === "ZodNullable") {
-      current = currentDef.innerType;
-      if (!current) return undefined;
-      continue;
-    }
-    break;
-  }
-
-  switch (typeName) {
-    case "ZodString": {
-      const out: Record<string, unknown> = { type: "string" };
-      if (description) out.description = description;
-      return out;
-    }
-    case "ZodNumber": {
-      const out: Record<string, unknown> = { type: "number" };
-      for (const check of currentDef?.checks ?? []) {
-        if (check.kind === "int") out.type = "integer";
-        if (check.kind === "min" && check.value !== undefined) {
-          out.minimum = check.value;
-        }
-        if (check.kind === "max" && check.value !== undefined) {
-          out.maximum = check.value;
-        }
-      }
-      if (description) out.description = description;
-      return out;
-    }
-    case "ZodBoolean": {
-      const out: Record<string, unknown> = { type: "boolean" };
-      if (description) out.description = description;
-      return out;
-    }
-    case "ZodEnum": {
-      const values = currentDef?.values ?? [];
-      const out: Record<string, unknown> = {
-        type: "string",
-        enum: values,
-      };
-      if (description) out.description = description;
-      return out;
-    }
-    default: {
-      // Unknown / nested shape — permissive rather than dropped.
-      const out: Record<string, unknown> = {};
-      if (description) out.description = description;
-      return out;
-    }
-  }
-}
-
-// Local narrowing shape — no zod runtime import; mirrors the duck-typing
-// in claude/factory.ts.
-interface ZodDef {
-  typeName?: string;
-  description?: string;
-  innerType?: unknown;
-  values?: unknown[];
-  checks?: Array<{ kind: string; value?: number }>;
+  // `$schema` is the JSON Schema draft URI; the SDK doesn't need it.
+  delete jsonSchema.$schema;
+  const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+  const hasNamedProps = !!properties && Object.keys(properties).length > 0;
+  // `z.object({}).passthrough()` / `z.object({}).catchall(...)` project to a
+  // schema with no named properties but `additionalProperties: true` (or a
+  // schema). Omitting `parameters` for those would advertise a zero-arg tool
+  // and silently drop the dynamic keys the rib intends to accept.
+  const additional = jsonSchema.additionalProperties;
+  const patternProps = jsonSchema.patternProperties as Record<string, unknown> | undefined;
+  const allowsDynamicKeys =
+    additional === true ||
+    (typeof additional === "object" && additional !== null) ||
+    (!!patternProps && Object.keys(patternProps).length > 0);
+  if (!hasNamedProps && !allowsDynamicKeys) return undefined;
+  return jsonSchema;
 }
 
 async function runToolHandler(

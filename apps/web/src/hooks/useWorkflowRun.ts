@@ -33,7 +33,7 @@ export interface NodeView {
   // model as Chat.tsx's `thinking` per-message field.
   thinkingText: string;
   logLines: string[];
-  // W4.6 — populated when an approval node is paused. Live source: the
+  // Populated when an approval node is paused. Live source: the
   // `approval_awaiting` frame. Snapshot source: the persisted `outputText`
   // of an `awaiting` node row (the route layer writes the message there
   // at pause time so a page-reload mid-pause can rehydrate the callout).
@@ -58,14 +58,14 @@ export interface RunView {
   error?: string | null;
   // Surfaces `run_warning` frames so the UI can toast them.
   warnings: { nodeId: string | null; message: string }[];
-  // Phase 4 W4.5: the linked chat conversation id, hydrated from the run
-  // snapshot. Null while loading and for legacy pre-W4.5 runs (impossible
+  // Linked chat conversation id, hydrated from the run snapshot. Null while
+  // loading and for legacy runs that predate the conversation link (impossible
   // in practice once migration 12 has run, but defensive against fixtures).
   conversationId?: string | null;
-  // W4.6 — derived: first node currently in `awaiting` status (DAG order).
-  // Computed at the hook boundary alongside `status`. Multiple parallel
-  // approval nodes can be open simultaneously; this surfaces the first one.
-  // The UI can iterate `nodes` directly when it needs the exhaustive set.
+  // Derived: first node currently in `awaiting` status (DAG order). Computed
+  // at the hook boundary alongside `status`. Multiple parallel approval nodes
+  // can be open simultaneously; this surfaces the first one. The UI can
+  // iterate `nodes` directly when it needs the exhaustive set.
   awaitingNodeId?: string;
 }
 
@@ -78,9 +78,9 @@ export interface UseWorkflowRunResult {
   error: string | null;
   wsState: ReconnectingWsState;
   cancel: () => Promise<void>;
-  // W4.6 — set when the executor pauses at an approval node. Stays defined
-  // across reconnects via snapshot rehydration (the node row's
-  // status='awaiting' carries the message in outputText).
+  // Set when the executor pauses at an approval node. Stays defined across
+  // reconnects via snapshot rehydration (the node row's status='awaiting'
+  // carries the message in outputText).
   awaitingNodeId?: string;
   resume: (nodeId: string, text: string) => Promise<void>;
 }
@@ -173,11 +173,11 @@ function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
     // Bash nodes persist their stdout in `outputText` and leave
     // `contentParts` null; the WS `node_log` frames aren't replayed on
     // reload, so we lift outputText into `logLines` when contentParts is
-    // empty. Prompt nodes (W3) populate `contentParts` and would already
-    // render their assistant text from those blocks — the outputText
-    // there would just duplicate it. W4.6 — an `awaiting` row's outputText
-    // is the approval message (not stdout), so it lifts into awaitingMessage
-    // and NOT into logLines.
+    // empty. Prompt nodes populate `contentParts` and would already render
+    // their assistant text from those blocks — the outputText there would
+    // just duplicate it. An `awaiting` row's outputText is the approval
+    // message (not stdout), so it lifts into awaitingMessage and NOT into
+    // logLines.
     const isAwaiting = status === "awaiting";
     const hasContentParts = row.contentParts !== null && row.contentParts.length > 0;
     const hydratedLogLines =
@@ -227,8 +227,8 @@ const TERMINAL_RUN_STATUSES_LOCAL: ReadonlySet<string> = new Set([
 // Snapshot-vs-live run-status reconciliation used during reconnect hydration.
 // Tabular form:
 //   snapshot terminal     → snapshot (server persisted final state)
-//   snapshot paused       → snapshot (W4.6: missed approval_awaiting frame
-//                            would otherwise leave UI thinking it's running)
+//   snapshot paused       → snapshot (missed approval_awaiting frame would
+//                            otherwise leave UI thinking it's running)
 //   live loading/unknown  → snapshot (live hasn't progressed past mount)
 //   live in any other     → live    (WS frames newer than the REST fetch)
 function chooseRunStatus(live: RunView["status"], snapshot: RunView["status"]): RunView["status"] {
@@ -261,8 +261,8 @@ function deriveExposedRun(stored: RunView, nodes: Record<string, NodeView>): Run
 }
 
 // Subscribes to a workflow run's live stream + persists view state. Used by
-// `<RunView>` (W4) and reusable as-is by the chat-side workflow surface
-// (W4.5) — the hook doesn't care which UI consumes its outputs.
+// `<RunView>` and reusable as-is by the chat-side workflow surface — the
+// hook doesn't care which UI consumes its outputs.
 export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   const [run, setRun] = useState<RunView>(() => ({
     runId: runId ?? "",
@@ -318,10 +318,10 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
           // Snapshot vs. live status precedence:
           //   1. Snapshot terminal (succeeded/failed/cancelled) — wins
           //      always; the server persisted a final state.
-          //   2. Snapshot paused (W4.6) — wins over live running. A
-          //      reconnect gap can miss the `approval_awaiting` frame
-          //      that would have flipped live; the REST snapshot is the
-          //      only signal left and the UI must enable the composer.
+          //   2. Snapshot paused — wins over live running. A reconnect gap
+          //      can miss the `approval_awaiting` frame that would have
+          //      flipped live; the REST snapshot is the only signal left
+          //      and the UI must enable the composer.
           //   3. Live in a real status (not loading/unknown) — wins,
           //      since it reflects WS frames newer than the snapshot fetch.
           //   4. Otherwise — snapshot.
@@ -398,10 +398,10 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
     await cancelWorkflowRun(runId);
   }, [runId]);
 
-  // W4.6 — resume the paused approval node. The server flips run status
-  // back to running and the executor proceeds; we don't optimistic-update
-  // here because the next `node_done` (or a snapshot reload) is the source
-  // of truth for what happened.
+  // Resume the paused approval node. The server flips run status back to
+  // running and the executor proceeds; we don't optimistic-update here
+  // because the next `node_done` (or a snapshot reload) is the source of
+  // truth for what happened.
   const resume = useCallback(
     async (nodeId: string, text: string) => {
       if (!runId) return;
@@ -455,11 +455,11 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   //   1. Either side that's terminal wins (snapshot terminal + live still
   //      running is exactly the WS-gap case where the client missed the
   //      node_done frame — snapshot is the only source of truth there).
-  //   2. W4.6 — snapshot `awaiting` beats live `running`. The server only
-  //      writes `awaiting` after opening the pause; if the client missed
-  //      the `approval_awaiting` frame during a reconnect gap, the REST
-  //      snapshot is the only signal that the run paused, and the
-  //      composer must enable. Symmetric to the snapshot-terminal rule.
+  //   2. Snapshot `awaiting` beats live `running`. The server only writes
+  //      `awaiting` after opening the pause; if the client missed the
+  //      `approval_awaiting` frame during a reconnect gap, the REST snapshot
+  //      is the only signal that the run paused, and the composer must
+  //      enable. Symmetric to the snapshot-terminal rule.
   //   3. Otherwise live wins once it left pending; else snapshot.
   // For contentParts / logLines we always pick the longer side, since
   // persistence collapses streamed deltas into compact blocks and either
@@ -476,8 +476,8 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   // from being overwritten by inferred cancellation.
   if (snapTerminal) winningStatus = snapshotSide.status;
   else if (snapshotSide.status === "awaiting" && !TERMINAL_NODE_STATUSES.has(liveSide.status)) {
-    // W4.6 — snapshot says the server has the node paused. Live's
-    // pre-pause `running` (or `pending`) must NOT clobber that.
+    // Snapshot says the server has the node paused. Live's pre-pause
+    // `running` (or `pending`) must NOT clobber that.
     winningStatus = snapshotSide.status;
   } else if (liveTerminal) winningStatus = liveSide.status;
   else if (liveSide.status !== "pending") winningStatus = liveSide.status;
@@ -495,11 +495,10 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   // terminal-only fields (completedAt, durationMs, error) when live is
   // still mid-flight. Choose the side whose status won for those fields.
   const winningSide = winningStatus === liveSide.status ? liveSide : snapshotSide;
-  // W4.6 — when winningStatus is `awaiting`, the approval message must
-  // come from whichever side actually has it (snapshot writes it at pause
-  // time; live only has it if the WS approval_awaiting frame arrived).
-  // Live's spread would otherwise overwrite snapshot's message with
-  // undefined.
+  // When winningStatus is `awaiting`, the approval message must come from
+  // whichever side actually has it (snapshot writes it at pause time; live
+  // only has it if the WS approval_awaiting frame arrived). Live's spread
+  // would otherwise overwrite snapshot's message with undefined.
   const winningAwaitingMessage =
     winningStatus === "awaiting"
       ? (liveSide.awaitingMessage ?? snapshotSide.awaitingMessage)
@@ -625,12 +624,12 @@ function applyFrame(
       return;
 
     case "approval_awaiting":
-      // W4.6 — mark the node awaiting + stash the approval message. The
-      // exposed run.status / awaitingNodeId are derived from this nodes
-      // map (see deriveExposedRun), so a single setNodes call is enough;
-      // no parallel setRun for stored status. The stored run.status only
-      // changes when the server explicitly broadcasts a new run-level
-      // state (run_done, hydrate, etc.).
+      // Mark the node awaiting + stash the approval message. The exposed
+      // run.status / awaitingNodeId are derived from this nodes map (see
+      // deriveExposedRun), so a single setNodes call is enough; no parallel
+      // setRun for stored status. The stored run.status only changes when
+      // the server explicitly broadcasts a new run-level state (run_done,
+      // hydrate, etc.).
       setNodes((prev) => {
         const base = prev[frame.nodeId] ?? emptyNode(frame.nodeId);
         return {
@@ -653,9 +652,9 @@ function applyFrame(
       }));
       // Cancellation propagates to any still-running, pending, OR awaiting
       // node — the server doesn't emit a node_done for nodes the abort
-      // caught mid-flight. W4.6 — `awaiting` is included so a DELETE during
-      // an approval pause clears the callout (otherwise deriveExposedRun
-      // would still surface awaitingNodeId from the lingering row).
+      // caught mid-flight. `awaiting` is included so a DELETE during an
+      // approval pause clears the callout (otherwise deriveExposedRun would
+      // still surface awaitingNodeId from the lingering row).
       if (frame.status === "cancelled") {
         setNodes((prev) => {
           const next: Record<string, NodeView> = { ...prev };

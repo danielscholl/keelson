@@ -89,12 +89,13 @@ export function ToolCallsBlock({ toolCalls, streaming }: ToolCallsBlockProps) {
                 {displayName}
                 <span
                   className={`tool-source-chip tool-source-${family}`}
+                  role="img"
                   aria-label={`tool source: ${familyLabel(family)}`}
                 >
                   {familyLabel(family)}
                 </span>
                 {isRunning ? (
-                  <span className="tool-calls-running-dot" aria-label="running" />
+                  <span className="tool-calls-running-dot" role="img" aria-label="running" />
                 ) : null}
                 {tc.isError ? (
                   <span className="tool-calls-error-badge" title={errorPreview}>

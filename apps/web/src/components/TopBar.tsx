@@ -53,6 +53,7 @@ export function TopBar(props: TopBarProps) {
             {pausedCount > 0 && (
               <span
                 className="nav-pip"
+                role="img"
                 aria-label={`${pausedCount} paused`}
                 title={`${pausedCount} run(s) awaiting input`}
               >

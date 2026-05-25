@@ -11,8 +11,7 @@ export const NODE_HEIGHT = 80;
 // carries terminal states (succeeded / failed / skipped); the executor's
 // `node_started` frame moves a row to `running` and our pre-run state is
 // `pending`. `cancelled` falls out of `run_done.status === "cancelled"`
-// applied to the still-running node. `awaiting` is W4.6 territory but the
-// type is here so the same component renders that future state.
+// applied to the still-running node. `awaiting` covers HITL approval pauses.
 export type NodeViewStatus =
   | "pending"
   | "running"
@@ -126,7 +125,7 @@ export function dagLayout({ nodes, statusByNode, durationByNode }: DagLayoutInpu
 }
 
 // Kahn's algorithm — true when a cycle exists. Mirrors Archon's helper so
-// future W6 schema validation can use the same primitive.
+// future schema validation can reuse the same primitive.
 export function hasCycle(
   nodeIds: ReadonlySet<string>,
   edges: ReadonlyArray<{ source: string; target: string }>,
