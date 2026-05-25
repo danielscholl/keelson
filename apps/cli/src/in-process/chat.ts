@@ -48,8 +48,8 @@ function buildOneShotSystemPrompt(): string | undefined {
 // one that persists.
 export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadlessResult> {
   bootstrapCliProviders();
-  // v0: no in-tree ribs; in-process tool catalog is empty. Operators
-  // wanting chat-side tools embed their ribs from a custom entry point.
+  // No in-tree ribs; in-process tool catalog is empty. Operators wanting
+  // chat-side tools embed their ribs from a custom entry point.
   bootstrapCliTools();
   const providerId = opts.provider ?? pickDefaultProvider();
   if (!isRegisteredProvider(providerId)) {

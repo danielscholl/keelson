@@ -9,10 +9,10 @@ import { useToast } from "../Toast.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 
 // Map the wire-schema run status onto the badge's NodeViewStatus surface.
-// W4.6 — `paused` maps to `awaiting` (same magenta accent the per-node
-// awaiting badge uses; cf. statusBadgeStatus in RunView.tsx). Without this
-// explicit mapping, paused runs would render as `cancelled` and look
-// terminated in history even though they're still resumable.
+// `paused` maps to `awaiting` (same magenta accent the per-node awaiting
+// badge uses; cf. statusBadgeStatus in RunView.tsx). Without this explicit
+// mapping, paused runs would render as `cancelled` and look terminated in
+// history even though they're still resumable.
 function badgeStatusFor(s: WorkflowRunStatus): NodeViewStatus | "running" {
   switch (s) {
     case "running":
@@ -53,8 +53,8 @@ function formatStarted(startedAt: string): string {
 
 export interface RecentRunsProps {
   // Catalog drives this — fanning out one listRuns() per workflow is
-  // wasteful but matches the W2 server surface (no aggregate endpoint yet)
-  // and avoids needing a Phase 4.x backend change for v1.
+  // wasteful but matches the current server surface (no aggregate endpoint
+  // yet) and avoids needing a backend change for the first cut.
   workflows: ReadonlyArray<WorkflowSummary>;
   onOpenRun: (runId: string, workflowName: string) => void;
   // Optional refresh ticker so a freshly-started run shows up in the list.
@@ -114,8 +114,7 @@ export function RecentRuns({
           // Newest first by startedAt; the column is ISO so string sort works.
           return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0;
         });
-        // v1 keeps the table small — top 20 entries by recency, matching
-        // mockup density. Phase 4.x adds sortable columns + pagination per W6.
+        // Keep the table small — top 20 entries by recency.
         setRows(merged.slice(0, 20));
         setFailedWorkflows(failed);
       })

@@ -59,8 +59,8 @@
         "useExhaustiveDependencies": "warn"
       },
       "a11y": {
-        "useAriaPropsSupportedByRole": "warn",
-        "useSemanticElements": "warn",
+        "useAriaPropsSupportedByRole": "error",
+        "useSemanticElements": "error",
         "noSvgWithoutTitle": "warn"
       }
     }
@@ -71,7 +71,8 @@
       "linter": {
         "rules": {
           "suspicious": {
-            "noExplicitAny": "off"
+            "noExplicitAny": "off",
+            "noTemplateCurlyInString": "off"
           },
           "style": {
             "useImportType": "off"

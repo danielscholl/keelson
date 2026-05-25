@@ -1,24 +1,71 @@
 {
   "name": "@keelson/shared",
   "version": "0.1.0",
-  "private": true,
+  "description": "Shared types, zod schemas, and the Rib extension contract for the Keelson local agent harness.",
   "license": "Apache-2.0",
-  "type": "module",
-  "main": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts",
-    "./chat": "./src/chat.ts",
-    "./exec": "./src/exec.ts",
-    "./tools": "./src/tools.ts"
+  "author": "Daniel Scholl",
+  "homepage": "https://github.com/danielscholl/keelson#readme",
+  "bugs": {
+    "url": "https://github.com/danielscholl/keelson/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielscholl/keelson.git",
+    "directory": "packages/shared"
+  },
+  "keywords": [
+    "keelson",
+    "rib",
+    "agent",
+    "harness",
+    "workflow"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./chat": {
+      "bun": "./src/chat.ts",
+      "types": "./dist/chat.d.ts",
+      "default": "./dist/chat.js"
+    },
+    "./exec": {
+      "bun": "./src/exec.ts",
+      "types": "./dist/exec.d.ts",
+      "default": "./dist/exec.js"
+    },
+    "./tools": {
+      "bun": "./src/tools.ts",
+      "types": "./dist/tools.d.ts",
+      "default": "./dist/tools.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "bun run build"
   },
   "dependencies": {
-    "zod": "^3.23.8"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.1.14"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -23,6 +23,7 @@ export function ThemePicker({ value, onChange }: ThemePickerProps) {
         const Icon = opt.icon;
         const active = value === opt.value;
         return (
+          // biome-ignore lint/a11y/useSemanticElements: custom-styled radio inside the parent role="radiogroup"; <input type="radio"> can't carry the inline SVG glyph + active background the design needs
           <button
             key={opt.value}
             type="button"

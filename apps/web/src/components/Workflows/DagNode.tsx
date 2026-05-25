@@ -10,9 +10,8 @@ function formatDuration(ms?: number | null): string {
   return `${minutes}m ${seconds}s`;
 }
 
-// Maps node type → label + class. Falls back to a generic chip for
-// unknown types so future node kinds (W4.6 `approval`) need no UI work
-// beyond a CSS rule.
+// Maps node type → label + class. Falls back to a generic chip for unknown
+// types so future node kinds need no UI work beyond a CSS rule.
 function typeChip(type: string): { className: string; label: string } {
   const lower = type.toLowerCase();
   if (lower === "bash") return { className: "bash", label: "BASH" };

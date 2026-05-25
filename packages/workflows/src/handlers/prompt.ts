@@ -7,12 +7,12 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 /**
- * `prompt` NodeHandler (W3). Opens an `IAgentProvider` session per node, fans
- * the streamed chunks back to the run consumer via `ctx.emit`, accumulates the
+ * `prompt` NodeHandler. Opens an `IAgentProvider` session per node, fans the
+ * streamed chunks back to the run consumer via `ctx.emit`, accumulates the
  * assistant text into `NodeResult.output.text`, and surfaces `failed` on
  * provider errors / timeouts / aborts.
  *
- * Architectural rules (docs/architecture.md §3 / §5):
+ * Architectural rules:
  *
  * - This package has NO dependency on apps/server. The provider, tool registry,
  *   and lifecycle hooks are injected via factory options so the handler stays
@@ -87,7 +87,7 @@ export interface MakePromptHandlerOptions {
   denylist?: readonly string[];
   /** Per-node timeout in milliseconds. Defaults to 10 minutes. */
   timeoutMs?: number;
-  /** Memory hook seam (Phase 4.5 plugs in here). v1 default is no-ops. */
+  /** Memory hook seam. Default is no-ops; reserved for the future memory layer. */
   lifecycle?: PromptHandlerLifecycle;
   /** Optional system prompt to seed every prompt-node session. */
   systemPrompt?: string;
@@ -110,7 +110,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
   return {
     type: "prompt",
     async handle(node, ctx): Promise<NodeResult> {
-      // Lifecycle: beforeNode (W5 memory recall plugs in here). Errors here
+      // Lifecycle: beforeNode (memory recall plugs in here). Errors here
       // MUST NOT take the node down — the seam is a hook, not an oracle.
       try {
         await lifecycle.beforeNode?.({ runId: ctx.runId, nodeId: ctx.nodeId });

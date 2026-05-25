@@ -7,15 +7,15 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 /**
- * Memory layer hook seam (Phase 4 / W5).
+ * Memory layer hook seam.
  *
- * Declaration-only placeholder. Phase 4.5 fills the contract in per
- * `docs/agent-memory.md` (schema axes, provenance, use-policy, recall/
- * writeback). v1 only ships the type so the workflow executor's
- * `NodeContext.memory?: MemoryTools` slot and the prompt-handler factory's
- * `lifecycle.{beforeNode, afterNode}` hooks have a name to bind to.
+ * Declaration-only placeholder — only the type ships today so the workflow
+ * executor's `NodeContext.memory?: MemoryTools` slot and the prompt-handler
+ * factory's `lifecycle.{beforeNode, afterNode}` hooks have a name to bind to.
+ * A future memory layer fills in the contract (schema axes, provenance,
+ * use-policy, recall/writeback).
  */
 
 export interface MemoryTools {
-  readonly __phase: "4.5-pending";
+  readonly __phase: "pending";
 }

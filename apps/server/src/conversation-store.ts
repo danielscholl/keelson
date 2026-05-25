@@ -52,9 +52,9 @@ interface ConvRow {
   seedSystemPrompt: string | null;
   createdAt: string;
   updatedAt: string;
-  // Populated by the LEFT JOIN against workflow_runs in list/get (Phase 4
-  // W4.5). NULL for ordinary chat conversations and for workflow conversations
-  // whose run row has been deleted (FK SET NULL via DELETE cascade).
+  // Populated by the LEFT JOIN against workflow_runs in list/get. NULL for
+  // ordinary chat conversations and for workflow conversations whose run row
+  // has been deleted (FK SET NULL via DELETE cascade).
   workflow_run_id: string | null;
   workflow_name: string | null;
   workflow_status: string | null;

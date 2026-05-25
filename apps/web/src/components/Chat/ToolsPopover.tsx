@@ -12,7 +12,7 @@ interface ToolsPopoverProps {
   // pattern as ModelPickerPopover / ReasoningEffortPopover.
   popoverId: string;
   // Tools surfaced by GET /api/tools. The popover groups by inferred family
-  // and renders read-only rows; v1 doesn't act on click.
+  // and renders read-only rows; click is a no-op today.
   tools: RegisteredToolInfo[];
 }
 
@@ -111,6 +111,7 @@ export function ToolsPopover({ popoverId, tools }: ToolsPopoverProps) {
       id={popoverId}
       popover="auto"
       className="tools-popover"
+      role="dialog"
       aria-label="Available tools"
     >
       <div className="tools-popover-body">

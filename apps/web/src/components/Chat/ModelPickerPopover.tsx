@@ -232,6 +232,7 @@ export function ModelPickerPopover({
       // the browser. Inline top/left set in the toggle handler.
       popover="auto"
       className="model-picker-popover"
+      role="dialog"
       aria-label="Pick a model"
     >
       <div className="model-picker-popover-search-wrap">
@@ -411,6 +412,7 @@ function Row({
         {info.costTier && (
           <span
             className={`model-picker-popover-pick-meta model-picker-popover-pick-cost cost-${info.costTier}`}
+            role="img"
             aria-label={`Cost tier: ${info.costTier}`}
           >
             {COST_LABEL[info.costTier]}

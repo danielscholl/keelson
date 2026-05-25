@@ -11,8 +11,9 @@
  * iteration, dispatches to the injected prompt handler, and stops on `until`
  * signal, on `max_iterations`, or on a failed iteration.
  *
- * Interactive loops (`loop.interactive === true`) are rejected — pause-between-
- * iterations needs the W4.6 metadata-approval pipeline and is its own slice.
+ * Interactive loops (`loop.interactive === true`) are rejected —
+ * pause-between-iterations needs the metadata-approval pipeline and is its
+ * own slice.
  */
 
 import { type NodeHandler, type NodeResult, resolveBody } from "../executor.ts";

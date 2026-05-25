@@ -225,11 +225,11 @@ export function projectToolsForClaude(
 }
 
 // SDK expects AnyZodRawShape (`{ key: ZodType }`), NOT a full z.object().
-// Duck-typed via `_def.typeName === "ZodObject"` + `.shape` to keep this
-// file zod-runtime-free. Non-object schemas fall back to an empty shape.
+// Duck-typed via `_def.type === "object"` + `.shape` to keep this file
+// zod-runtime-free. Non-object schemas fall back to an empty shape.
 function extractZodObjectShape(schema: ToolDefinition["inputSchema"]): Record<string, unknown> {
-  const def = (schema as { _def?: { typeName?: string } })._def;
-  if (def?.typeName !== "ZodObject") return {};
+  const def = (schema as { _def?: { type?: string } })._def;
+  if (def?.type !== "object") return {};
   const shape = (schema as { shape?: Record<string, unknown> }).shape;
   if (!shape || typeof shape !== "object") return {};
   return shape;

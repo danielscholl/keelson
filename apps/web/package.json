@@ -12,8 +12,12 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@keelson/shared": "workspace:*",
-    "@dagrejs/dagre": "^2.0.0",
+    "@shikijs/core": "^4.1.0",
+    "@shikijs/engine-oniguruma": "^4.1.0",
+    "@shikijs/langs": "^4.1.0",
+    "@shikijs/themes": "^4.1.0",
     "@xyflow/react": "^12.10.0",
     "anser": "^2.3.5",
     "react": "^19.0.0",
@@ -26,7 +30,7 @@
     "@types/bun": "^1.1.14",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.3"
+    "@vitejs/plugin-react": "^6.0.2",
+    "vite": "^8.0.14"
   }
 }

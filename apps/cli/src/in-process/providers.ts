@@ -6,9 +6,9 @@
 // so the CLI's --server-down chat path can drive copilot / claude with the
 // same keyring-backed credentials.
 //
-// Keelson v0 ships no in-tree ribs — the in-process tool catalog is empty
-// by default. Operators that want chat-side tools register them by setting
-// KEELSON_RIBS and embedding their rib packages from a custom entry point.
+// No in-tree ribs ship — the in-process tool catalog is empty by default.
+// Operators that want chat-side tools register them by setting KEELSON_RIBS
+// and embedding their rib packages from a custom entry point.
 
 import {
   getProviderInfoList,
@@ -110,10 +110,9 @@ export function pickDefaultProvider(): string {
 
 export { isRegisteredProvider };
 
-// In-process rib bootstrap. v0 ships no in-tree ribs, so the registered
-// set is always empty. The function returns the same shape as
-// bootstrapCliProviders so future versions can introduce dynamic rib
-// loading without changing callers.
+// In-process rib bootstrap. No in-tree ribs ship, so the registered set is
+// always empty. The function returns the same shape as bootstrapCliProviders
+// so future versions can introduce dynamic rib loading without changing callers.
 export function bootstrapCliTools(): BootstrapResult {
   return { registered: [] };
 }

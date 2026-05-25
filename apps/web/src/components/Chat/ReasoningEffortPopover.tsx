@@ -103,6 +103,7 @@ export function ReasoningEffortPopover({
       id={popoverId}
       popover="auto"
       className="reasoning-effort-popover"
+      role="dialog"
       aria-label="Pick a reasoning effort tier"
     >
       <div className="reasoning-effort-popover-body">

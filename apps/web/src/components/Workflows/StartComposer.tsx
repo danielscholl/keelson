@@ -9,8 +9,8 @@
 import { type KeyboardEvent, useState } from "react";
 
 export interface StartComposerProps {
-  // Empty → run with no args. The input remains optional even after W6
-  // lands named inputs; that flow will mount a different composer.
+  // Empty → run with no args. The input remains optional; future named-input
+  // flows will mount a different composer.
   onStart: (args: string) => Promise<void> | void;
   // True between the Start click and the API returning a runId — keeps
   // the button latched and the input read-only so a double-fire can't

@@ -35,7 +35,7 @@ function decorateEdges(edges: ReadonlyArray<Edge<{ status: NodeViewStatus }>>): 
 function DagGraphInner({ nodes, statusByNode, durationByNode }: DagGraphProps) {
   // Re-layout when the topology changes or any status flips. Status alone
   // doesn't change positions but does flow into nodeData/edgeData. Dagre
-  // is fast enough on the 2-7 nodes typical for v1 workflows that we
+  // is fast enough on the 2-7 nodes typical for current workflows that we
   // don't bother memoizing the positions independently.
   const { nodes: rfNodes, edges: rfEdges } = useMemo(
     () => dagLayout({ nodes, statusByNode, durationByNode }),

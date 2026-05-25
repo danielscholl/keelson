@@ -118,9 +118,9 @@ export function chatRoutes(
   });
 
   app.get("/api/conversations", (c) =>
-    // Workflow conversations (Phase 4 W4.5) persist for run history but are
-    // surfaced only via the Workflows tab; hide them from the chat sidebar so
-    // the two mental models stay separated.
+    // Workflow conversations persist for run history but are surfaced only
+    // via the Workflows tab; hide them from the chat sidebar so the two
+    // mental models stay separated.
     c.json({
       conversations: store.list().filter((conv) => conv.providerId !== "workflow"),
     }),
@@ -141,9 +141,9 @@ export function chatRoutes(
       return c.json({ error: `unknown provider '${parsed.data.providerId}'` }, 400);
     }
     // The synthetic `workflow` provider is registered for run-as-conversation
-    // (Phase 4 W4.5) but is non-chat. Reject manual creation so a stray client
-    // can't allocate a row that the chat surface will then try to send turns
-    // through (the provider's sendQuery throws on use).
+    // but is non-chat. Reject manual creation so a stray client can't allocate
+    // a row that the chat surface will then try to send turns through (the
+    // provider's sendQuery throws on use).
     if (parsed.data.providerId === "workflow") {
       return c.json(
         {
@@ -276,8 +276,8 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     return;
   }
   // Refuse chat turns against workflow-linked conversations. The UI disables
-  // the composer for these in v1 (W4.6 will lift that for HITL approval, but
-  // through POST /api/workflows/runs/:runId/resume, not this WS path).
+  // the composer for these; HITL approval flows through POST
+  // /api/workflows/runs/:runId/resume, not this WS path.
   if (conv.providerId === "workflow") {
     deps.send(
       errorFrame(
@@ -339,7 +339,6 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   const acc = createContentPartsAccumulator();
   let streamFailed = false;
 
-  // v1 sends every registered tool; per-conversation filtering TBD.
   const tools = getRegisteredTools();
 
   const systemPromptParts = [conv.seedSystemPrompt].filter(
