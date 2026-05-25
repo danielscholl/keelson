@@ -1,0 +1,265 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License").
+
+import type { WorkflowFrame } from "@keelson/shared";
+import type { RunStreamEvent } from "@keelson/workflows";
+
+import { attachRun, HttpError, isServerDownError, startRun } from "../http/workflow-client.ts";
+import { runHeadless, WorkflowNotFoundError } from "../in-process/run-workflow.ts";
+import { probeServer } from "../server-probe.ts";
+import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NOT_FOUND, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
+import { emit } from "../output.ts";
+
+export interface WorkflowRunOptions {
+  json: boolean;
+  inputs: string[];
+  // commander encodes `--watch` and `--no-watch` into the same `watch`
+  // field — `true`, `false`, or `undefined` for "not specified". The
+  // resolver below treats `undefined` as "auto from TTY".
+  watch?: boolean;
+  provider?: string;
+  baseUrl?: string;
+}
+
+function parseInputs(pairs: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of pairs) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0) {
+      throw new Error(`invalid --inputs value '${raw}'; expected 'key=value'`);
+    }
+    const key = raw.slice(0, eq);
+    out[key] = raw.slice(eq + 1);
+  }
+  return out;
+}
+
+// `--watch` defaults to true when stdout is a TTY (mirrors git's pager
+// heuristic) and false on a pipe so `--json` streams cleanly into another
+// tool. Explicit `--watch` / `--no-watch` always win — commander encodes
+// `--no-watch` as `watch: false`, so the explicit-false check has to be
+// strict (a missing flag is undefined, not false).
+function resolveWatch(opts: WorkflowRunOptions): boolean {
+  if (opts.watch === false) return false;
+  if (opts.watch === true) return true;
+  return process.stdout.isTTY === true;
+}
+
+// Format executor-emitted events (in-process path). Has access to
+// `event.result` and `event.summary` because the executor's RunStreamEvent
+// is the richer shape; the HTTP/WS wire frame is a sibling type below.
+function formatHumanEvent(event: RunStreamEvent): string {
+  switch (event.type) {
+    case "run_started":
+      return `▶ run ${event.runId.slice(0, 8)} (${event.workflowName})`;
+    case "node_started":
+      return `  · ${event.nodeId} …`;
+    case "node_done": {
+      const icon = event.result.status === "succeeded" ? "✓" : event.result.status === "skipped" ? "○" : "✗";
+      const err = event.result.error ? ` — ${event.result.error}` : "";
+      return `  ${icon} ${event.nodeId}${err}`;
+    }
+    case "node_event":
+      if (event.event.type === "node_log") return `    ${event.event.line}`;
+      if (event.event.type === "node_warning") return `    warning: ${event.event.message}`;
+      return "";
+    case "run_warning":
+      return `! ${event.message}`;
+    case "run_done":
+      return `■ ${event.status} (${(event.summary.completedAtMs - event.summary.startedAtMs)}ms)`;
+    default:
+      return "";
+  }
+}
+
+// Format wire frames from the server WS. Shape is workflowFrameSchema in
+// @keelson/shared — node_done is flat (status+error at top level, no
+// nested result), run_done carries no summary, and node_log / node_chunk
+// are top-level events instead of being wrapped in `node_event`.
+function formatWorkflowFrame(frame: WorkflowFrame): string {
+  switch (frame.type) {
+    case "run_started":
+      return `▶ run ${frame.runId.slice(0, 8)} (${frame.workflowName})`;
+    case "node_started":
+      return `  · ${frame.nodeId} …`;
+    case "node_done": {
+      const icon = frame.status === "succeeded" ? "✓" : frame.status === "skipped" ? "○" : "✗";
+      const err = frame.error ? ` — ${frame.error}` : "";
+      return `  ${icon} ${frame.nodeId}${err}`;
+    }
+    case "node_log":
+      return `    ${frame.line}`;
+    case "node_chunk":
+      return "";
+    case "run_warning":
+      return `! ${frame.message}`;
+    case "run_done":
+      return `■ ${frame.status}`;
+    case "approval_awaiting":
+      return `⏸ ${frame.nodeId} awaiting approval — ${frame.message}`;
+    default:
+      return "";
+  }
+}
+
+async function runViaHttp(
+  name: string,
+  inputs: Record<string, string>,
+  baseUrl: string,
+  watch: boolean,
+  json: boolean,
+): Promise<never> {
+  const { runId } = await startRun(baseUrl, name, inputs);
+
+  // Always attach the WS so we can wait for the terminal status — the CLI's
+  // contract is that exit code reflects the run's outcome, so even
+  // --no-watch can't exit until run_done arrives. In --no-watch mode we
+  // just suppress per-event human output (and skip the events array in the
+  // JSON envelope) so scripted callers get a single concise envelope at
+  // the end instead of a stream.
+  const frames: WorkflowFrame[] = [];
+  let terminalStatus: string | null = null;
+  await attachRun({
+    baseUrl,
+    runId,
+    onFrame: (frame) => {
+      if (watch) frames.push(frame);
+      if (frame.type === "run_done") terminalStatus = frame.status;
+      if (watch && !json) {
+        const line = formatWorkflowFrame(frame);
+        if (line) process.stdout.write(line + "\n");
+      }
+    },
+  });
+  if (terminalStatus === null) {
+    // The WS closed before a run_done arrived — server restart, network
+    // blip, or the runId being purged from the store. Don't silently emit
+    // `ok: true, status: null`; scripted callers would misread that as
+    // completion. Surface a transport error and let them retry.
+    emit(
+      {
+        error: `workflow run ${runId} ended without a terminal frame (server unreachable mid-run?)`,
+        code: "WS_NO_TERMINAL",
+      },
+      { json },
+    );
+    process.exit(EXIT_FAIL);
+  }
+  if (json) {
+    emit(
+      {
+        data: {
+          runId,
+          mode: "http",
+          status: terminalStatus,
+          ...(watch ? { events: frames } : {}),
+        },
+      },
+      { json },
+    );
+  }
+  process.exit(terminalStatus === "succeeded" ? EXIT_OK : EXIT_FAIL);
+}
+
+async function runInProcess(
+  name: string,
+  inputs: Record<string, string>,
+  opts: WorkflowRunOptions,
+  watch: boolean,
+): Promise<never> {
+  // Mirror the HTTP path: only buffer events when --watch is on. Long
+  // prompt workflows emit many node_chunk frames, and a --no-watch
+  // scripted caller doesn't want them in the envelope.
+  const events: RunStreamEvent[] = [];
+  try {
+    const result = await runHeadless({
+      name,
+      inputs,
+      cwd: process.cwd(),
+      provider: opts.provider,
+      onEvent: (ev) => {
+        if (watch) events.push(ev);
+        if (!opts.json && watch) {
+          const line = formatHumanEvent(ev);
+          if (line) process.stdout.write(line + "\n");
+        }
+      },
+    });
+    if (opts.json) {
+      emit(
+        {
+          data: {
+            runId: result.runId,
+            mode: "in-process",
+            status: result.summary.status,
+            summary: result.summary,
+            ...(watch ? { events } : {}),
+          },
+        },
+        { json: true },
+      );
+    }
+    process.exit(result.summary.status === "succeeded" ? EXIT_OK : EXIT_FAIL);
+  } catch (err) {
+    if (err instanceof WorkflowNotFoundError) {
+      emit({ error: err.message, code: "WORKFLOW_NOT_FOUND" }, { json: opts.json });
+      process.exit(EXIT_NOT_FOUND);
+    }
+    // Headless setup errors (unknown provider, fixture parse failures, etc.)
+    // must still produce a JSON envelope in --json mode. Rethrowing would
+    // leak an unstructured Bun stack trace, breaking the machine-readable
+    // contract operators are scripting against.
+    const message = err instanceof Error ? err.message : String(err);
+    emit({ error: message, code: "RUN_FAILED" }, { json: opts.json });
+    process.exit(EXIT_FAIL);
+  }
+}
+
+export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Promise<never> {
+  let inputs: Record<string, string>;
+  try {
+    inputs = parseInputs(opts.inputs);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Malformed `--inputs` is a usage error — exit 2, not 1, so scripts
+    // can distinguish "bad invocation" from "workflow failed at runtime".
+    emit({ error: message, code: "BAD_INPUTS" }, { json: opts.json });
+    process.exit(EXIT_BAD_ARGS);
+  }
+
+  const watch = resolveWatch(opts);
+  const baseUrl = opts.baseUrl;
+  const info = baseUrl ? null : await probeServer();
+  const effectiveBase = baseUrl ?? info?.baseUrl;
+
+  if (effectiveBase) {
+    try {
+      return await runViaHttp(name, inputs, effectiveBase, watch, opts.json);
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 404) {
+        emit({ error: err.message, code: "WORKFLOW_NOT_FOUND" }, { json: opts.json });
+        process.exit(EXIT_NOT_FOUND);
+      }
+      if (isServerDownError(err)) {
+        // Explicit --base-url was given but unreachable. Don't silently
+        // downgrade to in-process — the operator picked HTTP for a reason
+        // (e.g. wanted the SPA to observe the run). Surface NO_SERVER so
+        // scripted callers can decide whether to retry or pivot.
+        emit(
+          {
+            error: `server at ${effectiveBase} is not reachable`,
+            code: "NO_SERVER",
+          },
+          { json: opts.json },
+        );
+        process.exit(EXIT_NO_SERVER);
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      emit({ error: message, code: "RUN_FAILED" }, { json: opts.json });
+      process.exit(EXIT_FAIL);
+    }
+  }
+
+  return await runInProcess(name, inputs, opts, watch);
+}

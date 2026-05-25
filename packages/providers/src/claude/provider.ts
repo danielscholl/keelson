@@ -1,0 +1,358 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+import type {
+  IAgentProvider,
+  MessageChunk,
+  ModelInfo,
+  ProviderCapabilities,
+  SendQueryOptions,
+} from "../types.ts";
+import {
+  ClaudeQueryFactory,
+  type ClaudeContentBlock,
+  type ClaudeQueryHandle,
+  type ClaudeSdkMessage,
+  type ClaudeToolProjectionContext,
+} from "./factory.ts";
+import type { ToolContext } from "@keelson/shared";
+import { ChunkQueue } from "../chunk-queue.ts";
+import { buildFriendlyClaudeError } from "./errors.ts";
+
+export const CLAUDE_CREDENTIAL_SERVICE_ID = "claude" as const;
+
+// SDK has no listModels endpoint; curated. Update when a new haiku ships.
+export const CLAUDE_DEFAULT_MODEL = "claude-haiku-4-5-20251001" as const;
+
+// Hand-maintained — Agent SDK has no programmatic models.list().
+const CLAUDE_MODEL_CATALOG: readonly ModelInfo[] = [
+  {
+    id: "claude-opus-4-7",
+    displayName: "Claude Opus 4.7",
+    description: "Most capable Claude — deep reasoning, long planning.",
+    costTier: "high",
+    supports: { vision: true, tools: true, thinking: true },
+  },
+  {
+    id: "claude-sonnet-4-6",
+    displayName: "Claude Sonnet 4.6",
+    description: "Balanced cost and capability.",
+    costTier: "mid",
+    supports: { vision: true, tools: true, thinking: true },
+  },
+  {
+    id: CLAUDE_DEFAULT_MODEL,
+    displayName: "Claude Haiku 4.5",
+    description: "Fast, low-cost; default for short turns.",
+    costTier: "low",
+    supports: { vision: true, tools: true, thinking: true },
+  },
+];
+
+export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
+  // chat-handler doesn't propagate sessionId yet.
+  sessionResume: false,
+  streaming: true,
+  tools: true,
+  // Same source of truth as listModels(); providerInfoSchema's bare-id
+  // shape gets projected here so the two don't drift.
+  models: CLAUDE_MODEL_CATALOG.map((m) => m.id),
+  defaultModel: CLAUDE_DEFAULT_MODEL,
+};
+
+export interface GetCredentialFn {
+  (serviceId: string): Promise<string | undefined>;
+}
+
+export interface ClaudeProviderOptions {
+  getCredential: GetCredentialFn;
+  queryFactory?: ClaudeQueryFactory;
+}
+
+export class ClaudeProvider implements IAgentProvider {
+  private readonly getCredential: GetCredentialFn;
+  private readonly factory: ClaudeQueryFactory;
+
+  constructor(options: ClaudeProviderOptions) {
+    this.getCredential = options.getCredential;
+    this.factory = options.queryFactory ?? new ClaudeQueryFactory();
+  }
+
+  getType(): string {
+    return "claude";
+  }
+
+  getCapabilities(): ProviderCapabilities {
+    return CLAUDE_CAPABILITIES;
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    // Deep-clone the supports block so callers can't mutate the catalog.
+    return CLAUDE_MODEL_CATALOG.map((m) => ({
+      ...m,
+      ...(m.supports ? { supports: { ...m.supports } } : {}),
+    }));
+  }
+
+  async *sendQuery(
+    prompt: string,
+    cwd: string,
+    resumeSessionId?: string,
+    options?: SendQueryOptions,
+  ): AsyncGenerator<MessageChunk> {
+    if (options?.abortSignal?.aborted) return;
+
+    // Optional: absent opts the SDK into the `claude auth login` fallback.
+    const token = await this.getCredential(CLAUDE_CREDENTIAL_SERVICE_ID);
+    if (options?.abortSignal?.aborted) return;
+
+    const controller = new AbortController();
+    const detachAbort = bridgeAbort(options?.abortSignal, controller);
+
+    // Shared queue interleaves SDK-derived chunks (text/thinking deltas,
+    // tool blocks) with chunks pushed by in-process tool handlers via
+    // ctx.emit. queue.next() awaits both producers, so a tool's text chunks
+    // surface even while the SDK iterable is parked on a slow tool call.
+    const queue = new ChunkQueue();
+    const pushChunk = (chunk: MessageChunk) => queue.push(chunk);
+    const toolProjection: ClaudeToolProjectionContext = {
+      pushChunk,
+      contextFactory: (): ToolContext => ({
+        cwd,
+        emit: pushChunk,
+        abortSignal: options?.abortSignal ?? controller.signal,
+      }),
+    };
+
+    let handle: ClaudeQueryHandle;
+    try {
+      handle = await this.factory.createQuery({
+        token,
+        cwd,
+        prompt,
+        abortController: controller,
+        ...(resumeSessionId !== undefined ? { sessionId: resumeSessionId } : {}),
+        ...(options?.model !== undefined ? { model: options.model } : {}),
+        ...(options?.systemPrompt !== undefined
+          ? { systemPrompt: options.systemPrompt }
+          : {}),
+        ...(options?.thinking !== undefined
+          ? { thinking: options.thinking }
+          : {}),
+        ...(options?.tools && options.tools.length > 0
+          ? { tools: options.tools, toolProjection }
+          : {}),
+        ...(options?.allowedTools !== undefined
+          ? { allowedTools: options.allowedTools }
+          : {}),
+        ...(options?.disallowedTools !== undefined
+          ? { disallowedTools: options.disallowedTools }
+          : {}),
+        ...(options?.registeredMcpToolNames !== undefined
+          ? { registeredMcpToolNames: options.registeredMcpToolNames }
+          : {}),
+        ...(options?.hooks !== undefined ? { hooks: options.hooks } : {}),
+      });
+    } catch (err) {
+      detachAbort();
+      const msg = buildFriendlyClaudeError(err);
+      yield { type: "system", content: msg };
+      throw err instanceof Error ? err : new Error(msg);
+    }
+
+    let abortedDuringStream = false;
+    // Captured by the producer; thrown after queue drain so the error chunk
+    // reaches the consumer before the throw.
+    let terminalError: Error | null = null;
+
+    // Drains the SDK iterable into the shared queue and closes it on end
+    // (success, error, abort). Tool handlers push concurrently via their
+    // captured ctx.emit closure.
+    const producer = (async () => {
+      try {
+        for await (const msg of handle) {
+          if (options?.abortSignal?.aborted) {
+            abortedDuringStream = true;
+            return;
+          }
+
+          if (msg.type === "assistant" && typeof msg.error === "string") {
+            const errMsg = buildFriendlyClaudeError(new Error(msg.error));
+            queue.push({ type: "error", message: errMsg });
+            terminalError = new Error(errMsg);
+            return;
+          }
+
+          for (const chunk of mapSdkMessageToChunks(msg)) queue.push(chunk);
+
+          if (msg.type === "result") {
+            if (msg.is_error || (msg.subtype && msg.subtype !== "success")) {
+              const errs =
+                msg.errors && msg.errors.length > 0
+                  ? msg.errors.join("; ")
+                  : undefined;
+              const errMsg = buildFriendlyClaudeError(
+                new Error(`Claude turn ended: ${msg.subtype ?? "error"}`),
+                errs,
+              );
+              queue.push({ type: "error", message: errMsg });
+              terminalError = new Error(errMsg);
+            }
+            return;
+          }
+        }
+      } catch (err) {
+        terminalError = err instanceof Error ? err : new Error(String(err));
+      } finally {
+        queue.close();
+      }
+    })();
+
+    try {
+      while (true) {
+        if (options?.abortSignal?.aborted) {
+          abortedDuringStream = true;
+          break;
+        }
+        const chunk = await queue.next();
+        if (chunk === null) break;
+        // Re-check after await: consumer may have aborted while we parked.
+        if (options?.abortSignal?.aborted) {
+          abortedDuringStream = true;
+          break;
+        }
+        yield chunk;
+      }
+      // Await so any producer rejection surfaces (not orphaned).
+      await producer;
+      if (terminalError) throw terminalError;
+    } finally {
+      detachAbort();
+      // interrupt() is only supported in streaming-input mode; on success
+      // or iterator failure the SDK has already torn down, so calling it
+      // there would throw against a closed transport.
+      if (abortedDuringStream && handle.interrupt) {
+        try {
+          await handle.interrupt();
+        } catch {
+          // interrupt failures during cleanup are non-fatal
+        }
+      }
+    }
+  }
+}
+
+// Pure; no side effects.
+//
+// stream_event content_block_delta → text / thinking chunks. assistant →
+// tool_use chunks (text/thinking blocks skip; already streamed via deltas).
+// user → tool_result chunks (SDK-injected after tool handler returns).
+// assistant.error is handled before this call to avoid double-emit.
+function mapSdkMessageToChunks(msg: ClaudeSdkMessage): MessageChunk[] {
+  if (
+    msg.type === "stream_event" &&
+    msg.event?.type === "content_block_delta" &&
+    msg.event.delta?.type === "text_delta" &&
+    typeof msg.event.delta.text === "string" &&
+    msg.event.delta.text.length > 0
+  ) {
+    return [{ type: "text", content: msg.event.delta.text }];
+  }
+  if (
+    msg.type === "stream_event" &&
+    msg.event?.type === "content_block_delta" &&
+    msg.event.delta?.type === "thinking_delta" &&
+    typeof msg.event.delta.thinking === "string" &&
+    msg.event.delta.thinking.length > 0
+  ) {
+    return [{ type: "thinking", content: msg.event.delta.thinking }];
+  }
+  if (msg.type === "assistant") {
+    const blocks = msg.message?.content;
+    if (!blocks) return [];
+    const out: MessageChunk[] = [];
+    for (const block of blocks) {
+      const chunk = mapContentBlock(block);
+      if (chunk) out.push(chunk);
+    }
+    return out;
+  }
+  if (msg.type === "user") {
+    const content = msg.message?.content;
+    if (!Array.isArray(content)) return [];
+    const out: MessageChunk[] = [];
+    for (const block of content) {
+      const chunk = mapToolResultBlock(block);
+      if (chunk) out.push(chunk);
+    }
+    return out;
+  }
+  return [];
+}
+
+function mapContentBlock(block: ClaudeContentBlock): MessageChunk | null {
+  if (block.type === "tool_use" && typeof block.name === "string") {
+    const input = block.input;
+    const inputObj =
+      input && typeof input === "object" && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : undefined;
+    // Block id pairs with the eventual tool_result.tool_use_id; synthesize
+    // when the SDK omits it (defensive).
+    const id = block.id ?? crypto.randomUUID();
+    return inputObj
+      ? { type: "tool_use", id, toolName: block.name, toolInput: inputObj }
+      : { type: "tool_use", id, toolName: block.name };
+  }
+  return null;
+}
+
+// tool_use_id matches the originating assistant block. Content is string |
+// Array<TextBlockParam | ...>; we join text fields and drop the rest.
+function mapToolResultBlock(block: ClaudeContentBlock): MessageChunk | null {
+  if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") {
+    return null;
+  }
+  const content = stringifyToolResultContent(block.content);
+  return {
+    type: "tool_result",
+    toolUseId: block.tool_use_id,
+    content,
+    ...(block.is_error === true ? { isError: true } : {}),
+  };
+}
+
+function stringifyToolResultContent(
+  content: ClaudeContentBlock["content"],
+): string {
+  if (content === undefined || content === null) return "";
+  if (typeof content === "string") return content;
+  // Drop image / search-result / document blocks; chunk channel + persisted
+  // shape carry a single content string today.
+  const parts: string[] = [];
+  for (const item of content) {
+    if (item && item.type === "text" && typeof item.text === "string") {
+      parts.push(item.text);
+    }
+  }
+  return parts.join("");
+}
+
+function bridgeAbort(
+  signal: AbortSignal | undefined,
+  controller: AbortController,
+): () => void {
+  if (!signal) return () => {};
+  if (signal.aborted) {
+    controller.abort();
+    return () => {};
+  }
+  const onAbort = () => controller.abort();
+  signal.addEventListener("abort", onAbort);
+  return () => signal.removeEventListener("abort", onAbort);
+}

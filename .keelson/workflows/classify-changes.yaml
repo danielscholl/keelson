@@ -1,0 +1,57 @@
+name: classify-changes
+description: |
+  DAG demo: bash gathers staged-file paths, prompt classifies the change type,
+  and a conditional bash node echoes a label the user can pipe somewhere.
+
+  This procedure exercises the full Phase 1 surface:
+    - bash node feeding `$nodeId.output` into a prompt
+    - prompt node returning structured-ish text the conditional reads
+    - `when:` expression branching on substring equality
+    - `trigger_rule: one_success` collector
+
+  Pre-req: at least one staged file in the repo. If nothing is staged the
+  collect node still runs and the classifier just calls it 'none'.
+
+nodes:
+  - id: collect
+    bash: |
+      git diff --cached --name-only 2>/dev/null || true
+
+  - id: classify
+    depends_on: [collect]
+    prompt: |
+      Classify the staged changes below into ONE of these labels (return only the
+      uppercase label, no prose):
+
+      Labels:
+        - DOCS         (only README/CHANGELOG/docs files)
+        - TESTS        (only test files)
+        - REFACTOR     (rename, move, extract — no behavior change)
+        - FEATURE      (new functionality)
+        - BUGFIX       (fixes a defect)
+        - CHORE        (deps, config, CI, build)
+        - NONE         (no files staged)
+
+      Staged files:
+      $collect.output
+
+  - id: label-feature
+    depends_on: [classify]
+    when: "$classify.output == 'FEATURE'"
+    bash: echo "label=feature"
+
+  - id: label-bugfix
+    depends_on: [classify]
+    when: "$classify.output == 'BUGFIX'"
+    bash: echo "label=bugfix"
+
+  - id: label-other
+    depends_on: [classify]
+    when: "$classify.output != 'FEATURE' && $classify.output != 'BUGFIX'"
+    bash: echo "label=other ($KEELSON_NODE_classify_OUTPUT)"
+
+  - id: report
+    depends_on: [label-feature, label-bugfix, label-other]
+    trigger_rule: one_success
+    bash: |
+      echo "Classified $KEELSON_NODE_collect_OUTPUT"

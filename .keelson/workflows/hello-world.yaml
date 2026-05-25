@@ -1,0 +1,17 @@
+name: hello-world
+description: |
+  Smoke-test procedure: one prompt node that asks the model to say hello.
+  Use it to confirm `/workflow run hello-world` is wired up end-to-end
+  before you write something more involved.
+
+nodes:
+  - id: greet
+    prompt: |
+      You are Keelson's procedures smoke test.
+
+      Reply with a single sentence that:
+      - mentions you are running inside a Keelson procedure,
+      - confirms the workflow runtime received this prompt,
+      - greets the user (whose name may be in $ARGUMENTS).
+
+      Args from the user: $ARGUMENTS

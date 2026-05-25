@@ -1,0 +1,25 @@
+{
+  "name": "@keelson/cli",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "keelson": "./bin/keelson.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@keelson/providers": "workspace:*",
+    "@keelson/shared": "workspace:*",
+    "@keelson/skills": "workspace:*",
+    "@keelson/workflows": "workspace:*",
+    "@napi-rs/keyring": "1.3.0",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14"
+  }
+}

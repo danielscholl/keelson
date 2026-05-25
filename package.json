@@ -1,0 +1,25 @@
+{
+  "name": "keelson",
+  "version": "0.1.0",
+  "description": "Local agent harness — multi-provider chat surface, deterministic YAML workflows, typed extension contract",
+  "license": "Apache-2.0",
+  "author": "Daniel Scholl",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun --filter '*' dev",
+    "dev:server": "bun --filter @keelson/server dev",
+    "dev:web": "bun --filter @keelson/web dev",
+    "build": "bun --filter '*' build",
+    "typecheck": "bun --filter '*' typecheck",
+    "test": "bun --filter '*' test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

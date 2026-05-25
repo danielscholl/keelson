@@ -1,0 +1,7 @@
+name: smoke-bash
+description: |
+  Tiny bash-only workflow used by CLI tests to exercise the in-process
+  executor without needing a provider or network.
+nodes:
+  - id: greet
+    bash: echo "hello from $TEST_NAME"

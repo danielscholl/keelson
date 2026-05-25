@@ -1,0 +1,5958 @@
+:root {
+  /* Surfaces lifted toward midnight navy — pure-black vibrates over long sessions. */
+  --bg: #0d1429;
+  --bg-soft: #131a30;
+  --card: #161e3b;
+  --card-2: #1f2a4d;
+  --border: #2a3258;
+  --border-soft: #1f2746;
+
+  /* ~88% white-blue stays crisp over a dark bg without the strain of pure white. */
+  --fg: #d8def0;
+  /* Headings + <strong>. One step brighter than --fg so emphasis lands
+     without flipping to accent (which is reserved for chrome). */
+  --fg-strong: #f0f3ff;
+  --muted: #8993b2;
+  --dim: #5e6789;
+
+  /* Accents pulled ~10% in saturation so the one thing that should grab the eye can. */
+  --accent:  #9b8eff;
+  --green:   #6dd28d;
+  --yellow:  #f5c352;
+  --red:     #f08793;
+  --magenta: #c7a8f0;
+  --cyan:    #7cc0ff;
+  --orange:  #f59f6c;
+
+  --danger:  #e06666;
+  --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
+
+  /* Single source of truth for the centered Bridge/Chat column. Right-side
+     drawers anchor to this so they slide in from the panel's right edge
+     (not the viewport edge) on wide displays. Below cap+padding, the panel
+     fills the body content area and the drawer pins to the body padding. */
+  --max-content-width: 1600px;
+  --panel-right-gap: max(24px, calc((100vw - var(--max-content-width)) / 2));
+
+  color-scheme: dark;
+}
+
+/* Light mode keeps the purple-family brand identity — only surface + text  */
+/* shift, with accent/semantic colors deepened for contrast on light bg.   */
+:root[data-theme="light"] {
+  /* Layered lavender: tinted app bg, white cards, saturated tile fills.
+     Tokens are tuned so the same vars that drive dark-mode depth produce
+     visible separation here instead of collapsing into near-white. */
+  --bg: #f3f0fa;
+  --bg-soft: #eeeaf7;
+  --card: #ffffff;
+  --card-2: #eeeaf7;
+  --border: #c8bfdc;
+  --border-soft: #d9d1e8;
+
+  --fg: #161b31;
+  --fg-strong: #0b0f1e;
+  /* Darker than the previous #69708d / #9298ae — sidebar metadata and
+     secondary labels were close to disappearing on the lavender shell. */
+  --muted: #5d5876;
+  --dim: #7e7896;
+
+  --accent:  #6d4fe0;
+  --green:   #15834f;
+  --yellow:  #b57a00;
+  --red:     #d9385e;
+  --magenta: #804bc1;
+  --cyan:    #2e6fd8;
+  --orange:  #b66229;
+
+  --danger:  #d9385e;
+  --shadow-popover: 0 12px 32px rgba(57, 43, 92, 0.16);
+  --shadow-card:    0 10px 28px rgba(57, 43, 92, 0.08);
+
+  color-scheme: light;
+}
+
+/* Light-mode depth pass: keep cards white, add a faint vertical wash so the
+   top two cross-cards (Release Train, Providers) don't sit dead-flat, and
+   anchor the top chrome with a soft purple-tinted shadow. */
+:root[data-theme="light"] .cross-card,
+:root[data-theme="light"] .lane,
+:root[data-theme="light"] .release-health-tile {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfaff 100%);
+}
+:root[data-theme="light"] .topbar {
+  border-bottom-color: var(--border);
+  box-shadow: 0 2px 10px rgba(57, 43, 92, 0.04);
+}
+/* Anchor the scan path on actual P0 urgency, not row position — a uniform
+   list of P1s shouldn't fake an anchor on whichever row landed first. */
+:root[data-theme="light"] .cross-card .cross-item:has(.priority.P0) {
+  background: #fff7ed;
+}
+/* Sparkle glyph via pseudo-element so the character itself can swap per
+   theme. Dark mode keeps the OS color-emoji ✨; light mode uses a true
+   non-emoji glyph that responds to .ask-icon-btn's CSS color. */
+.ask-icon-btn::before {
+  content: "✨";
+}
+:root[data-theme="light"] .ask-icon-btn::before {
+  content: "✦";
+  font-size: 16px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  letter-spacing: 0.005em;
+  min-height: 100vh;
+  padding: 24px;
+  /* Flex column so full-bleed surfaces (Workflows run view, Chat) can grow
+     to fill the viewport via `flex: 1` instead of doing viewport math. */
+  display: flex;
+  flex-direction: column;
+}
+/* React's mount div sits between body and .wrap; without flex it stops at
+   natural content height and the flex: 1 on .wrap below has nothing to grow
+   into. Propagate flex column with flex: 1 so the chain reaches all the way
+   down. */
+#root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* Single centered column shared by the TopBar, Bridge body, and Chat
+   surface. Width is `--max-content-width` (default 1600px); changing that
+   variable also re-anchors the right-side drawers via `--panel-right-gap`. */
+.wrap {
+  max-width: var(--max-content-width);
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Workflows screens hang under .page; flex: 1 lets the catalog/start views
+   keep their natural top-anchored layout while the run view stretches its
+   panes to the viewport floor. */
+.wrap > .page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 6px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 18px;
+}
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, var(--accent), var(--magenta));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.tab {
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid transparent;
+  cursor: default;
+}
+.tab.active {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--fg);
+}
+.right-tools {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.theme-picker {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--bg-soft);
+  margin-left: 12px;
+}
+.theme-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--muted);
+  transition: background 80ms ease, color 80ms ease;
+  padding: 0;
+}
+.theme-picker-btn:hover {
+  color: var(--fg);
+}
+.theme-picker-btn.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.theme-picker-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.dot.green { background: var(--green); box-shadow: 0 0 8px rgba(109,210,141,0.5); }
+.dot.yellow { background: var(--yellow); box-shadow: 0 0 8px rgba(245,195,82,0.5); }
+.dot.red { background: var(--red); box-shadow: 0 0 8px rgba(240,135,147,0.5); }
+.dot.dim { background: var(--dim); }
+/* One-shot pulse on each bundle_done. TopBar toggles `.pulsing` for ~600ms;
+   the animation is finite (no `infinite`) so a stale class wouldn't loop. */
+.dot.pulsing { animation: bundle-pulse 600ms ease-out; }
+
+@keyframes bundle-pulse {
+  0%   { transform: scale(1);   opacity: 1;   }
+  50%  { transform: scale(1.6); opacity: 0.65;}
+  100% { transform: scale(1);   opacity: 1;   }
+}
+
+/* Full-width row holding the Waiting on you card below the Release Train
+   tile. Card grows vertically as items accumulate; the wrapper just owns
+   the bottom margin so the lanes below sit at the right rhythm. */
+.waiting-row {
+  margin-bottom: 14px;
+}
+.cross-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cross-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cross-card-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cross-card-title .glyph { font-size: 13px; }
+.cross-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cross-item {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: background 80ms ease;
+}
+.cross-item:hover { background: var(--bg-soft); }
+.cross-item .priority {
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+.cross-item .priority.P0 { color: var(--red); }
+.cross-item .priority.P1 { color: var(--orange); }
+.cross-item .priority.P2 { color: var(--yellow); }
+.cross-item .priority.P3 { color: var(--dim); }
+.cross-item .text { color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cross-item .text a { color: inherit; text-decoration: none; }
+.cross-item .text a:hover { text-decoration: underline; }
+.cross-item .meta {
+  color: var(--dim);
+  font-size: 11px;
+}
+.cross-item.wins-item {
+  grid-template-columns: 1fr auto;
+}
+.cross-item.wins-item .text { color: var(--muted); }
+.cross-item.wins-item .wins-check {
+  color: var(--green);
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+/* "New Merge Requests" panel — wider left slot for the project chip so
+   service names like "ingestion-workflow" fit without clipping. */
+.cross-item.new-mr-item {
+  grid-template-columns: 110px 1fr auto;
+}
+.new-mr-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 4px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.new-mr-chip.tone-0 {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.new-mr-chip.tone-1 {
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 14%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 32%, transparent);
+}
+.new-mr-chip.tone-2 {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
+}
+.new-mr-chip.tone-3 {
+  color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent);
+  border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
+}
+.new-mr-chip.tone-4 {
+  color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+  border-color: color-mix(in srgb, var(--orange) 32%, transparent);
+}
+.new-mr-age-fresh { color: var(--green); }
+.new-mr-age-normal { color: var(--muted); }
+.new-mr-age-stale { color: var(--orange); }
+.cross-item--empty,
+.cross-item--skeleton { cursor: default; }
+.cross-item--empty:hover,
+.cross-item--skeleton:hover { background: transparent; }
+.col {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  min-height: 380px;
+}
+.col-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.col.is-collapsed {
+  min-height: 0;
+}
+.col.is-collapsed .col-title {
+  margin-bottom: 0;
+}
+.col-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s ease;
+}
+.col-toggle:hover {
+  color: var(--accent);
+  border-color: rgba(155, 142, 255, 0.5);
+}
+.col:not(.is-collapsed) .col-toggle {
+  transform: rotate(180deg);
+}
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--muted);
+}
+.pill.red { color: var(--red); border-color: rgba(240,135,147,0.3); background: rgba(240,135,147,0.08); }
+.pill.yellow { color: var(--yellow); border-color: rgba(245,195,82,0.3); background: rgba(245,195,82,0.08); }
+
+.empty-state {
+  font-size: 12px;
+  color: var(--dim);
+  font-style: italic;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.queue-item {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.queue-item:last-child { border-bottom: none; }
+.queue-item .title { font-size: 13px; color: var(--fg); margin-bottom: 4px; }
+.queue-item .meta { font-size: 11px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.queue-item .why { font-size: 11px; color: var(--dim); margin-top: 4px; font-style: italic; }
+.priority-bar {
+  display: inline-block;
+  width: 3px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-radius: 1px;
+}
+.priority-bar.p0 { background: var(--red); }
+.priority-bar.p1 { background: var(--orange); }
+.priority-bar.p2 { background: var(--yellow); }
+.priority-bar.p3 { background: var(--dim); }
+
+/* --------------------------------------------------------------------- */
+/* Latest event feed. Single column, chronological, each row is          */
+/* `icon · origin chip · text · relative-time meta`.                     */
+/* --------------------------------------------------------------------- */
+.feed-card { margin-bottom: 14px; }
+.cross-item.feed-item {
+  grid-template-columns: 22px 92px 1fr auto;
+  gap: 10px;
+}
+.feed-icon {
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.feed-chip {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.feed-chip-mine {
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 14%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 32%, transparent);
+}
+.feed-chip-platform {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border-color: var(--border-soft);
+}
+.feed-meta {
+  font-variant-numeric: tabular-nums;
+}
+.feed-tail { padding-left: 6px; }
+
+/* PMC citation pill — sits on the Release Train bar (release-health-top
+   right cluster) next to the release subtitle. Subtle by design: this is
+   the chase-down link for the official write-up, not a headline. */
+.pmc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pmc-pill:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+
+.wins-card {
+  background: rgba(109,210,141,0.04);
+  border: 1px solid rgba(109,210,141,0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+.wins-card .hdr { font-size: 10px; color: var(--green); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+.wins-card .item { font-size: 11px; color: var(--muted); padding: 2px 0; }
+.wins-card .empty { font-size: 11px; color: var(--dim); font-style: italic; padding: 2px 0; }
+
+/* --------------------------------------------------------------------- */
+/* Pill primitives — small rounded badges with a colored dot. Used by    */
+/* the providers strip and the flow-metric strip inside the release-    */
+/* health tile.                                                          */
+/* --------------------------------------------------------------------- */
+.rd-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.rd-pill .dot { margin-right: 0; }
+.rd-pill-name { letter-spacing: 0.03em; }
+.rd-pill-rate { color: var(--muted); font-variant-numeric: tabular-nums; }
+.rd-pill-delta { color: var(--dim); font-variant-numeric: tabular-nums; }
+.rd-pill-green  { border-color: rgba(109,210,141,0.28); background: rgba(109,210,141,0.08); }
+.rd-pill-yellow { border-color: rgba(245,195,82,0.28);  background: rgba(245,195,82,0.08); }
+.rd-pill-red    { border-color: rgba(240,135,147,0.28); background: rgba(240,135,147,0.08); }
+.rd-pill-dim    { color: var(--dim); }
+
+
+.section-error {
+  color: var(--dim);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* --------------------------------------------------------------------- */
+/* Phase 5 — queue/feed/wins enhancements                                */
+/* --------------------------------------------------------------------- */
+/* Card title links: inherit colour, accent on hover. Keeps the          */
+/* prototype's flat look while making the entire title region clickable. */
+.card-link {
+  color: inherit;
+  text-decoration: none;
+}
+.card-link:hover { color: var(--accent); }
+
+/* Author/age inline meta bits that sit alongside the priority pill.     */
+.queue-item .meta .who,
+.queue-item .meta .age { color: var(--muted); }
+
+/* Compact status badges. Used in feed rows, win items, and as a        */
+/* secondary "pipeline failed" tag inside the queue meta line.          */
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
+  color: var(--muted);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.badge-running   { color: var(--accent);   border-color: rgba(155,142,255,0.3); }
+.badge-pending   { color: var(--cyan);     border-color: rgba(124,192,255,0.3); }
+.badge-stuck     { color: var(--yellow);   border-color: rgba(245,195,82,0.3); }
+.badge-failed    { color: var(--red);      border-color: rgba(240,135,147,0.3); }
+.badge-manual    { color: var(--orange);   border-color: rgba(245,159,108,0.3); }
+.badge-success   { color: var(--green);    border-color: rgba(109,210,141,0.3); }
+.badge-open      { color: var(--muted); }
+.badge-merged    { color: var(--magenta);  border-color: rgba(199,168,240,0.3); }
+.badge-win-merged    { color: var(--green);   border-color: rgba(109,210,141,0.3); }
+.badge-win-recovered { color: var(--cyan);    border-color: rgba(124,192,255,0.3); }
+.badge-win-completed { color: var(--magenta); border-color: rgba(199,168,240,0.3); }
+
+/* "+N more" tail row -- shown when a column's bundle list exceeds the   */
+/* visible cap. The composer normally enforces the cap before the bundle */
+/* leaves Python, so this only fires for synthetic test fixtures.        */
+.more-tail {
+  font-size: 11px;
+  color: var(--dim);
+  font-style: italic;
+  padding: 6px 0 2px;
+  text-align: left;
+}
+.queue-item + .more-tail { padding-top: 8px; }
+.wins-card .more-tail { color: var(--dim); padding: 4px 0 0; }
+
+
+/* --------------------------------------------------------------------- */
+/* Server-mode (cimpl bridge --serve) state                              */
+/* --------------------------------------------------------------------- */
+/* Two states the SSE client surfaces on <body>:                         */
+/*                                                                       */
+/*   .bridge-reconnecting -- transient connection failure. The browser   */
+/*   auto-retries; the page stays usable on last-known-good data.        */
+/*                                                                       */
+/*   .bridge-disconnected -- explicit server-side disconnect (idle       */
+/*   timeout or Ctrl-C). EventSource keeps retrying so a restart of      */
+/*   `cimpl bridge --serve` reconnects without a manual reload.          */
+.bridge-reconnecting {
+  position: relative;
+}
+.bridge-reconnecting::before {
+  content: "Reconnecting to bridge server…";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: var(--yellow);
+  color: var(--bg);
+  font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 8px 12px;
+  box-shadow: var(--shadow-card);
+}
+.bridge-reconnecting .wrap {
+  margin-top: 32px;
+}
+
+.bridge-disconnected {
+  position: relative;
+}
+.bridge-disconnected::before {
+  content: "Bridge server stopped — restart `cimpl bridge --serve` to reconnect.";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: var(--red);
+  color: var(--bg);
+  font: 600 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 8px 12px;
+  box-shadow: var(--shadow-card);
+}
+.bridge-disconnected .wrap {
+  filter: grayscale(0.6);
+  opacity: 0.55;
+  pointer-events: none;
+  margin-top: 32px;
+}
+
+
+/* --------------------------------------------------------------------- */
+/* Action toast (Phase 6)                                                */
+/* --------------------------------------------------------------------- */
+/* Tiny non-blocking notification appended to <body> by bridge JS when  */
+/* an action POST returns. Auto-removes after a few seconds.            */
+.bridge-toast {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10000;
+  max-width: 360px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  box-shadow: var(--shadow-popover);
+}
+.bridge-toast-ok {
+  border-color: rgba(109, 210, 141, 0.4);
+}
+.bridge-toast-error {
+  border-color: rgba(240, 135, 147, 0.5);
+}
+
+
+/* TopBar tabs are real <button> elements so keyboard navigation works  */
+/* for free; the rule overrides default button chrome to keep the flat   */
+/* "tab" look.                                                           */
+button.tab {
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+button.tab:hover:not(:disabled) {
+  color: var(--fg);
+}
+button.tab.active {
+  cursor: default;
+}
+button.tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--magenta);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+
+/* --------------------------------------------------------------------- */
+/* F4 — Chat surface                                                      */
+/* --------------------------------------------------------------------- */
+.tab-group {
+  display: flex;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+/* Shared chat column — transcript + composer cap at the same width so
+   the page reads as one intentional reading surface, not a narrow
+   document next to a wide input. min(1220px, 100%) lets the column
+   shrink on narrow viewports and centers within the grid cell on wide. */
+.chat-wrap {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 140px);
+  min-height: 400px;
+  width: min(1220px, 100%);
+  margin-inline: auto;
+}
+
+.chat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Toolbar chrome (padding + bottom border + spacing) only renders when
+   the bar actually has content — usually AuthWarning when auth is
+   missing, or a provider-load error. Empty toolbar = invisible.        */
+.chat-toolbar:has(.auth-warning),
+.chat-toolbar:has(.chat-error) {
+  padding: 0 4px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 14px;
+}
+
+/* Failure-only auth pill. Renders inline in the toolbar when the active
+   provider's auth probe says no token / no CLI / no env var is in
+   place. Warm yellow palette matches `.signin-warn` from the prior UX
+   so the visual continuity is intact; just no success state.            */
+.auth-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(245, 195, 82, 0.08);
+  border: 1px solid rgba(245, 195, 82, 0.3);
+  color: var(--yellow);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.auth-warning-icon {
+  font-size: 13px;
+}
+
+.auth-warning-text {
+  color: var(--fg);
+}
+
+/* Transcript is the dark backdrop, not a card. The card chrome lives on
+   the assistant message itself (see .chat-message.assistant .chat-bubble
+   below). Extra bottom padding gives the last message breathing room
+   before it meets the composer. */
+.chat-messages {
+  flex: 1 1 0;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: transparent;
+}
+
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Asymmetric caps below: user prompts stay compact so the chat reads like
+     a conversation; assistant + system replies can grow to fill the column
+     because their content (code blocks, tool-call JSON, ASCII trees) wants
+     the room. */
+}
+
+.chat-message.user {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: 640px;
+}
+/* Assistant + system stretch to fill the shared chat column. The
+   reading measure is enforced inside the card via the per-element
+   prose cap below — tables/code blocks still take the full card width
+   so dense data can breathe. */
+.chat-message.assistant,
+.chat-message.system {
+  align-self: stretch;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.chat-bubble {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: 0.005em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-message.user .chat-bubble {
+  background: rgba(155, 142, 255, 0.12);
+  border: 1px solid rgba(155, 142, 255, 0.25);
+  color: var(--fg);
+}
+
+/* The assistant message IS the reading card: calm navy reading surface,
+   no radial wash so the chrome doesn't tilt purple. Lavender hue stays
+   reserved for chrome (sidebar labels, list markers). Generous padding
+   + 15.5px body + 1.62 line-height for long-form reading. Sits on the
+   dark transcript so it reads as a document, not another dashboard panel. */
+.chat-message.assistant .chat-bubble {
+  padding: 24px 30px;
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    rgba(24, 32, 70, 0.97),
+    rgba(17, 25, 56, 0.99)
+  );
+  border: 1px solid rgba(148, 163, 255, 0.15);
+  color: var(--fg);
+  font-size: 15.5px;
+  line-height: 1.62;
+  letter-spacing: 0.003em;
+  width: 100%;
+}
+
+.chat-message.system .chat-bubble {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 11px;
+  font-style: italic;
+  padding: 2px 4px;
+}
+
+/* F10.7b: marker on assistant bubbles whose turn ended without a clean
+ * `done` (user abort or provider error). Sits below the content; deliberately
+ * understated so it reads as metadata, not failure. */
+.chat-truncated-marker {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* Ellipsis (not a block caret) since the composer is reachable mid-stream. */
+.chat-bubble.streaming::after {
+  content: "⋯";
+  display: inline-block;
+  margin-left: 4px;
+  color: var(--accent);
+  font-weight: 600;
+  animation: bubble-thinking 1.4s ease-in-out infinite;
+}
+
+@keyframes bubble-thinking {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1;   }
+}
+
+.chat-message .chat-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  padding: 0 4px;
+}
+
+/* Composer is a single bordered card — the textarea and the chip row
+   live inside one container. The card itself takes the focus ring so the
+   inner textarea can stay borderless and visually merge with the chips. */
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-top: 12px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.chat-composer:focus-within {
+  border-color: rgba(155, 142, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(155, 142, 255, 0.18);
+}
+
+.chat-composer-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-composer-spacer {
+  flex: 1 1 auto;
+}
+
+.chat-input {
+  flex: 1 1 0;
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  border-radius: 0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 13px;
+  resize: none;
+  min-height: 44px;
+  max-height: 140px;
+  line-height: 1.5;
+}
+
+.chat-input:focus {
+  outline: none;
+}
+
+.chat-input:disabled { opacity: 0.5; }
+
+/* Phase 4 W4.5 workflow-conversation surface. Mirrors the chat header
+   bar (chat-toolbar) but carries the run's name + status + back-link. */
+.chat-thread-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--card);
+}
+.chat-thread-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg);
+}
+.chat-thread-sub {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.chat-thread-actions {
+  margin-left: auto;
+}
+
+/* Model chip — the only handle on the composer for switching models.
+   Provider is no longer a separate control; clicking the chip opens the
+   picker popover where provider acts as a section / filter axis. */
+.chat-model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 80ms ease, background 80ms ease;
+}
+
+.chat-model-chip:hover:not(:disabled) {
+  border-color: rgba(155, 142, 255, 0.4);
+  background: rgba(155, 142, 255, 0.06);
+}
+
+.chat-model-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-model-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-model-chip-provider {
+  color: var(--muted);
+}
+
+.chat-model-chip-sep {
+  color: var(--dim);
+}
+
+.chat-model-chip-name {
+  color: var(--fg);
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.chat-model-chip-caret {
+  color: var(--muted);
+  font-size: 9px;
+  margin-left: 2px;
+}
+
+/* F10.4 — Per-turn extended-thinking toggle. Lives next to .chat-model-chip
+   in the composer chip row; only renders when the active model declares
+   supports.thinking. Pressed = thinking on for next turn.
+
+   Default (aria-pressed="true") is the "lit" state: saturated accent fill,
+   accent-colored text, bright border — at-a-glance "this is on." Off state
+   strips the fill and dims the icon so the contrast vs. on is unambiguous. */
+.chat-thinking-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(155, 142, 255, 0.28);
+  color: var(--accent);
+  border: 1px solid rgba(155, 142, 255, 0.7);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 80ms ease, background 80ms ease,
+    color 80ms ease, opacity 80ms ease;
+  /* Subtle inner glow reinforces the "on / lit" affordance. */
+  box-shadow: inset 0 0 0 1px rgba(155, 142, 255, 0.08);
+}
+
+.chat-thinking-chip:hover:not(:disabled) {
+  border-color: rgba(155, 142, 255, 0.95);
+  background: rgba(155, 142, 255, 0.36);
+}
+
+.chat-thinking-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-thinking-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Pressed=false (opted-out) reads as cold: no fill, muted color, dimmed icon.
+   The contrast vs. the lit on-state is the primary at-a-glance signal. */
+.chat-thinking-chip[aria-pressed="false"] {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+  font-weight: 400;
+  box-shadow: none;
+}
+.chat-thinking-chip[aria-pressed="false"]:hover:not(:disabled) {
+  border-color: var(--muted);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  color: var(--fg);
+}
+
+/* Emoji can't be color-styled, so dim it via opacity when the chip is off.
+   Targets the first <span aria-hidden="true"> child (the 💭 glyph). */
+.chat-thinking-chip[aria-pressed="false"] > span[aria-hidden="true"]:first-child {
+  opacity: 0.45;
+}
+
+.chat-thinking-chip-label {
+  color: inherit;
+}
+
+/* F10.6 — Per-turn reasoning-effort tier chip. Sibling of .chat-thinking-chip
+   but always "lit" — every tier (low/medium/high/xhigh) is a valid pick, so
+   there's no on/off contrast. Renders only when the active model declares
+   supports.reasoningEffort (Copilot reasoning models). */
+.chat-reasoning-effort-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(155, 142, 255, 0.28);
+  color: var(--accent);
+  border: 1px solid rgba(155, 142, 255, 0.7);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 80ms ease, background 80ms ease;
+  box-shadow: inset 0 0 0 1px rgba(155, 142, 255, 0.08);
+}
+
+.chat-reasoning-effort-chip:hover:not(:disabled) {
+  border-color: rgba(155, 142, 255, 0.95);
+  background: rgba(155, 142, 255, 0.36);
+}
+
+.chat-reasoning-effort-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-reasoning-effort-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-reasoning-effort-chip-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+}
+
+.chat-reasoning-effort-chip-caret {
+  font-size: 10px;
+  opacity: 0.85;
+  margin-left: 1px;
+}
+
+/* Phase 3 S6 — Composer tools chip. Mirrors .chat-model-chip's neutral
+   pill shape (this is a discoverability affordance, not a state toggle),
+   sits in the composer chip row alongside the model/thinking/effort chips,
+   and opens a read-only popover listing registered tools. */
+.chat-tools-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 80ms ease, background 80ms ease;
+}
+
+.chat-tools-chip:hover:not(:disabled) {
+  border-color: rgba(155, 142, 255, 0.4);
+  background: rgba(155, 142, 255, 0.06);
+}
+
+.chat-tools-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-tools-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-tools-chip-count {
+  color: var(--fg);
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.chat-tools-chip-caret {
+  color: var(--muted);
+  font-size: 9px;
+  margin-left: 2px;
+}
+
+.chat-send {
+  background: rgba(155, 142, 255, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(155, 142, 255, 0.3);
+  border-radius: 8px;
+  padding: 10px 18px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 80ms ease, border-color 80ms ease;
+  align-self: flex-end;
+}
+
+.chat-send:hover:not(:disabled) {
+  background: rgba(155, 142, 255, 0.22);
+  border-color: rgba(155, 142, 255, 0.5);
+}
+
+.chat-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Neutral default, hover reveals danger color to telegraph the interrupt. */
+.chat-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  color: var(--muted);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 18px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+  align-self: flex-end;
+}
+
+.chat-stop::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.chat-stop:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
+}
+
+/* F10.8: queued-send pill. Sits next to Stop while a turn is in flight; click
+ * restores the prompt to the textarea. Accent-bordered so it reads as "your
+ * intent is parked" rather than a generic chip. */
+.chat-queued-pill {
+  display: inline-flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  padding: 6px 12px;
+  margin-right: 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  align-self: flex-end;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+
+.chat-queued-pill:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.chat-sidebar-streaming-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  animation: tool-call-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-error {
+  font-size: 12px;
+  color: var(--red);
+  padding: 6px 0;
+}
+
+/* Chat sidebar's "New" button. */
+.chat-sidebar-new {
+  font: 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg-soft);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+.chat-sidebar-new:hover {
+  background: rgba(155, 142, 255, 0.08);
+  border-color: rgba(155, 142, 255, 0.3);
+}
+
+/* --------------------------------------------------------------------- */
+/* F9 — Polish: 2-pane chat layout, sidebar, skeleton, toast host,       */
+/*              markdown content, Copilot SignIn warn state              */
+/* --------------------------------------------------------------------- */
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  height: calc(100vh - 140px);
+  min-height: 400px;
+  /* Smooth the collapse — animating grid-template-columns is supported
+     in evergreen browsers via the explicit single-track interpolation
+     used here. Falls back to a snap on older renderers. */
+  transition: grid-template-columns 180ms ease;
+}
+
+.chat-layout.sidebar-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+/* When the layout owns the height, the inner chat-wrap should fill it
+   instead of repeating the viewport math. */
+.chat-layout .chat-wrap {
+  height: 100%;
+}
+
+/* --- Sidebar --- */
+
+.chat-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-right: 1px solid var(--border-soft);
+  padding-right: 14px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.chat-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.chat-sidebar-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+
+.chat-sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-sidebar-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.chat-sidebar-item:hover {
+  border-color: var(--border-soft);
+  background: var(--bg-soft);
+}
+
+.chat-sidebar-item.active {
+  border-color: rgba(155, 142, 255, 0.4);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+.chat-sidebar-link {
+  flex: 1 1 0;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-sidebar-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-sidebar-meta {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.chat-sidebar-provider {
+  font-size: 9px;
+  padding: 1px 6px;
+}
+
+/* Phase 4 W4.5: workflow-linked conversations get their own pill instead of
+   the provider badge. Magenta-tinted so it visually pairs with the run view's
+   workflow accent. The chat-sidebar-meta align-items keeps the status dot
+   centered against the pill height. */
+.chat-sidebar-meta {
+  align-items: center;
+}
+.chat-sidebar-wf-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--magenta) 40%, transparent);
+}
+.chat-sidebar-group-workflow .chat-sidebar-group-label {
+  color: var(--magenta);
+}
+
+.chat-sidebar-rename {
+  flex: 1 1 0;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid rgba(155, 142, 255, 0.5);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  margin: 4px;
+}
+
+.chat-sidebar-delete {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 8px;
+  align-self: stretch;
+  border-radius: 0 6px 6px 0;
+}
+
+.chat-sidebar-delete:hover {
+  color: var(--red);
+  background: rgba(240, 135, 147, 0.08);
+}
+
+/* --- Sidebar polish (F10.5): collapse toggle, search, date grouping --- */
+
+.chat-sidebar-collapse-toggle {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 80ms ease, background 80ms ease;
+}
+
+.chat-sidebar-collapse-toggle:hover {
+  color: var(--fg);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+.chat-sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.chat-sidebar-search-wrap {
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.chat-sidebar-search {
+  width: 100%;
+  background: var(--bg-soft);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 80ms ease;
+}
+
+.chat-sidebar-search:focus {
+  border-color: var(--accent);
+}
+
+.chat-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-sidebar-group-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 6px 2px 2px;
+}
+
+/* Collapsed rail layout: only the toggle + a New-conversation icon
+   button. Width is enforced via the parent grid (chat-layout.sidebar-
+   collapsed); the rail itself just stacks its two buttons. */
+.chat-sidebar.collapsed {
+  align-items: center;
+  padding-right: 0;
+  gap: 4px;
+}
+
+.chat-sidebar.collapsed .chat-sidebar-collapse-toggle {
+  margin-top: 4px;
+}
+
+.chat-sidebar-new-rail {
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: color 80ms ease, background 80ms ease, border-color 80ms ease;
+}
+
+.chat-sidebar-new-rail:hover {
+  color: var(--fg);
+  border-color: rgba(155, 142, 255, 0.4);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+/* --- Skeleton placeholders --- */
+
+.skeleton {
+  display: inline-block;
+  background: linear-gradient(
+    90deg,
+    var(--card) 25%,
+    var(--card-2) 50%,
+    var(--card) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.chat-skeleton {
+  padding: 14px 0;
+}
+
+/* Phase 3.7 L2 — per-tile skeleton placeholders. Heights match the data
+   render so a skeleton → data swap doesn't reflow the layout. */
+
+.skeleton {
+  border-radius: 4px;
+}
+
+
+.queue-item--skeleton .title { margin-bottom: 6px; }
+.skeleton-row-title { display: inline-block; height: 14px; width: 80%; }
+.skeleton-row-meta { display: inline-block; height: 12px; width: 40%; margin-left: 8px; }
+.skeleton-pill { display: inline-block; height: 14px; width: 32px; border-radius: 10px; }
+
+.skeleton-metric { display: inline-block; height: 14px; width: 48px; }
+
+.rd-pill-skeleton {
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+}
+.skeleton-portal { display: inline-block; height: 14px; width: 80px; }
+.skeleton-pill-content { display: inline-block; height: 14px; width: 64px; }
+.skeleton-train { display: inline-block; height: 16px; width: 120px; }
+
+/* --- Toast host (F9 stacks them; .bridge-toast already styles the body) --- */
+
+.toast-host {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast-host .bridge-toast {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+  animation: toast-slide-in 180ms ease-out;
+}
+
+.bridge-toast-info {
+  border-color: rgba(124, 192, 255, 0.4);
+}
+
+.toast-message {
+  flex: 1 1 0;
+}
+
+.toast-close {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  color: var(--fg);
+}
+
+@keyframes toast-slide-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+/* --- Markdown content inside assistant chat bubbles --- */
+
+.markdown-content {
+  /* Cancel the bubble's pre-wrap so paragraphs flow normally; markdown
+     handles its own newline / paragraph rendering. */
+  white-space: normal;
+}
+
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child  { margin-bottom: 0; }
+
+.markdown-content p {
+  margin: 0 0 0.9em;
+}
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* Cap prose at a comfortable measure — tables/code blocks still get
+   the full card width since dense data benefits from extra room. */
+.chat-message.assistant .markdown-content p,
+.chat-message.assistant .markdown-content ol,
+.chat-message.assistant .markdown-content ul,
+.chat-message.assistant .markdown-content blockquote {
+  max-width: 82ch;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0.55em 0;
+  padding-left: 1.4em;
+}
+
+.markdown-content li { margin: 0.3em 0; }
+
+/* Promote list markers to the accent so numbered steps + bullets read
+   as visual anchors when the model returns a long ordered report.
+   `::marker` is supported in all evergreen browsers; older renderers
+   silently fall back to the default color. */
+.markdown-content ol li::marker,
+.markdown-content ul li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Heading hierarchy: brighter than body so the eye finds structure.
+   Top margin is generous so sections breathe; first-child top margin
+   collapses so the bubble doesn't open with a gap. */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  color: var(--fg-strong);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+}
+.markdown-content h1 { font-size: 1.35em; }
+.markdown-content h2 { font-size: 1.18em; }
+.markdown-content h3 { font-size: 1.05em; }
+.markdown-content h4 { font-size: 1em; }
+.markdown-content > h1:first-child,
+.markdown-content > h2:first-child,
+.markdown-content > h3:first-child,
+.markdown-content > h4:first-child {
+  margin-top: 0;
+}
+
+/* Strong = brighter body, not accent. Accent stays reserved for chrome
+   (sidebar group labels + list markers) so emphasis within a paragraph
+   doesn't compete visually with structural cues. */
+.markdown-content strong {
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+
+/* Tables: separate, slightly recessed surface so the eye can tell
+   "reading" from "data". Smaller font + tabular numerics keep dense
+   numeric grids legible without bleeding brightness into the prose. */
+/* Tables sit *behind* the prose — recessed surface, soft border, tabular
+   numerals so columns line up. Slightly smaller font keeps dense numeric
+   grids legible without burning brightness. */
+.markdown-content table {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--fg);
+  background: rgba(8, 14, 34, 0.34);
+  border: 1px solid rgba(151, 164, 255, 0.11);
+  border-radius: 10px;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+.markdown-content th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.025);
+  text-align: left;
+}
+.markdown-content td,
+.markdown-content th {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(151, 164, 255, 0.07);
+  vertical-align: top;
+}
+.markdown-content tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown-content a {
+  color: var(--cyan);
+  text-decoration: underline;
+}
+
+.markdown-content code {
+  background: rgba(155, 142, 255, 0.1);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.92em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.markdown-content pre {
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0.6em 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.markdown-content pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Custom CodeBlock for fenced code in chat. Streamdown calls this via
+   components.pre; the shell owns the header + copy button, the body holds
+   the shiki output. Shiki is configured with dual themes + defaultColor:false
+   so it emits CSS variables (--shiki-light, --shiki-dark) that we swap on the
+   :root data-theme. */
+.code-block {
+  margin: 0.6em 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.code-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.code-block-lang {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.code-block-copy {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.code-block-copy:hover {
+  background: var(--card);
+  color: var(--fg);
+  border-color: var(--border-soft);
+}
+
+.code-block-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.code-block-body {
+  padding: 10px 12px;
+  margin: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.code-block-body pre,
+.code-block-body code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.code-block-body--plain code {
+  color: var(--fg);
+}
+
+/* Shiki dual-theme output: defaultColor:false emits --shiki-light /
+   --shiki-dark as CSS variables on every span (no inline color), so we pick
+   the right channel here. Project default is dark; light is opt-in via
+   data-theme="light". Only the outer .shiki carries the background; spans
+   only carry the foreground to avoid each token painting its own block. */
+.code-block-body .shiki {
+  background-color: var(--shiki-dark-bg);
+}
+
+.code-block-body .shiki,
+.code-block-body .shiki span {
+  color: var(--shiki-dark);
+}
+
+:root[data-theme="light"] .code-block-body .shiki {
+  background-color: var(--shiki-light-bg);
+}
+
+:root[data-theme="light"] .code-block-body .shiki,
+:root[data-theme="light"] .code-block-body .shiki span {
+  color: var(--shiki-light);
+}
+
+.markdown-content blockquote {
+  margin: 0.5em 0;
+  padding: 0.2em 0.8em;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+/* --- F10.3: Live tool-call render inside assistant chat bubbles --------- */
+/* Sits above .markdown-content; not persisted, so reload removes the      */
+/* block entirely. Open while streaming; collapses on done.                */
+
+.tool-calls-block {
+  margin-bottom: 8px;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.tool-calls-summary {
+  cursor: pointer;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  list-style: none;
+  user-select: none;
+}
+.tool-calls-summary::-webkit-details-marker { display: none; }
+.tool-calls-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+.tool-calls-block[open] > .tool-calls-summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-calls-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-calls-row {
+  border-top: 1px dashed var(--border-soft);
+  padding-top: 4px;
+}
+.tool-calls-row:first-child { border-top: none; padding-top: 0; }
+
+.tool-calls-row-name {
+  cursor: pointer;
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  list-style: none;
+  user-select: none;
+}
+.tool-calls-row-name::-webkit-details-marker { display: none; }
+.tool-calls-row-name::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 4px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.tool-calls-row[open] > .tool-calls-row-name::before {
+  transform: rotate(90deg);
+}
+
+.tool-calls-args {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Phase 3 prep: tool_result chunks attach result blobs below the args. */
+/* Border-left accent distinguishes results from inputs at a glance.    */
+.tool-calls-result {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--accent, #5b9aff);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text, var(--muted));
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-calls-result-error {
+  border-left-color: var(--danger, #e06666);
+  color: var(--danger, #e06666);
+}
+
+.tool-calls-error-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--danger, #e06666);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* F10.9: tool-source chip next to each tool-call row name. Disambiguates
+ * skill catalog vs Bridge tile vs provider-native built-in at a glance. */
+.tool-source-chip {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-source-bridge {
+  color: var(--cyan);
+}
+.tool-source-osdu {
+  color: var(--accent);
+}
+.tool-source-other {
+  color: var(--muted);
+}
+
+.tool-calls-running-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  animation: tool-call-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tool-call-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.1); }
+}
+
+/* --- F10.4: Live thinking-summary render inside assistant chat bubbles -- */
+/* Sits above .tool-calls-block (which is above .markdown-content). Live-  */
+/* only render — not persisted, so reload removes the block entirely.      */
+/* Slightly dimmer than tool-calls so it reads as ambient narration.       */
+
+.thinking-block {
+  margin-bottom: 8px;
+  background: var(--bg-soft);
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.thinking-summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  list-style: none;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.thinking-summary::-webkit-details-marker { display: none; }
+.thinking-summary::after {
+  content: "▸";
+  display: inline-block;
+  margin-left: 4px;
+  transition: transform 0.15s ease;
+}
+.thinking-block[open] > .thinking-summary::after {
+  transform: rotate(90deg);
+}
+
+.thinking-content {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --------------------------------------------------------------------- */
+/* Model picker popover                                                   */
+/* --------------------------------------------------------------------- */
+/* Native <div popover="auto"> — the browser handles light-dismiss and    */
+/* top-layer rendering. JS measures the chip and sets inline top/left     */
+/* in the toggle handler; we reset the default centering margins here.    */
+
+.model-picker-popover {
+  position: fixed;
+  margin: 0;
+  inset: auto;
+
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  max-height: min(60vh, 480px);
+  width: max-content;
+  max-width: 460px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Browsers without :popover-open should still hide the popover when not
+   shown. The popover attribute already does this, but spelling it out
+   keeps inspector previews clean. */
+.model-picker-popover:not(:popover-open) {
+  display: none;
+}
+
+.model-picker-popover-search-wrap {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+}
+
+.model-picker-popover-search {
+  width: 100%;
+  background: var(--bg-soft);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.model-picker-popover-search:focus {
+  border-color: rgba(155, 142, 255, 0.5);
+}
+
+.model-picker-popover-body {
+  /* `flex: 1 1 auto` (not `1 1 0`) so the body's intrinsic height drives
+     the popover's natural sizing. `min-height: 0` lets the body shrink
+     below its content when max-height caps the popover, allowing the
+     overflow-y: auto scroll region to engage. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.model-picker-popover-section {
+  padding: 4px 0;
+}
+
+.model-picker-popover-section-title {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  padding: 6px 14px 4px;
+}
+
+.model-picker-popover-section-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-picker-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  border-radius: 6px;
+  margin: 0 4px;
+}
+
+.model-picker-popover-row:hover:not(.disabled) {
+  background: rgba(155, 142, 255, 0.06);
+}
+
+.model-picker-popover-row.active {
+  background: rgba(155, 142, 255, 0.12);
+}
+
+.model-picker-popover-row.disabled {
+  opacity: 0.4;
+}
+
+.model-picker-popover-fav {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  transition: color 80ms ease, background 80ms ease;
+}
+
+.model-picker-popover-fav[aria-pressed="true"] {
+  color: var(--yellow);
+}
+
+.model-picker-popover-fav:hover {
+  color: var(--yellow);
+  background: rgba(245, 195, 82, 0.08);
+}
+
+.model-picker-popover-fav:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.model-picker-popover-pick {
+  flex: 1 1 0;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  padding: 6px 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.model-picker-popover-pick:disabled {
+  cursor: not-allowed;
+  color: var(--dim);
+}
+
+.model-picker-popover-pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.model-picker-popover-pick-prefix {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+}
+
+.model-picker-popover-pick-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Flex: shrinkable, content-width — the meta block to the right uses
+     margin-left:auto to claim the trailing space, so the label can sit
+     immediately after the prefix without absorbing the row. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Right-aligned trailing column: cost tier badge + capability icon row.
+   margin-left:auto pushes the whole block past the id, regardless of how
+   much label width the row eats.
+
+   Quiet by default — opacity + reduced saturation keep the metadata out
+   of the primary scan path so the model name is the only high-contrast
+   element. Row hover/active lifts the cascade so the data is available
+   when the user is actually looking at a row. */
+.model-picker-popover-pick-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  opacity: 0.45;
+  filter: saturate(0.65);
+  transition: opacity 80ms ease, filter 80ms ease;
+}
+
+.model-picker-popover-row:hover:not(.disabled) .model-picker-popover-pick-meta,
+.model-picker-popover-row.active .model-picker-popover-pick-meta {
+  opacity: 0.85;
+  filter: saturate(0.95);
+}
+
+/* Ghost cost token. All tiers sit in the purple family so high-cost
+   models don't read as warnings — Opus isn't dangerous, it's expensive
+   by design. Free gets a quiet green hint since it's a genuinely
+   positive distinction. Intensity climbs subtly across low/mid/high
+   via the border + background + color triplet; the meta cascade above
+   handles the rest of the contrast story. */
+.model-picker-popover-pick-cost {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 1px 6px;
+  border-radius: 8px;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(170, 160, 255, 0.12);
+  background: rgba(170, 160, 255, 0.06);
+  color: rgba(215, 210, 255, 0.55);
+}
+
+.model-picker-popover-pick-cost.cost-free {
+  border-color: rgba(120, 220, 160, 0.14);
+  background: rgba(120, 220, 160, 0.06);
+  color: rgba(170, 220, 180, 0.60);
+}
+
+.model-picker-popover-pick-cost.cost-low {
+  /* Same tokens as the default — declared for explicitness so the
+     low/mid/high progression reads in one place. */
+  border-color: rgba(170, 160, 255, 0.12);
+  background: rgba(170, 160, 255, 0.06);
+  color: rgba(215, 210, 255, 0.55);
+}
+
+.model-picker-popover-pick-cost.cost-mid {
+  border-color: rgba(170, 160, 255, 0.18);
+  background: rgba(170, 160, 255, 0.08);
+  color: rgba(215, 210, 255, 0.62);
+}
+
+.model-picker-popover-pick-cost.cost-high {
+  border-color: rgba(170, 160, 255, 0.24);
+  background: rgba(170, 160, 255, 0.10);
+  color: rgba(220, 215, 255, 0.70);
+}
+
+.model-picker-popover-empty {
+  font-size: 12px;
+  color: var(--dim);
+  font-style: italic;
+  padding: 18px;
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------- */
+/* F10.6 — Reasoning-effort popover                                      */
+/* --------------------------------------------------------------------- */
+/* Same native popover chrome as .model-picker-popover but narrower —    */
+/* only four rows ever fit. Anchored to the reasoning-effort chip; the   */
+/* component's reposition() sets inline top/left.                        */
+
+.reasoning-effort-popover {
+  position: fixed;
+  margin: 0;
+  inset: auto;
+
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  max-height: min(60vh, 240px);
+  width: max-content;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.reasoning-effort-popover:not(:popover-open) {
+  display: none;
+}
+
+.reasoning-effort-popover-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.reasoning-effort-popover-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.reasoning-effort-popover-row:hover {
+  background: rgba(155, 142, 255, 0.10);
+}
+
+.reasoning-effort-popover-row.active {
+  background: rgba(155, 142, 255, 0.18);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.reasoning-effort-popover-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.reasoning-effort-popover-row-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+}
+
+/* Phase 3 S6 — Tools popover. Anchored relative to .chat-tools-chip via
+   inline top/left set in the toggle handler (same browser-native popover
+   pattern as .model-picker-popover and .reasoning-effort-popover). */
+.tools-popover {
+  position: fixed;
+  margin: 0;
+  inset: auto;
+
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  max-height: min(60vh, 460px);
+  width: max-content;
+  max-width: 520px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tools-popover:not(:popover-open) {
+  display: none;
+}
+
+.tools-popover-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.tools-popover-section {
+  padding: 4px 0;
+}
+
+.tools-popover-section + .tools-popover-section {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.tools-popover-section-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 14px 6px;
+}
+
+.tools-popover-section-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+
+.tools-popover-section-hint {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.tools-popover-section-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.tools-popover-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 14px;
+  margin: 0 4px;
+  border-radius: 6px;
+}
+
+.tools-popover-row:hover {
+  background: rgba(155, 142, 255, 0.06);
+}
+
+.tools-popover-row-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.tools-popover-row-desc {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.tools-popover-empty {
+  padding: 14px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* --- Credentials drawer (Phase 3.6 H2) --- */
+
+.credentials-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+}
+
+.credentials-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 28, 0.5);
+  z-index: 1000;
+  animation: credentials-fade-in 120ms ease-out;
+}
+
+.credentials-drawer {
+  position: fixed;
+  top: 0;
+  right: var(--panel-right-gap);
+  height: 100vh;
+  width: 360px;
+  max-width: 90vw;
+  background: var(--bg);
+  border-left: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-popover);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  animation: credentials-slide-in 180ms ease-out;
+}
+
+@keyframes credentials-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes credentials-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.credentials-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.credentials-drawer-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.credentials-drawer-close {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: color 80ms ease, background 80ms ease;
+}
+
+.credentials-drawer-close:hover {
+  color: var(--fg);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+.credentials-drawer-body {
+  flex: 1 1 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.credentials-drawer-empty {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 24px 0;
+  text-align: center;
+}
+
+.credentials-drawer-empty-sub {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+
+.credentials-drawer-error {
+  font-size: 12px;
+  color: var(--red);
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: rgba(240, 135, 147, 0.06);
+}
+
+.credentials-drawer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.credentials-drawer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.credentials-drawer-item.absent {
+  opacity: 0.55;
+}
+
+.credentials-drawer-item-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.credentials-drawer-item-name {
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.credentials-drawer-item-source {
+  font-size: 10px;
+  color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.credentials-drawer-item-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.credentials-drawer-value {
+  flex: 1 1 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 8px;
+  background: var(--bg-soft);
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.credentials-drawer-value.revealed {
+  color: var(--fg);
+  background: rgba(125, 192, 255, 0.08);
+}
+
+.credentials-drawer-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.credentials-drawer-action {
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 80ms ease, border-color 80ms ease, background 80ms ease;
+}
+
+.credentials-drawer-action:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: rgba(155, 142, 255, 0.4);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+.credentials-drawer-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.credentials-drawer-item-absent {
+  font-size: 10px;
+  color: var(--dim);
+  font-style: italic;
+}
+
+/* ConfirmModal -------------------------------------------------------------- */
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 28, 0.55);
+  z-index: 2000;
+  animation: credentials-fade-in 120ms ease-out;
+}
+
+.confirm-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: 92vw;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-popover);
+  z-index: 2001;
+  display: flex;
+  flex-direction: column;
+  animation: credentials-fade-in 140ms ease-out;
+}
+
+.confirm-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.confirm-modal-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fg);
+}
+
+.confirm-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.confirm-modal-close:hover {
+  color: var(--fg);
+}
+
+.confirm-modal-body {
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.confirm-modal-body code {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.confirm-modal-typed {
+  padding: 0 16px 12px;
+}
+
+.confirm-modal-typed-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.confirm-modal-typed-input {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.confirm-modal-typed-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.confirm-modal-typed-hint code {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.confirm-modal-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.confirm-modal-cancel,
+.confirm-modal-confirm {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.confirm-modal-confirm {
+  background: rgba(155, 142, 255, 0.18);
+  border-color: rgba(155, 142, 255, 0.5);
+}
+
+.confirm-modal-confirm:hover:not(:disabled) {
+  background: rgba(155, 142, 255, 0.3);
+}
+
+.confirm-modal-confirm.danger {
+  background: rgba(255, 92, 92, 0.18);
+  border-color: rgba(255, 92, 92, 0.55);
+  color: var(--red);
+}
+
+.confirm-modal-confirm.danger:hover:not(:disabled) {
+  background: rgba(255, 92, 92, 0.3);
+}
+
+.confirm-modal-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ClusterOpStreamDrawer ----------------------------------------------------- */
+
+.cluster-op-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 28, 0.4);
+  z-index: 1500;
+  animation: credentials-fade-in 120ms ease-out;
+}
+
+.cluster-op-drawer {
+  position: fixed;
+  top: 0;
+  right: var(--panel-right-gap);
+  height: 100vh;
+  /* 50% of the panel — fluid below cap, clamped at `--max-content-width`
+     * 0.5 once the panel hits its cap. ~80 mono chars at typical sizes. */
+  width: min(calc(0.5 * (100vw - 48px)), calc(var(--max-content-width) * 0.5));
+  max-width: 92vw;
+  background: var(--bg);
+  border-left: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-popover);
+  z-index: 1501;
+  display: flex;
+  flex-direction: column;
+  animation: credentials-slide-in 180ms ease-out;
+}
+
+.cluster-op-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.cluster-op-drawer-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.cluster-op-drawer-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--border-soft);
+}
+
+.cluster-op-drawer-status.done {
+  color: var(--green);
+  border-color: rgba(58, 200, 130, 0.4);
+}
+
+.cluster-op-drawer-status.error,
+.cluster-op-drawer-status.closed {
+  color: var(--red);
+  border-color: rgba(255, 92, 92, 0.4);
+}
+
+.cluster-op-drawer-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.cluster-op-drawer-close:hover {
+  color: var(--fg);
+}
+
+.cluster-op-drawer-progress {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cluster-op-drawer-progress-phase {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.cluster-op-drawer-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--card);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cluster-op-drawer-progress-fill {
+  height: 100%;
+  background: rgba(155, 142, 255, 0.7);
+  transition: width 180ms ease;
+}
+
+.cluster-op-drawer-log {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: var(--card);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg);
+}
+
+.cluster-op-drawer-log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ANSI color mapping for the drawer (and any other surface that renders
+   <AnsiText>). anser emits class names like "ansi-red"; the renderer suffixes
+   with -fg / -bg for CSS disambiguation. Palette indices 0–15 are the 16-color
+   ANSI palette and are styled explicitly; higher palette indices fall through
+   to the surface default. */
+.ansi-black-fg, .ansi-palette-0-fg { color: var(--dim); }
+.ansi-red-fg, .ansi-palette-1-fg { color: var(--red); }
+.ansi-green-fg, .ansi-palette-2-fg { color: var(--green); }
+.ansi-yellow-fg, .ansi-palette-3-fg { color: var(--yellow); }
+.ansi-blue-fg, .ansi-palette-4-fg { color: var(--cyan); }
+.ansi-magenta-fg, .ansi-palette-5-fg { color: var(--magenta); }
+.ansi-cyan-fg, .ansi-palette-6-fg { color: var(--cyan); }
+.ansi-white-fg, .ansi-palette-7-fg { color: var(--fg); }
+.ansi-bright-black-fg, .ansi-palette-8-fg { color: var(--muted); }
+.ansi-bright-red-fg, .ansi-palette-9-fg { color: var(--red); }
+.ansi-bright-green-fg, .ansi-palette-10-fg { color: var(--green); }
+.ansi-bright-yellow-fg, .ansi-palette-11-fg { color: var(--yellow); }
+.ansi-bright-blue-fg, .ansi-palette-12-fg { color: var(--cyan); }
+.ansi-bright-magenta-fg, .ansi-palette-13-fg { color: var(--magenta); }
+.ansi-bright-cyan-fg, .ansi-palette-14-fg { color: var(--cyan); }
+.ansi-bright-white-fg, .ansi-palette-15-fg { color: var(--fg); }
+
+.ansi-black-bg, .ansi-palette-0-bg { background-color: var(--bg-soft); }
+.ansi-red-bg, .ansi-palette-1-bg { background-color: var(--red); color: var(--bg); }
+.ansi-green-bg, .ansi-palette-2-bg { background-color: var(--green); color: var(--bg); }
+.ansi-yellow-bg, .ansi-palette-3-bg { background-color: var(--yellow); color: var(--bg); }
+.ansi-blue-bg, .ansi-palette-4-bg { background-color: var(--cyan); color: var(--bg); }
+.ansi-magenta-bg, .ansi-palette-5-bg { background-color: var(--magenta); color: var(--bg); }
+.ansi-cyan-bg, .ansi-palette-6-bg { background-color: var(--cyan); color: var(--bg); }
+.ansi-white-bg, .ansi-palette-7-bg { background-color: var(--fg); color: var(--bg); }
+
+.ansi-bold { font-weight: 600; }
+.ansi-dim { opacity: 0.65; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
+.ansi-strikethrough { text-decoration: line-through; }
+
+/* Rich's terminal-native palette (dark syntax bg, neon greens/yellows, hard
+   blue panel borders) doesn't translate into the light-mode product surface
+   no matter what dark color we pick for the fill. The fix is structural,
+   not chromatic:
+     1. strip rich's inline backgrounds so the drawer's own surface shows
+        through — no purple "carpet" effect,
+     2. remap the 16-color ANSI fg palette to muted lavender-family tones
+        so panel borders + status text feel native instead of imported.
+   Pygments truecolor fg escapes (from rich's Syntax module) still come
+   through unchanged. They were tuned for a dark base; with the bg stripped
+   they paint on the drawer surface and stay legible because their HSL
+   lightness is generally low enough. A proper fix would switch rich's
+   syntax theme upstream, but that's a server change for another pass. */
+:root[data-theme="light"] .cluster-op-drawer-log-line span[style*="background"] {
+  background: transparent !important;
+}
+
+/* Rich's pygments-driven truecolor foregrounds (Syntax + Panel content) are
+   tuned for a dark terminal — many are near-white grays that vanish on the
+   light surface. Override every inline-color span to a dark ink so command
+   bodies and YAML payloads stay readable. We accept losing pygments' token
+   variation (pink keys, green values, etc.) — the class-based ANSI palette
+   above still drives panel borders, status text, and the rest of the log,
+   so semantic color is preserved where it matters. */
+:root[data-theme="light"] .cluster-op-drawer-log-line span[style*="color"] {
+  color: #211b34 !important;
+}
+
+:root[data-theme="light"] .ansi-red-fg,
+:root[data-theme="light"] .ansi-bright-red-fg,
+:root[data-theme="light"] .ansi-palette-1-fg,
+:root[data-theme="light"] .ansi-palette-9-fg {
+  color: #c23b63;
+}
+:root[data-theme="light"] .ansi-green-fg,
+:root[data-theme="light"] .ansi-bright-green-fg,
+:root[data-theme="light"] .ansi-palette-2-fg,
+:root[data-theme="light"] .ansi-palette-10-fg {
+  color: #177a4d;
+}
+:root[data-theme="light"] .ansi-yellow-fg,
+:root[data-theme="light"] .ansi-bright-yellow-fg,
+:root[data-theme="light"] .ansi-palette-3-fg,
+:root[data-theme="light"] .ansi-palette-11-fg {
+  color: #9a6b00;
+}
+:root[data-theme="light"] .ansi-blue-fg,
+:root[data-theme="light"] .ansi-bright-blue-fg,
+:root[data-theme="light"] .ansi-palette-4-fg,
+:root[data-theme="light"] .ansi-palette-12-fg,
+:root[data-theme="light"] .ansi-cyan-fg,
+:root[data-theme="light"] .ansi-bright-cyan-fg,
+:root[data-theme="light"] .ansi-palette-6-fg,
+:root[data-theme="light"] .ansi-palette-14-fg {
+  color: #6f7fbe;
+}
+:root[data-theme="light"] .ansi-magenta-fg,
+:root[data-theme="light"] .ansi-bright-magenta-fg,
+:root[data-theme="light"] .ansi-palette-5-fg,
+:root[data-theme="light"] .ansi-palette-13-fg {
+  color: #6f58d9;
+}
+
+/* Drawer chrome (header + status pill) — pulled into the lavender family
+   so the drawer reads as part of the app instead of a terminal popup. */
+:root[data-theme="light"] .cluster-op-drawer-header {
+  background: #f4effb;
+  border-bottom-color: #d7cdea;
+}
+:root[data-theme="light"] .cluster-op-drawer-status {
+  background: #eee8f7;
+  border-color: #cfc3e8;
+  color: #5d5376;
+}
+
+.cluster-op-drawer-empty {
+  color: var(--dim);
+  font-style: italic;
+}
+
+.cluster-op-drawer-error {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--red);
+  border-top: 1px solid var(--border-soft);
+}
+
+.cluster-op-drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.cluster-op-drawer-cancel,
+.cluster-op-drawer-close-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cluster-op-drawer-cancel:hover,
+.cluster-op-drawer-close-btn:hover {
+  border-color: rgba(155, 142, 255, 0.5);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+/* ---------------- Phase 3.8: cimpl version pill + popover + toast ---------------- */
+
+.cimpl-version-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 12px;
+}
+
+.cimpl-version-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border-soft);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cimpl-version-pill:hover {
+  border-color: var(--border);
+}
+
+.cimpl-version-pill-update-available {
+  color: var(--accent);
+  border-color: rgba(155, 142, 255, 0.5);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+.cimpl-version-pill-not-detected {
+  color: var(--dim);
+  opacity: 0.7;
+}
+
+/* Reset pill — same shape + neutral border as the cimpl version pill so
+   it doesn't shout, with a faded red text/glyph to signal "destructive". */
+.reset-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid var(--border-soft);
+  background: var(--card);
+  color: rgba(239, 68, 68, 0.7);
+  cursor: pointer;
+  margin-right: 8px;
+}
+.reset-pill:hover:not(:disabled) {
+  border-color: var(--border);
+  color: rgba(239, 68, 68, 0.95);
+}
+.reset-pill:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.reset-pill-glyph {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Liveness dot rendered inside the cimpl version pill — same dot palette
+   the freestanding indicator used (green/yellow/red + pulsing). */
+.cimpl-version-pill .dot {
+  margin-right: 6px;
+}
+
+.cimpl-update-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 280px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.cimpl-update-popover-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.cimpl-update-popover-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  margin: 0 0 12px;
+}
+
+.cimpl-update-popover-rows dt {
+  color: var(--muted);
+}
+
+.cimpl-update-popover-rows dd {
+  margin: 0;
+  color: var(--fg);
+}
+
+.cimpl-update-popover-flag {
+  color: var(--accent);
+  margin-left: 4px;
+}
+
+.cimpl-update-popover-error {
+  color: var(--red);
+  margin-bottom: 8px;
+}
+
+.cimpl-update-popover-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cimpl-update-popover-update,
+.cimpl-update-popover-check {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cimpl-update-popover-update {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+
+.cimpl-update-popover-update:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cimpl-update-popover-check {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.cimpl-update-popover-check:hover:not(:disabled) {
+  border-color: rgba(155, 142, 255, 0.5);
+  background: rgba(155, 142, 255, 0.08);
+}
+
+.cimpl-update-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: var(--card);
+  border: 1px solid rgba(155, 142, 255, 0.5);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  z-index: 60;
+  font-size: 12px;
+}
+
+.cimpl-update-toast-body {
+  padding: 10px 14px;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+
+.cimpl-update-toast-dismiss {
+  padding: 0 12px 0 4px;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  align-self: stretch;
+}
+
+.cimpl-update-toast-dismiss:hover {
+  color: var(--fg);
+}
+
+/* ---------------- Phase 3.9: Instance Control Center ----------------
+   Strip = [indicator] [picker] [age] [refresh] [chevron]. No chrome
+   title; the strip *is* the chrome. Body = chevron-collapsed by default
+   on Healthy. Two-form indicator: pill for operating, message for
+   pre-cluster + opfailed. Severity glyph + label, optional ⏸ modifier
+   on the Healthy pill. */
+
+.icc {
+  position: relative;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--card) 96%, var(--accent)), var(--card));
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.icc-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+}
+.icc:not(.icc-collapsed) .icc-strip {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.icc-strip-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Indicator — both pill (operating) and message (pre-cluster / opfailed)
+   forms. The pill carries the closed-enum status; messages carry sentence-
+   shaped severities. */
+.icc-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.icc-indicator-glyph {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  font-weight: 700;
+}
+.icc-indicator-modifier {
+  margin-left: 2px;
+  color: #4ec5d3;
+  font-size: 12px;
+}
+.icc-indicator-pill.status-ok {
+  color: var(--green);
+  border-color: rgba(109, 210, 141, 0.45);
+  background: rgba(109, 210, 141, 0.08);
+}
+.icc-indicator-pill.status-pending {
+  color: var(--accent);
+  border-color: rgba(155, 142, 255, 0.45);
+  background: rgba(155, 142, 255, 0.08);
+}
+.icc-indicator-pill.status-pending .icc-indicator-glyph {
+  letter-spacing: -1px;
+  animation: icc-pulse 1.4s ease-in-out infinite;
+}
+.icc-indicator-pill.status-updating {
+  color: var(--accent);
+  border-color: rgba(155, 142, 255, 0.45);
+  background: rgba(155, 142, 255, 0.08);
+}
+.icc-indicator-pill.status-updating .icc-indicator-glyph {
+  display: inline-block;
+  animation: icc-spin 1.6s linear infinite;
+}
+.icc-indicator-message.severity-error {
+  color: var(--red);
+  border-color: rgba(240, 135, 147, 0.45);
+  background: rgba(240, 135, 147, 0.08);
+}
+.icc-indicator-message.severity-warn {
+  color: var(--yellow);
+  border-color: rgba(245, 195, 82, 0.45);
+  background: rgba(245, 195, 82, 0.08);
+}
+
+@keyframes icc-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+@keyframes icc-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.icc-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.icc-picker-label {
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.icc-picker select,
+.icc-field select,
+.icc-field input {
+  min-width: 0;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.icc-picker select:disabled {
+  opacity: 0.6;
+}
+
+/* Snapshot age doubles as a click-to-refresh affordance — same as Slot 4
+   per design line 381. Looks like text, behaves like a button. */
+.icc-snapshot {
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+.icc-snapshot:hover { color: var(--accent); }
+
+/* Secondary controls. Fixed square so the refresh ↻ and chevron ⌄ glyphs
+   render at consistent visual weight regardless of glyph metrics. */
+.icc-refresh,
+.icc-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+.icc-refresh:hover:not(:disabled),
+.icc-expand-toggle:hover {
+  color: var(--accent);
+  border-color: rgba(155, 142, 255, 0.5);
+}
+.icc-refresh:disabled { opacity: 0.55; cursor: progress; }
+.icc-refresh.is-spinning .icc-refresh-glyph {
+  display: inline-block;
+  animation: icc-spin 0.9s linear infinite;
+}
+.icc:not(.icc-collapsed) .icc-expand-toggle {
+  transform: rotate(180deg);
+}
+
+/* Body — Lifecycle | Actions side-by-side, then Access full-width below.
+   Refreshing overlay per design open-question 2: panel fades to ~50%
+   with a centered Refreshing… pill rather than a yellow status bar. */
+.icc-body {
+  position: relative;
+  padding: 14px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.icc-body.is-refreshing > * {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.icc-body.is-refreshing::before {
+  content: "Refreshing…";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  background: var(--card);
+  border: 1px solid rgba(155, 142, 255, 0.45);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 1;
+}
+
+.icc-row-top {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.4fr) minmax(220px, 1fr);
+  gap: 16px;
+}
+/* Create mode has no right-side actions; let the form span the full row. */
+.icc-row-top.icc-create {
+  grid-template-columns: 1fr;
+}
+.icc-row-bottom {
+  display: grid;
+}
+.icc-zone {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.icc-zone-label {
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+
+/* Lifecycle rail — diagnostic only, no inline actions per design rule. */
+.icc-lifecycle { display: grid; gap: 6px; }
+.icc-lifecycle-row {
+  display: grid;
+  grid-template-columns: 18px 80px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
+  font-size: 12px;
+}
+.icc-lifecycle-glyph {
+  text-align: center;
+  font-weight: 700;
+}
+.icc-lifecycle-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+.icc-lifecycle-detail {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-ok .icc-lifecycle-glyph { color: var(--green); }
+.row-warn .icc-lifecycle-glyph,
+.row-pending .icc-lifecycle-glyph { color: var(--yellow); }
+.row-error .icc-lifecycle-glyph { color: var(--red); }
+.row-na .icc-lifecycle-glyph { color: var(--dim); }
+
+/* Actions panel — fixed 4-affordance set across every operating state
+   (Reconcile / Suspend|Resume / Delete / + Create another link). The
+   create-link is the only place creation is initiated. */
+.icc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+.icc-action,
+.icc-create-submit {
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.icc-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  cursor: pointer;
+  padding: 7px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+}
+.icc-action:hover:not(:disabled) {
+  border-color: rgba(155, 142, 255, 0.5);
+  background: rgba(155, 142, 255, 0.08);
+}
+.icc-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.icc-action-glyph {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+}
+.icc-action.danger {
+  color: var(--red);
+  border-color: rgba(240, 135, 147, 0.35);
+}
+.icc-action.danger:hover:not(:disabled) {
+  background: rgba(240, 135, 147, 0.1);
+  border-color: rgba(240, 135, 147, 0.6);
+}
+.icc-action-link {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 4px 0;
+  cursor: pointer;
+  text-align: left;
+  margin-top: 2px;
+}
+.icc-action-link:hover { text-decoration: underline; }
+
+/* Service access grid — auto-fit cards (~135px min). Status encoded in
+   dot color only (hover shows the word). ↗ icon-only Open, [Creds] text
+   button. Inline note (e.g. "8 instances") is the only per-row detail. */
+.icc-service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.icc-service-grid.empty {
+  display: block;
+  color: var(--dim);
+  font-size: 12px;
+  font-style: italic;
+  border: 1px dashed var(--border-soft);
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+
+.icc-service-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
+}
+.icc-service-card.service-unavailable { opacity: 0.55; }
+
+.icc-service-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.icc-service-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--dim);
+}
+.icc-service-dot.dot-ready { background: var(--green); box-shadow: 0 0 8px rgba(109, 210, 141, 0.55); }
+.icc-service-dot.dot-internal { background: #4ec5d3; }
+.icc-service-dot.dot-pending {
+  background: var(--accent);
+  animation: icc-pulse 1.4s ease-in-out infinite;
+}
+.icc-service-dot.dot-degraded { background: var(--yellow); }
+.icc-service-dot.dot-unavailable { background: var(--dim); }
+.icc-service-label {
+  font-size: 12px;
+  font-weight: 650;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.icc-service-note {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* The open-in-new-tab link now lives inline with the service label so the
+   tile reads "name → here's where to launch it". */
+.icc-service-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  text-decoration: none;
+  color: var(--muted);
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.icc-service-link:hover {
+  background: rgba(155, 142, 255, 0.12);
+  color: var(--accent);
+}
+
+/* Credential rows — one row per account (username + optional role tag + copy
+   button). Password is never rendered; the copy button writes it straight to
+   the clipboard. */
+.icc-service-creds {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.icc-service-cred-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+}
+.icc-service-cred-user {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--fg);
+  user-select: all;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.icc-service-cred-user-empty {
+  color: var(--dim);
+}
+.icc-service-cred-tag {
+  color: var(--dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex: 0 0 auto;
+}
+.icc-service-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  flex: 0 0 auto;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.icc-service-copy:hover:not(:disabled) {
+  border-color: rgba(155, 142, 255, 0.5);
+  background: rgba(155, 142, 255, 0.08);
+  color: var(--accent);
+}
+.icc-service-copy:disabled { opacity: 0.5; cursor: not-allowed; }
+.icc-service-copy.flash-ok {
+  color: var(--green);
+  border-color: rgba(109, 210, 141, 0.55);
+  background: rgba(109, 210, 141, 0.12);
+}
+.icc-service-copy.flash-fail {
+  color: rgb(239, 68, 68);
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Create form — "launch console" two-zone layout. Form on the left,
+   live cluster plan + command preview + primary action on the right.
+   The empty space becomes a confidence-builder before the operator
+   commits to a long-running create.
+   .icc-create-body                         2-column outer grid
+   ├─ .icc-create-form                      left zone (inputs)
+   │  ├─ .icc-create-section (Provider)
+   │  ├─ .icc-create-section (Basics)
+   │  ├─ .icc-create-section.icc-create-azure (conditional)
+   │  └─ details.icc-create-advanced
+   └─ aside.icc-create-plan                 right rail
+      ├─ dl.icc-create-plan-fields
+      ├─ pre.icc-create-plan-cmd
+      └─ button.icc-create-plan-submit */
+.icc-zone-create .icc-create-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
+}
+.icc-create-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  /* align-self: start keeps internal section spacing constant regardless of
+     whether the plan rail is taller than us. Without this, the form's grid
+     stretches its rows to match the rail and pushes sections apart. */
+  align-self: start;
+}
+.icc-create-section { display: grid; gap: 8px; }
+.icc-create-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.icc-create-section-label {
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+/* Options section: collapsed by default. Modeled after the main panel
+   strip — a bar with the label on the left and a chevron button on the
+   right that rotates 180° when expanded, same affordance the cluster
+   panel itself uses. Collapsed body shows muted chips with the implicit
+   defaults; expanded body shows the provider-conditional Azure row + the
+   OSDU scope row. */
+/* Border-top + padding does the section separation; no label needed. */
+.icc-options-expanded {
+  display: grid;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+.icc-options-expanded .icc-form-grid {
+  gap: 10px;
+}
+
+/* Env (1fr, min 360px) + Profile (360px fixed). The fixed right column
+   gives the 5-chip segmented control breathing room; the 3-input OSDU
+   scope row uses .icc-form-grid-3 to override to equal thirds. */
+.icc-form-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) 360px;
+  gap: 16px;
+  align-items: end;
+}
+.icc-form-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+.icc-form-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+@media (max-width: 820px) {
+  .icc-form-grid,
+  .icc-form-grid-2,
+  .icc-form-grid-3 { grid-template-columns: 1fr; }
+}
+
+.icc-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.icc-field span,
+.icc-checkbox {
+  color: var(--muted);
+  font-size: 11px;
+}
+/* Containerized pill so the checkbox reads as an intentional inline option
+   rather than a label floating in white space next to the Location input.
+   Height matches the adjacent input so the row baseline-aligns. */
+.icc-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  width: fit-content;
+  align-self: end;
+  cursor: pointer;
+}
+
+/* Provider cards — compact operator-control feel (~70-78px tall).
+   No tag pills; just a name (+ optional Soon badge) and a one-line
+   description. Auto-fit grid lays 4-across at panel width and gracefully
+   re-flows to 2×2 / 1× when the form column shrinks. */
+.icc-provider-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.icc-provider-card {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--fg);
+  font: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.icc-provider-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.icc-provider-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-soft));
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.icc-provider-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.icc-provider-card.disabled:hover {
+  border-color: var(--border);
+}
+.icc-provider-card-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.icc-provider-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.icc-provider-card-soon {
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.icc-provider-card-tagline {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Segmented profile control — 5 chips in a strip, single-select. */
+.icc-segmented {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.icc-segmented-option {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.icc-segmented-option:hover {
+  color: var(--fg);
+}
+.icc-segmented-option.selected {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--fg);
+}
+
+/* Azure conditional block — soft divider above so it reads as a
+   provider-scoped sub-section. */
+.icc-create-azure {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Advanced disclosure — collapsed by default. */
+.icc-create-advanced {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+}
+.icc-create-advanced > summary {
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.icc-create-advanced > summary::before {
+  content: "▸";
+  color: var(--dim);
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+.icc-create-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+.icc-create-advanced > summary::-webkit-details-marker { display: none; }
+.icc-create-advanced > summary:hover { color: var(--fg); }
+.icc-create-advanced > .icc-form-grid {
+  margin-top: 10px;
+}
+
+/* Right rail — cluster plan + command preview + primary action. Stretches
+   to the form column's height so the Create button anchors at the panel
+   bottom (review → execute is the rail's job). With OSDU scope collapsed
+   by default, the form column is now compact enough that the rail rarely
+   has dead space; if Azure + scope-expanded creates extra room, the
+   command preview block absorbs it via flex-grow. */
+.icc-create-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--bg-soft);
+  min-width: 0;
+}
+.icc-create-plan-label {
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.icc-create-plan-fields {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 0;
+}
+.icc-create-plan-fields dt {
+  color: var(--dim);
+  font-size: 11px;
+  align-self: baseline;
+}
+.icc-create-plan-fields dd {
+  color: var(--fg);
+  font-size: 12px;
+  margin: 0;
+  word-break: break-word;
+}
+.icc-create-plan-fields dd code {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+.icc-create-plan-cmd-label {
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-top: 4px;
+}
+.icc-create-plan-cmd {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+  /* Absorb any vertical slack — when the form column is taller than the
+     rail's natural content, this lets the preview block grow instead of
+     leaving a gap above the bottom-pinned Create button. */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.icc-create-submit {
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  color: var(--bg);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 9px 16px;
+  font-size: 12px;
+}
+.icc-create-submit:hover { filter: brightness(1.08); }
+.icc-create-plan-submit {
+  margin-top: auto;  /* pin to the bottom of the stretched rail */
+  width: 100%;
+}
+
+/* Narrow viewports: plan rail drops below the form so neither column
+   gets squeezed past usability. The flex-grow on the preview only matters
+   when the rail is stretched — collapsing to one column makes the preview
+   size to content normally. */
+@media (max-width: 960px) {
+  .icc-zone-create .icc-create-body {
+    grid-template-columns: 1fr;
+  }
+  .icc-create-plan-cmd { flex: 0 0 auto; }
+  .icc-create-plan-submit { margin-top: 4px; }
+}
+
+.icc-skel-indicator { width: 130px; height: 26px; border-radius: 999px; }
+.icc-skel-picker { width: 240px; height: 28px; }
+.icc-skel-button { width: 70px; height: 28px; }
+
+@media (max-width: 980px) {
+  .icc-strip { flex-wrap: wrap; }
+  .icc-strip-right { margin-left: 0; }
+  .icc-row-top { grid-template-columns: 1fr; }
+  .icc-actions { align-items: flex-start; }
+  .icc-service-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+
+/* ---------------- Create-cluster panel — light theme polish ------------- *
+ * Dark mode reads well because every surface (outer panel, form area,
+ * provider card, plan rail, command preview, button) carries its own
+ * contrast against the deep navy. In light mode the same tokens collapse
+ * into a pale lavender wash. These overrides re-introduce that depth with
+ * tinted surfaces, stronger borders, and a more decisive CTA — without
+ * abandoning the lavender identity.
+ * ------------------------------------------------------------------------ */
+:root[data-theme="light"] .icc-zone-create .icc-create-body {
+  background: linear-gradient(180deg, #f7f3ff 0%, #f1edfb 100%);
+  border-color: #cdc3e8;
+}
+
+:root[data-theme="light"] .icc-create-section-label,
+:root[data-theme="light"] .icc-options-bar-label,
+:root[data-theme="light"] .icc-create-plan-label,
+:root[data-theme="light"] .icc-create-plan-cmd-label {
+  color: #8b81a5;
+  font-weight: 700;
+}
+
+:root[data-theme="light"] .icc-options-bar {
+  border-top-color: #d5cdea;
+}
+
+:root[data-theme="light"] .icc-provider-card {
+  background: #f7f3fb;
+  border-color: #d8cfee;
+}
+:root[data-theme="light"] .icc-provider-card:hover {
+  border-color: #b9a8e8;
+}
+:root[data-theme="light"] .icc-provider-card.selected {
+  background: #eee8fb;
+  border-color: #8a73f5;
+  /* Inset ring simulates a 2px border without the 1px layout shift; outer
+     rings give the soft halo the user calibrated for this surface. */
+  box-shadow:
+    0 0 0 1px #8a73f5 inset,
+    0 0 0 2px rgba(138, 115, 245, 0.08),
+    0 8px 18px rgba(82, 63, 150, 0.08);
+}
+:root[data-theme="light"] .icc-provider-card.disabled {
+  background: #f4f0f8;
+  border: 1px dashed #d8d0e9;
+  opacity: 0.76;
+}
+
+:root[data-theme="light"] .icc-create-azure,
+:root[data-theme="light"] .icc-create-advanced {
+  border-top-color: #d5cdea;
+}
+
+:root[data-theme="light"] .icc-create-plan {
+  background: #eee8fb;
+  border-color: #c5b8e4;
+  box-shadow:
+    0 1px 1px rgba(45, 35, 85, 0.04),
+    0 10px 24px rgba(70, 54, 120, 0.08);
+}
+:root[data-theme="light"] .icc-create-plan-fields dt {
+  color: #756d8d;
+}
+:root[data-theme="light"] .icc-create-plan-fields dd,
+:root[data-theme="light"] .icc-create-plan-fields dd code {
+  color: #191629;
+}
+:root[data-theme="light"] .icc-create-plan-cmd {
+  background: #ded6ec;
+  border-color: #bfb2d9;
+  color: #211b34;
+}
+
+/* Form inputs — slightly darker border + lavender-tinted fill so empty
+   fields don't read as faint outlines against the panel surface. */
+:root[data-theme="light"] .icc-zone-create .icc-field input,
+:root[data-theme="light"] .icc-zone-create .icc-field select {
+  background: #f6f2fb;
+  border-color: #cfc5e5;
+}
+
+/* Filled-but-muted button: still reads as the primary action inside the
+   plan card, but doesn't glow loudly enough to compete with the panel
+   itself. Border + inner highlight do the heavy lifting; the drop shadow
+   is intentionally soft. */
+:root[data-theme="light"] .icc-create-submit {
+  background: linear-gradient(180deg, #8b78ea 0%, #725ed2 100%);
+  color: #ffffff;
+  border: 1px solid #6a57c5;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 6px 14px rgba(91, 71, 166, 0.16);
+}
+:root[data-theme="light"] .icc-create-submit:hover {
+  filter: brightness(1.04);
+}
+
+/* Brand: dark mode keeps the accent→magenta gradient. Light mode flattens
+   to a single muted purple so it doesn't shout against the calmer palette. */
+:root[data-theme="light"] .brand {
+  background: none;
+  -webkit-text-fill-color: initial;
+  color: #6f58d9;
+}
+
+/* Options row gets the same lavender border treatment as the other dividers
+   in this panel, plus a darker hover so the row reads as "clickable". */
+:root[data-theme="light"] .icc-options-expanded {
+  border-top-color: #d8cfee;
+}
+
+/* Secondary refresh/collapse controls — soft pill on the panel surface. */
+:root[data-theme="light"] .icc-refresh,
+:root[data-theme="light"] .icc-expand-toggle {
+  background: #faf8ff;
+  border-color: #d8cfee;
+  color: #6f6685;
+}
+:root[data-theme="light"] .icc-refresh:hover:not(:disabled),
+:root[data-theme="light"] .icc-expand-toggle:hover {
+  border-color: #b9a8e8;
+  color: #5d4f82;
+}
+:root[data-theme="light"] .col-toggle {
+  background: #faf8ff;
+  border-color: #d8cfee;
+  color: #6f6685;
+}
+:root[data-theme="light"] .col-toggle:hover {
+  border-color: #b9a8e8;
+  color: #5d4f82;
+}
+
+/* Chat readability — light theme parity for the chat-readability pass.
+   Headings/strong already pick up the light --fg-strong (#0b0f1e) via
+   the cascading var; tables get a soft lavender card. */
+:root[data-theme="light"] .markdown-content table {
+  background: #faf8ff;
+  border-color: var(--border);
+  color: var(--fg);
+}
+:root[data-theme="light"] .markdown-content th {
+  background: #efeaf7;
+  color: #6f6685;
+}
+:root[data-theme="light"] .markdown-content td,
+:root[data-theme="light"] .markdown-content th {
+  border-bottom-color: var(--border-soft);
+}
+
+/* Light-mode assistant card: white surface with a faint violet top-left
+   wash. Border picks up the lavender border var so it doesn't read as
+   a hard line on the lavender app shell. */
+:root[data-theme="light"] .chat-message.assistant .chat-bubble {
+  background: linear-gradient(180deg, #ffffff, #faf8ff);
+  border-color: var(--border-soft);
+  color: var(--fg);
+}
+
+/* Composer pulls away from pure white so it stops being the brightest
+   object on the light theme. Soft lavender paper matches the assistant
+   card without competing for attention. */
+:root[data-theme="light"] .chat-composer {
+  background: #fbfaff;
+  border-color: #d8d0ee;
+}
+
+/* ---------------- Release identity strip (slim hero) -------------------- *
+ * Title row only: brand-tinted glyph + "Release Train" headline + release-
+ * name subtitle. Operational metrics (flow / tests / providers / momentum)
+ * moved to their dedicated lanes below.
+ * ------------------------------------------------------------------------ */
+.release-health-tile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+/* Title row — gradient runs card → card-2 (white → faint lavender in light,
+   var(--card) → var(--card-2) in dark) so the header lands with more weight
+   than a peer lane-head; the subgrid's border-top below acts as the divider. */
+.release-health-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 14px 18px 12px;
+  background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+}
+.release-health-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.release-health-glyph {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.release-health-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Right cluster — subtitle (current release name) + PMC pill (citation
+   link). Grouped so the parent's space-between still pushes them as one
+   unit opposite the title-group on the left. */
+.release-health-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.release-health-subtitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* Release Train tile holds two release-adjacent sub-panels: New Merge
+   Requests (left) and Platform wins (right). The grid sits below the
+   release-identity header, separated by a top border; the two sub-panels
+   are separated by a vertical divider. */
+.release-health-subgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--border);
+}
+.release-health-subpanel {
+  padding: 12px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.release-health-subpanel + .release-health-subpanel {
+  border-left: 1px solid var(--border);
+}
+/* Phase 3.8 N7 — three-lane body shells (Features · Quality · Security).
+   Class names mirror mockups/bridge-page.html lines 314-500. Lanes mount
+   between the cross-strip and the legacy two-column body; lane bodies
+   carry placeholder slots until the N8 section renderers land. */
+.lanes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.lane {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.lane-head {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
+}
+.lane-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.lane-title .lane-glyph {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft);
+}
+.lane-title .lane-glyph.l1 { color: var(--magenta); }
+.lane-title .lane-glyph.l2 { color: var(--cyan); }
+.lane-title .lane-glyph.l3 { color: var(--orange); }
+.lane-title .lane-scope {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft);
+}
+.lane-pulse {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pulse-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pulse-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.pulse-seg.zero { opacity: 0.45; }
+.pulse-bullet {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.pulse-bullet.green  { background: var(--green);  box-shadow: 0 0 4px var(--green); }
+.pulse-bullet.cyan   { background: var(--cyan);   box-shadow: 0 0 4px var(--cyan); }
+.pulse-bullet.yellow { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
+.pulse-bullet.orange { background: var(--orange); box-shadow: 0 0 4px var(--orange); }
+.pulse-bullet.red    { background: var(--red);    box-shadow: 0 0 4px var(--red); }
+.pulse-sep {
+  color: var(--dim);
+  margin: 0 2px;
+}
+.ask-icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 24px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  margin-left: 8px;
+  transition: color 80ms ease, border-color 80ms ease;
+}
+.ask-icon-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.ask-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.kpis--empty {
+  display: block;
+  color: var(--dim);
+  font-size: 12px;
+  font-style: italic;
+  margin-top: 10px;
+}
+.kpi-empty { color: var(--dim); }
+.kpi {
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  min-width: 0;
+}
+.kpi--skeleton .kpi-label,
+.kpi--skeleton .kpi-value {
+  display: flex;
+  align-items: center;
+  min-height: 14px;
+}
+.kpi-label {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kpi-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-value.green  { color: var(--green); }
+.kpi-value.yellow { color: var(--yellow); }
+.kpi-value.red    { color: var(--red); }
+.kpi-value.dim    { color: var(--dim); }
+.kpi-sub {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+  /* Keep sub-text on one row so tile heights stay aligned across all three
+     lanes; anything that overflows truncates with an ellipsis rather than
+     wrapping. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kpi-sub.danger { color: var(--red); }
+.kpi-sub.warn   { color: var(--yellow); }
+.lane-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+.lane-section { display: block; }
+.section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--dim);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+/* Right slot opts out of the label's uppercase / letter-spacing / dim color so
+   it can carry its own (typically denser, normal-case) content like a pulse strip. */
+.section-label-right {
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg);
+}
+.lane-placeholder {
+  padding: 18px 14px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  font-style: italic;
+}
+.lane-placeholder.ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
+  font-style: normal;
+}
+
+/* === N8 section renderers ============================================= */
+
+/* Live-pill (epic liveness) */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+}
+.live-pill.active { color: var(--green); }
+.live-pill.quiet  { color: var(--cyan); }
+.live-pill.stale  { color: var(--orange); }
+.live-pill.dead   { color: var(--red); }
+
+/* Lane 1 — epic cards */
+.epic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.epic-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  transition: border-color 80ms ease;
+}
+.epic-card:hover { border-color: var(--border); }
+.epic-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.epic-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.epic-bar {
+  height: 4px;
+  background: var(--card-2);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.epic-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--magenta), var(--accent));
+  border-radius: 999px;
+}
+.epic-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.epic-meta .sep { color: var(--dim); }
+.epic-meta .owner { color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.epic-meta .owner.unowned { color: var(--orange); }
+.epic-reason {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-soft);
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+.epic-reason::before { content: "why flagged: "; color: var(--dim); font-style: normal; }
+
+/* Lane 2 — Sonar per-service grid */
+.sonar-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.sonar-table th {
+  text-align: center;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  padding: 4px 6px;
+}
+.sonar-table th.first { text-align: left; padding-left: 6px; }
+.sonar-table td {
+  padding: 7px 6px;
+  text-align: center;
+  vertical-align: middle;
+}
+.sonar-table td.first { text-align: left; }
+.sonar-table tr:hover td { background: var(--bg-soft); }
+.sonar-table tr.clickable:hover td { cursor: pointer; }
+.svc-name {
+  color: var(--fg);
+  font-weight: 500;
+  font-size: 13px;
+}
+.pct-cell { font-variant-numeric: tabular-nums; font-weight: 600; }
+.pct-cell.green  { color: var(--green); }
+.pct-cell.yellow { color: var(--yellow); }
+.pct-cell.red    { color: var(--red); }
+.pct-cell.dim    { color: var(--dim); }
+
+.ref-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  background: var(--bg-soft);
+}
+
+/* Quality cell: coverage % + R/S/M grade stack */
+.quality-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+.quality-cell .cov-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 40px;
+  text-align: right;
+}
+.quality-cell .cov-pct.green  { color: var(--green); }
+.quality-cell .cov-pct.yellow { color: var(--yellow); }
+.quality-cell .cov-pct.red    { color: var(--red); }
+.quality-cell .cov-pct.dim    { color: var(--dim); }
+
+/* Letter grade badge — shared by Sonar R/S/M stack and SAST cells */
+.grade {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.grade.A { color: var(--green);  background: color-mix(in srgb, var(--green)  18%, transparent); }
+.grade.B { color: var(--cyan);   background: color-mix(in srgb, var(--cyan)   18%, transparent); }
+.grade.C { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 18%, transparent); }
+.grade.D { color: var(--orange); background: color-mix(in srgb, var(--orange) 22%, transparent); }
+.grade.E { color: var(--red);    background: color-mix(in srgb, var(--red)    22%, transparent); }
+.grade.dim { color: var(--dim); background: var(--bg-soft); }
+.grade-stack { display: inline-flex; gap: 3px; }
+
+/* Generic key/value row meta (used by Sonar notes) */
+.kv-meta { color: var(--muted); font-size: 11px; }
+.kv-meta.warn { color: var(--yellow); }
+.kv-meta.bad  { color: var(--red); }
+
+/* Lane 2 — test performance panel */
+.test-perf {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.test-perf-buckets {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: 2px;
+}
+.test-perf-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stage-bar { margin-bottom: 0; }
+/* Partial rule between adjacent stage bars signals "different stages"; the
+   worst-services list below stays adjacent to the Acceptance bar so the
+   visual grouping says "this list is the acceptance breakdown." */
+.stage-bar + .stage-bar {
+  position: relative;
+  padding-top: 16px;
+  margin-top: 4px;
+}
+.stage-bar + .stage-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border-soft);
+}
+.stage-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.stage-bar-name { color: var(--fg); font-weight: 500; }
+.stage-bar-pct {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 14px;
+}
+.stage-bar-pct.green  { color: var(--green); }
+.stage-bar-pct.yellow { color: var(--yellow); }
+.stage-bar-pct.red    { color: var(--red); }
+.stage-bar-totals {
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.stage-bar-track {
+  height: 6px;
+  background: var(--card-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.stage-bar-fill { height: 100%; border-radius: 999px; }
+.stage-bar-fill.green  { background: var(--green); }
+.stage-bar-fill.yellow { background: var(--yellow); }
+.stage-bar-fill.red    { background: var(--red); }
+
+.worst-list {
+  display: flex;
+  flex-direction: column;
+}
+.worst-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px;
+  border-radius: 6px;
+}
+.worst-row:hover { background: var(--bg-soft); }
+.worst-row.clickable { cursor: pointer; }
+.worst-svc {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.worst-svc .svc-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.worst-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12px;
+  min-width: 38px;
+  text-align: right;
+}
+.worst-pct.green  { color: var(--green); }
+.worst-pct.yellow { color: var(--yellow); }
+.worst-pct.red    { color: var(--red); }
+.test-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.tc {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  min-width: 30px;
+  justify-content: center;
+}
+.tc.good { color: var(--green);  background: color-mix(in srgb, var(--green)  16%, transparent); }
+.tc.poor { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 16%, transparent); }
+.tc.fail { color: var(--red);    background: color-mix(in srgb, var(--red)    16%, transparent); }
+.tc.zero { opacity: 0.40; }
+.worst-list-head {
+  cursor: default;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  margin-bottom: 2px;
+}
+.worst-list-head:hover { background: transparent; }
+.worst-col {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.worst-col-pct { min-width: 38px; text-align: right; }
+.worst-col-counts .worst-col {
+  min-width: 30px;
+  text-align: center;
+}
+
+/* Lane 3 — offenders compact bar table */
+.offender-list { display: flex; flex-direction: column; }
+.offender-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.offender-row.clickable { cursor: pointer; }
+.offender-row.clickable:hover { background: var(--bg-soft); }
+.offender-name { color: var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.offender-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+}
+.offender-counts .crit { color: var(--red);    font-weight: 600; }
+.offender-counts .high { color: var(--orange); font-weight: 600; }
+.offender-counts .dim  { color: var(--dim); }
+
+.kv-bar {
+  width: 50px;
+  height: 4px;
+  background: var(--card-2);
+  border-radius: 999px;
+  overflow: hidden;
+  display: inline-block;
+}
+.kv-bar-fill { display: block; height: 100%; background: var(--red); border-radius: 999px; }
+.kv-bar-fill.warn { background: var(--yellow); }
+
+/* Lane 3 — SAST grid */
+.sast-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: 6px;
+}
+.sast-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--fg);
+}
+.sast-cell.clickable { cursor: pointer; }
+.sast-cell.clickable:hover { background: var(--card-2); }
+.sast-cell .svc { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Lane 3 — Quick wins */
+.qw-list { display: flex; flex-direction: column; gap: 4px; }
+.qw-rows { display: flex; flex-direction: column; }
+.qw-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 10px;
+  padding: 7px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.qw-row.clickable { cursor: pointer; }
+.qw-row.clickable:hover { background: var(--bg-soft); }
+.qw-name {
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.qw-bump { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.qw-bump .from { color: var(--dim); }
+.qw-bump .to   { color: var(--accent); }
+.qw-impact {
+  color: var(--green);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+.qw-risk {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  border: 1px solid currentColor;
+  margin-left: 6px;
+}
+.qw-risk.low { color: var(--green); }
+.qw-risk.med { color: var(--yellow); }
+.qw-risk.hi  { color: var(--red); }
+
+/* Lane 3 — Aged criticals (card variant; mirrors .epic-card from Stalled) */
+.cve-list { display: flex; flex-direction: column; gap: 6px; }
+.cve-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  transition: border-color 80ms ease;
+}
+.cve-card.clickable { cursor: pointer; }
+.cve-card.clickable:hover { border-color: var(--border); }
+.cve-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cve-card .cve-id {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cve-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.cve-card-meta .sep { color: var(--dim); }
+.cve-card-meta .cve-pkg {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  min-width: 0;
+}
+
+/* Service chip on Aged Critical cards — same tone palette as .new-mr-chip
+   so a service reads as the same color across the dashboard. Width is
+   intrinsic (no fixed-grid column) so short names don't waste space. */
+.svc-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-width: 140px;
+}
+.svc-chip.tone-0 {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.svc-chip.tone-1 {
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 14%, transparent);
+  border-color: color-mix(in srgb, var(--cyan) 32%, transparent);
+}
+.svc-chip.tone-2 {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
+}
+.svc-chip.tone-3 {
+  color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent);
+  border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
+}
+.svc-chip.tone-4 {
+  color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+  border-color: color-mix(in srgb, var(--orange) 32%, transparent);
+}
+
+/* Aged Criticals section-title bubble — compact count summary
+   (crit + high aged > threshold) rendered in LaneSection's right slot. */
+.aged-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--red) 32%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+}
+.aged-chip-seg.crit { color: var(--red); }
+.aged-chip-seg.high { color: var(--orange); }
+.aged-chip-sep { color: var(--dim); }
+
+/* ===================================================================== */
+
+@media (max-width: 1100px) {
+  .lanes { grid-template-columns: 1fr; }
+  .release-health-subgrid { grid-template-columns: 1fr; }
+  .release-health-subpanel + .release-health-subpanel {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
+/* ===================================================================== */
+/* WORKFLOWS surface (Phase 4 / W4)                                       */
+/* Mirrors mockups/workflows-page.html. Soft-tint backgrounds are derived */
+/* via color-mix from the existing palette so light/dark themes carry     */
+/* through without a second palette to maintain.                           */
+/* ===================================================================== */
+
+.page {
+  /* The .wrap div already centers at --max-content-width — .page is just
+     vertical padding so workflow content sits below the TopBar comfortably. */
+  padding: 8px 0 60px;
+}
+.page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.page-title { font-size: 20px; font-weight: 700; color: var(--fg-strong); margin: 0; }
+.page-sub { font-size: 12px; color: var(--muted); }
+
+.workflows-toolbar,
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.search {
+  flex: 1;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 7px;
+  max-width: 380px;
+}
+.search input {
+  flex: 1;
+  background: transparent; border: none; outline: none;
+  color: var(--fg); font-family: inherit; font-size: 12px;
+}
+.search input::placeholder { color: var(--dim); }
+.search-icon { color: var(--dim); font-size: 13px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 4px 12px; font-size: 11px;
+  background: var(--bg-soft); border: 1px solid var(--border-soft);
+  color: var(--muted); border-radius: 999px;
+  cursor: pointer; font-family: inherit;
+  text-transform: capitalize;
+}
+.chip:hover { color: var(--fg); border-color: var(--accent); }
+.chip.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Workflow card — catalog grid item. */
+.catalog-grid {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+}
+.workflow-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.workflow-card:hover {
+  border-color: var(--accent); transform: translateY(-1px);
+}
+.wc-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.wc-icon {
+  width: 30px; height: 30px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em;
+  flex-shrink: 0;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+}
+.wc-title { font-size: 14px; font-weight: 600; color: var(--fg-strong); }
+.wc-slug { font-size: 11px; color: var(--dim); font-family: ui-monospace, "JetBrains Mono", monospace; }
+.wc-grid {
+  display: grid; gap: 10px 14px;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 14px;
+}
+.wc-section { font-size: 12px; line-height: 1.45; }
+.wc-section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  color: var(--accent); text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.wc-section-body { color: var(--muted); }
+.wc-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: auto; padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  gap: 10px;
+}
+.wc-types { display: flex; gap: 4px; flex-wrap: wrap; }
+.wc-type-pill {
+  font-size: 10px; padding: 2px 7px;
+  border: 1px solid var(--border); border-radius: 4px;
+  color: var(--muted); font-family: ui-monospace, monospace;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.wc-type-pill.bash {
+  color: var(--yellow); border-color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 16%, transparent);
+}
+.wc-type-pill.prompt {
+  color: var(--cyan); border-color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 14%, transparent);
+}
+.wc-type-pill.approval {
+  color: var(--magenta); border-color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent);
+}
+.btn-run {
+  background: var(--accent); color: white;
+  border: none; padding: 5px 12px; border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: inherit;
+}
+.btn-run:hover { filter: brightness(1.1); }
+
+/* Empty state — used by catalog and recent-runs panel. Scoped under
+   `.page` so it doesn't clobber the global `.empty-state` rule (line
+   ~387) that Chat sidebar + transcript already rely on. */
+.page .empty-state {
+  padding: 60px 24px; text-align: center;
+  background: var(--card); border: 1px dashed var(--border);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: normal;
+}
+.page .empty-state-icon { font-size: 32px; color: var(--dim); margin-bottom: 12px; }
+.page .empty-state-title { font-size: 15px; font-weight: 600; color: var(--fg-strong); margin-bottom: 6px; }
+.page .empty-state-body { font-size: 12px; color: var(--muted); }
+.page .empty-state-body code {
+  background: var(--bg-soft); padding: 1px 6px; border-radius: 4px;
+  font-family: ui-monospace, monospace; font-size: 11px;
+}
+
+/* Section divider — separator between catalog and recent runs. */
+.section-divider {
+  margin: 28px 0 12px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+.section-divider h2 {
+  margin: 0; font-size: 13px; font-weight: 700;
+  color: var(--fg-strong); letter-spacing: 0.02em;
+}
+.section-divider .section-sub { font-size: 11px; color: var(--muted); }
+
+/* Recent runs table. Rows are <button> for keyboard navigability. */
+.runs-table {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+}
+.runs-row {
+  display: grid;
+  grid-template-columns: 22px 1.4fr 0.9fr 0.7fr 0.9fr 110px;
+  gap: 12px; align-items: center;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  width: 100%;
+}
+.runs-row.head {
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 10px; font-weight: 700; background: var(--bg-soft);
+  cursor: default;
+}
+.runs-row:last-child { border-bottom: none; }
+.runs-row:not(.head) { cursor: pointer; }
+.runs-row:not(.head):hover { background: var(--card-2); }
+.runs-row .run-name { font-weight: 600; color: var(--fg-strong); }
+.runs-row .run-name small {
+  display: block; color: var(--muted);
+  font-weight: 400; font-size: 11px; margin-top: 2px;
+  font-family: ui-monospace, monospace;
+}
+.runs-row .run-dur { color: var(--muted); font-family: ui-monospace, monospace; }
+.runs-row .run-time { color: var(--muted); }
+.runs-row .actions { display: flex; gap: 6px; justify-content: flex-end; }
+.runs-row .icon-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 8px; border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  display: inline-block;
+}
+.runs-row:hover .icon-btn { color: var(--fg); border-color: var(--accent); }
+.runs-row .icon-btn.danger { cursor: pointer; }
+.runs-row .icon-btn.danger:hover,
+.runs-row:hover .icon-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Status pills + dots. */
+.status-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; text-transform: lowercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--border);
+}
+.status-pill::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+}
+.status-pill.running   { color: var(--cyan);   border-color: var(--cyan);   background: color-mix(in srgb, var(--cyan) 14%, transparent); }
+.status-pill.running::before   { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); animation: workflow-pulse 1.6s ease-in-out infinite; }
+.status-pill.completed { color: var(--green);  border-color: var(--green);  background: color-mix(in srgb, var(--green) 14%, transparent); }
+.status-pill.completed::before { background: var(--green); }
+.status-pill.failed    { color: var(--red);    border-color: var(--red);    background: color-mix(in srgb, var(--red) 14%, transparent); }
+.status-pill.failed::before    { background: var(--red); }
+.status-pill.cancelled { color: var(--orange); border-color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.status-pill.cancelled::before { background: var(--orange); }
+.status-pill.pending   { color: var(--muted);  border-color: var(--border); }
+.status-pill.pending::before   { background: var(--muted); }
+.status-pill.skipped   { color: var(--dim);    border-color: var(--border-soft); }
+.status-pill.skipped::before   { background: var(--dim); }
+.status-pill.awaiting  { color: var(--magenta);border-color: var(--magenta);background: color-mix(in srgb, var(--magenta) 14%, transparent); }
+.status-pill.awaiting::before  { background: var(--magenta); box-shadow: 0 0 6px var(--magenta); animation: workflow-pulse 1.6s ease-in-out infinite; }
+
+.status-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+}
+.status-dot.running   { background: var(--cyan); box-shadow: 0 0 5px var(--cyan); }
+.status-dot.completed { background: var(--green); }
+/* Workflow-run terminal status: chat sidebar's WF row uses workflowRunStatusSchema's
+   `succeeded`, not the chat surface's `completed`. Share the green color. */
+.status-dot.succeeded { background: var(--green); }
+.status-dot.failed    { background: var(--red); }
+.status-dot.cancelled { background: var(--orange); }
+.status-dot.pending   { background: var(--muted); }
+.status-dot.skipped   { background: var(--dim); }
+.status-dot.awaiting  { background: var(--magenta); box-shadow: 0 0 5px var(--magenta); }
+/* W4.6 — run-level `paused` reuses the awaiting magenta accent so the
+   chat sidebar's dot doesn't render unstyled (Sidebar.tsx writes the raw
+   workflow.status as the dot's class). */
+.status-dot.paused    { background: var(--magenta); box-shadow: 0 0 5px var(--magenta); }
+
+@keyframes workflow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Run view header + tabs. */
+.run-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 0;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 14px;
+}
+.back-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--muted);
+  width: 28px; height: 28px; border-radius: 6px;
+  cursor: pointer; font-size: 13px;
+  font-family: inherit;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.back-btn:hover { color: var(--fg); border-color: var(--accent); }
+.run-name { font-size: 16px; font-weight: 700; color: var(--fg-strong); }
+.run-slug { font-size: 11px; color: var(--dim); font-family: ui-monospace, monospace; }
+.run-meta {
+  margin-left: auto; display: flex; align-items: center; gap: 14px;
+  font-size: 12px; color: var(--muted);
+}
+.run-meta .duration { font-family: ui-monospace, monospace; }
+
+/* Segmented control replacing the old Graph/Logs tabs. Filled active
+   pill + icon glyph reads as a layout switcher at a glance — much more
+   discoverable than a bare chevron or text tab. Lives inside
+   `.run-meta` so it sits in the header next to the status badge. */
+.layout-toggle {
+  display: inline-flex; gap: 2px;
+  padding: 2px; background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.layout-toggle-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; font-size: 11px; color: var(--muted);
+  border-radius: 5px; cursor: pointer;
+  font-family: inherit; border: none; background: transparent;
+  transition: background 120ms ease, color 120ms ease;
+}
+.layout-toggle-btn:hover { color: var(--fg); }
+.layout-toggle-btn.active {
+  background: var(--card);
+  color: var(--fg-strong);
+  font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, black 14%, transparent);
+}
+.layout-toggle-btn svg { display: block; }
+
+/* Run-detail view stretches into the viewport — the body→wrap→.page flex
+   chain hands `flex: 1` down to here so the DAG + Trace panes consume all
+   remaining space below run-header + layout-toggle. */
+.run-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.run-view .run-body,
+.run-view .run-body-single {
+  flex: 1;
+  min-height: 0;
+}
+.run-body {
+  display: grid;
+  grid-template-columns: 1.05fr 1.15fr;
+  gap: 14px;
+  min-height: 540px;
+}
+.pane {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.pane-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 11px; color: var(--muted);
+  display: flex; align-items: center; gap: 8px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.pane-body { padding: 14px; flex: 1; overflow: auto; }
+
+/* DAG graph host — xyflow lays out, we color via .dag-node classes. */
+.dag-stage {
+  flex: 1; position: relative; min-height: 480px;
+}
+.dag-node {
+  background: var(--card); border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 7px; padding: 8px 10px;
+  box-shadow: var(--shadow-card);
+  min-width: 150px; max-width: 200px;
+  font-family: inherit;
+}
+.dag-node .dn-row { display: flex; align-items: center; gap: 6px; }
+.dag-node .dn-type {
+  display: inline-block; padding: 1px 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 9px; font-weight: 700;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+.dag-node .dn-type.bash     { color: var(--yellow);  background: color-mix(in srgb, var(--yellow) 18%, transparent); }
+.dag-node .dn-type.prompt   { color: var(--cyan);    background: color-mix(in srgb, var(--cyan) 16%, transparent); }
+.dag-node .dn-type.approval { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
+.dag-node .dn-type.generic  { color: var(--muted);   background: var(--bg-soft); }
+.dag-node .dn-name { font-size: 12px; color: var(--fg-strong); font-weight: 600; }
+.dag-node .dn-meta { display: block; margin-top: 4px; font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace; }
+
+.dag-node.pending    { border-left-color: var(--muted); opacity: 0.7; }
+.dag-node.running    { border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 8%, var(--card)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 30%, transparent), var(--shadow-card); }
+.dag-node.succeeded  { border-left-color: var(--green); }
+.dag-node.failed     { border-left-color: var(--red); background: color-mix(in srgb, var(--red) 8%, var(--card)); }
+.dag-node.cancelled  { border-left-color: var(--orange); }
+.dag-node.skipped    { border-left-color: var(--dim); opacity: 0.55; }
+.dag-node.awaiting   { border-left-color: var(--magenta); background: color-mix(in srgb, var(--magenta) 7%, var(--card)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--magenta) 25%, transparent), var(--shadow-card); }
+.dag-node .check { color: var(--green); margin-right: 4px; font-weight: 700; }
+.dag-node .cross { color: var(--red); margin-right: 4px; font-weight: 700; }
+.dag-node .runspin {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan);
+  animation: workflow-pulse 1.6s ease-in-out infinite;
+  vertical-align: middle; margin-right: 4px;
+}
+.dag-handle {
+  /* Make xyflow handles invisible — edges connect at node borders cleanly
+     and we don't need the user dragging to wire nodes (workflows are
+     YAML-authored, not visually authored). */
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* xyflow edge colors via .dag-edge class chained from our edge data. */
+.react-flow__edge.dag-edge.pending .react-flow__edge-path,
+.react-flow__edge.dag-edge.skipped .react-flow__edge-path { stroke: var(--border); stroke-dasharray: 3 3; }
+.react-flow__edge.dag-edge.running .react-flow__edge-path { stroke: var(--cyan); stroke-dasharray: 4 3; }
+.react-flow__edge.dag-edge.succeeded .react-flow__edge-path { stroke: var(--green); }
+.react-flow__edge.dag-edge.failed .react-flow__edge-path { stroke: var(--red); }
+.react-flow__edge.dag-edge.cancelled .react-flow__edge-path { stroke: var(--orange); }
+.react-flow__edge.dag-edge.awaiting .react-flow__edge-path { stroke: var(--magenta); stroke-dasharray: 4 3; }
+.react-flow__controls {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+}
+.react-flow__controls-button {
+  background: var(--card) !important;
+  color: var(--muted) !important;
+  border-bottom: 1px solid var(--border-soft) !important;
+}
+.react-flow__controls-button:hover {
+  background: var(--card-2) !important;
+  color: var(--fg) !important;
+}
+.react-flow__controls-button svg { fill: currentColor; }
+.react-flow__background { background: var(--bg-soft); }
+
+/* Inputs form + buttons. */
+.inputs-form { padding: 4px 0; }
+.inputs-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  color: var(--accent); text-transform: uppercase;
+  margin-bottom: 6px;
+  display: flex; align-items: center; gap: 8px;
+}
+.inputs-label .kbd {
+  font-family: ui-monospace, monospace; font-size: 10px;
+  background: var(--bg-soft); padding: 1px 5px; border-radius: 3px;
+  color: var(--muted); border: 1px solid var(--border-soft);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.inputs-form textarea {
+  width: 100%; min-height: 64px;
+  padding: 8px 10px;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg); font-family: inherit; font-size: 12px;
+  line-height: 1.5; resize: vertical;
+}
+.inputs-form textarea:focus { outline: none; border-color: var(--accent); }
+.inputs-actions {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px;
+}
+/* Generic workflow button — distinct from the `.btn-run` catalog primary. */
+.pane-body .btn,
+.inputs-actions .btn,
+.run-meta .btn {
+  background: var(--card-2); color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 5px 14px; border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-family: inherit;
+}
+.pane-body .btn:hover,
+.inputs-actions .btn:hover,
+.run-meta .btn:hover { border-color: var(--accent); }
+.pane-body .btn.primary,
+.inputs-actions .btn.primary {
+  background: var(--accent); border-color: var(--accent); color: white; font-weight: 600;
+}
+.pane-body .btn.primary:hover,
+.inputs-actions .btn.primary:hover { filter: brightness(1.1); }
+.pane-body .btn.danger:hover,
+.inputs-actions .btn.danger:hover,
+.run-meta .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+.pane-body .btn:disabled,
+.inputs-actions .btn:disabled,
+.run-meta .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Trace rows (right pane in run view). */
+.trace { display: flex; flex-direction: column; gap: 8px; }
+.trace-empty {
+  padding: 14px 4px;
+  font-size: 12px;
+  color: var(--dim);
+  font-style: italic;
+}
+.trace-row {
+  background: var(--card-2); border: 1px solid var(--border-soft);
+  border-left-width: 2px;
+  border-radius: 6px; padding: 9px 12px;
+  font-size: 12px;
+}
+.trace-row.pending    { border-left-color: var(--muted); opacity: 0.5; }
+.trace-row.running    { border-left-color: var(--cyan); }
+.trace-row.succeeded  { border-left-color: var(--green); }
+.trace-row.failed     { border-left-color: var(--red); }
+.trace-row.cancelled  { border-left-color: var(--orange); }
+.trace-row.skipped    { border-left-color: var(--dim); opacity: 0.6; }
+.trace-row.awaiting   { border-left-color: var(--magenta); background: color-mix(in srgb, var(--magenta) 6%, var(--card-2)); }
+.trace-head {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; color: var(--fg-strong);
+}
+.trace-head .caret {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--muted); font-family: inherit; padding: 0;
+  font-size: 12px;
+}
+.trace-head .caret:hover { color: var(--fg); }
+.trace-head .dur { margin-left: auto; font-family: ui-monospace, monospace; color: var(--muted); font-size: 11px; font-weight: 400; }
+.trace-head .node-type {
+  font-family: ui-monospace, monospace; font-size: 9px; font-weight: 700;
+  padding: 1px 5px; border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+.trace-head .node-type.bash     { color: var(--yellow);  background: color-mix(in srgb, var(--yellow) 18%, transparent); }
+.trace-head .node-type.prompt   { color: var(--cyan);    background: color-mix(in srgb, var(--cyan) 16%, transparent); }
+.trace-head .node-type.approval { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
+.trace-head .node-type.generic  { color: var(--muted);   background: var(--bg-soft); }
+.trace-body { margin-top: 8px; color: var(--muted); }
+.trace-body p { margin: 0 0 6px; }
+.trace-body p:last-child { margin-bottom: 0; }
+.trace-error {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+  padding: 6px 10px; border-radius: 6px; margin-bottom: 6px;
+  font-size: 11px;
+}
+.trace-body .code-block {
+  margin-top: 6px;
+  background: var(--bg-soft); border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 11px; line-height: 1.55;
+  color: var(--fg);
+  overflow: auto;
+  max-height: 220px;
+  white-space: pre-wrap;
+}
+
+.typing-dots {
+  display: inline-flex; gap: 3px; padding-left: 4px;
+  align-items: center;
+}
+.typing-dots span {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--muted);
+  animation: workflow-typing 1.2s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.30s; }
+@keyframes workflow-typing {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+.run-warnings {
+  margin-bottom: 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.run-warning-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 12px;
+}
+.run-warning-row .run-warning-glyph {
+  color: var(--yellow);
+  font-weight: 700;
+}
+.run-warning-row strong { color: var(--fg-strong); margin-right: 2px; }
+
+@media (max-width: 900px) {
+  .run-body { grid-template-columns: 1fr; }
+  .dag-stage { min-height: 320px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   W4.6 — HITL approval flow: callout, pause-pill, paused-composer accent.
+   The DAG/trace/badge magenta accents already live above (see
+   .status-pill.awaiting, .dag-node.awaiting, .trace-row.awaiting,
+   .node-type.approval, .dn-type.approval).
+   ───────────────────────────────────────────────────────────────────────── */
+
+.approval-callout {
+  border: 1px solid color-mix(in srgb, var(--magenta) 38%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--magenta) 7%, var(--card));
+  padding: 10px 12px;
+  margin: 6px 0;
+}
+.approval-callout .callout-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--magenta);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.approval-callout .callout-body {
+  font-size: 13px;
+  color: var(--fg);
+}
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.approval-actions .btn.approve {
+  border-color: var(--magenta);
+  color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent);
+}
+.approval-actions .btn.approve:hover {
+  background: color-mix(in srgb, var(--magenta) 22%, transparent);
+}
+.approval-composer {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.approval-composer-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 56px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+.approval-composer-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--magenta) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--magenta) 18%, transparent);
+}
+.approval-composer-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Pre-start composer rendered above the DAG/Trace panes. Mirrors the
+   chat composer: single bordered card, transparent borderless textarea
+   that visually merges with the action row, embedded send-style button
+   bottom-right. The card itself takes the focus ring. */
+.start-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.start-composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.start-composer-input {
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  border-radius: 0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  width: 100%;
+  resize: none;
+  /* Single-row visual default; grows to ~6 rows for pasted multi-line
+     content like task descriptions, diffs, or stack traces. */
+  min-height: 28px;
+  max-height: 140px;
+}
+.start-composer-input:focus { outline: none; }
+.start-composer-input:disabled { opacity: 0.5; }
+.start-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.start-composer-spacer { flex: 1 1 auto; }
+
+.dag-node .awaiting-glyph {
+  color: var(--magenta);
+  margin-right: 4px;
+  font-weight: 700;
+}
+.trace-head .dur.awaiting {
+  color: var(--magenta);
+  font-weight: 600;
+}
+
+/* Composer takes on the magenta accent while the run is paused — visual
+   parity with the mockup's "◆ Workflow paused" treatment. */
+.chat-composer.paused {
+  border-color: color-mix(in srgb, var(--magenta) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--magenta) 18%, transparent);
+}
+.chat-composer.paused:focus-within {
+  border-color: var(--magenta);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--magenta) 28%, transparent);
+}
+.chat-composer .pause-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--magenta);
+  font-family: ui-monospace, monospace;
+}
+.chat-composer .chat-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.chat-composer .chat-composer-row .btn:last-child {
+  margin-left: auto;
+}

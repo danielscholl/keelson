@@ -1,0 +1,40 @@
+name: plan-and-apply
+description: |
+  HITL plan-then-apply procedure. The prompt generates a small change plan,
+  the approval node pauses the run inside the conversation surface, and the
+  bash node only runs if the user replies 'approve'.
+
+  Use this workflow when a model-generated plan should be reviewed before
+  anything touches disk. Reply 'approve' to continue; any other reply (e.g.
+  "narrow the regex") becomes $review-plan.output and the downstream
+  `apply` node is skipped via its `when:` rule.
+
+nodes:
+  - id: generate-plan
+    prompt: |
+      You are planning a small, safe code change for the keelson repo.
+
+      Task from the user: $ARGUMENTS
+
+      Return a short 3-line plan in this exact shape:
+        Files: <paths you'd touch>
+        Rule:  <the one-line change>
+        Risk:  <one sentence; call out anything load-bearing>
+
+      Keep it terse — the user will review this before anything happens.
+
+  - id: review-plan
+    depends_on: [generate-plan]
+    approval:
+      message: |
+        Review the plan above. Reply `approve` to continue, or describe
+        what to change. Any non-`approve` reply skips the apply step and
+        ends the run successfully so you can iterate.
+      capture_response: true
+
+  - id: apply
+    depends_on: [review-plan]
+    when: "$review-plan.output == 'approve'"
+    bash: |
+      echo "Approved. Applying plan:"
+      echo "$KEELSON_NODE_generate_plan_OUTPUT"

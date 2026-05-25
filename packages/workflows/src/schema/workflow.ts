@@ -1,0 +1,158 @@
+/**
+ * Zod schemas for workflow definition types, plus result types for
+ * workflow loading and execution (non-schema hand-written discriminated
+ * unions). The on-disk YAML format is compatible with the upstream
+ * specification credited in the repo NOTICE.
+ */
+import { z } from 'zod';
+import {
+  dagNodeSchema,
+  effortLevelSchema,
+  thinkingConfigSchema,
+  sandboxSettingsSchema,
+} from './dag-node.ts';
+
+// ---------------------------------------------------------------------------
+// Shared enum schemas
+// ---------------------------------------------------------------------------
+
+export const modelReasoningEffortSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
+export type ModelReasoningEffort = z.infer<typeof modelReasoningEffortSchema>;
+
+export const webSearchModeSchema = z.enum(['disabled', 'cached', 'live']);
+
+export type WebSearchMode = z.infer<typeof webSearchModeSchema>;
+
+// ---------------------------------------------------------------------------
+// Workflow-level worktree policy
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-workflow worktree policy. Pins whether a run uses isolation regardless of
+ * how it was invoked. When the field is omitted the caller's default applies.
+ */
+export const workflowWorktreePolicySchema = z.object({
+  /**
+   * Pin worktree isolation on or off for this workflow.
+   * - `true`  — always run inside a worktree
+   * - `false` — always run in the live checkout
+   * - omitted — caller decides
+   */
+  enabled: z.boolean().optional(),
+});
+
+export type WorkflowWorktreePolicy = z.infer<typeof workflowWorktreePolicySchema>;
+
+// ---------------------------------------------------------------------------
+// WorkflowBase — common fields shared by all workflow types
+// ---------------------------------------------------------------------------
+
+export const workflowBaseSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  provider: z.string().trim().min(1).optional(),
+  model: z.string().optional(),
+  modelReasoningEffort: modelReasoningEffortSchema.optional(),
+  webSearchMode: webSearchModeSchema.optional(),
+  additionalDirectories: z.array(z.string()).optional(),
+  interactive: z.boolean().optional(),
+  effort: effortLevelSchema.optional(),
+  thinking: thinkingConfigSchema.optional(),
+  fallbackModel: z.string().min(1).optional(),
+  betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
+  sandbox: sandboxSettingsSchema.optional(),
+  worktree: workflowWorktreePolicySchema.optional(),
+  /**
+   * When `false`, the engine skips the path-exclusive lock for this workflow,
+   * allowing N concurrent runs on the same live checkout. The author asserts
+   * that concurrent runs will not race (e.g. all writes are per-run-scoped).
+   * Defaults to `true` (safe: serialize runs on the same path).
+   */
+  mutates_checkout: z.boolean().optional(),
+  tags: z.array(z.string().min(1)).optional(),
+});
+
+export type WorkflowBase = z.infer<typeof workflowBaseSchema>;
+
+// ---------------------------------------------------------------------------
+// WorkflowDefinition — DAG-based workflow with nodes
+// ---------------------------------------------------------------------------
+
+/**
+ * Workflow definition parsed from YAML.
+ * All workflows use DAG-based execution with `nodes`.
+ */
+export const workflowDefinitionSchema = workflowBaseSchema.extend({
+  nodes: z.array(dagNodeSchema),
+});
+
+/** Workflow definition with fully typed nodes (DagNode[]) derived from the schema. */
+export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema> & { prompt?: never };
+
+// ---------------------------------------------------------------------------
+// LoadCommandResult — discriminated union for command load outcomes
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of loading a command prompt - discriminated union for specific error handling.
+ * On success, `content` is non-empty (enforced at load time).
+ */
+export type LoadCommandResult =
+  | { success: true; content: string }
+  | {
+      success: false;
+      reason: 'invalid_name' | 'empty_file' | 'not_found' | 'permission_denied' | 'read_error';
+      message: string;
+    };
+
+// ---------------------------------------------------------------------------
+// WorkflowExecutionResult — discriminated union for execution outcomes
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of workflow execution - allows callers to detect success/failure
+ */
+export type WorkflowExecutionResult =
+  | { success: true; workflowRunId: string; summary?: string }
+  | { success: false; workflowRunId?: string; error: string }
+  | { success: true; paused: true; workflowRunId: string };
+
+// ---------------------------------------------------------------------------
+// WorkflowLoadError / WorkflowLoadResult — workflow discovery results
+// ---------------------------------------------------------------------------
+
+/**
+ * Workflow origin:
+ * - `bundled` — embedded in the package's defaults
+ * - `global`  — user-level, discovered at `~/.keelson/workflows/`
+ * - `project` — repo-local, discovered at `<repoRoot>/.keelson/workflows/`
+ *
+ * Precedence for same-named files: `bundled` < `global` < `project`.
+ */
+export type WorkflowSource = 'bundled' | 'global' | 'project';
+
+/** A workflow definition paired with its discovery source. */
+export interface WorkflowWithSource {
+  readonly workflow: WorkflowDefinition;
+  readonly source: WorkflowSource;
+  /** Absolute path the workflow was loaded from. */
+  readonly path: string;
+}
+
+/**
+ * Error encountered while loading a workflow file
+ */
+export interface WorkflowLoadError {
+  readonly filename: string;
+  readonly error: string;
+  readonly errorType: 'read_error' | 'parse_error' | 'validation_error';
+}
+
+/**
+ * Result of workflow discovery - includes both successful loads and errors
+ */
+export interface WorkflowLoadResult {
+  readonly workflows: readonly WorkflowWithSource[];
+  readonly errors: readonly WorkflowLoadError[];
+}

@@ -1,0 +1,33 @@
+name: status-report
+description: |
+  Two-step sequential procedure: bash collects local git status, prompt
+  summarizes it. Demonstrates the bash → prompt pattern with `$nodeId.output`
+  substitution, and works on any git repository without extra tooling.
+
+nodes:
+  - id: collect
+    bash: |
+      set -e
+      echo "=== git status ==="
+      git status --short
+      echo
+      echo "=== git log -5 ==="
+      git log --oneline -5 2>/dev/null || echo "(no commits yet)"
+      echo
+      echo "=== branch ==="
+      git branch --show-current 2>/dev/null || echo "(not on a branch)"
+
+  - id: summarize
+    depends_on: [collect]
+    prompt: |
+      You are summarizing the local git state for the user. Read the raw output below
+      and produce a 3-5 line digest:
+      - the active branch
+      - how many files are staged / unstaged / untracked
+      - the most recent commit
+      - one short observation if the working tree looks unusual
+
+      Raw git state:
+      $collect.output
+
+      Args from the user: $ARGUMENTS

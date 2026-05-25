@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+.bun/
+.cache/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Workflow run state (per-context history, event logs).
+.keelson/runs/
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# SQLite session + workflow-run persistence.
+.keelson/keelson.db
+.keelson/keelson.db-wal
+.keelson/keelson.db-shm
