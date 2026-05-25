@@ -291,7 +291,6 @@ describe("bootstrapPromptHandler", () => {
 
   function registerFakeProvider(id: string): void {
     const provider: IAgentProvider = {
-      // biome-ignore lint/correctness/useYield: stub returns no chunks
       async *sendQuery(): AsyncGenerator<MessageChunk> {},
     };
     const capabilities: ProviderCapabilities = {

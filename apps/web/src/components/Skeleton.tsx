@@ -40,6 +40,7 @@ export function SkeletonStack({
   return (
     <div className="skeleton-stack" style={{ display: "grid", gap }}>
       {Array.from({ length: rows }).map((_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows are stable for the lifetime of the skeleton; no semantic identity to key on
         <Skeleton key={i} height={height} />
       ))}
     </div>

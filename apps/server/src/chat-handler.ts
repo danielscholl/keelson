@@ -5,6 +5,7 @@
 import {
   getAgentProvider,
   getProviderInfoList,
+  type IAgentProvider,
   isRegisteredProvider,
   UnknownProviderError,
 } from "@keelson/providers";
@@ -321,7 +322,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     return;
   }
 
-  let provider;
+  let provider: IAgentProvider;
   try {
     provider = getAgentProvider(message.providerId);
   } catch (err) {

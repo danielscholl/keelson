@@ -28,6 +28,7 @@ import {
   buildSubprocessEnv,
   runSubprocess,
   SUBPROCESS_DEFAULT_TIMEOUT_MS,
+  type SubprocessOutcome,
   SubprocessSpawnError,
 } from "./subprocess.ts";
 
@@ -99,7 +100,7 @@ export function makeScriptHandler(opts: MakeScriptHandlerOptions = {}): NodeHand
         spec = buildSpawnSpec(runtime, scriptBody, resolved.path, sn.deps ?? []);
       }
 
-      let outcome;
+      let outcome: SubprocessOutcome;
       try {
         outcome = await runSubprocess({
           cmd: spec.cmd,

@@ -54,6 +54,14 @@
       },
       "performance": {
         "noDelete": "off"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn"
+      },
+      "a11y": {
+        "useAriaPropsSupportedByRole": "warn",
+        "useSemanticElements": "warn",
+        "noSvgWithoutTitle": "warn"
       }
     }
   },

@@ -325,9 +325,7 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
       sources.push({ text: node.cancel, label: "cancel", allowReservedNamespace: true });
     }
     for (const source of sources) {
-      let m: RegExpExecArray | null;
-      refPattern.lastIndex = 0;
-      while ((m = refPattern.exec(source.text)) !== null) {
+      for (const m of source.text.matchAll(refPattern)) {
         const refId = m[1];
         if (refId === undefined) continue;
         if (RESERVED_REF_NAMESPACES.has(refId)) {
@@ -358,9 +356,9 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
       if (!source.allowReservedNamespace) {
         const broadPattern =
           /(?<!\\)\$(?:inputs\.[a-zA-Z_][a-zA-Z0-9_]*|ARGUMENTS(?![a-zA-Z0-9_-])|ARTIFACTS_DIR(?![a-zA-Z0-9_-]))/g;
-        let r: RegExpExecArray | null;
-        while ((r = broadPattern.exec(source.text)) !== null) {
-          return `Node '${node.id}' ${source.label}: '${r[0]}' isn't supported in this context — evaluateCondition only resolves '$nodeId.output' refs. Encode the input via a producer node and reference its output.`;
+        const firstMatch = broadPattern.exec(source.text);
+        if (firstMatch !== null) {
+          return `Node '${node.id}' ${source.label}: '${firstMatch[0]}' isn't supported in this context — evaluateCondition only resolves '$nodeId.output' refs. Encode the input via a producer node and reference its output.`;
         }
       }
     }
@@ -486,7 +484,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
   const shapeErrors = validateDagShape(nodes);
   if (shapeErrors.length > 0) {
     const messages = shapeErrors
-      .map((e) => {
+      .map((e): string => {
         switch (e.kind) {
           case "duplicate_id":
             return `Duplicate node id: '${e.id}'`;
@@ -496,6 +494,12 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
             return `Node '${e.nodeId}' depends on itself`;
           case "cycle":
             return `Cycle detected among nodes: ${e.nodeIds.join(", ")}`;
+          default: {
+            // Compile-time exhaustiveness: if a new ShapeError variant lands,
+            // TS errors here until the switch is extended.
+            const _exhaustive: never = e;
+            return _exhaustive;
+          }
         }
       })
       .join("; ");

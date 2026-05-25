@@ -24,9 +24,14 @@ Use `bun dev:server` or `bun dev:web` to run one side alone.
 Every PR must keep these green. CI runs the same commands.
 
 ```bash
+bun run check               # Biome lint + format check
 bun --filter '*' typecheck
 bun --filter '*' test
+bun --filter '*' build
 ```
+
+Run `bun run check:fix` to auto-fix the safe lint/format issues, or
+`bun run format` to apply formatting only.
 
 If you touched the workflow engine, also run a smoke pass:
 

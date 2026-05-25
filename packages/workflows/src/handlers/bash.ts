@@ -22,6 +22,7 @@ import {
   buildSubprocessEnv,
   runSubprocess,
   SUBPROCESS_DEFAULT_TIMEOUT_MS,
+  type SubprocessOutcome,
   SubprocessSpawnError,
 } from "./subprocess.ts";
 
@@ -40,7 +41,7 @@ export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler 
           ? nodeTimeout
           : factoryTimeoutMs;
 
-      let outcome;
+      let outcome: SubprocessOutcome;
       try {
         outcome = await runSubprocess({
           cmd: "bash",

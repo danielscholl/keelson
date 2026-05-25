@@ -35,10 +35,12 @@ export class WorkflowProvider implements IAgentProvider {
     return [];
   }
 
+  // biome-ignore lint/correctness/useYield: non-chat provider throws unconditionally; no chunk to yield
   async *sendQuery(): AsyncGenerator<MessageChunk> {
     // Defense-in-depth: the chat-handler POST also rejects this providerId,
-    // but if anything slips through, fail loudly rather than silently echoing.
+    // but if anything slips through, fail loudly rather than silently
+    // echoing. `async *` is enough to satisfy AsyncGenerator — no yield
+    // is required when the body throws unconditionally.
     throw new Error("workflow provider is non-chat; use POST /api/workflows/:name/runs");
-    yield { type: "done" }; // unreachable; satisfies AsyncGenerator return type
   }
 }

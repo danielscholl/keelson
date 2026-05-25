@@ -91,6 +91,7 @@ export function CodeBlock({ children }: HTMLAttributes<HTMLPreElement>) {
         </button>
       </div>
       {html ? (
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki HTML is generated from sanitized source and matches the highlighter's escape rules
         <div className="code-block-body" dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
         <pre className="code-block-body code-block-body--plain">

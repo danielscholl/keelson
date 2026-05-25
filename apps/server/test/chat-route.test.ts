@@ -87,6 +87,9 @@ function makeSpyProvider(
       getType: () => "spy",
       getCapabilities: () => capabilities,
       listModels: async () => [{ id: "spy-model" }],
+      // Spy generator — captures the options the harness passed in. No yield:
+      // the test only asserts what was forwarded, not what came back.
+      // biome-ignore lint/correctness/useYield: spy generator intentionally yields nothing
       async *sendQuery(_prompt, _cwd, _resume, options) {
         capture(options);
       },

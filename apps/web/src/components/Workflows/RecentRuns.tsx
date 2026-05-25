@@ -70,7 +70,7 @@ interface RunRow extends WorkflowRunSummary {}
 export function RecentRuns({
   workflows,
   onOpenRun,
-  refreshKey = 0,
+  refreshKey: _refreshKey = 0,
   onRunDeleted,
 }: RecentRunsProps) {
   const [rows, setRows] = useState<RunRow[] | null>(null);

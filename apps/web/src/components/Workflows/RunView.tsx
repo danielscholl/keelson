@@ -177,6 +177,7 @@ export function RunView({ workflow, runId, onBack, onStart, starting = false }: 
       {run.warnings.length > 0 && (
         <div className="run-warnings" role="status">
           {run.warnings.map((w, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: warnings are append-only for a settled run and the order matches the executor's emission order
             <div key={i} className="run-warning-row">
               <span className="run-warning-glyph" aria-hidden="true">
                 ⚠

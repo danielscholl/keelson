@@ -680,7 +680,6 @@ describe("makePromptHandler", () => {
     // handler racing against an external timeout promise, handle() would
     // hang forever and the workflow_runs row would stay 'running'.
     const hungProvider: PromptHandlerProvider = {
-      // biome-ignore lint/correctness/useYield: intentionally never yields
       async *sendQuery() {
         await new Promise<void>(() => {
           /* never resolves; ignores abort */
