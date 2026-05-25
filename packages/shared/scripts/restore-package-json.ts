@@ -4,8 +4,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+// fileURLToPath (vs `new URL(...).pathname`) is the Windows- and
+// percent-encoding-safe way to turn import.meta.url into a usable path.
+const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgPath = path.join(here, "..", "package.json");
 const backupPath = `${pkgPath}.bak`;
 
