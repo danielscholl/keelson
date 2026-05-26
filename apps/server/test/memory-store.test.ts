@@ -25,7 +25,7 @@ import {
   writebackResponseSchema,
 } from "@keelson/shared";
 import { openDatabase } from "../src/db/init.ts";
-import { createMemoryStore, type MemoryStore } from "../src/memory-store.ts";
+import { createMemoryStore, InvalidCursorError, type MemoryStore } from "../src/memory-store.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -573,6 +573,119 @@ describe("MemoryStore — confirm state machine", () => {
         .get() as { c: number }
     ).c;
     expect(eventCount).toBe(1);
+  });
+});
+
+describe("MemoryStore — listPending", () => {
+  test("returns only pending memories", () => {
+    const wb = store.writeback(
+      makeWritebackRequest([
+        makeDraft({ contentHash: "a", summary: "alpha a" }),
+        makeDraft({ contentHash: "b", summary: "alpha b" }),
+      ]),
+    );
+    store.confirm({ memoryId: wb.written[0].memoryId, action: "confirm", actor: "alice" });
+
+    const page = store.listPending({});
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].memoryId).toBe(wb.written[1].memoryId);
+    expect(page.items[0].reviewStatus).toBe("pending");
+  });
+
+  test("orders newest first by (created_at DESC, id DESC)", () => {
+    const wb = store.writeback(
+      makeWritebackRequest([
+        makeDraft({ contentHash: "a", summary: "first" }),
+        makeDraft({ contentHash: "b", summary: "second" }),
+      ]),
+    );
+    // Backdate the first row so the second row is unambiguously newer.
+    db.prepare("UPDATE memories SET created_at = ? WHERE id = ?").run(
+      new Date(Date.now() - 60_000).toISOString(),
+      wb.written[0].memoryId,
+    );
+    const page = store.listPending({});
+    expect(page.items.map((i) => i.memoryId)).toEqual([
+      wb.written[1].memoryId,
+      wb.written[0].memoryId,
+    ]);
+  });
+
+  test("projection drops idempotencyKey and contentHash", () => {
+    store.writeback(makeWritebackRequest([makeDraft()]));
+    const page = store.listPending({});
+    const item = page.items[0] as Record<string, unknown>;
+    expect(item.idempotencyKey).toBeUndefined();
+    expect(item.contentHash).toBeUndefined();
+    expect(item.memoryId).toBeDefined();
+    expect(item.summary).toBe("alpha bravo charlie");
+  });
+
+  test("limit + cursor paginate without duplicates", () => {
+    const drafts: WritebackMemoryDraft[] = [];
+    for (let i = 0; i < 5; i++) {
+      drafts.push(makeDraft({ contentHash: `h-${i}`, summary: `s-${i}` }));
+    }
+    store.writeback(makeWritebackRequest(drafts));
+
+    const first = store.listPending({ limit: 2 });
+    expect(first.items).toHaveLength(2);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = store.listPending({ limit: 2, cursor: first.nextCursor });
+    expect(second.items).toHaveLength(2);
+    expect(second.nextCursor).toBeDefined();
+
+    const third = store.listPending({ limit: 2, cursor: second.nextCursor });
+    expect(third.items).toHaveLength(1);
+    expect(third.nextCursor).toBeUndefined();
+
+    const ids = new Set([...first.items, ...second.items, ...third.items].map((i) => i.memoryId));
+    expect(ids.size).toBe(5);
+  });
+
+  test("default limit caps the page", () => {
+    const drafts: WritebackMemoryDraft[] = [];
+    for (let i = 0; i < 3; i++) {
+      drafts.push(makeDraft({ contentHash: `h-${i}` }));
+    }
+    store.writeback(makeWritebackRequest(drafts));
+    const page = store.listPending({});
+    expect(page.items).toHaveLength(3);
+    // Default 50 is far above page size; no nextCursor.
+    expect(page.nextCursor).toBeUndefined();
+  });
+
+  test("invalid cursor throws InvalidCursorError", () => {
+    expect(() => store.listPending({ cursor: "not-base64-json" })).toThrow(InvalidCursorError);
+  });
+
+  test("scope filter — projectId narrows the page", () => {
+    store.writeback(
+      makeWritebackRequest([makeDraft({ contentHash: "p-a" })], {
+        scope: { visibility: "project", projectId: "proj-a" },
+      }),
+    );
+    store.writeback(
+      makeWritebackRequest([makeDraft({ contentHash: "p-b" })], {
+        scope: { visibility: "project", projectId: "proj-b" },
+      }),
+    );
+    const page = store.listPending({ projectId: "proj-a" });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].scope.projectId).toBe("proj-a");
+  });
+
+  test("scope filter — scopeVisibility narrows the page", () => {
+    store.writeback(makeWritebackRequest([makeDraft({ contentHash: "a" })]));
+    store.writeback(
+      makeWritebackRequest([makeDraft({ contentHash: "b" })], {
+        scope: { visibility: "personal" },
+      }),
+    );
+    const page = store.listPending({ scopeVisibility: "personal" });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].scope.visibility).toBe("personal");
   });
 });
 

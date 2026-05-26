@@ -10,10 +10,15 @@ import type { Database } from "bun:sqlite";
 import {
   type Memory,
   RECALL_RESPONSE_SCHEMA_VERSION,
+  REVIEW_LIST_DEFAULT_LIMIT,
+  REVIEW_LIST_MAX_LIMIT,
   type RecallItem,
   type RecallRequest,
   type RecallResponse,
   type ReviewActionRequest,
+  type ReviewItem,
+  type ReviewListQuery,
+  type ReviewListResponse,
   type SourceRef,
   WRITEBACK_RESPONSE_SCHEMA_VERSION,
   type WritebackRequest,
@@ -27,6 +32,9 @@ export interface MemoryStore {
   // Returns { applied: false } when memoryId is unknown — silent no-op,
   // matches ConversationStore.delete posture so callers don't need try/catch.
   confirm(input: ReviewActionRequest): { applied: boolean };
+  // Pending review queue. Cursor encodes (createdAt, id) so concurrent
+  // writebacks during pagination don't shuffle pages.
+  listPending(query: ReviewListQuery): ReviewListResponse;
   // Debug/test helper. Returns the full Memory shape including storage-
   // internal fields (idempotencyKey, contentHash) that the recall projection
   // trims. Not surfaced over the wire in M3 — M4 routes will gate this.
@@ -171,6 +179,91 @@ interface ConfirmState {
   provenance: string;
   canUseAsInstruction: boolean;
   doNotInjectAutomatically: boolean;
+}
+
+// Thrown by listPending when the caller supplies a cursor that doesn't
+// decode to the expected `{ createdAt, id }` payload. The route layer
+// catches by class name and surfaces a 400; everything else bubbles as 500.
+export class InvalidCursorError extends Error {
+  constructor(message = "invalid cursor") {
+    super(message);
+    this.name = "InvalidCursorError";
+  }
+}
+
+interface PendingCursor {
+  createdAt: string;
+  id: string;
+}
+
+function encodePendingCursor(c: PendingCursor): string {
+  return Buffer.from(JSON.stringify(c), "utf8").toString("base64url");
+}
+
+function decodePendingCursor(raw: string): PendingCursor {
+  let json: string;
+  try {
+    json = Buffer.from(raw, "base64url").toString("utf8");
+  } catch {
+    throw new InvalidCursorError();
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new InvalidCursorError();
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    typeof (parsed as PendingCursor).createdAt !== "string" ||
+    typeof (parsed as PendingCursor).id !== "string"
+  ) {
+    throw new InvalidCursorError();
+  }
+  return parsed as PendingCursor;
+}
+
+// Projection of MemoryRow → ReviewItem. Storage-internal fields
+// (idempotency_key, content_hash) are intentionally dropped — the review
+// queue is the surface that lands in front of the operator, and the
+// dedupe key has no business being there.
+function rowToReviewItem(
+  row: MemoryRow,
+  sourceRefs: SourceRef[],
+  artifacts: Memory["artifacts"],
+): ReviewItem {
+  const usePolicy = {
+    canUseAsInstruction: row.use_policy_can_use_as_instruction === 1,
+    canUseAsEvidence: row.use_policy_can_use_as_evidence === 1,
+    requiresUserConfirmation: row.use_policy_requires_user_confirmation === 1,
+    doNotInjectAutomatically: row.use_policy_do_not_inject_automatically === 1,
+  };
+  const scope: Memory["scope"] = {
+    visibility: row.scope_visibility as Memory["scope"]["visibility"],
+    ...(row.scope_project_id !== null ? { projectId: row.scope_project_id } : {}),
+  };
+  return {
+    memoryId: row.id,
+    type: row.type as Memory["type"],
+    summary: row.summary,
+    content: row.content,
+    provenance: row.provenance as Memory["provenance"],
+    usePolicy,
+    scope,
+    lifecycle: row.lifecycle as Memory["lifecycle"],
+    reviewStatus: row.review_status as Memory["reviewStatus"],
+    sourceRefs,
+    artifacts,
+    ...(row.confidence !== null ? { confidence: row.confidence } : {}),
+    runtime: row.runtime,
+    ...(row.task_id !== null ? { taskId: row.task_id } : {}),
+    ...(row.flow_id !== null ? { flowId: row.flow_id } : {}),
+    ...(row.model !== null ? { model: row.model } : {}),
+    ...(row.provider !== null ? { provider: row.provider } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 // Action → terminal state. Confirm is the only action that may set
@@ -551,6 +644,68 @@ export function createMemoryStore(db: Database): MemoryStore {
       if (!row) return undefined;
       const [hydrated] = hydrate([row]);
       return hydrated;
+    },
+
+    listPending(query) {
+      const limit = Math.min(query.limit ?? REVIEW_LIST_DEFAULT_LIMIT, REVIEW_LIST_MAX_LIMIT);
+      const cursor = query.cursor !== undefined ? decodePendingCursor(query.cursor) : null;
+
+      // Fetch limit+1 rows so we can determine whether a next page exists
+      // without a second round trip. The trailing row gets dropped before
+      // hydration so the SourceRef / Artifact fetches don't pay for it.
+      const overFetch = limit + 1;
+      const whereClauses: string[] = ["review_status = 'pending'"];
+      const args: (string | number)[] = [];
+      if (query.scopeVisibility !== undefined) {
+        whereClauses.push("scope_visibility = ?");
+        args.push(query.scopeVisibility);
+      }
+      if (query.projectId !== undefined) {
+        whereClauses.push("scope_project_id = ?");
+        args.push(query.projectId);
+      }
+      if (cursor) {
+        // Strict ordering by (created_at DESC, id DESC) means the next page
+        // starts at any row whose (created_at, id) is lexicographically less.
+        whereClauses.push("(created_at < ? OR (created_at = ? AND id < ?))");
+        args.push(cursor.createdAt, cursor.createdAt, cursor.id);
+      }
+      const sql = `
+        SELECT * FROM memories
+         WHERE ${whereClauses.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?
+      `;
+      args.push(overFetch);
+      const rows = db.prepare(sql).all(...args) as MemoryRow[];
+
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      if (pageRows.length === 0) {
+        return { items: [] };
+      }
+
+      const ids = pageRows.map((r) => r.id);
+      const srGroups = groupBy(fetchSourceRefs(ids));
+      const arGroups = groupBy(fetchArtifacts(ids));
+      const items = pageRows.map((row) =>
+        rowToReviewItem(
+          row,
+          (srGroups.get(row.id) ?? []).map(srRowToSourceRef),
+          (arGroups.get(row.id) ?? []).map(arRowToArtifact),
+        ),
+      );
+
+      if (!hasMore) {
+        return { items };
+      }
+      // hasMore implies pageRows.length === limit ≥ 1; the cast is the
+      // narrow workaround for noUncheckedIndexedAccess on the bracket lookup.
+      const last = pageRows[pageRows.length - 1] as MemoryRow;
+      return {
+        items,
+        nextCursor: encodePendingCursor({ createdAt: last.created_at, id: last.id }),
+      };
     },
   };
 }
