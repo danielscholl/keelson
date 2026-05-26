@@ -294,6 +294,19 @@ describe("GET /api/memory/review", () => {
     expect(res.status).toBe(400);
   });
 
+  test("cursor with bare-year createdAt is rejected as 400", async () => {
+    // Regression: Date.parse("9999") returns a finite number, so a cursor
+    // {createdAt: "9999"} would slip past a plain Date.parse gate while
+    // lexically comparing greater than every real '20xx-...Z' timestamp,
+    // returning the full first page. The strict ISO-8601 schema check rejects.
+    seedMemory();
+    const forged = Buffer.from(JSON.stringify({ createdAt: "9999", id: "x" }), "utf8").toString(
+      "base64url",
+    );
+    const res = await app.fetch(getJson(`/api/memory/review?cursor=${forged}`));
+    expect(res.status).toBe(400);
+  });
+
   test("rejects non-positive limit with 400", async () => {
     const res = await app.fetch(getJson("/api/memory/review?limit=0"));
     expect(res.status).toBe(400);
@@ -309,6 +322,100 @@ describe("GET /api/memory/review", () => {
     const projectBody = (await projectRes.json()) as ReviewListResponse;
     expect(projectBody.items).toHaveLength(1);
     expect(projectBody.items.every((i) => i.scope.visibility === "project")).toBe(true);
+  });
+});
+
+describe("internal error envelope (no storage detail leak)", () => {
+  // The four route handlers' 500 path must return a generic { error: "internal error" }
+  // — bun:sqlite errors carry schema column names and absolute DB paths;
+  // echoing them would disclose storage internals to any caller that can
+  // reach the route.
+  function rigWithThrowingStore(error: Error): Hono {
+    const throwing: MemoryStore = {
+      recall: () => {
+        throw error;
+      },
+      writeback: () => {
+        throw error;
+      },
+      confirm: () => {
+        throw error;
+      },
+      listPending: () => {
+        throw error;
+      },
+      getById: () => undefined,
+    };
+    const a = new Hono();
+    memoryRoutes(a, { memoryStore: throwing });
+    return a;
+  }
+
+  test("recall 500 body is the generic envelope, not err.message", async () => {
+    const a = rigWithThrowingStore(
+      new Error("SQLITE_CANTOPEN: unable to open /abs/path/to/keelson.db"),
+    );
+    const res = await a.fetch(
+      postJson("/api/memory/recall", {
+        schemaVersion: RECALL_REQUEST_SCHEMA_VERSION,
+        scope: { visibility: "project" },
+        task: { runtime: "chat" },
+        query: "alpha",
+      }),
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("internal error");
+    expect(body.error).not.toContain("SQLITE_CANTOPEN");
+    expect(body.error).not.toContain("/abs/path/to/keelson.db");
+  });
+
+  test("writeback 500 body is the generic envelope", async () => {
+    const a = rigWithThrowingStore(
+      new Error("SQLITE_CONSTRAINT_UNIQUE: UNIQUE constraint failed: memories.idempotency_key"),
+    );
+    const res = await a.fetch(
+      postJson("/api/memory/writeback", {
+        schemaVersion: WRITEBACK_REQUEST_SCHEMA_VERSION,
+        idempotencyKey: "env-1",
+        task: { runtime: "chat" },
+        memories: [
+          {
+            type: "lesson",
+            summary: "s",
+            content: "c",
+            contentHash: "h",
+            provenance: "generated",
+            sourceRefs: [],
+            artifacts: [],
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("internal error");
+    expect(body.error).not.toContain("memories.idempotency_key");
+  });
+
+  test("review POST 500 body is the generic envelope", async () => {
+    const a = rigWithThrowingStore(new Error("memories.review_status: constraint failed"));
+    const res = await a.fetch(
+      postJson("/api/memory/review", {
+        memoryId: "x",
+        action: "confirm",
+        actor: "alice",
+      }),
+    );
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { error: string }).error).toBe("internal error");
+  });
+
+  test("review GET 500 body is the generic envelope (non-cursor error)", async () => {
+    const a = rigWithThrowingStore(new Error("SQLITE_BUSY: database is locked"));
+    const res = await a.fetch(getJson("/api/memory/review"));
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { error: string }).error).toBe("internal error");
   });
 });
 

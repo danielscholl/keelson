@@ -24,7 +24,19 @@ import {
   type WritebackRequest,
   type WritebackResponse,
 } from "@keelson/shared";
+import { z } from "zod";
 import { evaluateDraft } from "./memory-guardrails.ts";
+
+// Decoded cursor shape — strict() so a forged payload with extra keys fails
+// parse, and .datetime({ offset: true }) matches the wire schema's ISO-8601
+// guard so a bare-year string like "9999" (which Date.parse happily accepts)
+// gets rejected before it can defeat the lexical SQL comparison.
+const pendingCursorSchema = z
+  .object({
+    createdAt: z.string().datetime({ offset: true }),
+    id: z.string().min(1),
+  })
+  .strict();
 
 export interface MemoryStore {
   recall(req: RecallRequest): RecallResponse;
@@ -205,7 +217,9 @@ function encodePendingCursor(c: PendingCursor): string {
 function decodePendingCursor(raw: string): PendingCursor {
   // Buffer.from(..., "base64url") is lenient — it never throws on garbage,
   // it silently emits whatever bytes it can. The downstream JSON.parse +
-  // shape + datetime checks are the actual validation gate.
+  // pendingCursorSchema.safeParse() is the actual validation gate; together
+  // they catch malformed encoding, non-object payloads, missing fields, and
+  // non-ISO createdAt (which would otherwise defeat the lexical SQL compare).
   const json = Buffer.from(raw, "base64url").toString("utf8");
   let parsed: unknown;
   try {
@@ -213,23 +227,11 @@ function decodePendingCursor(raw: string): PendingCursor {
   } catch {
     throw new InvalidCursorError();
   }
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    typeof (parsed as PendingCursor).createdAt !== "string" ||
-    typeof (parsed as PendingCursor).id !== "string"
-  ) {
-    throw new InvalidCursorError();
+  const result = pendingCursorSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new InvalidCursorError(`invalid cursor: ${result.error.message}`);
   }
-  // Reject a non-parseable createdAt: SQLite TEXT comparison is lexical, so
-  // a payload like `{createdAt: "foo"}` would compare against every ISO
-  // timestamp (which all start with a digit < 'f') and return the entire
-  // page on the very first call. Parseable here is a necessary precondition.
-  const cursor = parsed as PendingCursor;
-  if (Number.isNaN(Date.parse(cursor.createdAt))) {
-    throw new InvalidCursorError("invalid cursor: createdAt is not a parseable datetime");
-  }
-  return cursor;
+  return result.data;
 }
 
 // Projection of MemoryRow → ReviewItem. Storage-internal fields

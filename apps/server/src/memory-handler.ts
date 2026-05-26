@@ -8,12 +8,21 @@ import {
   reviewListQuerySchema,
   writebackRequestSchema,
 } from "@keelson/shared";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { isAllowedOrigin } from "./chat-handler.ts";
 import { InvalidCursorError, type MemoryStore } from "./memory-store.ts";
 
 export interface MemoryRoutesDeps {
   memoryStore: MemoryStore;
+}
+
+// Generic envelope for unexpected store failures. bun:sqlite errors carry
+// schema column names and the absolute DB path; echoing them in the response
+// would disclose storage internals to any caller that triggered a constraint
+// or lock. Log the detail, surface a stable string.
+function internalErrorResponse(c: Context, scope: string, err: unknown) {
+  console.warn(`[memory] ${scope} failed: ${err instanceof Error ? err.message : String(err)}`);
+  return c.json({ error: "internal error" }, 500);
 }
 
 export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
@@ -45,7 +54,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     try {
       return c.json(memoryStore.recall(parsed.data));
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return internalErrorResponse(c, "recall", err);
     }
   });
 
@@ -66,7 +75,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     try {
       return c.json(memoryStore.writeback(parsed.data));
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return internalErrorResponse(c, "writeback", err);
     }
   });
 
@@ -84,7 +93,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     try {
       return c.json(memoryStore.confirm(parsed.data));
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return internalErrorResponse(c, "review", err);
     }
   });
 
@@ -121,7 +130,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
         console.warn(`[memory] invalid review cursor rejected: ${err.message}`);
         return c.json({ error: err.message }, 400);
       }
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return internalErrorResponse(c, "review.list", err);
     }
   });
 }
