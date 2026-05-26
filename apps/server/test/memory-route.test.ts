@@ -323,6 +323,19 @@ describe("GET /api/memory/review", () => {
     expect(projectBody.items).toHaveLength(1);
     expect(projectBody.items.every((i) => i.scope.visibility === "project")).toBe(true);
   });
+
+  test("projectId query filter narrows results", async () => {
+    const a = seedMemory({ contentHash: "proj-a" });
+    const b = seedMemory({ contentHash: "proj-b" });
+    db.prepare("UPDATE memories SET scope_project_id = ? WHERE id = ?").run("proj-a", a);
+    db.prepare("UPDATE memories SET scope_project_id = ? WHERE id = ?").run("proj-b", b);
+
+    const res = await app.fetch(getJson("/api/memory/review?projectId=proj-a"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ReviewListResponse;
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].scope.projectId).toBe("proj-a");
+  });
 });
 
 describe("internal error envelope (no storage detail leak)", () => {

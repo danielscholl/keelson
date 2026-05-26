@@ -656,6 +656,21 @@ describe("MemoryStore — listPending", () => {
     expect(page.nextCursor).toBeUndefined();
   });
 
+  test("a caller-supplied limit above the 200 hard cap is clamped", () => {
+    // Defense against a runaway request body: even if a future schema relaxes
+    // the max(200) check, the store clamps at REVIEW_LIST_MAX_LIMIT.
+    const drafts: WritebackMemoryDraft[] = [];
+    for (let i = 0; i < 205; i++) {
+      drafts.push(makeDraft({ contentHash: `cap-${i}`, summary: `cap ${i}` }));
+    }
+    store.writeback(makeWritebackRequest(drafts));
+
+    const page = store.listPending({ limit: 999 });
+    expect(page.items.length).toBeLessThanOrEqual(200);
+    expect(page.items).toHaveLength(200);
+    expect(page.nextCursor).toBeDefined();
+  });
+
   test("invalid cursor throws InvalidCursorError", () => {
     expect(() => store.listPending({ cursor: "not-base64-json" })).toThrow(InvalidCursorError);
   });
