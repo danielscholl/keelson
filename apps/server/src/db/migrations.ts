@@ -75,6 +75,159 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    description: "memory layer: memories + adjacency tables + FTS5 + instruction-promotion gate",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE memories (
+          id                                     TEXT PRIMARY KEY NOT NULL,
+          type                                   TEXT NOT NULL CHECK (type IN (
+            'decision','output','lesson','constraint','open_question','failure','artifact_reference','work_log'
+          )),
+          summary                                TEXT NOT NULL,
+          content                                TEXT NOT NULL,
+          provenance                             TEXT NOT NULL CHECK (provenance IN (
+            'observed','inferred','user_confirmed','imported','generated','superseded','disputed'
+          )),
+          use_policy_can_use_as_instruction      INTEGER NOT NULL DEFAULT 0
+                                                 CHECK (use_policy_can_use_as_instruction IN (0, 1)),
+          use_policy_can_use_as_evidence         INTEGER NOT NULL DEFAULT 1
+                                                 CHECK (use_policy_can_use_as_evidence IN (0, 1)),
+          use_policy_requires_user_confirmation  INTEGER NOT NULL DEFAULT 0
+                                                 CHECK (use_policy_requires_user_confirmation IN (0, 1)),
+          use_policy_do_not_inject_automatically INTEGER NOT NULL DEFAULT 0
+                                                 CHECK (use_policy_do_not_inject_automatically IN (0, 1)),
+          scope_project_id                       TEXT,
+          scope_visibility                       TEXT NOT NULL DEFAULT 'project'
+                                                 CHECK (scope_visibility IN ('project','personal')),
+          lifecycle                              TEXT NOT NULL DEFAULT 'active'
+                                                 CHECK (lifecycle IN (
+                                                   'active','stale','superseded','disputed','rejected'
+                                                 )),
+          review_status                          TEXT NOT NULL DEFAULT 'pending'
+                                                 CHECK (review_status IN (
+                                                   'pending','confirmed','evidence_only','restricted','rejected','stale','merged'
+                                                 )),
+          content_hash                           TEXT NOT NULL,
+          idempotency_key                        TEXT NOT NULL UNIQUE,
+          confidence                             REAL CHECK (confidence >= 0 AND confidence <= 1),
+          runtime                                TEXT NOT NULL,
+          task_id                                TEXT,
+          flow_id                                TEXT,
+          model                                  TEXT,
+          provider                               TEXT,
+          created_at                             TEXT NOT NULL,
+          updated_at                             TEXT NOT NULL,
+          stale_after                            TEXT,
+          CHECK (
+            use_policy_can_use_as_instruction = 0
+            OR provenance IN ('user_confirmed','imported')
+          )
+        );
+
+        CREATE INDEX idx_memories_runtime_created_at
+          ON memories(runtime, created_at DESC);
+        CREATE INDEX idx_memories_scope_lifecycle
+          ON memories(scope_visibility, lifecycle);
+        CREATE INDEX idx_memories_review_status
+          ON memories(review_status);
+
+        CREATE TABLE memory_source_refs (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          memory_id   TEXT NOT NULL,
+          kind        TEXT NOT NULL,
+          identifier  TEXT NOT NULL,
+          url         TEXT,
+          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE memory_artifacts (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          memory_id   TEXT NOT NULL,
+          kind        TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE memory_relations (
+          memory_id          TEXT NOT NULL,
+          related_memory_id  TEXT NOT NULL,
+          kind               TEXT NOT NULL,
+          PRIMARY KEY (memory_id, related_memory_id, kind),
+          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+          FOREIGN KEY (related_memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE memory_review_actions (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          memory_id   TEXT NOT NULL,
+          action      TEXT NOT NULL CHECK (action IN (
+            'confirm','evidence_only','restrict','reject','merge','mark_stale'
+          )),
+          actor       TEXT NOT NULL,
+          notes       TEXT,
+          created_at  TEXT NOT NULL,
+          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE memory_recall_traces (
+          id              TEXT PRIMARY KEY NOT NULL,
+          request_id      TEXT NOT NULL,
+          query           TEXT NOT NULL,
+          scope_json      TEXT NOT NULL,
+          returned_count  INTEGER NOT NULL,
+          created_at      TEXT NOT NULL
+        );
+        CREATE INDEX idx_memory_recall_traces_request_id
+          ON memory_recall_traces(request_id);
+
+        CREATE TABLE memory_recall_items (
+          trace_id    TEXT NOT NULL,
+          memory_id   TEXT NOT NULL,
+          rank        INTEGER NOT NULL,
+          used        INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
+          PRIMARY KEY (trace_id, memory_id),
+          FOREIGN KEY (trace_id)  REFERENCES memory_recall_traces(id) ON DELETE CASCADE,
+          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE memory_audit_events (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_type    TEXT NOT NULL,
+          memory_id     TEXT,
+          actor         TEXT,
+          payload_json  TEXT,
+          created_at    TEXT NOT NULL,
+          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE SET NULL
+        );
+
+        CREATE VIRTUAL TABLE memories_fts USING fts5(
+          summary,
+          content,
+          content='memories',
+          content_rowid='rowid'
+        );
+
+        CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+          INSERT INTO memories_fts(rowid, summary, content)
+          VALUES (new.rowid, new.summary, new.content);
+        END;
+
+        CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, summary, content)
+          VALUES('delete', old.rowid, old.summary, old.content);
+        END;
+
+        CREATE TRIGGER memories_au AFTER UPDATE OF summary, content ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, summary, content)
+          VALUES('delete', old.rowid, old.summary, old.content);
+          INSERT INTO memories_fts(rowid, summary, content)
+          VALUES (new.rowid, new.summary, new.content);
+        END;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
