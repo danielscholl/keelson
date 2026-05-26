@@ -1,0 +1,8 @@
+name: memory-required
+description: Fixture for the M5 headless-refusal test — declares a memory block
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: anything

@@ -5,10 +5,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ExecutorValidationError,
+  type MemoryTools,
   type NodeHandler,
+  type RecallResponseLike,
   type RunOptions,
   type RunStreamEvent,
   runWorkflow,
+  type WritebackResponseLike,
 } from "./executor.ts";
 import { makeApprovalHandler } from "./handlers/approval.ts";
 import { parseWorkflow } from "./loader.ts";
@@ -1589,4 +1592,711 @@ describe.if(UV_PRESENT)("runWorkflow — smoke-test (every node type)", () => {
     }
     expect(summary.nodes.assert.output).toContain("PASS: all node types verified");
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// M5 — memory: block
+// ---------------------------------------------------------------------------
+
+interface RecallCallRecord {
+  req: Record<string, unknown>;
+}
+interface WritebackCallRecord {
+  req: Record<string, unknown>;
+}
+
+function mockMemory(
+  opts: {
+    recallItems?: readonly Record<string, unknown>[];
+    recallTraceId?: string;
+    recallShouldThrow?: boolean;
+    writebackWritten?: readonly { memoryId: string }[];
+    writebackBlocked?: readonly { reason: string; summary: string }[];
+    writebackShouldThrow?: boolean;
+  } = {},
+): {
+  tools: MemoryTools;
+  recalls: RecallCallRecord[];
+  writebacks: WritebackCallRecord[];
+} {
+  const recalls: RecallCallRecord[] = [];
+  const writebacks: WritebackCallRecord[] = [];
+  const tools: MemoryTools = {
+    recall: async (req): Promise<RecallResponseLike> => {
+      recalls.push({ req: req as Record<string, unknown> });
+      if (opts.recallShouldThrow) throw new Error("recall blew up");
+      return {
+        items: opts.recallItems ?? [],
+        trace: {
+          traceId: opts.recallTraceId ?? "trace-1",
+          returned: (opts.recallItems ?? []).length,
+        },
+      };
+    },
+    writeback: async (req): Promise<WritebackResponseLike> => {
+      writebacks.push({ req: req as Record<string, unknown> });
+      if (opts.writebackShouldThrow) throw new Error("writeback blew up");
+      return {
+        written: opts.writebackWritten ?? [{ memoryId: "mem-1" }],
+        blocked: opts.writebackBlocked ?? [],
+      };
+    },
+  };
+  return { tools, recalls, writebacks };
+}
+
+describe("runWorkflow — memory: block (M5)", () => {
+  const promptWorkflowYaml = (memoryBlock: string, body = "Body: $memory.recall.items") => `
+name: memory-recall-test
+description: M5 inline fixture
+nodes:
+  - id: think
+    prompt: |
+      ${body}
+    memory:
+${memoryBlock}
+`;
+
+  test("recall fires before substitution and populates $memory.recall.items", async () => {
+    const workflow = parseInline(
+      promptWorkflowYaml(
+        `      recall:\n        query: prior fixes\n        limits: { maxItems: 3 }`,
+        "Prior: $memory.recall.items / trace=$memory.recall.trace",
+      ),
+    );
+    const items = [
+      { memoryId: "m1", summary: "first" },
+      { memoryId: "m2", summary: "second" },
+    ];
+    const mem = mockMemory({ recallItems: items, recallTraceId: "trace-xyz" });
+    const { handler, calls } = echoHandler("prompt");
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(mem.recalls).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    // Substitution: $memory.recall.items → JSON-stringified array, $memory.recall.trace → trace id
+    expect(calls[0]?.resolvedBody).toContain(JSON.stringify(items));
+    expect(calls[0]?.resolvedBody).toContain("trace=trace-xyz");
+  });
+
+  test("recall query is resolved against inputs before recall is called", async () => {
+    const workflow = parseInline(
+      promptWorkflowYaml(`      recall:\n        query: "prior fixes for $inputs.cve"`),
+    );
+    const mem = mockMemory();
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      inputs: { cve: "CVE-2026-1234" },
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.recalls[0]?.req.query).toBe("prior fixes for CVE-2026-1234");
+  });
+
+  test("recall failure emits run_warning and substitutes $memory.recall.items as []", async () => {
+    const workflow = parseInline(promptWorkflowYaml(`      recall:\n        query: anything`));
+    const mem = mockMemory({ recallShouldThrow: true });
+    const { handler, calls } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+      onEvent,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(calls[0]?.resolvedBody).toContain("Body: []");
+    const warning = events.find(
+      (e): e is Extract<RunStreamEvent, { type: "run_warning" }> => e.type === "run_warning",
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.message).toContain("memory recall failed");
+  });
+
+  test("writeback fires after node success when on: success", async () => {
+    const workflow = parseInline(`
+name: wb-success
+description: test
+nodes:
+  - id: think
+    prompt: do the thing
+    memory:
+      writeback:
+        on: success
+        type: decision
+        summary: result
+        content: hello world
+`);
+    const mem = mockMemory();
+    const { handler } = echoHandler("prompt");
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(mem.writebacks).toHaveLength(1);
+    const draft = (mem.writebacks[0]?.req.memories as Record<string, unknown>[])[0];
+    expect(draft?.type).toBe("decision");
+    expect(draft?.content).toBe("hello world");
+    // Evidence-default invariant: executor hard-codes "generated" regardless
+    // of any author-supplied value (the schema doesn't expose provenance).
+    expect(draft?.provenance).toBe("generated");
+  });
+
+  test("writeback does NOT fire after node failure when on: success", async () => {
+    const workflow = parseInline(`
+name: wb-skip
+description: test
+nodes:
+  - id: fail
+    prompt: doomed
+    memory:
+      writeback:
+        on: success
+        type: failure
+        summary: should not write
+        content: should not write
+`);
+    const mem = mockMemory();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", failingHandler("prompt", "kaboom")]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.writebacks).toHaveLength(0);
+  });
+
+  test("writeback fires after node failure when on: always", async () => {
+    const workflow = parseInline(`
+name: wb-always
+description: test
+nodes:
+  - id: fail
+    prompt: doomed
+    memory:
+      writeback:
+        on: always
+        type: failure
+        summary: failure note
+        content: it failed
+`);
+    const mem = mockMemory();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", failingHandler("prompt", "kaboom")]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.writebacks).toHaveLength(1);
+  });
+
+  test("writeback task.taskId is qualified by workflow name (cross-workflow dedup safety)", async () => {
+    // The M3 store derives its per-row dedupe key from
+    // `${task.runtime}:${task.taskId}:${type}:${contentHash}` — flowId and
+    // the envelope idempotencyKey are excluded. If taskId were just the
+    // node id, two different workflows with the same node id + content
+    // would collide. The executor qualifies taskId with the workflow name
+    // to avoid that.
+    const workflow = parseInline(`
+name: alpha-workflow
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      writeback:
+        on: success
+        type: decision
+        summary: s
+        content: c
+`);
+    const mem = mockMemory();
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.writebacks).toHaveLength(1);
+    const task = mem.writebacks[0]?.req.task as Record<string, unknown>;
+    expect(task.taskId).toBe("alpha-workflow:think");
+    expect(task.runtime).toBe("workflow");
+  });
+
+  test("recall task.taskId is qualified by workflow name", async () => {
+    const workflow = parseInline(`
+name: beta-workflow
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: stuff
+`);
+    const mem = mockMemory();
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.recalls).toHaveLength(1);
+    const task = mem.recalls[0]?.req.task as Record<string, unknown>;
+    expect(task.taskId).toBe("beta-workflow:think");
+  });
+
+  test("idempotencyKey is stable across identical content but distinct across nodes", async () => {
+    const workflow = parseInline(`
+name: idem
+description: test
+nodes:
+  - id: a
+    prompt: a-prompt
+    memory:
+      writeback:
+        on: success
+        type: decision
+        summary: same
+        content: same content
+  - id: b
+    prompt: b-prompt
+    memory:
+      writeback:
+        on: success
+        type: decision
+        summary: same
+        content: same content
+`);
+    const mem = mockMemory();
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.writebacks).toHaveLength(2);
+    const keyA = mem.writebacks[0]?.req.idempotencyKey;
+    const keyB = mem.writebacks[1]?.req.idempotencyKey;
+    expect(typeof keyA).toBe("string");
+    expect(typeof keyB).toBe("string");
+    expect(keyA).not.toBe(keyB); // distinct node ids
+    expect(keyA).toContain(":a:"); // node id is part of key
+    expect(keyB).toContain(":b:");
+  });
+
+  test("workflows without memory: never call the memoryTools adapter", async () => {
+    const workflow = parseInline(`
+name: no-memory
+description: test
+nodes:
+  - id: a
+    prompt: hello
+`);
+    const mem = mockMemory();
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.recalls).toHaveLength(0);
+    expect(mem.writebacks).toHaveLength(0);
+  });
+
+  test("emits memory_recalled and memory_written events on the node_event channel", async () => {
+    const workflow = parseInline(`
+name: events
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: stuff
+      writeback:
+        on: success
+        type: lesson
+        summary: s
+        content: c
+`);
+    const mem = mockMemory({
+      recallItems: [{ memoryId: "m1" }],
+      recallTraceId: "tr-1",
+      writebackWritten: [{ memoryId: "mem-out" }],
+    });
+    const { handler } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+      onEvent,
+    });
+
+    const recalled = events
+      .filter((e): e is Extract<RunStreamEvent, { type: "node_event" }> => e.type === "node_event")
+      .map((e) => e.event)
+      .find((ev) => ev.type === "memory_recalled");
+    expect(recalled).toEqual({ type: "memory_recalled", traceId: "tr-1", returned: 1 });
+
+    const written = events
+      .filter((e): e is Extract<RunStreamEvent, { type: "node_event" }> => e.type === "node_event")
+      .map((e) => e.event)
+      .find((ev) => ev.type === "memory_written");
+    expect(written).toEqual({ type: "memory_written", memoryId: "mem-out" });
+  });
+
+  test("writeback blocked[] surfaces as run_warning, not as a node failure", async () => {
+    const workflow = parseInline(`
+name: blocked
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      writeback:
+        on: success
+        type: lesson
+        summary: s
+        content: c
+`);
+    const mem = mockMemory({
+      writebackWritten: [],
+      writebackBlocked: [{ reason: "potential_secret", summary: "s" }],
+    });
+    const { handler } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+      onEvent,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    const warning = events.find(
+      (e): e is Extract<RunStreamEvent, { type: "run_warning" }> => e.type === "run_warning",
+    );
+    expect(warning?.message).toContain("blocked: potential_secret");
+  });
+
+  test("memory: blocks are no-ops when no memoryTools adapter is provided", async () => {
+    const workflow = parseInline(`
+name: no-adapter
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: anything
+      writeback:
+        on: success
+        type: lesson
+        summary: s
+        content: c
+`);
+    const { handler, calls } = echoHandler("prompt");
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      // memoryTools intentionally omitted
+    });
+
+    expect(summary.status).toBe("succeeded");
+    // $memory.recall.items resolves to "[]" via the "no context" default,
+    // confirming the hook short-circuited rather than ran with empty results.
+    expect(calls[0]?.resolvedBody).toContain("hello");
+  });
+
+  test("writeback templates can reference $memory.recall.items (recall context propagates to writeback)", async () => {
+    // Codex-flagged gap: runPostWriteback was resolving summary/content
+    // without the per-node memoryRecall context, so a writeback body that
+    // referenced the recalled items would substitute against the empty
+    // default. Threading memoryRecall through the post-writeback path is
+    // load-bearing for "persist what we did with the recalled items"
+    // patterns.
+    const workflow = parseInline(`
+name: recall-into-writeback
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: prior
+      writeback:
+        on: success
+        type: decision
+        summary: "saw $memory.recall.trace"
+        content: "items: $memory.recall.items"
+`);
+    const items = [{ memoryId: "m1" }];
+    const mem = mockMemory({ recallItems: items, recallTraceId: "rtid-7" });
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.writebacks).toHaveLength(1);
+    const draft = (mem.writebacks[0]?.req.memories as Record<string, unknown>[])[0];
+    expect(draft?.summary).toBe("saw rtid-7");
+    expect(draft?.content).toBe(`items: ${JSON.stringify(items)}`);
+  });
+
+  test("writeback fires when handler throws and on: always", async () => {
+    // Codex-flagged gap: the executor's catch block only synthesized a
+    // failed NodeResult without invoking runPostWriteback, so `on: always`
+    // missed thrown-handler failures (subprocess crash, abort propagation,
+    // custom handler bugs).
+    const workflow = parseInline(`
+name: throw-always
+description: test
+nodes:
+  - id: doomed
+    prompt: please throw
+    memory:
+      writeback:
+        on: always
+        type: failure
+        summary: "captured failure"
+        content: "thrown handler"
+`);
+    const throwingHandler: NodeHandler = {
+      type: "prompt",
+      async handle() {
+        throw new Error("kaboom");
+      },
+    };
+    const mem = mockMemory();
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", throwingHandler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(summary.status).toBe("failed");
+    expect(mem.writebacks).toHaveLength(1);
+    expect((mem.writebacks[0]?.req.memories as Record<string, unknown>[])[0]?.summary).toBe(
+      "captured failure",
+    );
+  });
+
+  test("writeback does NOT fire when handler throws and on: success", async () => {
+    // The success-gated companion: thrown failures should still be
+    // excluded from `on: success` writebacks.
+    const workflow = parseInline(`
+name: throw-success
+description: test
+nodes:
+  - id: doomed
+    prompt: please throw
+    memory:
+      writeback:
+        on: success
+        type: lesson
+        summary: should not write
+        content: should not write
+`);
+    const throwingHandler: NodeHandler = {
+      type: "prompt",
+      async handle() {
+        throw new Error("kaboom");
+      },
+    };
+    const mem = mockMemory();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", throwingHandler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.writebacks).toHaveLength(0);
+  });
+
+  test("ctx.memory exposes the adapter so custom handlers can call recall/writeback imperatively", async () => {
+    // Codex-flagged: NodeContext.memory was declared on the type but the
+    // executor only forwarded memoryRecall, leaving ctx.memory undefined
+    // even when RunOptions.memoryTools was wired. Handlers that need
+    // imperative access (M6 rib tools, ad-hoc recall in a loop) must see
+    // the same adapter the declarative hooks use.
+    const workflow = parseInline(`
+name: ctx-memory-tools
+description: test
+nodes:
+  - id: think
+    prompt: hello
+`);
+    let observed: MemoryTools | undefined;
+    const inspectingHandler: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        observed = ctx.memory;
+        // Exercise the handle end-to-end — a custom handler should be
+        // able to recall directly via ctx.memory without going through
+        // the declarative memory: block.
+        if (ctx.memory) {
+          const res = await ctx.memory.recall({ query: "imperative" });
+          return {
+            status: "succeeded",
+            output: { kind: "text", text: `traceId=${res.trace.traceId}` },
+          };
+        }
+        return { status: "succeeded", output: { kind: "text", text: "no adapter" } };
+      },
+    };
+    const mem = mockMemory({ recallTraceId: "imp-trace" });
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", inspectingHandler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(observed).toBe(mem.tools);
+    expect(mem.recalls).toHaveLength(1);
+    expect(summary.nodes.think?.output).toBe("traceId=imp-trace");
+  });
+
+  test("ctx.memory is undefined when no memoryTools adapter is wired", async () => {
+    const workflow = parseInline(`
+name: ctx-memory-absent
+description: test
+nodes:
+  - id: think
+    prompt: hello
+`);
+    let observed: MemoryTools | undefined = "sentinel" as unknown as MemoryTools;
+    const inspectingHandler: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        observed = ctx.memory;
+        return { status: "succeeded", output: { kind: "text", text: "" } };
+      },
+    };
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", inspectingHandler]]),
+      // memoryTools intentionally omitted
+    });
+
+    expect(observed).toBeUndefined();
+  });
+
+  test("memoryRecall is exposed on NodeContext for handlers that re-substitute", async () => {
+    // Codex-flagged gap: handlers re-resolving nested bodies (command file
+    // contents, loop.prompt) only got memoryRecall if it was threaded
+    // through NodeContext. This test exercises that propagation via a
+    // custom handler that reads ctx.memoryRecall directly.
+    const workflow = parseInline(`
+name: ctx-memory
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: stuff
+`);
+    let observedItems: unknown[] | undefined;
+    let observedTraceId: string | null | undefined;
+    const inspectingHandler: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        observedItems = ctx.memoryRecall ? [...ctx.memoryRecall.items] : undefined;
+        observedTraceId = ctx.memoryRecall?.traceId;
+        return { status: "succeeded", output: { kind: "text", text: "" } };
+      },
+    };
+    const items = [{ memoryId: "m1" }, { memoryId: "m2" }];
+    const mem = mockMemory({ recallItems: items, recallTraceId: "ctx-trace" });
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", inspectingHandler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(observedItems).toEqual(items);
+    expect(observedTraceId).toBe("ctx-trace");
+  });
+
+  test("loop.prompt per-iteration substitution sees $memory.recall.items", async () => {
+    // The loop handler builds iterationPrompt via resolveBody on
+    // loop.prompt each iteration. Without forwarding ctx.memoryRecall the
+    // declared memory.recall: would silently no-op for loop nodes.
+    const workflow = parseInline(`
+name: loop-recall
+description: test
+nodes:
+  - id: looper
+    loop:
+      prompt: |
+        Items: $memory.recall.items
+        END
+      max_iterations: 1
+      until: COMPLETE
+    memory:
+      recall:
+        query: stuff
+`);
+    const promptResolvedBodies: string[] = [];
+    const promptHandler: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        promptResolvedBodies.push(ctx.resolvedBody);
+        // Emit COMPLETE so the loop stops cleanly after iteration 1.
+        return { status: "succeeded", output: { kind: "text", text: "COMPLETE" } };
+      },
+    };
+    const items = [{ memoryId: "m-loop" }];
+    const mem = mockMemory({ recallItems: items });
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([
+        ["prompt", promptHandler],
+        ["loop", makeLoopHandler({ promptHandler })],
+      ]),
+      memoryTools: mem.tools,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(promptResolvedBodies).toHaveLength(1);
+    expect(promptResolvedBodies[0]).toContain(JSON.stringify(items));
+  });
 });

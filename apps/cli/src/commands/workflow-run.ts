@@ -6,7 +6,11 @@ import type { WorkflowFrame } from "@keelson/shared";
 import type { RunStreamEvent } from "@keelson/workflows";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { attachRun, HttpError, isServerDownError, startRun } from "../http/workflow-client.ts";
-import { runHeadless, WorkflowNotFoundError } from "../in-process/run-workflow.ts";
+import {
+  MemoryRequiresServerError,
+  runHeadless,
+  WorkflowNotFoundError,
+} from "../in-process/run-workflow.ts";
 import { emit } from "../output.ts";
 import { probeServer } from "../server-probe.ts";
 
@@ -205,6 +209,10 @@ async function runInProcess(
     if (err instanceof WorkflowNotFoundError) {
       emit({ error: err.message, code: "WORKFLOW_NOT_FOUND" }, { json: opts.json });
       process.exit(EXIT_NOT_FOUND);
+    }
+    if (err instanceof MemoryRequiresServerError) {
+      emit({ error: err.message, code: "NO_SERVER" }, { json: opts.json });
+      process.exit(EXIT_NO_SERVER);
     }
     // Headless setup errors (unknown provider, fixture parse failures, etc.)
     // must still produce a JSON envelope in --json mode. Rethrowing would

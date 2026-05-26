@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 
 import type { RunStreamEvent } from "@keelson/workflows";
 
-import { runHeadless } from "../src/in-process/run-workflow.ts";
+import { MemoryRequiresServerError, runHeadless } from "../src/in-process/run-workflow.ts";
 
 const FIXTURES = resolve(import.meta.dir, "fixtures");
 
@@ -36,5 +36,17 @@ describe("runHeadless (in-process executor)", () => {
       workflowsDir: FIXTURES,
     });
     expect(promise).rejects.toThrow(/no workflow named/);
+  });
+
+  test("memory-bearing workflow refused with MemoryRequiresServerError (M5)", async () => {
+    const promise = runHeadless({
+      name: "memory-required",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+    });
+    await expect(promise).rejects.toBeInstanceOf(MemoryRequiresServerError);
+    await expect(promise).rejects.toThrow(/Memory requires the server/);
+    await expect(promise).rejects.toThrow(/think/); // names the memory-bearing node
   });
 });

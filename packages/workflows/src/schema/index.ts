@@ -64,6 +64,17 @@ export {
 export type { LoopNodeConfig } from "./loop.ts";
 // Loop node configuration
 export { loopNodeConfigSchema } from "./loop.ts";
+export type {
+  NodeMemoryBlock,
+  NodeMemoryRecall,
+  NodeMemoryWriteback,
+} from "./memory-block.ts";
+// Memory block (M5)
+export {
+  nodeMemoryBlockSchema,
+  nodeMemoryRecallSchema,
+  nodeMemoryWritebackSchema,
+} from "./memory-block.ts";
 export type { StepRetryConfig } from "./retry.ts";
 // Retry configuration
 export { stepRetryConfigSchema } from "./retry.ts";

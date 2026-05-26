@@ -155,6 +155,7 @@ workflowsRoutes(
     conversationStore: store,
     cwd: REPO_ROOT,
     ...(promptHandler ? { promptHandler } : {}),
+    memoryStore,
   },
   activeWorkflowRuns,
   workflowSubscribers,

@@ -65,9 +65,12 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
         // Substitution pipeline matches what the executor applies to
         // top-level string bodies; $LOOP_PREV_OUTPUT (previous stripped
         // output, empty on iteration 1) is a loop-only extension layered
-        // on top.
+        // on top. `memoryRecall` is forwarded so `$memory.recall.items`
+        // inside loop.prompt substitutes against the executor's pre-run
+        // recall on every iteration, not just the (skipped) outer pass.
         const substituted = resolveBody(loop.prompt, ctx.inputs, ctx.upstreamOutputs, {
           ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+          ...(ctx.memoryRecall !== undefined ? { memoryRecall: ctx.memoryRecall } : {}),
         });
         const iterationPrompt = substituted.replace(/\$LOOP_PREV_OUTPUT/g, prevOutput);
 

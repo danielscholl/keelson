@@ -227,16 +227,20 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
 
 /** Reserved namespaces that look like `$X.output` but aren't node references.
  *  The executor's resolveBody handles `$inputs.<key>` and `$ARTIFACTS_DIR`
- *  directly, so the validator must not false-positive when those appear with
- *  a `.output` suffix in a workflow body (e.g. literal path text). */
+ *  directly with a `.output` suffix possible in literal text (e.g.
+ *  `$ARTIFACTS_DIR/foo.output` as a path); the validator must not
+ *  false-positive on those. `memory` is intentionally NOT reserved here:
+ *  the `$memory.recall.*` namespace doesn't match the `.output` regex
+ *  pattern anyway, so keeping `$memory.output` and `$memory.foo.output`
+ *  flagged as unknown-node references catches author typos. */
 const RESERVED_REF_NAMESPACES = new Set(["inputs", "ARTIFACTS_DIR"]);
 
 /** Node ids that can't be declared because they collide with substitution
  *  namespaces. The executor's resolveBody resolves `$inputs.*`, `$ARGUMENTS`,
- *  and `$ARTIFACTS_DIR` before considering them as node refs, so a node
- *  literally named any of these would be silently shadowed — reject at parse
- *  time. */
-const RESERVED_NODE_IDS = new Set(["inputs", "ARGUMENTS", "ARTIFACTS_DIR"]);
+ *  `$ARTIFACTS_DIR`, and `$memory.recall.*` before considering them as node
+ *  refs, so a node literally named any of these would be silently shadowed
+ *  — reject at parse time. */
+const RESERVED_NODE_IDS = new Set(["inputs", "ARGUMENTS", "ARTIFACTS_DIR", "memory"]);
 
 /** Workflow names that can't be declared because they collide with the
  *  `/api/workflows/<name>` route family. The path segment `runs` is owned by
@@ -288,7 +292,16 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
   const stripMarkdownCode = (s: string): string =>
     s.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
 
-  type Source = { text: string; label: string; allowReservedNamespace: boolean };
+  type Source = {
+    text: string;
+    label: string;
+    allowReservedNamespace: boolean;
+    // `memory.writeback.*` templates resolve against the just-completed
+    // node's output (executor adds it to outputsWithSelf before
+    // substitution), so a self-reference like `$<thisNodeId>.output` is
+    // valid there. recall.query runs pre-execution and cannot self-ref.
+    allowSelfReference?: boolean;
+  };
   for (const node of nodes) {
     const sources: Source[] = [];
     // `when:` is evaluated by evaluateCondition (in conditions.ts), which
@@ -324,6 +337,46 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
     if (isCancelNode(node)) {
       sources.push({ text: node.cancel, label: "cancel", allowReservedNamespace: true });
     }
+    // M5 — memory templates also flow through resolveBody before being
+    // sent to the recall/writeback service, so $nodeId.output refs there
+    // need the same parse-time validation. Without this, a typo like
+    // `$mising.output` silently resolves to "" at runtime and the recall
+    // query / writeback content is wrong without any signal.
+    if (node.memory !== undefined) {
+      const mem = node.memory;
+      if (mem.recall?.query !== undefined) {
+        sources.push({
+          text: mem.recall.query,
+          label: "memory.recall.query",
+          allowReservedNamespace: true,
+        });
+      }
+      if (mem.writeback !== undefined) {
+        sources.push({
+          text: mem.writeback.summary,
+          label: "memory.writeback.summary",
+          allowReservedNamespace: true,
+          allowSelfReference: true,
+        });
+        sources.push({
+          text: mem.writeback.content,
+          label: "memory.writeback.content",
+          allowReservedNamespace: true,
+          allowSelfReference: true,
+        });
+        for (let i = 0; i < mem.writeback.sourceRefs.length; i++) {
+          const ref = mem.writeback.sourceRefs[i];
+          if (ref?.uri !== undefined) {
+            sources.push({
+              text: ref.uri,
+              label: `memory.writeback.sourceRefs[${i}].uri`,
+              allowReservedNamespace: true,
+              allowSelfReference: true,
+            });
+          }
+        }
+      }
+    }
     for (const source of sources) {
       for (const m of source.text.matchAll(refPattern)) {
         const refId = m[1];
@@ -335,6 +388,11 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
         if (!ids.has(refId)) {
           return `Node '${node.id}' references unknown node '$${refId}.output'`;
         }
+        // Self-reference allowance for writeback templates — the executor
+        // adds the current node's output to its substitution context
+        // before resolving these, so $<thisNodeId>.output is valid even
+        // though the node isn't its own ancestor.
+        if (refId === node.id && source.allowSelfReference) continue;
         // Catches the silent-empty trap where a node references an output
         // from a non-ancestor: at runtime that output isn't in the
         // upstreams map yet, substitution resolves to "", and the
