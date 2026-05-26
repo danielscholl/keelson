@@ -475,14 +475,30 @@ async function runChatRecall(args: RunChatRecallArgs): Promise<string | undefine
     return undefined;
   }
 
-  if (res.items.length === 0) return undefined;
+  // The system-prompt channel is the model's instruction channel — only
+  // memories explicitly promoted to instruction-grade may enter it. The
+  // schema's promotion gate (memory.ts) ties canUseAsInstruction to
+  // user_confirmed / imported provenance, so workflow-written memories
+  // (provenance: "generated") stay out until a human curates them through
+  // the review queue. Defense-in-depth on the other two flags — recall's
+  // SQL already excludes doNotInjectAutomatically.
+  const injectable = res.items.filter(
+    ({ usePolicy }) =>
+      usePolicy.canUseAsInstruction &&
+      !usePolicy.requiresUserConfirmation &&
+      !usePolicy.doNotInjectAutomatically,
+  );
+  if (injectable.length === 0) return undefined;
 
-  const lines = res.items.map((item) => {
-    const content =
-      item.content.length > MEMORY_RECALL_CONTENT_CHARS
-        ? `${item.content.slice(0, MEMORY_RECALL_CONTENT_CHARS - 1)}…`
-        : item.content;
-    return `- ${item.summary}: ${content}`;
+  // Cap the whole rendered line (summary + content) so an unbounded summary
+  // can't bust the MAX_ITEMS × CONTENT_CHARS section bound.
+  const lines = injectable.map((item) => {
+    const body = `${item.summary}: ${item.content}`;
+    const truncated =
+      body.length > MEMORY_RECALL_CONTENT_CHARS
+        ? `${body.slice(0, MEMORY_RECALL_CONTENT_CHARS - 1)}…`
+        : body;
+    return `- ${truncated}`;
   });
   return `${MEMORY_SECTION_HEADER}\n\n${lines.join("\n")}`;
 }

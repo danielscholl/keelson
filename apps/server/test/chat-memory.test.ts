@@ -110,15 +110,19 @@ function makeFakeMemoryStore(opts: FakeMemoryStoreOptions = {}): {
   return { store, calls };
 }
 
+// Default to a fully injectable item — instruction-promoted, no confirmation
+// gate, not flagged for manual-only injection. Promotion requires user_confirmed
+// or imported provenance per the schema gate, hence the matching default below.
+// Tests that verify the gating filter override usePolicy / provenance explicitly.
 function makeRecallItem(overrides: Partial<RecallItem> = {}): RecallItem {
   return {
     memoryId: overrides.memoryId ?? "mem-1",
     type: overrides.type ?? "lesson",
     summary: overrides.summary ?? "port assignment",
     content: overrides.content ?? "the server listens on 7878",
-    provenance: overrides.provenance ?? "generated",
+    provenance: overrides.provenance ?? "user_confirmed",
     usePolicy: overrides.usePolicy ?? {
-      canUseAsInstruction: false,
+      canUseAsInstruction: true,
       canUseAsEvidence: true,
       requiresUserConfirmation: false,
       doNotInjectAutomatically: false,
@@ -338,6 +342,188 @@ describe("chat memory recall", () => {
     // The injected line is "- big: <content>" — content body must be capped.
     const xCount = (sp.match(/x/g) ?? []).length;
     expect(xCount).toBeLessThanOrEqual(200);
+  });
+
+  test("caps the whole rendered line so a long summary cannot bust the bound", async () => {
+    const spyId = "spy-recall-summary-cap";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    const longSummary = "S".repeat(400);
+    const { store: memoryStore } = makeFakeMemoryStore({
+      items: [makeRecallItem({ summary: longSummary, content: "short content" })],
+    });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      memoryStore,
+      abortSignal: new AbortController().signal,
+    });
+
+    const sp = captured!.systemPrompt!;
+    // The injected line "- <summary>: <content>" must respect the 200-char body cap.
+    const lineMatch = sp.match(/^- [^\n]*$/m);
+    expect(lineMatch).not.toBeNull();
+    const lineBody = lineMatch![0].slice(2); // strip leading "- "
+    expect(lineBody.length).toBeLessThanOrEqual(200);
+    expect(lineBody.endsWith("…")).toBe(true);
+    // Content was never reached because summary alone fills the budget.
+    expect(sp).not.toContain("short content");
+  });
+
+  test("excludes recalled items with canUseAsInstruction = false", async () => {
+    const spyId = "spy-recall-not-instruction";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId, seedSystemPrompt: "seed" });
+    const { store: memoryStore } = makeFakeMemoryStore({
+      items: [
+        makeRecallItem({
+          memoryId: "evidence-only",
+          summary: "gen-evidence",
+          content: "workflow-written, not promoted",
+          provenance: "generated",
+          usePolicy: {
+            canUseAsInstruction: false,
+            canUseAsEvidence: true,
+            requiresUserConfirmation: false,
+            doNotInjectAutomatically: false,
+          },
+        }),
+      ],
+    });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      memoryStore,
+      abortSignal: new AbortController().signal,
+    });
+
+    // Filtered out → no injection, systemPrompt is just the seed.
+    expect(captured?.systemPrompt).toBe("seed");
+  });
+
+  test("excludes recalled items that require user confirmation", async () => {
+    const spyId = "spy-recall-requires-confirm";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId, seedSystemPrompt: "seed" });
+    const { store: memoryStore } = makeFakeMemoryStore({
+      items: [
+        makeRecallItem({
+          memoryId: "needs-confirm",
+          summary: "gated",
+          content: "requires human sign-off before use",
+          usePolicy: {
+            canUseAsInstruction: true,
+            canUseAsEvidence: true,
+            requiresUserConfirmation: true,
+            doNotInjectAutomatically: false,
+          },
+        }),
+      ],
+    });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      memoryStore,
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(captured?.systemPrompt).toBe("seed");
+  });
+
+  test("excludes recalled items flagged doNotInjectAutomatically (defense-in-depth)", async () => {
+    const spyId = "spy-recall-do-not-inject";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId, seedSystemPrompt: "seed" });
+    // The store's recall SQL already excludes these — this fake bypasses
+    // that gate so the handler-side filter is exercised independently.
+    const { store: memoryStore } = makeFakeMemoryStore({
+      items: [
+        makeRecallItem({
+          memoryId: "manual-only",
+          summary: "manual",
+          content: "operator-only memory",
+          usePolicy: {
+            canUseAsInstruction: true,
+            canUseAsEvidence: true,
+            requiresUserConfirmation: false,
+            doNotInjectAutomatically: true,
+          },
+        }),
+      ],
+    });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      memoryStore,
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(captured?.systemPrompt).toBe("seed");
+  });
+
+  test("injects only the items that pass every gate, dropping the rest", async () => {
+    const spyId = "spy-recall-mixed-policy";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    const { store: memoryStore } = makeFakeMemoryStore({
+      items: [
+        // Passes — default helper sets canUseAsInstruction: true.
+        makeRecallItem({ memoryId: "pass", summary: "ok", content: "use this" }),
+        // Blocked — not instruction-grade.
+        makeRecallItem({
+          memoryId: "blocked-evidence",
+          summary: "evidence-only",
+          content: "should not appear",
+          provenance: "generated",
+          usePolicy: {
+            canUseAsInstruction: false,
+            canUseAsEvidence: true,
+            requiresUserConfirmation: false,
+            doNotInjectAutomatically: false,
+          },
+        }),
+      ],
+    });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      memoryStore,
+      abortSignal: new AbortController().signal,
+    });
+
+    const sp = captured!.systemPrompt!;
+    expect(sp).toContain("ok: use this");
+    expect(sp).not.toContain("should not appear");
   });
 
   test("skips recall when the user prompt is whitespace-only", async () => {
