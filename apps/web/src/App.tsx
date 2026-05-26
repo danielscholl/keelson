@@ -3,8 +3,10 @@ import { ToastHost } from "./components/Toast.tsx";
 import { type ActiveTab, TopBar } from "./components/TopBar.tsx";
 import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
+import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import { Chat } from "./views/Chat.tsx";
+import { Memory } from "./views/Memory.tsx";
 import { Workflows } from "./views/Workflows.tsx";
 
 export function App() {
@@ -19,6 +21,7 @@ function AppInner() {
   const { settings, setTheme } = useSettings();
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
   const pausedRunCount = usePausedRunCount();
+  const pendingMemoryCount = usePendingMemoryCount();
 
   const themePreference = settings.theme ?? "system";
   useEffect(() => {
@@ -50,9 +53,10 @@ function AppInner() {
         themePreference={themePreference}
         onThemeChange={setTheme}
         pausedRunCount={pausedRunCount}
+        pendingMemoryCount={pendingMemoryCount}
         onNewChat={handleNewChat}
       />
-      {activeTab === "workflows" ? <Workflows /> : <Chat />}
+      {activeTab === "workflows" ? <Workflows /> : activeTab === "memory" ? <Memory /> : <Chat />}
     </div>
   );
 }

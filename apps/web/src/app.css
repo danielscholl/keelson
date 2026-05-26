@@ -5892,3 +5892,245 @@ button.tab:focus-visible {
 .chat-composer .chat-composer-row .btn:last-child {
   margin-left: auto;
 }
+
+/* === Memory tab (M7) ====================================================== */
+
+.memory-page .page-header {
+  margin-bottom: 14px;
+}
+.memory-refresh {
+  background: var(--bg-soft); color: var(--fg);
+  border: 1px solid var(--border); padding: 5px 12px; border-radius: 6px;
+  font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.memory-refresh:hover { background: var(--card-2); }
+
+.memory-subtabs {
+  display: flex; gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.memory-subtab {
+  background: transparent; border: none;
+  padding: 8px 14px;
+  color: var(--muted); font-size: 12px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.memory-subtab:hover { color: var(--fg); }
+.memory-subtab.is-active {
+  color: var(--fg-strong);
+  border-bottom-color: var(--accent);
+}
+
+.memory-filters {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.memory-filter {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--muted);
+}
+.memory-filter select {
+  background: var(--bg-soft); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 8px; font-size: 11px; font-family: inherit;
+}
+
+.memory-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.memory-item {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+}
+.memory-item.is-expanded {
+  border-color: var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.memory-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 12px; align-items: center;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent; border: none;
+  font-family: inherit; text-align: left; cursor: pointer;
+  color: var(--fg);
+}
+.memory-row:hover { background: var(--card-2); }
+.memory-chevron {
+  color: var(--dim); font-size: 10px;
+}
+.memory-summary {
+  font-weight: 600; color: var(--fg-strong); font-size: 13px;
+}
+.memory-chips {
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap; justify-content: flex-end;
+}
+.memory-meta { color: var(--muted); font-size: 11px; }
+.memory-pill {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 600;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft); color: var(--muted);
+  text-transform: lowercase; letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.memory-pill-type { color: var(--fg); background: var(--bg-soft); }
+.memory-pill-prov { color: var(--cyan); border-color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 12%, transparent); }
+.memory-pill-prom { color: var(--magenta); border-color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent); }
+.memory-pill-instr { color: var(--magenta); border-color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 22%, transparent); }
+.memory-pill-ev { color: var(--yellow); border-color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 12%, transparent); }
+.memory-pill-status {
+  color: var(--fg); border-color: var(--border);
+  background: var(--card-2);
+}
+
+.memory-detail {
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px 14px 48px;
+  background: var(--bg-soft);
+}
+.memory-content {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: ui-monospace, monospace; font-size: 12px;
+  color: var(--fg); white-space: pre-wrap; word-wrap: break-word;
+  line-height: 1.5;
+}
+.memory-detail-row {
+  display: grid; grid-template-columns: 100px 1fr;
+  gap: 12px; margin-bottom: 6px;
+  font-size: 11px;
+}
+.memory-detail-label {
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 700; font-size: 10px; padding-top: 2px;
+}
+.memory-detail-value { color: var(--fg); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.memory-detail-value code {
+  background: var(--card); padding: 1px 6px; border-radius: 4px;
+  font-family: ui-monospace, monospace; font-size: 11px;
+  border: 1px solid var(--border-soft);
+}
+.memory-source-ref {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 6px;
+  background: var(--card); border: 1px solid var(--border-soft);
+  font-size: 11px;
+}
+.memory-source-kind {
+  color: var(--muted); font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.memory-source-ref a { color: var(--accent); text-decoration: none; }
+.memory-source-ref a:hover { text-decoration: underline; }
+
+.memory-actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.btn-action {
+  background: var(--card); color: var(--fg);
+  border: 1px solid var(--border); padding: 5px 12px;
+  border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-family: inherit; font-weight: 600;
+}
+.btn-action:hover:not(:disabled) { background: var(--card-2); }
+.btn-action:disabled { opacity: 0.5; cursor: wait; }
+.btn-action-confirm {
+  background: var(--accent); color: white; border-color: var(--accent);
+}
+.btn-action-confirm:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent); }
+.btn-action-reject {
+  color: var(--red, #d04848); border-color: var(--red, #d04848);
+}
+.btn-action-reject:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red, #d04848) 12%, var(--card));
+}
+.btn-action-secondary { color: var(--muted); }
+
+/* === Save to memory affordance + modal (M7b) ============================== */
+
+.chat-message-actions {
+  display: flex; gap: 6px;
+  margin-top: 4px;
+  opacity: 0; transition: opacity 120ms ease-in;
+}
+.chat-message:hover .chat-message-actions,
+.chat-message:focus-within .chat-message-actions {
+  opacity: 1;
+}
+.chat-message-action {
+  background: var(--bg-soft); color: var(--muted);
+  border: 1px solid var(--border-soft);
+  padding: 2px 8px; border-radius: 5px;
+  font-size: 10px; font-family: inherit; cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+}
+.chat-message-action:hover { color: var(--fg); border-color: var(--border); }
+
+.save-memory-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; padding: 20px;
+}
+.save-memory-modal {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 22px;
+  width: 100%; max-width: 560px;
+  max-height: 90vh; overflow-y: auto;
+}
+.save-memory-modal h2 {
+  margin: 0 0 4px; font-size: 16px; color: var(--fg-strong);
+}
+.save-memory-modal .save-memory-sub {
+  color: var(--muted); font-size: 11px; margin-bottom: 16px;
+}
+.save-memory-field { margin-bottom: 12px; }
+.save-memory-field label {
+  display: block; font-size: 11px; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.save-memory-field input,
+.save-memory-field textarea,
+.save-memory-field select {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg-soft); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 10px; font-size: 12px; font-family: inherit;
+}
+.save-memory-field textarea {
+  min-height: 100px; resize: vertical;
+  font-family: ui-monospace, monospace;
+}
+.save-memory-source-label {
+  font-size: 11px; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.save-memory-source {
+  font-size: 11px; color: var(--muted);
+  padding: 8px 10px; background: var(--bg-soft);
+  border: 1px solid var(--border-soft); border-radius: 6px;
+  font-family: ui-monospace, monospace;
+}
+.save-memory-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 18px;
+}

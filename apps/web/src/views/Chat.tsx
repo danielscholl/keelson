@@ -15,9 +15,11 @@ import {
   fetchProviders,
   fetchTools,
   getConversation,
+  rememberChatMessage,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
 import { Sidebar } from "../components/Chat/Sidebar.tsx";
+import { SaveToMemoryModal } from "../components/Memory/SaveToMemoryModal.tsx";
 import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
 import {
@@ -240,6 +242,16 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   // flushed only on a clean `done` frame.
   const queuedPromptRef = useRef<string | null>(null);
   const [queued, setQueued] = useState<string | null>(null);
+
+  // Save-to-memory modal state (M7b). Open when a target message is set;
+  // submitting flag disables the modal's submit button + the per-message
+  // Save buttons so a double-click can't fire twice.
+  const [memoryTarget, setMemoryTarget] = useState<{
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+  } | null>(null);
+  const [savingMemory, setSavingMemory] = useState(false);
 
   // Seed + name from a lane Ask handoff. Captured on mount when no convo
   // is hydrated; doSend reads + clears them on the createConversation call
@@ -1116,6 +1128,30 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                         m.content
                       )}
                     </div>
+                    {/* Save-to-memory only on persisted, non-streaming, non-system
+                        messages. The lookup at the server uses the message id we
+                        pass — that exists in ConversationStore once the turn has
+                        committed. Hidden roles (seed kickoffs) are filtered by
+                        visibleMessages above. */}
+                    {!m.streaming && m.content.trim().length > 0 && conversationId !== null && (
+                      <div className="chat-message-actions">
+                        <button
+                          type="button"
+                          className="chat-message-action"
+                          title="Save this message to memory for review"
+                          disabled={savingMemory}
+                          onClick={() =>
+                            setMemoryTarget({
+                              id: m.id,
+                              role: m.role === "system" ? "assistant" : m.role,
+                              content: m.content,
+                            })
+                          }
+                        >
+                          ★ Save to memory
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </>
@@ -1218,6 +1254,47 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           <ToolsPopover popoverId={TOOLS_POPOVER_ID} tools={tools} />
         )}
       </div>
+
+      {memoryTarget !== null && conversationId !== null && (
+        <SaveToMemoryModal
+          open={true}
+          conversationId={conversationId}
+          messageId={memoryTarget.id}
+          role={memoryTarget.role}
+          initialContent={memoryTarget.content}
+          submitting={savingMemory}
+          onClose={() => setMemoryTarget(null)}
+          onSubmit={async (draft) => {
+            setSavingMemory(true);
+            try {
+              const verdict = await rememberChatMessage(conversationId, memoryTarget.id, draft);
+              if (verdict.status === "ok") {
+                toast.push({
+                  kind: "ok",
+                  message: "Saved to memory — review it in the Memory tab.",
+                });
+                setMemoryTarget(null);
+              } else if (verdict.status === "deduped") {
+                toast.push({
+                  kind: "info",
+                  message: "Already saved.",
+                });
+                setMemoryTarget(null);
+              } else {
+                toast.push({
+                  kind: "error",
+                  message: `Blocked: ${verdict.reason}. Try editing the content.`,
+                });
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              toast.push({ kind: "error", message: `Save failed: ${msg}` });
+            } finally {
+              setSavingMemory(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
