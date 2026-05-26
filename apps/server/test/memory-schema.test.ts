@@ -218,6 +218,28 @@ describe("Memory layer schema (v2 migration)", () => {
     db.close();
   });
 
+  test("boolean CHECKs reject non-0/1 values on use_policy_* flags", () => {
+    const db = openDatabase({ path: dbPath });
+    const badCases: Array<[string, Partial<MemoryRow>]> = [
+      ["can_use_as_instruction", { use_policy_can_use_as_instruction: 2 }],
+      ["can_use_as_evidence", { use_policy_can_use_as_evidence: 2 }],
+      ["requires_user_confirmation", { use_policy_requires_user_confirmation: -1 }],
+      ["do_not_inject_automatically", { use_policy_do_not_inject_automatically: 99 }],
+    ];
+    for (const [label, override] of badCases) {
+      expect(() =>
+        insertMemory(
+          db,
+          makeMemory({
+            ...override,
+            idempotency_key: `bool-${label}`,
+          }),
+        ),
+      ).toThrow(/CHECK constraint/i);
+    }
+    db.close();
+  });
+
   test("idempotency_key UNIQUE enforced", () => {
     const db = openDatabase({ path: dbPath });
     insertMemory(db, makeMemory({ id: "mem-a", idempotency_key: "same" }));

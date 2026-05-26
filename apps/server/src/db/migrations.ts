@@ -90,10 +90,14 @@ const migrations: Migration[] = [
           provenance                             TEXT NOT NULL CHECK (provenance IN (
             'observed','inferred','user_confirmed','imported','generated','superseded','disputed'
           )),
-          use_policy_can_use_as_instruction      INTEGER NOT NULL DEFAULT 0,
-          use_policy_can_use_as_evidence         INTEGER NOT NULL DEFAULT 1,
-          use_policy_requires_user_confirmation  INTEGER NOT NULL DEFAULT 0,
-          use_policy_do_not_inject_automatically INTEGER NOT NULL DEFAULT 0,
+          use_policy_can_use_as_instruction      INTEGER NOT NULL DEFAULT 0
+                                                 CHECK (use_policy_can_use_as_instruction IN (0, 1)),
+          use_policy_can_use_as_evidence         INTEGER NOT NULL DEFAULT 1
+                                                 CHECK (use_policy_can_use_as_evidence IN (0, 1)),
+          use_policy_requires_user_confirmation  INTEGER NOT NULL DEFAULT 0
+                                                 CHECK (use_policy_requires_user_confirmation IN (0, 1)),
+          use_policy_do_not_inject_automatically INTEGER NOT NULL DEFAULT 0
+                                                 CHECK (use_policy_do_not_inject_automatically IN (0, 1)),
           scope_project_id                       TEXT,
           scope_visibility                       TEXT NOT NULL DEFAULT 'project'
                                                  CHECK (scope_visibility IN ('project','personal')),
@@ -182,7 +186,7 @@ const migrations: Migration[] = [
           trace_id    TEXT NOT NULL,
           memory_id   TEXT NOT NULL,
           rank        INTEGER NOT NULL,
-          used        INTEGER NOT NULL DEFAULT 0,
+          used        INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
           PRIMARY KEY (trace_id, memory_id),
           FOREIGN KEY (trace_id)  REFERENCES memory_recall_traces(id) ON DELETE CASCADE,
           FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
@@ -215,7 +219,7 @@ const migrations: Migration[] = [
           VALUES('delete', old.rowid, old.summary, old.content);
         END;
 
-        CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+        CREATE TRIGGER memories_au AFTER UPDATE OF summary, content ON memories BEGIN
           INSERT INTO memories_fts(memories_fts, rowid, summary, content)
           VALUES('delete', old.rowid, old.summary, old.content);
           INSERT INTO memories_fts(rowid, summary, content)
