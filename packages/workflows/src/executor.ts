@@ -79,7 +79,15 @@ export interface NodeContext {
    * prompt / command nodes get it via `$ARTIFACTS_DIR` text substitution.
    */
   artifactsDir?: string;
-  /** Memory layer seam. Always undefined today; reserved for future. */
+  /**
+   * Memory layer handle (M5). Populated when `runWorkflow` was called with
+   * `memoryTools`. The executor's declarative pre/post hooks cover the
+   * common case via the `memory:` block on a node, but custom handlers
+   * that need imperative access (M6 rib tool surface, ad-hoc recall in a
+   * loop, etc.) can call `ctx.memory.recall(req)` / `ctx.memory.writeback(req)`
+   * directly. Undefined when no adapter was wired — handler is responsible
+   * for the guard.
+   */
   memory?: MemoryTools;
   /**
    * Per-node recall results from the executor's pre-run hook (M5). Present
@@ -624,6 +632,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     rawBody,
     workflow: ctx.workflow,
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+    ...(ctx.memoryTools !== undefined ? { memory: ctx.memoryTools } : {}),
   };
   emit({ type: "node_started", nodeId: node.id });
   const startedAtMs = Date.now();

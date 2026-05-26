@@ -2147,6 +2147,76 @@ nodes:
     expect(mem.writebacks).toHaveLength(0);
   });
 
+  test("ctx.memory exposes the adapter so custom handlers can call recall/writeback imperatively", async () => {
+    // Codex-flagged: NodeContext.memory was declared on the type but the
+    // executor only forwarded memoryRecall, leaving ctx.memory undefined
+    // even when RunOptions.memoryTools was wired. Handlers that need
+    // imperative access (M6 rib tools, ad-hoc recall in a loop) must see
+    // the same adapter the declarative hooks use.
+    const workflow = parseInline(`
+name: ctx-memory-tools
+description: test
+nodes:
+  - id: think
+    prompt: hello
+`);
+    let observed: MemoryTools | undefined;
+    const inspectingHandler: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        observed = ctx.memory;
+        // Exercise the handle end-to-end — a custom handler should be
+        // able to recall directly via ctx.memory without going through
+        // the declarative memory: block.
+        if (ctx.memory) {
+          const res = await ctx.memory.recall({ query: "imperative" });
+          return {
+            status: "succeeded",
+            output: { kind: "text", text: `traceId=${res.trace.traceId}` },
+          };
+        }
+        return { status: "succeeded", output: { kind: "text", text: "no adapter" } };
+      },
+    };
+    const mem = mockMemory({ recallTraceId: "imp-trace" });
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", inspectingHandler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(observed).toBe(mem.tools);
+    expect(mem.recalls).toHaveLength(1);
+    expect(summary.nodes.think?.output).toBe("traceId=imp-trace");
+  });
+
+  test("ctx.memory is undefined when no memoryTools adapter is wired", async () => {
+    const workflow = parseInline(`
+name: ctx-memory-absent
+description: test
+nodes:
+  - id: think
+    prompt: hello
+`);
+    let observed: MemoryTools | undefined = "sentinel" as unknown as MemoryTools;
+    const inspectingHandler: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        observed = ctx.memory;
+        return { status: "succeeded", output: { kind: "text", text: "" } };
+      },
+    };
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", inspectingHandler]]),
+      // memoryTools intentionally omitted
+    });
+
+    expect(observed).toBeUndefined();
+  });
+
   test("memoryRecall is exposed on NodeContext for handlers that re-substitute", async () => {
     // Codex-flagged gap: handlers re-resolving nested bodies (command file
     // contents, loop.prompt) only got memoryRecall if it was threaded
