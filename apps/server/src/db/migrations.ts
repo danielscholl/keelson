@@ -228,6 +228,16 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    description: "drop unused memory_relations table",
+    up: (db) => {
+      // memory_relations shipped in v2 anticipating a relation-walk feature
+      // that never landed in v0.3. Nothing reads or writes it; dropping
+      // before the v0.3 close so the schema reflects what's actually used.
+      db.exec("DROP TABLE IF EXISTS memory_relations;");
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

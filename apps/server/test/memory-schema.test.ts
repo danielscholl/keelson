@@ -114,11 +114,11 @@ function insertMemory(db: Database, row: MemoryRow): void {
   db.prepare(INSERT_MEMORY_SQL).run(params);
 }
 
-describe("Memory layer schema (v2 migration)", () => {
-  test("migration applies cleanly and schema_version reaches 2", () => {
+describe("Memory layer schema (v2 + v3 migrations)", () => {
+  test("migrations apply cleanly and schema_version reaches 3", () => {
     const db = openDatabase({ path: dbPath });
     const row = db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number };
-    expect(row.v).toBe(2);
+    expect(row.v).toBe(3);
     db.close();
   });
 
@@ -136,12 +136,21 @@ describe("Memory layer schema (v2 migration)", () => {
       "memory_audit_events",
       "memory_recall_items",
       "memory_recall_traces",
-      "memory_relations",
       "memory_review_actions",
       "memory_source_refs",
     ]) {
       expect(tables).toContain(expected);
     }
+    db.close();
+  });
+
+  test("v3 drops the unused memory_relations table", () => {
+    const db = openDatabase({ path: dbPath });
+    const tables = db
+      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table'")
+      .all()
+      .map((r) => r.name);
+    expect(tables).not.toContain("memory_relations");
     db.close();
   });
 
@@ -336,7 +345,7 @@ describe("Memory layer schema (v2 migration)", () => {
     const versionRow = db.query("SELECT MAX(version) AS v FROM schema_version").get() as {
       v: number;
     };
-    expect(versionRow.v).toBe(2);
+    expect(versionRow.v).toBe(3);
 
     const conv = db
       .query<{ id: string }, []>("SELECT id FROM conversations WHERE id = 'conv-1'")
