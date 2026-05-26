@@ -122,41 +122,81 @@ function isPersistedMessageId(id: string): boolean {
   return UUID_RE.test(id);
 }
 
-// Walk both arrays from the tail, swapping each local message's id for the
-// server's persisted id until we hit a local id that is already UUID-shaped
-// (meaning it was hydrated from server or reconciled by a prior turn).
-//
-// Client-only `system` rows (e.g. "stub provider started" emitted by the
-// in-process echo provider) sit between user/assistant turns but never
-// persist server-side, so skip them on the local index — otherwise the
-// role-mismatch check stops the walk before reaching the user message.
-// `hidden` kickoff user messages DO persist, so they stay in the walk.
-function reconcileMessageIds<T extends { id: string; role: string }>(
+// Snapshot of a just-completed turn's client-side ids + their index in the
+// non-system local sequence. Captured at `done` time BEFORE flushing any
+// queued follow-up. The server's `messages` array is append-only, so the
+// indices remain valid as later turns get persisted.
+interface TurnReconcileSnapshot {
+  assistantClientId: string | null;
+  userClientId: string | null;
+  // Count of non-system local messages at done-time. The just-completed
+  // assistant lives at server[nonSystemCount - 1], its user at [nonSystemCount - 2].
+  nonSystemCount: number;
+}
+
+// Reconcile only the specific client ids of a just-completed turn, located
+// by their stable server-side index. Avoids the role-only tail walk that
+// would corrupt a flushed queue's freshly-minted local ids (see PR #21
+// review — a follow-up turn queued during streaming gets its new local
+// user/assistant rows appended before this reconcile fetch resolves, so
+// a tail walk would rewrite their ids to the just-completed turn's
+// persisted ids and chunk dispatch for the follow-up would break).
+function reconcileTurnIds<T extends { id: string; role: string }>(
   local: T[],
   server: readonly { id: string; role: string }[],
+  snap: TurnReconcileSnapshot,
 ): T[] {
-  if (server.length === 0 || local.length === 0) return local;
-  let li = local.length - 1;
-  let si = server.length - 1;
+  if (server.length < snap.nonSystemCount) return local;
+  const aIdx = snap.nonSystemCount - 1;
+  const uIdx = snap.nonSystemCount - 2;
+  const serverAssistant = aIdx >= 0 ? server[aIdx] : null;
+  const serverUser = uIdx >= 0 ? server[uIdx] : null;
+
   let updated: T[] | null = null;
-  while (li >= 0 && si >= 0) {
-    const lm = local[li];
-    if (!lm) break;
-    if (lm.role === "system") {
-      li--;
-      continue;
-    }
-    const sm = server[si];
-    if (!sm || lm.role !== sm.role) break;
-    if (isPersistedMessageId(lm.id)) break;
-    if (lm.id !== sm.id) {
+  if (
+    snap.assistantClientId &&
+    serverAssistant?.role === "assistant" &&
+    !isPersistedMessageId(snap.assistantClientId)
+  ) {
+    const idx = local.findIndex((m) => m.id === snap.assistantClientId);
+    const row = idx >= 0 ? local[idx] : undefined;
+    if (idx >= 0 && row) {
       if (updated === null) updated = local.slice();
-      updated[li] = { ...lm, id: sm.id };
+      updated[idx] = { ...row, id: serverAssistant.id };
     }
-    li--;
-    si--;
+  }
+  if (
+    snap.userClientId &&
+    serverUser?.role === "user" &&
+    !isPersistedMessageId(snap.userClientId)
+  ) {
+    const base = updated ?? local;
+    const idx = base.findIndex((m) => m.id === snap.userClientId);
+    const row = idx >= 0 ? base[idx] : undefined;
+    if (idx >= 0 && row) {
+      if (updated === null) updated = local.slice();
+      updated[idx] = { ...row, id: serverUser.id };
+    }
   }
   return updated ?? local;
+}
+
+// Build the snapshot from current local state. The completed turn's
+// assistant is the last non-system message; its user is the immediately
+// preceding non-system row (almost always role === "user"). Returns null
+// when there's nothing to reconcile yet.
+function snapshotTurnForReconcile<T extends { id: string; role: string }>(
+  local: T[],
+): TurnReconcileSnapshot | null {
+  const nonSystem = local.filter((m) => m.role !== "system");
+  if (nonSystem.length === 0) return null;
+  const lastAssistant = nonSystem[nonSystem.length - 1];
+  const lastUser = nonSystem[nonSystem.length - 2];
+  return {
+    assistantClientId: lastAssistant?.role === "assistant" ? lastAssistant.id : null,
+    userClientId: lastUser?.role === "user" ? lastUser.id : null,
+    nonSystemCount: nonSystem.length,
+  };
 }
 
 // Order of preference: lastUsed → first registered favorite → Copilot → stub →
@@ -271,6 +311,14 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   }, [providers]);
 
   const [messages, setMessages] = useState<LocalMessage[]>([]);
+  // Mirror of `messages` for synchronous reads from WS frame handlers — the
+  // done handler captures a turn snapshot before flushing a queued follow-up,
+  // and `setMessages(updater)` only fires the updater on the next render so
+  // we can't snapshot from inside it without racing the queue dispatch.
+  const messagesRef = useRef<LocalMessage[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -672,6 +720,15 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
         );
+
+        // Snapshot the just-completed turn's client ids BEFORE the queue
+        // flush. The queued follow-up appends new local user/assistant rows
+        // synchronously; without this snapshot the reconcile fetch's tail
+        // would be those new rows, and matching by role would mistakenly
+        // rewrite their client ids to the just-completed turn's persisted
+        // UUIDs — see PR #21 [P2] review.
+        const reconcileSnapshot = snapshotTurnForReconcile(messagesRef.current);
+
         // Clean `done` flushes the queue. Provider errors leave it parked so
         // the user can recover the prompt via the pill.
         const nextQueued = queuedPromptRef.current;
@@ -680,9 +737,10 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           setQueued(null);
           void doSendRef.current?.(nextQueued);
         }
+
         // Pick up the server's auto-name write and bumped updatedAt, plus
         // reconcile this turn's client-side message ids with the server's
-        // persisted UUIDs. Without this, /api/chat/:cid/messages/:mid/remember
+        // persisted UUIDs. Without the reconcile, /api/chat/:cid/messages/:mid/remember
         // returns 404 for the just-finished turn because the server minted
         // its own UUIDs in `handleChatRequest` and never echoed them in the
         // wire frames (chat.ts:chatFrameSchema carries only chunk/error/done).
@@ -692,7 +750,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
             .then((conv) => {
               if (!conv) return;
               conversationsList.upsertLocal(conv);
-              setMessages((prev) => reconcileMessageIds(prev, conv.messages));
+              if (reconcileSnapshot) {
+                setMessages((prev) => reconcileTurnIds(prev, conv.messages, reconcileSnapshot));
+              }
             })
             .catch(() => {
               // non-fatal — sidebar will catch up on next refresh
