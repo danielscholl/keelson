@@ -53,6 +53,25 @@ export class WorkflowNotFoundError extends Error {
   }
 }
 
+/**
+ * Thrown by `runHeadless` when the loaded workflow declares one or more
+ * `memory:` blocks. The headless path has no MemoryStore wired (single-DB
+ * invariant; the server owns the connection), so memory-bearing workflows
+ * route through `keelson serve`. The CLI command translates this to exit
+ * code 3 (server required).
+ */
+export class MemoryRequiresServerError extends Error {
+  constructor(
+    public readonly workflowName: string,
+    public readonly memoryNodeIds: readonly string[],
+  ) {
+    super(
+      `workflow '${workflowName}' declares 'memory:' on ${memoryNodeIds.length} node(s) (${memoryNodeIds.join(", ")}). Memory requires the server. Run \`keelson serve\` first.`,
+    );
+    this.name = "MemoryRequiresServerError";
+  }
+}
+
 // Find a workflow definition by name. Discovery walks the project's
 // workflow directory only — global / home-scoped roots are out of scope
 // for the CLI's in-process path (mirrors the server's discovery surface).
@@ -71,6 +90,17 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const workflowsDir = opts.workflowsDir ?? defaultWorkflowsDir();
   const workflow = loadWorkflowByName(workflowsDir, opts.name);
   if (!workflow) throw new WorkflowNotFoundError(opts.name, workflowsDir);
+
+  // M5 — memory recall/writeback require the server-owned MemoryStore.
+  // Reject workflows that declare `memory:` blocks before any execution so
+  // the operator gets a single clear error rather than per-node warnings
+  // about a missing adapter.
+  const memoryNodes = workflow.nodes
+    .filter((n) => (n as { memory?: unknown }).memory !== undefined)
+    .map((n) => n.id);
+  if (memoryNodes.length > 0) {
+    throw new MemoryRequiresServerError(opts.name, memoryNodes);
+  }
 
   // Stub provider is the deterministic fallback when nothing else is
   // registered. Real providers (claude / copilot) would need keytar

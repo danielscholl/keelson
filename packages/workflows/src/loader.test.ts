@@ -537,3 +537,254 @@ describe("discoverWorkflows", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M5 — memory: block
+// ---------------------------------------------------------------------------
+
+describe("parseWorkflow — memory: block (M5)", () => {
+  test("valid memory block on a prompt node parses successfully", () => {
+    const yaml = `
+name: m5
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: prior context
+        limits: { maxItems: 5, recencyDays: 30 }
+        entities:
+          repos: [keelson]
+      writeback:
+        on: success
+        type: decision
+        summary: a summary
+        content: a content body
+        sourceRefs:
+          - { kind: workflow_run, uri: "$inputs.runId" }
+`;
+    const result = parseWorkflow(yaml, "memory.yaml");
+    expect(result.error).toBeNull();
+    expect(result.workflow?.nodes[0]).toMatchObject({
+      id: "think",
+      memory: {
+        recall: { query: "prior context" },
+        writeback: { type: "decision", summary: "a summary", on: "success" },
+      },
+    });
+  });
+
+  test("workflows without memory: block parse unchanged (backward compat)", () => {
+    const yaml = `
+name: legacy
+description: test
+nodes:
+  - id: think
+    prompt: hello
+`;
+    const result = parseWorkflow(yaml, "legacy.yaml");
+    expect(result.error).toBeNull();
+    const node = result.workflow?.nodes[0] as { memory?: unknown };
+    expect(node?.memory).toBeUndefined();
+  });
+
+  test("$memory.recall.items in prompt does not trigger unknown-node error", () => {
+    const yaml = `
+name: ref
+description: test
+nodes:
+  - id: think
+    prompt: |
+      Prior context: $memory.recall.items / trace=$memory.recall.trace
+    memory:
+      recall:
+        query: anything
+`;
+    const result = parseWorkflow(yaml, "ref.yaml");
+    expect(result.error).toBeNull();
+  });
+
+  test("a node literally named 'memory' is rejected at parse time", () => {
+    const yaml = `
+name: clash
+description: test
+nodes:
+  - id: memory
+    prompt: hello
+`;
+    const result = parseWorkflow(yaml, "clash.yaml");
+    expect(result.error).toBeDefined();
+  });
+
+  test("writeback default for 'on' is 'success'", () => {
+    const yaml = `
+name: defaults
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      writeback:
+        type: lesson
+        summary: s
+        content: c
+`;
+    const result = parseWorkflow(yaml, "defaults.yaml");
+    expect(result.error).toBeNull();
+    const node = result.workflow?.nodes[0] as { memory?: { writeback?: { on?: string } } };
+    expect(node?.memory?.writeback?.on).toBe("success");
+  });
+
+  test("writeback rejects unknown memory type", () => {
+    const yaml = `
+name: bad-type
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      writeback:
+        type: not_a_real_type
+        summary: s
+        content: c
+`;
+    const result = parseWorkflow(yaml, "bad.yaml");
+    expect(result.error).toBeDefined();
+  });
+
+  test("memory block rejects a provenance field (executor hard-codes 'generated')", () => {
+    // Evidence-default invariant: workflow authors cannot opt out by writing
+    // a different provenance value. The schema is strict, so an extra
+    // 'provenance' key trips it.
+    const yaml = `
+name: no-provenance
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      writeback:
+        type: lesson
+        summary: s
+        content: c
+        provenance: user_confirmed
+`;
+    const result = parseWorkflow(yaml, "prov.yaml");
+    expect(result.error).toBeDefined();
+  });
+
+  test("memory.recall.query referencing an unknown node id is rejected", () => {
+    const yaml = `
+name: bad-recall-ref
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: "find $missing.output"
+`;
+    const result = parseWorkflow(yaml, "bad-recall.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/unknown node.*missing/);
+  });
+
+  test("memory.recall.query referencing a non-ancestor is rejected", () => {
+    const yaml = `
+name: non-ancestor-recall
+description: test
+nodes:
+  - id: a
+    bash: echo a
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: "look at $a.output"
+`;
+    const result = parseWorkflow(yaml, "non-ancestor.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/depends_on/);
+  });
+
+  test("memory.recall.query allows an ancestor reference", () => {
+    const yaml = `
+name: ancestor-recall
+description: test
+nodes:
+  - id: a
+    bash: echo a
+  - id: think
+    depends_on: [a]
+    prompt: hello
+    memory:
+      recall:
+        query: "look at $a.output"
+`;
+    const result = parseWorkflow(yaml, "ancestor.yaml");
+    expect(result.error).toBeNull();
+  });
+
+  test("memory.writeback.content referencing the node's own output is allowed (self-ref)", () => {
+    // The executor adds the just-completed node's output to its
+    // substitution context before resolving writeback templates, so
+    // self-reference is valid here even though `think` isn't its own
+    // ancestor.
+    const yaml = `
+name: self-ref
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    memory:
+      writeback:
+        on: success
+        type: lesson
+        summary: "captured: $think.output"
+        content: "body: $think.output"
+`;
+    const result = parseWorkflow(yaml, "self-ref.yaml");
+    expect(result.error).toBeNull();
+  });
+
+  test("memory.writeback.content referencing an unknown node is rejected", () => {
+    const yaml = `
+name: bad-wb-ref
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    memory:
+      writeback:
+        on: success
+        type: lesson
+        summary: s
+        content: "leaks $ghost.output"
+`;
+    const result = parseWorkflow(yaml, "bad-wb.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/unknown node.*ghost/);
+  });
+
+  test("memory.writeback.sourceRefs[].uri references are validated", () => {
+    const yaml = `
+name: bad-sourceref
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    memory:
+      writeback:
+        on: success
+        type: artifact_reference
+        summary: s
+        content: c
+        sourceRefs:
+          - { kind: workflow_run, uri: "ref-$missing.output" }
+`;
+    const result = parseWorkflow(yaml, "bad-sourceref.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/unknown node.*missing/);
+  });
+});

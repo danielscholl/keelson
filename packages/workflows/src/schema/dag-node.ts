@@ -16,6 +16,7 @@ import { z } from "zod";
 import { isValidCommandName } from "./command-validation.ts";
 import { workflowNodeHooksSchema } from "./hooks.ts";
 import { loopNodeConfigSchema } from "./loop.ts";
+import { nodeMemoryBlockSchema } from "./memory-block.ts";
 import { stepRetryConfigSchema } from "./retry.ts";
 
 // ---------------------------------------------------------------------------
@@ -164,6 +165,7 @@ export const dagNodeBaseSchema = z.object({
   fallbackModel: z.string().min(1).optional(),
   betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
   sandbox: sandboxSettingsSchema.optional(),
+  memory: nodeMemoryBlockSchema.optional(),
 });
 
 export type DagNodeBase = z.infer<typeof dagNodeBaseSchema>;
@@ -539,6 +541,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.when !== undefined ? { when: data.when } : {}),
       ...(data.trigger_rule !== undefined ? { trigger_rule: data.trigger_rule } : {}),
       ...(data.idle_timeout !== undefined ? { idle_timeout: data.idle_timeout } : {}),
+      ...(data.memory !== undefined ? { memory: data.memory } : {}),
     };
 
     // Shared optional fields (valid on AI and bash nodes)

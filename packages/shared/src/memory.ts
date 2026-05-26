@@ -434,12 +434,12 @@ export const reviewListResponseSchema = z
   .strict();
 export type ReviewListResponse = z.infer<typeof reviewListResponseSchema>;
 
-// === Runtime handle (placeholder) ===========================================
-// Declaration-only — the workflow executor's `NodeContext.memory?:
-// MemoryTools` slot and the prompt-handler `lifecycle.{beforeNode,
-// afterNode}` hooks bind to this. M6 fleshes out the concrete
-// recall/writeback/confirm methods.
+// === Runtime handle =========================================================
+// The workflow executor's `RunOptions.memoryTools` and `NodeContext.memory`
+// bind to this. M5 wires recall (pre-run) and writeback (post-run); M6
+// widens the surface with `confirm` for rib agent-tool exposure.
 
 export interface MemoryTools {
-  readonly __phase: "pending";
+  recall(req: RecallRequest): Promise<RecallResponse>;
+  writeback(req: WritebackRequest): Promise<WritebackResponse>;
 }

@@ -41,9 +41,13 @@ export function makeCommandHandler(opts: MakeCommandHandlerOptions): NodeHandler
       // Apply the executor's substitution pipeline to the file body —
       // the executor only resolved the original `command` field (the
       // command name), so $ARGUMENTS / $inputs.* / $X.output inside the
-      // file would otherwise reach the model literally.
+      // file would otherwise reach the model literally. Forward
+      // `memoryRecall` so `$memory.recall.items` inside the command file
+      // substitutes against the executor's pre-run recall (otherwise the
+      // declared memory.recall: block silently no-ops for command nodes).
       const resolvedPrompt = resolveBody(resolved.content, ctx.inputs, ctx.upstreamOutputs, {
         ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+        ...(ctx.memoryRecall !== undefined ? { memoryRecall: ctx.memoryRecall } : {}),
       });
       const synthesized = synthesizePromptNode(node, {
         id: node.id,
