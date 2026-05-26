@@ -30,11 +30,16 @@ import { evaluateDraft } from "./memory-guardrails.ts";
 // Decoded cursor shape — strict() so a forged payload with extra keys fails
 // parse, and .datetime({ offset: true }) matches the wire schema's ISO-8601
 // guard so a bare-year string like "9999" (which Date.parse happily accepts)
-// gets rejected before it can defeat the lexical SQL comparison.
+// gets rejected before it can defeat the lexical SQL comparison. The `id`
+// refine rejects whitespace-only strings (which .min(1) alone permits) so
+// the cursor boundary is always well-defined against real UUIDs.
 const pendingCursorSchema = z
   .object({
     createdAt: z.string().datetime({ offset: true }),
-    id: z.string().min(1),
+    id: z
+      .string()
+      .min(1)
+      .refine((s) => s.trim().length > 0, "id must not be whitespace-only"),
   })
   .strict();
 

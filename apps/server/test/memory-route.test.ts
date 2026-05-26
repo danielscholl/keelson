@@ -307,6 +307,19 @@ describe("GET /api/memory/review", () => {
     expect(res.status).toBe(400);
   });
 
+  test("cursor with whitespace-only id is rejected as 400", async () => {
+    // .min(1) alone permits "  " — the .trim() refine on the id field
+    // closes that to keep the cursor boundary well-defined against real
+    // (UUID) ids.
+    seedMemory();
+    const forged = Buffer.from(
+      JSON.stringify({ createdAt: "2026-01-01T00:00:00Z", id: "   " }),
+      "utf8",
+    ).toString("base64url");
+    const res = await app.fetch(getJson(`/api/memory/review?cursor=${forged}`));
+    expect(res.status).toBe(400);
+  });
+
   test("rejects non-positive limit with 400", async () => {
     const res = await app.fetch(getJson("/api/memory/review?limit=0"));
     expect(res.status).toBe(400);
