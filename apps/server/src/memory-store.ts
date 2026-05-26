@@ -10,16 +10,38 @@ import type { Database } from "bun:sqlite";
 import {
   type Memory,
   RECALL_RESPONSE_SCHEMA_VERSION,
+  REVIEW_LIST_DEFAULT_LIMIT,
+  REVIEW_LIST_MAX_LIMIT,
   type RecallItem,
   type RecallRequest,
   type RecallResponse,
   type ReviewActionRequest,
+  type ReviewItem,
+  type ReviewListQuery,
+  type ReviewListResponse,
   type SourceRef,
   WRITEBACK_RESPONSE_SCHEMA_VERSION,
   type WritebackRequest,
   type WritebackResponse,
 } from "@keelson/shared";
+import { z } from "zod";
 import { evaluateDraft } from "./memory-guardrails.ts";
+
+// Decoded cursor shape — strict() so a forged payload with extra keys fails
+// parse, and .datetime({ offset: true }) matches the wire schema's ISO-8601
+// guard so a bare-year string like "9999" (which Date.parse happily accepts)
+// gets rejected before it can defeat the lexical SQL comparison. The `id`
+// refine rejects whitespace-only strings (which .min(1) alone permits) so
+// the cursor boundary is always well-defined against real UUIDs.
+const pendingCursorSchema = z
+  .object({
+    createdAt: z.string().datetime({ offset: true }),
+    id: z
+      .string()
+      .min(1)
+      .refine((s) => s.trim().length > 0, "id must not be whitespace-only"),
+  })
+  .strict();
 
 export interface MemoryStore {
   recall(req: RecallRequest): RecallResponse;
@@ -27,9 +49,14 @@ export interface MemoryStore {
   // Returns { applied: false } when memoryId is unknown — silent no-op,
   // matches ConversationStore.delete posture so callers don't need try/catch.
   confirm(input: ReviewActionRequest): { applied: boolean };
+  // Pending review queue. Cursor encodes (createdAt, id) so concurrent
+  // writebacks during pagination don't shuffle pages.
+  listPending(query: ReviewListQuery): ReviewListResponse;
   // Debug/test helper. Returns the full Memory shape including storage-
-  // internal fields (idempotencyKey, contentHash) that the recall projection
-  // trims. Not surfaced over the wire in M3 — M4 routes will gate this.
+  // internal fields (idempotencyKey, contentHash) that the wire projections
+  // trim. Not surfaced over the wire — recall and the review queue read
+  // through their trimmed shapes; this method exists only for tests and
+  // direct script use.
   getById(id: string): Memory | undefined;
 }
 
@@ -171,6 +198,88 @@ interface ConfirmState {
   provenance: string;
   canUseAsInstruction: boolean;
   doNotInjectAutomatically: boolean;
+}
+
+// Thrown by listPending when the caller supplies a cursor that doesn't
+// decode to the expected `{ createdAt, id }` payload. The route layer
+// catches by class name and surfaces a 400; everything else bubbles as 500.
+export class InvalidCursorError extends Error {
+  constructor(message = "invalid cursor") {
+    super(message);
+    this.name = "InvalidCursorError";
+  }
+}
+
+interface PendingCursor {
+  createdAt: string;
+  id: string;
+}
+
+function encodePendingCursor(c: PendingCursor): string {
+  return Buffer.from(JSON.stringify(c), "utf8").toString("base64url");
+}
+
+function decodePendingCursor(raw: string): PendingCursor {
+  // Buffer.from(..., "base64url") is lenient — it never throws on garbage,
+  // it silently emits whatever bytes it can. The downstream JSON.parse +
+  // pendingCursorSchema.safeParse() is the actual validation gate; together
+  // they catch malformed encoding, non-object payloads, missing fields, and
+  // non-ISO createdAt (which would otherwise defeat the lexical SQL compare).
+  const json = Buffer.from(raw, "base64url").toString("utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new InvalidCursorError();
+  }
+  const result = pendingCursorSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new InvalidCursorError(`invalid cursor: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+// Projection of MemoryRow → ReviewItem. Storage-internal fields
+// (idempotency_key, content_hash) are intentionally dropped — the review
+// queue is the surface that lands in front of the operator, and the
+// dedupe key has no business being there.
+function rowToReviewItem(
+  row: MemoryRow,
+  sourceRefs: SourceRef[],
+  artifacts: Memory["artifacts"],
+): ReviewItem {
+  const usePolicy = {
+    canUseAsInstruction: row.use_policy_can_use_as_instruction === 1,
+    canUseAsEvidence: row.use_policy_can_use_as_evidence === 1,
+    requiresUserConfirmation: row.use_policy_requires_user_confirmation === 1,
+    doNotInjectAutomatically: row.use_policy_do_not_inject_automatically === 1,
+  };
+  const scope: Memory["scope"] = {
+    visibility: row.scope_visibility as Memory["scope"]["visibility"],
+    ...(row.scope_project_id !== null ? { projectId: row.scope_project_id } : {}),
+  };
+  return {
+    memoryId: row.id,
+    type: row.type as Memory["type"],
+    summary: row.summary,
+    content: row.content,
+    provenance: row.provenance as Memory["provenance"],
+    usePolicy,
+    scope,
+    lifecycle: row.lifecycle as Memory["lifecycle"],
+    reviewStatus: row.review_status as Memory["reviewStatus"],
+    sourceRefs,
+    artifacts,
+    ...(row.confidence !== null ? { confidence: row.confidence } : {}),
+    runtime: row.runtime,
+    ...(row.task_id !== null ? { taskId: row.task_id } : {}),
+    ...(row.flow_id !== null ? { flowId: row.flow_id } : {}),
+    ...(row.model !== null ? { model: row.model } : {}),
+    ...(row.provider !== null ? { provider: row.provider } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ...(row.stale_after !== null ? { staleAfter: row.stale_after } : {}),
+  };
 }
 
 // Action → terminal state. Confirm is the only action that may set
@@ -551,6 +660,78 @@ export function createMemoryStore(db: Database): MemoryStore {
       if (!row) return undefined;
       const [hydrated] = hydrate([row]);
       return hydrated;
+    },
+
+    listPending(query) {
+      const limit = Math.min(query.limit ?? REVIEW_LIST_DEFAULT_LIMIT, REVIEW_LIST_MAX_LIMIT);
+      const cursor = query.cursor !== undefined ? decodePendingCursor(query.cursor) : null;
+
+      // Fetch limit+1 rows so we can determine whether a next page exists
+      // without a second round trip. The trailing row gets dropped before
+      // hydration so the SourceRef / Artifact fetches don't pay for it.
+      const overFetch = limit + 1;
+      const whereClauses: string[] = ["review_status = 'pending'"];
+      const args: (string | number)[] = [];
+      if (query.scopeVisibility !== undefined) {
+        whereClauses.push("scope_visibility = ?");
+        args.push(query.scopeVisibility);
+      }
+      if (query.projectId !== undefined) {
+        whereClauses.push("scope_project_id = ?");
+        args.push(query.projectId);
+      }
+      if (cursor) {
+        // Strict ordering by (created_at DESC, id DESC) means the next page
+        // starts at any row whose (created_at, id) is lexicographically less.
+        whereClauses.push("(created_at < ? OR (created_at = ? AND id < ?))");
+        args.push(cursor.createdAt, cursor.createdAt, cursor.id);
+      }
+      // Explicit column list — matches the rest of the file and keeps the
+      // MemoryRow cast honest if a future migration adds a column.
+      const sql = `
+        SELECT
+          id, type, summary, content, provenance,
+          use_policy_can_use_as_instruction, use_policy_can_use_as_evidence,
+          use_policy_requires_user_confirmation, use_policy_do_not_inject_automatically,
+          scope_project_id, scope_visibility, lifecycle, review_status,
+          content_hash, idempotency_key, confidence, runtime,
+          task_id, flow_id, model, provider,
+          created_at, updated_at, stale_after
+        FROM memories
+        WHERE ${whereClauses.join(" AND ")}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `;
+      args.push(overFetch);
+      const rows = db.prepare(sql).all(...args) as MemoryRow[];
+
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      if (pageRows.length === 0) {
+        return { items: [] };
+      }
+
+      const ids = pageRows.map((r) => r.id);
+      const srGroups = groupBy(fetchSourceRefs(ids));
+      const arGroups = groupBy(fetchArtifacts(ids));
+      const items = pageRows.map((row) =>
+        rowToReviewItem(
+          row,
+          (srGroups.get(row.id) ?? []).map(srRowToSourceRef),
+          (arGroups.get(row.id) ?? []).map(arRowToArtifact),
+        ),
+      );
+
+      if (!hasMore) {
+        return { items };
+      }
+      // hasMore implies pageRows.length === limit ≥ 1; the cast is the
+      // narrow workaround for noUncheckedIndexedAccess on the bracket lookup.
+      const last = pageRows[pageRows.length - 1] as MemoryRow;
+      return {
+        items,
+        nextCursor: encodePendingCursor({ createdAt: last.created_at, id: last.id }),
+      };
     },
   };
 }

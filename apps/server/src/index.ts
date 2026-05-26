@@ -24,6 +24,7 @@ import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
+import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
 import { installRedactedConsole } from "./redact.ts";
 import { createSnapshotManager } from "./snapshot-manager.ts";
@@ -77,11 +78,7 @@ const DB_PATH = process.env.KEELSON_DB ?? join(REPO_ROOT, ".keelson", "keelson.d
 const db = openDatabase({ path: DB_PATH });
 const store = createConversationStore(db);
 const workflowStore = createWorkflowStore(db);
-// v0.3 M3 bootstrap stub. The store is instantiated so M4 can mount routes
-// against a single composition-root handle without further wiring; no
-// consumer reaches it yet, so the binding is intentionally unused for now.
-const _memoryStore = createMemoryStore(db);
-void _memoryStore;
+const memoryStore = createMemoryStore(db);
 const workflowCatalog = bootstrapWorkflows({
   workflowDir: join(REPO_ROOT, ".keelson", "workflows"),
 });
@@ -163,6 +160,7 @@ workflowsRoutes(
   workflowSubscribers,
 );
 snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
+memoryRoutes(app, { memoryStore });
 credentialsRoutes(app, credentialStore, {
   copilotAuthProbe: bootstrap.copilotAuthProbe,
   claudeAuthProbe: bootstrap.claudeAuthProbe,

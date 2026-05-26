@@ -133,8 +133,10 @@ export const artifactSchema = z
 export type Artifact = z.infer<typeof artifactSchema>;
 
 // === Memory record ==========================================================
-// Read shape returned by GET /api/memory/:id and projected (trimmed) into
-// recallItemSchema.
+// Full read shape, projected (trimmed) into recallItemSchema for the recall
+// wire and reviewItemSchema for the review-queue wire. Not exposed
+// over HTTP directly — storage-internal fields (idempotencyKey, contentHash)
+// would leak through.
 
 const memoryBaseSchema = z
   .object({
@@ -360,6 +362,77 @@ export const reviewActionRequestSchema = z
   })
   .strict();
 export type ReviewActionRequest = z.infer<typeof reviewActionRequestSchema>;
+
+// `applied: false` is the silent-no-op shape the store returns for an
+// unknown memoryId — matches `ConversationStore.delete`. M7 uses it to
+// distinguish "review row vanished between list and confirm" from a real
+// state transition.
+export const reviewActionResponseSchema = z
+  .object({
+    applied: z.boolean(),
+  })
+  .strict();
+export type ReviewActionResponse = z.infer<typeof reviewActionResponseSchema>;
+
+// === Review queue (pending list) ============================================
+// GET /api/memory/review surface for the M7 review tab. Deliberately a
+// trimmed projection of Memory that drops storage-internal fields
+// (`idempotencyKey`, `contentHash`) so an HTML view of the queue never
+// surfaces the dedupe key publicly. Lifecycle + reviewStatus are added back
+// because the reviewer needs to see the state they're about to advance.
+
+export const REVIEW_LIST_DEFAULT_LIMIT = 50 as const;
+export const REVIEW_LIST_MAX_LIMIT = 200 as const;
+
+export const reviewItemSchema = z
+  .object({
+    memoryId: z.string().min(1),
+    type: memoryTypeSchema,
+    summary: z.string().min(1),
+    content: z.string().min(1),
+    provenance: provenanceSchema,
+    usePolicy: usePolicySchema,
+    scope: scopeSchema,
+    lifecycle: lifecycleSchema,
+    reviewStatus: reviewStatusSchema,
+    sourceRefs: z.array(sourceRefSchema).default([]),
+    artifacts: z.array(artifactSchema).default([]),
+    confidence: z.number().min(0).max(1).optional(),
+    runtime: z.string().min(1),
+    taskId: z.string().optional(),
+    flowId: z.string().optional(),
+    model: z.string().optional(),
+    provider: z.string().optional(),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    // Surfaced so the reviewer can see whether a pending row has already
+    // passed its TTL — the reviewer might still want to confirm it (the
+    // promotion is the explicit gesture) but should at least see the state.
+    staleAfter: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict();
+export type ReviewItem = z.infer<typeof reviewItemSchema>;
+
+// Opaque cursor — base64(JSON({ createdAt, id })) — paired with the
+// deterministic `created_at DESC, id DESC` ordering so concurrent
+// writebacks can't shuffle a page mid-walk.
+export const reviewListQuerySchema = z
+  .object({
+    limit: z.number().int().positive().max(REVIEW_LIST_MAX_LIMIT).optional(),
+    cursor: z.string().min(1).optional(),
+    scopeVisibility: scopeVisibilitySchema.optional(),
+    projectId: z.string().min(1).optional(),
+  })
+  .strict();
+export type ReviewListQuery = z.infer<typeof reviewListQuerySchema>;
+
+export const reviewListResponseSchema = z
+  .object({
+    items: z.array(reviewItemSchema),
+    nextCursor: z.string().min(1).optional(),
+  })
+  .strict();
+export type ReviewListResponse = z.infer<typeof reviewListResponseSchema>;
 
 // === Runtime handle (placeholder) ===========================================
 // Declaration-only — the workflow executor's `NodeContext.memory?:
