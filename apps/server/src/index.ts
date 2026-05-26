@@ -177,7 +177,7 @@ if (import.meta.main) {
   console.log(`keelson server listening on http://${HOSTNAME}:${PORT}`);
 }
 
-const chatHandlers = chatWebSocketHandlers(store);
+const chatHandlers = chatWebSocketHandlers(store, { memoryStore });
 const workflowRunHandlers = workflowRunWebSocketHandlers({
   subscribers: workflowSubscribers,
   store: workflowStore,

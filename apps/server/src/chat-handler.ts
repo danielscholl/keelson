@@ -17,6 +17,9 @@ import {
   inferToolFamily,
   type MessageChunk,
   modelInfoSchema,
+  RECALL_REQUEST_SCHEMA_VERSION,
+  type RecallRequest,
+  type RecallResponse,
   registeredToolInfoSchema,
   renameConversationBodySchema,
   WIRE_PROTOCOL_VERSION,
@@ -27,6 +30,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
+import type { MemoryStore } from "./memory-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 import type { ActiveRuns } from "./workflows-handler.ts";
 import { purgeWorkflowRun } from "./workflows-handler.ts";
@@ -226,7 +230,14 @@ export function handleChatUpgrade(req: Request, server: Server<WsData>): Respons
   return new Response("expected websocket", { status: 426 });
 }
 
-export function chatWebSocketHandlers(store: ConversationStore): WebSocketHandler<WsData> {
+export interface ChatWebSocketDeps {
+  memoryStore?: MemoryStore;
+}
+
+export function chatWebSocketHandlers(
+  store: ConversationStore,
+  deps: ChatWebSocketDeps = {},
+): WebSocketHandler<WsData> {
   return {
     open(_ws) {},
     async message(ws, raw) {
@@ -247,6 +258,7 @@ export function chatWebSocketHandlers(store: ConversationStore): WebSocketHandle
         send: (out) => sendFrame(ws, out),
         store,
         abortSignal: ws.data.abort.signal,
+        ...(deps.memoryStore !== undefined ? { memoryStore: deps.memoryStore } : {}),
       });
     },
     close(ws) {
@@ -259,7 +271,16 @@ export interface ChatDeps {
   send: (frame: ChatFrame) => void;
   store: ConversationStore;
   abortSignal: AbortSignal;
+  // When wired, a pre-turn recall against this store prepends a memory
+  // section to `systemPrompt`. Undefined → recall skipped.
+  memoryStore?: MemoryStore;
 }
+
+// Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
+// populated store can't bloat every turn's prompt.
+const MEMORY_RECALL_MAX_ITEMS = 5;
+const MEMORY_RECALL_CONTENT_CHARS = 200;
+const MEMORY_SECTION_HEADER = "## Relevant prior memory";
 
 export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Promise<void> {
   const { conversationId } = frame;
@@ -295,9 +316,11 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
 
   // Record the user prompt immediately so it survives provider failures.
   // Assistant message persists in the finally block; aborted/errored turns
-  // get `truncated: true` so the UI marks them on reload.
+  // get `truncated: true` so the UI marks them on reload. Minted up front
+  // so it can be threaded into the recall envelope as `task.flowId`.
+  const userMessageId = crypto.randomUUID();
   deps.store.appendMessage(conversationId, {
-    id: crypto.randomUUID(),
+    id: userMessageId,
     role: "user",
     content: message.prompt,
     createdAt: new Date().toISOString(),
@@ -344,9 +367,20 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
 
   const tools = getRegisteredTools();
 
-  const systemPromptParts = [conv.seedSystemPrompt].filter(
-    (s): s is string => typeof s === "string" && s.length > 0,
-  );
+  // Recall failures warn-and-continue with the section omitted; the turn
+  // proceeds with whatever systemPrompt the seed would have produced.
+  const recallSection = await runChatRecall({
+    memoryStore: deps.memoryStore,
+    conversationId,
+    userMessageId,
+    query: message.prompt,
+  });
+
+  const systemPromptParts: string[] = [];
+  if (recallSection !== undefined) systemPromptParts.push(recallSection);
+  if (typeof conv.seedSystemPrompt === "string" && conv.seedSystemPrompt.length > 0) {
+    systemPromptParts.push(conv.seedSystemPrompt);
+  }
   const systemPrompt = systemPromptParts.length > 0 ? systemPromptParts.join("\n\n") : undefined;
 
   try {
@@ -401,6 +435,72 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       deps.send(doneFrame(conversationId));
     }
   }
+}
+
+// --- Memory recall ---
+
+interface RunChatRecallArgs {
+  memoryStore: MemoryStore | undefined;
+  conversationId: string;
+  userMessageId: string;
+  query: string;
+}
+
+// Returns the formatted section to prepend onto systemPrompt, or undefined
+// when recall is disabled, returned no items, or failed. Best-effort — a
+// failure never surfaces to the caller.
+async function runChatRecall(args: RunChatRecallArgs): Promise<string | undefined> {
+  const { memoryStore, conversationId, userMessageId, query } = args;
+  if (memoryStore === undefined) return undefined;
+  // recallRequestSchema enforces query.min(1); guard here so a whitespace-
+  // only prompt doesn't trip a parse error inside the store.
+  const trimmed = query.trim();
+  if (trimmed.length === 0) return undefined;
+
+  const req: RecallRequest = {
+    schemaVersion: RECALL_REQUEST_SCHEMA_VERSION,
+    scope: { visibility: "project" },
+    task: { runtime: "chat", taskId: conversationId, flowId: userMessageId },
+    query,
+    limits: { maxItems: MEMORY_RECALL_MAX_ITEMS },
+  };
+
+  let res: RecallResponse;
+  try {
+    res = memoryStore.recall(req);
+  } catch (err) {
+    console.warn(
+      `[memory] chat recall failed (continuing without injection): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return undefined;
+  }
+
+  // The system-prompt channel is the model's instruction channel — only
+  // memories explicitly promoted to instruction-grade may enter it. The
+  // schema's promotion gate (memory.ts) ties canUseAsInstruction to
+  // user_confirmed / imported provenance, so workflow-written memories
+  // (provenance: "generated") stay out until a human curates them through
+  // the review queue. Defense-in-depth on the other two flags — recall's
+  // SQL already excludes doNotInjectAutomatically.
+  const injectable = res.items.filter(
+    ({ usePolicy }) =>
+      usePolicy.canUseAsInstruction &&
+      !usePolicy.requiresUserConfirmation &&
+      !usePolicy.doNotInjectAutomatically,
+  );
+  if (injectable.length === 0) return undefined;
+
+  // Cap the whole rendered line (summary + content) so an unbounded summary
+  // can't bust the MAX_ITEMS × CONTENT_CHARS section bound.
+  const lines = injectable.map((item) => {
+    const body = `${item.summary}: ${item.content}`;
+    const truncated =
+      body.length > MEMORY_RECALL_CONTENT_CHARS
+        ? `${body.slice(0, MEMORY_RECALL_CONTENT_CHARS - 1)}…`
+        : body;
+    return `- ${truncated}`;
+  });
+  return `${MEMORY_SECTION_HEADER}\n\n${lines.join("\n")}`;
 }
 
 // --- Frame builders ---
