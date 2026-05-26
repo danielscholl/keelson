@@ -123,6 +123,26 @@ describe("MemoryStore — writeback → recall round-trip", () => {
     const rr = store.recall(makeRecallRequest({ query: "(alpha OR beta)*" }));
     expect(rr.items.length).toBeGreaterThanOrEqual(0);
   });
+
+  test("path-like query splits on separators and matches indexed tokens", () => {
+    // Regression: prior tokenizer stripped `/` and `.` instead of splitting
+    // on them, so a path query collapsed into one un-matchable mega-token.
+    store.writeback(
+      makeWritebackRequest([makeDraft({ summary: "apps server src index ts", content: "body" })]),
+    );
+    const rr = store.recall(makeRecallRequest({ query: "apps/server/src/index.ts" }));
+    expect(rr.items).toHaveLength(1);
+  });
+
+  test("non-ASCII query tokens survive sanitization", () => {
+    // Regression: \w is ASCII-only — using it for the strip step lost
+    // every non-Latin character and could yield empty FTS queries.
+    store.writeback(
+      makeWritebackRequest([makeDraft({ summary: "東京 deployment", content: "tokyo notes" })]),
+    );
+    const rr = store.recall(makeRecallRequest({ query: "東京" }));
+    expect(rr.items).toHaveLength(1);
+  });
 });
 
 describe("MemoryStore — recall filters", () => {
@@ -177,6 +197,28 @@ describe("MemoryStore — recall filters", () => {
     );
     const rr = store.recall(makeRecallRequest({ query: "alpha", limits: { recencyDays: 30 } }));
     expect(rr.items).toEqual([]);
+  });
+
+  test("excludes memories past their stale_after timestamp", () => {
+    const wb = store.writeback(makeWritebackRequest([makeDraft()]));
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+    db.prepare("UPDATE memories SET stale_after = ? WHERE id = ?").run(
+      yesterday,
+      wb.written[0].memoryId,
+    );
+    const rr = store.recall(makeRecallRequest({ query: "alpha" }));
+    expect(rr.items).toEqual([]);
+  });
+
+  test("includes memories with future stale_after", () => {
+    const wb = store.writeback(makeWritebackRequest([makeDraft()]));
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+    db.prepare("UPDATE memories SET stale_after = ? WHERE id = ?").run(
+      tomorrow,
+      wb.written[0].memoryId,
+    );
+    const rr = store.recall(makeRecallRequest({ query: "alpha" }));
+    expect(rr.items).toHaveLength(1);
   });
 
   test("scope.projectId narrows results", () => {
@@ -291,6 +333,29 @@ describe("MemoryStore — ranking", () => {
   test("empty page produces rankingScore 0 (no division by zero)", () => {
     const rr = store.recall(makeRecallRequest({ query: "nothingmatcheshere" }));
     expect(rr.items).toEqual([]);
+  });
+
+  test("fresher row out-ranks an older row with the same BM25 at the LIMIT boundary", () => {
+    // Regression: prior SQL ordered by raw bm25 then LIMITed, so a fresh
+    // candidate that should win on combined score could be dropped before
+    // the JS layer ever saw it.
+    const wbOld = store.writeback(
+      makeWritebackRequest([makeDraft({ contentHash: "old", summary: "alpha bravo" })]),
+    );
+    const wbNew = store.writeback(
+      makeWritebackRequest([makeDraft({ contentHash: "new", summary: "alpha bravo" })]),
+    );
+    // Make the first row look 200 days old. Both match the query identically
+    // (same summary), so SQL would tie on bm25; combined score must put the
+    // fresher row first.
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    db.prepare("UPDATE memories SET created_at = ? WHERE id = ?").run(
+      old,
+      wbOld.written[0].memoryId,
+    );
+    const rr = store.recall(makeRecallRequest({ query: "alpha bravo", limits: { maxItems: 1 } }));
+    expect(rr.items).toHaveLength(1);
+    expect(rr.items[0].memoryId).toBe(wbNew.written[0].memoryId);
   });
 });
 

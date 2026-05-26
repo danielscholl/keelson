@@ -77,16 +77,22 @@ interface ArtifactRow {
   content: string;
 }
 
-// Tokenize for FTS5 — strip operator characters and quote each token so
-// user input can't smuggle AND/OR/NOT/NEAR/parens into the query. Join with
-// OR for recall-oriented matching (vs FTS5's default AND). Returns "" when
-// nothing tokenizable remains so callers can short-circuit before hitting
-// the FTS engine (which errors on empty queries).
+// Tokenize for FTS5 by splitting on any codepoint that isn't a letter,
+// number, underscore, or hyphen. This:
+//   - treats whitespace AND separators (`/`, `.`, `:`, parens, etc.) as
+//     token boundaries, so a query like `apps/server/src/index.ts` becomes
+//     [apps, server, src, index, ts] rather than one un-matchable
+//     `appsserversrcindexts` mega-token
+//   - preserves non-ASCII letters via `\p{L}` (ASCII `\w` would strip
+//     `東京`, `é`, `你`, etc.)
+//   - removes anything FTS5 might parse as an operator (AND/OR/NOT/NEAR,
+//     parens, `*`, `:`), so user input can't smuggle query syntax
+// Each surviving token is wrapped in double quotes and joined with OR for
+// recall-oriented matching (FTS5's default is AND). Returns "" when nothing
+// tokenizable remains so callers can short-circuit before hitting the FTS
+// engine (which errors on empty queries).
 function buildFtsQuery(raw: string): string {
-  const tokens = raw
-    .split(/\s+/)
-    .map((t) => t.replace(/[^\w-]/g, ""))
-    .filter((t) => t.length > 0);
+  const tokens = raw.split(/[^\p{L}\p{N}_-]+/u).filter((t) => t.length > 0);
   if (tokens.length === 0) return "";
   return tokens.map((t) => `"${t}"`).join(" OR ");
 }
@@ -321,11 +327,17 @@ export function createMemoryStore(db: Database): MemoryStore {
     );
   }
 
-  // Single SQL: filter on scope/lifecycle/inject policy, optionally narrow
-  // by projectId and recency, and surface bm25() as a score column. The
-  // (? IS NULL OR ...) pattern lets us prepare once even for optional filters
-  // — both halves of the disjunction are bound positionally, and SQLite
-  // short-circuits when the sentinel is NULL.
+  // Single SQL: filter on scope/lifecycle/inject policy/stale_after, optionally
+  // narrow by projectId and recency, and ORDER BY the same combined
+  // `abs(bm25) × recency_decay` score the JS layer normalizes to rankingScore.
+  // Sorting in SQL — before LIMIT — is what lets a fresher row out-rank a
+  // raw-BM25-better but older row at the page boundary; ordering only by
+  // bm25 here would drop those candidates before JS ever sees them.
+  // The (? IS NULL OR ...) pattern lets us prepare once even for optional
+  // filters — SQLite short-circuits when the sentinel is NULL.
+  // `max(0.0, julianday('now') - julianday(m.created_at))` mirrors the JS
+  // `Math.max(0, ...)` in daysSince() so future-dated timestamps are clamped
+  // to "now" (decay=1) instead of inflating the recency factor.
   const recallSql = `
     SELECT
       m.id, m.type, m.summary, m.content, m.provenance,
@@ -342,9 +354,13 @@ export function createMemoryStore(db: Database): MemoryStore {
       AND m.scope_visibility = ?
       AND m.lifecycle = 'active'
       AND m.use_policy_do_not_inject_automatically = 0
+      AND (m.stale_after IS NULL OR datetime(m.stale_after) > datetime('now'))
       AND (? IS NULL OR m.scope_project_id = ?)
       AND (? IS NULL OR datetime(m.created_at) >= datetime('now', ?))
-    ORDER BY bm25(memories_fts) ASC
+    ORDER BY
+      abs(bm25(memories_fts))
+        * (1.0 / (1.0 + (max(0.0, julianday('now') - julianday(m.created_at)) / 30.0)))
+      DESC
     LIMIT ?
   `;
   const recallStmt = db.prepare(recallSql);
@@ -378,17 +394,15 @@ export function createMemoryStore(db: Database): MemoryStore {
         }
       }
 
-      // bm25() returns negative scores (lower = better). Combine with a
-      // recency decay and normalize across the page so rankingScore ∈ [0,1]
-      // as recallItemSchema requires. SQL ordered by raw BM25; recency can
-      // shuffle the ordering, so re-sort by combined score before emitting.
-      const scored = rawRows
-        .map((r) => {
-          const decay = recencyDecay(daysSince(r.created_at));
-          const combined = Math.abs(r.bm25_score) * decay;
-          return { row: r, combined };
-        })
-        .sort((a, b) => b.combined - a.combined);
+      // bm25() returns negative scores (lower = better). Combine with the
+      // same recency decay SQL used in ORDER BY, then normalize across the
+      // page so rankingScore ∈ [0,1] as recallItemSchema requires. SQL
+      // already returns rows in descending combined order — no post-sort.
+      const scored = rawRows.map((r) => {
+        const decay = recencyDecay(daysSince(r.created_at));
+        const combined = Math.abs(r.bm25_score) * decay;
+        return { row: r, combined };
+      });
       const maxCombined = scored.reduce((acc, s) => Math.max(acc, s.combined), 0);
       const memories = hydrate(scored.map((s) => s.row));
       const items: RecallItem[] = memories.map((m, idx) => {

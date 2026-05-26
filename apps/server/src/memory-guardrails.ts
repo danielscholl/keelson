@@ -27,9 +27,18 @@ const SOURCE_REF_REQUIRED_TYPES: ReadonlySet<WritebackMemoryDraft["type"]> = new
 
 const SECRET_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: "aws_access_key_id", pattern: /\bAKIA[0-9A-Z]{16}\b/ },
-  { name: "github_pat", pattern: /\bghp_[A-Za-z0-9]{36}\b/ },
+  // Classic GitHub PATs and OAuth/server-to-server tokens — fixed 36-char
+  // body. The fine-grained PAT below is a separate format (different
+  // prefix, longer body, underscores allowed).
+  { name: "github_classic_pat", pattern: /\bghp_[A-Za-z0-9]{36}\b/ },
   { name: "github_oauth", pattern: /\bgho_[A-Za-z0-9]{36}\b/ },
   { name: "github_app", pattern: /\bgh[su]_[A-Za-z0-9]{36}\b/ },
+  // Fine-grained PATs: `github_pat_` + 82 chars of [A-Za-z0-9_]. GitHub's
+  // official format is `[A-Za-z0-9]{22}_[A-Za-z0-9]{59}` after the prefix;
+  // we allow underscore throughout the body to keep one regex and stay
+  // permissive — a few extra false positives is the right side of the
+  // trade-off for secret detection.
+  { name: "github_fine_grained_pat", pattern: /\bgithub_pat_[A-Za-z0-9_]{82}\b/ },
   { name: "jwt", pattern: /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/ },
   { name: "pem_private_key", pattern: /-----BEGIN [A-Z ]+PRIVATE KEY-----/ },
   { name: "slack_token", pattern: /\bxox[bsp]-[A-Za-z0-9-]+\b/ },

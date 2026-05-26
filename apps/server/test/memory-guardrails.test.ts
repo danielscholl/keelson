@@ -53,6 +53,16 @@ describe("detectSecret", () => {
     expect(detectSecret(`ghs_${"B".repeat(36)}`)?.reason).toBe("potential_secret");
   });
 
+  test("matches fine-grained GitHub PAT (github_pat_)", () => {
+    // Realistic shape: `github_pat_` + 22 chars + `_` + 59 chars = 82 body chars.
+    const body = `${"A".repeat(22)}_${"B".repeat(59)}`;
+    expect(detectSecret(`token github_pat_${body} oops`)?.reason).toBe("potential_secret");
+  });
+
+  test("does not match github_pat_ prefix with too-short body", () => {
+    expect(detectSecret(`github_pat_${"A".repeat(40)}`)).toBeNull();
+  });
+
   test("matches JWT", () => {
     const jwt = "eyJabc123.eyJdef456.ghi-_jkl789";
     expect(detectSecret(`auth ${jwt}`)?.reason).toBe("potential_secret");
