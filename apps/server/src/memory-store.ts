@@ -509,8 +509,12 @@ export function createMemoryStore(db: Database): MemoryStore {
           });
 
           for (const sr of draft.sourceRefs) {
-            const url = /^https?:\/\//.test(sr.uri) ? sr.uri : null;
-            insertSourceRef.run(id, sr.kind, sr.uri, url);
+            // M2's SourceRef wire shape is (kind, uri, title?, sourceTimestamp?);
+            // the M1 adjacency adds a separate `url` column that M2 doesn't
+            // surface. We write NULL there so the read path (which drops the
+            // column) stays symmetric — no silent data loss. A future schema
+            // bump can either repurpose `url` or drop it.
+            insertSourceRef.run(id, sr.kind, sr.uri, null);
           }
           for (const ar of draft.artifacts) {
             insertArtifact.run(id, ar.kind, ar.uri);
