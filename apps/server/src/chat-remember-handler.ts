@@ -62,6 +62,10 @@ export function chatRememberRoutes(app: Hono, deps: ChatRememberRoutesDeps): voi
       return c.json({ error: parsed.error.message }, 400);
     }
     const draft = parsed.data;
+    const normalizedContent = draft.content.trim();
+    if (normalizedContent.length === 0) {
+      return c.json({ error: "content must not be blank" }, 400);
+    }
 
     const conv = conversationStore.get(conversationId);
     if (!conv) {
@@ -74,7 +78,7 @@ export function chatRememberRoutes(app: Hono, deps: ChatRememberRoutesDeps): voi
 
     let contentHash: string;
     try {
-      contentHash = await sha256Hex(draft.content.trim());
+      contentHash = await sha256Hex(normalizedContent);
     } catch (err) {
       return internalErrorResponse(c, "remember.hash", err);
     }
@@ -100,7 +104,7 @@ export function chatRememberRoutes(app: Hono, deps: ChatRememberRoutesDeps): voi
           {
             type: draft.type,
             summary: draft.summary,
-            content: draft.content,
+            content: normalizedContent,
             contentHash,
             // Operator observed something in the conversation. The Confirm
             // action in the M7 review queue is what promotes provenance to

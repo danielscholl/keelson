@@ -6006,7 +6006,7 @@ button.tab:focus-visible {
   background: var(--card); border: 1px solid var(--border);
   border-radius: 7px;
   font-family: ui-monospace, monospace; font-size: 12px;
-  color: var(--fg); white-space: pre-wrap; word-wrap: break-word;
+  color: var(--fg); white-space: pre-wrap; overflow-wrap: break-word;
   line-height: 1.5;
 }
 .memory-detail-row {

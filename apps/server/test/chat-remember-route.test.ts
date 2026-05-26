@@ -158,6 +158,37 @@ describe("POST /api/chat/:cid/messages/:mid/remember", () => {
     expect(second.memoryId).toBe(first.memoryId);
   });
 
+  test("dedupes whitespace-only content variants and stores the normalized form", async () => {
+    const { conversationId, messageId } = seedConversationWithMessage("noted");
+    const first = (await (
+      await app.fetch(
+        postJson(`/api/chat/${conversationId}/messages/${messageId}/remember`, {
+          type: "lesson",
+          summary: "s",
+          content: "noted",
+        }),
+      )
+    ).json()) as RememberChatMessageResponse;
+    expect(first.status).toBe("ok");
+    if (first.status !== "ok") return;
+
+    const second = (await (
+      await app.fetch(
+        postJson(`/api/chat/${conversationId}/messages/${messageId}/remember`, {
+          type: "lesson",
+          summary: "s",
+          content: "  noted  ",
+        }),
+      )
+    ).json()) as RememberChatMessageResponse;
+    expect(second.status).toBe("deduped");
+    if (second.status !== "deduped") return;
+    expect(second.memoryId).toBe(first.memoryId);
+
+    const stored = memoryStore.getById(first.memoryId);
+    expect(stored?.content).toBe("noted");
+  });
+
   test("rejects malformed body with 400", async () => {
     const { conversationId, messageId } = seedConversationWithMessage("hi");
     const res = await app.fetch(

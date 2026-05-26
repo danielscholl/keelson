@@ -262,13 +262,9 @@ export function Memory() {
               key={item.memoryId}
               item={item}
               onAction={
-                subTab === "all" && item.reviewStatus !== "pending"
-                  ? null
-                  : pendingActions.has(item.memoryId)
-                    ? null
-                    : handleAction
+                subTab === "all" ? null : pendingActions.has(item.memoryId) ? null : handleAction
               }
-              readOnly={subTab === "all" && item.reviewStatus !== "pending"}
+              readOnly={subTab === "all"}
             />
           ))}
         </ul>

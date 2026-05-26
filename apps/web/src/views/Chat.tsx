@@ -1187,7 +1187,8 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                         ConversationStore; until the done-frame reconcile above
                         swaps the client-side `newId()` for the persisted UUID,
                         the lookup would 404. `isPersistedMessageId` is the gate. */}
-                    {!m.streaming &&
+                    {m.role !== "system" &&
+                      !m.streaming &&
                       m.content.trim().length > 0 &&
                       conversationId !== null &&
                       isPersistedMessageId(m.id) && (
@@ -1200,7 +1201,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                             onClick={() =>
                               setMemoryTarget({
                                 id: m.id,
-                                role: m.role === "system" ? "assistant" : m.role,
+                                role: m.role as "user" | "assistant",
                                 content: m.content,
                               })
                             }
