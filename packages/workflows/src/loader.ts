@@ -226,11 +226,14 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
 // ---------------------------------------------------------------------------
 
 /** Reserved namespaces that look like `$X.output` but aren't node references.
- *  The executor's resolveBody handles `$inputs.<key>`, `$ARTIFACTS_DIR`, and
- *  `$memory.recall.*` directly, so the validator must not false-positive
- *  when those appear with a `.output` suffix in a workflow body (e.g.
- *  literal path text). */
-const RESERVED_REF_NAMESPACES = new Set(["inputs", "ARTIFACTS_DIR", "memory"]);
+ *  The executor's resolveBody handles `$inputs.<key>` and `$ARTIFACTS_DIR`
+ *  directly with a `.output` suffix possible in literal text (e.g.
+ *  `$ARTIFACTS_DIR/foo.output` as a path); the validator must not
+ *  false-positive on those. `memory` is intentionally NOT reserved here:
+ *  the `$memory.recall.*` namespace doesn't match the `.output` regex
+ *  pattern anyway, so keeping `$memory.output` and `$memory.foo.output`
+ *  flagged as unknown-node references catches author typos. */
+const RESERVED_REF_NAMESPACES = new Set(["inputs", "ARTIFACTS_DIR"]);
 
 /** Node ids that can't be declared because they collide with substitution
  *  namespaces. The executor's resolveBody resolves `$inputs.*`, `$ARGUMENTS`,

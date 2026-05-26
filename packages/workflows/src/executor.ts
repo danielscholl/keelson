@@ -648,7 +648,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     // executor hard-codes `provenance: "generated"` and the idempotency
     // key — neither is author-controllable, enforcing the evidence-default
     // invariant.
-    await runPostWriteback(node, ctx, nodeOutputs, recordedOutput, result, emit);
+    await runPostWriteback(node, ctx, nodeOutputs, recordedOutput, result, emit, memoryRecall);
     emit({ type: "node_done", nodeId: node.id, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -668,7 +668,15 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     // bug in a custom handler). Pass the synthesized failed result so
     // the writeback's `on: success` gate still excludes thrown errors.
     const failedNodeResult = failedResult(message);
-    await runPostWriteback(node, ctx, nodeOutputs, recordedOutput, failedNodeResult, emit);
+    await runPostWriteback(
+      node,
+      ctx,
+      nodeOutputs,
+      recordedOutput,
+      failedNodeResult,
+      emit,
+      memoryRecall,
+    );
     emit({ type: "node_done", nodeId: node.id, result: failedNodeResult });
   }
 }
@@ -771,6 +779,7 @@ async function runPostWriteback(
   recordedOutput: NodeOutput,
   result: NodeResult,
   emit: (event: RunStreamEvent) => void,
+  memoryRecall: MemoryRecallContext | undefined,
 ): Promise<void> {
   const memBlock = nodeMemoryOf(node);
   if (!memBlock?.writeback || !ctx.memoryTools) return;
@@ -782,10 +791,17 @@ async function runPostWriteback(
 
   // Writeback templates may reference the just-completed node's output; build
   // a temporary map that includes it so `$<thisNodeId>.output.field` resolves.
+  // `memoryRecall` is forwarded so writeback templates that reference
+  // `$memory.recall.items` / `$memory.recall.trace` substitute against the
+  // pre-run recall instead of the empty default — without this, a node
+  // declaring both recall and writeback loses the recall context when the
+  // writeback body interpolates it (which is the natural way to persist
+  // "what we did with the recalled items").
   const outputsWithSelf = new Map(nodeOutputs);
   outputsWithSelf.set(node.id, recordedOutput);
   const resolveOpts = {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+    ...(memoryRecall !== undefined ? { memoryRecall } : {}),
   };
 
   const summary = resolveBody(wb.summary, ctx.inputs, outputsWithSelf, resolveOpts);

@@ -787,4 +787,84 @@ nodes:
     expect(result.error).toBeDefined();
     expect(result.error?.error).toMatch(/unknown node.*missing/);
   });
+
+  test("empty memory: {} block is rejected at parse time", () => {
+    // A bare `memory: {}` declares neither recall nor writeback but still
+    // trips the headless server-required gate. Reject so authors get a
+    // clear schema error rather than an exit-3 surprise.
+    const yaml = `
+name: empty-memory
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory: {}
+`;
+    const result = parseWorkflow(yaml, "empty-memory.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/recall.*writeback|writeback.*recall/);
+  });
+
+  test("$memory.output (no .recall.) is flagged as an unknown-node reference", () => {
+    // The $memory.recall.* namespace doesn't match the `$X.output` regex,
+    // so removing `memory` from RESERVED_REF_NAMESPACES makes $memory.output
+    // typos fall through to the unknown-node check — catching author
+    // mistakes rather than silently substituting empty string at runtime.
+    const yaml = `
+name: bare-memory-output
+description: test
+nodes:
+  - id: think
+    prompt: "leak $memory.output"
+    memory:
+      recall:
+        query: anything
+`;
+    const result = parseWorkflow(yaml, "bare-memory.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/unknown node.*memory/);
+  });
+
+  test("sourceTimestamp must be an RFC3339 datetime with offset", () => {
+    // Mirrors the shared sourceRefSchema. A plain string parses here would
+    // fail at the server adapter's Zod re-parse — fail fast at load time.
+    const yaml = `
+name: bad-timestamp
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    memory:
+      writeback:
+        on: success
+        type: artifact_reference
+        summary: s
+        content: c
+        sourceRefs:
+          - { kind: workflow_run, uri: "x", sourceTimestamp: "yesterday" }
+`;
+    const result = parseWorkflow(yaml, "bad-ts.yaml");
+    expect(result.error).toBeDefined();
+  });
+
+  test("memory.writeback.content exceeding 4096 chars is rejected", () => {
+    // Mirror the shared MEMORY_TEXT_LIMIT cap. Catches a verbose-template
+    // mistake at load time rather than at the adapter Zod re-parse.
+    const long = "x".repeat(4097);
+    const yaml = `
+name: too-long
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    memory:
+      writeback:
+        on: success
+        type: lesson
+        summary: s
+        content: "${long}"
+`;
+    const result = parseWorkflow(yaml, "too-long.yaml");
+    expect(result.error).toBeDefined();
+  });
 });

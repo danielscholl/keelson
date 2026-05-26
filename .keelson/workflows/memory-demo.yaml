@@ -11,8 +11,11 @@ description: |
 
 nodes:
   - id: observe
+    # bash nodes execute the raw body (pre-substitution), so CLI args
+    # come from the env channel ($KEELSON_ARGUMENTS) — NOT from $ARGUMENTS
+    # text substitution, which only applies to prompt / command bodies.
     bash: |
-      echo "observation recorded: $ARGUMENTS"
+      echo "observation recorded: $KEELSON_ARGUMENTS"
     memory:
       recall:
         query: prior observations

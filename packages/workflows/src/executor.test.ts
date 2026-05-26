@@ -2037,6 +2037,44 @@ nodes:
     expect(calls[0]?.resolvedBody).toContain("hello");
   });
 
+  test("writeback templates can reference $memory.recall.items (recall context propagates to writeback)", async () => {
+    // Codex-flagged gap: runPostWriteback was resolving summary/content
+    // without the per-node memoryRecall context, so a writeback body that
+    // referenced the recalled items would substitute against the empty
+    // default. Threading memoryRecall through the post-writeback path is
+    // load-bearing for "persist what we did with the recalled items"
+    // patterns.
+    const workflow = parseInline(`
+name: recall-into-writeback
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    memory:
+      recall:
+        query: prior
+      writeback:
+        on: success
+        type: decision
+        summary: "saw $memory.recall.trace"
+        content: "items: $memory.recall.items"
+`);
+    const items = [{ memoryId: "m1" }];
+    const mem = mockMemory({ recallItems: items, recallTraceId: "rtid-7" });
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      memoryTools: mem.tools,
+    });
+
+    expect(mem.writebacks).toHaveLength(1);
+    const draft = (mem.writebacks[0]?.req.memories as Record<string, unknown>[])[0];
+    expect(draft?.summary).toBe("saw rtid-7");
+    expect(draft?.content).toBe(`items: ${JSON.stringify(items)}`);
+  });
+
   test("writeback fires when handler throws and on: always", async () => {
     // Codex-flagged gap: the executor's catch block only synthesized a
     // failed NodeResult without invoking runPostWriteback, so `on: always`
