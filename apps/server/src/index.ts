@@ -20,6 +20,7 @@ import {
   isAllowedOrigin,
   type WsData,
 } from "./chat-handler.ts";
+import { chatRememberRoutes } from "./chat-remember-handler.ts";
 import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
@@ -162,6 +163,7 @@ workflowsRoutes(
 );
 snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
 memoryRoutes(app, { memoryStore });
+chatRememberRoutes(app, { conversationStore: store, memoryStore });
 credentialsRoutes(app, credentialStore, {
   copilotAuthProbe: bootstrap.copilotAuthProbe,
   claudeAuthProbe: bootstrap.claudeAuthProbe,

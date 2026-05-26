@@ -1,7 +1,7 @@
 import type { ThemePreference } from "../hooks/useSettings.ts";
 import { ThemePicker } from "./ThemePicker.tsx";
 
-export type ActiveTab = "chat" | "workflows";
+export type ActiveTab = "chat" | "workflows" | "memory";
 
 export interface TopBarProps {
   activeTab: ActiveTab;
@@ -12,15 +12,26 @@ export interface TopBarProps {
   // the magenta pip on the Workflows nav so the Chat tab notices without
   // subscribing to every run's WS.
   pausedRunCount?: number;
+  // Count of memory rows in review_status='pending'. Drives the pip on the
+  // Memory nav — same posture as pausedRunCount.
+  pendingMemoryCount?: number;
   // Fires when the operator clicks the brand or a "new chat" affordance.
   // App resets the active conversation id and routes to the Chat tab.
   onNewChat?: () => void;
 }
 
 export function TopBar(props: TopBarProps) {
-  const { activeTab, onTabChange, themePreference, onThemeChange, pausedRunCount, onNewChat } =
-    props;
+  const {
+    activeTab,
+    onTabChange,
+    themePreference,
+    onThemeChange,
+    pausedRunCount,
+    pendingMemoryCount,
+    onNewChat,
+  } = props;
   const pausedCount = pausedRunCount ?? 0;
+  const memoryCount = pendingMemoryCount ?? 0;
 
   return (
     <header className="topbar">
@@ -58,6 +69,24 @@ export function TopBar(props: TopBarProps) {
                 title={`${pausedCount} run(s) awaiting input`}
               >
                 {pausedCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={`nav-tab${activeTab === "memory" ? " is-active" : ""}`}
+            aria-pressed={activeTab === "memory"}
+            onClick={() => onTabChange("memory")}
+          >
+            Memory
+            {memoryCount > 0 && (
+              <span
+                className="nav-pip"
+                role="img"
+                aria-label={`${memoryCount} pending`}
+                title={`${memoryCount} memory item(s) awaiting review`}
+              >
+                {memoryCount}
               </span>
             )}
           </button>

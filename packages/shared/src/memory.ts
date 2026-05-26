@@ -434,6 +434,70 @@ export const reviewListResponseSchema = z
   .strict();
 export type ReviewListResponse = z.infer<typeof reviewListResponseSchema>;
 
+// === Memory list (browsable, non-pending view) ===============================
+// GET /api/memory/list — the M7 "All memories" sub-tab. Same projection as
+// reviewItemSchema (storage-internal fields trimmed) but the query supports
+// optional reviewStatus / lifecycle filters so the operator can browse
+// confirmed, evidence-only, restricted, rejected, or stale rows in addition
+// to pending. Cursor encodes (createdAt, id) — same shape as reviewListQuery.
+
+export const memoryListQuerySchema = z
+  .object({
+    limit: z.number().int().positive().max(REVIEW_LIST_MAX_LIMIT).optional(),
+    cursor: z.string().min(1).optional(),
+    scopeVisibility: scopeVisibilitySchema.optional(),
+    projectId: z.string().min(1).optional(),
+    reviewStatus: reviewStatusSchema.optional(),
+    lifecycle: lifecycleSchema.optional(),
+  })
+  .strict();
+export type MemoryListQuery = z.infer<typeof memoryListQuerySchema>;
+
+export const memoryListResponseSchema = z
+  .object({
+    items: z.array(reviewItemSchema),
+    nextCursor: z.string().min(1).optional(),
+  })
+  .strict();
+export type MemoryListResponse = z.infer<typeof memoryListResponseSchema>;
+
+// === Chat-side capture (M7b) ================================================
+// POST /api/chat/:cid/messages/:mid/remember — operator-initiated capture
+// of a chat message into memory. The server validates the message exists,
+// computes contentHash, builds the WritebackMemoryDraft, and delegates to
+// MemoryStore.writeback. Provenance defaults to `observed` (operator noted
+// something in the conversation); the review-queue Confirm action is what
+// promotes it to `user_confirmed` per the evidence-default invariant
+// (PRD §"Load-bearing invariants" #1).
+
+export const rememberChatMessageRequestSchema = z
+  .object({
+    type: memoryTypeSchema,
+    summary: z.string().min(1).max(MEMORY_TEXT_LIMIT),
+    content: z.string().min(1).max(MEMORY_TEXT_LIMIT),
+    scope: scopeSchema.optional(),
+    staleAfterDays: z.number().int().positive().optional(),
+  })
+  .strict();
+export type RememberChatMessageRequest = z.infer<typeof rememberChatMessageRequestSchema>;
+
+// Per-call verdict for the remember endpoint. `ok` is the happy path with
+// the new memoryId; `blocked` mirrors the writeback guardrail shape; `deduped`
+// surfaces the silent-no-op case so the UI can toast "already saved" instead
+// of pretending it succeeded.
+export const rememberChatMessageResponseSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("ok"), memoryId: z.string().min(1) }).strict(),
+  z
+    .object({
+      status: z.literal("blocked"),
+      reason: writebackBlockedReasonSchema,
+      summary: z.string(),
+    })
+    .strict(),
+  z.object({ status: z.literal("deduped"), memoryId: z.string().min(1) }).strict(),
+]);
+export type RememberChatMessageResponse = z.infer<typeof rememberChatMessageResponseSchema>;
+
 // === Runtime handle =========================================================
 // The workflow executor's `RunOptions.memoryTools` and `NodeContext.memory`
 // bind to this. M5 wires recall (pre-run) and writeback (post-run); M6

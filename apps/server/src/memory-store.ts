@@ -9,6 +9,8 @@
 import type { Database } from "bun:sqlite";
 import {
   type Memory,
+  type MemoryListQuery,
+  type MemoryListResponse,
   RECALL_RESPONSE_SCHEMA_VERSION,
   REVIEW_LIST_DEFAULT_LIMIT,
   REVIEW_LIST_MAX_LIMIT,
@@ -52,6 +54,11 @@ export interface MemoryStore {
   // Pending review queue. Cursor encodes (createdAt, id) so concurrent
   // writebacks during pagination don't shuffle pages.
   listPending(query: ReviewListQuery): ReviewListResponse;
+  // Browsable list across review statuses + lifecycles — backs the M7
+  // "All memories" sub-tab. Same cursor scheme as listPending; same hydrated
+  // ReviewItem projection (storage-internal fields trimmed). Filters default
+  // to "no filter" (every row), but the route layer typically pins one.
+  listMemories(query: MemoryListQuery): MemoryListResponse;
   // Debug/test helper. Returns the full Memory shape including storage-
   // internal fields (idempotencyKey, contentHash) that the wire projections
   // trim. Not surfaced over the wire — recall and the review queue read
@@ -727,6 +734,77 @@ export function createMemoryStore(db: Database): MemoryStore {
       }
       // hasMore implies pageRows.length === limit ≥ 1; the cast is the
       // narrow workaround for noUncheckedIndexedAccess on the bracket lookup.
+      const last = pageRows[pageRows.length - 1] as MemoryRow;
+      return {
+        items,
+        nextCursor: encodePendingCursor({ createdAt: last.created_at, id: last.id }),
+      };
+    },
+
+    listMemories(query) {
+      const limit = Math.min(query.limit ?? REVIEW_LIST_DEFAULT_LIMIT, REVIEW_LIST_MAX_LIMIT);
+      const cursor = query.cursor !== undefined ? decodePendingCursor(query.cursor) : null;
+      const overFetch = limit + 1;
+      const whereClauses: string[] = [];
+      const args: (string | number)[] = [];
+      if (query.reviewStatus !== undefined) {
+        whereClauses.push("review_status = ?");
+        args.push(query.reviewStatus);
+      }
+      if (query.lifecycle !== undefined) {
+        whereClauses.push("lifecycle = ?");
+        args.push(query.lifecycle);
+      }
+      if (query.scopeVisibility !== undefined) {
+        whereClauses.push("scope_visibility = ?");
+        args.push(query.scopeVisibility);
+      }
+      if (query.projectId !== undefined) {
+        whereClauses.push("scope_project_id = ?");
+        args.push(query.projectId);
+      }
+      if (cursor) {
+        whereClauses.push("(created_at < ? OR (created_at = ? AND id < ?))");
+        args.push(cursor.createdAt, cursor.createdAt, cursor.id);
+      }
+      const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+      const sql = `
+        SELECT
+          id, type, summary, content, provenance,
+          use_policy_can_use_as_instruction, use_policy_can_use_as_evidence,
+          use_policy_requires_user_confirmation, use_policy_do_not_inject_automatically,
+          scope_project_id, scope_visibility, lifecycle, review_status,
+          content_hash, idempotency_key, confidence, runtime,
+          task_id, flow_id, model, provider,
+          created_at, updated_at, stale_after
+        FROM memories
+        ${where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `;
+      args.push(overFetch);
+      const rows = db.prepare(sql).all(...args) as MemoryRow[];
+
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      if (pageRows.length === 0) {
+        return { items: [] };
+      }
+
+      const ids = pageRows.map((r) => r.id);
+      const srGroups = groupBy(fetchSourceRefs(ids));
+      const arGroups = groupBy(fetchArtifacts(ids));
+      const items = pageRows.map((row) =>
+        rowToReviewItem(
+          row,
+          (srGroups.get(row.id) ?? []).map(srRowToSourceRef),
+          (arGroups.get(row.id) ?? []).map(arRowToArtifact),
+        ),
+      );
+
+      if (!hasMore) {
+        return { items };
+      }
       const last = pageRows[pageRows.length - 1] as MemoryRow;
       return {
         items,

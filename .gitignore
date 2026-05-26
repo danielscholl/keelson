@@ -23,3 +23,7 @@ package.json.bak
 .keelson/keelson.db
 .keelson/keelson.db-wal
 .keelson/keelson.db-shm
+
+# Playwright MCP scratch — screenshots, console logs, snapshots from
+# headless verification runs. Local-only; never committed.
+.playwright-mcp/

@@ -11,9 +11,21 @@ import {
   type ListWorkflowsResponse,
   listRunsResponseSchema,
   listWorkflowsResponseSchema,
+  type MemoryListQuery,
+  type MemoryListResponse,
   type ModelInfo,
+  memoryListResponseSchema,
   type ProviderInfo,
   type RegisteredToolInfo,
+  type RememberChatMessageRequest,
+  type RememberChatMessageResponse,
+  type ReviewActionRequest,
+  type ReviewActionResponse,
+  type ReviewListQuery,
+  type ReviewListResponse,
+  rememberChatMessageResponseSchema,
+  reviewActionResponseSchema,
+  reviewListResponseSchema,
   startWorkflowRunResponseSchema,
   type WorkflowDetail,
   type WorkflowRunDetail,
@@ -278,4 +290,62 @@ export async function submitApproval(runId: string, nodeId: string, text: string
     allowedStatusValue: undefined,
     label: `/api/workflows/runs/${runId}/resume`,
   });
+}
+
+// === Memory ================================================================
+
+function buildMemoryListQuery(query: ReviewListQuery | MemoryListQuery): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined) continue;
+    params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+// Pending review queue — what the M7 Memory tab opens onto by default.
+export async function listPendingMemories(
+  query: ReviewListQuery = {},
+): Promise<ReviewListResponse> {
+  return reviewListResponseSchema.parse(
+    await apiRequest<unknown>(`/api/memory/review${buildMemoryListQuery(query)}`),
+  );
+}
+
+// Browsable list across review statuses + lifecycles — backs the "All" sub-tab.
+export async function listMemories(query: MemoryListQuery = {}): Promise<MemoryListResponse> {
+  return memoryListResponseSchema.parse(
+    await apiRequest<unknown>(`/api/memory/list${buildMemoryListQuery(query)}`),
+  );
+}
+
+export async function postReviewAction(req: ReviewActionRequest): Promise<ReviewActionResponse> {
+  return reviewActionResponseSchema.parse(
+    await apiRequest<unknown>("/api/memory/review", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+      errorBody: "json-error",
+    }),
+  );
+}
+
+export async function rememberChatMessage(
+  conversationId: string,
+  messageId: string,
+  draft: RememberChatMessageRequest,
+): Promise<RememberChatMessageResponse> {
+  return rememberChatMessageResponseSchema.parse(
+    await apiRequest<unknown>(
+      `/api/chat/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/remember`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(draft),
+        errorBody: "json-error",
+        label: `/api/chat/${conversationId}/messages/${messageId}/remember`,
+      },
+    ),
+  );
 }

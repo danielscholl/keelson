@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
+  memoryListQuerySchema,
   recallRequestSchema,
   reviewActionRequestSchema,
   reviewListQuerySchema,
@@ -131,6 +132,41 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
         return c.json({ error: err.message }, 400);
       }
       return internalErrorResponse(c, "review.list", err);
+    }
+  });
+
+  // GET /api/memory/list — browsable view across review statuses + lifecycles.
+  // Backs the M7 "All memories" sub-tab; the existing /api/memory/review
+  // endpoint stays pinned to review_status='pending'. Filters are optional;
+  // unset = no filter.
+  app.get("/api/memory/list", async (c) => {
+    const limitRaw = c.req.query("limit");
+    const cursor = c.req.query("cursor");
+    const scopeVisibility = c.req.query("scopeVisibility");
+    const projectId = c.req.query("projectId");
+    const reviewStatus = c.req.query("reviewStatus");
+    const lifecycle = c.req.query("lifecycle");
+
+    const queryShape: Record<string, unknown> = {};
+    if (limitRaw !== undefined) queryShape.limit = Number(limitRaw);
+    if (cursor !== undefined) queryShape.cursor = cursor;
+    if (scopeVisibility !== undefined) queryShape.scopeVisibility = scopeVisibility;
+    if (projectId !== undefined) queryShape.projectId = projectId;
+    if (reviewStatus !== undefined) queryShape.reviewStatus = reviewStatus;
+    if (lifecycle !== undefined) queryShape.lifecycle = lifecycle;
+
+    const parsed = memoryListQuerySchema.safeParse(queryShape);
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.message }, 400);
+    }
+    try {
+      return c.json(memoryStore.listMemories(parsed.data));
+    } catch (err) {
+      if (err instanceof InvalidCursorError) {
+        console.warn(`[memory] invalid list cursor rejected: ${err.message}`);
+        return c.json({ error: err.message }, 400);
+      }
+      return internalErrorResponse(c, "memory.list", err);
     }
   });
 }

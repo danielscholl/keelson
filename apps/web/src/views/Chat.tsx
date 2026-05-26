@@ -15,9 +15,11 @@ import {
   fetchProviders,
   fetchTools,
   getConversation,
+  rememberChatMessage,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
 import { Sidebar } from "../components/Chat/Sidebar.tsx";
+import { SaveToMemoryModal } from "../components/Memory/SaveToMemoryModal.tsx";
 import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
 import {
@@ -108,6 +110,93 @@ function pickEffortSeed(
 
 function newId(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+// Server-side message IDs are `crypto.randomUUID()` (36 chars, dashed) —
+// `newId()` is the local placeholder during a live turn. Id-driven endpoints
+// like `/api/chat/:cid/messages/:mid/remember` only resolve the UUID form;
+// the done-frame reconcile below swaps client IDs for the persisted ones
+// after a turn completes.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isPersistedMessageId(id: string): boolean {
+  return UUID_RE.test(id);
+}
+
+// Snapshot of a just-completed turn's client-side ids + their index in the
+// non-system local sequence. Captured at `done` time BEFORE flushing any
+// queued follow-up. The server's `messages` array is append-only, so the
+// indices remain valid as later turns get persisted.
+interface TurnReconcileSnapshot {
+  assistantClientId: string | null;
+  userClientId: string | null;
+  // Count of non-system local messages at done-time. The just-completed
+  // assistant lives at server[nonSystemCount - 1], its user at [nonSystemCount - 2].
+  nonSystemCount: number;
+}
+
+// Reconcile only the specific client ids of a just-completed turn, located
+// by their stable server-side index. Avoids the role-only tail walk that
+// would corrupt a flushed queue's freshly-minted local ids (see PR #21
+// review — a follow-up turn queued during streaming gets its new local
+// user/assistant rows appended before this reconcile fetch resolves, so
+// a tail walk would rewrite their ids to the just-completed turn's
+// persisted ids and chunk dispatch for the follow-up would break).
+function reconcileTurnIds<T extends { id: string; role: string }>(
+  local: T[],
+  server: readonly { id: string; role: string }[],
+  snap: TurnReconcileSnapshot,
+): T[] {
+  if (server.length < snap.nonSystemCount) return local;
+  const aIdx = snap.nonSystemCount - 1;
+  const uIdx = snap.nonSystemCount - 2;
+  const serverAssistant = aIdx >= 0 ? server[aIdx] : null;
+  const serverUser = uIdx >= 0 ? server[uIdx] : null;
+
+  let updated: T[] | null = null;
+  if (
+    snap.assistantClientId &&
+    serverAssistant?.role === "assistant" &&
+    !isPersistedMessageId(snap.assistantClientId)
+  ) {
+    const idx = local.findIndex((m) => m.id === snap.assistantClientId);
+    const row = idx >= 0 ? local[idx] : undefined;
+    if (idx >= 0 && row) {
+      if (updated === null) updated = local.slice();
+      updated[idx] = { ...row, id: serverAssistant.id };
+    }
+  }
+  if (
+    snap.userClientId &&
+    serverUser?.role === "user" &&
+    !isPersistedMessageId(snap.userClientId)
+  ) {
+    const base = updated ?? local;
+    const idx = base.findIndex((m) => m.id === snap.userClientId);
+    const row = idx >= 0 ? base[idx] : undefined;
+    if (idx >= 0 && row) {
+      if (updated === null) updated = local.slice();
+      updated[idx] = { ...row, id: serverUser.id };
+    }
+  }
+  return updated ?? local;
+}
+
+// Build the snapshot from current local state. The completed turn's
+// assistant is the last non-system message; its user is the immediately
+// preceding non-system row (almost always role === "user"). Returns null
+// when there's nothing to reconcile yet.
+function snapshotTurnForReconcile<T extends { id: string; role: string }>(
+  local: T[],
+): TurnReconcileSnapshot | null {
+  const nonSystem = local.filter((m) => m.role !== "system");
+  if (nonSystem.length === 0) return null;
+  const lastAssistant = nonSystem[nonSystem.length - 1];
+  const lastUser = nonSystem[nonSystem.length - 2];
+  return {
+    assistantClientId: lastAssistant?.role === "assistant" ? lastAssistant.id : null,
+    userClientId: lastUser?.role === "user" ? lastUser.id : null,
+    nonSystemCount: nonSystem.length,
+  };
 }
 
 // Order of preference: lastUsed → first registered favorite → Copilot → stub →
@@ -222,6 +311,14 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   }, [providers]);
 
   const [messages, setMessages] = useState<LocalMessage[]>([]);
+  // Mirror of `messages` for synchronous reads from WS frame handlers — the
+  // done handler captures a turn snapshot before flushing a queued follow-up,
+  // and `setMessages(updater)` only fires the updater on the next render so
+  // we can't snapshot from inside it without racing the queue dispatch.
+  const messagesRef = useRef<LocalMessage[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -240,6 +337,16 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   // flushed only on a clean `done` frame.
   const queuedPromptRef = useRef<string | null>(null);
   const [queued, setQueued] = useState<string | null>(null);
+
+  // Save-to-memory modal state (M7b). Open when a target message is set;
+  // submitting flag disables the modal's submit button + the per-message
+  // Save buttons so a double-click can't fire twice.
+  const [memoryTarget, setMemoryTarget] = useState<{
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+  } | null>(null);
+  const [savingMemory, setSavingMemory] = useState(false);
 
   // Seed + name from a lane Ask handoff. Captured on mount when no convo
   // is hydrated; doSend reads + clears them on the createConversation call
@@ -613,6 +720,15 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
         );
+
+        // Snapshot the just-completed turn's client ids BEFORE the queue
+        // flush. The queued follow-up appends new local user/assistant rows
+        // synchronously; without this snapshot the reconcile fetch's tail
+        // would be those new rows, and matching by role would mistakenly
+        // rewrite their client ids to the just-completed turn's persisted
+        // UUIDs — see PR #21 [P2] review.
+        const reconcileSnapshot = snapshotTurnForReconcile(messagesRef.current);
+
         // Clean `done` flushes the queue. Provider errors leave it parked so
         // the user can recover the prompt via the pill.
         const nextQueued = queuedPromptRef.current;
@@ -621,12 +737,22 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           setQueued(null);
           void doSendRef.current?.(nextQueued);
         }
-        // Pick up the server's auto-name write and bumped updatedAt.
+
+        // Pick up the server's auto-name write and bumped updatedAt, plus
+        // reconcile this turn's client-side message ids with the server's
+        // persisted UUIDs. Without the reconcile, /api/chat/:cid/messages/:mid/remember
+        // returns 404 for the just-finished turn because the server minted
+        // its own UUIDs in `handleChatRequest` and never echoed them in the
+        // wire frames (chat.ts:chatFrameSchema carries only chunk/error/done).
         const cid = conversationIdRef.current;
         if (cid) {
           void getConversation(cid)
             .then((conv) => {
-              if (conv) conversationsList.upsertLocal(conv);
+              if (!conv) return;
+              conversationsList.upsertLocal(conv);
+              if (reconcileSnapshot) {
+                setMessages((prev) => reconcileTurnIds(prev, conv.messages, reconcileSnapshot));
+              }
             })
             .catch(() => {
               // non-fatal — sidebar will catch up on next refresh
@@ -1116,6 +1242,34 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                         m.content
                       )}
                     </div>
+                    {/* Save-to-memory only on persisted, non-streaming, non-system
+                        messages. The server route looks up the id in
+                        ConversationStore; until the done-frame reconcile above
+                        swaps the client-side `newId()` for the persisted UUID,
+                        the lookup would 404. `isPersistedMessageId` is the gate. */}
+                    {m.role !== "system" &&
+                      !m.streaming &&
+                      m.content.trim().length > 0 &&
+                      conversationId !== null &&
+                      isPersistedMessageId(m.id) && (
+                        <div className="chat-message-actions">
+                          <button
+                            type="button"
+                            className="chat-message-action"
+                            title="Save this message to memory for review"
+                            disabled={savingMemory}
+                            onClick={() =>
+                              setMemoryTarget({
+                                id: m.id,
+                                role: m.role as "user" | "assistant",
+                                content: m.content,
+                              })
+                            }
+                          >
+                            ★ Save to memory
+                          </button>
+                        </div>
+                      )}
                   </div>
                 ))}
               </>
@@ -1218,6 +1372,47 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           <ToolsPopover popoverId={TOOLS_POPOVER_ID} tools={tools} />
         )}
       </div>
+
+      {memoryTarget !== null && conversationId !== null && (
+        <SaveToMemoryModal
+          open={true}
+          conversationId={conversationId}
+          messageId={memoryTarget.id}
+          role={memoryTarget.role}
+          initialContent={memoryTarget.content}
+          submitting={savingMemory}
+          onClose={() => setMemoryTarget(null)}
+          onSubmit={async (draft) => {
+            setSavingMemory(true);
+            try {
+              const verdict = await rememberChatMessage(conversationId, memoryTarget.id, draft);
+              if (verdict.status === "ok") {
+                toast.push({
+                  kind: "ok",
+                  message: "Saved to memory — review it in the Memory tab.",
+                });
+                setMemoryTarget(null);
+              } else if (verdict.status === "deduped") {
+                toast.push({
+                  kind: "info",
+                  message: "Already saved.",
+                });
+                setMemoryTarget(null);
+              } else {
+                toast.push({
+                  kind: "error",
+                  message: `Blocked: ${verdict.reason}. Try editing the content.`,
+                });
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              toast.push({ kind: "error", message: `Save failed: ${msg}` });
+            } finally {
+              setSavingMemory(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
