@@ -112,6 +112,53 @@ function newId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// Server-side message IDs are `crypto.randomUUID()` (36 chars, dashed) —
+// `newId()` is the local placeholder during a live turn. Id-driven endpoints
+// like `/api/chat/:cid/messages/:mid/remember` only resolve the UUID form;
+// the done-frame reconcile below swaps client IDs for the persisted ones
+// after a turn completes.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isPersistedMessageId(id: string): boolean {
+  return UUID_RE.test(id);
+}
+
+// Walk both arrays from the tail, swapping each local message's id for the
+// server's persisted id until we hit a local id that is already UUID-shaped
+// (meaning it was hydrated from server or reconciled by a prior turn).
+//
+// Client-only `system` rows (e.g. "stub provider started" emitted by the
+// in-process echo provider) sit between user/assistant turns but never
+// persist server-side, so skip them on the local index — otherwise the
+// role-mismatch check stops the walk before reaching the user message.
+// `hidden` kickoff user messages DO persist, so they stay in the walk.
+function reconcileMessageIds<T extends { id: string; role: string }>(
+  local: T[],
+  server: readonly { id: string; role: string }[],
+): T[] {
+  if (server.length === 0 || local.length === 0) return local;
+  let li = local.length - 1;
+  let si = server.length - 1;
+  let updated: T[] | null = null;
+  while (li >= 0 && si >= 0) {
+    const lm = local[li];
+    if (!lm) break;
+    if (lm.role === "system") {
+      li--;
+      continue;
+    }
+    const sm = server[si];
+    if (!sm || lm.role !== sm.role) break;
+    if (isPersistedMessageId(lm.id)) break;
+    if (lm.id !== sm.id) {
+      if (updated === null) updated = local.slice();
+      updated[li] = { ...lm, id: sm.id };
+    }
+    li--;
+    si--;
+  }
+  return updated ?? local;
+}
+
 // Order of preference: lastUsed → first registered favorite → Copilot → stub →
 // first provider's default. Returns null when no providers are registered.
 function pickInitialRef(
@@ -633,12 +680,19 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           setQueued(null);
           void doSendRef.current?.(nextQueued);
         }
-        // Pick up the server's auto-name write and bumped updatedAt.
+        // Pick up the server's auto-name write and bumped updatedAt, plus
+        // reconcile this turn's client-side message ids with the server's
+        // persisted UUIDs. Without this, /api/chat/:cid/messages/:mid/remember
+        // returns 404 for the just-finished turn because the server minted
+        // its own UUIDs in `handleChatRequest` and never echoed them in the
+        // wire frames (chat.ts:chatFrameSchema carries only chunk/error/done).
         const cid = conversationIdRef.current;
         if (cid) {
           void getConversation(cid)
             .then((conv) => {
-              if (conv) conversationsList.upsertLocal(conv);
+              if (!conv) return;
+              conversationsList.upsertLocal(conv);
+              setMessages((prev) => reconcileMessageIds(prev, conv.messages));
             })
             .catch(() => {
               // non-fatal — sidebar will catch up on next refresh
@@ -1129,29 +1183,32 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                       )}
                     </div>
                     {/* Save-to-memory only on persisted, non-streaming, non-system
-                        messages. The lookup at the server uses the message id we
-                        pass — that exists in ConversationStore once the turn has
-                        committed. Hidden roles (seed kickoffs) are filtered by
-                        visibleMessages above. */}
-                    {!m.streaming && m.content.trim().length > 0 && conversationId !== null && (
-                      <div className="chat-message-actions">
-                        <button
-                          type="button"
-                          className="chat-message-action"
-                          title="Save this message to memory for review"
-                          disabled={savingMemory}
-                          onClick={() =>
-                            setMemoryTarget({
-                              id: m.id,
-                              role: m.role === "system" ? "assistant" : m.role,
-                              content: m.content,
-                            })
-                          }
-                        >
-                          ★ Save to memory
-                        </button>
-                      </div>
-                    )}
+                        messages. The server route looks up the id in
+                        ConversationStore; until the done-frame reconcile above
+                        swaps the client-side `newId()` for the persisted UUID,
+                        the lookup would 404. `isPersistedMessageId` is the gate. */}
+                    {!m.streaming &&
+                      m.content.trim().length > 0 &&
+                      conversationId !== null &&
+                      isPersistedMessageId(m.id) && (
+                        <div className="chat-message-actions">
+                          <button
+                            type="button"
+                            className="chat-message-action"
+                            title="Save this message to memory for review"
+                            disabled={savingMemory}
+                            onClick={() =>
+                              setMemoryTarget({
+                                id: m.id,
+                                role: m.role === "system" ? "assistant" : m.role,
+                                content: m.content,
+                              })
+                            }
+                          >
+                            ★ Save to memory
+                          </button>
+                        </div>
+                      )}
                   </div>
                 ))}
               </>
