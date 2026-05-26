@@ -77,20 +77,9 @@ interface ArtifactRow {
   content: string;
 }
 
-// Tokenize for FTS5 by splitting on any codepoint that isn't a letter,
-// number, underscore, or hyphen. This:
-//   - treats whitespace AND separators (`/`, `.`, `:`, parens, etc.) as
-//     token boundaries, so a query like `apps/server/src/index.ts` becomes
-//     [apps, server, src, index, ts] rather than one un-matchable
-//     `appsserversrcindexts` mega-token
-//   - preserves non-ASCII letters via `\p{L}` (ASCII `\w` would strip
-//     `東京`, `é`, `你`, etc.)
-//   - removes anything FTS5 might parse as an operator (AND/OR/NOT/NEAR,
-//     parens, `*`, `:`), so user input can't smuggle query syntax
-// Each surviving token is wrapped in double quotes and joined with OR for
-// recall-oriented matching (FTS5's default is AND). Returns "" when nothing
-// tokenizable remains so callers can short-circuit before hitting the FTS
-// engine (which errors on empty queries).
+// Split on non-letter/digit codepoints (Unicode-aware) so path separators
+// become token boundaries and FTS5 operators in user input are stripped.
+// Quoted tokens joined with OR for recall-oriented matching.
 function buildFtsQuery(raw: string): string {
   const tokens = raw.split(/[^\p{L}\p{N}_-]+/u).filter((t) => t.length > 0);
   if (tokens.length === 0) return "";
@@ -327,17 +316,8 @@ export function createMemoryStore(db: Database): MemoryStore {
     );
   }
 
-  // Single SQL: filter on scope/lifecycle/inject policy/stale_after, optionally
-  // narrow by projectId and recency, and ORDER BY the same combined
-  // `abs(bm25) × recency_decay` score the JS layer normalizes to rankingScore.
-  // Sorting in SQL — before LIMIT — is what lets a fresher row out-rank a
-  // raw-BM25-better but older row at the page boundary; ordering only by
-  // bm25 here would drop those candidates before JS ever sees them.
-  // The (? IS NULL OR ...) pattern lets us prepare once even for optional
-  // filters — SQLite short-circuits when the sentinel is NULL.
-  // `max(0.0, julianday('now') - julianday(m.created_at))` mirrors the JS
-  // `Math.max(0, ...)` in daysSince() so future-dated timestamps are clamped
-  // to "now" (decay=1) instead of inflating the recency factor.
+  // ORDER BY the combined score before LIMIT — sorting by bm25 alone would
+  // drop fresh candidates at the page boundary that the JS layer can't recover.
   const recallSql = `
     SELECT
       m.id, m.type, m.summary, m.content, m.provenance,
@@ -394,13 +374,10 @@ export function createMemoryStore(db: Database): MemoryStore {
         }
       }
 
-      // bm25() returns negative scores (lower = better). Combine with the
-      // same recency decay SQL used in ORDER BY, then normalize across the
-      // page so rankingScore ∈ [0,1] as recallItemSchema requires. SQL
-      // already returns rows in descending combined order — no post-sort.
+      // SQL already returns rows in descending combined order; we only
+      // recompute the score here to normalize rankingScore into [0,1].
       const scored = rawRows.map((r) => {
-        const decay = recencyDecay(daysSince(r.created_at));
-        const combined = Math.abs(r.bm25_score) * decay;
+        const combined = Math.abs(r.bm25_score) * recencyDecay(daysSince(r.created_at));
         return { row: r, combined };
       });
       const maxCombined = scored.reduce((acc, s) => Math.max(acc, s.combined), 0);
@@ -509,11 +486,7 @@ export function createMemoryStore(db: Database): MemoryStore {
           });
 
           for (const sr of draft.sourceRefs) {
-            // M2's SourceRef wire shape is (kind, uri, title?, sourceTimestamp?);
-            // the M1 adjacency adds a separate `url` column that M2 doesn't
-            // surface. We write NULL there so the read path (which drops the
-            // column) stays symmetric — no silent data loss. A future schema
-            // bump can either repurpose `url` or drop it.
+            // url column is unused on read; write NULL to keep read/write symmetric.
             insertSourceRef.run(id, sr.kind, sr.uri, null);
           }
           for (const ar of draft.artifacts) {
