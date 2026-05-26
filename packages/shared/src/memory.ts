@@ -133,8 +133,10 @@ export const artifactSchema = z
 export type Artifact = z.infer<typeof artifactSchema>;
 
 // === Memory record ==========================================================
-// Read shape returned by GET /api/memory/:id and projected (trimmed) into
-// recallItemSchema.
+// Full read shape, projected (trimmed) into recallItemSchema for the recall
+// wire and reviewItemSchema for the review-queue wire. Not exposed
+// over HTTP directly — storage-internal fields (idempotencyKey, contentHash)
+// would leak through.
 
 const memoryBaseSchema = z
   .object({
@@ -403,6 +405,10 @@ export const reviewItemSchema = z
     provider: z.string().optional(),
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),
+    // Surfaced so the reviewer can see whether a pending row has already
+    // passed its TTL — the reviewer might still want to confirm it (the
+    // promotion is the explicit gesture) but should at least see the state.
+    staleAfter: z.string().datetime({ offset: true }).optional(),
   })
   .strict();
 export type ReviewItem = z.infer<typeof reviewItemSchema>;

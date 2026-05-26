@@ -42,13 +42,16 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const response = memoryStore.recall(parsed.data);
-    return c.json(response);
+    try {
+      return c.json(memoryStore.recall(parsed.data));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   // A writeback whose every draft is blocked or deduped still returns 200 —
   // the per-item verdict lives in the response body. HTTP status only fires
-  // on transport / schema failures.
+  // on transport / schema / unexpected-store failures.
   app.post("/api/memory/writeback", async (c) => {
     let body: unknown;
     try {
@@ -60,8 +63,11 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const response = memoryStore.writeback(parsed.data);
-    return c.json(response);
+    try {
+      return c.json(memoryStore.writeback(parsed.data));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   app.post("/api/memory/review", async (c) => {
@@ -75,28 +81,28 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const response = memoryStore.confirm(parsed.data);
-    return c.json(response);
+    try {
+      return c.json(memoryStore.confirm(parsed.data));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
-  // GET pending-list for M7. Numeric `limit` arrives as a string on the URL
-  // — coerce before schema parse so the validator sees the typed shape it
-  // expects. `cursor` opacity is opaque-by-base64; bad cursors throw
-  // InvalidCursorError from the store, surfaced here as a 400.
-  app.get("/api/memory/review", (c) => {
+  // GET pending-list for M7. `limit` arrives as a string — coerce to a
+  // number once so Zod (.int().positive().max(REVIEW_LIST_MAX_LIMIT)) gives
+  // a single, uniform error shape for every invalid limit (0, -1, 1.5, abc).
+  // `cursor` is opaque; the store throws InvalidCursorError for any payload
+  // that fails decode/shape/datetime validation, which we surface as 400.
+  app.get("/api/memory/review", async (c) => {
     const limitRaw = c.req.query("limit");
     const cursor = c.req.query("cursor");
     const scopeVisibility = c.req.query("scopeVisibility");
     const projectId = c.req.query("projectId");
 
     const queryShape: Record<string, unknown> = {};
-    if (limitRaw !== undefined) {
-      const limit = Number(limitRaw);
-      if (!Number.isFinite(limit)) {
-        return c.json({ error: "limit must be a positive integer" }, 400);
-      }
-      queryShape.limit = limit;
-    }
+    // Pass non-numeric strings straight through so Zod's coerced rejection
+    // (rather than NaN-via-Number) drives the error message.
+    if (limitRaw !== undefined) queryShape.limit = Number(limitRaw);
     if (cursor !== undefined) queryShape.cursor = cursor;
     if (scopeVisibility !== undefined) queryShape.scopeVisibility = scopeVisibility;
     if (projectId !== undefined) queryShape.projectId = projectId;
@@ -106,13 +112,16 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
       return c.json({ error: parsed.error.message }, 400);
     }
     try {
-      const response = memoryStore.listPending(parsed.data);
-      return c.json(response);
+      return c.json(memoryStore.listPending(parsed.data));
     } catch (err) {
       if (err instanceof InvalidCursorError) {
+        // Surfaced as 400 so a client can distinguish "your cursor is bad"
+        // from a real server fault. The log line gives operators a signal
+        // when a client is sending corrupted or forged cursors at volume.
+        console.warn(`[memory] invalid review cursor rejected: ${err.message}`);
         return c.json({ error: err.message }, 400);
       }
-      throw err;
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 }

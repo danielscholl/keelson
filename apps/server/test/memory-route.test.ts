@@ -18,6 +18,7 @@ import {
   type RecallResponse,
   type ReviewActionResponse,
   type ReviewListResponse,
+  reviewListResponseSchema,
   WRITEBACK_REQUEST_SCHEMA_VERSION,
   type WritebackResponse,
 } from "@keelson/shared";
@@ -236,6 +237,19 @@ describe("GET /api/memory/review", () => {
     expect(item.idempotencyKey).toBeUndefined();
     expect(item.contentHash).toBeUndefined();
     expect(item.memoryId).toBeDefined();
+    // Defense in depth: the response body must round-trip through the
+    // strict() schema. Catches future additive leaks the spot-check above
+    // would miss when a new column shows up in rowToReviewItem.
+    expect(reviewListResponseSchema.safeParse(body).success).toBe(true);
+  });
+
+  test("surfaces staleAfter when the row has one", async () => {
+    const memoryId = seedMemory();
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    db.prepare("UPDATE memories SET stale_after = ? WHERE id = ?").run(future, memoryId);
+    const res = await app.fetch(getJson("/api/memory/review"));
+    const body = (await res.json()) as ReviewListResponse;
+    expect(body.items[0].staleAfter).toBe(future);
   });
 
   test("limit + cursor paginate deterministically", async () => {
@@ -264,6 +278,19 @@ describe("GET /api/memory/review", () => {
 
   test("invalid cursor returns 400", async () => {
     const res = await app.fetch(getJson("/api/memory/review?cursor=not-base64-json"));
+    expect(res.status).toBe(400);
+  });
+
+  test("cursor with unparseable createdAt is rejected as 400", async () => {
+    // Regression: SQLite TEXT comparison is lexical, so a forged cursor with
+    // createdAt='foo' would compare against every ISO timestamp (which all
+    // start with a digit < 'f') and return the full pending queue. The
+    // store's datetime check must reject before the SQL ever runs.
+    seedMemory();
+    const forged = Buffer.from(JSON.stringify({ createdAt: "foo", id: "x" }), "utf8").toString(
+      "base64url",
+    );
+    const res = await app.fetch(getJson(`/api/memory/review?cursor=${forged}`));
     expect(res.status).toBe(400);
   });
 

@@ -36,8 +36,10 @@ export interface MemoryStore {
   // writebacks during pagination don't shuffle pages.
   listPending(query: ReviewListQuery): ReviewListResponse;
   // Debug/test helper. Returns the full Memory shape including storage-
-  // internal fields (idempotencyKey, contentHash) that the recall projection
-  // trims. Not surfaced over the wire in M3 — M4 routes will gate this.
+  // internal fields (idempotencyKey, contentHash) that the wire projections
+  // trim. Not surfaced over the wire — recall and the review queue read
+  // through their trimmed shapes; this method exists only for tests and
+  // direct script use.
   getById(id: string): Memory | undefined;
 }
 
@@ -201,12 +203,10 @@ function encodePendingCursor(c: PendingCursor): string {
 }
 
 function decodePendingCursor(raw: string): PendingCursor {
-  let json: string;
-  try {
-    json = Buffer.from(raw, "base64url").toString("utf8");
-  } catch {
-    throw new InvalidCursorError();
-  }
+  // Buffer.from(..., "base64url") is lenient — it never throws on garbage,
+  // it silently emits whatever bytes it can. The downstream JSON.parse +
+  // shape + datetime checks are the actual validation gate.
+  const json = Buffer.from(raw, "base64url").toString("utf8");
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -221,7 +221,15 @@ function decodePendingCursor(raw: string): PendingCursor {
   ) {
     throw new InvalidCursorError();
   }
-  return parsed as PendingCursor;
+  // Reject a non-parseable createdAt: SQLite TEXT comparison is lexical, so
+  // a payload like `{createdAt: "foo"}` would compare against every ISO
+  // timestamp (which all start with a digit < 'f') and return the entire
+  // page on the very first call. Parseable here is a necessary precondition.
+  const cursor = parsed as PendingCursor;
+  if (Number.isNaN(Date.parse(cursor.createdAt))) {
+    throw new InvalidCursorError("invalid cursor: createdAt is not a parseable datetime");
+  }
+  return cursor;
 }
 
 // Projection of MemoryRow → ReviewItem. Storage-internal fields
@@ -263,6 +271,7 @@ function rowToReviewItem(
     ...(row.provider !== null ? { provider: row.provider } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.stale_after !== null ? { staleAfter: row.stale_after } : {}),
   };
 }
 
@@ -670,11 +679,21 @@ export function createMemoryStore(db: Database): MemoryStore {
         whereClauses.push("(created_at < ? OR (created_at = ? AND id < ?))");
         args.push(cursor.createdAt, cursor.createdAt, cursor.id);
       }
+      // Explicit column list — matches the rest of the file and keeps the
+      // MemoryRow cast honest if a future migration adds a column.
       const sql = `
-        SELECT * FROM memories
-         WHERE ${whereClauses.join(" AND ")}
-         ORDER BY created_at DESC, id DESC
-         LIMIT ?
+        SELECT
+          id, type, summary, content, provenance,
+          use_policy_can_use_as_instruction, use_policy_can_use_as_evidence,
+          use_policy_requires_user_confirmation, use_policy_do_not_inject_automatically,
+          scope_project_id, scope_visibility, lifecycle, review_status,
+          content_hash, idempotency_key, confidence, runtime,
+          task_id, flow_id, model, provider,
+          created_at, updated_at, stale_after
+        FROM memories
+        WHERE ${whereClauses.join(" AND ")}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
       `;
       args.push(overFetch);
       const rows = db.prepare(sql).all(...args) as MemoryRow[];
