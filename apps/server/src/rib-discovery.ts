@@ -6,8 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { type Rib, ribDisplayNameSchema, ribIdSchema } from "@keelson/shared";
 
@@ -17,27 +16,44 @@ export interface DiscoverRibsOptions {
   root?: string;
 }
 
+// Hooks on the `Rib` contract that must be functions when present. Discovery
+// validates each before handing the candidate to `applyRibs`, which would
+// otherwise throw mid-bootstrap on `registerTools?.(ctx)` if a package
+// exported e.g. `registerTools: 42`.
+const HOOK_FIELDS = ["registerTools", "composeBundle", "dispose"] as const;
+
 // Walk `root`, dynamic-import each `rib-*` package's default export, and
 // return a manifest keyed by the rib's id (the directory suffix after `rib-`).
 // Every failure mode (missing root, malformed export, throwing import,
-// schema violation, id mismatch with package basename, duplicate id) warns
-// and skips — a single broken rib package must not prevent the rest from
-// activating, matching how `KEELSON_RIBS` typos are handled in `applyRibs`.
+// schema violation, non-function hook, id mismatch with package basename,
+// duplicate id) warns and skips — a single broken rib package must not
+// prevent the rest from activating, matching how `KEELSON_RIBS` typos are
+// handled in `applyRibs`.
 export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Record<string, Rib>> {
   const root = opts.root ?? join(process.cwd(), "node_modules", "@keelson");
-  let entries: Dirent[];
+  let names: string[];
   try {
-    entries = await readdir(root, { withFileTypes: true });
+    names = await readdir(root);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return {};
     throw err;
   }
   const out: Record<string, Rib> = {};
-  for (const dirent of entries) {
-    if (!dirent.isDirectory()) continue;
-    const name = dirent.name;
+  for (const name of names) {
     if (!name.startsWith("rib-")) continue;
+    const entry = join(root, name);
+    // `stat` follows symlinks, so Bun workspace installs (which symlink
+    // `node_modules/@keelson/rib-*` to the real package dir) resolve here.
+    let entryStat: Awaited<ReturnType<typeof stat>>;
+    try {
+      entryStat = await stat(entry);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] discovered '${name}': failed to stat (${msg}); skipping`);
+      continue;
+    }
+    if (!entryStat.isDirectory()) continue;
     const expectedId = name.slice("rib-".length);
     const idCheck = ribIdSchema.safeParse(expectedId);
     if (!idCheck.success) {
@@ -46,7 +62,6 @@ export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Reco
       );
       continue;
     }
-    const entry = join(root, name);
     let mod: { default?: unknown };
     try {
       mod = (await import(entry)) as { default?: unknown };
@@ -72,6 +87,15 @@ export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Reco
     if (!displayCheck.success) {
       console.warn(
         `[keelson] discovered '${name}': default export has invalid displayName; skipping`,
+      );
+      continue;
+    }
+    const badHook = HOOK_FIELDS.find(
+      (k) => candidate[k] !== undefined && typeof candidate[k] !== "function",
+    );
+    if (badHook) {
+      console.warn(
+        `[keelson] discovered '${name}': '${badHook}' is present but not a function; skipping`,
       );
       continue;
     }

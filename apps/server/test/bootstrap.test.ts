@@ -3,6 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   clearRegistry as clearProviderRegistry,
@@ -300,6 +302,26 @@ describe("bootstrapRibs", () => {
         discoveryRoot: join(fixtureRoot, "does-not-exist"),
       });
       expect(manifests).toEqual([]);
+    });
+
+    test("a rib whose declared hook is not a function is skipped", async () => {
+      process.env.KEELSON_RIBS = "bad-hook";
+      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      expect(manifests).toEqual([]);
+    });
+
+    test("a symlinked rib directory is followed and activated", async () => {
+      // Bun workspace installs link `node_modules/@keelson/rib-*` to the
+      // real package dir; discovery has to stat through the symlink.
+      process.env.KEELSON_RIBS = "test";
+      const tempRoot = await mkdtemp(join(tmpdir(), "keelson-discovery-"));
+      try {
+        await symlink(join(fixtureRoot, "rib-test"), join(tempRoot, "rib-test"), "dir");
+        const { manifests } = await bootstrapRibs({ discoveryRoot: tempRoot });
+        expect(manifests.map((m) => m.id)).toEqual(["test"]);
+      } finally {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
     });
   });
 });
