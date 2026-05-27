@@ -6,13 +6,10 @@ import type { ContentBlock, MessageChunk } from "@keelson/shared";
 
 // Accumulates a provider's streaming MessageChunk feed into the persisted
 // shape: a denormalized assistant text string + a structured ContentBlock[]
-// projection that survives reload. Used by chat-handler.ts on every turn and
-// by workflows-handler.ts to capture each prompt-node's structured output for
-// workflow_node_outputs.content_parts_json.
+// projection that survives reload.
 //
-// Thinking chunks are intentionally excluded from the persisted projection —
-// reasoning traces stay live-only (matches docs/agent-memory.md §"Write-back
-// guardrails" rule that reasoning never durably stores).
+// Thinking chunks are intentionally excluded — reasoning traces stay
+// live-only and never durably store.
 export interface ContentPartsAccumulator {
   ingest(chunk: MessageChunk): void;
   text(): string;

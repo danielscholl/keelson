@@ -13,13 +13,7 @@ import {
   bootstrapRibs,
   bootstrapWorkflows,
 } from "./bootstrap.ts";
-import {
-  chatRoutes,
-  chatWebSocketHandlers,
-  handleChatUpgrade,
-  isAllowedOrigin,
-  type WsData,
-} from "./chat-handler.ts";
+import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
 import { chatRememberRoutes } from "./chat-remember-handler.ts";
 import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, getCredential } from "./credentials.ts";
@@ -28,6 +22,7 @@ import { openDatabase } from "./db/init.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
 import { installRedactedConsole } from "./redact.ts";
+import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { createSnapshotManager } from "./snapshot-manager.ts";
 import { createSnapshotSubscribers } from "./snapshot-subscribers.ts";
 import {

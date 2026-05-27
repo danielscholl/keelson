@@ -16,8 +16,8 @@ import {
   setCredentialBodySchema,
 } from "@keelson/shared";
 import type { Hono } from "hono";
-import { isAllowedOrigin } from "./chat-handler.ts";
 import type { CredentialStore } from "./credentials.ts";
+import { isAllowedOrigin } from "./server-context.ts";
 
 export interface CredentialsRoutesDeps {
   // Optional — present only when Copilot is among the registered providers.

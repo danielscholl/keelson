@@ -8,11 +8,9 @@ import { existsSync } from "node:fs";
 import { defaultDbPath } from "../paths.ts";
 import type { CategoryResult, CheckResult } from "./types.ts";
 
-// Mirror the highest `version` in apps/server/src/db/migrations.ts. Doctor's
-// check warns when the on-disk DB lags this — the server runs pending
-// migrations on next start, so the remediation is `keelson serve`. If a new
-// migration lands, bump this and the assertion catches stale DBs.
-export const LATEST_MIGRATION_VERSION = 12;
+// Mirror the highest `version` in apps/server/src/db/migrations.ts; a binding
+// test in doctor.test.ts asserts the two stay in sync.
+export const LATEST_MIGRATION_VERSION = 4;
 
 interface SchemaRow {
   v: number | null;

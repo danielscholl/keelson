@@ -43,7 +43,7 @@ Keelson is a **local-only agent harness**, not a hosted service. The harness is 
 
 **State.** SQLite (sessions, runs, node outputs, memory rows) + keytar (credentials). Schema migrations live in `apps/server/src/db/migrations.ts`; `keelson doctor` checks `schema_version` matches.
 
-**Provider/tool determinism.** `KEELSON_WORKFLOW_PROVIDER` pins the provider workflows use for `prompt` nodes; `KEELSON_WORKFLOW_TOOL_DENYLIST` is an operator floor for per-node tool filtering. `KEELSON_USE_STUBS=1` hints ribs to use bundled fixtures.
+**Provider/tool determinism.** `KEELSON_WORKFLOW_PROVIDER` pins the provider workflows use for `prompt` nodes; `KEELSON_WORKFLOW_TOOL_DENYLIST` is an operator floor for per-node tool filtering. `KEELSON_USE_STUBS=1` is a test-only env var (CI + bun test setup) — no production code reads it.
 
 ## Comments
 

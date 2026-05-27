@@ -10,8 +10,8 @@ import {
   writebackRequestSchema,
 } from "@keelson/shared";
 import type { Context, Hono } from "hono";
-import { isAllowedOrigin } from "./chat-handler.ts";
 import { InvalidCursorError, type MemoryStore } from "./memory-store.ts";
+import { isAllowedOrigin } from "./server-context.ts";
 
 export interface MemoryRoutesDeps {
   memoryStore: MemoryStore;

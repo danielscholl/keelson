@@ -91,7 +91,7 @@ export type UsePolicy = z.infer<typeof usePolicySchema>;
 export const scopeSchema = z
   .object({
     projectId: z.string().min(1).optional(),
-    // `personal` does not surface in workflow recall — see PRD §Scope.
+    // `personal` does not surface in workflow recall.
     visibility: scopeVisibilitySchema,
   })
   .strict();
@@ -445,15 +445,9 @@ export const memoryListResponseSchema = z
   .strict();
 export type MemoryListResponse = z.infer<typeof memoryListResponseSchema>;
 
-// === Chat-side capture (M7b) ================================================
-// POST /api/chat/:cid/messages/:mid/remember — operator-initiated capture
-// of a chat message into memory. The server validates the message exists,
-// computes contentHash, builds the WritebackMemoryDraft, and delegates to
-// MemoryStore.writeback. Provenance defaults to `observed` (operator noted
-// something in the conversation); the review-queue Confirm action is what
-// promotes it to `user_confirmed` per the evidence-default invariant
-// (PRD §"Load-bearing invariants" #1).
-
+// Operator-initiated capture of a chat message into memory. Provenance
+// defaults to `observed`; the review-queue Confirm action is what promotes
+// it to `user_confirmed` — instruction promotion requires an explicit gesture.
 export const rememberChatMessageRequestSchema = z
   .object({
     type: memoryTypeSchema,

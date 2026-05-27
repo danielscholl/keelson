@@ -49,8 +49,7 @@ export const messageChunkSchema = z.discriminatedUnion("type", [
 export type MessageChunk = z.infer<typeof messageChunkSchema>;
 
 // Durable shape replayed on reload. Thinking blocks are excluded — reasoning
-// traces stay live-only, matching the memory layer's "no reasoning traces"
-// rule (docs/agent-memory.md §"Write-back guardrails").
+// traces stay live-only and never durably store.
 export const contentBlockSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }).strict(),
   z

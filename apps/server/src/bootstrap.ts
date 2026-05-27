@@ -111,7 +111,6 @@ export interface BootstrapRibsOptions {
   // each rib's `composeBundle`. Optional so unit tests for parseRibList /
   // applyRibs don't need to spin up a manager.
   snapshotManager?: SnapshotManager;
-  discoveryRoot?: string;
 }
 
 export interface RibBootstrap {
@@ -124,8 +123,7 @@ export interface RibBootstrap {
 
 export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
-  const discoveryOpts = options.discoveryRoot ? { root: options.discoveryRoot } : {};
-  const available = options.available ?? (await discoverRibs(discoveryOpts));
+  const available = options.available ?? (await discoverRibs());
   const active = requested.length > 0 ? requested : Object.keys(available);
   const snapshotManager = options.snapshotManager;
   const ctx: RibContext = {

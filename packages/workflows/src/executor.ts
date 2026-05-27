@@ -842,9 +842,8 @@ function computeRunStatus(
   cancelled: boolean,
 ): RunStatus {
   if (cancelled) return "cancelled";
-  // A node failure makes the run fail UNLESS it has a downstream node that
-  // completed under a rescuing trigger_rule. Encodes the PRD's "fail-fast
-  // unless a downstream trigger_rule says otherwise."
+  // A node failure fails the run UNLESS a downstream node completed under a
+  // rescuing trigger_rule — fail-fast unless a downstream rule says otherwise.
   for (const node of workflow.nodes) {
     if (nodeOutputs.get(node.id)?.state !== "failed") continue;
     const rescued = workflow.nodes.some((d) => {
