@@ -39,6 +39,7 @@ import {
 // flows ship.
 const OPENING_PROMPT = "__keelson_seeded_opening_prompt__";
 
+import { CommandCallBlock } from "../components/Chat/CommandCallBlock.tsx";
 import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";
 import { ModelChip } from "../components/Chat/ModelChip.tsx";
 import { ModelPickerPopover } from "../components/Chat/ModelPickerPopover.tsx";
@@ -46,6 +47,7 @@ import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { ReasoningEffortChip } from "../components/Chat/ReasoningEffortChip.tsx";
 import { ReasoningEffortPopover } from "../components/Chat/ReasoningEffortPopover.tsx";
+import { SlashCommandPopover } from "../components/Chat/SlashCommandPopover.tsx";
 import { ThinkingBlock } from "../components/Chat/ThinkingBlock.tsx";
 import { ThinkingChip } from "../components/Chat/ThinkingChip.tsx";
 import {
@@ -59,8 +61,23 @@ import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
+import {
+  filterSlashCommands,
+  isCommittedToCommand,
+  matchSlashCommand,
+  type SlashCommand,
+  type SlashCommandFamily,
+} from "../lib/slashCommands.ts";
 
-type Role = "user" | "assistant" | "system";
+type Role = "user" | "assistant" | "system" | "command";
+
+interface CommandCall {
+  command: string;
+  args: string;
+  family: SlashCommandFamily;
+  // Undefined while the dispatcher is in flight; populated on resolution.
+  result?: { ok: boolean; message: string };
+}
 
 interface LocalMessage {
   id: string;
@@ -68,6 +85,7 @@ interface LocalMessage {
   content: string;
   streaming?: boolean;
   toolCalls?: LiveToolCall[];
+  commandCall?: CommandCall;
   // Live-only Claude extended-thinking deltas; not persisted.
   thinking?: string;
   // Ended without a clean `done` (user abort or provider error).
@@ -81,6 +99,7 @@ interface LocalMessage {
 const MODEL_PICKER_POPOVER_ID = "chat-model-picker-popover";
 const PROJECT_PICKER_POPOVER_ID = "chat-project-picker-popover";
 const REASONING_EFFORT_POPOVER_ID = "chat-reasoning-effort-popover";
+const SLASH_PICKER_POPOVER_ID = "chat-slash-picker-popover";
 const TOOLS_POPOVER_ID = "chat-tools-popover";
 
 const DEFAULT_REASONING_EFFORT: ReasoningEffortLevel = "medium";
@@ -196,7 +215,7 @@ function reconcileTurnIds<T extends { id: string; role: string }>(
 function snapshotTurnForReconcile<T extends { id: string; role: string }>(
   local: T[],
 ): TurnReconcileSnapshot | null {
-  const nonSystem = local.filter((m) => m.role !== "system");
+  const nonSystem = local.filter((m) => m.role !== "system" && m.role !== "command");
   if (nonSystem.length === 0) return null;
   const lastAssistant = nonSystem[nonSystem.length - 1];
   const lastUser = nonSystem[nonSystem.length - 2];
@@ -235,6 +254,7 @@ const ROLE_LABEL: Record<Role, string> = {
   user: "You",
   assistant: "Assistant",
   system: "System",
+  command: "Command",
 };
 
 // Auth/sign-in errors get a sticky toast; everything else gets a normal one.
@@ -353,6 +373,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   // flushed only on a clean `done` frame.
   const queuedPromptRef = useRef<string | null>(null);
   const [queued, setQueued] = useState<string | null>(null);
+
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
 
   // Save-to-memory modal state. Open when a target message is set; the
   // submitting flag disables the modal's submit button + the per-message
@@ -1006,7 +1029,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   );
 
   const dispatchProjectCommand = useCallback(
-    async (rest: string): Promise<string> => {
+    async (rest: string): Promise<{ ok: boolean; message: string }> => {
       // Snapshot the conversation at dispatch time so async resolutions
       // don't clobber a chat the user started while the command was in
       // flight (e.g. a slow `/project <url>` clone).
@@ -1014,6 +1037,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       const trimmed = rest.trim();
       const tokens = trimmed.split(/\s+/).filter((t) => t.length > 0);
       const projects = projectList;
+
+      const ok = (message: string) => ({ ok: true, message });
+      const fail = (message: string) => ({ ok: false, message });
 
       const formatList = (list: Project[]): string => {
         if (list.length === 0) return "No projects yet.";
@@ -1030,7 +1056,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           .replace(/[^a-z0-9_-]+/g, "-")
           .replace(/^[-_]+|[-_]+$/g, "");
 
-      if (trimmed.length === 0) return formatList(projects);
+      if (trimmed.length === 0) return ok(formatList(projects));
 
       // URLs use only `tokens[0]` (with `tokens[1]` reserved for an
       // optional explicit name). Paths consume the entire rest-of-input so
@@ -1047,67 +1073,109 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         });
         await refreshProjects();
         switchActiveProject(project.id, startConvoId);
-        return `Cloned ${project.name} → ${project.rootPath}`;
+        return ok(`Cloned ${project.name} → ${project.rootPath}`);
       }
 
       if (isPath) {
         const rootPath = trimmed;
         const segs = rootPath.replace(/\/$/, "").split("/");
         const derived = slugifyName(segs[segs.length - 1] ?? "");
-        if (!derived) return "could not derive a project name from the path";
+        if (!derived) return fail("could not derive a project name from the path");
         const project = await createProject({ name: derived, rootPath });
         await refreshProjects();
         switchActiveProject(project.id, startConvoId);
-        return `Registered ${project.name} → ${project.rootPath}`;
+        return ok(`Registered ${project.name} → ${project.rootPath}`);
       }
 
       const head = tokens[0]!;
       if (head === "remove" && tokens[1]) {
         const target = projects.find((p) => p.name === tokens[1]);
-        if (!target) return `unknown project '${tokens[1]}'`;
+        if (!target) return fail(`unknown project '${tokens[1]}'`);
         await deleteProject(target.id);
         await refreshProjects();
         if (activeProjectId === target.id) switchActiveProject(null, startConvoId);
-        return `Removed ${target.name}`;
+        return ok(`Removed ${target.name}`);
       }
 
       if (head === "layout" && tokens[1] && tokens[2]) {
         const target = projects.find((p) => p.name === tokens[1]);
-        if (!target) return `unknown project '${tokens[1]}'`;
+        if (!target) return fail(`unknown project '${tokens[1]}'`);
         const layoutRaw = tokens[2];
         if (layoutRaw !== "workspace-scoped" && layoutRaw !== "repo-local") {
-          return `layout must be workspace-scoped or repo-local`;
+          return fail(`layout must be workspace-scoped or repo-local`);
         }
         const layout: WorktreeLayout = layoutRaw;
         const updated = await updateProject(target.id, { worktreeLayout: layout });
         await refreshProjects();
-        return `${updated.name} → ${updated.worktreeLayout}`;
+        return ok(`${updated.name} → ${updated.worktreeLayout}`);
       }
 
       if (head === "use" && tokens[1]) {
         const target = projects.find((p) => p.name === tokens[1]);
-        if (!target) return `unknown project '${tokens[1]}'`;
+        if (!target) return fail(`unknown project '${tokens[1]}'`);
         switchActiveProject(target.id, startConvoId);
-        return `Active project: ${target.name}`;
+        return ok(`Active project: ${target.name}`);
       }
 
-      return [
-        "Usage:",
-        "  /project                          list projects",
-        "  /project <url> [name]             clone a repo into the projects root",
-        "  /project <absolute-path>          register an existing local path",
-        "  /project remove <name>            remove a project",
-        "  /project layout <name> <mode>     workspace-scoped | repo-local",
-        "  /project use <name>               set active project",
-      ].join("\n");
+      return fail(
+        [
+          "Usage:",
+          "  /project                          list projects",
+          "  /project <url> [name]             clone a repo into the projects root",
+          "  /project <absolute-path>          register an existing local path",
+          "  /project remove <name>            remove a project",
+          "  /project layout <name> <mode>     workspace-scoped | repo-local",
+          "  /project use <name>               set active project",
+        ].join("\n"),
+      );
     },
     [activeProjectId, projectList, refreshProjects, switchActiveProject],
   );
 
+  const slashFilteredItems = useMemo(() => filterSlashCommands(input), [input]);
+  const slashHelpCommand = useMemo(() => matchSlashCommand(input), [input]);
+  const slashMode: "list" | "help" = isCommittedToCommand(input) ? "help" : "list";
+
+  // Open the picker when the user starts a slash command; close it as soon as
+  // the input stops starting with `/`. Keeping selectedIndex in range as the
+  // filter shrinks the candidate set.
+  useEffect(() => {
+    if (input.startsWith("/")) {
+      setSlashOpen(true);
+      setSlashSelectedIndex((idx) =>
+        slashFilteredItems.length === 0
+          ? 0
+          : Math.min(Math.max(idx, 0), slashFilteredItems.length - 1),
+      );
+    } else {
+      setSlashOpen(false);
+      setSlashSelectedIndex(0);
+    }
+  }, [input, slashFilteredItems.length]);
+
+  // Bridge React state to the native popover element. `manual` mode means the
+  // browser won't toggle it for us; we explicitly call show/hide here and on
+  // Escape from the textarea below.
+  useEffect(() => {
+    const popoverEl = document.getElementById(SLASH_PICKER_POPOVER_ID);
+    if (!popoverEl) return;
+    if (slashOpen && !popoverEl.matches(":popover-open")) {
+      popoverEl.showPopover();
+    } else if (!slashOpen && popoverEl.matches(":popover-open")) {
+      popoverEl.hidePopover();
+    }
+  }, [slashOpen]);
+
+  const onSlashSelect = useCallback((cmd: SlashCommand) => {
+    setInput(`/${cmd.name} `);
+    setSlashSelectedIndex(0);
+  }, []);
+
   const onSubmit = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || hydrating) return;
-    if (trimmed === "/project" || trimmed.startsWith("/project ")) {
+    const matched = matchSlashCommand(trimmed);
+    if (matched) {
       // Refuse while a turn is in flight — `switchActiveProject` clears the
       // active conversation, which would orphan a live WS stream.
       if (streaming) {
@@ -1122,25 +1190,45 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         return;
       }
       setInput("");
-      const rest = trimmed.slice("/project".length).trim();
-      // Snapshot at submit so a slow command resolving after the user has
-      // switched conversations doesn't append its system message to the
-      // unrelated transcript that's now active.
-      const submitConvoId = conversationIdRef.current;
-      setMessages((prev) => [...prev, { id: newId(), role: "system", content: `> ${trimmed}` }]);
-      void dispatchProjectCommand(rest)
-        .then((result) => {
-          if (conversationIdRef.current !== submitConvoId) return;
-          setMessages((prev) => [...prev, { id: newId(), role: "system", content: result }]);
-        })
-        .catch((err: unknown) => {
-          if (conversationIdRef.current !== submitConvoId) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          setMessages((prev) => [
-            ...prev,
-            { id: newId(), role: "system", content: `error: ${msg}` },
-          ]);
-        });
+      setSlashOpen(false);
+      const rest = trimmed.slice(`/${matched.name}`.length).trim();
+      if (matched.name === "project") {
+        const commandMessageId = newId();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: commandMessageId,
+            role: "command",
+            content: "",
+            commandCall: {
+              command: matched.name,
+              args: rest,
+              family: matched.family,
+            },
+          },
+        ]);
+        // The functional setMessages is the staleness guard: if the user
+        // switched conversations (messages reset) or the command message was
+        // otherwise dropped, the id won't be in `prev` and the map is a
+        // no-op. A conversation-id check would over-fire — a command issued
+        // before any chat existed (submitConvoId=null) and resolved after
+        // `doSend` created one would leave the row stuck running.
+        const patchResult = (result: { ok: boolean; message: string }) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === commandMessageId && m.commandCall
+                ? { ...m, commandCall: { ...m.commandCall, result } }
+                : m,
+            ),
+          );
+        };
+        void dispatchProjectCommand(rest)
+          .then(patchResult)
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            patchResult({ ok: false, message });
+          });
+      }
       return;
     }
     // Mid-turn: stash for auto-flush on clean `done`. Single-slot — a second
@@ -1165,12 +1253,37 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
 
   const onInputKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (slashOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSlashOpen(false);
+          return;
+        }
+        if (slashMode === "list" && slashFilteredItems.length > 0) {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setSlashSelectedIndex((idx) => Math.min(idx + 1, slashFilteredItems.length - 1));
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setSlashSelectedIndex((idx) => Math.max(idx - 1, 0));
+            return;
+          }
+          if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+            e.preventDefault();
+            const cmd = slashFilteredItems[slashSelectedIndex] ?? slashFilteredItems[0];
+            if (cmd) onSlashSelect(cmd);
+            return;
+          }
+        }
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         onSubmit();
       }
     },
-    [onSubmit],
+    [onSlashSelect, onSubmit, slashFilteredItems, slashMode, slashOpen, slashSelectedIndex],
   );
 
   // Switching provider via the picker is only reachable on a fresh chat —
@@ -1430,6 +1543,8 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                             </div>
                           )}
                         </>
+                      ) : m.role === "command" && m.commandCall ? (
+                        <CommandCallBlock commandCall={m.commandCall} />
                       ) : (
                         m.content
                       )}
@@ -1440,6 +1555,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                         swaps the client-side `newId()` for the persisted UUID,
                         the lookup would 404. `isPersistedMessageId` is the gate. */}
                     {m.role !== "system" &&
+                      m.role !== "command" &&
                       !m.streaming &&
                       m.content.trim().length > 0 &&
                       conversationId !== null &&
@@ -1578,6 +1694,15 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         {selectedProvider?.capabilities.tools === true && tools.length > 0 && (
           <ToolsPopover popoverId={TOOLS_POPOVER_ID} tools={tools} />
         )}
+
+        <SlashCommandPopover
+          popoverId={SLASH_PICKER_POPOVER_ID}
+          mode={slashMode}
+          items={slashFilteredItems}
+          selectedIndex={slashSelectedIndex}
+          helpCommand={slashHelpCommand}
+          onSelect={onSlashSelect}
+        />
       </div>
 
       {memoryTarget !== null && conversationId !== null && (

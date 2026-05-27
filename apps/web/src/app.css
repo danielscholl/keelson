@@ -890,6 +890,19 @@ button.tab:focus-visible {
   padding: 2px 4px;
 }
 
+/* Command messages let the inner .command-call-block carry the visual
+   frame — bubble stays neutral and the role label is hidden because the
+   block already shows the command name + family chip. */
+.chat-message.command .chat-bubble {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.chat-message.command .chat-role {
+  display: none;
+}
+
 /* F10.7b: marker on assistant bubbles whose turn ended without a clean
  * `done` (user abort or provider error). Sits below the content; deliberately
  * understated so it reads as metadata, not failure. */
@@ -2069,6 +2082,10 @@ button.tab:focus-visible {
   color: var(--muted);
 }
 
+.tool-source-project {
+  color: var(--accent);
+}
+
 .tool-calls-running-dot {
   display: inline-block;
   width: 6px;
@@ -2083,6 +2100,96 @@ button.tab:focus-visible {
 @keyframes tool-call-pulse {
   0%, 100% { opacity: 0.35; transform: scale(0.85); }
   50%      { opacity: 1;    transform: scale(1.1); }
+}
+
+/* Command-call block — chip-style rendering of slash command echoes and
+   their resolved results. Modeled on .tool-calls-block; reuses
+   .tool-source-chip and .tool-calls-running-dot / .tool-calls-error-badge
+   for the family tag and inline status indicators. */
+.command-call-block {
+  margin: 0;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.command-call-summary {
+  cursor: pointer;
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.command-call-summary::-webkit-details-marker { display: none; }
+.command-call-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+.command-call-block[open] > .command-call-summary::before {
+  transform: rotate(90deg);
+}
+
+.command-call-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.command-call-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.command-call-args {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.command-call-args-empty {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.command-call-result {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--accent, #5b9aff);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text, var(--muted));
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.command-call-result-error {
+  border-left-color: var(--danger, #e06666);
+  color: var(--danger, #e06666);
 }
 
 /* --- F10.4: Live thinking-summary render inside assistant chat bubbles -- */
@@ -2556,6 +2663,108 @@ button.tab:focus-visible {
   font-size: 12px;
   color: var(--muted);
   text-align: center;
+}
+
+/* Slash command picker — anchored above .chat-composer when the user types
+   `/`. Two modes: `list` shows filtered command rows; `help` shows a single
+   usage strip once the input has committed to a registered command. */
+.slash-popover {
+  position: fixed;
+  margin: 0;
+  inset: auto;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  width: max-content;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.slash-popover:not(:popover-open) {
+  display: none;
+}
+
+.slash-popover-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.slash-popover-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg);
+}
+
+.slash-popover-row:hover,
+.slash-popover-row[aria-selected="true"] {
+  background: rgba(155, 142, 255, 0.1);
+}
+
+.slash-popover-row-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.slash-popover-row-tag {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.slash-popover-row-desc {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.slash-popover-empty {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.slash-popover-help {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.slash-popover-help-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.slash-popover-help-usage {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 /* --- Credentials drawer (Phase 3.6 H2) --- */
@@ -6282,48 +6491,6 @@ button.tab:focus-visible {
   cursor: pointer; font-size: 12px; font-family: inherit;
 }
 .projects-item .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
-
-/* Start-composer project selector (slice 2). */
-.start-composer-target {
-  padding: 8px 12px 0;
-}
-.start-composer-target-label {
-  display: flex; flex-direction: column; gap: 4px;
-  font-size: 11px; color: var(--muted);
-  text-transform: uppercase; letter-spacing: 0.04em;
-}
-.start-composer-target-label select {
-  text-transform: none; letter-spacing: normal;
-  font-family: inherit; font-size: 12px;
-  padding: 5px 8px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg);
-  cursor: pointer;
-}
-.start-composer-target-label select:focus {
-  outline: none; border-color: var(--accent);
-}
-.start-composer-target-label select:disabled {
-  opacity: 0.6; cursor: not-allowed;
-}
-
-/* Per-run isolation checkbox inside the StartComposer. */
-.start-composer-isolation {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.start-composer-isolation input[type="checkbox"] {
-  margin: 0;
-  cursor: pointer;
-}
-.start-composer-isolation em {
-  color: var(--dim); font-style: italic;
-}
 
 /* RecentRuns: 6-column grid extended with a Project column. */
 .runs-table--with-project .runs-row {
