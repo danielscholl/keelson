@@ -344,10 +344,9 @@ nodes:
 
     const before = conversationStore.list().length;
     const res = await app.fetch(postRun("http://test/api/workflows/anything/runs", { inputs: {} }));
-    // Hono propagates the throw to a 500 (default error handler). We don't
-    // assert the body shape here — the point is the conversation should not
-    // have leaked into the store.
     expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("failed to create run");
     const after = conversationStore.list().length;
     expect(after).toBe(before);
   });

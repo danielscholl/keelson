@@ -586,7 +586,9 @@ export function workflowsRoutes(
           }`,
         );
       }
-      throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[workflows] createRun failed for ${name}: ${message}`);
+      return c.json({ error: `failed to create run: ${message}` }, 500);
     }
     const abort = new AbortController();
     // Per-run pending approval map. The approval handler awaits a Promise
