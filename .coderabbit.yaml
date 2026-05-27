@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Keelson uses Biome (see biome.json) for lint + format. CodeRabbit's default
+# ESLint hook can't find an eslint config and emits a "tool skipped" warning
+# on every PR — disable it explicitly so the noise stops. CodeRabbit's LLM
+# review and other tools still run unchanged.
+
+reviews:
+  tools:
+    eslint:
+      enabled: false
