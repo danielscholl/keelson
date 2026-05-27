@@ -183,18 +183,23 @@ export function createConversationStore(db: Database): ConversationStore {
     const groups = new Map<string, Message[]>();
     for (const id of ids) groups.set(id, []);
     if (ids.length === 0) return groups;
-    const placeholders = ids.map(() => "?").join(",");
-    const rows = db
-      .prepare(
-        `SELECT id, role, content, content_parts, truncated, createdAt, conversationId
-           FROM messages
-          WHERE conversationId IN (${placeholders})
-          ORDER BY conversationId, rowid ASC`,
-      )
-      .all(...ids) as (MessageRow & { conversationId: string })[];
-    for (const row of rows) {
-      const list = groups.get(row.conversationId);
-      if (list) list.push(rowToMessage(row));
+    // Chunked so the IN(?,…) parameter count never approaches SQLite's variable-count limit.
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(",");
+      const rows = db
+        .prepare(
+          `SELECT id, role, content, content_parts, truncated, createdAt, conversationId
+             FROM messages
+            WHERE conversationId IN (${placeholders})
+            ORDER BY conversationId, rowid ASC`,
+        )
+        .all(...chunk) as (MessageRow & { conversationId: string })[];
+      for (const row of rows) {
+        const list = groups.get(row.conversationId);
+        if (list) list.push(rowToMessage(row));
+      }
     }
     return groups;
   }

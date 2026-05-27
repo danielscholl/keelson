@@ -28,13 +28,13 @@ function readWorkflowsSource(relPath: string): string {
 describe("@keelson/workflows mirrors of shared wire constants", () => {
   test("RECALL_REQUEST_SCHEMA_VERSION literal matches", () => {
     const source = readWorkflowsSource("executor.ts");
-    const match = source.match(/RECALL_REQUEST_SCHEMA_VERSION\s*=\s*"([^"]+)"/);
+    const match = source.match(/RECALL_REQUEST_SCHEMA_VERSION\s*=\s*["']([^"']+)["']/);
     expect(match?.[1]).toBe(RECALL_REQUEST_SCHEMA_VERSION);
   });
 
   test("WRITEBACK_REQUEST_SCHEMA_VERSION literal matches", () => {
     const source = readWorkflowsSource("executor.ts");
-    const match = source.match(/WRITEBACK_REQUEST_SCHEMA_VERSION\s*=\s*"([^"]+)"/);
+    const match = source.match(/WRITEBACK_REQUEST_SCHEMA_VERSION\s*=\s*["']([^"']+)["']/);
     expect(match?.[1]).toBe(WRITEBACK_REQUEST_SCHEMA_VERSION);
   });
 
@@ -43,7 +43,7 @@ describe("@keelson/workflows mirrors of shared wire constants", () => {
     const block = source.match(/const memoryTypeSchema = z\.enum\(\[([\s\S]*?)\]\)/);
     const body = block?.[1] ?? "";
     expect(body.length).toBeGreaterThan(0);
-    const mirrored = Array.from(body.matchAll(/"([^"]+)"/g), (m) => m[1] ?? "");
+    const mirrored = Array.from(body.matchAll(/["']([^"']+)["']/g), (m) => m[1] ?? "");
     expect(mirrored).toEqual([...memoryTypeSchema.options]);
   });
 });

@@ -49,7 +49,7 @@ Keelson is a **local-only agent harness**, not a hosted service. The harness is 
 
 Comments live in source long after the PR that motivated them merges. Default to **none**. Only add a comment when it captures non-obvious **why** a future reader would need — a hidden constraint, a workaround for a specific bug, a non-obvious order dependency, an invariant from another module.
 
-- **One short line.** No multi-paragraph block comments. No bulleted explanations inside `/* */`.
+- **No multi-paragraph blocks or bulleted `/* */` explanations.** A single sentence soft-wrapped over two lines is fine; the rule targets verbose narration, not line count.
 - **No PR-point-in-time narration.** No "Codex flagged X, so we Y" / "Per CodeRabbit review…" / "Addresses #N" / "M5 wire shape evolved to…" — that content belongs in the commit message or PR body, not in source.
 - **No what-just-changed notes.** If a comment explains what this PR is doing, delete it and put it in the PR description.
 - **No restating the code.** Well-named identifiers do that; a comment that paraphrases the next line is noise.
