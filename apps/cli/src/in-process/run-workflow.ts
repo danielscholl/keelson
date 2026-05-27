@@ -218,13 +218,20 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const isolationOn =
     isolationMode === "worktree" ||
     (isolationMode === "auto" && workflow.worktree?.enabled === true);
+  // `worktree` is the operator's explicit flag — fail closed so a typo / non-git
+  // dir doesn't silently mutate the live checkout. `auto` means "honor the YAML
+  // default" — best-effort, fall back to in-place with a warning if the target
+  // isn't a git repo.
+  const isolationRequired = isolationMode === "worktree";
   let effectiveCwd = opts.cwd;
   let cleanupWorktree: { repoPath: string; dest: string } | null = null;
   if (isolationOn) {
     if (!(await isGitRepo(opts.cwd))) {
-      console.warn(
-        `[keelson] worktree isolation requested but ${opts.cwd} is not a git repo; running in place`,
-      );
+      const msg = `worktree isolation requested but ${opts.cwd} is not a git repo`;
+      if (isolationRequired) {
+        throw new Error(`${msg}. Initialize the directory with \`git init\` or drop --worktree.`);
+      }
+      console.warn(`[keelson] ${msg}; running in place`);
     } else {
       const branch = resolveBranchTemplate(workflow.worktree?.branch, {
         workflow: workflow.name,
@@ -242,6 +249,9 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         cleanupWorktree = { repoPath: opts.cwd, dest: created.worktreePath };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (isolationRequired) {
+          throw new Error(`worktree creation failed: ${message}`);
+        }
         console.warn(`[keelson] worktree creation failed; running in place: ${message}`);
       }
     }

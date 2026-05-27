@@ -80,7 +80,8 @@ export function projectsRoutes(app: Hono, opts: ProjectsHandlerOptions): void {
       if (err instanceof DuplicateProjectNameError) {
         return c.json({ error: err.message }, 409);
       }
-      throw err;
+      console.warn(`[projects] create failed: ${err instanceof Error ? err.message : String(err)}`);
+      return c.json({ error: "internal server error" }, 500);
     }
   });
 

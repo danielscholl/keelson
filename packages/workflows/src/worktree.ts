@@ -15,7 +15,7 @@
  * catalog; the worktree path is stored directly on the workflow_runs row.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -138,6 +138,22 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Creat
     throw new NotAGitRepoError(opts.repoPath);
   }
   if (existsSync(opts.dest)) {
+    const known = await listWorktrees(opts.repoPath);
+    const destReal = realpathSync(opts.dest);
+    const isRegistered = known.some((wt) => {
+      try {
+        return (
+          realpathSync(wt.path) === destReal && (wt.branch === null || wt.branch === opts.branch)
+        );
+      } catch {
+        return false;
+      }
+    });
+    if (!isRegistered) {
+      throw new WorktreeCreationError(
+        `destination exists but is not a registered worktree for this repo: ${opts.dest}`,
+      );
+    }
     return { worktreePath: opts.dest, branchCreated: false, adopted: true };
   }
   mkdirSync(dirname(opts.dest), { recursive: true });

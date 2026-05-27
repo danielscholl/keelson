@@ -55,10 +55,10 @@ export function StartComposer({
   useEffect(() => {
     setIsolated(yamlIsolationDefault === true);
   }, [yamlIsolationDefault]);
-  const canStart = !starting && selectedProjectId !== null && projects.length > 0;
+  const canStart = !starting && !!selectedProjectId && projects.length > 0;
 
   const submit = async () => {
-    if (!canStart || selectedProjectId === null) return;
+    if (!canStart || !selectedProjectId) return;
     // Only send the override when the user diverged from the YAML default,
     // so an unchanged checkbox doesn't pin the run's policy on the server.
     const isolation: "worktree" | "none" | null =

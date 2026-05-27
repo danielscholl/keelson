@@ -72,14 +72,15 @@ export function Workflows() {
         if (cancelled) return;
         setProjects(next);
         setSelectedProjectId((prev) => {
-          // Auto-select on first add or when the persisted choice is gone.
           if (prev && next.some((p) => p.id === prev)) return prev;
-          if (next.length === 1) return next[0]!.id;
-          // Stale id — the persisted project was removed and there's no
-          // single obvious replacement. Drop it so the StartComposer renders
-          // the "select a project…" placeholder; otherwise the Start button
-          // stays enabled with a target the server will reject.
-          return null;
+          const resolved = next.length === 1 ? next[0]!.id : null;
+          try {
+            if (resolved) localStorage.setItem(SELECTED_PROJECT_STORAGE_KEY, resolved);
+            else localStorage.removeItem(SELECTED_PROJECT_STORAGE_KEY);
+          } catch {
+            // Quota / disabled — best-effort persistence.
+          }
+          return resolved;
         });
       })
       .catch((err) => {

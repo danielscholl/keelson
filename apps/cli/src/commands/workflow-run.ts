@@ -129,12 +129,19 @@ function formatWorkflowFrame(frame: WorkflowFrame): string {
 // pass through unchanged so scripts that already cached an id keep working.
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+class ProjectNotFoundError extends Error {
+  constructor(nameOrId: string) {
+    super(`no project named '${nameOrId}'`);
+    this.name = "ProjectNotFoundError";
+  }
+}
+
 async function resolveProjectId(baseUrl: string, nameOrId: string): Promise<string> {
   if (UUID_PATTERN.test(nameOrId)) return nameOrId;
   const projects = await listProjects(baseUrl);
   const match = projects.find((p) => p.name === nameOrId);
   if (!match) {
-    throw new HttpError(404, `no project named '${nameOrId}'`);
+    throw new ProjectNotFoundError(nameOrId);
   }
   return match.id;
 }
@@ -331,6 +338,10 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
         ...(isolation !== undefined ? { isolation } : {}),
       });
     } catch (err) {
+      if (err instanceof ProjectNotFoundError) {
+        emit({ error: err.message, code: "PROJECT_NOT_FOUND" }, { json: opts.json });
+        process.exit(EXIT_NOT_FOUND);
+      }
       if (err instanceof HttpError && err.status === 404) {
         emit({ error: err.message, code: "WORKFLOW_NOT_FOUND" }, { json: opts.json });
         process.exit(EXIT_NOT_FOUND);

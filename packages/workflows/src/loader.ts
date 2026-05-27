@@ -668,7 +668,9 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     const raw = obj.worktree as Record<string, unknown>;
     const enabled = typeof raw.enabled === "boolean" ? raw.enabled : undefined;
     const branch =
-      typeof raw.branch === "string" && raw.branch.trim().length > 0 ? raw.branch : undefined;
+      typeof raw.branch === "string" && raw.branch.trim().length > 0
+        ? raw.branch.trim()
+        : undefined;
     if (enabled !== undefined || branch !== undefined) {
       worktreePolicy = {
         ...(enabled !== undefined ? { enabled } : {}),

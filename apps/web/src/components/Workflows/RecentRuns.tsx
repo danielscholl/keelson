@@ -220,7 +220,8 @@ export function RecentRuns({
         {rows.map((r) => {
           const openRun = () => onOpenRun(r.runId, r.workflowName);
           const project = r.projectId ? projectsById?.get(r.projectId) : undefined;
-          const projectLabel = project?.name ?? (r.workingDir ? "(adhoc)" : "—");
+          const projectLabel =
+            project?.name ?? (r.projectId ? "(deleted project)" : r.workingDir ? "(adhoc)" : "—");
           return (
             // The row is a <div role="button"> rather than a <button> so the
             // delete action inside can be a real nested <button> — nesting

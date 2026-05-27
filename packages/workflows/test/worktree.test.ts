@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -19,6 +19,7 @@ import {
   removeWorktree,
   repoPathFromWorktree,
   resolveBranchTemplate,
+  WorktreeCreationError,
   worktreePathFor,
 } from "../src/worktree.ts";
 
@@ -133,6 +134,15 @@ describe("createWorktree", () => {
     });
     expect(second.adopted).toBe(true);
     expect(second.worktreePath).toBe(dest);
+  });
+
+  test("throws WorktreeCreationError when dest exists but is not a registered worktree", async () => {
+    await initRepo(tmp);
+    const dest = join(tmp, ".wt", "unrelated");
+    mkdirSync(dest, { recursive: true });
+    await expect(
+      createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest }),
+    ).rejects.toBeInstanceOf(WorktreeCreationError);
   });
 });
 

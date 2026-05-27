@@ -55,10 +55,23 @@ function writeWorkflow(filename: string, body: string): void {
 }
 
 function postRun(url: string, body: unknown): Request {
+  // Auto-inject `workingDir: tmpDir` on /runs POSTs that don't already supply
+  // a target. The wire schema requires `projectId` or `workingDir` (see
+  // packages/shared/src/workflows.ts); these tests intentionally exercise the
+  // server's `defaultCwd: tmpDir` seam, but the schema rejects before the
+  // route sees the body. Centralizing the injection here keeps the test
+  // bodies focused on what they're asserting.
+  let finalBody = body;
+  if (url.endsWith("/runs") && body !== null && typeof body === "object" && !Array.isArray(body)) {
+    const obj = body as Record<string, unknown>;
+    if (!("projectId" in obj) && !("workingDir" in obj)) {
+      finalBody = { ...obj, workingDir: tmpDir };
+    }
+  }
   return new Request(url, {
     method: "POST",
     headers: { origin: ORIGIN, "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(finalBody),
   });
 }
 

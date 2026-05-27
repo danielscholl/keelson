@@ -110,6 +110,15 @@ describe("projects routes", () => {
 
   test("POST rejects requests with no/wrong origin", async () => {
     const { app } = makeRig();
+    const missingOrigin = await app.fetch(
+      new Request("http://test/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "x0", rootPath: tmpDir }),
+      }),
+    );
+    expect(missingOrigin.status).toBe(403);
+
     const res = await app.fetch(
       new Request("http://test/api/projects", {
         method: "POST",

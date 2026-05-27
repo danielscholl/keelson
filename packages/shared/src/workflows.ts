@@ -155,7 +155,11 @@ export const startWorkflowRunBodySchema = z
     workingDir: z.string().optional(),
     isolation: isolationOverrideSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => Boolean(v.projectId || v.workingDir), {
+    message: "either projectId or workingDir is required",
+    path: ["projectId"],
+  });
 export type StartWorkflowRunBody = z.infer<typeof startWorkflowRunBodySchema>;
 
 // POST /api/workflows/:name/runs response body.

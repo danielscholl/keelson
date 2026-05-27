@@ -26,7 +26,7 @@ export type Project = z.infer<typeof projectSchema>;
 // Names are used as filesystem path segments under `~/.keelson/worktrees/<name>/...`
 // so the allowed character set is conservative. 64 chars is generous for a
 // short handle and well under POSIX_PATH_MAX even after concatenation.
-export const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+export const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 export const createProjectBodySchema = z
   .object({
@@ -36,7 +36,7 @@ export const createProjectBodySchema = z
       .max(64)
       .regex(
         PROJECT_NAME_PATTERN,
-        "name must start with a letter or digit and contain only letters, digits, '-' or '_'",
+        "name must start with a lowercase letter or digit and contain only lowercase letters, digits, '-' or '_'",
       ),
     rootPath: z.string().min(1),
   })

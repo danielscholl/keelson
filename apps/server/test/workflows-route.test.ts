@@ -349,7 +349,7 @@ nodes:
     );
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/long/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/long/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
 
@@ -530,7 +530,7 @@ nodes:
       promptHandler,
     });
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/spwf/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/spwf/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     const run = (await pollUntilTerminal(app, runId)) as {
@@ -616,7 +616,7 @@ nodes:
     );
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/longprompt/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/longprompt/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     // Give the executor a tick to start the node and the provider to start emitting.
@@ -714,7 +714,7 @@ nodes:
     workflowsRoutes(app, { catalog, store, conversationStore, defaultCwd: tmpDir });
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/purgable/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/purgable/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilTerminal(app, runId);
@@ -797,7 +797,7 @@ nodes:
     );
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/slowpurge/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/slowpurge/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     await new Promise((r) => setTimeout(r, 75));
@@ -907,7 +907,7 @@ nodes:
       subscribers,
     );
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/instant/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/instant/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     // Wait for the run to fully terminate AND for activeRuns/subscribers to
@@ -1012,7 +1012,7 @@ nodes:
       subscribers,
     );
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/wsflow/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/wsflow/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     subscribers.subscribe(runId, fakeWs);
@@ -1256,7 +1256,9 @@ nodes:
       undefined,
       subscribers,
     );
-    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/pa/runs", { inputs: {}, workingDir: tmpDir }),
+    );
     const { runId } = (await startRes.json()) as { runId: string };
     subscribers.subscribe(runId, fakeWs);
     const pausedDeadline = Date.now() + 2000;
@@ -1522,7 +1524,7 @@ nodes:
 
     // Run 1 — writes to memory.
     const start1 = await app.fetch(
-      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {}, workingDir: tmpDir }),
     );
     expect(start1.status).toBe(200);
     const { runId: runId1 } = (await start1.json()) as { runId: string };
@@ -1545,7 +1547,7 @@ nodes:
     // that the in-process store sees a recall_trace row recorded by the
     // executor's pre-run hook.
     const start2 = await app.fetch(
-      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId: runId2 } = (await start2.json()) as { runId: string };
     const run2 = await pollUntilTerminal(app, runId2);
@@ -1626,7 +1628,7 @@ nodes:
     });
 
     const start = await app.fetch(
-      postRun("http://test/api/workflows/memory-invalid/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/memory-invalid/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await start.json()) as { runId: string };
     const run = await pollUntilTerminal(app, runId);

@@ -8,7 +8,7 @@
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, normalize } from "node:path";
 import {
   type ContentBlock,
   type IsolationOverride,
@@ -508,7 +508,11 @@ export function workflowsRoutes(
     let projectName: string | null = null;
     let workingDir: string;
     if (parsed.data.workingDir !== undefined && parsed.data.workingDir.trim().length > 0) {
-      workingDir = parsed.data.workingDir;
+      const raw = parsed.data.workingDir;
+      if (!isAbsolute(raw)) {
+        return c.json({ error: "workingDir must be an absolute path" }, 400);
+      }
+      workingDir = normalize(raw);
       projectId = parsed.data.projectId ?? null;
       if (projectId !== null && projectsStore) {
         const proj = projectsStore.get(projectId);
@@ -604,7 +608,7 @@ export function workflowsRoutes(
       pendingApprovals,
       isolation: isolationOn
         ? {
-            projectName: projectName ?? slugifyForPath(basename(workingDir)),
+            projectName: slugifyForPath(projectName ?? basename(workingDir)),
             branchTemplate,
             worktreeRoot,
           }
@@ -869,12 +873,11 @@ interface ExecuteRunArgs {
 // Used as the per-project bucket under ~/.keelson/worktrees/<slug>/ when the
 // run isn't tied to a named project.
 function slugifyForPath(s: string): string {
-  return (
-    s
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 64) || "workspace"
-  );
+  const slug = s
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return !slug || /^\.+$/.test(slug) ? "workspace" : slug;
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
