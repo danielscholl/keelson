@@ -5319,7 +5319,21 @@ button.tab:focus-visible {
   color: var(--accent); text-transform: uppercase;
   margin-bottom: 4px;
 }
-.wc-section-body { color: var(--muted); }
+/* Clamp at 5 lines so a long Does / Not for block doesn't blow the card
+   height out of grid alignment with neighbours; the full text is reachable
+   via the `title` attribute set in WorkflowCard.tsx. `cursor: help` is the
+   discovery cue that hover will surface more. */
+.wc-section-body {
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wc-section-body[title]:hover {
+  cursor: help;
+}
 .wc-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: auto; padding-top: 10px;
