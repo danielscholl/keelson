@@ -366,5 +366,21 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
     }
   }
 
+  // Named projects only exist in the server catalog. If the operator picked
+  // one explicitly and we got here (server down + no --base-url), the
+  // in-process path would silently target `process.cwd()` — the wrong tree
+  // for a mutating workflow. Surface NO_SERVER so scripted callers retry
+  // instead of trampling the caller's shell directory.
+  if (opts.project !== undefined) {
+    emit(
+      {
+        error: `--project '${opts.project}' requires the server (start \`keelson serve\`)`,
+        code: "NO_SERVER",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_NO_SERVER);
+  }
+
   return await runInProcess(name, inputs, opts, watch);
 }

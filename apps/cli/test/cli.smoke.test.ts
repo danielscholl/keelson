@@ -268,4 +268,22 @@ describe("keelson CLI smoke", () => {
     expect(envelope.ok).toBe(false);
     expect(envelope.code).toBe("NO_SERVER");
   });
+
+  test("workflow run --project requires the server (named projects live in the catalog)", async () => {
+    // Probe fails (no server in CI), so the in-process path would otherwise
+    // silently target process.cwd() — wrong tree for a mutating workflow.
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "workflow",
+      "run",
+      "any-workflow",
+      "--project",
+      "work-mono",
+    ]);
+    expect(exitCode).toBe(3);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.code).toBe("NO_SERVER");
+    expect(envelope.error).toContain("--project");
+  });
 });

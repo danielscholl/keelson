@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import { statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, normalize } from "node:path";
@@ -538,6 +539,19 @@ export function workflowsRoutes(
       return c.json({ error: "projectId or workingDir is required" }, 400);
     }
 
+    // Fail closed when the resolved target isn't a usable directory. Without
+    // this, a `--working-dir package.json` (file) or stale project root would
+    // pass schema validation, get a run row written, then crash the executor's
+    // pre-start worktree probe before the try/finally that closes the row out.
+    try {
+      const st = statSync(workingDir);
+      if (!st.isDirectory()) {
+        return c.json({ error: `workingDir is not a directory: ${workingDir}` }, 400);
+      }
+    } catch {
+      return c.json({ error: `workingDir does not exist: ${workingDir}` }, 400);
+    }
+
     // Resolve isolation policy: YAML default ⊕ per-run override. The override
     // wins when given; otherwise we use the workflow's `worktree.enabled`
     // (defaulting to false). The handler still does the git-repo probe later
@@ -913,11 +927,21 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // file between the executor returning and our cleanup running.
   let terminalStatus: WorkflowRunStatus | null = null;
   if (isolation !== null) {
-    if (!(await isGitRepo(cwd))) {
+    let isRepo = false;
+    let probeError: string | null = null;
+    try {
+      isRepo = await isGitRepo(cwd);
+    } catch (err) {
+      probeError = err instanceof Error ? err.message : String(err);
+    }
+    if (!isRepo) {
       subscribers.broadcast(runId, {
         type: "run_warning",
         nodeId: null,
-        message: `worktree isolation requested but ${cwd} is not a git repo; running in place`,
+        message:
+          probeError !== null
+            ? `worktree isolation probe failed; running in place: ${probeError}`
+            : `worktree isolation requested but ${cwd} is not a git repo; running in place`,
       });
     } else {
       const branch = resolveBranchTemplate(isolation.branchTemplate, {

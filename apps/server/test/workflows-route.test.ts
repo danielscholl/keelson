@@ -486,6 +486,49 @@ nodes:
     expect(body.error).toContain("projectId or workingDir");
   });
 
+  test("POST .../runs rejects workingDir pointing at a file (not a directory)", async () => {
+    writeWorkflow(
+      "to-file.yaml",
+      `name: to-file
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const filePath = join(tmpDir, "not-a-dir.txt");
+    writeFileSync(filePath, "marker");
+    const { app } = makeRig();
+    const res = await app.fetch(
+      postRun("http://test/api/workflows/to-file/runs", { inputs: {}, workingDir: filePath }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not a directory");
+  });
+
+  test("POST .../runs rejects workingDir that does not exist", async () => {
+    writeWorkflow(
+      "to-missing.yaml",
+      `name: to-missing
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const { app } = makeRig();
+    const res = await app.fetch(
+      postRun("http://test/api/workflows/to-missing/runs", {
+        inputs: {},
+        workingDir: join(tmpDir, "does-not-exist"),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("does not exist");
+  });
+
   test("injected prompt handler — node succeeds end-to-end and contentParts persists", async () => {
     writeWorkflow(
       "spwf.yaml",
