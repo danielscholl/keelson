@@ -111,12 +111,7 @@ function recordEvents(): { events: RunStreamEvent[]; onEvent: (e: RunStreamEvent
   return { events, onEvent: (e) => events.push(e) };
 }
 
-// Test-only fixtures live under packages/workflows/test/fixtures/. They used
-// to ship as bundled workflows in .keelson/workflows/ but were pruned out of
-// the user-facing catalog when v0.3 closed — they're still useful here as
-// DAG-shape coverage (hello-world: single layer; status-report: sequential;
-// classify-changes: conditional fan-out) without leaking into the SPA's
-// workflow picker.
+// DAG-shape fixtures: hello-world (single layer), status-report (sequential), classify-changes (conditional fan-out).
 function loadStarter(name: string): WorkflowDefinition {
   const root = join(import.meta.dir, "..", "test", "fixtures", `${name}.yaml`);
   const yaml = readFileSync(root, "utf-8");
@@ -1539,9 +1534,7 @@ import { makeCommandHandler } from "./handlers/command.ts";
 import { makeLoopHandler } from "./handlers/loop.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
 
-// Bundled smoke-test is Bun-only — no `runtime: uv` nodes since the
-// python-smoke-test fixture was pruned with the v0.3 close — so this suite
-// runs unconditionally.
+// Bundled smoke-test is Bun-only (no `runtime: uv` nodes), so this suite runs unconditionally.
 describe("runWorkflow — smoke-test (every node type)", () => {
   test("all active nodes succeed and the final assert prints PASS", async () => {
     const workflow = loadBundled("smoke-test");
@@ -1601,7 +1594,7 @@ describe("runWorkflow — smoke-test (every node type)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// M5 — memory: block
+// memory: block
 // ---------------------------------------------------------------------------
 
 interface RecallCallRecord {
@@ -1651,10 +1644,10 @@ function mockMemory(
   return { tools, recalls, writebacks };
 }
 
-describe("runWorkflow — memory: block (M5)", () => {
+describe("runWorkflow — memory: block", () => {
   const promptWorkflowYaml = (memoryBlock: string, body = "Body: $memory.recall.items") => `
 name: memory-recall-test
-description: M5 inline fixture
+description: memory block inline fixture
 nodes:
   - id: think
     prompt: |
@@ -1814,12 +1807,9 @@ nodes:
   });
 
   test("writeback task.taskId is qualified by workflow name (cross-workflow dedup safety)", async () => {
-    // The M3 store derives its per-row dedupe key from
-    // `${task.runtime}:${task.taskId}:${type}:${contentHash}` — flowId and
-    // the envelope idempotencyKey are excluded. If taskId were just the
-    // node id, two different workflows with the same node id + content
-    // would collide. The executor qualifies taskId with the workflow name
-    // to avoid that.
+    // Per-row dedupe key is `${task.runtime}:${task.taskId}:${type}:${contentHash}` — flowId
+    // and the envelope idempotencyKey are excluded. The executor qualifies taskId with the
+    // workflow name so two workflows sharing a node id + content can't collide.
     const workflow = parseInline(`
 name: alpha-workflow
 description: test
@@ -2154,11 +2144,9 @@ nodes:
   });
 
   test("ctx.memory exposes the adapter so custom handlers can call recall/writeback imperatively", async () => {
-    // Codex-flagged: NodeContext.memory was declared on the type but the
-    // executor only forwarded memoryRecall, leaving ctx.memory undefined
-    // even when RunOptions.memoryTools was wired. Handlers that need
-    // imperative access (M6 rib tools, ad-hoc recall in a loop) must see
-    // the same adapter the declarative hooks use.
+    // ctx.memory must surface the same adapter the declarative hooks use, so handlers
+    // doing imperative recall/writeback (rib tools, ad-hoc loops) see a wired tools object,
+    // not undefined, when RunOptions.memoryTools is set.
     const workflow = parseInline(`
 name: ctx-memory-tools
 description: test

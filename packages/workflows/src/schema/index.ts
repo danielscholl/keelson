@@ -69,7 +69,7 @@ export type {
   NodeMemoryRecall,
   NodeMemoryWriteback,
 } from "./memory-block.ts";
-// Memory block (M5)
+// Memory block
 export {
   nodeMemoryBlockSchema,
   nodeMemoryRecallSchema,

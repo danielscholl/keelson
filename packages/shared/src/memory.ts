@@ -55,8 +55,7 @@ export const reviewStatusSchema = z.enum([
 ]);
 export type ReviewStatus = z.infer<typeof reviewStatusSchema>;
 
-// Imperative form posted to the M7 review-queue endpoint. The terminal
-// review_status the action drives is in reviewStatusSchema above.
+// Imperative form posted to the review-queue endpoint. Terminal review_status is in reviewStatusSchema above.
 export const reviewActionKindSchema = z.enum([
   "confirm",
   "evidence_only",
@@ -67,8 +66,8 @@ export const reviewActionKindSchema = z.enum([
 ]);
 export type ReviewActionKind = z.infer<typeof reviewActionKindSchema>;
 
-// Provenances that may be promoted to instruction — kept as a named export so
-// the M7 UI and the M3 service layer read the same intent the DB CHECK does.
+// Provenances eligible for promotion to instruction — exported so the UI and service layer
+// share one source of truth with the DB CHECK constraint.
 export const INSTRUCTION_ELIGIBLE_PROVENANCES: readonly Provenance[] = [
   "user_confirmed",
   "imported",
@@ -76,10 +75,9 @@ export const INSTRUCTION_ELIGIBLE_PROVENANCES: readonly Provenance[] = [
 
 // === Building blocks ========================================================
 
-// Wire surface uses camelCase booleans; the M1 storage layer maps to 0/1
-// INTEGER columns. The instruction-promotion gate is enforced on
-// memorySchema below, not here, so partial-shape callers (drafts, patches)
-// can compose this without tripping the cross-field check.
+// Wire surface uses camelCase booleans; storage maps to 0/1 INTEGER columns.
+// The instruction-promotion gate lives on memorySchema below, not here, so partial-shape
+// callers (drafts, patches) can compose this without tripping the cross-field check.
 export const usePolicySchema = z
   .object({
     canUseAsInstruction: z.boolean(),
@@ -216,10 +214,9 @@ export const recallRequestSchema = z
   .strict();
 export type RecallRequest = z.infer<typeof recallRequestSchema>;
 
-// Trimmed projection of memorySchema — enough for the agent to cite the
-// recalled item without leaking storage-internal fields like
-// idempotencyKey or contentHash. `rankingScore` is the BM25 + recency +
-// scope-weighted score from the M3 retrieval pass.
+// Trimmed projection of memorySchema — enough to cite a recalled item without leaking
+// storage-internal fields (idempotencyKey, contentHash). `rankingScore` is the BM25 + recency +
+// scope-weighted score from retrieval.
 export const recallItemSchema = z
   .object({
     memoryId: z.string().min(1),
@@ -257,18 +254,13 @@ export type RecallResponse = z.infer<typeof recallResponseSchema>;
 export const WRITEBACK_REQUEST_SCHEMA_VERSION = "keelson.memory.writeback.v1" as const;
 export const WRITEBACK_RESPONSE_SCHEMA_VERSION = "keelson.memory.writeback_response.v1" as const;
 
-// PRD §Write-back guardrails caps summary/content at 4 KB. Cap here is on
-// JavaScript string length (UTF-16 code units); the true byte cap is
-// re-checked in the M3 service layer before insert.
+// Cap on JS string length (UTF-16 code units). The byte-floor (defense in depth) is re-checked
+// in the service layer before insert — see memory-guardrails.ts.
 export const MEMORY_TEXT_LIMIT = 4096 as const;
 
-// Provenances an agent writeback may produce. Excludes `user_confirmed` and
-// `imported` (only the review-queue and import paths create those) and
-// excludes `superseded` / `disputed` (lifecycle transitions, not initial
-// states). The evidence-default invariant (PRD §"Load-bearing invariants"
-// #1) means none of these are instruction-eligible — promotion always
-// requires a review action, even if the service blindly trusted the value
-// on the wire.
+// Provenances an agent writeback may produce. Excludes user_confirmed/imported (review-queue + import paths only)
+// and lifecycle transitions (superseded, disputed). None of these are instruction-eligible — evidence-default
+// requires a review action to promote, regardless of what the wire value claims.
 export const writebackProvenanceSchema = z.enum(["observed", "inferred", "generated"]);
 export type WritebackProvenance = z.infer<typeof writebackProvenanceSchema>;
 
@@ -277,11 +269,9 @@ export const writebackMemoryDraftSchema = z
     type: memoryTypeSchema,
     summary: z.string().min(1).max(MEMORY_TEXT_LIMIT),
     content: z.string().min(1).max(MEMORY_TEXT_LIMIT),
-    // SHA256 of the normalized content, computed by the agent. The M3
-    // storage layer derives each row's UNIQUE `idempotency_key` as
-    // `{task.runtime}:{task.taskId}:{type}:{contentHash}`, so the hash
-    // must live on the draft (not the envelope) for multi-memory writebacks
-    // to stay distinct when type and task match.
+    // SHA256 of normalized content. Storage derives each row's UNIQUE idempotency_key as
+    // `{task.runtime}:{task.taskId}:{type}:{contentHash}`, so the hash must live on the draft
+    // (not the envelope) for multi-memory writebacks to stay distinct when type + task match.
     contentHash: z.string().min(1),
     provenance: writebackProvenanceSchema.default("generated"),
     sourceRefs: z.array(sourceRefSchema).default([]),
@@ -351,7 +341,7 @@ export const writebackResponseSchema = z
 export type WritebackResponse = z.infer<typeof writebackResponseSchema>;
 
 // === Review action ==========================================================
-// M7's review queue posts this to advance review_status / lifecycle.
+// Posted by the review queue to advance review_status / lifecycle.
 
 export const reviewActionRequestSchema = z
   .object({
@@ -363,10 +353,8 @@ export const reviewActionRequestSchema = z
   .strict();
 export type ReviewActionRequest = z.infer<typeof reviewActionRequestSchema>;
 
-// `applied: false` is the silent-no-op shape the store returns for an
-// unknown memoryId — matches `ConversationStore.delete`. M7 uses it to
-// distinguish "review row vanished between list and confirm" from a real
-// state transition.
+// `applied: false` is the silent-no-op shape for an unknown memoryId — matches `ConversationStore.delete`.
+// The review UI uses it to distinguish "row vanished between list and confirm" from a real state transition.
 export const reviewActionResponseSchema = z
   .object({
     applied: z.boolean(),
@@ -375,11 +363,9 @@ export const reviewActionResponseSchema = z
 export type ReviewActionResponse = z.infer<typeof reviewActionResponseSchema>;
 
 // === Review queue (pending list) ============================================
-// GET /api/memory/review surface for the M7 review tab. Deliberately a
-// trimmed projection of Memory that drops storage-internal fields
-// (`idempotencyKey`, `contentHash`) so an HTML view of the queue never
-// surfaces the dedupe key publicly. Lifecycle + reviewStatus are added back
-// because the reviewer needs to see the state they're about to advance.
+// Trimmed projection of Memory for the review surface — drops storage-internal fields
+// (idempotencyKey, contentHash) so the dedupe key never surfaces publicly. Lifecycle and
+// reviewStatus are added back; the reviewer needs to see what they're about to advance.
 
 export const REVIEW_LIST_DEFAULT_LIMIT = 50 as const;
 export const REVIEW_LIST_MAX_LIMIT = 200 as const;
@@ -435,10 +421,8 @@ export const reviewListResponseSchema = z
 export type ReviewListResponse = z.infer<typeof reviewListResponseSchema>;
 
 // === Memory list (browsable, non-pending view) ===============================
-// GET /api/memory/list — the M7 "All memories" sub-tab. Same projection as
-// reviewItemSchema (storage-internal fields trimmed) but the query supports
-// optional reviewStatus / lifecycle filters so the operator can browse
-// confirmed, evidence-only, restricted, rejected, or stale rows in addition
+// Same projection as reviewItemSchema with optional reviewStatus / lifecycle filters so the
+// operator can browse confirmed, evidence-only, restricted, rejected, or stale rows in addition
 // to pending. Cursor encodes (createdAt, id) — same shape as reviewListQuery.
 
 export const memoryListQuerySchema = z
@@ -499,9 +483,7 @@ export const rememberChatMessageResponseSchema = z.discriminatedUnion("status", 
 export type RememberChatMessageResponse = z.infer<typeof rememberChatMessageResponseSchema>;
 
 // === Runtime handle =========================================================
-// The workflow executor's `RunOptions.memoryTools` and `NodeContext.memory`
-// bind to this. M5 wires recall (pre-run) and writeback (post-run); M6
-// widens the surface with `confirm` for rib agent-tool exposure.
+// The workflow executor's `RunOptions.memoryTools` and `NodeContext.memory` bind to this.
 
 export interface MemoryTools {
   recall(req: RecallRequest): Promise<RecallResponse>;

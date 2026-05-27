@@ -337,11 +337,8 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
     if (isCancelNode(node)) {
       sources.push({ text: node.cancel, label: "cancel", allowReservedNamespace: true });
     }
-    // M5 — memory templates also flow through resolveBody before being
-    // sent to the recall/writeback service, so $nodeId.output refs there
-    // need the same parse-time validation. Without this, a typo like
-    // `$mising.output` silently resolves to "" at runtime and the recall
-    // query / writeback content is wrong without any signal.
+    // Memory templates flow through resolveBody too — parse-time-validate $nodeId.output refs
+    // there so a typo doesn't silently expand to "" at runtime.
     if (node.memory !== undefined) {
       const mem = node.memory;
       if (mem.recall?.query !== undefined) {

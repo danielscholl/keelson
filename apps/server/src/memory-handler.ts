@@ -98,11 +98,8 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     }
   });
 
-  // GET pending-list for M7. `limit` arrives as a string — coerce to a
-  // number once so Zod (.int().positive().max(REVIEW_LIST_MAX_LIMIT)) gives
-  // a single, uniform error shape for every invalid limit (0, -1, 1.5, abc).
-  // `cursor` is opaque; the store throws InvalidCursorError for any payload
-  // that fails decode/shape/datetime validation, which we surface as 400.
+  // Coerce `limit` once so Zod yields a single error shape for every invalid limit (0, -1, 1.5, abc).
+  // `cursor` is opaque; the store throws InvalidCursorError, which we surface as 400.
   app.get("/api/memory/review", async (c) => {
     const limitRaw = c.req.query("limit");
     const cursor = c.req.query("cursor");
@@ -135,10 +132,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     }
   });
 
-  // GET /api/memory/list — browsable view across review statuses + lifecycles.
-  // Backs the M7 "All memories" sub-tab; the existing /api/memory/review
-  // endpoint stays pinned to review_status='pending'. Filters are optional;
-  // unset = no filter.
+  // Browsable view across review statuses + lifecycles; /api/memory/review stays pinned to pending.
   app.get("/api/memory/list", async (c) => {
     const limitRaw = c.req.query("limit");
     const cursor = c.req.query("cursor");

@@ -9,3 +9,12 @@ reviews:
   tools:
     eslint:
       enabled: false
+
+  # CONTRIBUTING.md sets a "no-narration" comment policy: add a comment only
+  # when it captures non-obvious why. CodeRabbit's docstring-coverage check
+  # (default 80%) pushes the opposite direction, so turn it off. Voluntary
+  # TSDoc on @keelson/shared public exports is still welcome when an export
+  # is touched — just not coverage-driven.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"

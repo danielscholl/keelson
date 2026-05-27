@@ -38,7 +38,7 @@ describe("runHeadless (in-process executor)", () => {
     expect(promise).rejects.toThrow(/no workflow named/);
   });
 
-  test("memory-bearing workflow refused with MemoryRequiresServerError (M5)", async () => {
+  test("memory-bearing workflow refused with MemoryRequiresServerError", async () => {
     const promise = runHeadless({
       name: "memory-required",
       inputs: {},

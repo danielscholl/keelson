@@ -13,9 +13,8 @@ export interface GuardrailVerdict {
   reason: WritebackBlockedReason;
 }
 
-// Byte-length floor. The M2 wire schema already caps summary/content at 4096
-// UTF-16 code units; this byte cap is defense in depth — emoji-heavy content
-// passes the code-unit check but can exceed the storage budget.
+// Byte cap is defense-in-depth on top of the 4096-code-unit wire schema cap —
+// emoji-heavy content passes the code-unit check but can still exceed the storage budget.
 export const MEMORY_BYTE_LIMIT = 8192 as const;
 
 // Invariant #4 in #10: source references, not raw content. For types whose

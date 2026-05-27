@@ -539,13 +539,13 @@ describe("discoverWorkflows", () => {
 });
 
 // ---------------------------------------------------------------------------
-// M5 — memory: block
+// memory: block
 // ---------------------------------------------------------------------------
 
-describe("parseWorkflow — memory: block (M5)", () => {
+describe("parseWorkflow — memory: block", () => {
   test("valid memory block on a prompt node parses successfully", () => {
     const yaml = `
-name: m5
+name: memory-block-test
 description: test
 nodes:
   - id: think

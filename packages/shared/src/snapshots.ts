@@ -8,9 +8,8 @@
 
 import { z } from "zod";
 
-// Wire frame the snapshot WS broadcasts on each recompose. Single-type union
-// for v0.2 — a future error/invalidated frame can be added as a discriminator
-// without breaking existing clients.
+// Wire frame the snapshot WS broadcasts on each recompose. Single-type union for now;
+// adding error/invalidated frames later is non-breaking via the existing discriminator.
 export const snapshotFrameSchema = z
   .object({
     type: z.literal("snapshot_update"),

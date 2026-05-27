@@ -1,21 +1,10 @@
-/**
- * Per-node `memory:` block — declarative recall (pre-run) and writeback
- * (post-run) hooks for the M5 workflow memory integration.
- *
- * The enums below mirror `@keelson/shared/memory.ts` (memoryType, scope kind,
- * source-ref shape). They are intentionally duplicated rather than imported
- * because `@keelson/workflows` keeps its dep graph free of `@keelson/shared`
- * (same boundary discipline as `PromptHandlerProvider` and `MemoryTools` in
- * executor.ts). The constraints applied here must match the shared wire
- * schema byte-for-byte — drift means a workflow parses at load time and
- * then fails at the server adapter's Zod re-parse, which is a worse author
- * experience than a deterministic load-time error.
- *
- * Evidence-default invariant (PRD #10, load-bearing rule #1): the writeback
- * block intentionally does NOT expose `provenance`. The executor hard-codes
- * `provenance: "generated"` when building the wire envelope, so a workflow
- * author cannot opt out of evidence-default by writing a different value.
- */
+// Per-node `memory:` block — declarative recall (pre-run) and writeback (post-run) hooks.
+// Enums mirror `@keelson/shared/memory.ts` but are duplicated, not imported, so `@keelson/workflows`
+// stays free of a `@keelson/shared` dep. Constraints must match the shared wire schema byte-for-byte;
+// drift causes a workflow to parse at load time then fail at the adapter's Zod re-parse.
+//
+// Evidence-default invariant: the writeback block does NOT expose `provenance`. The executor
+// hard-codes `provenance: "generated"` so authors cannot opt out of evidence-default.
 import { z } from "zod";
 
 // Mirrors `MEMORY_TEXT_LIMIT` in @keelson/shared/memory.ts. The shared

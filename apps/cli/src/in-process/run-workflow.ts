@@ -91,10 +91,8 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const workflow = loadWorkflowByName(workflowsDir, opts.name);
   if (!workflow) throw new WorkflowNotFoundError(opts.name, workflowsDir);
 
-  // M5 — memory recall/writeback require the server-owned MemoryStore.
-  // Reject workflows that declare `memory:` blocks before any execution so
-  // the operator gets a single clear error rather than per-node warnings
-  // about a missing adapter.
+  // Reject memory-bearing workflows up front — the headless path has no MemoryStore,
+  // so let the operator see one clear error rather than per-node "missing adapter" warnings.
   const memoryNodes = workflow.nodes
     .filter((n) => (n as { memory?: unknown }).memory !== undefined)
     .map((n) => n.id);

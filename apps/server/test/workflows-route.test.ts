@@ -1423,18 +1423,16 @@ nodes:
   });
 
   // -------------------------------------------------------------------------
-  // M5 — memory: block end-to-end (writeback from run 1 surfaces in run 2's
-  // recall). Uses a real MemoryStore over an in-memory SQLite, exercises the
-  // adapter wired in workflows-handler.ts.
+  // memory: block end-to-end — writeback from run 1 surfaces in run 2's recall.
+  // Real MemoryStore over in-memory SQLite, exercises the adapter wired in workflows-handler.ts.
   // -------------------------------------------------------------------------
-  test("memory: writeback in run 1 is recalled in run 2 (M5 acceptance)", async () => {
+  test("memory: writeback in run 1 is recalled in run 2", async () => {
     const { createMemoryStore } = await import("../src/memory-store.ts");
-    // Writeback fires from a bash node so we don't need a real prompt
-    // handler — the executor's post-run hook is handler-agnostic.
+    // Bash node fires the writeback so this doesn't need a real prompt handler.
     writeWorkflow(
       "memory-demo.yaml",
       `name: memory-demo
-description: M5 e2e
+description: memory block e2e
 nodes:
   - id: think
     bash: echo "hello world"
@@ -1474,7 +1472,7 @@ nodes:
     const run1 = await pollUntilTerminal(app, runId1);
     expect(run1.status).toBe("succeeded");
 
-    // Sanity: the memory landed via the store directly (M3 surface).
+    // Sanity: the memory landed via the store directly.
     const recall1 = memoryStore.recall({
       schemaVersion: "keelson.memory.recall.v1",
       scope: { visibility: "project" },
@@ -1512,7 +1510,7 @@ nodes:
     writeWorkflow(
       "memory-noop.yaml",
       `name: memory-noop
-description: M5 no-adapter case
+description: no-adapter case
 nodes:
   - id: think
     bash: echo "no adapter"
@@ -1534,19 +1532,17 @@ nodes:
     expect(run.status).toBe("succeeded");
   });
 
-  // M5 — Codex-flagged: the executor's hand-built writeback request must
-  // satisfy the same Zod wire schema as HTTP-posted writebacks. A template
-  // that resolves to "" or oversize content should be rejected at the
-  // adapter boundary, not silently persisted via the in-process path. The
-  // node should still complete (recall/writeback failures warn-and-continue
-  // per the M5 design); the run-level warning surfaces the rejection.
+  // Executor-built writeback requests must satisfy the same Zod wire schema as HTTP-posted ones.
+  // A template resolving to "" or oversize content is rejected at the adapter boundary, not silently
+  // persisted via the in-process path. The node still completes (recall/writeback failures warn-and-continue);
+  // the run-level warning surfaces the rejection.
   test("memory: adapter rejects invalid resolved writeback drafts (e.g. empty summary)", async () => {
     const { createMemoryStore } = await import("../src/memory-store.ts");
     writeWorkflow(
       "memory-invalid.yaml",
       // $inputs.missing resolves to "" — Zod's min(1) on summary then trips.
       `name: memory-invalid
-description: M5 invalid-draft test
+description: invalid-draft test
 nodes:
   - id: think
     bash: echo done
