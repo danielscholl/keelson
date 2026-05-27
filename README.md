@@ -52,20 +52,18 @@ Ribs ship as their own packages and repos:
 | TypeScript contract | `Rib` interface from `@keelson/shared` |
 | Activation | embedder-wired manifest, filtered by `KEELSON_RIBS` |
 
-v0.1 ships **no in-tree ribs** and **no dynamic discovery** — the harness
-is the deliverable. To activate a rib today you fork or wrap the server's
-composition root (`apps/server/src/index.ts`), import the rib package, and
-hand it to `bootstrapRibs` in its `available` map:
+No ribs ship in-tree — the harness is the deliverable. Install any
+`@keelson/rib-*` package as a dependency and the server discovers it from
+`node_modules/@keelson/` at boot:
 
-```ts
-import { osduRib } from "@keelson/rib-osdu";
-bootstrapRibs({ available: { osdu: osduRib } });
+```bash
+bun add @keelson/rib-osdu
 ```
 
-`KEELSON_RIBS=<id1>,<id2>` then filters which entries from that manifest
-actually activate. When unset, every entry in the manifest activates.
-Dynamic discovery from `node_modules/@keelson/rib-*` is on the roadmap
-(see Status, v0.4). See [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts)
+`KEELSON_RIBS=<id1>,<id2>` then filters which discovered ribs actually
+activate. When unset, every discovered rib activates. Embedders who want
+to bypass discovery can hand `bootstrapRibs` an explicit `available` map
+instead. See [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts)
 for the contract.
 
 
@@ -251,16 +249,6 @@ Every command supports `--json` for piping. Stable exit codes: `0` success,
 - [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) — the `Rib` contract
 - [`packages/workflows/src/schema/`](packages/workflows/src/schema/) — YAML schema (Archon-compatible)
 - [`.keelson/workflows/`](.keelson/workflows/) — bundled starter workflows
-
-
-## Status
-
-| Phase | Deliverable | Status |
-|---|---|---|
-| v0.1 | Skeleton, providers, workflow engine, CLI, Chat + Workflows SPA, Rib contract | ✅ |
-| v0.2 | Snapshot infrastructure (generic `SnapshotManager` + WS streaming) | ✅ |
-| v0.3 | Agent memory layer (governed recall/writeback) | ✅ |
-| v0.4 | Dynamic rib discovery from `node_modules/@keelson/rib-*` | next |
 
 
 ## License
