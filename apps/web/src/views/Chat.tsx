@@ -1121,12 +1121,18 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       }
       setInput("");
       const rest = trimmed.slice("/project".length).trim();
+      // Snapshot at submit so a slow command resolving after the user has
+      // switched conversations doesn't append its system message to the
+      // unrelated transcript that's now active.
+      const submitConvoId = conversationIdRef.current;
       setMessages((prev) => [...prev, { id: newId(), role: "system", content: `> ${trimmed}` }]);
       void dispatchProjectCommand(rest)
         .then((result) => {
+          if (conversationIdRef.current !== submitConvoId) return;
           setMessages((prev) => [...prev, { id: newId(), role: "system", content: result }]);
         })
         .catch((err: unknown) => {
+          if (conversationIdRef.current !== submitConvoId) return;
           const msg = err instanceof Error ? err.message : String(err);
           setMessages((prev) => [
             ...prev,
