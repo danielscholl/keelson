@@ -9,7 +9,8 @@
 import { statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, normalize } from "node:path";
+import { basename, isAbsolute, join, normalize, sep } from "node:path";
+import type { WorktreeLayout } from "@keelson/shared";
 import {
   type ContentBlock,
   type IsolationOverride,
@@ -49,6 +50,7 @@ import {
   runWorkflow,
   type WorkflowDefinition,
   worktreePathFor,
+  worktreePathForRepoLocal,
 } from "@keelson/workflows";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
@@ -450,6 +452,13 @@ export function workflowsRoutes(
     return c.json({ runs: store.listRunsByStatus("paused") });
   });
 
+  // Read-only feed for `keelson worktree prune`. Returns persisted
+  // worktree_path values so worktrees from deleted projects (FK NULLed,
+  // path retained) stay prunable.
+  app.get("/api/workflows/worktree-paths", (c) => {
+    return c.json({ paths: store.listWorktreePaths() });
+  });
+
   app.get("/api/workflows/:name", (c) => {
     const name = c.req.param("name");
     const wf = catalog.get(name);
@@ -502,9 +511,9 @@ export function workflowsRoutes(
     // Resolve the run's working directory. The wire schema allows either
     // `projectId` (named pointer) or `workingDir` (raw override) or both —
     // when both are present, `workingDir` wins and `projectId` is preserved
-    // for display. Reject when neither is set: the harness intentionally
-    // doesn't fall back to `process.cwd()` here so a UI start without a
-    // project picker can't silently target the server's install dir.
+    // for display. When only `workingDir` is set we attempt a longest-prefix
+    // lookup so runs anchored inside a registered project still get tagged.
+    let resolvedProject: import("@keelson/shared").Project | null = null;
     let projectId: string | null = null;
     let projectName: string | null = null;
     let workingDir: string;
@@ -514,13 +523,18 @@ export function workflowsRoutes(
         return c.json({ error: "workingDir must be an absolute path" }, 400);
       }
       workingDir = normalize(raw);
-      projectId = parsed.data.projectId ?? null;
-      if (projectId !== null && projectsStore) {
-        const proj = projectsStore.get(projectId);
+      if (parsed.data.projectId !== undefined && projectsStore) {
+        const proj = projectsStore.get(parsed.data.projectId);
         if (!proj) {
-          return c.json({ error: `unknown project '${projectId}'` }, 400);
+          return c.json({ error: `unknown project '${parsed.data.projectId}'` }, 400);
         }
-        projectName = proj.name;
+        resolvedProject = proj;
+      } else if (projectsStore) {
+        resolvedProject = projectsStore.findByPathPrefix(workingDir) ?? null;
+      }
+      if (resolvedProject) {
+        projectId = resolvedProject.id;
+        projectName = resolvedProject.name;
       }
     } else if (parsed.data.projectId !== undefined && parsed.data.projectId.length > 0) {
       if (!projectsStore) {
@@ -530,6 +544,7 @@ export function workflowsRoutes(
       if (!project) {
         return c.json({ error: `unknown project '${parsed.data.projectId}'` }, 400);
       }
+      resolvedProject = project;
       projectId = project.id;
       projectName = project.name;
       workingDir = project.rootPath;
@@ -627,6 +642,17 @@ export function workflowsRoutes(
             projectName: slugifyForPath(projectName ?? basename(workingDir)),
             branchTemplate,
             worktreeRoot,
+            layout: resolvedProject?.worktreeLayout ?? "workspace-scoped",
+            // repo-local anchors at the project's rootPath whenever workingDir
+            // sits inside it (incl. equal) — that's the dir keelson worktree
+            // prune scans. Only fall back to workingDir when the caller forced
+            // a path that's not under the project (different repo entirely).
+            projectRootPath:
+              resolvedProject &&
+              (workingDir === resolvedProject.rootPath ||
+                workingDir.startsWith(`${resolvedProject.rootPath}${sep}`))
+                ? resolvedProject.rootPath
+                : workingDir,
           }
         : null,
       // Scope this run's memory recall/writeback to the target project so a
@@ -851,12 +877,16 @@ export function workflowRunWebSocketHandlers(deps: {
 }
 
 interface IsolationConfig {
-  /** Project label used as the path segment under `~/.keelson/worktrees/`. */
+  /** Project label used as the path segment under `<root>/<name>/<branch>`. */
   projectName: string;
   /** YAML-supplied branch template; undefined → default. */
   branchTemplate: string | undefined;
-  /** Override for the worktree home; undefined → `defaultWorktreeRoot()`. */
+  /** Override for the workspace-scoped worktree home; undefined → `defaultWorktreeRoot()`. */
   worktreeRoot: string | undefined;
+  /** repo-local → `<projectRootPath>/.worktrees/<branch>/`; otherwise workspace-scoped. */
+  layout: WorktreeLayout;
+  /** Source repo root; required for repo-local layout, ignored for workspace-scoped. */
+  projectRootPath: string | undefined;
 }
 
 interface ExecuteRunArgs {
@@ -948,11 +978,17 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
         workflow: workflow.name,
         runId,
       });
-      const dest = worktreePathFor({
-        root: isolation.worktreeRoot ?? defaultWorktreeRoot(),
-        projectName: isolation.projectName,
-        branch,
-      });
+      const dest =
+        isolation.layout === "repo-local" && isolation.projectRootPath !== undefined
+          ? worktreePathForRepoLocal({
+              projectRootPath: isolation.projectRootPath,
+              branch,
+            })
+          : worktreePathFor({
+              root: isolation.worktreeRoot ?? defaultWorktreeRoot(),
+              projectName: isolation.projectName,
+              branch,
+            });
       try {
         const created = await createWorktree({ repoPath: cwd, branch, dest });
         effectiveCwd = created.worktreePath;

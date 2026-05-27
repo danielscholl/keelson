@@ -84,7 +84,13 @@ export function chatRememberRoutes(app: Hono, deps: ChatRememberRoutesDeps): voi
     }
 
     const sourceRefUri = `conversation/${conversationId}/message/${messageId}`;
-    const scope = draft.scope ?? { visibility: "project" as const };
+    // Inherit the conversation's projectId when the client omits one so saved
+    // chat memories survive the project-scoped recall filter.
+    const baseScope = draft.scope ?? { visibility: "project" as const };
+    const scope =
+      baseScope.projectId === undefined && conv.projectId !== undefined
+        ? { ...baseScope, projectId: conv.projectId }
+        : baseScope;
 
     try {
       const result = memoryStore.writeback({

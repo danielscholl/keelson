@@ -2,8 +2,10 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
+import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
 import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -68,11 +70,38 @@ const HOSTNAME = "127.0.0.1";
 // SDK turns without holding sockets open forever.
 const IDLE_TIMEOUT_S = 60;
 const DB_PATH = process.env.KEELSON_DB ?? join(REPO_ROOT, ".keelson", "keelson.db");
+const PROJECTS_ROOT = resolve(
+  process.env.KEELSON_PROJECTS_ROOT?.trim() || join(homedir(), "keelson", "projects"),
+);
+const DEFAULT_PROJECT_PATH = join(PROJECTS_ROOT, "_default");
+// /api/projects/clone clones into PROJECTS_ROOT; make sure the directory
+// exists regardless of whether the default project row was just seeded.
+mkdirSync(PROJECTS_ROOT, { recursive: true });
 const db = openDatabase({ path: DB_PATH });
 const store = createConversationStore(db);
 const workflowStore = createWorkflowStore(db);
 const memoryStore = createMemoryStore(db);
 const projectsStore = createProjectsStore(db);
+const existingDefault = projectsStore.getByName(DEFAULT_PROJECT_NAME);
+const defaultProject =
+  existingDefault ??
+  (() => {
+    mkdirSync(DEFAULT_PROJECT_PATH, { recursive: true });
+    return projectsStore.create({
+      name: DEFAULT_PROJECT_NAME,
+      rootPath: DEFAULT_PROJECT_PATH,
+    });
+  })();
+// Idempotent backfills — safe to re-run because the WHERE clauses match
+// only legacy NULL rows that pre-date project scoping. Without these,
+// chat recall (now project-scoped) silently stops returning them and
+// projectless conversations would leak memories across all projects.
+db.prepare(
+  "UPDATE memories SET scope_project_id = ? WHERE scope_project_id IS NULL AND scope_visibility = 'project'",
+).run(defaultProject.id);
+db.prepare("UPDATE conversations SET project_id = ? WHERE project_id IS NULL").run(
+  defaultProject.id,
+);
 const workflowCatalog = bootstrapWorkflows({
   workflowDir: join(REPO_ROOT, ".keelson", "workflows"),
 });
@@ -137,10 +166,15 @@ app.get("/api/config", (c) =>
   }),
 );
 
-chatRoutes(app, store, {
-  workflowStore,
-  activeRuns: activeWorkflowRuns,
-});
+chatRoutes(
+  app,
+  store,
+  {
+    workflowStore,
+    activeRuns: activeWorkflowRuns,
+  },
+  { projectsStore },
+);
 workflowsRoutes(
   app,
   {
@@ -148,6 +182,7 @@ workflowsRoutes(
     store: workflowStore,
     conversationStore: store,
     projectsStore,
+    worktreeRoot: join(PROJECTS_ROOT, "_worktrees"),
     ...(promptHandler ? { promptHandler } : {}),
     memoryStore,
   },
@@ -155,7 +190,7 @@ workflowsRoutes(
   workflowSubscribers,
 );
 snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
-projectsRoutes(app, { store: projectsStore });
+projectsRoutes(app, { store: projectsStore, projectsRoot: PROJECTS_ROOT });
 memoryRoutes(app, { memoryStore });
 chatRememberRoutes(app, { conversationStore: store, memoryStore });
 credentialsRoutes(app, credentialStore, {
@@ -173,7 +208,7 @@ if (import.meta.main) {
   console.log(`keelson server listening on http://${HOSTNAME}:${PORT}`);
 }
 
-const chatHandlers = chatWebSocketHandlers(store, { memoryStore });
+const chatHandlers = chatWebSocketHandlers(store, { memoryStore, projectsStore });
 const workflowRunHandlers = workflowRunWebSocketHandlers({
   subscribers: workflowSubscribers,
   store: workflowStore,

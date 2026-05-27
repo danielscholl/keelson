@@ -1,5 +1,6 @@
 import {
   type ClaudeCliStatus,
+  type CloneProjectBody,
   type Conversation,
   type CopilotCliStatus,
   type CreateProjectBody,
@@ -11,7 +12,6 @@ import {
   credentialStatusSchema,
   getWorkflowDetailResponseSchema,
   getWorkflowRunResponseSchema,
-  type ListProjectsResponse,
   type ListWorkflowsResponse,
   listProjectsResponseSchema,
   listRunsResponseSchema,
@@ -33,6 +33,7 @@ import {
   reviewActionResponseSchema,
   reviewListResponseSchema,
   startWorkflowRunResponseSchema,
+  type UpdateProjectBody,
   type WorkflowDetail,
   type WorkflowRunDetail,
   type WorkflowRunSummary,
@@ -151,20 +152,26 @@ export async function deleteConversation(id: string): Promise<void> {
   });
 }
 
+export interface CreateConversationOptions {
+  model?: string;
+  seedSystemPrompt?: string;
+  name?: string;
+  projectId?: string;
+}
+
 export async function createConversation(
   providerId: string,
-  model?: string,
-  seedSystemPrompt?: string,
-  name?: string,
+  options: CreateConversationOptions = {},
 ): Promise<Conversation> {
   return apiRequest<Conversation>("/api/conversations", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       providerId,
-      ...(model ? { model } : {}),
-      ...(seedSystemPrompt ? { seedSystemPrompt } : {}),
-      ...(name ? { name } : {}),
+      ...(options.model ? { model: options.model } : {}),
+      ...(options.seedSystemPrompt ? { seedSystemPrompt: options.seedSystemPrompt } : {}),
+      ...(options.name ? { name: options.name } : {}),
+      ...(options.projectId ? { projectId: options.projectId } : {}),
     }),
   });
 }
@@ -375,6 +382,31 @@ export async function deleteProject(id: string): Promise<void> {
     errorBody: "json-error",
     label: `/api/projects/${id} DELETE`,
   });
+}
+
+export async function cloneProject(input: CloneProjectBody): Promise<Project> {
+  const body = createProjectResponseSchema.parse(
+    await apiRequest<CreateProjectResponse>("/api/projects/clone", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+      errorBody: "json-error",
+    }),
+  );
+  return body.project;
+}
+
+export async function updateProject(id: string, patch: UpdateProjectBody): Promise<Project> {
+  const body = createProjectResponseSchema.parse(
+    await apiRequest<CreateProjectResponse>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+      errorBody: "json-error",
+      label: `/api/projects/${id} PATCH`,
+    }),
+  );
+  return body.project;
 }
 
 export async function rememberChatMessage(

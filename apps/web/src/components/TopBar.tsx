@@ -1,7 +1,7 @@
 import type { ThemePreference } from "../hooks/useSettings.ts";
 import { ThemePicker } from "./ThemePicker.tsx";
 
-export type ActiveTab = "chat" | "workflows" | "projects" | "memory";
+export type ActiveTab = "chat" | "workflows" | "memory";
 
 export interface TopBarProps {
   activeTab: ActiveTab;
@@ -71,14 +71,6 @@ export function TopBar(props: TopBarProps) {
                 {pausedCount}
               </span>
             )}
-          </button>
-          <button
-            type="button"
-            className={`nav-tab${activeTab === "projects" ? " is-active" : ""}`}
-            aria-pressed={activeTab === "projects"}
-            onClick={() => onTabChange("projects")}
-          >
-            Projects
           </button>
           <button
             type="button"

@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { isAbsolute, resolve } from "node:path";
+import type { WorktreeLayout } from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { createProject, deleteProject, listProjects } from "../http/projects-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
@@ -61,8 +62,7 @@ export async function runProjectList(opts: BaseOptions): Promise<never> {
 }
 
 export interface ProjectAddOptions extends BaseOptions {
-  // commander positionals
-  // resolved here so the user can pass a relative path
+  layout?: string;
 }
 
 export async function runProjectAdd(
@@ -80,12 +80,28 @@ export async function runProjectAdd(
     emit({ error: "rootPath must not be empty", code: "BAD_INPUTS" }, { json: opts.json });
     process.exit(EXIT_BAD_ARGS);
   }
-  // Resolve relative-to-cwd so a user invoking `keelson project add foo .`
-  // gets the absolute path the server requires.
+  let layout: WorktreeLayout | undefined;
+  if (opts.layout !== undefined) {
+    if (opts.layout !== "workspace-scoped" && opts.layout !== "repo-local") {
+      emit(
+        {
+          error: "--layout must be 'workspace-scoped' or 'repo-local'",
+          code: "BAD_INPUTS",
+        },
+        { json: opts.json },
+      );
+      process.exit(EXIT_BAD_ARGS);
+    }
+    layout = opts.layout;
+  }
   const absolutePath = isAbsolute(trimmedPath) ? trimmedPath : resolve(process.cwd(), trimmedPath);
   const baseUrl = effectiveBaseUrl(opts);
   try {
-    const project = await createProject(baseUrl, { name: trimmedName, rootPath: absolutePath });
+    const project = await createProject(baseUrl, {
+      name: trimmedName,
+      rootPath: absolutePath,
+      ...(layout ? { worktreeLayout: layout } : {}),
+    });
     emit({ data: { project } }, { json: opts.json });
     process.exit(EXIT_OK);
   } catch (err) {

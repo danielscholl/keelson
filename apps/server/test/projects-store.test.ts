@@ -74,4 +74,58 @@ describe("ProjectsStore", () => {
     const list = store.list();
     expect(list.map((p) => p.name)).toEqual(["alpha", "bravo", "charlie"]);
   });
+
+  test("worktreeLayout defaults to workspace-scoped and can be overridden", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    const a = store.create({ name: "default-layout", rootPath: "/tmp/a" });
+    const b = store.create({
+      name: "repo-local",
+      rootPath: "/tmp/b",
+      worktreeLayout: "repo-local",
+    });
+    expect(a.worktreeLayout).toBe("workspace-scoped");
+    expect(b.worktreeLayout).toBe("repo-local");
+    expect(store.get(b.id)?.worktreeLayout).toBe("repo-local");
+  });
+
+  test("update changes name and worktreeLayout in place", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    const p = store.create({ name: "before", rootPath: "/tmp/p" });
+    const after = store.update(p.id, { name: "after", worktreeLayout: "repo-local" });
+    expect(after?.name).toBe("after");
+    expect(after?.worktreeLayout).toBe("repo-local");
+    expect(store.get(p.id)?.name).toBe("after");
+    expect(store.getByName("before")).toBeUndefined();
+    expect(store.getByName("after")?.id).toBe(p.id);
+  });
+
+  test("update rejects rename to a name already in use", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    store.create({ name: "taken", rootPath: "/tmp/a" });
+    const other = store.create({ name: "other", rootPath: "/tmp/b" });
+    expect(() => store.update(other.id, { name: "taken" })).toThrow(DuplicateProjectNameError);
+  });
+
+  test("findByPathPrefix returns the longest-prefix match", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    const outer = store.create({ name: "outer", rootPath: "/tmp/work" });
+    const inner = store.create({ name: "inner", rootPath: "/tmp/work/repo" });
+    expect(store.findByPathPrefix("/tmp/work/repo/src/a.ts")?.id).toBe(inner.id);
+    expect(store.findByPathPrefix("/tmp/work/other/file")?.id).toBe(outer.id);
+    expect(store.findByPathPrefix("/elsewhere/x")).toBeUndefined();
+  });
+
+  test("findByPathPrefix does not false-match sibling prefixes", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    store.create({ name: "ab", rootPath: "/tmp/ab" });
+    expect(store.findByPathPrefix("/tmp/abc")).toBeUndefined();
+    expect(store.findByPathPrefix("/tmp/ab")?.name).toBe("ab");
+    expect(store.findByPathPrefix("/tmp/ab/")?.name).toBe("ab");
+    expect(store.findByPathPrefix("/tmp/ab/x")?.name).toBe("ab");
+  });
 });
