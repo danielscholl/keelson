@@ -181,9 +181,8 @@ describe("snapshots WS", () => {
   });
 
   test("a rib publishing via composeBundle round-trips through GET and WS", async () => {
-    // End-to-end shape check for the v0.2 contract: a rib whose composeBundle
-    // is registered with the manager produces a frame visible both at the
-    // REST endpoint AND to live WS subscribers.
+    // End-to-end shape check: a rib whose composeBundle is registered with the manager
+    // produces a frame visible both at the REST endpoint AND to live WS subscribers.
     const { app, manager, subscribers } = makeRig();
 
     // Mimic what apps/server/src/ribs.ts will do in step 4 — register a

@@ -77,7 +77,7 @@ function nodeEvents(events: RunStreamEvent[], type: NodeStreamEvent["type"]): No
     .filter((inner) => inner.type === type);
 }
 
-describe("v0.3 memory layer acceptance", () => {
+describe("memory layer acceptance", () => {
   // Issue #10 scenario, verbatim:
   //   Run the workflow twice with the same inputs but different run IDs. The
   //   second run's recall returns the first run's findings. Memory written by

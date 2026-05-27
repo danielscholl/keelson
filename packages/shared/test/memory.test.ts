@@ -36,8 +36,8 @@ import {
   writebackResponseSchema,
 } from "../src/memory.ts";
 
-// Mirrors apps/server/test/memory-schema.test.ts:57-87 but in camelCase wire
-// shape. Defaults track the M1 column defaults so reads off storage round-trip.
+// Mirrors apps/server/test/memory-schema.test.ts:57-87 in camelCase wire shape.
+// Defaults track the storage column defaults so reads round-trip.
 function makeMemory(overrides: Record<string, unknown> = {}) {
   return {
     id: "mem_01",

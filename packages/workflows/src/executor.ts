@@ -79,24 +79,12 @@ export interface NodeContext {
    * prompt / command nodes get it via `$ARTIFACTS_DIR` text substitution.
    */
   artifactsDir?: string;
-  /**
-   * Memory layer handle (M5). Populated when `runWorkflow` was called with
-   * `memoryTools`. The executor's declarative pre/post hooks cover the
-   * common case via the `memory:` block on a node, but custom handlers
-   * that need imperative access (M6 rib tool surface, ad-hoc recall in a
-   * loop, etc.) can call `ctx.memory.recall(req)` / `ctx.memory.writeback(req)`
-   * directly. Undefined when no adapter was wired — handler is responsible
-   * for the guard.
-   */
+  // Memory handle for handlers needing imperative recall/writeback beyond the declarative `memory:` block.
+  // Undefined when no adapter was wired — handler is responsible for the guard.
   memory?: MemoryTools;
-  /**
-   * Per-node recall results from the executor's pre-run hook (M5). Present
-   * only when the node declared `memory.recall:` AND a `MemoryTools`
-   * adapter was wired. Handlers that re-resolve nested bodies (command
-   * file contents, loop.prompt per iteration) must forward this to their
-   * `resolveBody` calls so `$memory.recall.items` / `$memory.recall.trace`
-   * substitute against the recalled values rather than the empty default.
-   */
+  // Pre-run recall results. Present only when the node declared `memory.recall:` AND an adapter was wired.
+  // Handlers that re-resolve nested bodies must forward this to `resolveBody` so $memory.recall.* substitutes
+  // against the recalled values rather than defaults.
   memoryRecall?: MemoryRecallContext;
 }
 
@@ -125,12 +113,9 @@ export interface NodeHandler {
 export type NodeStreamEvent =
   | { type: "node_chunk"; chunk: unknown }
   | { type: "node_log"; line: string }
-  // Slice 4 — handler-side warning that should surface to subscribers as a
-  // run-scoped `run_warning` frame. The executor re-emits these on the
-  // nodeCtx.emit boundary so handlers don't need a separate side channel.
+  // Handler-side warning re-emitted on the nodeCtx.emit boundary so handlers don't need a side channel.
   | { type: "node_warning"; message: string }
-  // M5 — memory recall/writeback observability. Emitted by the executor
-  // (not handlers) at the pre-run and post-run hook boundaries.
+  // Memory observability — emitted by the executor (not handlers) at pre-run / post-run hook boundaries.
   | { type: "memory_recalled"; traceId: string | null; returned: number }
   | { type: "memory_written"; memoryId: string };
 
@@ -142,25 +127,11 @@ export interface RunOptions {
   cwd: string;
   abortSignal?: AbortSignal;
   onEvent?: (event: RunStreamEvent) => void;
-  /**
-   * Pre-minted per-run scratch directory. The caller (workflows-handler.ts)
-   * owns lifecycle — create at run start, delete on terminal. The executor
-   * forwards it to NodeContext + buildSubprocessEnv + substituteWorkflowVariables.
-   */
+  // Per-run scratch directory. Caller owns lifecycle (create at run start, delete on terminal).
   artifactsDir?: string;
-  /**
-   * Memory adapter — pre-run recall and post-run writeback. Server-routed
-   * runs bind `MemoryStore` via an adapter in `workflows-handler.ts`; the
-   * headless CLI path rejects memory-bearing workflows before reaching the
-   * executor (M5: server-required for memory). Undefined → both hooks are
-   * no-ops, so workflows without `memory:` blocks are unaffected.
-   */
+  // Memory adapter for pre-run recall / post-run writeback. Undefined → both hooks are no-ops.
   memoryTools?: MemoryTools;
-  /**
-   * Optional `scope.projectId` populated on every memory recall/writeback
-   * envelope this run produces. Unset means project-wide scope with no
-   * projectId. Threading this from workflow inputs is a follow-up after M5.
-   */
+  // Populates scope.projectId on every memory envelope this run produces.
   projectId?: string;
 }
 
@@ -594,11 +565,9 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     return;
   }
 
-  // 3a. memory recall (M5) — runs before substitution so the resolved query
-  // sees the same `$inputs.*` / `$nodeId.output` values the prompt body
-  // would. Failures warn-and-continue with an empty recall context; the
-  // node body still executes and the `$memory.recall.*` substitutions
-  // resolve to defensive defaults (`[]` / `""`).
+  // 3a. Memory recall runs before substitution so the resolved query sees the same
+  // $inputs.* / $nodeId.output values the prompt body does. Failures warn-and-continue
+  // with an empty context; $memory.recall.* substitutions then fall back to [] / "".
   const memoryRecall = await runPreRecall(node, ctx, nodeOutputs, emit);
 
   // 4. substitution (executor-owned, single-pass — data containing literal
@@ -651,12 +620,9 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     }
     const recordedOutput = bodyToSchemaOutput(result, startedAtMs, Date.now());
     layerResults.set(node.id, recordedOutput);
-    // 6. memory writeback (M5) — runs after the node's recorded output is
-    // captured, before `node_done` so subscribers see writeback events as
-    // node-scoped. Gated on `wb.on === "always" || node succeeded`. The
-    // executor hard-codes `provenance: "generated"` and the idempotency
-    // key — neither is author-controllable, enforcing the evidence-default
-    // invariant.
+    // 6. Memory writeback fires after the recorded output is captured but before `node_done`,
+    // so subscribers see writeback events as node-scoped. Gated on `on === "always" || succeeded`.
+    // provenance and idempotencyKey are hard-coded — author-uncontrollable — to keep evidence-default.
     await runPostWriteback(node, ctx, nodeOutputs, recordedOutput, result, emit, memoryRecall);
     emit({ type: "node_done", nodeId: node.id, result });
   } catch (err) {
@@ -670,12 +636,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
       durationMs: Date.now() - startedAtMs,
     };
     layerResults.set(node.id, recordedOutput);
-    // M5 — `memory.writeback.on: always` is meant to capture failures
-    // including thrown handler errors. The happy-path call runs after
-    // handler.handle() returns a NodeResult; this path catches the case
-    // where the handler throws (subprocess crashed, abort propagation,
-    // bug in a custom handler). Pass the synthesized failed result so
-    // the writeback's `on: success` gate still excludes thrown errors.
+    // `memory.writeback.on: always` must also fire on thrown handler errors, not just returned NodeResults.
     const failedNodeResult = failedResult(message);
     await runPostWriteback(
       node,
@@ -691,7 +652,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Memory hooks (M5)
+// Memory hooks
 // ---------------------------------------------------------------------------
 
 function nodeMemoryOf(node: DagNode): NodeMemoryBlock | undefined {
@@ -704,8 +665,7 @@ function nodeMemoryOf(node: DagNode): NodeMemoryBlock | undefined {
 function buildMemoryScope(
   projectId?: string,
 ): { visibility: "project" } | { visibility: "project"; projectId: string } {
-  // M5 hard-codes project-scoped recall/writeback. `personal` scope is an
-  // operator-only surface (review queue) and not addressable from workflows.
+  // Workflows can only recall/writeback at project scope; `personal` is operator-only via the review queue.
   return projectId !== undefined ? { visibility: "project", projectId } : { visibility: "project" };
 }
 
@@ -718,13 +678,9 @@ function buildMemoryTask(
   taskId: string;
   flowId: string;
 } {
-  // The M3 store dedupes memories on `(task.runtime, task.taskId, type,
-  // contentHash)` — flowId and the envelope idempotencyKey are excluded
-  // from that key. Without the workflow name in taskId, two workflows that
-  // share a node id and emit the same writeback content collide and the
-  // second is dropped. Qualifying with `${workflowName}:${nodeId}` keeps
-  // intra-workflow idempotency (same content from the same node + workflow
-  // dedupes across runs) while preserving cross-workflow distinction.
+  // Per-row dedupe is `(task.runtime, task.taskId, type, contentHash)`. Without the workflow name
+  // in taskId, two workflows sharing a node id + content would collide; `${workflowName}:${nodeId}`
+  // keeps intra-workflow idempotency while preserving cross-workflow distinction.
   return { runtime: "workflow", taskId: `${workflowName}:${nodeId}`, flowId: runId };
 }
 
@@ -833,10 +789,7 @@ async function runPostWriteback(
     // (the field isn't on the schema; the executor owns it).
     provenance: "generated" as const,
     sourceRefs,
-    // M3 MemoryStore accepts already-parsed Zod input — mirror Zod's
-    // defaults here so the executor can speak the same dialect when calling
-    // through the adapter directly. Authors don't declare artifacts in the
-    // workflow YAML; an empty array preserves the wire-shape invariant.
+    // MemoryStore accepts already-parsed Zod input; empty array mirrors Zod's default so the wire shape stays whole.
     artifacts: [],
     ...(wb.confidence !== undefined ? { confidence: wb.confidence } : {}),
     ...(wb.staleAfterDays !== undefined ? { staleAfterDays: wb.staleAfterDays } : {}),

@@ -304,7 +304,7 @@ function buildMemoryListQuery(query: ReviewListQuery | MemoryListQuery): string 
   return qs ? `?${qs}` : "";
 }
 
-// Pending review queue — what the M7 Memory tab opens onto by default.
+// Pending review queue — the Memory tab opens on this by default.
 export async function listPendingMemories(
   query: ReviewListQuery = {},
 ): Promise<ReviewListResponse> {

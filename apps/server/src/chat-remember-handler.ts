@@ -106,10 +106,8 @@ export function chatRememberRoutes(app: Hono, deps: ChatRememberRoutesDeps): voi
             summary: draft.summary,
             content: normalizedContent,
             contentHash,
-            // Operator observed something in the conversation. The Confirm
-            // action in the M7 review queue is what promotes provenance to
-            // `user_confirmed` and flips canUseAsInstruction — evidence-default
-            // invariant #1 (PRD §"Load-bearing invariants").
+            // Operator-observed; the review queue's Confirm action is what promotes to user_confirmed
+            // and flips canUseAsInstruction — the evidence-default invariant.
             provenance: "observed",
             sourceRefs: [{ kind: "chat_message", uri: sourceRefUri }],
             artifacts: [],

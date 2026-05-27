@@ -48,22 +48,12 @@ const pendingCursorSchema = z
 export interface MemoryStore {
   recall(req: RecallRequest): RecallResponse;
   writeback(req: WritebackRequest): WritebackResponse;
-  // Returns { applied: false } when memoryId is unknown — silent no-op,
-  // matches ConversationStore.delete posture so callers don't need try/catch.
+  // Unknown memoryId returns { applied: false } silently — mirrors ConversationStore.delete.
   confirm(input: ReviewActionRequest): { applied: boolean };
-  // Pending review queue. Cursor encodes (createdAt, id) so concurrent
-  // writebacks during pagination don't shuffle pages.
+  // Cursor encodes (createdAt, id) so concurrent writebacks don't shuffle pages.
   listPending(query: ReviewListQuery): ReviewListResponse;
-  // Browsable list across review statuses + lifecycles — backs the M7
-  // "All memories" sub-tab. Same cursor scheme as listPending; same hydrated
-  // ReviewItem projection (storage-internal fields trimmed). Filters default
-  // to "no filter" (every row), but the route layer typically pins one.
   listMemories(query: MemoryListQuery): MemoryListResponse;
-  // Debug/test helper. Returns the full Memory shape including storage-
-  // internal fields (idempotencyKey, contentHash) that the wire projections
-  // trim. Not surfaced over the wire — recall and the review queue read
-  // through their trimmed shapes; this method exists only for tests and
-  // direct script use.
+  // Test/script-only: returns storage-internal fields (idempotencyKey, contentHash) the wire projections trim.
   getById(id: string): Memory | undefined;
 }
 
@@ -184,17 +174,12 @@ function groupBy<T extends { memory_id: string }>(rows: T[]): Map<string, T[]> {
   return m;
 }
 
-// M1 adjacency table is (kind, identifier, url); the M2 wire shape carries
-// (kind, uri, title?, sourceTimestamp?). M3 persists only kind+identifier+url;
-// title and sourceTimestamp don't round-trip until a future schema bump adds
-// the columns. Reads echo a minimal SourceRef — schema accepts that since
-// title/sourceTimestamp are optional.
+// title/sourceTimestamp on the wire don't round-trip — no columns yet. Reads echo a minimal SourceRef.
 function srRowToSourceRef(r: SourceRefRow): SourceRef {
   return { kind: r.kind, uri: r.identifier };
 }
 
-// Same story for artifacts — M1 stores (kind, content); M2 wire is
-// (kind, uri, description?). We map content back to uri; description drops.
+// description on the wire is dropped on read — only kind/content (→ uri) persist.
 function arRowToArtifact(r: ArtifactRow): Memory["artifacts"][number] {
   return { kind: r.kind, uri: r.content };
 }
@@ -552,9 +537,8 @@ export function createMemoryStore(db: Database): MemoryStore {
           continue;
         }
 
-        // Per-draft idempotency key — contentHash lives on the draft (M2 PR
-        // #13 closed this hole) so a multi-memory writeback produces
-        // distinct UNIQUE keys even when task and type match.
+        // Per-draft idempotency key — contentHash is in the key so a multi-memory writeback
+        // produces distinct UNIQUE keys even when task and type match.
         const idempotencyKey = `${req.task.runtime}:${req.task.taskId ?? ""}:${draft.type}:${draft.contentHash}`;
         const existing = selectByIdempotencyKey.get(idempotencyKey) as { id: string } | null;
         if (existing) {

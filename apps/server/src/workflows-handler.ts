@@ -75,10 +75,7 @@ export interface WorkflowsHandlerOptions {
   // prompt nodes fail with a "not registered" sentinel. Keeps the route
   // construction testable without standing up a provider rig.
   promptHandler?: NodeHandler;
-  // M5 — memory layer adapter. When provided, prompt nodes with a `memory:`
-  // block recall/writeback through this store. When undefined (tests that
-  // don't care), the executor's hooks are no-ops and workflows without
-  // memory blocks are unaffected.
+  // Optional MemoryStore. Undefined → executor memory hooks no-op.
   memoryStore?: MemoryStore;
 }
 
@@ -387,19 +384,9 @@ export function workflowsRoutes(
 ): void {
   const { catalog, store, conversationStore, cwd, promptHandler, memoryStore } = opts;
   const effectivePromptHandler = promptHandler ?? placeholderPromptHandler;
-  // M5 — wrap the sync MemoryStore in the executor's Promise-shaped contract.
-  // Promise.resolve keeps the binding straightforward while leaving room for
-  // a future async (HTTP-backed) adapter to slot in without changing the
-  // executor signature.
-  //
-  // Re-parse with the Zod wire schemas at the adapter boundary so the
-  // executor's hand-built request must satisfy the same constraints the
-  // HTTP route enforces (non-empty summary/content after substitution,
-  // text-length caps, source-ref shape). Without this, a template that
-  // resolves to "" or expands past MEMORY_TEXT_LIMIT would persist via the
-  // in-process path while the HTTP path would reject it. Parse failures
-  // throw, which the executor's recall/writeback catch converts into a
-  // `run_warning` for the operator.
+  // Re-parse with the Zod wire schemas at the adapter boundary so executor-built requests
+  // satisfy the same constraints as the HTTP route (text-length caps, source-ref shape, etc.).
+  // Without this, an in-process workflow could persist values the HTTP path would reject.
   const memoryTools =
     memoryStore !== undefined
       ? {
@@ -773,8 +760,7 @@ interface ExecuteRunArgs {
   // DELETE handlers. The route owns the lifecycle; this function builds the
   // closures that populate / drain it as the executor pauses and resumes.
   pendingApprovals: Map<string, PendingApproval>;
-  // M5 — undefined when the composition root didn't wire a MemoryStore; the
-  // executor's memory hooks no-op in that case.
+  // Undefined when no MemoryStore was wired; executor memory hooks no-op in that case.
   memoryTools?: MemoryTools;
 }
 

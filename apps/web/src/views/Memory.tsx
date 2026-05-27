@@ -17,8 +17,7 @@ import { useToast } from "../components/Toast.tsx";
 
 type SubTab = "pending" | "all";
 
-// Stable actor string for review actions. Single-user local — a real
-// account name would land here when v0.4 adds multi-user.
+// Stable actor string for review actions. Single-user local — multi-user would replace this.
 const REVIEW_ACTOR = "operator";
 
 // "Already resolved" toast verbiage for the silent-no-op shape.

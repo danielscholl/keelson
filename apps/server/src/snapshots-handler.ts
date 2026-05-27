@@ -27,10 +27,8 @@ export function snapshotsRoutes(app: Hono, deps: SnapshotsRoutesDeps): void {
     return c.json({ keys: manager.keys() });
   });
 
-  // Latest cached frame for a key. 404 means "no cached snapshot" — that
-  // covers both unregistered keys and registered-but-never-composed keys.
-  // The /api/snapshots index endpoint is the way to introspect registration.
-  // v0.2 intentionally does not lazy-compose on read; recompose is explicit.
+  // 404 covers both unregistered keys and registered-but-never-composed keys.
+  // Reads never lazy-compose — recompose is explicit. Use /api/snapshots to introspect registration.
   app.get("/api/snapshots/:key", (c) => {
     const key = c.req.param("key");
     const frame = manager.latest(key);
