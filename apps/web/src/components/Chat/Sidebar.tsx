@@ -1,6 +1,7 @@
 import type { Conversation } from "@keelson/shared";
 import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmModal } from "../ConfirmModal.tsx";
 import { SkeletonStack } from "../Skeleton.tsx";
 
 interface SidebarProps {
@@ -72,6 +73,7 @@ export function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [query, setQuery] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -118,18 +120,20 @@ export function Sidebar({
     [cancelRename, commitRename],
   );
 
-  const handleDelete = useCallback(
-    async (conv: Conversation) => {
-      const label = conv.name ?? "Untitled";
-      if (!window.confirm(`Delete "${label}" and all its messages?`)) return;
-      try {
-        await onDelete(conv.id);
-      } catch {
-        // Caller surfaces toast on failure.
-      }
-    },
-    [onDelete],
-  );
+  const handleDelete = useCallback((conv: Conversation) => {
+    setPendingDelete(conv);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete) return;
+    const id = pendingDelete.id;
+    setPendingDelete(null);
+    try {
+      await onDelete(id);
+    } catch {
+      // Caller surfaces toast on failure.
+    }
+  }, [onDelete, pendingDelete]);
 
   const buckets = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -186,66 +190,84 @@ export function Sidebar({
   }
 
   return (
-    <aside className="chat-sidebar">
-      <div className="chat-sidebar-header">
-        <button
-          type="button"
-          className="chat-sidebar-collapse-toggle"
-          onClick={onToggleCollapse}
-          aria-label="Collapse sidebar"
-          title="Collapse sidebar"
-        >
-          <span aria-hidden="true">‹</span>
-        </button>
-        <span className="chat-sidebar-title">Conversations</span>
-        <button
-          type="button"
-          className="chat-sidebar-new"
-          onClick={onNew}
-          aria-label="Start a new conversation"
-        >
-          New
-        </button>
-      </div>
-
-      <div className="chat-sidebar-search-wrap">
-        <input
-          type="search"
-          className="chat-sidebar-search"
-          placeholder="Search…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Search conversations"
-        />
-      </div>
-
-      {loading && conversations.length === 0 && (
-        <div className="chat-sidebar-list">
-          <SkeletonStack rows={3} height="2.4em" />
+    <>
+      <aside className="chat-sidebar">
+        <div className="chat-sidebar-header">
+          <button
+            type="button"
+            className="chat-sidebar-collapse-toggle"
+            onClick={onToggleCollapse}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+          <span className="chat-sidebar-title">Conversations</span>
+          <button
+            type="button"
+            className="chat-sidebar-new"
+            onClick={onNew}
+            aria-label="Start a new conversation"
+          >
+            New
+          </button>
         </div>
-      )}
 
-      {!loading && conversations.length === 0 && (
-        <div className="empty-state">No conversations yet.</div>
-      )}
+        <div className="chat-sidebar-search-wrap">
+          <input
+            type="search"
+            className="chat-sidebar-search"
+            placeholder="Search…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search conversations"
+          />
+        </div>
 
-      {!loading && conversations.length > 0 && totalVisible === 0 && (
-        <div className="empty-state">No matches.</div>
-      )}
-
-      {BUCKET_ORDER.map((bucket) => {
-        const list = buckets[bucket];
-        if (list.length === 0) return null;
-        return (
-          <div key={bucket} className="chat-sidebar-group">
-            <div className="chat-sidebar-group-label">{BUCKET_LABEL[bucket]}</div>
-            <ul className="chat-sidebar-list">
-              {list.map((conv) => renderConversationItem(conv))}
-            </ul>
+        {loading && conversations.length === 0 && (
+          <div className="chat-sidebar-list">
+            <SkeletonStack rows={3} height="2.4em" />
           </div>
-        );
-      })}
-    </aside>
+        )}
+
+        {!loading && conversations.length === 0 && (
+          <div className="empty-state">No conversations yet.</div>
+        )}
+
+        {!loading && conversations.length > 0 && totalVisible === 0 && (
+          <div className="empty-state">No matches.</div>
+        )}
+
+        {BUCKET_ORDER.map((bucket) => {
+          const list = buckets[bucket];
+          if (list.length === 0) return null;
+          return (
+            <div key={bucket} className="chat-sidebar-group">
+              <div className="chat-sidebar-group-label">{BUCKET_LABEL[bucket]}</div>
+              <ul className="chat-sidebar-list">
+                {list.map((conv) => renderConversationItem(conv))}
+              </ul>
+            </div>
+          );
+        })}
+      </aside>
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Delete conversation"
+        body={
+          pendingDelete ? (
+            <>
+              Delete <strong>{pendingDelete.name ?? "Untitled"}</strong> and all its messages?
+            </>
+          ) : null
+        }
+        mode={{ kind: "simple" }}
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+    </>
   );
 
   function renderConversationItem(conv: Conversation) {
