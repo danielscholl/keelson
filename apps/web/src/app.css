@@ -198,7 +198,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font: inherit;
+  font-family: inherit;
 }
 .nav-tab:hover {
   color: var(--fg);

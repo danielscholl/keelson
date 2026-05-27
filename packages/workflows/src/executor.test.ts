@@ -1539,21 +1539,10 @@ import { makeCommandHandler } from "./handlers/command.ts";
 import { makeLoopHandler } from "./handlers/loop.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
 
-async function uvOnPath(): Promise<boolean> {
-  try {
-    const p = Bun.spawn(["uv", "--version"], { stdout: "ignore", stderr: "ignore" });
-    return (await p.exited) === 0;
-  } catch {
-    return false;
-  }
-}
-
-const UV_PRESENT = await uvOnPath();
-
-// The smoke YAML uses a `script-python-node` (runtime: uv). Skip the full
-// run when uv is missing — the discovery + handler tests already cover the
-// uv-not-on-PATH path with a clear error.
-describe.if(UV_PRESENT)("runWorkflow — smoke-test (every node type)", () => {
+// Bundled smoke-test is Bun-only — no `runtime: uv` nodes since the
+// python-smoke-test fixture was pruned with the v0.3 close — so this suite
+// runs unconditionally.
+describe("runWorkflow — smoke-test (every node type)", () => {
   test("all active nodes succeed and the final assert prints PASS", async () => {
     const workflow = loadBundled("smoke-test");
 
