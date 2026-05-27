@@ -28,6 +28,7 @@ import {
   type WorkflowDefinition,
   type WorkflowLoadWarning,
 } from "@keelson/workflows";
+import { discoverRibs } from "./rib-discovery.ts";
 import { applyRibs, parseRibList, type RibManifest } from "./ribs.ts";
 
 export interface BootstrapProvidersOptions {
@@ -104,13 +105,13 @@ function isBuiltIn(id: string): id is BuiltInId {
 }
 
 export interface BootstrapRibsOptions {
-  // Operator-supplied manifest mapping rib id → Rib implementation. Typically
-  // the embedder imports `@keelson/rib-<name>` packages here.
-  available: Readonly<Record<string, Rib>>;
+  // Omitted runs discovery; explicit (even `{}`) bypasses it.
+  available?: Readonly<Record<string, Rib>>;
   // Shared SnapshotManager passed into RibContext and used to auto-register
   // each rib's `composeBundle`. Optional so unit tests for parseRibList /
   // applyRibs don't need to spin up a manager.
   snapshotManager?: SnapshotManager;
+  discoveryRoot?: string;
 }
 
 export interface RibBootstrap {
@@ -121,9 +122,10 @@ export interface RibBootstrap {
   disposeAll(): Promise<void>;
 }
 
-export function bootstrapRibs(options: BootstrapRibsOptions): RibBootstrap {
+export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
-  const available = options.available;
+  const discoveryOpts = options.discoveryRoot ? { root: options.discoveryRoot } : {};
+  const available = options.available ?? (await discoverRibs(discoveryOpts));
   const active = requested.length > 0 ? requested : Object.keys(available);
   const snapshotManager = options.snapshotManager;
   const ctx: RibContext = {

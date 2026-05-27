@@ -1,0 +1,6 @@
+{
+  "name": "@keelson/rib-bad-default",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./index.ts"
+}
