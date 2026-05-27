@@ -15,7 +15,7 @@
  * catalog; the worktree path is stored directly on the workflow_runs row.
  */
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -198,6 +198,39 @@ export async function removeWorktree(opts: RemoveWorktreeOptions): Promise<Remov
     };
   }
   return { removed: true, warning: null };
+}
+
+/**
+ * Recover the source repository's path from a worktree directory by parsing
+ * its `.git` file. Git stores `gitdir: <abs-path>/.git/worktrees/<name>` in
+ * that pointer; trimming the `/worktrees/<name>` and `/.git` suffixes yields
+ * the source repo root. Returns `null` when the directory isn't a worktree
+ * (no `.git` file, dir not a file, malformed pointer).
+ *
+ * Used by `keelson worktree prune` to unregister worktrees whose projects
+ * were deleted (or were never associated with a project) — without the source
+ * repo path, `git worktree remove` can't unregister the entry and a plain
+ * `rm -rf` would leave a stale record under the source repo's
+ * `.git/worktrees/`.
+ */
+export function repoPathFromWorktree(worktreeDir: string): string | null {
+  const gitPointer = join(worktreeDir, ".git");
+  if (!existsSync(gitPointer)) return null;
+  let raw: string;
+  try {
+    raw = readFileSync(gitPointer, "utf-8");
+  } catch {
+    return null;
+  }
+  // Expected: `gitdir: <repo>/.git/worktrees/<name>`. A trailing newline is
+  // standard but not guaranteed; trim aggressively.
+  const match = raw.trim().match(/^gitdir:\s*(.+)$/);
+  if (!match) return null;
+  const gitdir = match[1]!.trim();
+  // Strip `/worktrees/<name>` to get `<repo>/.git`, then dirname to get repo.
+  const worktreesIdx = gitdir.lastIndexOf("/.git/worktrees/");
+  if (worktreesIdx < 0) return null;
+  return gitdir.slice(0, worktreesIdx);
 }
 
 /**

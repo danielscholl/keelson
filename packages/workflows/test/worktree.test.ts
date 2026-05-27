@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import {
   createWorktree,
@@ -17,6 +17,7 @@ import {
   listWorktrees,
   NotAGitRepoError,
   removeWorktree,
+  repoPathFromWorktree,
   resolveBranchTemplate,
   worktreePathFor,
 } from "../src/worktree.ts";
@@ -164,6 +165,29 @@ describe("removeWorktree", () => {
     const forced = await removeWorktree({ repoPath: tmp, dest, force: true });
     expect(forced.removed).toBe(true);
     expect(existsSync(dest)).toBe(false);
+  });
+});
+
+describe("repoPathFromWorktree", () => {
+  test("recovers the source repo from a real worktree's .git pointer", async () => {
+    await initRepo(tmp);
+    const dest = join(tmp, ".wt", "feature");
+    await createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest });
+    // git resolves /tmp → /private/tmp on macOS, so compare via realpath.
+    const recovered = repoPathFromWorktree(dest);
+    expect(recovered).toBeTruthy();
+    expect(recovered!.endsWith(basename(tmp))).toBe(true);
+  });
+
+  test("returns null when the directory has no .git pointer", () => {
+    expect(repoPathFromWorktree(tmp)).toBeNull();
+  });
+
+  test("returns null when .git is malformed", () => {
+    const wt = join(tmp, "broken");
+    require("node:fs").mkdirSync(wt);
+    require("node:fs").writeFileSync(join(wt, ".git"), "not a git pointer");
+    expect(repoPathFromWorktree(wt)).toBeNull();
   });
 });
 

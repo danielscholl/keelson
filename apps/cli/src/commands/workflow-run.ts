@@ -234,13 +234,19 @@ async function runInProcess(
   // In-process has no project store to consult, so --project is a no-op
   // here; --working-dir wins, falling back to the invoking process's cwd.
   // The HTTP path is where named projects resolve.
-  const cwd = opts.workingDir ?? process.cwd();
+  const rawCwd = opts.workingDir ?? process.cwd();
+  const cwd = isAbsolute(rawCwd) ? rawCwd : resolve(process.cwd(), rawCwd);
+  // Map the boolean CLI flag onto the three-state isolation directive the
+  // headless runner expects. `undefined` falls through to the workflow YAML.
+  const isolation: "worktree" | "none" | "auto" =
+    opts.worktree === true ? "worktree" : opts.worktree === false ? "none" : "auto";
   try {
     const result = await runHeadless({
       name,
       inputs,
       cwd,
       provider: opts.provider,
+      isolation,
       onEvent: (ev) => {
         if (watch) events.push(ev);
         if (!opts.json && watch) {

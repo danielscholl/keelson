@@ -5,7 +5,13 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { defaultWorktreeRoot, isGitRepo, listWorktrees, removeWorktree } from "@keelson/workflows";
+import {
+  defaultWorktreeRoot,
+  isGitRepo,
+  listWorktrees,
+  removeWorktree,
+  repoPathFromWorktree,
+} from "@keelson/workflows";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
 import { isServerDownError } from "../http/workflow-client.ts";
@@ -78,16 +84,39 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
       } catch {
         continue;
       }
-      const branch = liveByPath.get(path);
+      // Recover the source repo from the worktree's .git pointer when the
+      // projects catalog can't tell us. This catches two cases: (1) the
+      // worktree was created from a raw `workingDir` so it never had a
+      // project entry, and (2) the project was deleted between run and
+      // prune. Without this, `prune --force` would `rmSync` the directory
+      // but leave the source repo's `.git/worktrees/<leaf>` record behind.
+      const effectiveRepoPath = repoPath ?? repoPathFromWorktree(path);
+      // Re-check the live-tracked map against the recovered repo path; the
+      // initial scan only filled it when we had a project-supplied repo.
+      let branch = liveByPath.get(path);
+      let trackedKnown = branch !== undefined;
+      if (
+        effectiveRepoPath !== null &&
+        effectiveRepoPath !== repoPath &&
+        (await isGitRepo(effectiveRepoPath))
+      ) {
+        for (const entry of await listWorktrees(effectiveRepoPath)) {
+          if (entry.path === path) {
+            branch = entry.branch;
+            trackedKnown = true;
+            break;
+          }
+        }
+      }
       candidates.push({
         path,
         projectName,
         branch: branch ?? null,
-        repoPath,
+        repoPath: effectiveRepoPath,
         reason:
-          repoPath === null
+          effectiveRepoPath === null
             ? "orphan-no-repo"
-            : branch !== undefined
+            : trackedKnown
               ? "tracked"
               : "orphan-stale-record",
       });

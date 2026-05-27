@@ -95,6 +95,7 @@ export {
   type RemoveWorktreeOptions,
   type RemoveWorktreeResult,
   removeWorktree,
+  repoPathFromWorktree,
   resolveBranchTemplate,
   WorktreeCreationError,
   worktreePathFor,
