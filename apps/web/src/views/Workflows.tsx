@@ -154,7 +154,6 @@ export function Workflows() {
         const { runId } = await startWorkflowRun(workflowDetail.name, {
           inputs: { ARGUMENTS: req.args },
           projectId: req.projectId,
-          ...(req.isolation ? { isolation: req.isolation } : {}),
         });
         setScreen({ kind: "run", workflow: workflowDetail, runId });
         setRunsRefresh((n) => n + 1);
@@ -228,6 +227,7 @@ export function Workflows() {
           projects={projects}
           selectedProjectId={activeProjectId}
           onSelectProject={handleSelectProject}
+          onProjectUpdated={() => void refreshProjects()}
         />
       </div>
     );

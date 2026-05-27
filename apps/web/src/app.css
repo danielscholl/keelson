@@ -6491,48 +6491,6 @@ button.tab:focus-visible {
 }
 .projects-item .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
 
-/* Start-composer project selector (slice 2). */
-.start-composer-target {
-  padding: 8px 12px 0;
-}
-.start-composer-target-label {
-  display: flex; flex-direction: column; gap: 4px;
-  font-size: 11px; color: var(--muted);
-  text-transform: uppercase; letter-spacing: 0.04em;
-}
-.start-composer-target-label select {
-  text-transform: none; letter-spacing: normal;
-  font-family: inherit; font-size: 12px;
-  padding: 5px 8px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg);
-  cursor: pointer;
-}
-.start-composer-target-label select:focus {
-  outline: none; border-color: var(--accent);
-}
-.start-composer-target-label select:disabled {
-  opacity: 0.6; cursor: not-allowed;
-}
-
-/* Per-run isolation checkbox inside the StartComposer. */
-.start-composer-isolation {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.start-composer-isolation input[type="checkbox"] {
-  margin: 0;
-  cursor: pointer;
-}
-.start-composer-isolation em {
-  color: var(--dim); font-style: italic;
-}
-
 /* RecentRuns: 6-column grid extended with a Project column. */
 .runs-table--with-project .runs-row {
   grid-template-columns: 22px 1.3fr 1.1fr 0.9fr 0.7fr 0.9fr 110px;

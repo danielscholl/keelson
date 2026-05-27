@@ -2,10 +2,14 @@ import type { Project, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { ProjectChip } from "../Chat/ProjectChip.tsx";
+import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
 import { DagGraph } from "./DagGraph.tsx";
 import { fallbackStatusFromRun, RunTrace } from "./RunTrace.tsx";
 import { StartComposer, type StartRequest } from "./StartComposer.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
+
+const RUN_VIEW_PROJECT_PICKER_POPOVER_ID = "run-view-project-picker-popover";
 
 function formatDuration(ms?: number | null): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return "";
@@ -40,11 +44,14 @@ export interface RunViewProps {
   onStart?: (req: StartRequest) => Promise<void> | void;
   // True while the start request is in flight; latches the composer.
   starting?: boolean;
-  // Projects feed the composer's required project dropdown. The parent owns
+  // Projects feed the header chip's required project picker. The parent owns
   // selection state so it persists across workflow / run navigation.
   projects?: Project[];
   selectedProjectId?: string | null;
   onSelectProject?: (projectId: string) => void;
+  // Fired when the picker edits a project (e.g. layout change). Parent
+  // refreshes its list so the chip label and downstream views stay in sync.
+  onProjectUpdated?: () => void;
 }
 
 // Three layouts the segmented control switches between. `split` keeps the
@@ -61,7 +68,9 @@ export function RunView({
   projects = [],
   selectedProjectId = null,
   onSelectProject,
+  onProjectUpdated,
 }: RunViewProps) {
+  const activeProject = projects.find((p) => p.id === selectedProjectId) ?? null;
   const preStart = runId === null;
   const { run, nodes, status, error, cancel, resume } = useWorkflowRun(runId);
   const [layout, setLayout] = useState<Layout>("split");
@@ -153,6 +162,13 @@ export function RunView({
           )}
         </div>
         <div className="run-meta">
+          {onSelectProject && (
+            <ProjectChip
+              projectName={activeProject?.name ?? "default"}
+              popoverId={RUN_VIEW_PROJECT_PICKER_POPOVER_ID}
+              disabled={!preStart}
+            />
+          )}
           {preStart ? (
             <StatusBadge status="pending" />
           ) : (
@@ -213,16 +229,7 @@ export function RunView({
       )}
 
       {preStart && onStart && (
-        <StartComposer
-          projects={projects}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={onSelectProject ?? (() => {})}
-          onStart={onStart}
-          starting={starting}
-          {...(workflow.worktree?.enabled !== undefined
-            ? { yamlIsolationDefault: workflow.worktree.enabled }
-            : {})}
-        />
+        <StartComposer projectId={selectedProjectId} onStart={onStart} starting={starting} />
       )}
 
       {layout === "split" && (
@@ -280,6 +287,16 @@ export function RunView({
             />
           </div>
         </div>
+      )}
+
+      {onSelectProject && (
+        <ProjectPickerPopover
+          popoverId={RUN_VIEW_PROJECT_PICKER_POPOVER_ID}
+          projects={projects}
+          activeProjectId={selectedProjectId}
+          onSelect={onSelectProject}
+          onProjectUpdated={() => onProjectUpdated?.()}
+        />
       )}
     </div>
   );
