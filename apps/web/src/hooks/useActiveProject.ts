@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { Project } from "@keelson/shared";
+import { DEFAULT_PROJECT_NAME, type Project } from "@keelson/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { listProjects } from "../api.ts";
 
@@ -115,15 +115,23 @@ export function useActiveProject(): ActiveProjectState {
   }, []);
 
   const list = projects ?? [];
-  const fallback = list.find((p) => p.name === "default") ?? list[0] ?? null;
+  const fallback = list.find((p) => p.name === DEFAULT_PROJECT_NAME) ?? list[0] ?? null;
   const activeProject =
     (activeProjectId ? list.find((p) => p.id === activeProjectId) : null) ?? fallback;
   // Stored id wins until the project list resolves; a chat send during the
   // initial load otherwise binds the conversation to the default project
-  // and diverges from the chip the user reloaded with.
+  // and diverges from the chip the user reloaded with. Once projects load,
+  // a stored id that no longer matches gets cleared so requests don't carry
+  // a stale id the server will 400 on.
   const projectsLoaded = projects !== null;
-  const resolvedActiveProjectId =
-    !projectsLoaded && activeProjectId !== null ? activeProjectId : (activeProject?.id ?? null);
+  const knownActive = activeProjectId ? list.some((p) => p.id === activeProjectId) : false;
+  useEffect(() => {
+    if (!projectsLoaded) return;
+    if (activeProjectId !== null && !knownActive) {
+      setActiveId(null);
+    }
+  }, [activeProjectId, knownActive, projectsLoaded]);
+  const resolvedActiveProjectId = !projectsLoaded ? activeProjectId : (activeProject?.id ?? null);
 
   const setActiveProject = useCallback((id: string | null) => {
     setActiveId(id);

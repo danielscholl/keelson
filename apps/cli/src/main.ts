@@ -197,10 +197,11 @@ export function buildProgram(): Command {
     ) {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", addOpts.baseUrl);
+      const layout = requireNonEmpty(json, "--layout", addOpts.layout);
       await runProjectAdd(name, rootPath, {
         json,
         ...(baseUrl ? { baseUrl } : {}),
-        ...(addOpts.layout ? { layout: addOpts.layout } : {}),
+        ...(layout ? { layout } : {}),
       });
     });
 

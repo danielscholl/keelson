@@ -14,6 +14,7 @@ import {
   type ClientFrame,
   chatFrameSchema,
   clientFrameSchema,
+  DEFAULT_PROJECT_NAME,
   inferToolFamily,
   type MessageChunk,
   modelInfoSchema,
@@ -142,7 +143,7 @@ export function chatRoutes(
       return c.json({ error: `unknown project '${projectId}'` }, 400);
     }
     if (projectId === undefined && opts.projectsStore) {
-      projectId = opts.projectsStore.getByName("default")?.id;
+      projectId = opts.projectsStore.getByName(DEFAULT_PROJECT_NAME)?.id;
     }
     const conv = store.create({
       ...parsed.data,
@@ -364,7 +365,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // MemoryStore.recall would skip the filter and inject memories from every
   // project. Fall back to the default project when conv.projectId is unset
   // (e.g. a row whose project was deleted, FK SET NULL).
-  const recallProjectId = conv.projectId ?? deps.projectsStore?.getByName("default")?.id;
+  const recallProjectId = conv.projectId ?? deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME)?.id;
 
   // Recall failures warn-and-continue with the section omitted; the turn
   // proceeds with whatever systemPrompt the seed would have produced.
@@ -386,7 +387,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // Falls back to the default project's rootPath when conv.projectId was
   // NULLed (deleted project) or when the row's id no longer resolves; using
   // process.cwd() would send tools to the server's launch directory.
-  const defaultRootPath = deps.projectsStore?.getByName("default")?.rootPath;
+  const defaultRootPath = deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME)?.rootPath;
   const resolvedRootPath =
     conv.projectId && deps.projectsStore
       ? deps.projectsStore.get(conv.projectId)?.rootPath

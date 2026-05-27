@@ -540,9 +540,13 @@ nodes:
 `,
     );
     const { app, store, projectsStore } = makeRig();
-    const subDir = join(tmpDir, "sub");
+    // makeRig already registers `test-project` at tmpDir; create `owning`
+    // under a distinct nested path so findByPathPrefix has a single
+    // longest-prefix winner and the assertion is deterministic.
+    const owningRoot = join(tmpDir, "owning");
+    const subDir = join(owningRoot, "sub");
     mkdirSync(subDir, { recursive: true });
-    const owning = projectsStore.create({ name: "owning", rootPath: tmpDir });
+    const owning = projectsStore.create({ name: "owning", rootPath: owningRoot });
     const res = await app.fetch(
       new Request("http://test/api/workflows/infer-proj/runs", {
         method: "POST",

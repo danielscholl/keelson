@@ -6365,7 +6365,7 @@ button.tab:focus-visible {
 .project-edit-label input,
 .project-edit-label select {
   padding: 4px 6px; font-size: 13px; color: var(--fg);
-  background: var(--bg-strong); border: 1px solid var(--border);
+  background: var(--bg-soft); border: 1px solid var(--border);
   border-radius: 4px;
 }
 .project-edit-error { font-size: 12px; color: var(--red); }
@@ -6374,7 +6374,7 @@ button.tab:focus-visible {
 }
 .project-edit-actions button {
   padding: 4px 10px; font-size: 12px;
-  background: var(--bg-strong); color: var(--fg);
+  background: var(--bg-soft); color: var(--fg);
   border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
 }
 .project-edit-actions button:disabled { opacity: 0.5; cursor: not-allowed; }

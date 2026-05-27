@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import {
@@ -38,7 +38,10 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 export interface ProjectsHandlerOptions {
   store: ProjectsStore;
   // Destination root for `/api/projects/clone`. Required so `/project <url>`
-  // lands in a predictable place; rejects relative or unset configurations.
+  // lands in a predictable place; clone returns 500 when unset, and the
+  // composition root in apps/server/src/index.ts always passes an absolute
+  // path (resolve(process.env.KEELSON_PROJECTS_ROOT ?? join(homedir(),
+  // "keelson", "projects"))).
   projectsRoot?: string;
 }
 
@@ -83,21 +86,46 @@ function deriveProjectNameFromUrl(url: string): string | null {
   return projectNameSchema.safeParse(candidate).success ? candidate : null;
 }
 
+const GIT_CLONE_TIMEOUT_MS = 60_000;
+
 async function gitClone(
   url: string,
   dest: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Force non-interactive: any credential / known-hosts prompt would hang
+  // the Hono handler. SSH_ASKPASS=/usr/bin/true neutralizes any passphrase
+  // prompt for SSH URLs; GIT_TERMINAL_PROMPT=0 covers HTTPS basic auth.
+  // The 60s timeout protects against a server that accepts the connection
+  // but never finishes; aborted clones are reported as a clean failure.
   const proc = Bun.spawn({
     cmd: ["git", "clone", "--", url, dest],
     stdout: "pipe",
     stderr: "pipe",
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "/usr/bin/true",
+      SSH_ASKPASS: "/usr/bin/true",
+      GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+    },
   });
-  const stderr = await new Response(proc.stderr).text();
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    return { ok: false, error: stderr.trim() || `git clone exited ${exitCode}` };
+  const timeout = setTimeout(() => {
+    try {
+      proc.kill();
+    } catch {
+      // already exited
+    }
+  }, GIT_CLONE_TIMEOUT_MS);
+  try {
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      return { ok: false, error: stderr.trim() || `git clone exited ${exitCode}` };
+    }
+    return { ok: true };
+  } finally {
+    clearTimeout(timeout);
   }
-  return { ok: true };
 }
 
 export function projectsRoutes(app: Hono, opts: ProjectsHandlerOptions): void {
@@ -181,6 +209,15 @@ export function projectsRoutes(app: Hono, opts: ProjectsHandlerOptions): void {
       });
       return c.json(createProjectResponseSchema.parse({ project }), 201);
     } catch (err) {
+      // Roll back the on-disk clone so the dest path is reusable and
+      // doesn't wedge a future retry on existsSync(dest).
+      try {
+        rmSync(dest, { recursive: true, force: true });
+      } catch (cleanupErr) {
+        console.warn(
+          `[projects] clone rollback failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+        );
+      }
       if (err instanceof DuplicateProjectNameError) {
         return c.json({ error: err.message }, 409);
       }

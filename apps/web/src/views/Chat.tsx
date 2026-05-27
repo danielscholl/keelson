@@ -1032,8 +1032,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
 
       if (trimmed.length === 0) return formatList(projects);
 
-      // URL / path heads consume the *entire* rest-of-input — paths with
-      // spaces would otherwise be truncated to the first token.
+      // URLs use only `tokens[0]` (with `tokens[1]` reserved for an
+      // optional explicit name). Paths consume the entire rest-of-input so
+      // an absolute path with spaces survives.
       const isUrl = /^(https?:|git@|ssh:)/.test(trimmed);
       const isPath = trimmed.startsWith("/") || trimmed.startsWith("~");
 
@@ -1073,10 +1074,11 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       if (head === "layout" && tokens[1] && tokens[2]) {
         const target = projects.find((p) => p.name === tokens[1]);
         if (!target) return `unknown project '${tokens[1]}'`;
-        const layout = tokens[2] as WorktreeLayout;
-        if (layout !== "workspace-scoped" && layout !== "repo-local") {
+        const layoutRaw = tokens[2];
+        if (layoutRaw !== "workspace-scoped" && layoutRaw !== "repo-local") {
           return `layout must be workspace-scoped or repo-local`;
         }
+        const layout: WorktreeLayout = layoutRaw;
         const updated = await updateProject(target.id, { worktreeLayout: layout });
         await refreshProjects();
         return `${updated.name} → ${updated.worktreeLayout}`;

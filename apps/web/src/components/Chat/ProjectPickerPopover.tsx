@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { Project, WorktreeLayout } from "@keelson/shared";
+import { DEFAULT_PROJECT_NAME, type Project, type WorktreeLayout } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { updateProject } from "../../api.ts";
 
@@ -177,7 +177,7 @@ function ProjectEditRow({ project, onCancel, onSaved }: ProjectEditRowProps) {
   const [layout, setLayout] = useState<WorktreeLayout>(project.worktreeLayout);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isDefault = project.name === "default";
+  const isDefault = project.name === DEFAULT_PROJECT_NAME;
 
   const handleSave = useCallback(async () => {
     const patch: { name?: string; worktreeLayout?: WorktreeLayout } = {};
