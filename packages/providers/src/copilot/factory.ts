@@ -84,28 +84,35 @@ function projectCopilotModel(m: CopilotModelInfo): ModelInfo {
   const supports: NonNullable<ModelInfo["supports"]> = { tools: true };
   if (m.capabilities?.supports?.vision === true) supports.vision = true;
   if (m.capabilities?.supports?.reasoningEffort === true) {
-    supports.reasoningEffort = true;
-  }
-  info.supports = supports;
-  // Guard against fixture drift surfacing the metadata when not supported.
-  if (m.capabilities?.supports?.reasoningEffort === true) {
+    // Filter supportedReasoningEfforts to known values. If the SDK
+    // enumerated tiers AND every one of them is outside our schema, treat
+    // the model as if reasoningEffort isn't supported at all — otherwise
+    // the picker renders with no tier list and the client falls back to
+    // its default "medium", which the model rejects (the whole point of
+    // the new enum value the SDK added).
+    let efforts: KnownReasoningEffort[] | undefined;
     if (m.supportedReasoningEfforts) {
       const raw = m.supportedReasoningEfforts as readonly unknown[];
-      const filtered = raw.filter(isKnownReasoningEffort);
+      efforts = raw.filter(isKnownReasoningEffort);
       const dropped = raw.filter((e) => !isKnownReasoningEffort(e));
       if (dropped.length > 0) {
         console.warn(
           `[copilot] dropping unknown reasoning effort(s) from model ${m.id}: ${dropped.join(", ")}`,
         );
       }
-      if (filtered.length > 0) {
-        info.supportedReasoningEfforts = filtered;
+    }
+    const enumeratedButAllUnknown = efforts !== undefined && efforts.length === 0;
+    if (!enumeratedButAllUnknown) {
+      supports.reasoningEffort = true;
+      if (efforts && efforts.length > 0) {
+        info.supportedReasoningEfforts = efforts;
+      }
+      if (m.defaultReasoningEffort && isKnownReasoningEffort(m.defaultReasoningEffort)) {
+        info.defaultReasoningEffort = m.defaultReasoningEffort;
       }
     }
-    if (m.defaultReasoningEffort && isKnownReasoningEffort(m.defaultReasoningEffort)) {
-      info.defaultReasoningEffort = m.defaultReasoningEffort;
-    }
   }
+  info.supports = supports;
   return info;
 }
 

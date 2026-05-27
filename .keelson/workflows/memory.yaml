@@ -6,7 +6,7 @@ description: |
   Does: Records the invocation argument as a lesson-typed memory entry (provenance:
         generated, review_status: pending) and surfaces it in the Memory review queue for
         operator confirmation. Recall also fires so the run trace shows any related prior
-        captures. Run with `keelson workflow run memory "<observation text>"`.
+        captures. Run with `keelson workflow run memory --inputs "ARGUMENTS=<observation text>"`.
   NOT for: Editing or deleting existing memories, or promoting an entry to instruction-grade
            — those require operator actions in the Memory review queue.
 

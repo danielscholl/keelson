@@ -1003,9 +1003,40 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     });
     const models = await provider.listModels();
     expect(models).toHaveLength(1);
+    expect(models[0]!.supports?.reasoningEffort).toBe(true);
     expect(models[0]!.supportedReasoningEfforts).toEqual(["low", "medium", "high"]);
     // "minimal" isn't a known tier, so the default is dropped rather than
     // round-tripped through the picker.
+    expect(models[0]!.defaultReasoningEffort).toBeUndefined();
+  });
+
+  it("listModels() clears reasoningEffort support when every advertised tier is unknown", async () => {
+    // If the SDK enumerates supported tiers and ALL of them are outside our
+    // enum, advertising supports.reasoningEffort with no list lets the client
+    // send its fallback "medium" effort — which the model rejects. Treat
+    // such a model as if reasoningEffort isn't supported.
+    const sdk = makeMockSdk({
+      models: [
+        {
+          id: "gpt-future",
+          name: "GPT-future",
+          capabilities: { supports: { reasoningEffort: true } },
+          supportedReasoningEfforts: ["minimal", "ultra"] as unknown as Array<
+            "low" | "medium" | "high" | "xhigh"
+          >,
+          defaultReasoningEffort: "minimal" as unknown as "low" | "medium" | "high" | "xhigh",
+        },
+      ],
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    const models = await provider.listModels();
+    expect(models).toHaveLength(1);
+    expect(models[0]!.supports?.reasoningEffort).toBeUndefined();
+    expect(models[0]!.supportedReasoningEfforts).toBeUndefined();
     expect(models[0]!.defaultReasoningEffort).toBeUndefined();
   });
 });
