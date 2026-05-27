@@ -62,12 +62,12 @@ const bootstrap = bootstrapProviders({ getCredential });
 const snapshotSubscribers = createSnapshotSubscribers();
 const snapshotManager = createSnapshotManager(snapshotSubscribers);
 
-// No built-in ribs ship. Operators wire their own ribs by importing the
-// rib packages here and adding them to the `available` map; `KEELSON_RIBS`
-// (when set) filters that map to a subset. Until something is wired up,
-// the tool registry stays empty and only the SDK's built-ins (Read/Write/
-// Bash on Claude) are available to chat and workflow `prompt` nodes.
-const ribs = bootstrapRibs({ available: {}, snapshotManager });
+// No built-in ribs ship. With no arguments, bootstrapRibs walks
+// `node_modules/@keelson/rib-*` and activates every package whose default
+// export is a valid Rib. `KEELSON_RIBS` (when set) filters that discovered
+// map to a subset. Embedders that prefer hand-wired activation can pass
+// `available: { … }` here instead — that path bypasses discovery entirely.
+const ribs = await bootstrapRibs({ snapshotManager });
 
 const PORT = Number(process.env.PORT ?? 7878);
 const HOSTNAME = "127.0.0.1";

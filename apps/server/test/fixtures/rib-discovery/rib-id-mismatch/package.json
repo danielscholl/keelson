@@ -1,0 +1,6 @@
+{
+  "name": "@keelson/rib-id-mismatch",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./index.ts"
+}

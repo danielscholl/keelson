@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import {
   clearRegistry as clearProviderRegistry,
   type IAgentProvider,
@@ -65,14 +66,14 @@ describe("bootstrapRibs", () => {
     };
   }
 
-  test("returns empty manifest when no ribs are available", () => {
+  test("returns empty manifest when no ribs are available", async () => {
     delete process.env.KEELSON_RIBS;
-    expect(bootstrapRibs({ available: {} }).manifests).toEqual([]);
+    expect((await bootstrapRibs({ available: {} })).manifests).toEqual([]);
   });
 
-  test("when KEELSON_RIBS is unset, every available rib registers", () => {
+  test("when KEELSON_RIBS is unset, every available rib registers", async () => {
     delete process.env.KEELSON_RIBS;
-    const { manifests } = bootstrapRibs({
+    const { manifests } = await bootstrapRibs({
       available: {
         alpha: fakeRib("alpha", ["alpha_one"]),
         beta: fakeRib("beta", ["beta_one", "beta_two"]),
@@ -81,9 +82,9 @@ describe("bootstrapRibs", () => {
     expect(manifests.map((m) => m.id).sort()).toEqual(["alpha", "beta"]);
   });
 
-  test("KEELSON_RIBS restricts to listed ids", () => {
+  test("KEELSON_RIBS restricts to listed ids", async () => {
     process.env.KEELSON_RIBS = "alpha";
-    const { manifests } = bootstrapRibs({
+    const { manifests } = await bootstrapRibs({
       available: {
         alpha: fakeRib("alpha", ["alpha_one"]),
         beta: fakeRib("beta", ["beta_one"]),
@@ -93,17 +94,17 @@ describe("bootstrapRibs", () => {
     expect(manifests[0]?.registered).toEqual(["alpha_one"]);
   });
 
-  test("unknown ids in KEELSON_RIBS are skipped (warn-and-continue)", () => {
+  test("unknown ids in KEELSON_RIBS are skipped (warn-and-continue)", async () => {
     process.env.KEELSON_RIBS = "alpha,missing";
-    const { manifests } = bootstrapRibs({
+    const { manifests } = await bootstrapRibs({
       available: { alpha: fakeRib("alpha") },
     });
     expect(manifests.map((m) => m.id)).toEqual(["alpha"]);
   });
 
-  test("malformed ids in KEELSON_RIBS are rejected by the schema", () => {
+  test("malformed ids in KEELSON_RIBS are rejected by the schema", async () => {
     process.env.KEELSON_RIBS = "Alpha,al_pha,alpha";
-    const { manifests } = bootstrapRibs({
+    const { manifests } = await bootstrapRibs({
       available: { alpha: fakeRib("alpha") },
     });
     // Only 'alpha' survives — 'Alpha' (uppercase) and 'al_pha' (underscore)
@@ -111,25 +112,25 @@ describe("bootstrapRibs", () => {
     expect(manifests.map((m) => m.id)).toEqual(["alpha"]);
   });
 
-  test("rib whose self-id diverges from its manifest key throws", () => {
+  test("rib whose self-id diverges from its manifest key throws", async () => {
     process.env.KEELSON_RIBS = "alpha";
-    expect(() =>
+    await expect(
       bootstrapRibs({
         available: { alpha: fakeRib("beta") },
       }),
-    ).toThrow(/manifest key 'alpha' declares id 'beta'/);
+    ).rejects.toThrow(/manifest key 'alpha' declares id 'beta'/);
   });
 
-  test("malformed manifest key throws (embedder bug, not operator typo)", () => {
+  test("malformed manifest key throws (embedder bug, not operator typo)", async () => {
     // Unset KEELSON_RIBS — active list comes from Object.keys(available),
     // so a bad key would otherwise be silently skipped. Throwing surfaces
     // the embedder's typo at boot instead of leaving the rib inactive.
     delete process.env.KEELSON_RIBS;
-    expect(() =>
+    await expect(
       bootstrapRibs({
         available: { Alpha: fakeRib("Alpha") },
       }),
-    ).toThrow(/manifest key 'Alpha' is invalid/);
+    ).rejects.toThrow(/manifest key 'Alpha' is invalid/);
   });
 
   test("disposeAll awaits async disposers in order", async () => {
@@ -144,7 +145,7 @@ describe("bootstrapRibs", () => {
         calls.push(id);
       },
     });
-    const { disposeAll } = bootstrapRibs({
+    const { disposeAll } = await bootstrapRibs({
       available: {
         // alpha sleeps longer; sequential await means alpha lands first
         // even though beta's wait is shorter.
@@ -167,7 +168,7 @@ describe("bootstrapRibs", () => {
         calls.push(id);
       },
     });
-    const { disposeAll } = bootstrapRibs({
+    const { disposeAll } = await bootstrapRibs({
       available: {
         alpha: ribWithDispose("alpha"),
         beta: ribWithDispose("beta"),
@@ -180,7 +181,7 @@ describe("bootstrapRibs", () => {
   test("disposeAll continues past a throwing disposer", async () => {
     delete process.env.KEELSON_RIBS;
     const survived: string[] = [];
-    const { disposeAll } = bootstrapRibs({
+    const { disposeAll } = await bootstrapRibs({
       available: {
         alpha: {
           id: "alpha",
@@ -217,7 +218,7 @@ describe("bootstrapRibs", () => {
         return { generation: composeCalls };
       },
     };
-    bootstrapRibs({ available: { alpha: ribWithBundle }, snapshotManager });
+    await bootstrapRibs({ available: { alpha: ribWithBundle }, snapshotManager });
     expect(snapshotManager.keys()).toEqual(["alpha"]);
     const frame = await snapshotManager.recompose<{ generation: number }>("alpha");
     expect(frame?.data).toEqual({ generation: 1 });
@@ -228,7 +229,7 @@ describe("bootstrapRibs", () => {
     delete process.env.KEELSON_RIBS;
     const { createSnapshotManager } = await import("../src/snapshot-manager.ts");
     const snapshotManager = createSnapshotManager();
-    bootstrapRibs({ available: { alpha: fakeRib("alpha") }, snapshotManager });
+    await bootstrapRibs({ available: { alpha: fakeRib("alpha") }, snapshotManager });
     expect(snapshotManager.keys()).toEqual([]);
   });
 
@@ -246,8 +247,60 @@ describe("bootstrapRibs", () => {
         return { registered: [] };
       },
     };
-    bootstrapRibs({ available: { alpha: multiSnapshotRib }, snapshotManager });
+    await bootstrapRibs({ available: { alpha: multiSnapshotRib }, snapshotManager });
     expect(snapshotManager.keys().sort()).toEqual(["alpha.partitions", "alpha.users"]);
+  });
+
+  describe("discovery", () => {
+    const fixtureRoot = join(import.meta.dir, "fixtures", "rib-discovery");
+
+    test("walks the discovery root and activates a healthy fixture rib", async () => {
+      // Narrow to just rib-test so the broken / bad-default / id-mismatch
+      // siblings stay out of this assertion. Their handling is exercised
+      // in the next three cases.
+      process.env.KEELSON_RIBS = "test";
+      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      expect(manifests.map((m) => m.id)).toEqual(["test"]);
+      expect(manifests[0]?.registered).toEqual(["test.tool"]);
+    });
+
+    test("a throwing import warns and skips; healthy ribs still activate", async () => {
+      process.env.KEELSON_RIBS = "test,broken";
+      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      expect(manifests.map((m) => m.id)).toEqual(["test"]);
+    });
+
+    test("a non-object default export is skipped", async () => {
+      process.env.KEELSON_RIBS = "bad-default";
+      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      expect(manifests).toEqual([]);
+    });
+
+    test("a rib whose declared id doesn't match its package suffix is skipped", async () => {
+      // Filter to both candidate ids so neither suffix nor declared id can
+      // route past the divergence check.
+      process.env.KEELSON_RIBS = "id-mismatch,other";
+      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      expect(manifests).toEqual([]);
+    });
+
+    test("explicit `available` bypasses discovery even when discoveryRoot is set", async () => {
+      delete process.env.KEELSON_RIBS;
+      const { manifests } = await bootstrapRibs({
+        available: { foo: fakeRib("foo", ["foo.tool"]) },
+        discoveryRoot: fixtureRoot,
+      });
+      expect(manifests.map((m) => m.id)).toEqual(["foo"]);
+      expect(manifests[0]?.registered).toEqual(["foo.tool"]);
+    });
+
+    test("a missing discovery root returns no ribs without throwing", async () => {
+      delete process.env.KEELSON_RIBS;
+      const { manifests } = await bootstrapRibs({
+        discoveryRoot: join(fixtureRoot, "does-not-exist"),
+      });
+      expect(manifests).toEqual([]);
+    });
   });
 });
 
