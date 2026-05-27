@@ -99,11 +99,10 @@ cd keelson
 bun install
 ```
 
-**Optional**: install [uv](https://docs.astral.sh/uv/) if you want to run
+**Optional**: install [uv](https://docs.astral.sh/uv/) if a rib you load uses
 the Python `runtime: uv` script-node path. The bundled
-[`python-smoke-test`](.keelson/workflows/python-smoke-test.yaml) workflow
-exercises it; the regular [`smoke-test`](.keelson/workflows/smoke-test.yaml)
-is Bun-only.
+[`smoke-test`](.keelson/workflows/smoke-test.yaml) is Bun-only and doesn't
+require it.
 
 Alias the workspace bin while developing:
 
