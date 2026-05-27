@@ -4,13 +4,16 @@
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { getAgentProvider, isRegisteredProvider, registerStubProvider } from "@keelson/providers";
 import { getRegisteredTools } from "@keelson/skills";
 import {
   bashHandler,
+  createWorktree,
+  defaultWorktreeRoot,
   discoverWorkflows,
+  isGitRepo,
   makeApprovalHandler,
   makeCancelHandler,
   makeCommandHandler,
@@ -22,8 +25,11 @@ import {
   parseWorkflow,
   type RunStreamEvent,
   type RunSummary,
+  removeWorktree,
+  resolveBranchTemplate,
   runWorkflow,
   type WorkflowDefinition,
+  worktreePathFor,
 } from "@keelson/workflows";
 
 import { defaultWorkflowsDir } from "../paths.ts";
@@ -36,6 +42,11 @@ export interface RunHeadlessOptions {
   workflowsDir?: string;
   abortSignal?: AbortSignal;
   onEvent?: (event: RunStreamEvent) => void;
+  // Per-run isolation override; mirrors the wire schema. `"auto"` defers to
+  // the workflow's YAML `worktree.enabled`. Without this, `--worktree`
+  // requests sent through the server-down fallback would silently downgrade
+  // to in-place runs.
+  isolation?: "worktree" | "none" | "auto";
 }
 
 export interface RunHeadlessResult {
@@ -70,6 +81,19 @@ export class MemoryRequiresServerError extends Error {
     );
     this.name = "MemoryRequiresServerError";
   }
+}
+
+// Mirrors the slugify helper the server uses to pick the
+// `~/.keelson/worktrees/<slug>/` bucket when there's no named project. Kept
+// identical so the same headless run reuses the same worktree home across
+// invocations (otherwise prune would see two near-identical orphans).
+function slugifyForPath(s: string): string {
+  return (
+    s
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "workspace"
+  );
 }
 
 // Find a workflow definition by name. Discovery walks the project's
@@ -162,8 +186,16 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const runId = crypto.randomUUID();
 
   let capturedSummary: RunSummary | null = null;
+  // Mirrored boolean so the worktree-cleanup finally can read terminal-status
+  // intent without tripping TS's closure-narrowing on `capturedSummary` (it
+  // can't trace the onEvent assignment, so the property read narrows to
+  // `never` at the finally site).
+  let runSucceeded = false;
   const onEvent = (event: RunStreamEvent): void => {
-    if (event.type === "run_done") capturedSummary = event.summary;
+    if (event.type === "run_done") {
+      capturedSummary = event.summary;
+      runSucceeded = event.status === "succeeded";
+    }
     opts.onEvent?.(event);
   };
 
@@ -175,18 +207,84 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // throwing from the finally and masking the original error.
   const artifactsDir = mkdtempSync(join(tmpdir(), "keelson-cli-run-"));
 
+  // Worktree isolation mirrors the server's lifecycle: opt in via override
+  // OR YAML `worktree.enabled`; create before the first node; prune on
+  // success, keep on failure for inspection. The headless path skips memory
+  // already (see MemoryRequiresServerError above), but worktree-bearing
+  // workflows are the common headless ask (run `architect` against any local
+  // checkout from the shell), so honoring this here is what closes the
+  // server-down isolation gap.
+  const isolationMode = opts.isolation ?? "auto";
+  const isolationOn =
+    isolationMode === "worktree" ||
+    (isolationMode === "auto" && workflow.worktree?.enabled === true);
+  // `worktree` is the operator's explicit flag — fail closed so a typo / non-git
+  // dir doesn't silently mutate the live checkout. `auto` means "honor the YAML
+  // default" — best-effort, fall back to in-place with a warning if the target
+  // isn't a git repo.
+  const isolationRequired = isolationMode === "worktree";
+  let effectiveCwd = opts.cwd;
+  let cleanupWorktree: { repoPath: string; dest: string } | null = null;
+  if (isolationOn) {
+    if (!(await isGitRepo(opts.cwd))) {
+      const msg = `worktree isolation requested but ${opts.cwd} is not a git repo`;
+      if (isolationRequired) {
+        throw new Error(`${msg}. Initialize the directory with \`git init\` or drop --worktree.`);
+      }
+      console.warn(`[keelson] ${msg}; running in place`);
+    } else {
+      const branch = resolveBranchTemplate(workflow.worktree?.branch, {
+        workflow: workflow.name,
+        runId,
+      });
+      const projectName = slugifyForPath(basename(opts.cwd));
+      const dest = worktreePathFor({
+        root: defaultWorktreeRoot(),
+        projectName,
+        branch,
+      });
+      try {
+        const created = await createWorktree({ repoPath: opts.cwd, branch, dest });
+        effectiveCwd = created.worktreePath;
+        cleanupWorktree = { repoPath: opts.cwd, dest: created.worktreePath };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (isolationRequired) {
+          throw new Error(`worktree creation failed: ${message}`);
+        }
+        console.warn(`[keelson] worktree creation failed; running in place: ${message}`);
+      }
+    }
+  }
+
   try {
     await runWorkflow({
       workflow,
       runId,
       inputs: opts.inputs,
       handlers,
-      cwd: opts.cwd,
+      cwd: effectiveCwd,
       abortSignal: abort.signal,
       artifactsDir,
       onEvent,
     });
   } finally {
+    if (cleanupWorktree !== null && runSucceeded) {
+      // Force-remove on success: same semantics as the server path — the
+      // worktree is ephemeral, and any intentional artifacts should have
+      // been committed elsewhere.
+      try {
+        await removeWorktree({
+          repoPath: cleanupWorktree.repoPath,
+          dest: cleanupWorktree.dest,
+          force: true,
+        });
+      } catch (err) {
+        console.warn(
+          `[keelson] worktree cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     try {
       rmSync(artifactsDir, { recursive: true, force: true });
     } catch {

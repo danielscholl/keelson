@@ -40,6 +40,13 @@ export const workflowWorktreePolicySchema = z.object({
    * - omitted — caller decides
    */
   enabled: z.boolean().optional(),
+  /**
+   * Branch name template, with `{workflow}` and `{run_id_short}` placeholders.
+   * Defaults to `keelson/{workflow}/{run_id_short}`. The leaf segment of the
+   * resolved branch is also used as the worktree directory name under
+   * `~/.keelson/worktrees/<project>/`.
+   */
+  branch: z.string().min(1).optional(),
 });
 
 export type WorkflowWorktreePolicy = z.infer<typeof workflowWorktreePolicySchema>;

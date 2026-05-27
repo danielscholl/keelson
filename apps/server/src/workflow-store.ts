@@ -25,6 +25,14 @@ export interface CreateRunInput {
   // the row to tolerate FK SET NULL after the user deletes the conversation,
   // but the create path always sets it.
   conversationId: string;
+  // Projects: when the caller targeted a named project. Nullable because the
+  // CLI's in-process headless path may pass `workingDir` directly without a
+  // project handle. Resolves to the project's root_path at run start.
+  projectId?: string | null;
+  // The cwd the executor will spawn against. Always set on new runs.
+  workingDir: string;
+  // Populated by the executor only when isolation is on (slice 3); null until then.
+  worktreePath?: string | null;
 }
 
 export interface UpsertNodeOutputInput {
@@ -49,6 +57,9 @@ export interface WorkflowStore {
   createRun(input: CreateRunInput): void;
   updateRunStatus(input: UpdateRunStatusInput): void;
   upsertNodeOutput(input: UpsertNodeOutputInput): void;
+  // Patches worktree_path after-the-fact (worktree creation is lazy, so the
+  // path isn't known at createRun time when isolation is on).
+  setRunWorktreePath(runId: string, worktreePath: string | null): void;
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];
   // Drives the Workflows-nav badge: caller polls for `paused` rows so other
@@ -73,6 +84,9 @@ interface RunRow {
   inputs_json: string;
   error: string | null;
   conversation_id: string | null;
+  project_id: string | null;
+  working_dir: string | null;
+  worktree_path: string | null;
 }
 
 interface NodeRow {
@@ -94,6 +108,9 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     completedAt: row.completed_at,
     error: row.error,
     conversationId: row.conversation_id,
+    projectId: row.project_id,
+    workingDir: row.working_dir,
+    worktreePath: row.worktree_path,
   };
 }
 
@@ -153,11 +170,12 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
   );
+  const updateWorktreePath = db.prepare("UPDATE workflow_runs SET worktree_path = ? WHERE id = ?");
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
   const listRunsAll = db.prepare(
     "SELECT * FROM workflow_runs ORDER BY started_at DESC, rowid DESC",
@@ -199,10 +217,16 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         JSON.stringify(input.inputs),
         null,
         input.conversationId,
+        input.projectId ?? null,
+        input.workingDir,
+        input.worktreePath ?? null,
       );
     },
     updateRunStatus(input) {
       updateRun.run(input.status, input.completedAt, input.error, input.runId);
+    },
+    setRunWorktreePath(runId, worktreePath) {
+      updateWorktreePath.run(worktreePath, runId);
     },
     upsertNodeOutput(input) {
       upsertNode.run(

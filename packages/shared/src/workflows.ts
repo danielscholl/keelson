@@ -65,12 +65,23 @@ export const workflowSummarySchema = z
   .strict();
 export type WorkflowSummary = z.infer<typeof workflowSummarySchema>;
 
+// Worktree policy block surfaced in the detail response so the SPA can
+// pre-check / pre-clear the isolation checkbox in the StartComposer.
+export const workflowWorktreePolicyWireSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    branch: z.string().optional(),
+  })
+  .strict();
+export type WorkflowWorktreePolicyWire = z.infer<typeof workflowWorktreePolicyWireSchema>;
+
 // Single-workflow detail (GET /api/workflows/:name).
 export const workflowDetailSchema = z
   .object({
     name: z.string(),
     description: z.string(),
     nodes: z.array(workflowNodeSummarySchema),
+    worktree: workflowWorktreePolicyWireSchema.optional(),
   })
   .strict();
 export type WorkflowDetail = z.infer<typeof workflowDetailSchema>;
@@ -94,6 +105,11 @@ export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
 // `conversationId` is the FK added in migration 12; nullable because
 // pre-migration rows + post-FK orphans (conversation deleted) carry no link,
 // but every newly-created run sets it.
+//
+// `projectId` / `workingDir` / `worktreePath` are nullable on the wire for
+// back-compat with rows created before the projects feature landed. New runs
+// always have `workingDir`; `projectId` is set when the caller targeted a
+// named project; `worktreePath` is populated only when isolation is on.
 export const workflowRunSummarySchema = z
   .object({
     runId: z.string(),
@@ -103,6 +119,9 @@ export const workflowRunSummarySchema = z
     completedAt: z.string().nullable(),
     error: z.string().nullable(),
     conversationId: z.string().nullable(),
+    projectId: z.string().nullable(),
+    workingDir: z.string().nullable(),
+    worktreePath: z.string().nullable(),
   })
   .strict();
 export type WorkflowRunSummary = z.infer<typeof workflowRunSummarySchema>;
@@ -116,12 +135,31 @@ export const workflowRunDetailSchema = workflowRunSummarySchema
   .strict();
 export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>;
 
+// Per-run isolation override. `"worktree"` forces a git-worktree run;
+// `"none"` forces an in-place run; omitted → the workflow YAML's
+// `worktree.enabled` decides (default: in-place).
+export const isolationOverrideSchema = z.enum(["worktree", "none"]);
+export type IsolationOverride = z.infer<typeof isolationOverrideSchema>;
+
 // POST /api/workflows/:name/runs request body.
+//
+// At least one of `projectId` / `workingDir` must be provided: the server
+// rejects requests with neither so a workflow doesn't silently target the
+// server's install directory. `projectId` resolves to the project's
+// `root_path`; `workingDir` overrides that (or stands alone). When both
+// are given, `workingDir` wins and `projectId` is recorded for display only.
 export const startWorkflowRunBodySchema = z
   .object({
     inputs: z.record(z.string(), z.string()).default({}),
+    projectId: z.string().optional(),
+    workingDir: z.string().optional(),
+    isolation: isolationOverrideSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => Boolean(v.projectId || v.workingDir), {
+    message: "either projectId or workingDir is required",
+    path: ["projectId"],
+  });
 export type StartWorkflowRunBody = z.infer<typeof startWorkflowRunBodySchema>;
 
 // POST /api/workflows/:name/runs response body.

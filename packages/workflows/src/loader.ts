@@ -663,10 +663,20 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     }
   }
 
-  let worktreePolicy: { enabled?: boolean } | undefined;
+  let worktreePolicy: { enabled?: boolean; branch?: string } | undefined;
   if (obj.worktree && typeof obj.worktree === "object" && !Array.isArray(obj.worktree)) {
-    const enabled = (obj.worktree as Record<string, unknown>).enabled;
-    if (typeof enabled === "boolean") worktreePolicy = { enabled };
+    const raw = obj.worktree as Record<string, unknown>;
+    const enabled = typeof raw.enabled === "boolean" ? raw.enabled : undefined;
+    const branch =
+      typeof raw.branch === "string" && raw.branch.trim().length > 0
+        ? raw.branch.trim()
+        : undefined;
+    if (enabled !== undefined || branch !== undefined) {
+      worktreePolicy = {
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(branch !== undefined ? { branch } : {}),
+      };
+    }
   }
 
   let mutatesCheckout: boolean | undefined;

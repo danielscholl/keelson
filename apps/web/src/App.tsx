@@ -7,6 +7,7 @@ import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
+import { Projects } from "./views/Projects.tsx";
 import { Workflows } from "./views/Workflows.tsx";
 
 export function App() {
@@ -56,7 +57,15 @@ function AppInner() {
         pendingMemoryCount={pendingMemoryCount}
         onNewChat={handleNewChat}
       />
-      {activeTab === "workflows" ? <Workflows /> : activeTab === "memory" ? <Memory /> : <Chat />}
+      {activeTab === "workflows" ? (
+        <Workflows />
+      ) : activeTab === "projects" ? (
+        <Projects />
+      ) : activeTab === "memory" ? (
+        <Memory />
+      ) : (
+        <Chat />
+      )}
     </div>
   );
 }

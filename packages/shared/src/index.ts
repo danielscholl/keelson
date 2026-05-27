@@ -8,6 +8,7 @@
 
 export * from "./chat.ts";
 export * from "./memory.ts";
+export * from "./projects.ts";
 export * from "./rib.ts";
 export * from "./snapshots.ts";
 export * from "./tools.ts";

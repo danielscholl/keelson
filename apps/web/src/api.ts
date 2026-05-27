@@ -2,19 +2,25 @@ import {
   type ClaudeCliStatus,
   type Conversation,
   type CopilotCliStatus,
+  type CreateProjectBody,
+  type CreateProjectResponse,
   type CredentialStatus,
   claudeCliStatusSchema,
   copilotCliStatusSchema,
+  createProjectResponseSchema,
   credentialStatusSchema,
   getWorkflowDetailResponseSchema,
   getWorkflowRunResponseSchema,
+  type ListProjectsResponse,
   type ListWorkflowsResponse,
+  listProjectsResponseSchema,
   listRunsResponseSchema,
   listWorkflowsResponseSchema,
   type MemoryListQuery,
   type MemoryListResponse,
   type ModelInfo,
   memoryListResponseSchema,
+  type Project,
   type ProviderInfo,
   type RegisteredToolInfo,
   type RememberChatMessageRequest,
@@ -230,15 +236,27 @@ export async function listPausedRuns(): Promise<WorkflowRunSummary[]> {
   ).runs;
 }
 
+export interface StartWorkflowRunOptions {
+  inputs?: Record<string, string>;
+  projectId?: string;
+  workingDir?: string;
+  isolation?: "worktree" | "none";
+}
+
 export async function startWorkflowRun(
   workflowName: string,
-  inputs: Record<string, string> = {},
+  options: StartWorkflowRunOptions = {},
 ): Promise<{ runId: string }> {
   return startWorkflowRunResponseSchema.parse(
     await apiRequest<unknown>(`/api/workflows/${encodeURIComponent(workflowName)}/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ inputs }),
+      body: JSON.stringify({
+        inputs: options.inputs ?? {},
+        ...(options.projectId ? { projectId: options.projectId } : {}),
+        ...(options.workingDir ? { workingDir: options.workingDir } : {}),
+        ...(options.isolation ? { isolation: options.isolation } : {}),
+      }),
       errorBody: "json-error",
       label: `/api/workflows/${workflowName}/runs`,
     }),
@@ -329,6 +347,34 @@ export async function postReviewAction(req: ReviewActionRequest): Promise<Review
       errorBody: "json-error",
     }),
   );
+}
+
+// === Projects ==============================================================
+
+export async function listProjects(): Promise<Project[]> {
+  const body = listProjectsResponseSchema.parse(await apiRequest<unknown>("/api/projects"));
+  return body.projects;
+}
+
+export async function createProject(input: CreateProjectBody): Promise<Project> {
+  const body = createProjectResponseSchema.parse(
+    await apiRequest<CreateProjectResponse>("/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+      errorBody: "json-error",
+    }),
+  );
+  return body.project;
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await apiRequest<void>(`/api/projects/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    responseBody: "void",
+    errorBody: "json-error",
+    label: `/api/projects/${id} DELETE`,
+  });
 }
 
 export async function rememberChatMessage(

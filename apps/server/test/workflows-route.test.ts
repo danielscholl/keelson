@@ -20,6 +20,7 @@ import { Hono } from "hono";
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
+import { createProjectsStore, type ProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
 import {
   createActiveRuns,
@@ -36,6 +37,9 @@ beforeEach(() => {
   dbPath = join(tmpDir, "test.db");
   wfDir = join(tmpDir, "workflows");
   mkdirSync(wfDir, { recursive: true });
+  // Reset the postRun auto-inject latch — inline rigs that bypass makeRig
+  // must not inherit a project id from the previous test's DB.
+  CURRENT_DEFAULT_PROJECT_ID = null;
 });
 
 afterEach(() => {
@@ -45,16 +49,30 @@ afterEach(() => {
 interface Rig {
   app: Hono;
   store: WorkflowStore;
+  projectsStore: ProjectsStore;
+  // Pre-created project so test bodies can target a real id without setup
+  // churn. Suite-wide single project keeps the assertion surface small;
+  // tests that exercise project-scoping wire their own.
+  defaultProjectId: string;
 }
+
+// Module-level latch: makeRig stamps the per-test default project id here so
+// `postRun` can auto-inject it into /runs bodies without every callsite having
+// to thread it through. Reset to null in beforeEach so inline rigs that bypass
+// makeRig don't inherit a stale id from the previous test.
+let CURRENT_DEFAULT_PROJECT_ID: string | null = null;
 
 function makeRig(): Rig {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
+  const projectsStore = createProjectsStore(db);
+  const defaultProject = projectsStore.create({ name: "test-project", rootPath: tmpDir });
+  CURRENT_DEFAULT_PROJECT_ID = defaultProject.id;
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const app = new Hono();
-  workflowsRoutes(app, { catalog, store, conversationStore, cwd: tmpDir });
-  return { app, store };
+  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore });
+  return { app, store, projectsStore, defaultProjectId: defaultProject.id };
 }
 
 function writeWorkflow(filename: string, body: string): void {
@@ -66,6 +84,22 @@ function writeWorkflow(filename: string, body: string): void {
 const ORIGIN = "http://127.0.0.1:5173";
 
 function postRun(url: string, body: unknown, init: RequestInit = {}): Request {
+  // Auto-inject the test's default project id on /runs POSTs that don't
+  // already specify a target. The route requires `projectId` or `workingDir`;
+  // tests that don't care about targeting shouldn't have to set one.
+  let finalBody = body;
+  if (
+    url.endsWith("/runs") &&
+    body !== null &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    CURRENT_DEFAULT_PROJECT_ID !== null
+  ) {
+    const obj = body as Record<string, unknown>;
+    if (!("projectId" in obj) && !("workingDir" in obj)) {
+      finalBody = { ...obj, projectId: CURRENT_DEFAULT_PROJECT_ID };
+    }
+  }
   return new Request(url, {
     method: "POST",
     ...init,
@@ -74,7 +108,7 @@ function postRun(url: string, body: unknown, init: RequestInit = {}): Request {
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
-    body: typeof body === "string" ? body : JSON.stringify(body),
+    body: typeof finalBody === "string" ? finalBody : JSON.stringify(finalBody),
   });
 }
 
@@ -310,12 +344,12 @@ nodes:
     const activeRuns = createActiveRuns();
     workflowsRoutes(
       app,
-      { catalog, store, conversationStore: createConversationStore(db), cwd: tmpDir },
+      { catalog, store, conversationStore: createConversationStore(db), defaultCwd: tmpDir },
       activeRuns,
     );
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/long/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/long/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
 
@@ -406,7 +440,7 @@ nodes:
     expect(store.listRuns("j")).toHaveLength(0);
   });
 
-  test("POST .../runs accepts a fully empty body (inputs defaults to {})", async () => {
+  test("POST .../runs with no inputs defaults to {} when target is supplied", async () => {
     writeWorkflow(
       "k.yaml",
       `name: k
@@ -416,17 +450,83 @@ nodes:
     bash: echo hi
 `,
     );
-    const { app } = makeRig();
+    const { app, defaultProjectId } = makeRig();
+    // `inputs` is optional and defaults to {}; the target (projectId here)
+    // is what's required.
     const res = await app.fetch(
-      new Request("http://test/api/workflows/k/runs", {
-        method: "POST",
-        headers: { origin: ORIGIN, "content-type": "application/json" },
-      }),
+      postRun("http://test/api/workflows/k/runs", { projectId: defaultProjectId }),
     );
     expect(res.status).toBe(200);
     const { runId } = (await res.json()) as { runId: string };
     const run = (await pollUntilTerminal(app, runId)) as { status: string };
     expect(run.status).toBe("succeeded");
+  });
+
+  test("POST .../runs without projectId or workingDir returns 400", async () => {
+    writeWorkflow(
+      "no-target.yaml",
+      `name: no-target
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const { app } = makeRig();
+    // Bypass postRun's auto-inject so we exercise the bare-empty body path.
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/no-target/runs", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {} }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("projectId or workingDir");
+  });
+
+  test("POST .../runs rejects workingDir pointing at a file (not a directory)", async () => {
+    writeWorkflow(
+      "to-file.yaml",
+      `name: to-file
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const filePath = join(tmpDir, "not-a-dir.txt");
+    writeFileSync(filePath, "marker");
+    const { app } = makeRig();
+    const res = await app.fetch(
+      postRun("http://test/api/workflows/to-file/runs", { inputs: {}, workingDir: filePath }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not a directory");
+  });
+
+  test("POST .../runs rejects workingDir that does not exist", async () => {
+    writeWorkflow(
+      "to-missing.yaml",
+      `name: to-missing
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const { app } = makeRig();
+    const res = await app.fetch(
+      postRun("http://test/api/workflows/to-missing/runs", {
+        inputs: {},
+        workingDir: join(tmpDir, "does-not-exist"),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("does not exist");
   });
 
   test("injected prompt handler — node succeeds end-to-end and contentParts persists", async () => {
@@ -469,11 +569,11 @@ nodes:
       catalog,
       store,
       conversationStore: createConversationStore(db),
-      cwd: tmpDir,
+      defaultCwd: tmpDir,
       promptHandler,
     });
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/spwf/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/spwf/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     const run = (await pollUntilTerminal(app, runId)) as {
@@ -552,14 +652,14 @@ nodes:
         catalog,
         store,
         conversationStore: createConversationStore(db),
-        cwd: tmpDir,
+        defaultCwd: tmpDir,
         promptHandler,
       },
       activeRuns,
     );
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/longprompt/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/longprompt/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     // Give the executor a tick to start the node and the provider to start emitting.
@@ -654,10 +754,10 @@ nodes:
     const conversationStore = createConversationStore(db);
     const catalog = bootstrapWorkflows({ workflowDir: wfDir });
     const app = new Hono();
-    workflowsRoutes(app, { catalog, store, conversationStore, cwd: tmpDir });
+    workflowsRoutes(app, { catalog, store, conversationStore, defaultCwd: tmpDir });
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/purgable/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/purgable/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilTerminal(app, runId);
@@ -735,12 +835,12 @@ nodes:
     const app = new Hono();
     workflowsRoutes(
       app,
-      { catalog, store, conversationStore, cwd: tmpDir, promptHandler },
+      { catalog, store, conversationStore, defaultCwd: tmpDir, promptHandler },
       activeRuns,
     );
 
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/slowpurge/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/slowpurge/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     await new Promise((r) => setTimeout(r, 75));
@@ -845,12 +945,12 @@ nodes:
     const app = new Hono();
     workflowsRoutes(
       app,
-      { catalog, store, conversationStore: createConversationStore(db), cwd: tmpDir },
+      { catalog, store, conversationStore: createConversationStore(db), defaultCwd: tmpDir },
       undefined,
       subscribers,
     );
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/instant/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/instant/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     // Wait for the run to fully terminate AND for activeRuns/subscribers to
@@ -948,14 +1048,14 @@ nodes:
         catalog,
         store,
         conversationStore: createConversationStore(db),
-        cwd: tmpDir,
+        defaultCwd: tmpDir,
         promptHandler,
       },
       undefined,
       subscribers,
     );
     const startRes = await app.fetch(
-      postRun("http://test/api/workflows/wsflow/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/wsflow/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await startRes.json()) as { runId: string };
     subscribers.subscribe(runId, fakeWs);
@@ -1194,12 +1294,14 @@ nodes:
         catalog,
         store,
         conversationStore: createConversationStore(db),
-        cwd: tmpDir,
+        defaultCwd: tmpDir,
       },
       undefined,
       subscribers,
     );
-    const startRes = await app.fetch(postRun("http://test/api/workflows/pa/runs", { inputs: {} }));
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/pa/runs", { inputs: {}, workingDir: tmpDir }),
+    );
     const { runId } = (await startRes.json()) as { runId: string };
     subscribers.subscribe(runId, fakeWs);
     const pausedDeadline = Date.now() + 2000;
@@ -1459,13 +1561,13 @@ nodes:
       catalog,
       store,
       conversationStore,
-      cwd: tmpDir,
+      defaultCwd: tmpDir,
       memoryStore,
     });
 
     // Run 1 — writes to memory.
     const start1 = await app.fetch(
-      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {}, workingDir: tmpDir }),
     );
     expect(start1.status).toBe(200);
     const { runId: runId1 } = (await start1.json()) as { runId: string };
@@ -1488,7 +1590,7 @@ nodes:
     // that the in-process store sees a recall_trace row recorded by the
     // executor's pre-run hook.
     const start2 = await app.fetch(
-      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/memory-demo/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId: runId2 } = (await start2.json()) as { runId: string };
     const run2 = await pollUntilTerminal(app, runId2);
@@ -1564,12 +1666,12 @@ nodes:
       catalog,
       store,
       conversationStore,
-      cwd: tmpDir,
+      defaultCwd: tmpDir,
       memoryStore,
     });
 
     const start = await app.fetch(
-      postRun("http://test/api/workflows/memory-invalid/runs", { inputs: {} }),
+      postRun("http://test/api/workflows/memory-invalid/runs", { inputs: {}, workingDir: tmpDir }),
     );
     const { runId } = (await start.json()) as { runId: string };
     const run = await pollUntilTerminal(app, runId);
