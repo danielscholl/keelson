@@ -890,6 +890,19 @@ button.tab:focus-visible {
   padding: 2px 4px;
 }
 
+/* Command messages let the inner .command-call-block carry the visual
+   frame — bubble stays neutral and the role label is hidden because the
+   block already shows the command name + family chip. */
+.chat-message.command .chat-bubble {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.chat-message.command .chat-role {
+  display: none;
+}
+
 /* F10.7b: marker on assistant bubbles whose turn ended without a clean
  * `done` (user abort or provider error). Sits below the content; deliberately
  * understated so it reads as metadata, not failure. */
@@ -2069,6 +2082,10 @@ button.tab:focus-visible {
   color: var(--muted);
 }
 
+.tool-source-project {
+  color: var(--accent);
+}
+
 .tool-calls-running-dot {
   display: inline-block;
   width: 6px;
@@ -2083,6 +2100,94 @@ button.tab:focus-visible {
 @keyframes tool-call-pulse {
   0%, 100% { opacity: 0.35; transform: scale(0.85); }
   50%      { opacity: 1;    transform: scale(1.1); }
+}
+
+/* Command-call block — chip-style rendering of slash command echoes and
+   their resolved results. Modeled on .tool-calls-block; reuses
+   .tool-source-chip and .tool-calls-running-dot / .tool-calls-error-badge
+   for the family tag and inline status indicators. */
+.command-call-block {
+  margin: 0;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.command-call-summary {
+  cursor: pointer;
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.command-call-summary::-webkit-details-marker { display: none; }
+.command-call-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+.command-call-block[open] > .command-call-summary::before {
+  transform: rotate(90deg);
+}
+
+.command-call-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.command-call-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.command-call-args {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.command-call-args-empty {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.command-call-result {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--accent, #5b9aff);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text, var(--muted));
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.command-call-result-error {
+  border-left-color: var(--danger, #e06666);
+  color: var(--danger, #e06666);
 }
 
 /* --- F10.4: Live thinking-summary render inside assistant chat bubbles -- */

@@ -39,6 +39,7 @@ import {
 // flows ship.
 const OPENING_PROMPT = "__keelson_seeded_opening_prompt__";
 
+import { CommandCallBlock } from "../components/Chat/CommandCallBlock.tsx";
 import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";
 import { ModelChip } from "../components/Chat/ModelChip.tsx";
 import { ModelPickerPopover } from "../components/Chat/ModelPickerPopover.tsx";
@@ -65,9 +66,18 @@ import {
   isCommittedToCommand,
   matchSlashCommand,
   type SlashCommand,
+  type SlashCommandFamily,
 } from "../lib/slashCommands.ts";
 
-type Role = "user" | "assistant" | "system";
+type Role = "user" | "assistant" | "system" | "command";
+
+interface CommandCall {
+  command: string;
+  args: string;
+  family: SlashCommandFamily;
+  // Undefined while the dispatcher is in flight; populated on resolution.
+  result?: { ok: boolean; message: string };
+}
 
 interface LocalMessage {
   id: string;
@@ -75,6 +85,7 @@ interface LocalMessage {
   content: string;
   streaming?: boolean;
   toolCalls?: LiveToolCall[];
+  commandCall?: CommandCall;
   // Live-only Claude extended-thinking deltas; not persisted.
   thinking?: string;
   // Ended without a clean `done` (user abort or provider error).
@@ -204,7 +215,7 @@ function reconcileTurnIds<T extends { id: string; role: string }>(
 function snapshotTurnForReconcile<T extends { id: string; role: string }>(
   local: T[],
 ): TurnReconcileSnapshot | null {
-  const nonSystem = local.filter((m) => m.role !== "system");
+  const nonSystem = local.filter((m) => m.role !== "system" && m.role !== "command");
   if (nonSystem.length === 0) return null;
   const lastAssistant = nonSystem[nonSystem.length - 1];
   const lastUser = nonSystem[nonSystem.length - 2];
@@ -243,6 +254,7 @@ const ROLE_LABEL: Record<Role, string> = {
   user: "You",
   assistant: "Assistant",
   system: "System",
+  command: "Command",
 };
 
 // Auth/sign-in errors get a sticky toast; everything else gets a normal one.
@@ -1017,7 +1029,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   );
 
   const dispatchProjectCommand = useCallback(
-    async (rest: string): Promise<string> => {
+    async (rest: string): Promise<{ ok: boolean; message: string }> => {
       // Snapshot the conversation at dispatch time so async resolutions
       // don't clobber a chat the user started while the command was in
       // flight (e.g. a slow `/project <url>` clone).
@@ -1025,6 +1037,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       const trimmed = rest.trim();
       const tokens = trimmed.split(/\s+/).filter((t) => t.length > 0);
       const projects = projectList;
+
+      const ok = (message: string) => ({ ok: true, message });
+      const fail = (message: string) => ({ ok: false, message });
 
       const formatList = (list: Project[]): string => {
         if (list.length === 0) return "No projects yet.";
@@ -1041,7 +1056,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           .replace(/[^a-z0-9_-]+/g, "-")
           .replace(/^[-_]+|[-_]+$/g, "");
 
-      if (trimmed.length === 0) return formatList(projects);
+      if (trimmed.length === 0) return ok(formatList(projects));
 
       // URLs use only `tokens[0]` (with `tokens[1]` reserved for an
       // optional explicit name). Paths consume the entire rest-of-input so
@@ -1058,59 +1073,61 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         });
         await refreshProjects();
         switchActiveProject(project.id, startConvoId);
-        return `Cloned ${project.name} → ${project.rootPath}`;
+        return ok(`Cloned ${project.name} → ${project.rootPath}`);
       }
 
       if (isPath) {
         const rootPath = trimmed;
         const segs = rootPath.replace(/\/$/, "").split("/");
         const derived = slugifyName(segs[segs.length - 1] ?? "");
-        if (!derived) return "could not derive a project name from the path";
+        if (!derived) return fail("could not derive a project name from the path");
         const project = await createProject({ name: derived, rootPath });
         await refreshProjects();
         switchActiveProject(project.id, startConvoId);
-        return `Registered ${project.name} → ${project.rootPath}`;
+        return ok(`Registered ${project.name} → ${project.rootPath}`);
       }
 
       const head = tokens[0]!;
       if (head === "remove" && tokens[1]) {
         const target = projects.find((p) => p.name === tokens[1]);
-        if (!target) return `unknown project '${tokens[1]}'`;
+        if (!target) return fail(`unknown project '${tokens[1]}'`);
         await deleteProject(target.id);
         await refreshProjects();
         if (activeProjectId === target.id) switchActiveProject(null, startConvoId);
-        return `Removed ${target.name}`;
+        return ok(`Removed ${target.name}`);
       }
 
       if (head === "layout" && tokens[1] && tokens[2]) {
         const target = projects.find((p) => p.name === tokens[1]);
-        if (!target) return `unknown project '${tokens[1]}'`;
+        if (!target) return fail(`unknown project '${tokens[1]}'`);
         const layoutRaw = tokens[2];
         if (layoutRaw !== "workspace-scoped" && layoutRaw !== "repo-local") {
-          return `layout must be workspace-scoped or repo-local`;
+          return fail(`layout must be workspace-scoped or repo-local`);
         }
         const layout: WorktreeLayout = layoutRaw;
         const updated = await updateProject(target.id, { worktreeLayout: layout });
         await refreshProjects();
-        return `${updated.name} → ${updated.worktreeLayout}`;
+        return ok(`${updated.name} → ${updated.worktreeLayout}`);
       }
 
       if (head === "use" && tokens[1]) {
         const target = projects.find((p) => p.name === tokens[1]);
-        if (!target) return `unknown project '${tokens[1]}'`;
+        if (!target) return fail(`unknown project '${tokens[1]}'`);
         switchActiveProject(target.id, startConvoId);
-        return `Active project: ${target.name}`;
+        return ok(`Active project: ${target.name}`);
       }
 
-      return [
-        "Usage:",
-        "  /project                          list projects",
-        "  /project <url> [name]             clone a repo into the projects root",
-        "  /project <absolute-path>          register an existing local path",
-        "  /project remove <name>            remove a project",
-        "  /project layout <name> <mode>     workspace-scoped | repo-local",
-        "  /project use <name>               set active project",
-      ].join("\n");
+      return fail(
+        [
+          "Usage:",
+          "  /project                          list projects",
+          "  /project <url> [name]             clone a repo into the projects root",
+          "  /project <absolute-path>          register an existing local path",
+          "  /project remove <name>            remove a project",
+          "  /project layout <name> <mode>     workspace-scoped | repo-local",
+          "  /project use <name>               set active project",
+        ].join("\n"),
+      );
     },
     [activeProjectId, projectList, refreshProjects, switchActiveProject],
   );
@@ -1177,22 +1194,41 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       const rest = trimmed.slice(`/${matched.name}`.length).trim();
       if (matched.name === "project") {
         // Snapshot at submit so a slow command resolving after the user has
-        // switched conversations doesn't append its system message to the
-        // unrelated transcript that's now active.
+        // switched conversations doesn't patch the message into an unrelated
+        // transcript that's now active.
         const submitConvoId = conversationIdRef.current;
-        setMessages((prev) => [...prev, { id: newId(), role: "system", content: `> ${trimmed}` }]);
+        const commandMessageId = newId();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: commandMessageId,
+            role: "command",
+            content: "",
+            commandCall: {
+              command: matched.name,
+              args: rest,
+              family: matched.family,
+            },
+          },
+        ]);
+        const patchResult = (result: { ok: boolean; message: string }) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === commandMessageId && m.commandCall
+                ? { ...m, commandCall: { ...m.commandCall, result } }
+                : m,
+            ),
+          );
+        };
         void dispatchProjectCommand(rest)
           .then((result) => {
             if (conversationIdRef.current !== submitConvoId) return;
-            setMessages((prev) => [...prev, { id: newId(), role: "system", content: result }]);
+            patchResult(result);
           })
           .catch((err: unknown) => {
             if (conversationIdRef.current !== submitConvoId) return;
-            const msg = err instanceof Error ? err.message : String(err);
-            setMessages((prev) => [
-              ...prev,
-              { id: newId(), role: "system", content: `error: ${msg}` },
-            ]);
+            const message = err instanceof Error ? err.message : String(err);
+            patchResult({ ok: false, message });
           });
       }
       return;
@@ -1509,6 +1545,8 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                             </div>
                           )}
                         </>
+                      ) : m.role === "command" && m.commandCall ? (
+                        <CommandCallBlock commandCall={m.commandCall} />
                       ) : (
                         m.content
                       )}
@@ -1519,6 +1557,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                         swaps the client-side `newId()` for the persisted UUID,
                         the lookup would 404. `isPersistedMessageId` is the gate. */}
                     {m.role !== "system" &&
+                      m.role !== "command" &&
                       !m.streaming &&
                       m.content.trim().length > 0 &&
                       conversationId !== null &&
