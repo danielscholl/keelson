@@ -100,19 +100,29 @@ export async function listWorkflows(baseUrl: string): Promise<ListWorkflowsRespo
   return (await res.json()) as ListWorkflowsResponse;
 }
 
+export interface StartRunBody {
+  inputs: Record<string, string>;
+  projectId?: string;
+  workingDir?: string;
+  isolation?: "worktree" | "none";
+}
+
 export async function startRun(
   baseUrl: string,
   name: string,
-  inputs: Record<string, string>,
+  body: StartRunBody,
 ): Promise<StartRunResponse> {
   const res = await fetch(url(baseUrl, `/api/workflows/${encodeURIComponent(name)}/runs`), {
     method: "POST",
     headers: { ...defaultHeaders(baseUrl), "content-type": "application/json" },
-    body: JSON.stringify({ inputs }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new HttpError(res.status, `POST /workflows/${name}/runs failed: ${res.status} ${body}`);
+    const errBody = await res.text().catch(() => "");
+    throw new HttpError(
+      res.status,
+      `POST /workflows/${name}/runs failed: ${res.status} ${errBody}`,
+    );
   }
   return (await res.json()) as StartRunResponse;
 }

@@ -114,7 +114,7 @@ function makeRig(): Rig {
   // Share the activeRuns instance so chat-delete can cancel in-flight runs
   // that workflowsRoutes registered.
   chatRoutes(app, conversationStore, { workflowStore: store, activeRuns });
-  workflowsRoutes(app, { catalog, store, conversationStore, cwd: tmpDir }, activeRuns);
+  workflowsRoutes(app, { catalog, store, conversationStore, defaultCwd: tmpDir }, activeRuns);
   return { app, store, conversationStore };
 }
 
@@ -326,7 +326,7 @@ nodes:
       catalog,
       store: throwingStore,
       conversationStore,
-      cwd: tmpDir,
+      defaultCwd: tmpDir,
     });
 
     const before = conversationStore.list().length;

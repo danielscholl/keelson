@@ -1,10 +1,10 @@
-import type { WorkflowDetail } from "@keelson/shared";
+import type { Project, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { DagGraph } from "./DagGraph.tsx";
 import { fallbackStatusFromRun, RunTrace } from "./RunTrace.tsx";
-import { StartComposer } from "./StartComposer.tsx";
+import { StartComposer, type StartRequest } from "./StartComposer.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 
 function formatDuration(ms?: number | null): string {
@@ -37,9 +37,14 @@ export interface RunViewProps {
   onBack: () => void;
   // Pre-start only: invoked when the user submits the StartComposer.
   // Parent owns the API call + screen-state transition to the live run.
-  onStart?: (args: string) => Promise<void> | void;
+  onStart?: (req: StartRequest) => Promise<void> | void;
   // True while the start request is in flight; latches the composer.
   starting?: boolean;
+  // Projects feed the composer's required project dropdown. The parent owns
+  // selection state so it persists across workflow / run navigation.
+  projects?: Project[];
+  selectedProjectId?: string | null;
+  onSelectProject?: (projectId: string) => void;
 }
 
 // Three layouts the segmented control switches between. `split` keeps the
@@ -47,7 +52,16 @@ export interface RunViewProps {
 // the single-pane modes for focused reading.
 type Layout = "split" | "trace" | "graph";
 
-export function RunView({ workflow, runId, onBack, onStart, starting = false }: RunViewProps) {
+export function RunView({
+  workflow,
+  runId,
+  onBack,
+  onStart,
+  starting = false,
+  projects = [],
+  selectedProjectId = null,
+  onSelectProject,
+}: RunViewProps) {
   const preStart = runId === null;
   const { run, nodes, status, error, cancel, resume } = useWorkflowRun(runId);
   const [layout, setLayout] = useState<Layout>("split");
@@ -130,6 +144,13 @@ export function RunView({ workflow, runId, onBack, onStart, starting = false }: 
               ? `${workflow.nodes.length} node${workflow.nodes.length === 1 ? "" : "s"}`
               : runId.slice(0, 8)}
           </div>
+          {!preStart && (run.workingDir || run.worktreePath) && (
+            <div className="run-target" title={run.workingDir ?? run.worktreePath ?? ""}>
+              <span className="run-target-label">cwd</span>
+              {run.worktreePath ?? run.workingDir}
+              {run.worktreePath && <em className="run-target-isolated">isolated worktree</em>}
+            </div>
+          )}
         </div>
         <div className="run-meta">
           {preStart ? (
@@ -191,7 +212,18 @@ export function RunView({ workflow, runId, onBack, onStart, starting = false }: 
         </div>
       )}
 
-      {preStart && onStart && <StartComposer onStart={onStart} starting={starting} />}
+      {preStart && onStart && (
+        <StartComposer
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+          onSelectProject={onSelectProject ?? (() => {})}
+          onStart={onStart}
+          starting={starting}
+          {...(workflow.worktree?.enabled !== undefined
+            ? { yamlIsolationDefault: workflow.worktree.enabled }
+            : {})}
+        />
+      )}
 
       {layout === "split" && (
         <div className="run-body">

@@ -2,9 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { isAbsolute, resolve } from "node:path";
+
 import type { WorkflowFrame } from "@keelson/shared";
 import type { RunStreamEvent } from "@keelson/workflows";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
+import { listProjects } from "../http/projects-client.ts";
 import { attachRun, HttpError, isServerDownError, startRun } from "../http/workflow-client.ts";
 import {
   MemoryRequiresServerError,
@@ -23,6 +26,19 @@ export interface WorkflowRunOptions {
   watch?: boolean;
   provider?: string;
   baseUrl?: string;
+  // Named project — server resolves to project's root_path. When given
+  // alongside `workingDir`, `workingDir` wins and the project is recorded
+  // for display.
+  project?: string;
+  // Explicit working directory override. Defaults to `process.cwd()` for the
+  // in-process path; for the HTTP path, when neither --project nor
+  // --working-dir is given, we send `process.cwd()` so the server doesn't
+  // reject the request.
+  workingDir?: string;
+  // Per-run isolation override: forces a worktree run (`true`), or forces
+  // in-place when the YAML defaulted to worktree (`false`). Undefined →
+  // honor the workflow's YAML default.
+  worktree?: boolean;
 }
 
 function parseInputs(pairs: readonly string[]): Record<string, string> {
@@ -107,14 +123,53 @@ function formatWorkflowFrame(frame: WorkflowFrame): string {
   }
 }
 
+// CLI `--project` accepts either a project name or a UUID (the project add /
+// list / remove surfaces all use the human name). The server only matches by
+// id, so we resolve the name → id via `/api/projects` before POSTing. UUIDs
+// pass through unchanged so scripts that already cached an id keep working.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function resolveProjectId(baseUrl: string, nameOrId: string): Promise<string> {
+  if (UUID_PATTERN.test(nameOrId)) return nameOrId;
+  const projects = await listProjects(baseUrl);
+  const match = projects.find((p) => p.name === nameOrId);
+  if (!match) {
+    throw new HttpError(404, `no project named '${nameOrId}'`);
+  }
+  return match.id;
+}
+
 async function runViaHttp(
   name: string,
   inputs: Record<string, string>,
   baseUrl: string,
   watch: boolean,
   json: boolean,
+  body: {
+    project?: string;
+    workingDir?: string;
+    isolation?: "worktree" | "none";
+  },
 ): Promise<never> {
-  const { runId } = await startRun(baseUrl, name, inputs);
+  const projectId =
+    body.project !== undefined ? await resolveProjectId(baseUrl, body.project) : undefined;
+  const { runId } = await startRun(baseUrl, name, {
+    inputs,
+    ...(projectId !== undefined ? { projectId } : {}),
+    ...(body.workingDir !== undefined ? { workingDir: body.workingDir } : {}),
+    ...(body.isolation !== undefined ? { isolation: body.isolation } : {}),
+  });
+  // Echo the run's target up front so the human-mode operator can see what
+  // the run is acting against before frames start arriving.
+  if (watch && !json) {
+    const targetParts: string[] = [];
+    if (body.project) targetParts.push(`project=${body.project}`);
+    if (body.workingDir) targetParts.push(`cwd=${body.workingDir}`);
+    if (body.isolation) targetParts.push(`isolation=${body.isolation}`);
+    if (targetParts.length > 0) {
+      process.stdout.write(`◆ target: ${targetParts.join(" ")}\n`);
+    }
+  }
 
   // Always attach the WS so we can wait for the terminal status — the CLI's
   // contract is that exit code reflects the run's outcome, so even
@@ -176,11 +231,15 @@ async function runInProcess(
   // prompt workflows emit many node_chunk frames, and a --no-watch
   // scripted caller doesn't want them in the envelope.
   const events: RunStreamEvent[] = [];
+  // In-process has no project store to consult, so --project is a no-op
+  // here; --working-dir wins, falling back to the invoking process's cwd.
+  // The HTTP path is where named projects resolve.
+  const cwd = opts.workingDir ?? process.cwd();
   try {
     const result = await runHeadless({
       name,
       inputs,
-      cwd: process.cwd(),
+      cwd,
       provider: opts.provider,
       onEvent: (ev) => {
         if (watch) events.push(ev);
@@ -243,7 +302,28 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
 
   if (effectiveBase) {
     try {
-      return await runViaHttp(name, inputs, effectiveBase, watch, opts.json);
+      // When neither --project nor --working-dir is given, send process.cwd()
+      // so the server's "projectId or workingDir is required" gate doesn't
+      // reject the call — mirrors the in-process default and preserves the
+      // pre-projects behavior of "run against my shell's cwd".
+      // Resolve --working-dir to an absolute path relative to the *CLI's*
+      // shell cwd, not the long-running server's cwd. Without this, a user
+      // invoking `keelson workflow run foo --working-dir .` over HTTP would
+      // pin the run to whatever directory `keelson serve` was launched in.
+      const rawCwd = opts.workingDir ?? (opts.project ? undefined : process.cwd());
+      const cwd =
+        rawCwd === undefined
+          ? undefined
+          : isAbsolute(rawCwd)
+            ? rawCwd
+            : resolve(process.cwd(), rawCwd);
+      const isolation =
+        opts.worktree === true ? "worktree" : opts.worktree === false ? "none" : undefined;
+      return await runViaHttp(name, inputs, effectiveBase, watch, opts.json, {
+        ...(opts.project !== undefined ? { project: opts.project } : {}),
+        ...(cwd !== undefined ? { workingDir: cwd } : {}),
+        ...(isolation !== undefined ? { isolation } : {}),
+      });
     } catch (err) {
       if (err instanceof HttpError && err.status === 404) {
         emit({ error: err.message, code: "WORKFLOW_NOT_FOUND" }, { json: opts.json });

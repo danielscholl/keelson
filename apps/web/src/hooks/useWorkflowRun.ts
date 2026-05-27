@@ -67,6 +67,13 @@ export interface RunView {
   // can be open simultaneously; this surfaces the first one. The UI can
   // iterate `nodes` directly when it needs the exhaustive set.
   awaitingNodeId?: string;
+  // Hydrated from the run snapshot. `projectId` is the named project the
+  // caller targeted (null for ad-hoc / workingDir-only runs); `workingDir`
+  // is the effective root the executor spawned against; `worktreePath` is
+  // set when the run is/was in an isolated worktree.
+  projectId?: string | null;
+  workingDir?: string | null;
+  worktreePath?: string | null;
 }
 
 export type UseWorkflowRunStatus = "loading" | "ready" | "error";
@@ -211,6 +218,9 @@ function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
     error: snapshot.error,
     warnings: [],
     conversationId: snapshot.conversationId ?? null,
+    projectId: snapshot.projectId,
+    workingDir: snapshot.workingDir,
+    worktreePath: snapshot.worktreePath,
   };
   return { run, nodes };
 }

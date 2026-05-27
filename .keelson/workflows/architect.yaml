@@ -19,6 +19,13 @@ description: |
         simplifications -> executes fixes with self-review loops (hooks) -> validates -> creates PR.
   NOT for: Single-file fixes, feature development, bug fixes, PR reviews.
 
+# This workflow mutates the working tree (writes patches, creates a branch,
+# opens a PR). Run it in an isolated worktree by default so concurrent runs
+# don't trample each other or the operator's editor state. The user can
+# override per-run with --no-worktree (CLI) or the StartComposer checkbox.
+worktree:
+  enabled: true
+
 nodes:
   # ═══════════════════════════════════════════════════════════════
   # PHASE 1: MEASURE

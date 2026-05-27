@@ -83,3 +83,19 @@ export {
   substituteWorkflowVariables,
 } from "./substitute.ts";
 export { checkTriggerRule } from "./triggers.ts";
+export {
+  type BranchTemplateContext,
+  type CreateWorktreeOptions,
+  type CreateWorktreeResult,
+  createWorktree,
+  defaultWorktreeRoot,
+  isGitRepo,
+  listWorktrees,
+  NotAGitRepoError,
+  type RemoveWorktreeOptions,
+  type RemoveWorktreeResult,
+  removeWorktree,
+  resolveBranchTemplate,
+  WorktreeCreationError,
+  worktreePathFor,
+} from "./worktree.ts";

@@ -246,6 +246,42 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    description: "projects: named pointers to local directories that workflow runs target",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE keelson_projects (
+          id         TEXT PRIMARY KEY NOT NULL,
+          name       TEXT NOT NULL UNIQUE,
+          root_path  TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX ix_keelson_projects_name ON keelson_projects(name);
+      `);
+    },
+  },
+  {
+    version: 6,
+    description: "workflow_runs: project + working_dir + worktree_path targeting columns",
+    up: (db) => {
+      // All three columns are nullable for back-compat with pre-v6 rows. The
+      // route layer requires at least one of project_id / working_dir on new
+      // runs; worktree_path is populated by the executor only when isolation
+      // is on (lands in slice 3). FK is SET NULL on project delete so removing
+      // a project doesn't cascade-purge historical runs that reference it.
+      db.exec(`
+        ALTER TABLE workflow_runs
+          ADD COLUMN project_id TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL;
+        ALTER TABLE workflow_runs
+          ADD COLUMN working_dir TEXT;
+        ALTER TABLE workflow_runs
+          ADD COLUMN worktree_path TEXT;
+        CREATE INDEX ix_workflow_runs_project_started
+          ON workflow_runs(project_id, started_at DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

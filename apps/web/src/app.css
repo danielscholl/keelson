@@ -6207,3 +6207,149 @@ button.tab:focus-visible {
   display: flex; gap: 8px; justify-content: flex-end;
   margin-top: 18px;
 }
+
+/* Projects view (single-user pointer catalog for workflow targets). */
+.projects-add-form {
+  margin: 14px 0 20px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.projects-form-row {
+  display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
+}
+.projects-form-field {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 160px;
+}
+.projects-form-field--grow {
+  flex: 1 1 320px;
+}
+.projects-form-label {
+  font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.projects-add-form input[type="text"] {
+  padding: 7px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.projects-add-form input[type="text"]:focus {
+  outline: none; border-color: var(--accent);
+}
+.projects-add-form .btn {
+  background: var(--card-2); color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 7px 14px; border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-family: inherit;
+}
+.projects-add-form .btn:hover { border-color: var(--accent); }
+.projects-add-form .btn.primary {
+  background: var(--accent); border-color: var(--accent); color: white; font-weight: 600;
+}
+.projects-add-form .btn.primary:hover { filter: brightness(1.1); }
+.projects-add-form .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.projects-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.projects-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+.projects-item-main {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+}
+.projects-item-name {
+  font-size: 13px; font-weight: 600; color: var(--fg-strong);
+}
+.projects-item-path {
+  font-family: ui-monospace, monospace; font-size: 11px;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.projects-item .btn {
+  background: var(--card-2); color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 5px 12px; border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-family: inherit;
+}
+.projects-item .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Start-composer project selector (slice 2). */
+.start-composer-target {
+  padding: 8px 12px 0;
+}
+.start-composer-target-label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.start-composer-target-label select {
+  text-transform: none; letter-spacing: normal;
+  font-family: inherit; font-size: 12px;
+  padding: 5px 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.start-composer-target-label select:focus {
+  outline: none; border-color: var(--accent);
+}
+.start-composer-target-label select:disabled {
+  opacity: 0.6; cursor: not-allowed;
+}
+
+/* Per-run isolation checkbox inside the StartComposer. */
+.start-composer-isolation {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.start-composer-isolation input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+.start-composer-isolation em {
+  color: var(--dim); font-style: italic;
+}
+
+/* RecentRuns: 6-column grid extended with a Project column. */
+.runs-table--with-project .runs-row {
+  grid-template-columns: 22px 1.3fr 1.1fr 0.9fr 0.7fr 0.9fr 110px;
+}
+.runs-row .run-project {
+  color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px;
+}
+.runs-row .run-project .run-isolated {
+  color: var(--magenta); font-style: italic; font-weight: 500;
+  font-size: 11px;
+}
+
+/* RunView header — show working dir + worktree path. */
+.run-target {
+  font-size: 11px; color: var(--muted);
+  margin-top: 4px;
+  font-family: ui-monospace, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.run-target .run-target-label {
+  color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em;
+  margin-right: 6px;
+}
+.run-target .run-target-isolated {
+  color: var(--magenta); margin-left: 8px;
+}

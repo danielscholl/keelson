@@ -1,4 +1,9 @@
-import type { WorkflowRunStatus, WorkflowRunSummary, WorkflowSummary } from "@keelson/shared";
+import type {
+  Project,
+  WorkflowRunStatus,
+  WorkflowRunSummary,
+  WorkflowSummary,
+} from "@keelson/shared";
 import { useEffect, useState } from "react";
 
 import { deleteWorkflowRun, listRuns } from "../../api.ts";
@@ -63,6 +68,11 @@ export interface RecentRunsProps {
   // Bumped after a successful delete so parent state (active runs, badges)
   // stays in sync with the now-shorter history.
   onRunDeleted?: () => void;
+  // Projects keyed by id, so each row can show its project label. The
+  // parent owns the list — passing a map keeps RecentRuns from fetching
+  // /api/projects on its own and dropping cache freshness on every
+  // refresh.
+  projectsById?: ReadonlyMap<string, Project>;
 }
 
 interface RunRow extends WorkflowRunSummary {}
@@ -72,6 +82,7 @@ export function RecentRuns({
   onOpenRun,
   refreshKey = 0,
   onRunDeleted,
+  projectsById,
 }: RecentRunsProps) {
   const [rows, setRows] = useState<RunRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -196,10 +207,11 @@ export function RecentRuns({
   return (
     <>
       {failureBanner}
-      <div className="runs-table">
+      <div className="runs-table runs-table--with-project">
         <div className="runs-row head">
           <span />
           <span>Workflow</span>
+          <span>Project</span>
           <span>Status</span>
           <span>Duration</span>
           <span>Started</span>
@@ -207,6 +219,8 @@ export function RecentRuns({
         </div>
         {rows.map((r) => {
           const openRun = () => onOpenRun(r.runId, r.workflowName);
+          const project = r.projectId ? projectsById?.get(r.projectId) : undefined;
+          const projectLabel = project?.name ?? (r.workingDir ? "(adhoc)" : "—");
           return (
             // The row is a <div role="button"> rather than a <button> so the
             // delete action inside can be a real nested <button> — nesting
@@ -234,6 +248,15 @@ export function RecentRuns({
               <span className="run-name">
                 {r.workflowName}
                 <small>{r.runId.slice(0, 8)}</small>
+              </span>
+              <span className="run-project" title={r.workingDir ?? project?.rootPath ?? ""}>
+                {projectLabel}
+                {r.worktreePath && (
+                  <em className="run-isolated" title={r.worktreePath}>
+                    {" "}
+                    · isolated
+                  </em>
+                )}
               </span>
               <span>
                 <StatusBadge status={badgeStatusFor(r.status)} />

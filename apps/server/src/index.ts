@@ -21,6 +21,8 @@ import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
+import { projectsRoutes } from "./projects-handler.ts";
+import { createProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { createSnapshotManager } from "./snapshot-manager.ts";
@@ -70,6 +72,7 @@ const db = openDatabase({ path: DB_PATH });
 const store = createConversationStore(db);
 const workflowStore = createWorkflowStore(db);
 const memoryStore = createMemoryStore(db);
+const projectsStore = createProjectsStore(db);
 const workflowCatalog = bootstrapWorkflows({
   workflowDir: join(REPO_ROOT, ".keelson", "workflows"),
 });
@@ -144,7 +147,7 @@ workflowsRoutes(
     catalog: workflowCatalog,
     store: workflowStore,
     conversationStore: store,
-    cwd: REPO_ROOT,
+    projectsStore,
     ...(promptHandler ? { promptHandler } : {}),
     memoryStore,
   },
@@ -152,6 +155,7 @@ workflowsRoutes(
   workflowSubscribers,
 );
 snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
+projectsRoutes(app, { store: projectsStore });
 memoryRoutes(app, { memoryStore });
 chatRememberRoutes(app, { conversationStore: store, memoryStore });
 credentialsRoutes(app, credentialStore, {

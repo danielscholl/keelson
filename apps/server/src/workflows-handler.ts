@@ -8,9 +8,10 @@
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   type ContentBlock,
+  type IsolationOverride,
   listWorkflowsResponseSchema,
   type MessageChunk,
   recallRequestSchema,
@@ -28,7 +29,10 @@ import {
 import {
   type AwaitApproval,
   bashHandler,
+  createWorktree,
   type DagNode,
+  defaultWorktreeRoot,
+  isGitRepo,
   type MemoryTools,
   makeApprovalHandler,
   makeCancelHandler,
@@ -39,8 +43,11 @@ import {
   type NodeResult,
   type RequestCancel,
   type RunStreamEvent,
+  removeWorktree,
+  resolveBranchTemplate,
   runWorkflow,
   type WorkflowDefinition,
+  worktreePathFor,
 } from "@keelson/workflows";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
@@ -58,6 +65,7 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import type { ProjectsStore } from "./projects-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
 export interface WorkflowsHandlerOptions {
@@ -68,7 +76,21 @@ export interface WorkflowsHandlerOptions {
   // not optional — without it the run row's NOT NULL conversation_id FK has
   // nowhere to point.
   conversationStore: ConversationStore;
-  cwd: string;
+  // Resolves projectId → root_path at run start; also lets the route surface
+  // a friendly 400 when the caller references an unknown project. Optional
+  // so tests can spin up the routes without a project catalog — production
+  // wiring (apps/server/src/index.ts) always passes one.
+  projectsStore?: ProjectsStore;
+  // Fallback cwd used when neither `projectId` nor `workingDir` is set on
+  // the run body. Test-only seam: the production composition root leaves
+  // it undefined so a UI start without a project picker rejects 400 rather
+  // than silently targeting the server's install dir.
+  defaultCwd?: string;
+  // Override for the worktree home (defaults to `~/.keelson/worktrees/`).
+  // Test-only seam: production wiring leaves it undefined so isolated runs
+  // land in the documented global location; tests inject a per-suite temp
+  // dir so they don't pollute the developer's home.
+  worktreeRoot?: string;
   // Real prompt handler injected from the composition root. When omitted
   // (tests, env where no provider is registered), the placeholder fires and
   // prompt nodes fail with a "not registered" sentinel. Keeps the route
@@ -124,6 +146,16 @@ function workflowToDetail(workflow: WorkflowDefinition) {
       ...(n.when ? { when: n.when } : {}),
       ...(n.trigger_rule ? { triggerRule: n.trigger_rule } : {}),
     })),
+    ...(workflow.worktree
+      ? {
+          worktree: {
+            ...(workflow.worktree.enabled !== undefined
+              ? { enabled: workflow.worktree.enabled }
+              : {}),
+            ...(workflow.worktree.branch !== undefined ? { branch: workflow.worktree.branch } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -367,7 +399,16 @@ export function workflowsRoutes(
   activeRuns: ActiveRuns = createActiveRuns(),
   subscribers: WorkflowSubscribers = createWorkflowSubscribers(),
 ): void {
-  const { catalog, store, conversationStore, cwd, promptHandler, memoryStore } = opts;
+  const {
+    catalog,
+    store,
+    conversationStore,
+    projectsStore,
+    defaultCwd,
+    worktreeRoot,
+    promptHandler,
+    memoryStore,
+  } = opts;
   const effectivePromptHandler = promptHandler ?? placeholderPromptHandler;
   // Re-parse with the Zod wire schemas at the adapter boundary so executor-built requests
   // satisfy the same constraints as the HTTP route (text-length caps, source-ref shape, etc.).
@@ -457,6 +498,52 @@ export function workflowsRoutes(
       return c.json({ error: parsed.error.message }, 400);
     }
 
+    // Resolve the run's working directory. The wire schema allows either
+    // `projectId` (named pointer) or `workingDir` (raw override) or both —
+    // when both are present, `workingDir` wins and `projectId` is preserved
+    // for display. Reject when neither is set: the harness intentionally
+    // doesn't fall back to `process.cwd()` here so a UI start without a
+    // project picker can't silently target the server's install dir.
+    let projectId: string | null = null;
+    let projectName: string | null = null;
+    let workingDir: string;
+    if (parsed.data.workingDir !== undefined && parsed.data.workingDir.trim().length > 0) {
+      workingDir = parsed.data.workingDir;
+      projectId = parsed.data.projectId ?? null;
+      if (projectId !== null && projectsStore) {
+        const proj = projectsStore.get(projectId);
+        if (!proj) {
+          return c.json({ error: `unknown project '${projectId}'` }, 400);
+        }
+        projectName = proj.name;
+      }
+    } else if (parsed.data.projectId !== undefined && parsed.data.projectId.length > 0) {
+      if (!projectsStore) {
+        return c.json({ error: "projects are not wired in this server" }, 400);
+      }
+      const project = projectsStore.get(parsed.data.projectId);
+      if (!project) {
+        return c.json({ error: `unknown project '${parsed.data.projectId}'` }, 400);
+      }
+      projectId = project.id;
+      projectName = project.name;
+      workingDir = project.rootPath;
+    } else if (defaultCwd !== undefined) {
+      workingDir = defaultCwd;
+    } else {
+      return c.json({ error: "projectId or workingDir is required" }, 400);
+    }
+
+    // Resolve isolation policy: YAML default ⊕ per-run override. The override
+    // wins when given; otherwise we use the workflow's `worktree.enabled`
+    // (defaulting to false). The handler still does the git-repo probe later
+    // and warns-then-falls-back if isolation can't be honored.
+    const yamlEnabled = workflow.worktree?.enabled === true;
+    const isolationOverride: IsolationOverride | null = parsed.data.isolation ?? null;
+    const isolationOn =
+      isolationOverride === "worktree" ? true : isolationOverride === "none" ? false : yamlEnabled;
+    const branchTemplate = workflow.worktree?.branch;
+
     const runId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
     // Create the conversation FIRST so the workflow_runs FK has a target.
@@ -479,6 +566,8 @@ export function workflowsRoutes(
         inputs: parsed.data.inputs,
         startedAt,
         conversationId: conversation.id,
+        projectId,
+        workingDir,
       });
     } catch (err) {
       // Orphan rollback: the conversation row exists only to anchor a run, so
@@ -506,13 +595,23 @@ export function workflowsRoutes(
       workflow,
       runId,
       inputs: parsed.data.inputs,
-      cwd,
+      cwd: workingDir,
       store,
       abort,
       activeRuns,
       subscribers,
       promptHandler: effectivePromptHandler,
       pendingApprovals,
+      isolation: isolationOn
+        ? {
+            projectName: projectName ?? slugifyForPath(basename(workingDir)),
+            branchTemplate,
+            worktreeRoot,
+          }
+        : null,
+      // Scope this run's memory recall/writeback to the target project so a
+      // workflow with `memory:` nodes doesn't bleed across projects.
+      ...(projectId !== null ? { projectId } : {}),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
     });
     activeRuns.register(runId, { abort, done, pendingApprovals });
@@ -731,6 +830,15 @@ export function workflowRunWebSocketHandlers(deps: {
   };
 }
 
+interface IsolationConfig {
+  /** Project label used as the path segment under `~/.keelson/worktrees/`. */
+  projectName: string;
+  /** YAML-supplied branch template; undefined → default. */
+  branchTemplate: string | undefined;
+  /** Override for the worktree home; undefined → `defaultWorktreeRoot()`. */
+  worktreeRoot: string | undefined;
+}
+
 interface ExecuteRunArgs {
   workflow: WorkflowDefinition;
   runId: string;
@@ -745,8 +853,28 @@ interface ExecuteRunArgs {
   // DELETE handlers. The route owns the lifecycle; this function builds the
   // closures that populate / drain it as the executor pauses and resumes.
   pendingApprovals: Map<string, PendingApproval>;
+  // null → run in place at `cwd`. Set → create a worktree from `cwd` before
+  // the first node runs and prune on success (keep on failure for inspection).
+  isolation: IsolationConfig | null;
+  // Forwarded to runWorkflow so the executor's pre-run recall and post-run
+  // writeback envelopes carry `scope.projectId`. Without this the memory
+  // layer falls back to the unqualified project scope and rows bleed across
+  // targets.
+  projectId?: string;
   // Undefined when no MemoryStore was wired; executor memory hooks no-op in that case.
   memoryTools?: MemoryTools;
+}
+
+// Constrain a free-form filesystem segment to a slug git/posix paths accept.
+// Used as the per-project bucket under ~/.keelson/worktrees/<slug>/ when the
+// run isn't tied to a named project.
+function slugifyForPath(s: string): string {
+  return (
+    s
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "workspace"
+  );
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
@@ -761,8 +889,65 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     subscribers,
     promptHandler,
     pendingApprovals,
+    isolation,
+    projectId,
     memoryTools,
   } = args;
+  // Worktree lifecycle: create before the executor sees its first node, run
+  // against the worktree path, prune on success — but keep on failure so the
+  // operator can `cd` in and inspect. When the target isn't a git repo we
+  // warn-and-fall-back to running in place rather than failing the run; the
+  // workflow author may have isolation as a "best effort" preference for a
+  // shared workspace they don't always run in.
+  let effectiveCwd = cwd;
+  let worktreePathForCleanup: string | null = null;
+  let cleanupOnSuccessOnly = false;
+  // Latches the run's terminal status as observed in the executor's run_done
+  // dispatch (or in the catch block for pre-start failures). The finally uses
+  // this instead of re-reading from SQLite — test teardown can delete the DB
+  // file between the executor returning and our cleanup running.
+  let terminalStatus: WorkflowRunStatus | null = null;
+  if (isolation !== null) {
+    if (!(await isGitRepo(cwd))) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `worktree isolation requested but ${cwd} is not a git repo; running in place`,
+      });
+    } else {
+      const branch = resolveBranchTemplate(isolation.branchTemplate, {
+        workflow: workflow.name,
+        runId,
+      });
+      const dest = worktreePathFor({
+        root: isolation.worktreeRoot ?? defaultWorktreeRoot(),
+        projectName: isolation.projectName,
+        branch,
+      });
+      try {
+        const created = await createWorktree({ repoPath: cwd, branch, dest });
+        effectiveCwd = created.worktreePath;
+        worktreePathForCleanup = created.worktreePath;
+        cleanupOnSuccessOnly = true;
+        try {
+          store.setRunWorktreePath(runId, created.worktreePath);
+        } catch (err) {
+          console.warn(
+            `[workflows] failed to persist worktree path for ${runId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: `worktree creation failed; running in place: ${message}`,
+        });
+      }
+    }
+  }
 
   // Per-node timestamps + content-parts accumulators. The executor emits
   // node_started / node_event / node_done as separate events; the persistence
@@ -884,11 +1069,13 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       runId,
       inputs,
       handlers,
-      cwd,
+      cwd: effectiveCwd,
       abortSignal: abort.signal,
       ...artifacts.runWorkflowOptions(),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
+      ...(projectId !== undefined ? { projectId } : {}),
       onEvent: (event) => {
+        if (event.type === "run_done") terminalStatus = event.status;
         dispatchRunEvent({
           event,
           runId,
@@ -909,8 +1096,35 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       completedAt: new Date().toISOString(),
       error: msg,
     });
+    terminalStatus = "failed" as WorkflowRunStatus;
     subscribers.broadcast(runId, { type: "run_done", status: "failed" });
   } finally {
+    // Worktree cleanup before activeRuns.delete so the shutdown drain awaits
+    // it via `entry.done`. Only on a clean terminal status — failed /
+    // cancelled runs leave the worktree behind for inspection. `keelson
+    // worktree prune` (slice 4) is the operator's escape hatch.
+    if (worktreePathForCleanup !== null && cleanupOnSuccessOnly && terminalStatus === "succeeded") {
+      // Force-remove on success: a successful run may have produced
+      // intentional untracked files (e.g. an `architect` PR-creation node
+      // that committed elsewhere) or left bash scratch in the working tree.
+      // The worktree is ephemeral; if the author wanted the changes they
+      // should have committed-and-pushed.
+      const out = await removeWorktree({
+        repoPath: cwd,
+        dest: worktreePathForCleanup,
+        force: true,
+      });
+      if (out.warning !== null) {
+        console.warn(`[workflows] worktree cleanup for ${runId} warned: ${out.warning}`);
+      }
+      if (out.removed) {
+        try {
+          store.setRunWorktreePath(runId, null);
+        } catch {
+          // Best-effort; non-fatal.
+        }
+      }
+    }
     activeRuns.delete(runId);
     // Close any lingering WS subscribers — the run will emit no further frames.
     subscribers.closeRun(runId);

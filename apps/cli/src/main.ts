@@ -12,11 +12,13 @@ import pkg from "../package.json" with { type: "json" };
 
 import { runChat } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
+import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runServe } from "./commands/serve.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRun } from "./commands/workflow-run.ts";
 import { runWorkflowStatus } from "./commands/workflow-status.ts";
 import { runWorkflowValidate } from "./commands/workflow-validate.ts";
+import { runWorktreePrune } from "./commands/worktree.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "./exit.ts";
 import { emit } from "./output.ts";
 
@@ -120,6 +122,10 @@ export function buildProgram(): Command {
     .option("--no-watch", "skip streaming; emit a single envelope at completion")
     .option("--provider <id>", "provider id for in-process runs (default: stub)")
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .option("--project <name>", "named project (server resolves to its rootPath)")
+    .option("--working-dir <path>", "override cwd directly (defaults to current shell cwd)")
+    .option("--worktree", "force a git-worktree isolated run (overrides workflow default)")
+    .option("--no-worktree", "force an in-place run (overrides workflow default)")
     .action(async function runAction(
       this: Command,
       name: string,
@@ -128,6 +134,9 @@ export function buildProgram(): Command {
         watch?: boolean;
         provider?: string;
         baseUrl?: string;
+        project?: string;
+        workingDir?: string;
+        worktree?: boolean;
       },
     ) {
       const { json } = globalOpts(this);
@@ -137,6 +146,9 @@ export function buildProgram(): Command {
         watch: runOpts.watch,
         provider: runOpts.provider,
         baseUrl: runOpts.baseUrl,
+        ...(runOpts.project ? { project: runOpts.project } : {}),
+        ...(runOpts.workingDir ? { workingDir: runOpts.workingDir } : {}),
+        ...(runOpts.worktree !== undefined ? { worktree: runOpts.worktree } : {}),
       });
     });
 
@@ -155,6 +167,73 @@ export function buildProgram(): Command {
         json,
         baseUrl: statusOpts.baseUrl,
         workflow: statusOpts.workflow,
+      });
+    });
+
+  const project = program
+    .command("project")
+    .description("project operations (list, add, remove) — named pointers workflows run against");
+
+  project
+    .command("list")
+    .description("list registered projects (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function projectListAction(this: Command, listOpts: { baseUrl?: string }) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", listOpts.baseUrl);
+      await runProjectList({ json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  project
+    .command("add <name> <rootPath>")
+    .description("register a project pointing at a local directory (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function projectAddAction(
+      this: Command,
+      name: string,
+      rootPath: string,
+      addOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", addOpts.baseUrl);
+      await runProjectAdd(name, rootPath, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  project
+    .command("remove <nameOrId>")
+    .description("remove a project by name or id (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function projectRemoveAction(
+      this: Command,
+      nameOrId: string,
+      removeOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
+      await runProjectRemove(nameOrId, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  const worktree = program
+    .command("worktree")
+    .description("worktree maintenance (prune leftover isolated run directories)");
+
+  worktree
+    .command("prune")
+    .description("remove leftover worktrees under ~/.keelson/worktrees/")
+    .option("--dry-run", "list candidates without removing anything", false)
+    .option("--force", "also remove directories with uncommitted changes", false)
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function pruneAction(
+      this: Command,
+      pruneOpts: { dryRun: boolean; force: boolean; baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", pruneOpts.baseUrl);
+      await runWorktreePrune({
+        json,
+        dryRun: pruneOpts.dryRun,
+        force: pruneOpts.force,
+        ...(baseUrl ? { baseUrl } : {}),
       });
     });
 
