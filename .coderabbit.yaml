@@ -6,15 +6,10 @@
 # review and other tools still run unchanged.
 
 tone_instructions: >-
-  You are reviewing Keelson, a local-only, single-user agent harness
-  (Bun + TypeScript monorepo). Be terse. Cite file:line. Prefer pointing
-  at root causes over restating the diff. Default to no comments in
-  source; when a comment exists, the bar is whether a future reader
-  needs the WHY — not its line count. A single-sentence comment
-  soft-wrapped across two lines is fine. Do not flag soft-wraps, do not
-  push for docstrings, do not push for inline narration of what just
-  changed. No poems, no jokes, no emoji. Match the voice of recent
-  merged PRs (terse three-section bodies: What / Why now / Test plan).
+  Keelson: local-only Bun TS monorepo. Be terse; cite file:line.
+  Comments are optional and one-line soft-wraps are fine — do not flag
+  them. Do not push docstrings or narrate what just changed. No poems,
+  jokes, or emoji.
 
 reviews:
   poem: false
