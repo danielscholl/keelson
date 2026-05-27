@@ -173,10 +173,36 @@ export function createConversationStore(db: Database): ConversationStore {
   );
   // Order by rowid (insertion order) so messages inserted within the same
   // millisecond preserve insertion order — UUID-id tiebreak would shuffle them.
-  // TODO: batched IN(?,?,...) query when conversation count grows past ~50.
   const selectMessages = db.prepare(
     "SELECT id, role, content, content_parts, truncated, createdAt FROM messages WHERE conversationId = ? ORDER BY rowid ASC",
   );
+  // Batched IN(?,?,...) hydration for list(); arity varies so it can't be
+  // pre-compiled. conversationId returned alongside the message columns so
+  // results can be grouped without a second lookup.
+  function fetchMessagesByConvIds(ids: string[]): Map<string, Message[]> {
+    const groups = new Map<string, Message[]>();
+    for (const id of ids) groups.set(id, []);
+    if (ids.length === 0) return groups;
+    // Chunked so the IN(?,…) parameter count never approaches SQLite's variable-count limit.
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(",");
+      const rows = db
+        .prepare(
+          `SELECT id, role, content, content_parts, truncated, createdAt, conversationId
+             FROM messages
+            WHERE conversationId IN (${placeholders})
+            ORDER BY conversationId, rowid ASC`,
+        )
+        .all(...chunk) as (MessageRow & { conversationId: string })[];
+      for (const row of rows) {
+        const list = groups.get(row.conversationId);
+        if (list) list.push(rowToMessage(row));
+      }
+    }
+    return groups;
+  }
   const insertMsg = db.prepare(
     "INSERT INTO messages(id, conversationId, role, content, content_parts, truncated, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
@@ -197,10 +223,8 @@ export function createConversationStore(db: Database): ConversationStore {
     },
     list() {
       const rows = listConv.all() as ConvRow[];
-      return rows.map((row) => {
-        const messages = (selectMessages.all(row.id) as MessageRow[]).map(rowToMessage);
-        return rowToConversation(row, messages);
-      });
+      const messagesByConv = fetchMessagesByConvIds(rows.map((r) => r.id));
+      return rows.map((row) => rowToConversation(row, messagesByConv.get(row.id) ?? []));
     },
     create(input) {
       const id = input.id ?? crypto.randomUUID();

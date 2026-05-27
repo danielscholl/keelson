@@ -8,7 +8,7 @@
 
 import type { SnapshotFrame } from "@keelson/shared";
 import type { ServerWebSocket } from "bun";
-import type { WsData } from "./chat-handler.ts";
+import type { WsData } from "./server-context.ts";
 
 // Per-key snapshot WS subscriber manager. Parallel to WorkflowSubscriberRegistry
 // (workflows-handler.ts) but keyed by snapshotKey instead of runId and without

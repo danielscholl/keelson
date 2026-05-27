@@ -118,7 +118,7 @@ function daysSince(iso: string): number {
 }
 
 // Half-life ~30 days: a result from a month ago scores half what an identical
-// result from today would. Pulled from the PRD's BM25 + recency formulation.
+// result from today would.
 function recencyDecay(days: number): number {
   return 1 / (1 + days / 30);
 }
@@ -276,9 +276,8 @@ function rowToReviewItem(
 
 // Action → terminal state. Confirm is the only action that may set
 // canUseAsInstruction = 1; to keep the storage CHECK satisfied for agent-
-// authored memory we also upgrade provenance to `user_confirmed`. That
-// upgrade is the explicit operator gesture invariant #1 (PRD §"Load-bearing
-// invariants") demands before promotion.
+// authored memory we also upgrade provenance to `user_confirmed` — instruction
+// promotion requires an explicit operator gesture.
 function computeConfirmState(action: ReviewActionRequest["action"], row: MemoryRow): ConfirmState {
   const base: ConfirmState = {
     reviewStatus: row.review_status,

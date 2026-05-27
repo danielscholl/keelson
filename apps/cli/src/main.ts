@@ -31,9 +31,9 @@ function globalOpts(cmd: Command): GlobalOptions {
 // Reject an option that was supplied but resolved to an empty/whitespace
 // string (e.g. `--provider "$PROVIDER"` with `PROVIDER` unset). Returns
 // `undefined` when the option wasn't supplied at all, the trimmed value
-// otherwise. Empty strings exit BAD_ARGS with a stable envelope shape —
-// silently dropping them would route the call to the default provider /
-// fresh conversation, exactly the silent-mis-target case Codex flagged.
+// otherwise. Empty strings exit BAD_ARGS — silently dropping them would
+// route the call to the default provider / fresh conversation, a silent
+// mis-target.
 function requireNonEmpty(
   json: boolean,
   name: string,

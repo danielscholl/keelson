@@ -43,9 +43,9 @@ function buildOneShotSystemPrompt(): string | undefined {
 }
 
 // One-shot chat turn against the provider registry. Does not touch SQLite —
-// per PRD §203 the in-process write would race a server start mid-call, so
-// one-shot stdout is the contract. The HTTP path (chat-client.ts) is the
-// one that persists.
+// an in-process write would race a concurrent `keelson serve`, so one-shot
+// stdout is the contract. The HTTP path (chat-client.ts) is the one that
+// persists.
 export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadlessResult> {
   bootstrapCliProviders();
   // No in-tree ribs; in-process tool catalog is empty. Operators wanting

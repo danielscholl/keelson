@@ -135,12 +135,11 @@ interface TurnReconcileSnapshot {
 }
 
 // Reconcile only the specific client ids of a just-completed turn, located
-// by their stable server-side index. Avoids the role-only tail walk that
-// would corrupt a flushed queue's freshly-minted local ids (see PR #21
-// review — a follow-up turn queued during streaming gets its new local
-// user/assistant rows appended before this reconcile fetch resolves, so
-// a tail walk would rewrite their ids to the just-completed turn's
-// persisted ids and chunk dispatch for the follow-up would break).
+// by their stable server-side index. A role-only tail walk would corrupt
+// freshly-minted local ids when a follow-up turn was queued during
+// streaming — the new local rows append before the reconcile fetch
+// resolves, so a tail walk would rewrite their ids to the just-completed
+// turn's persisted ids and chunk dispatch for the follow-up would break.
 function reconcileTurnIds<T extends { id: string; role: string }>(
   local: T[],
   server: readonly { id: string; role: string }[],
@@ -338,7 +337,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   const queuedPromptRef = useRef<string | null>(null);
   const [queued, setQueued] = useState<string | null>(null);
 
-  // Save-to-memory modal state (M7b). Open when a target message is set;
+  // Save-to-memory modal state. Open when a target message is set; the
   // submitting flag disables the modal's submit button + the per-message
   // Save buttons so a double-click can't fire twice.
   const [memoryTarget, setMemoryTarget] = useState<{
@@ -726,7 +725,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         // synchronously; without this snapshot the reconcile fetch's tail
         // would be those new rows, and matching by role would mistakenly
         // rewrite their client ids to the just-completed turn's persisted
-        // UUIDs — see PR #21 [P2] review.
+        // UUIDs.
         const reconcileSnapshot = snapshotTurnForReconcile(messagesRef.current);
 
         // Clean `done` flushes the queue. Provider errors leave it parked so

@@ -32,10 +32,10 @@ import {
   chatWebSocketHandlers,
   handleChatRequest,
   handleChatUpgrade,
-  type WsData,
 } from "../src/chat-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
+import type { WsData } from "../src/server-context.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { createActiveRuns } from "../src/workflows-handler.ts";
 

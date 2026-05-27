@@ -22,6 +22,7 @@ import {
   parseProviderList,
   parseToolDenylist,
 } from "../src/bootstrap.ts";
+import { discoverRibs } from "../src/rib-discovery.ts";
 import { parseRibList } from "../src/ribs.ts";
 
 describe("parseRibList", () => {
@@ -258,20 +259,23 @@ describe("bootstrapRibs", () => {
 
     test("walks the discovery root and activates a healthy fixture rib", async () => {
       process.env.KEELSON_RIBS = "test";
-      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      const available = await discoverRibs({ root: fixtureRoot });
+      const { manifests } = await bootstrapRibs({ available });
       expect(manifests.map((m) => m.id)).toEqual(["test"]);
       expect(manifests[0]?.registered).toEqual(["test.tool"]);
     });
 
     test("a throwing import warns and skips; healthy ribs still activate", async () => {
       process.env.KEELSON_RIBS = "test,broken";
-      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      const available = await discoverRibs({ root: fixtureRoot });
+      const { manifests } = await bootstrapRibs({ available });
       expect(manifests.map((m) => m.id)).toEqual(["test"]);
     });
 
     test("a non-object default export is skipped", async () => {
       process.env.KEELSON_RIBS = "bad-default";
-      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      const available = await discoverRibs({ root: fixtureRoot });
+      const { manifests } = await bootstrapRibs({ available });
       expect(manifests).toEqual([]);
     });
 
@@ -279,31 +283,20 @@ describe("bootstrapRibs", () => {
       // Filter to both candidate ids so neither suffix nor declared id can
       // route past the divergence check.
       process.env.KEELSON_RIBS = "id-mismatch,other";
-      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      const available = await discoverRibs({ root: fixtureRoot });
+      const { manifests } = await bootstrapRibs({ available });
       expect(manifests).toEqual([]);
-    });
-
-    test("explicit `available` bypasses discovery even when discoveryRoot is set", async () => {
-      delete process.env.KEELSON_RIBS;
-      const { manifests } = await bootstrapRibs({
-        available: { foo: fakeRib("foo", ["foo.tool"]) },
-        discoveryRoot: fixtureRoot,
-      });
-      expect(manifests.map((m) => m.id)).toEqual(["foo"]);
-      expect(manifests[0]?.registered).toEqual(["foo.tool"]);
     });
 
     test("a missing discovery root returns no ribs without throwing", async () => {
-      delete process.env.KEELSON_RIBS;
-      const { manifests } = await bootstrapRibs({
-        discoveryRoot: join(fixtureRoot, "does-not-exist"),
-      });
-      expect(manifests).toEqual([]);
+      const available = await discoverRibs({ root: join(fixtureRoot, "does-not-exist") });
+      expect(available).toEqual({});
     });
 
     test("a rib whose declared hook is not a function is skipped", async () => {
       process.env.KEELSON_RIBS = "bad-hook";
-      const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
+      const available = await discoverRibs({ root: fixtureRoot });
+      const { manifests } = await bootstrapRibs({ available });
       expect(manifests).toEqual([]);
     });
 
@@ -312,7 +305,8 @@ describe("bootstrapRibs", () => {
       const tempRoot = await mkdtemp(join(tmpdir(), "keelson-discovery-"));
       try {
         await symlink(join(fixtureRoot, "rib-test"), join(tempRoot, "rib-test"), "dir");
-        const { manifests } = await bootstrapRibs({ discoveryRoot: tempRoot });
+        const available = await discoverRibs({ root: tempRoot });
+        const { manifests } = await bootstrapRibs({ available });
         expect(manifests.map((m) => m.id)).toEqual(["test"]);
       } finally {
         await rm(tempRoot, { recursive: true, force: true });

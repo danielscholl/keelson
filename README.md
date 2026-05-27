@@ -197,7 +197,7 @@ in-tree — bring your own and activate them with `KEELSON_RIBS`.
 | `KEELSON_WORKFLOW_TOOL_DENYLIST=tool_a,tool_b` | Operator floor: per-node tool denylist |
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S=600` | Per-prompt-node timeout in seconds |
 | `KEELSON_DB=/tmp/scratch.db` | Override the SQLite path (default: `.keelson/keelson.db`) |
-| `KEELSON_USE_STUBS=1` | Hint to ribs that they should use bundled fixtures |
+| `PORT=7878` | Override the HTTP/WS listen port |
 
 </details>
 

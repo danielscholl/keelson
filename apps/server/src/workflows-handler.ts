@@ -21,7 +21,6 @@ import {
   type WorkflowRunStatus,
   type WorkflowSummary,
   workflowDetailSchema,
-  workflowFrameSchema,
   workflowRunDetailSchema,
   workflowRunSummarySchema,
   writebackRequestSchema,
@@ -48,8 +47,8 @@ import type { Hono } from "hono";
 import { z } from "zod";
 
 import type { WorkflowCatalog } from "./bootstrap.ts";
-import { isAllowedOrigin, type WsData } from "./chat-handler.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
+import { isAllowedOrigin, type WsData } from "./server-context.ts";
 
 // CSRF defense for state-changing routes — reject cross-origin POSTs that
 // the browser would otherwise send with the user's cookies.
@@ -262,9 +261,8 @@ export function createActiveRuns(): ActiveRuns {
 // Per-run WS subscriber manager. Mirrors the chat connection manager (the
 // chat WS is keyed by conversationId implicitly through the request frame;
 // workflow runs are keyed by runId at the URL path). One Set of sockets per
-// runId; cleanup runs on close. Frames are validated against
-// workflowFrameSchema before send so a buggy event mapping surfaces in tests
-// rather than silently producing malformed wire output.
+// runId; cleanup runs on close. Frames are typed values constructed by the
+// executor; the SPA parses workflowFrameSchema on receive.
 export interface WorkflowSubscribers {
   subscribe(runId: string, ws: ServerWebSocket<WsData>): void;
   unsubscribe(runId: string, ws: ServerWebSocket<WsData>): void;
@@ -295,20 +293,7 @@ class WorkflowSubscriberRegistry implements WorkflowSubscribers {
   broadcast(runId: string, frame: WorkflowFrame): void {
     const set = this.subscribers.get(runId);
     if (!set || set.size === 0) return;
-    let json: string;
-    try {
-      json = JSON.stringify(workflowFrameSchema.parse(frame));
-    } catch (err) {
-      // Validation failure here is a wire-shape bug, not a runtime concern
-      // the run can recover from. Log and drop so the run still completes
-      // for HTTP polling consumers.
-      console.warn(
-        `[workflows] dropping malformed run frame for ${runId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return;
-    }
+    const json = JSON.stringify(frame);
     for (const ws of set) {
       try {
         ws.send(json);
@@ -684,7 +669,7 @@ export function workflowRunWebSocketHandlers(deps: {
   function sendTerminal(ws: ServerWebSocket<WsData>, status: WorkflowRunStatus): void {
     const frame: WorkflowFrame = { type: "run_done", status };
     try {
-      ws.send(JSON.stringify(workflowFrameSchema.parse(frame)));
+      ws.send(JSON.stringify(frame));
     } catch {
       // socket may have closed mid-send; nothing to do
     }

@@ -9,7 +9,7 @@
 import type { SnapshotManager } from "@keelson/shared";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
-import { isAllowedOrigin, type WsData } from "./chat-handler.ts";
+import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import type { SnapshotSubscribers } from "./snapshot-subscribers.ts";
 
 export interface SnapshotsRoutesDeps {

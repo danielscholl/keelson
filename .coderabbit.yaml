@@ -5,7 +5,44 @@
 # on every PR — disable it explicitly so the noise stops. CodeRabbit's LLM
 # review and other tools still run unchanged.
 
+tone_instructions: >-
+  Keelson: local-only Bun TS monorepo. Be terse; cite file:line.
+  Comments are optional and one-line soft-wraps are fine — do not flag
+  them. Do not push docstrings or narrate what just changed. No poems,
+  jokes, or emoji.
+
 reviews:
+  poem: false
+
+  path_instructions:
+    - path: "apps/server/**"
+      instructions: >-
+        Bun HTTP/WS server on :7878. Flag handlers that throw at request
+        paths instead of returning typed error envelopes. Flag new env
+        vars not added to the README env table. Flag any handler that
+        imports from chat-handler.ts for non-chat reasons — server-wide
+        types live in server-context.ts. Stores under src/ use prepared
+        statements; flag any raw SQL concatenation.
+    - path: "packages/workflows/**"
+      instructions: >-
+        Pure DAG executor with intentionally zero @keelson/* deps. Flag
+        any new import from @keelson/shared, @keelson/providers, etc.
+        When the package needs a value from shared, mirror it locally
+        (see the wire-protocol constants in executor.ts and the enum
+        mirror in schema/memory-block.ts) and add a binding assertion
+        in packages/shared/test/wire-mirrors.test.ts.
+    - path: "packages/shared/**"
+      instructions: >-
+        Public wire types. Zod schemas mirror the SQL CHECK constraints
+        in apps/server/src/db/migrations.ts — flag drift. Any export
+        removal or rename is a public-surface change; flag it.
+    - path: "**/*.test.ts"
+      instructions: >-
+        Bun's test runner (bun:test). Do not flag mock-vs-real-DB
+        tradeoffs. Do not require docstrings on test helpers. Tests
+        may break the production package boundary (e.g., fs-read
+        another workspace's source) when used as a drift guard.
+
   tools:
     eslint:
       enabled: false
@@ -18,3 +55,33 @@ reviews:
   pre_merge_checks:
     docstrings:
       mode: "off"
+
+    custom_checks:
+      - name: "Query Parameterization"
+        mode: "error"
+        instructions: >-
+          Review new or modified SQL in apps/server/src/db/ and the
+          per-store files (conversation-store, memory-store, workflow-store).
+          Fail if any query string interpolates a non-literal value
+          (template literals with ${} for anything other than static
+          placeholder strings or column identifiers). Parameterized
+          queries (db.prepare("... WHERE x = ?").run(val)) are required
+          for all external values. Reuse prepared statements at module
+          scope when arity is fixed; for IN(?,…) where arity varies per
+          call, build the placeholder string from the array length and
+          pass the values via .all(...ids) — never interpolate the
+          values themselves into the SQL string.
+
+      - name: "Runtime Efficiency and N+1"
+        mode: "warning"
+        instructions: >-
+          Flag O(n²) or worse behavior in request handlers, the DAG
+          executor, redaction pipeline, and snapshot streaming. Flag N+1
+          query patterns — SQLite calls inside a JS loop that should be
+          batched IN(?,…) with results grouped in JS (see
+          conversation-store.ts fetchMessagesByConvIds and
+          memory-store.ts fetchSourceRefs for the established pattern).
+          Flag unbounded data accumulation in long-running paths
+          (snapshot subscribers, audit-event tables). Ignore
+          micro-optimizations and speculative concerns — the deployment
+          is single-user local.

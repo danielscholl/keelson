@@ -8,9 +8,9 @@ import {
   WRITEBACK_REQUEST_SCHEMA_VERSION,
 } from "@keelson/shared";
 import type { Context, Hono } from "hono";
-import { isAllowedOrigin } from "./chat-handler.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import { isAllowedOrigin } from "./server-context.ts";
 
 export interface ChatRememberRoutesDeps {
   conversationStore: ConversationStore;

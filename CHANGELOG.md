@@ -5,6 +5,45 @@ All notable changes to Keelson are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions track the milestones in the README Status table.
 
+## [0.4.0] — 2026-05-27 — Dynamic rib discovery
+
+The harness now discovers ribs from `node_modules/@keelson/rib-*` at boot,
+removing the embedder-wired manifest as the only activation path. Embedders
+who want to bypass discovery still hand `bootstrapRibs` an explicit `available`
+map; `KEELSON_RIBS=<id1>,<id2>` still filters which discovered ribs activate.
+
+### Added
+
+- `discoverRibs()` walks `node_modules/@keelson/` (or a caller-supplied root),
+  resolves each `rib-*` directory through symlinks, validates the default
+  export against `ribIdSchema` / `ribDisplayNameSchema`, and skips entries
+  with non-function hooks, mismatched ids, or import failures (warn-and-continue).
+- `bootstrapRibs` now runs discovery when no explicit `available` map is
+  supplied; existing embedders passing `available` are unaffected.
+
+### Changed
+
+- README updated to describe `bun add @keelson/rib-*` as the activation path
+  for end users and `available:` as the embedder override.
+- Bundled workflow catalog pruned: `plan-and-apply` and `python-smoke-test`
+  removed; `memory-demo` renamed to `memory`.
+- SPA workflow cards clamp section bodies to 5 lines with hover tooltips.
+- Conversation delete now routes through a `ConfirmModal`; workflow notices
+  persist in localStorage.
+
+### Fixed
+
+- Copilot provider clears `reasoningEffort` when all advertised tiers are
+  unknown.
+- Chat local-id reconciliation no longer races queued follow-up turns:
+  `TurnReconcileSnapshot` captures the just-completed turn's client ids
+  before the queue flush.
+
+### Removed
+
+- The `discoveryRoot` option on `BootstrapRibsOptions` (tests now compose
+  `discoverRibs({ root })` directly into `available`).
+
 ## [0.3.0] — 2026-05-26 — Agent memory layer
 
 A governed recall + writeback layer that lets workflows and chat surfaces

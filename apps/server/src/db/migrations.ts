@@ -236,6 +236,16 @@ const migrations: Migration[] = [
       db.exec("DROP TABLE IF EXISTS memory_relations;");
     },
   },
+  {
+    version: 4,
+    description: "index workflow_runs(status, started_at DESC) for paused-run polling",
+    up: (db) => {
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS ix_workflow_runs_status_started
+          ON workflow_runs(status, started_at DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

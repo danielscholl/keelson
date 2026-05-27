@@ -17,8 +17,8 @@ export interface GuardrailVerdict {
 // emoji-heavy content passes the code-unit check but can still exceed the storage budget.
 export const MEMORY_BYTE_LIMIT = 8192 as const;
 
-// Invariant #4 in #10: source references, not raw content. For types whose
-// purpose is to point at an external artifact, we hard-require a sourceRef.
+// Types whose purpose is to point at an external artifact must carry a
+// sourceRef rather than inlining the artifact's content.
 const SOURCE_REF_REQUIRED_TYPES: ReadonlySet<WritebackMemoryDraft["type"]> = new Set([
   "artifact_reference",
   "output",

@@ -3,9 +3,9 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExecResult } from "@keelson/shared/exec";
-
 import { runAuthCheck } from "../src/checks/auth.ts";
 import { type DbReader, LATEST_MIGRATION_VERSION, runDbCheck } from "../src/checks/db.ts";
 import { runServerCheck } from "../src/checks/server.ts";
@@ -79,6 +79,22 @@ describe("db check", () => {
   const okReader: DbReader = {
     readSchemaVersion: () => LATEST_MIGRATION_VERSION,
   };
+
+  test("LATEST_MIGRATION_VERSION matches highest version in server migrations.ts", () => {
+    const migrationsPath = join(
+      import.meta.dir,
+      "..",
+      "..",
+      "server",
+      "src",
+      "db",
+      "migrations.ts",
+    );
+    const source = readFileSync(migrationsPath, "utf8");
+    const versions = Array.from(source.matchAll(/^\s*version:\s*(\d+)\s*,/gm), (m) => Number(m[1]));
+    expect(versions.length).toBeGreaterThan(0);
+    expect(LATEST_MIGRATION_VERSION).toBe(Math.max(...versions));
+  });
 
   test("db missing → warn", async () => {
     const result = await runDbCheck({
