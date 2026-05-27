@@ -2161,7 +2161,8 @@ button.tab:focus-visible {
   color: var(--muted);
   overflow-x: auto;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .command-call-args-empty {
@@ -2182,7 +2183,8 @@ button.tab:focus-visible {
   color: var(--text, var(--muted));
   overflow-x: auto;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .command-call-result-error {
@@ -2670,7 +2672,6 @@ button.tab:focus-visible {
   position: fixed;
   margin: 0;
   inset: auto;
-
   background: var(--card);
   color: var(--fg);
   border: 1px solid var(--border);
