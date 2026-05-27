@@ -1193,10 +1193,6 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       setSlashOpen(false);
       const rest = trimmed.slice(`/${matched.name}`.length).trim();
       if (matched.name === "project") {
-        // Snapshot at submit so a slow command resolving after the user has
-        // switched conversations doesn't patch the message into an unrelated
-        // transcript that's now active.
-        const submitConvoId = conversationIdRef.current;
         const commandMessageId = newId();
         setMessages((prev) => [
           ...prev,
@@ -1211,6 +1207,12 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
             },
           },
         ]);
+        // The functional setMessages is the staleness guard: if the user
+        // switched conversations (messages reset) or the command message was
+        // otherwise dropped, the id won't be in `prev` and the map is a
+        // no-op. A conversation-id check would over-fire — a command issued
+        // before any chat existed (submitConvoId=null) and resolved after
+        // `doSend` created one would leave the row stuck running.
         const patchResult = (result: { ok: boolean; message: string }) => {
           setMessages((prev) =>
             prev.map((m) =>
@@ -1221,12 +1223,8 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           );
         };
         void dispatchProjectCommand(rest)
-          .then((result) => {
-            if (conversationIdRef.current !== submitConvoId) return;
-            patchResult(result);
-          })
+          .then(patchResult)
           .catch((err: unknown) => {
-            if (conversationIdRef.current !== submitConvoId) return;
             const message = err instanceof Error ? err.message : String(err);
             patchResult({ ok: false, message });
           });

@@ -162,11 +162,11 @@ export function RunView({
           )}
         </div>
         <div className="run-meta">
-          {onSelectProject && (
+          {preStart && onSelectProject && (
             <ProjectChip
               projectName={activeProject?.name ?? "default"}
               popoverId={RUN_VIEW_PROJECT_PICKER_POPOVER_ID}
-              disabled={!preStart}
+              disabled={starting}
             />
           )}
           {preStart ? (
@@ -289,7 +289,7 @@ export function RunView({
         </div>
       )}
 
-      {onSelectProject && (
+      {preStart && onSelectProject && (
         <ProjectPickerPopover
           popoverId={RUN_VIEW_PROJECT_PICKER_POPOVER_ID}
           projects={projects}
