@@ -13,10 +13,30 @@ import { WorkflowList } from "../components/Workflows/WorkflowList.tsx";
 // only fires when the user submits the composer.
 type Screen = { kind: "catalog" } | { kind: "run"; workflow: WorkflowDetail; runId: string | null };
 
-// Module-scoped so it survives the view re-mounting on every tab switch.
-// Without this, navigating back to Workflows fires the same loader-notice
-// toasts every time, which is just noise after the user has seen them.
-const seenNotices = new Set<string>();
+// Persisted to localStorage so a discovery notice the user has already seen
+// once stays dismissed across page reloads and HMR resets. Module-scoped
+// alone is enough for tab switches but not for the dev-mode hot-reload
+// churn that recreates the module on every save.
+const SEEN_NOTICES_STORAGE_KEY = "keelson.workflows.seenNotices.v1";
+const seenNotices = loadSeenNotices();
+function loadSeenNotices(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SEEN_NOTICES_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((s): s is string => typeof s === "string"));
+  } catch {
+    return new Set();
+  }
+}
+function persistSeenNotices(set: Set<string>): void {
+  try {
+    localStorage.setItem(SEEN_NOTICES_STORAGE_KEY, JSON.stringify([...set]));
+  } catch {
+    // Quota exceeded / storage disabled — best-effort persistence.
+  }
+}
 
 export function Workflows() {
   const toast = useToast();
@@ -50,6 +70,7 @@ export function Workflows() {
             message: `${where}: ${notice.message}`,
           });
         }
+        persistSeenNotices(seenNotices);
         // Preload details in parallel — the catalog cards show node-type
         // chips, and the run-start flow needs detail anyway. ~3 fetches
         // for the starter set is cheap.

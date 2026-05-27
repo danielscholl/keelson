@@ -24,20 +24,20 @@ import {
 import { openDatabase } from "../src/db/init.ts";
 import { createMemoryStore, type MemoryStore } from "../src/memory-store.ts";
 
-const MEMORY_DEMO_PATH = join(
+const MEMORY_WORKFLOW_PATH = join(
   import.meta.dir,
   "..",
   "..",
   "..",
   ".keelson",
   "workflows",
-  "memory-demo.yaml",
+  "memory.yaml",
 );
 
-function loadMemoryDemo(): WorkflowDefinition {
-  const yaml = readFileSync(MEMORY_DEMO_PATH, "utf8");
-  const result = parseWorkflow(yaml, MEMORY_DEMO_PATH);
-  if (result.error) throw new Error(`failed to load memory-demo: ${result.error.error}`);
+function loadMemoryWorkflow(): WorkflowDefinition {
+  const yaml = readFileSync(MEMORY_WORKFLOW_PATH, "utf8");
+  const result = parseWorkflow(yaml, MEMORY_WORKFLOW_PATH);
+  if (result.error) throw new Error(`failed to load memory workflow: ${result.error.error}`);
   return result.workflow;
 }
 
@@ -83,11 +83,11 @@ describe("v0.3 memory layer acceptance", () => {
   //   second run's recall returns the first run's findings. Memory written by
   //   run 1 is evidence by default and only graduates to instruction if an
   //   operator confirms it via the review queue.
-  test("memory-demo: writeback → recall → operator confirm → instruction-promotion", async () => {
+  test("memory workflow: writeback → recall → operator confirm → instruction-promotion", async () => {
     const db = openDatabase({ path: ":memory:" });
     try {
       const store = createMemoryStore(db);
-      const workflow = loadMemoryDemo();
+      const workflow = loadMemoryWorkflow();
       // ARGUMENTS contains both tokens the recall query searches for ("prior",
       // "observations"), so the FTS5 default tokenizer hits on the writeback's
       // resolved content "Observed: observation recorded: prior observations
@@ -122,7 +122,7 @@ describe("v0.3 memory layer acceptance", () => {
       const beforeConfirm = store.recall({
         schemaVersion: RECALL_REQUEST_SCHEMA_VERSION,
         scope: { visibility: "project" },
-        task: { runtime: "workflow", taskId: "memory-demo:observe", flowId: "verify-pre" },
+        task: { runtime: "workflow", taskId: "memory:capture", flowId: "verify-pre" },
         query: "prior observations",
         limits: { maxItems: 5 },
       });
@@ -142,7 +142,7 @@ describe("v0.3 memory layer acceptance", () => {
       const afterConfirm = store.recall({
         schemaVersion: RECALL_REQUEST_SCHEMA_VERSION,
         scope: { visibility: "project" },
-        task: { runtime: "workflow", taskId: "memory-demo:observe", flowId: "verify-post" },
+        task: { runtime: "workflow", taskId: "memory:capture", flowId: "verify-post" },
         query: "prior observations",
         limits: { maxItems: 5 },
       });

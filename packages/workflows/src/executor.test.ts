@@ -111,11 +111,28 @@ function recordEvents(): { events: RunStreamEvent[]; onEvent: (e: RunStreamEvent
   return { events, onEvent: (e) => events.push(e) };
 }
 
+// Test-only fixtures live under packages/workflows/test/fixtures/. They used
+// to ship as bundled workflows in .keelson/workflows/ but were pruned out of
+// the user-facing catalog when v0.3 closed — they're still useful here as
+// DAG-shape coverage (hello-world: single layer; status-report: sequential;
+// classify-changes: conditional fan-out) without leaking into the SPA's
+// workflow picker.
 function loadStarter(name: string): WorkflowDefinition {
-  const root = join(import.meta.dir, "..", "..", "..", ".keelson", "workflows", `${name}.yaml`);
+  const root = join(import.meta.dir, "..", "test", "fixtures", `${name}.yaml`);
   const yaml = readFileSync(root, "utf-8");
   const result = parseWorkflow(yaml, root);
   if (result.error) throw new Error(`fixture load failed: ${result.error.error}`);
+  return result.workflow as WorkflowDefinition;
+}
+
+// smoke-test stays bundled — it's the user-facing "is the engine alive"
+// fixture and we want both the SPA card and this executor test to read the
+// same file. Separate helper so a future move of one doesn't drag the other.
+function loadBundled(name: string): WorkflowDefinition {
+  const root = join(import.meta.dir, "..", "..", "..", ".keelson", "workflows", `${name}.yaml`);
+  const yaml = readFileSync(root, "utf-8");
+  const result = parseWorkflow(yaml, root);
+  if (result.error) throw new Error(`bundled load failed: ${result.error.error}`);
   return result.workflow as WorkflowDefinition;
 }
 
@@ -1522,23 +1539,12 @@ import { makeCommandHandler } from "./handlers/command.ts";
 import { makeLoopHandler } from "./handlers/loop.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
 
-async function uvOnPath(): Promise<boolean> {
-  try {
-    const p = Bun.spawn(["uv", "--version"], { stdout: "ignore", stderr: "ignore" });
-    return (await p.exited) === 0;
-  } catch {
-    return false;
-  }
-}
-
-const UV_PRESENT = await uvOnPath();
-
-// The smoke YAML uses a `script-python-node` (runtime: uv). Skip the full
-// run when uv is missing — the discovery + handler tests already cover the
-// uv-not-on-PATH path with a clear error.
-describe.if(UV_PRESENT)("runWorkflow — smoke-test (every node type)", () => {
-  test("all 10 active nodes succeed and the final assert prints PASS", async () => {
-    const workflow = loadStarter("smoke-test");
+// Bundled smoke-test is Bun-only — no `runtime: uv` nodes since the
+// python-smoke-test fixture was pruned with the v0.3 close — so this suite
+// runs unconditionally.
+describe("runWorkflow — smoke-test (every node type)", () => {
+  test("all active nodes succeed and the final assert prints PASS", async () => {
+    const workflow = loadBundled("smoke-test");
 
     // Canned prompt responses for prompt-node / command-node / loop iterations.
     const promptHandler: NodeHandler = {

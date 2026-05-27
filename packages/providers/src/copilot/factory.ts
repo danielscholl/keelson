@@ -59,6 +59,20 @@ function copilotCostTier(multiplier: number | undefined): ModelInfo["costTier"] 
   return "high";
 }
 
+// Mirrors @keelson/shared's reasoningEffortLevelSchema. Repeated here so the
+// projection can drop unknown values the live SDK ships (e.g. when GitHub
+// rotates a new effort tier into the catalog) before they reach the wire
+// schema — without this filter, one unknown effort poisons the whole
+// /api/providers/:id/models response with a Zod parse error and the picker
+// falls back to the curated 5-item baseline.
+const KNOWN_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+type KnownReasoningEffort = (typeof KNOWN_REASONING_EFFORTS)[number];
+function isKnownReasoningEffort(value: unknown): value is KnownReasoningEffort {
+  return (
+    typeof value === "string" && (KNOWN_REASONING_EFFORTS as readonly string[]).includes(value)
+  );
+}
+
 // `tools: true` is hardcoded because every Copilot-served model accepts
 // tool-use through the session protocol — the SDK's per-model
 // `capabilities.supports` block carries vision + reasoningEffort only.
@@ -70,18 +84,35 @@ function projectCopilotModel(m: CopilotModelInfo): ModelInfo {
   const supports: NonNullable<ModelInfo["supports"]> = { tools: true };
   if (m.capabilities?.supports?.vision === true) supports.vision = true;
   if (m.capabilities?.supports?.reasoningEffort === true) {
-    supports.reasoningEffort = true;
+    // Filter supportedReasoningEfforts to known values. If the SDK
+    // enumerated tiers AND every one of them is outside our schema, treat
+    // the model as if reasoningEffort isn't supported at all — otherwise
+    // the picker renders with no tier list and the client falls back to
+    // its default "medium", which the model rejects (the whole point of
+    // the new enum value the SDK added).
+    let efforts: KnownReasoningEffort[] | undefined;
+    if (m.supportedReasoningEfforts) {
+      const raw = m.supportedReasoningEfforts as readonly unknown[];
+      efforts = raw.filter(isKnownReasoningEffort);
+      const dropped = raw.filter((e) => !isKnownReasoningEffort(e));
+      if (dropped.length > 0) {
+        console.warn(
+          `[copilot] dropping unknown reasoning effort(s) from model ${m.id}: ${dropped.join(", ")}`,
+        );
+      }
+    }
+    const enumeratedButAllUnknown = efforts !== undefined && efforts.length === 0;
+    if (!enumeratedButAllUnknown) {
+      supports.reasoningEffort = true;
+      if (efforts && efforts.length > 0) {
+        info.supportedReasoningEfforts = efforts;
+      }
+      if (m.defaultReasoningEffort && isKnownReasoningEffort(m.defaultReasoningEffort)) {
+        info.defaultReasoningEffort = m.defaultReasoningEffort;
+      }
+    }
   }
   info.supports = supports;
-  // Guard against fixture drift surfacing the metadata when not supported.
-  if (m.capabilities?.supports?.reasoningEffort === true) {
-    if (m.supportedReasoningEfforts) {
-      info.supportedReasoningEfforts = [...m.supportedReasoningEfforts];
-    }
-    if (m.defaultReasoningEffort) {
-      info.defaultReasoningEffort = m.defaultReasoningEffort;
-    }
-  }
   return info;
 }
 

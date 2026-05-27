@@ -163,6 +163,65 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+.topbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 20px;
+}
+.topbar-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+.brand-button {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+}
+.topbar-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.nav-tab {
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+}
+.nav-tab:hover {
+  color: var(--fg);
+}
+.nav-tab.is-active {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--fg);
+}
+.nav-pip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--magenta);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
 .tab {
   padding: 5px 14px;
   border-radius: 6px;
@@ -5260,7 +5319,21 @@ button.tab:focus-visible {
   color: var(--accent); text-transform: uppercase;
   margin-bottom: 4px;
 }
-.wc-section-body { color: var(--muted); }
+/* Clamp at 5 lines so a long Does / Not for block doesn't blow the card
+   height out of grid alignment with neighbours; the full text is reachable
+   via the `title` attribute set in WorkflowCard.tsx. `cursor: help` is the
+   discovery cue that hover will surface more. */
+.wc-section-body {
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wc-section-body[title]:hover {
+  cursor: help;
+}
 .wc-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: auto; padding-top: 10px;

@@ -60,30 +60,40 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
         {parsed.useWhen && (
           <div className="wc-section">
             <div className="wc-section-label">Use when</div>
-            <div className="wc-section-body">{parsed.useWhen}</div>
+            <div className="wc-section-body" title={parsed.useWhen}>
+              {parsed.useWhen}
+            </div>
           </div>
         )}
         {parsed.does && (
           <div className="wc-section">
             <div className="wc-section-label">Does</div>
-            <div className="wc-section-body">{parsed.does}</div>
+            <div className="wc-section-body" title={parsed.does}>
+              {parsed.does}
+            </div>
           </div>
         )}
         {parsed.triggers && (
           <div className="wc-section">
             <div className="wc-section-label">Triggers</div>
-            <div className="wc-section-body">{parsed.triggers}</div>
+            <div className="wc-section-body" title={parsed.triggers}>
+              {parsed.triggers}
+            </div>
           </div>
         )}
         {parsed.notFor && (
           <div className="wc-section">
             <div className="wc-section-label">Not for</div>
-            <div className="wc-section-body">{parsed.notFor}</div>
+            <div className="wc-section-body" title={parsed.notFor}>
+              {parsed.notFor}
+            </div>
           </div>
         )}
         {parsed.body && !parsed.useWhen && !parsed.does && (
           <div className="wc-section" style={{ gridColumn: "1 / -1" }}>
-            <div className="wc-section-body">{parsed.body}</div>
+            <div className="wc-section-body" title={parsed.body}>
+              {parsed.body}
+            </div>
           </div>
         )}
       </div>

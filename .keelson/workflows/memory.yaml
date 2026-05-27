@@ -1,0 +1,37 @@
+name: memory
+description: |
+  Use when: User wants to capture an observation, lesson, or note directly into project
+            memory without going through a chat turn.
+  Triggers: "remember", "save to memory", "capture this", "note this", "log this observation".
+  Does: Records the invocation argument as a lesson-typed memory entry (provenance:
+        generated, review_status: pending) and surfaces it in the Memory review queue for
+        operator confirmation. Recall also fires so the run trace shows any related prior
+        captures. Run with `keelson workflow run memory --inputs "ARGUMENTS=<observation text>"`.
+  NOT for: Editing or deleting existing memories, or promoting an entry to instruction-grade
+           — those require operator actions in the Memory review queue.
+
+  Requires `keelson serve` — the in-process headless path refuses workflows with memory:
+  blocks (server-required for memory).
+
+nodes:
+  - id: capture
+    # bash bodies are pre-substitution, so the argument arrives via the env
+    # channel ($KEELSON_ARGUMENTS) — NOT via $ARGUMENTS text substitution.
+    bash: |
+      echo "$KEELSON_ARGUMENTS"
+    memory:
+      recall:
+        # Substituted from inputs at pre-node time so the recall is content-
+        # aware. The capture node hasn't run yet here, so $capture.output is
+        # not available — $ARGUMENTS is.
+        query: $ARGUMENTS
+        limits: { maxItems: 5, recencyDays: 90 }
+      writeback:
+        on: success
+        type: lesson
+        summary: User observation
+        content: |
+          $capture.output
+        sourceRefs:
+          - kind: workflow_run
+            uri: memory

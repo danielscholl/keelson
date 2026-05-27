@@ -3,15 +3,22 @@
 #   (deterministic node types) + depends_on / when / trigger_rule / $nodeId.output
 #   (DAG features).
 # Skipped: `approval:` — pauses for human input, incompatible with CI.
-# Skipped: `runtime: uv` — see python-smoke-test.yaml for the Python demo;
-#   keeping this workflow Bun-only means the README quick-start has zero
-#   non-Bun prerequisites.
+# Skipped: `runtime: uv` — keeping this workflow Bun-only means the README
+#   quick-start has zero non-Bun prerequisites.
 # No provider pin — runs against whichever provider the server has registered
 # as default (stub / claude / copilot). Adjust per-node `model:` if you want
 # to exercise a specific backend.
 
 name: smoke-test
-description: End-to-end smoke covering every CI-compatible node type (Bun-only).
+description: |
+  Use when: User wants to verify the workflow engine end-to-end against a Bun-only environment,
+            either after a fresh install or after changes to the executor / handlers.
+  Triggers: "smoke test", "run smoke", "verify workflows", "engine sanity check".
+  Does: Exercises every CI-compatible node type (prompt, command, loop, bash, script-bun) plus
+        DAG features (depends_on, when, trigger_rule, $nodeId.output substitution). Asserts
+        every upstream node produced non-empty output.
+  NOT for: Provider-specific feature validation (claude hooks, copilot tools — those live in
+           their provider's own fixtures). Skips approval (interactive) and uv (Python).
 
 nodes:
   # ─── AI node types ──────────────────────────────────────────────────────
