@@ -99,4 +99,5 @@ export {
   resolveBranchTemplate,
   WorktreeCreationError,
   worktreePathFor,
+  worktreePathForRepoLocal,
 } from "./worktree.ts";

@@ -1,17 +1,18 @@
-import type { Project, WorkflowDetail, WorkflowSummary } from "@keelson/shared";
+import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getWorkflowDetail, listProjects, listWorkflows, startWorkflowRun } from "../api.ts";
+import { getWorkflowDetail, listWorkflows, startWorkflowRun } from "../api.ts";
+import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
+import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { RecentRuns } from "../components/Workflows/RecentRuns.tsx";
 import { RunView } from "../components/Workflows/RunView.tsx";
 import type { StartRequest } from "../components/Workflows/StartComposer.tsx";
 import { WorkflowList } from "../components/Workflows/WorkflowList.tsx";
+import { useActiveProject } from "../hooks/useActiveProject.ts";
 
-// Persist the last-used project so reloads land on the same context. Same
-// localStorage discipline as `seenNotices` below.
-const SELECTED_PROJECT_STORAGE_KEY = "keelson.workflows.selectedProjectId.v1";
+const PROJECT_PICKER_POPOVER_ID = "workflows-project-picker-popover";
 
 // `runId: null` is the pre-start state — RunView paints the DAG with all
 // nodes pending and pins the StartComposer to the bottom; the API call
@@ -50,14 +51,13 @@ export function Workflows() {
   const [details, setDetails] = useState<Map<string, WorkflowDetail>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>({ kind: "catalog" });
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY);
-    } catch {
-      return null;
-    }
-  });
+  const {
+    projects,
+    activeProjectId,
+    activeProject,
+    setActiveProject,
+    refresh: refreshProjects,
+  } = useActiveProject();
   // Bump on every kick so RecentRuns re-fetches.
   const [runsRefresh, setRunsRefresh] = useState(0);
   // Ref is the synchronous race gate; state drives the StartComposer
@@ -65,42 +65,12 @@ export function Workflows() {
   const startingRef = useRef(false);
   const [starting, setStarting] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    listProjects()
-      .then((next) => {
-        if (cancelled) return;
-        setProjects(next);
-        setSelectedProjectId((prev) => {
-          if (prev && next.some((p) => p.id === prev)) return prev;
-          const resolved = next.length === 1 ? next[0]!.id : null;
-          try {
-            if (resolved) localStorage.setItem(SELECTED_PROJECT_STORAGE_KEY, resolved);
-            else localStorage.removeItem(SELECTED_PROJECT_STORAGE_KEY);
-          } catch {
-            // Quota / disabled — best-effort persistence.
-          }
-          return resolved;
-        });
-      })
-      .catch((err) => {
-        // Non-fatal: projects load failure shouldn't block the workflows view.
-        console.warn("[workflows] listProjects failed:", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleSelectProject = useCallback((projectId: string) => {
-    setSelectedProjectId(projectId);
-    try {
-      if (projectId) localStorage.setItem(SELECTED_PROJECT_STORAGE_KEY, projectId);
-      else localStorage.removeItem(SELECTED_PROJECT_STORAGE_KEY);
-    } catch {
-      // Quota / disabled — best-effort persistence.
-    }
-  }, []);
+  const handleSelectProject = useCallback(
+    (projectId: string) => {
+      setActiveProject(projectId);
+    },
+    [setActiveProject],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -256,7 +226,7 @@ export function Workflows() {
           onStart={(req) => handleStart(screen.workflow, req)}
           starting={starting}
           projects={projects}
-          selectedProjectId={selectedProjectId}
+          selectedProjectId={activeProjectId}
           onSelectProject={handleSelectProject}
         />
       </div>
@@ -270,7 +240,21 @@ export function Workflows() {
         <span className="page-sub">
           {workflows.length} workflow{workflows.length === 1 ? "" : "s"} discovered
         </span>
+        <ProjectChip
+          projectName={activeProject?.name ?? "default"}
+          popoverId={PROJECT_PICKER_POPOVER_ID}
+        />
       </div>
+
+      <ProjectPickerPopover
+        popoverId={PROJECT_PICKER_POPOVER_ID}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelect={setActiveProject}
+        onProjectUpdated={() => {
+          void refreshProjects();
+        }}
+      />
 
       <WorkflowList
         workflows={workflows}

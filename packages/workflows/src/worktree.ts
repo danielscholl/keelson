@@ -47,10 +47,7 @@ export function defaultWorktreeRoot(): string {
 }
 
 /**
- * Compute the per-run worktree path under
- * `<root>/<project-name>/<branch-leaf>/`. The branch leaf is the
- * post-final-slash segment of the resolved branch (`keelson/foo/abc` →
- * `abc`) so users can `cd` into a recognizable directory.
+ * Workspace-scoped placement: `<root>/<project-name>/<branch-leaf>/`.
  */
 export function worktreePathFor(opts: {
   root: string;
@@ -59,6 +56,17 @@ export function worktreePathFor(opts: {
 }): string {
   const leaf = opts.branch.split("/").pop() ?? opts.branch;
   return join(opts.root, opts.projectName, leaf);
+}
+
+/**
+ * Repo-local placement: `<projectRootPath>/.worktrees/<branch-leaf>/`.
+ */
+export function worktreePathForRepoLocal(opts: {
+  projectRootPath: string;
+  branch: string;
+}): string {
+  const leaf = opts.branch.split("/").pop() ?? opts.branch;
+  return join(opts.projectRootPath, ".worktrees", leaf);
 }
 
 /** Resolve the branch-name template against the run's workflow / id. */

@@ -152,4 +152,99 @@ describe("projects routes", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  test("DELETE rejects removal of the default project", async () => {
+    const { app, store } = makeRig();
+    const p = store.create({ name: "default", rootPath: tmpDir });
+    const res = await app.fetch(
+      new Request(`http://test/api/projects/${p.id}`, {
+        method: "DELETE",
+        headers: { origin: LOOPBACK_ORIGIN },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(store.get(p.id)).toBeDefined();
+  });
+
+  test("PATCH updates worktreeLayout", async () => {
+    const { app, store } = makeRig();
+    const p = store.create({ name: "patchme", rootPath: tmpDir });
+    const res = await app.fetch(
+      new Request(`http://test/api/projects/${p.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: LOOPBACK_ORIGIN },
+        body: JSON.stringify({ worktreeLayout: "repo-local" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { project: { worktreeLayout: string } };
+    expect(body.project.worktreeLayout).toBe("repo-local");
+    expect(store.get(p.id)?.worktreeLayout).toBe("repo-local");
+  });
+
+  test("PATCH rejects renaming the default project", async () => {
+    const { app, store } = makeRig();
+    const p = store.create({ name: "default", rootPath: tmpDir });
+    const res = await app.fetch(
+      new Request(`http://test/api/projects/${p.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: LOOPBACK_ORIGIN },
+        body: JSON.stringify({ name: "renamed" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("PATCH rejects empty patch", async () => {
+    const { app, store } = makeRig();
+    const p = store.create({ name: "empty-patch", rootPath: tmpDir });
+    const res = await app.fetch(
+      new Request(`http://test/api/projects/${p.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: LOOPBACK_ORIGIN },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /api/projects/clone fails when destination already exists", async () => {
+    const dbPath = join(tmpDir, "test.db");
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    const app = new Hono();
+    projectsRoutes(app, { store, projectsRoot: tmpDir });
+    // tmpDir already exists as a directory, so `clone` would try to clone
+    // into tmpDir/<name> which we now create up-front.
+    const targetDir = join(tmpDir, "existing-repo");
+    rmSync(targetDir, { recursive: true, force: true });
+    require("node:fs").mkdirSync(targetDir, { recursive: true });
+    const res = await app.fetch(
+      new Request("http://test/api/projects/clone", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: LOOPBACK_ORIGIN },
+        body: JSON.stringify({
+          url: "https://example.com/x/existing-repo.git",
+          name: "existing-repo",
+        }),
+      }),
+    );
+    expect(res.status).toBe(409);
+  });
+
+  test("POST /api/projects/clone returns 400 when name cannot be derived", async () => {
+    const dbPath = join(tmpDir, "test.db");
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    const app = new Hono();
+    projectsRoutes(app, { store, projectsRoot: tmpDir });
+    const res = await app.fetch(
+      new Request("http://test/api/projects/clone", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: LOOPBACK_ORIGIN },
+        body: JSON.stringify({ url: "http://example.com/" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
 });

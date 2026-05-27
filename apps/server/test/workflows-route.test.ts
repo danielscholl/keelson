@@ -529,6 +529,38 @@ nodes:
     expect(body.error).toContain("does not exist");
   });
 
+  test("POST .../runs infers project from workingDir via longest-prefix lookup", async () => {
+    writeWorkflow(
+      "infer-proj.yaml",
+      `name: infer-proj
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const { app, store, projectsStore } = makeRig();
+    // makeRig already registers `test-project` at tmpDir; create `owning`
+    // under a distinct nested path so findByPathPrefix has a single
+    // longest-prefix winner and the assertion is deterministic.
+    const owningRoot = join(tmpDir, "owning");
+    const subDir = join(owningRoot, "sub");
+    mkdirSync(subDir, { recursive: true });
+    const owning = projectsStore.create({ name: "owning", rootPath: owningRoot });
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/infer-proj/runs", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {}, workingDir: subDir }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    await pollUntilTerminal(app, runId);
+    const run = store.getRun(runId) as { projectId?: string | null };
+    expect(run.projectId).toBe(owning.id);
+  });
+
   test("injected prompt handler — node succeeds end-to-end and contentParts persists", async () => {
     writeWorkflow(
       "spwf.yaml",

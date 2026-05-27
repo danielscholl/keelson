@@ -1,3 +1,4 @@
+import type { Project, WorktreeLayout } from "@keelson/shared";
 import {
   type ChatFrame,
   type Conversation,
@@ -10,12 +11,16 @@ import {
 import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  cloneProject,
   createConversation,
+  createProject,
+  deleteProject,
   fetchProviderModels,
   fetchProviders,
   fetchTools,
   getConversation,
   rememberChatMessage,
+  updateProject,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
 import { Sidebar } from "../components/Chat/Sidebar.tsx";
@@ -37,6 +42,8 @@ const OPENING_PROMPT = "__keelson_seeded_opening_prompt__";
 import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";
 import { ModelChip } from "../components/Chat/ModelChip.tsx";
 import { ModelPickerPopover } from "../components/Chat/ModelPickerPopover.tsx";
+import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
+import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { ReasoningEffortChip } from "../components/Chat/ReasoningEffortChip.tsx";
 import { ReasoningEffortPopover } from "../components/Chat/ReasoningEffortPopover.tsx";
 import { ThinkingBlock } from "../components/Chat/ThinkingBlock.tsx";
@@ -50,6 +57,7 @@ import { ToolsChip } from "../components/Chat/ToolsChip.tsx";
 import { ToolsPopover } from "../components/Chat/ToolsPopover.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
+import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
 
 type Role = "user" | "assistant" | "system";
@@ -71,6 +79,7 @@ interface LocalMessage {
 }
 
 const MODEL_PICKER_POPOVER_ID = "chat-model-picker-popover";
+const PROJECT_PICKER_POPOVER_ID = "chat-project-picker-popover";
 const REASONING_EFFORT_POPOVER_ID = "chat-reasoning-effort-popover";
 const TOOLS_POPOVER_ID = "chat-tools-popover";
 
@@ -318,6 +327,14 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  const {
+    projects: projectList,
+    activeProject,
+    activeProjectId,
+    setActiveProject,
+    refresh: refreshProjects,
+  } = useActiveProject();
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -377,6 +394,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   const doSendRef = useRef<
     ((prompt: string, opts?: { hideUserMessage?: boolean }) => Promise<void>) | null
   >(null);
+  // Ref-shim so switchActiveProject can abort a live stream without
+  // forward-declaring abortActiveStream (which depends on later state).
+  const abortActiveStreamRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   // Don't pin a default here; hydration may have already pinned the stored
@@ -528,6 +548,12 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
             };
           }),
         );
+        // Pin the chip to the conversation's project so the picker reflects
+        // the cwd handleChatRequest will resolve, not the cross-conversation
+        // global active id. Clear it when the conversation's project was
+        // deleted (FK NULLed) so the chip falls back to default instead of
+        // continuing to show the previously-active project.
+        setActiveProject(conv.projectId ?? null);
       })
       .catch((e: unknown) => {
         if (cancelled || conversationIdRef.current !== storedId) return;
@@ -540,7 +566,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [setConversationId]);
+  }, [setActiveProject, setConversationId]);
 
   // Close WS on unmount.
   useEffect(() => {
@@ -816,12 +842,12 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         seedForCreate = pendingSeedRef.current ?? undefined;
         nameForCreate = pendingNameRef.current ?? undefined;
         try {
-          const c = await createConversation(
-            selectedProviderId,
-            selectedModel || undefined,
-            seedForCreate,
-            nameForCreate,
-          );
+          const c = await createConversation(selectedProviderId, {
+            ...(selectedModel ? { model: selectedModel } : {}),
+            ...(seedForCreate ? { seedSystemPrompt: seedForCreate } : {}),
+            ...(nameForCreate ? { name: nameForCreate } : {}),
+            ...(activeProjectId ? { projectId: activeProjectId } : {}),
+          });
           convoId = c.id;
           setConversationId(c.id);
           conversationIdRef.current = c.id;
@@ -889,6 +915,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       }
     },
     [
+      activeProjectId,
       conversationsList,
       ensureWs,
       reasoningEffort,
@@ -954,9 +981,168 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
     void doSend(armed, { hideUserMessage: true });
   }, [conversationId, selectedProviderId, hydrating, streaming, input, doSend]);
 
+  // Switching project on an open conversation starts a fresh chat; the
+  // existing conversation row stays in the sidebar but next prompts target
+  // the new project's cwd. Abort any active stream first so a slash command
+  // that resolves mid-stream can't leave the composer stuck.
+  //
+  // `expectedConvoId` guards delayed callers (e.g. a `/project <url>` clone
+  // that resolves after the user has moved into a different conversation):
+  // when present and the live conversation has changed since dispatch, the
+  // selection updates silently without clearing the newer chat.
+  const switchActiveProject = useCallback(
+    (id: string | null, expectedConvoId?: string | null) => {
+      const liveConvoId = conversationIdRef.current;
+      const inExpectedConvo = expectedConvoId === undefined || expectedConvoId === liveConvoId;
+      if (liveConvoId && id !== activeProjectId && inExpectedConvo) {
+        abortActiveStreamRef.current?.();
+        setMessages([]);
+        conversationIdRef.current = null;
+        setConversationId(null);
+      }
+      setActiveProject(id);
+    },
+    [activeProjectId, setActiveProject, setConversationId],
+  );
+
+  const dispatchProjectCommand = useCallback(
+    async (rest: string): Promise<string> => {
+      // Snapshot the conversation at dispatch time so async resolutions
+      // don't clobber a chat the user started while the command was in
+      // flight (e.g. a slow `/project <url>` clone).
+      const startConvoId = conversationIdRef.current;
+      const trimmed = rest.trim();
+      const tokens = trimmed.split(/\s+/).filter((t) => t.length > 0);
+      const projects = projectList;
+
+      const formatList = (list: Project[]): string => {
+        if (list.length === 0) return "No projects yet.";
+        const rows = list.map((p) => {
+          const marker = p.id === activeProjectId ? "*" : " ";
+          return `${marker} ${p.name.padEnd(20)} ${p.rootPath}  [${p.worktreeLayout}]`;
+        });
+        return ["Projects:", ...rows].join("\n");
+      };
+
+      const slugifyName = (raw: string): string =>
+        raw
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^[-_]+|[-_]+$/g, "");
+
+      if (trimmed.length === 0) return formatList(projects);
+
+      // URLs use only `tokens[0]` (with `tokens[1]` reserved for an
+      // optional explicit name). Paths consume the entire rest-of-input so
+      // an absolute path with spaces survives.
+      const isUrl = /^(https?:|git@|ssh:)/.test(trimmed);
+      const isPath = trimmed.startsWith("/") || trimmed.startsWith("~");
+
+      if (isUrl) {
+        const url = tokens[0]!;
+        const explicitName = tokens[1];
+        const project = await cloneProject({
+          url,
+          ...(explicitName ? { name: explicitName } : {}),
+        });
+        await refreshProjects();
+        switchActiveProject(project.id, startConvoId);
+        return `Cloned ${project.name} → ${project.rootPath}`;
+      }
+
+      if (isPath) {
+        const rootPath = trimmed;
+        const segs = rootPath.replace(/\/$/, "").split("/");
+        const derived = slugifyName(segs[segs.length - 1] ?? "");
+        if (!derived) return "could not derive a project name from the path";
+        const project = await createProject({ name: derived, rootPath });
+        await refreshProjects();
+        switchActiveProject(project.id, startConvoId);
+        return `Registered ${project.name} → ${project.rootPath}`;
+      }
+
+      const head = tokens[0]!;
+      if (head === "remove" && tokens[1]) {
+        const target = projects.find((p) => p.name === tokens[1]);
+        if (!target) return `unknown project '${tokens[1]}'`;
+        await deleteProject(target.id);
+        await refreshProjects();
+        if (activeProjectId === target.id) switchActiveProject(null, startConvoId);
+        return `Removed ${target.name}`;
+      }
+
+      if (head === "layout" && tokens[1] && tokens[2]) {
+        const target = projects.find((p) => p.name === tokens[1]);
+        if (!target) return `unknown project '${tokens[1]}'`;
+        const layoutRaw = tokens[2];
+        if (layoutRaw !== "workspace-scoped" && layoutRaw !== "repo-local") {
+          return `layout must be workspace-scoped or repo-local`;
+        }
+        const layout: WorktreeLayout = layoutRaw;
+        const updated = await updateProject(target.id, { worktreeLayout: layout });
+        await refreshProjects();
+        return `${updated.name} → ${updated.worktreeLayout}`;
+      }
+
+      if (head === "use" && tokens[1]) {
+        const target = projects.find((p) => p.name === tokens[1]);
+        if (!target) return `unknown project '${tokens[1]}'`;
+        switchActiveProject(target.id, startConvoId);
+        return `Active project: ${target.name}`;
+      }
+
+      return [
+        "Usage:",
+        "  /project                          list projects",
+        "  /project <url> [name]             clone a repo into the projects root",
+        "  /project <absolute-path>          register an existing local path",
+        "  /project remove <name>            remove a project",
+        "  /project layout <name> <mode>     workspace-scoped | repo-local",
+        "  /project use <name>               set active project",
+      ].join("\n");
+    },
+    [activeProjectId, projectList, refreshProjects, switchActiveProject],
+  );
+
   const onSubmit = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || hydrating) return;
+    if (trimmed === "/project" || trimmed.startsWith("/project ")) {
+      // Refuse while a turn is in flight — `switchActiveProject` clears the
+      // active conversation, which would orphan a live WS stream.
+      if (streaming) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: newId(),
+            role: "system",
+            content: "slash commands are disabled while a response is streaming",
+          },
+        ]);
+        return;
+      }
+      setInput("");
+      const rest = trimmed.slice("/project".length).trim();
+      // Snapshot at submit so a slow command resolving after the user has
+      // switched conversations doesn't append its system message to the
+      // unrelated transcript that's now active.
+      const submitConvoId = conversationIdRef.current;
+      setMessages((prev) => [...prev, { id: newId(), role: "system", content: `> ${trimmed}` }]);
+      void dispatchProjectCommand(rest)
+        .then((result) => {
+          if (conversationIdRef.current !== submitConvoId) return;
+          setMessages((prev) => [...prev, { id: newId(), role: "system", content: result }]);
+        })
+        .catch((err: unknown) => {
+          if (conversationIdRef.current !== submitConvoId) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          setMessages((prev) => [
+            ...prev,
+            { id: newId(), role: "system", content: `error: ${msg}` },
+          ]);
+        });
+      return;
+    }
     // Mid-turn: stash for auto-flush on clean `done`. Single-slot — a second
     // Enter replaces the queued prompt.
     if (streaming) {
@@ -967,7 +1153,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
     }
     setInput("");
     void doSend(trimmed);
-  }, [doSend, hydrating, input, streaming]);
+  }, [dispatchProjectCommand, doSend, hydrating, input, streaming]);
 
   // Cancels auto-send by returning the prompt to the textarea for editing.
   const onCancelQueue = useCallback(() => {
@@ -1018,6 +1204,10 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
     queuedPromptRef.current = null;
     setQueued(null);
   }, []);
+
+  useEffect(() => {
+    abortActiveStreamRef.current = abortActiveStream;
+  }, [abortActiveStream]);
 
   // Window-level so popovers (which stopPropagation Esc) still win when open.
   useEffect(() => {
@@ -1079,6 +1269,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
               };
             }),
           );
+          // Same project-pin as the hydration path: clears to default when
+          // conv.projectId is missing (deleted project / FK NULLed).
+          setActiveProject(conv.projectId ?? null);
         })
         .catch((e: unknown) => {
           if (conversationIdRef.current !== id) return;
@@ -1091,7 +1284,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           setHydrating(false);
         });
     },
-    [abortActiveStream, resetEffortForModel, setConversationId, toast],
+    [abortActiveStream, resetEffortForModel, setActiveProject, setConversationId, toast],
   );
 
   const onNewConversation = useCallback(() => {
@@ -1297,6 +1490,11 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
               popoverId={MODEL_PICKER_POPOVER_ID}
               disabled={streaming || providers.length === 0}
             />
+            <ProjectChip
+              projectName={activeProject?.name ?? "default"}
+              popoverId={PROJECT_PICKER_POPOVER_ID}
+              disabled={streaming}
+            />
             {selectedModelInfo?.supports?.thinking === true && (
               <ThinkingChip
                 enabled={thinkingEnabled}
@@ -1356,6 +1554,16 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           lockedProviderId={lockedProviderId}
           onSelect={onModelSelect}
           onToggleFavorite={toggleFavorite}
+        />
+
+        <ProjectPickerPopover
+          popoverId={PROJECT_PICKER_POPOVER_ID}
+          projects={projectList}
+          activeProjectId={activeProjectId}
+          onSelect={switchActiveProject}
+          onProjectUpdated={() => {
+            void refreshProjects();
+          }}
         />
 
         {selectedModelInfo?.supports?.reasoningEffort === true && (

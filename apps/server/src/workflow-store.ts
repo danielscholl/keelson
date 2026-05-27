@@ -65,6 +65,10 @@ export interface WorkflowStore {
   // Drives the Workflows-nav badge: caller polls for `paused` rows so other
   // tabs can show a pending-input count without subscribing to every run's WS.
   listRunsByStatus(status: WorkflowRunStatus): WorkflowRunSummary[];
+  // Distinct non-null worktree_path values across all runs. Used by `keelson
+  // worktree prune` so worktrees from deleted projects (FK NULLed but path
+  // still persisted) remain reachable for cleanup.
+  listWorktreePaths(): string[];
   // Hard-delete a terminal run. FK CASCADE on workflow_node_outputs handles
   // the per-node rows. The route layer is responsible for the linked
   // conversation (FK is SET NULL, not CASCADE).
@@ -269,6 +273,12 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     listRunsByStatus(status) {
       const rows = listRunsByStatusStmt.all(status) as RunRow[];
       return rows.map(rowToRunSummary);
+    },
+    listWorktreePaths() {
+      const rows = db
+        .query("SELECT DISTINCT worktree_path FROM workflow_runs WHERE worktree_path IS NOT NULL")
+        .all() as { worktree_path: string }[];
+      return rows.map((r) => r.worktree_path);
     },
     deleteRun(runId) {
       return deleteRunStmt.run(runId).changes > 0;

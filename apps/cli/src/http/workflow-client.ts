@@ -100,6 +100,18 @@ export async function listWorkflows(baseUrl: string): Promise<ListWorkflowsRespo
   return (await res.json()) as ListWorkflowsResponse;
 }
 
+export async function listPersistedWorktreePaths(baseUrl: string): Promise<string[]> {
+  const res = await fetch(url(baseUrl, "/api/workflows/worktree-paths"), {
+    headers: defaultHeaders(baseUrl),
+  });
+  if (!res.ok) {
+    throw new HttpError(res.status, `GET /api/workflows/worktree-paths failed: ${res.status}`);
+  }
+  const body = (await res.json()) as { paths?: unknown };
+  if (!Array.isArray(body.paths)) return [];
+  return body.paths.filter((p): p is string => typeof p === "string");
+}
+
 export interface StartRunBody {
   inputs: Record<string, string>;
   projectId?: string;

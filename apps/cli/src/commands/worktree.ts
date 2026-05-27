@@ -3,8 +3,10 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 
+import type { Project } from "@keelson/shared";
 import {
   defaultWorktreeRoot,
   isGitRepo,
@@ -14,9 +16,36 @@ import {
 } from "@keelson/workflows";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
-import { isServerDownError } from "../http/workflow-client.ts";
+import { isServerDownError, listPersistedWorktreePaths } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
 import { DEFAULT_SERVER_BASE_URL } from "../server-probe.ts";
+
+// Mirrors apps/server/src/index.ts; KEELSON_PROJECTS_ROOT must match between
+// the server and any prune invocation, otherwise managed worktrees under the
+// server's actual root will be invisible here.
+function resolveProjectsRoot(): string {
+  const raw = process.env.KEELSON_PROJECTS_ROOT?.trim();
+  return resolve(raw && raw.length > 0 ? raw : join(homedir(), "keelson", "projects"));
+}
+
+function workspaceScopedRoots(): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (p: string) => {
+    let canonical = p;
+    try {
+      canonical = realpathSync(p);
+    } catch {
+      // Path may not exist; dedupe on the requested form instead.
+    }
+    if (seen.has(canonical)) return;
+    seen.add(canonical);
+    out.push(p);
+  };
+  add(defaultWorktreeRoot());
+  add(join(resolveProjectsRoot(), "_worktrees"));
+  return out;
+}
 
 export interface WorktreePruneOptions {
   json: boolean;
@@ -39,18 +68,88 @@ interface PruneResult {
   inspected: number;
 }
 
-// Walk ~/.keelson/worktrees/ and collect every worktree directory we can
-// see, paired with its project's source repo (resolved via the server's
-// /api/projects listing — needed to call `git worktree remove` against the
+async function buildLiveByPath(repoPath: string): Promise<Map<string, string | null>> {
+  const liveByPath = new Map<string, string | null>();
+  if (!(await isGitRepo(repoPath))) return liveByPath;
+  for (const entry of await listWorktrees(repoPath)) {
+    let resolved = entry.path;
+    try {
+      resolved = realpathSync(entry.path);
+    } catch {
+      // path may not exist; keep as-is
+    }
+    liveByPath.set(resolved, entry.branch);
+  }
+  return liveByPath;
+}
+
+async function classifyWorktreeDir(args: {
+  path: string;
+  projectName: string;
+  projectRepoPath: string | null;
+  liveByPath: Map<string, string | null>;
+}): Promise<PruneCandidate | null> {
+  const { path, projectName, projectRepoPath, liveByPath } = args;
+  try {
+    if (!statSync(path).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  let resolvedPath = path;
+  try {
+    resolvedPath = realpathSync(path);
+  } catch {
+    // path may not exist yet; keep as-is
+  }
+  // The `.git` pointer is authoritative: it reflects which repo actually
+  // owns this worktree, which matters when a repo-local placement under a
+  // project rootPath was created from a nested repo. Fall back to the
+  // project's repo only when the pointer can't be resolved (e.g. dir was
+  // hand-deleted but the registration lingers).
+  const effectiveRepoPath = repoPathFromWorktree(path) ?? projectRepoPath;
+  let branch = liveByPath.get(resolvedPath);
+  let trackedKnown = branch !== undefined;
+  if (
+    effectiveRepoPath !== null &&
+    effectiveRepoPath !== projectRepoPath &&
+    (await isGitRepo(effectiveRepoPath))
+  ) {
+    for (const entry of await listWorktrees(effectiveRepoPath)) {
+      let resolvedEntry = entry.path;
+      try {
+        resolvedEntry = realpathSync(entry.path);
+      } catch {
+        // keep as-is
+      }
+      if (resolvedEntry === resolvedPath) {
+        branch = entry.branch;
+        trackedKnown = true;
+        break;
+      }
+    }
+  }
+  return {
+    path,
+    projectName,
+    branch: branch ?? null,
+    repoPath: effectiveRepoPath,
+    reason:
+      effectiveRepoPath === null
+        ? "orphan-no-repo"
+        : trackedKnown
+          ? "tracked"
+          : "orphan-stale-record",
+  };
+}
+
+// Walks the workspace-scoped worktree roots and any repo-local `.worktrees`
+// dirs to collect every worktree directory we can see, paired with its
+// project's source repo (needed to call `git worktree remove` against the
 // right repo).
 async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
-  const root = defaultWorktreeRoot();
-  if (!existsSync(root)) return [];
   const candidates: PruneCandidate[] = [];
 
-  // Resolve project name → repo path. Without the server, we can still
-  // remove orphan directories but `git worktree remove` won't run.
-  let projects: { name: string; rootPath: string }[];
+  let projects: Project[];
   try {
     projects = await listProjects(baseUrl);
   } catch (err) {
@@ -61,85 +160,97 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
     }
   }
   const repoByProject = new Map(projects.map((p) => [p.name, p.rootPath]));
-
-  for (const projectName of readdirSync(root)) {
-    const projectDir = join(root, projectName);
+  const seenPaths = new Set<string>();
+  const recordPath = (p: string): boolean => {
+    let canonical = p;
     try {
-      if (!statSync(projectDir).isDirectory()) continue;
+      canonical = realpathSync(p);
     } catch {
-      continue;
+      // keep as-is
     }
-    const repoPath = repoByProject.get(projectName) ?? null;
-    // If the project still exists, ask git which worktrees it considers live.
-    const liveByPath = new Map<string, string | null>();
-    if (repoPath !== null && (await isGitRepo(repoPath))) {
-      for (const entry of await listWorktrees(repoPath)) {
-        let resolved = entry.path;
-        try {
-          resolved = realpathSync(entry.path);
-        } catch {
-          // path may not exist; keep as-is
-        }
-        liveByPath.set(resolved, entry.branch);
-      }
-    }
-    for (const leaf of readdirSync(projectDir)) {
-      const path = join(projectDir, leaf);
+    if (seenPaths.has(canonical)) return false;
+    seenPaths.add(canonical);
+    return true;
+  };
+
+  for (const root of workspaceScopedRoots()) {
+    if (!existsSync(root)) continue;
+    for (const projectName of readdirSync(root)) {
+      const projectDir = join(root, projectName);
       try {
-        if (!statSync(path).isDirectory()) continue;
+        if (!statSync(projectDir).isDirectory()) continue;
       } catch {
         continue;
       }
+      const repoPath = repoByProject.get(projectName) ?? null;
+      const liveByPath =
+        repoPath !== null ? await buildLiveByPath(repoPath) : new Map<string, string | null>();
+      for (const leaf of readdirSync(projectDir)) {
+        const path = join(projectDir, leaf);
+        if (!recordPath(path)) continue;
+        const c = await classifyWorktreeDir({
+          path,
+          projectName,
+          projectRepoPath: repoPath,
+          liveByPath,
+        });
+        if (c !== null) candidates.push(c);
+      }
+    }
+  }
+
+  // Repo-local placement is `<project.rootPath>/.worktrees/<leaf>/`. This
+  // directory lives *inside the user's repo*, so we must not enqueue plain
+  // user directories the operator dropped there. Only consider entries that
+  // are genuine worktrees: either git lists them as live, or their `.git`
+  // pointer resolves to a repo. Anything else is left alone.
+  for (const project of projects) {
+    const repoLocalRoot = join(project.rootPath, ".worktrees");
+    if (!existsSync(repoLocalRoot)) continue;
+    const liveByPath = await buildLiveByPath(project.rootPath);
+    for (const leaf of readdirSync(repoLocalRoot)) {
+      const path = join(repoLocalRoot, leaf);
+      if (!recordPath(path)) continue;
       let resolvedPath = path;
       try {
         resolvedPath = realpathSync(path);
       } catch {
-        // path may not exist yet; keep as-is
+        // keep as-is
       }
-      // Recover the source repo from the worktree's .git pointer when the
-      // projects catalog can't tell us. This catches two cases: (1) the
-      // worktree was created from a raw `workingDir` so it never had a
-      // project entry, and (2) the project was deleted between run and
-      // prune. Without this, `prune --force` would `rmSync` the directory
-      // but leave the source repo's `.git/worktrees/<leaf>` record behind.
-      const effectiveRepoPath = repoPath ?? repoPathFromWorktree(path);
-      // Re-check the live-tracked map against the recovered repo path; the
-      // initial scan only filled it when we had a project-supplied repo.
-      let branch = liveByPath.get(resolvedPath);
-      let trackedKnown = branch !== undefined;
-      if (
-        effectiveRepoPath !== null &&
-        effectiveRepoPath !== repoPath &&
-        (await isGitRepo(effectiveRepoPath))
-      ) {
-        for (const entry of await listWorktrees(effectiveRepoPath)) {
-          let resolvedEntry = entry.path;
-          try {
-            resolvedEntry = realpathSync(entry.path);
-          } catch {
-            // keep as-is
-          }
-          if (resolvedEntry === resolvedPath) {
-            branch = entry.branch;
-            trackedKnown = true;
-            break;
-          }
-        }
-      }
-      candidates.push({
+      const isLive = liveByPath.has(resolvedPath);
+      const recovered = repoPathFromWorktree(path);
+      if (!isLive && recovered === null) continue;
+      const c = await classifyWorktreeDir({
         path,
-        projectName,
-        branch: branch ?? null,
-        repoPath: effectiveRepoPath,
-        reason:
-          effectiveRepoPath === null
-            ? "orphan-no-repo"
-            : trackedKnown
-              ? "tracked"
-              : "orphan-stale-record",
+        projectName: project.name,
+        projectRepoPath: project.rootPath,
+        liveByPath,
       });
+      if (c !== null) candidates.push(c);
     }
   }
+
+  // Persisted worktree paths from workflow_runs. Catches worktrees whose
+  // project row has been deleted (FK NULLed, path retained) — those dirs
+  // are otherwise invisible to the project-scoped scans above.
+  let orphanPaths: string[] = [];
+  try {
+    orphanPaths = await listPersistedWorktreePaths(baseUrl);
+  } catch (err) {
+    if (!isServerDownError(err)) throw err;
+  }
+  for (const path of orphanPaths) {
+    if (!existsSync(path)) continue;
+    if (!recordPath(path)) continue;
+    const c = await classifyWorktreeDir({
+      path,
+      projectName: basename(dirname(path)),
+      projectRepoPath: null,
+      liveByPath: new Map(),
+    });
+    if (c !== null) candidates.push(c);
+  }
+
   return candidates;
 }
 

@@ -8,43 +8,65 @@
 
 import { z } from "zod";
 
-// A "project" in Keelson is a named pointer to a local directory. It's the
-// target a workflow run operates against. Intentionally minimal — no repo URL,
-// no clone, no per-project env vars. Add columns when there is a concrete use
-// case (see `project_swamp_design_borrows` memory for the wider Archon model
-// we explicitly chose not to adopt).
+export const worktreeLayoutSchema = z.enum(["workspace-scoped", "repo-local"]);
+export type WorktreeLayout = z.infer<typeof worktreeLayoutSchema>;
+
 export const projectSchema = z
   .object({
     id: z.string(),
     name: z.string(),
     rootPath: z.string(),
+    worktreeLayout: worktreeLayoutSchema,
     createdAt: z.string(),
   })
   .strict();
 export type Project = z.infer<typeof projectSchema>;
 
-// Names are used as filesystem path segments under `~/.keelson/worktrees/<name>/...`
-// so the allowed character set is conservative. 64 chars is generous for a
-// short handle and well under POSIX_PATH_MAX even after concatenation.
 export const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+
+export const projectNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    PROJECT_NAME_PATTERN,
+    "name must start with a lowercase letter or digit and contain only lowercase letters, digits, '-' or '_'",
+  );
 
 export const createProjectBodySchema = z
   .object({
-    name: z
-      .string()
-      .min(1)
-      .max(64)
-      .regex(
-        PROJECT_NAME_PATTERN,
-        "name must start with a lowercase letter or digit and contain only lowercase letters, digits, '-' or '_'",
-      ),
+    name: projectNameSchema,
     rootPath: z.string().min(1),
+    worktreeLayout: worktreeLayoutSchema.optional(),
   })
   .strict();
 export type CreateProjectBody = z.infer<typeof createProjectBodySchema>;
+
+export const cloneProjectBodySchema = z
+  .object({
+    url: z.string().min(1),
+    name: projectNameSchema.optional(),
+    worktreeLayout: worktreeLayoutSchema.optional(),
+  })
+  .strict();
+export type CloneProjectBody = z.infer<typeof cloneProjectBodySchema>;
+
+export const updateProjectBodySchema = z
+  .object({
+    name: projectNameSchema.optional(),
+    worktreeLayout: worktreeLayoutSchema.optional(),
+  })
+  .strict()
+  .refine((v) => v.name !== undefined || v.worktreeLayout !== undefined, {
+    message: "patch must include at least one of name or worktreeLayout",
+  });
+export type UpdateProjectBody = z.infer<typeof updateProjectBodySchema>;
 
 export const listProjectsResponseSchema = z.object({ projects: z.array(projectSchema) }).strict();
 export type ListProjectsResponse = z.infer<typeof listProjectsResponseSchema>;
 
 export const createProjectResponseSchema = z.object({ project: projectSchema }).strict();
 export type CreateProjectResponse = z.infer<typeof createProjectResponseSchema>;
+
+export const DEFAULT_PROJECT_NAME = "default";
+export const DEFAULT_WORKTREE_LAYOUT: WorktreeLayout = "workspace-scoped";

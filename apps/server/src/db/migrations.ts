@@ -282,6 +282,28 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    description: "conversations: add project_id FK + index",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE conversations
+          ADD COLUMN project_id TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL;
+        CREATE INDEX ix_conversations_project ON conversations(project_id);
+      `);
+    },
+  },
+  {
+    version: 8,
+    description: "keelson_projects: add worktree_layout column",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE keelson_projects
+          ADD COLUMN worktree_layout TEXT NOT NULL DEFAULT 'workspace-scoped'
+          CHECK (worktree_layout IN ('workspace-scoped','repo-local'));
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

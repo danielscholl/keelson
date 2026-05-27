@@ -21,6 +21,7 @@ export interface CreateConversationInput {
   model?: string;
   seedSystemPrompt?: string;
   name?: string;
+  projectId?: string;
 }
 
 // Patch shape for `update()`. Each key is optional so callers only pay for
@@ -50,6 +51,7 @@ interface ConvRow {
   providerSessionId: string | null;
   name: string | null;
   seedSystemPrompt: string | null;
+  project_id: string | null;
   createdAt: string;
   updatedAt: string;
   // Populated by the LEFT JOIN against workflow_runs in list/get. NULL for
@@ -138,6 +140,7 @@ function rowToConversation(row: ConvRow, messages: Message[]): Conversation {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+  if (row.project_id !== null) conv.projectId = row.project_id;
   const workflow = workflowProjection(row);
   if (workflow) conv.workflow = workflow;
   return conv;
@@ -145,13 +148,11 @@ function rowToConversation(row: ConvRow, messages: Message[]): Conversation {
 
 export function createConversationStore(db: Database): ConversationStore {
   const insertConv = db.prepare(
-    "INSERT INTO conversations(id, providerId, model, providerSessionId, name, seedSystemPrompt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO conversations(id, providerId, model, providerSessionId, name, seedSystemPrompt, project_id, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
-  // `*` plus the JOINed workflow columns — kept aliased so ConvRow's typed
-  // shape matches the projection regardless of column order.
   const convSelectColumns = `
     c.id, c.providerId, c.model, c.providerSessionId, c.name,
-    c.seedSystemPrompt, c.createdAt, c.updatedAt,
+    c.seedSystemPrompt, c.project_id, c.createdAt, c.updatedAt,
     w.id AS workflow_run_id,
     w.workflow_name AS workflow_name,
     w.status AS workflow_status
@@ -236,10 +237,11 @@ export function createConversationStore(db: Database): ConversationStore {
         null,
         input.name ?? null,
         input.seedSystemPrompt ?? null,
+        input.projectId ?? null,
         now,
         now,
       );
-      return {
+      const conv: Conversation = {
         id,
         providerId: input.providerId,
         model: input.model,
@@ -249,6 +251,8 @@ export function createConversationStore(db: Database): ConversationStore {
         createdAt: now,
         updatedAt: now,
       };
+      if (input.projectId !== undefined) conv.projectId = input.projectId;
+      return conv;
     },
     appendMessage(id, message) {
       db.transaction(() => {

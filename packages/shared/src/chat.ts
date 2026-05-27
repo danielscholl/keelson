@@ -121,6 +121,7 @@ export const conversationSchema = z
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime().optional(),
     workflow: conversationWorkflowProjectionSchema.optional(),
+    projectId: z.string().optional(),
   })
   .strict();
 export type Conversation = z.infer<typeof conversationSchema>;

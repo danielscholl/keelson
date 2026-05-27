@@ -14,6 +14,7 @@ import {
   type ClientFrame,
   chatFrameSchema,
   clientFrameSchema,
+  DEFAULT_PROJECT_NAME,
   inferToolFamily,
   type MessageChunk,
   modelInfoSchema,
@@ -31,6 +32,7 @@ import { z } from "zod";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import type { ProjectsStore } from "./projects-store.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 import type { ActiveRuns } from "./workflows-handler.ts";
@@ -41,16 +43,20 @@ export interface ChatRoutesWorkflowDeps {
   activeRuns: ActiveRuns;
 }
 
+export interface ChatRoutesOptions {
+  // Optional so tests can spin up chat routes without project wiring; in
+  // production, conversations resolve cwd via the linked project's rootPath
+  // and fall back to the default project when projectId is omitted.
+  projectsStore?: ProjectsStore;
+}
+
 const createConversationBodySchema = z
   .object({
     providerId: z.string(),
     model: z.string().optional(),
-    // Defensive ceiling — lane primers target ~1–2KB; 8KB blocks
-    // pathological seeds before they hit the model's context.
     seedSystemPrompt: z.string().min(1).max(8000).optional(),
-    // Pre-set sidebar title. When provided, the first-prompt auto-derive
-    // in the chat-turn handler is short-circuited.
     name: z.string().min(1).max(80).optional(),
+    projectId: z.string().optional(),
   })
   .strict();
 
@@ -64,6 +70,7 @@ export function chatRoutes(
   app: Hono,
   store: ConversationStore,
   workflowDeps: ChatRoutesWorkflowDeps,
+  opts: ChatRoutesOptions = {},
 ): void {
   app.get("/api/providers", (c) => c.json({ providers: getProviderInfoList() }));
 
@@ -131,7 +138,17 @@ export function chatRoutes(
         400,
       );
     }
-    const conv = store.create(parsed.data);
+    let projectId = parsed.data.projectId;
+    if (projectId !== undefined && opts.projectsStore && !opts.projectsStore.get(projectId)) {
+      return c.json({ error: `unknown project '${projectId}'` }, 400);
+    }
+    if (projectId === undefined && opts.projectsStore) {
+      projectId = opts.projectsStore.getByName(DEFAULT_PROJECT_NAME)?.id;
+    }
+    const conv = store.create({
+      ...parsed.data,
+      ...(projectId !== undefined ? { projectId } : {}),
+    });
     return c.json(conv, 201);
   });
 
@@ -204,6 +221,7 @@ export function handleChatUpgrade(req: Request, server: Server<WsData>): Respons
 
 export interface ChatWebSocketDeps {
   memoryStore?: MemoryStore;
+  projectsStore?: ProjectsStore;
 }
 
 export function chatWebSocketHandlers(
@@ -231,6 +249,7 @@ export function chatWebSocketHandlers(
         store,
         abortSignal: ws.data.abort.signal,
         ...(deps.memoryStore !== undefined ? { memoryStore: deps.memoryStore } : {}),
+        ...(deps.projectsStore !== undefined ? { projectsStore: deps.projectsStore } : {}),
       });
     },
     close(ws) {
@@ -246,6 +265,9 @@ export interface ChatDeps {
   // When wired, a pre-turn recall against this store prepends a memory
   // section to `systemPrompt`. Undefined → recall skipped.
   memoryStore?: MemoryStore;
+  // Resolves the conversation's projectId → rootPath used as the agent's cwd.
+  // Undefined → falls back to process.cwd().
+  projectsStore?: ProjectsStore;
 }
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
@@ -339,6 +361,12 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
 
   const tools = getRegisteredTools();
 
+  // A projectId is always required for project-scoped recall; without it,
+  // MemoryStore.recall would skip the filter and inject memories from every
+  // project. Fall back to the default project when conv.projectId is unset
+  // (e.g. a row whose project was deleted, FK SET NULL).
+  const recallProjectId = conv.projectId ?? deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME)?.id;
+
   // Recall failures warn-and-continue with the section omitted; the turn
   // proceeds with whatever systemPrompt the seed would have produced.
   const recallSection = await runChatRecall({
@@ -346,6 +374,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     conversationId,
     userMessageId,
     query: message.prompt,
+    ...(recallProjectId !== undefined ? { projectId: recallProjectId } : {}),
   });
 
   const systemPromptParts: string[] = [];
@@ -355,23 +384,28 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   }
   const systemPrompt = systemPromptParts.length > 0 ? systemPromptParts.join("\n\n") : undefined;
 
+  // Falls back to the default project's rootPath when conv.projectId was
+  // NULLed (deleted project) or when the row's id no longer resolves; using
+  // process.cwd() would send tools to the server's launch directory.
+  const defaultRootPath = deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME)?.rootPath;
+  const resolvedRootPath =
+    conv.projectId && deps.projectsStore
+      ? deps.projectsStore.get(conv.projectId)?.rootPath
+      : undefined;
+  const cwd = resolvedRootPath ?? defaultRootPath ?? process.cwd();
+
   try {
-    for await (const chunk of provider.sendQuery(
-      message.prompt,
-      process.cwd(),
-      conv.providerSessionId,
-      {
-        model: message.model ?? conv.model,
-        abortSignal: deps.abortSignal,
-        // Omit unset fields so providers see their SDK defaults.
-        ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
-        ...(message.reasoningEffort !== undefined
-          ? { reasoningEffort: message.reasoningEffort }
-          : {}),
-        ...(tools.length > 0 ? { tools } : {}),
-        ...(systemPrompt !== undefined ? { systemPrompt } : {}),
-      },
-    )) {
+    for await (const chunk of provider.sendQuery(message.prompt, cwd, conv.providerSessionId, {
+      model: message.model ?? conv.model,
+      abortSignal: deps.abortSignal,
+      // Omit unset fields so providers see their SDK defaults.
+      ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
+      ...(message.reasoningEffort !== undefined
+        ? { reasoningEffort: message.reasoningEffort }
+        : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+      ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    })) {
       if (deps.abortSignal.aborted) return;
       if (chunk.type === "done") continue;
       acc.ingest(chunk);
@@ -416,13 +450,14 @@ interface RunChatRecallArgs {
   conversationId: string;
   userMessageId: string;
   query: string;
+  projectId?: string;
 }
 
 // Returns the formatted section to prepend onto systemPrompt, or undefined
 // when recall is disabled, returned no items, or failed. Best-effort — a
 // failure never surfaces to the caller.
 async function runChatRecall(args: RunChatRecallArgs): Promise<string | undefined> {
-  const { memoryStore, conversationId, userMessageId, query } = args;
+  const { memoryStore, conversationId, userMessageId, query, projectId } = args;
   if (memoryStore === undefined) return undefined;
   // recallRequestSchema enforces query.min(1); guard here so a whitespace-
   // only prompt doesn't trip a parse error inside the store.
@@ -431,7 +466,10 @@ async function runChatRecall(args: RunChatRecallArgs): Promise<string | undefine
 
   const req: RecallRequest = {
     schemaVersion: RECALL_REQUEST_SCHEMA_VERSION,
-    scope: { visibility: "project" },
+    scope: {
+      visibility: "project",
+      ...(projectId !== undefined ? { projectId } : {}),
+    },
     task: { runtime: "chat", taskId: conversationId, flowId: userMessageId },
     query,
     limits: { maxItems: MEMORY_RECALL_MAX_ITEMS },

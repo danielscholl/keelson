@@ -188,15 +188,21 @@ export function buildProgram(): Command {
     .command("add <name> <rootPath>")
     .description("register a project pointing at a local directory (server-required)")
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .option("--layout <mode>", "worktree layout: workspace-scoped (default) or repo-local")
     .action(async function projectAddAction(
       this: Command,
       name: string,
       rootPath: string,
-      addOpts: { baseUrl?: string },
+      addOpts: { baseUrl?: string; layout?: string },
     ) {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", addOpts.baseUrl);
-      await runProjectAdd(name, rootPath, { json, ...(baseUrl ? { baseUrl } : {}) });
+      const layout = requireNonEmpty(json, "--layout", addOpts.layout);
+      await runProjectAdd(name, rootPath, {
+        json,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(layout ? { layout } : {}),
+      });
     });
 
   project
