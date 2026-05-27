@@ -24,11 +24,12 @@ const HOOK_FIELDS = ["registerTools", "composeBundle", "dispose"] as const;
 
 // Walk `root`, dynamic-import each `rib-*` package's default export, and
 // return a manifest keyed by the rib's id (the directory suffix after `rib-`).
-// Every failure mode (missing root, malformed export, throwing import,
-// schema violation, non-function hook, id mismatch with package basename,
-// duplicate id) warns and skips — a single broken rib package must not
-// prevent the rest from activating, matching how `KEELSON_RIBS` typos are
-// handled in `applyRibs`.
+// A missing root (ENOENT / ENOTDIR) is the common no-ribs-installed case and
+// returns silently. Every per-package failure mode (malformed export,
+// throwing import, schema violation, non-function hook, id mismatch with
+// package basename, duplicate id) warns and skips — a single broken rib
+// package must not prevent the rest from activating, matching how
+// `KEELSON_RIBS` typos are handled in `applyRibs`.
 export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Record<string, Rib>> {
   const root = opts.root ?? join(process.cwd(), "node_modules", "@keelson");
   let names: string[];
