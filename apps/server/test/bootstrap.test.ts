@@ -257,9 +257,6 @@ describe("bootstrapRibs", () => {
     const fixtureRoot = join(import.meta.dir, "fixtures", "rib-discovery");
 
     test("walks the discovery root and activates a healthy fixture rib", async () => {
-      // Narrow to just rib-test so the broken / bad-default / id-mismatch
-      // siblings stay out of this assertion. Their handling is exercised
-      // in the next three cases.
       process.env.KEELSON_RIBS = "test";
       const { manifests } = await bootstrapRibs({ discoveryRoot: fixtureRoot });
       expect(manifests.map((m) => m.id)).toEqual(["test"]);
@@ -311,8 +308,6 @@ describe("bootstrapRibs", () => {
     });
 
     test("a symlinked rib directory is followed and activated", async () => {
-      // Bun workspace installs link `node_modules/@keelson/rib-*` to the
-      // real package dir; discovery has to stat through the symlink.
       process.env.KEELSON_RIBS = "test";
       const tempRoot = await mkdtemp(join(tmpdir(), "keelson-discovery-"));
       try {

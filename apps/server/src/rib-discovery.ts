@@ -11,31 +11,18 @@ import { join } from "node:path";
 import { type Rib, ribDisplayNameSchema, ribIdSchema } from "@keelson/shared";
 
 export interface DiscoverRibsOptions {
-  // Directory containing `rib-*` subdirectories. Defaults to
-  // `<process.cwd()>/node_modules/@keelson`; tests pass a fixture path.
   root?: string;
 }
 
-// Hooks on the `Rib` contract that must be functions when present. Discovery
-// validates each before handing the candidate to `applyRibs`, which would
-// otherwise throw mid-bootstrap on `registerTools?.(ctx)` if a package
-// exported e.g. `registerTools: 42`.
 const HOOK_FIELDS = ["registerTools", "composeBundle", "dispose"] as const;
 
-// Walk `root`, dynamic-import each `rib-*` package's default export, and
-// return a manifest keyed by the rib's id (the directory suffix after `rib-`).
-// A missing root (ENOENT / ENOTDIR) is the common no-ribs-installed case and
-// returns silently. Every per-package failure mode (malformed export,
-// throwing import, schema violation, non-function hook, id mismatch with
-// package basename, duplicate id) warns and skips — a single broken rib
-// package must not prevent the rest from activating, matching how
-// `KEELSON_RIBS` typos are handled in `applyRibs`.
 export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Record<string, Rib>> {
   const root = opts.root ?? join(process.cwd(), "node_modules", "@keelson");
   let names: string[];
   try {
     names = await readdir(root);
   } catch (err) {
+    // Missing root is the common no-ribs-installed case; warning here would be boot-time noise.
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return {};
     throw err;
@@ -44,8 +31,7 @@ export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Reco
   for (const name of names) {
     if (!name.startsWith("rib-")) continue;
     const entry = join(root, name);
-    // `stat` follows symlinks, so Bun workspace installs (which symlink
-    // `node_modules/@keelson/rib-*` to the real package dir) resolve here.
+    // stat follows symlinks; Bun workspace installs symlink node_modules/@keelson/rib-* to the real package dir.
     let entryStat: Awaited<ReturnType<typeof stat>>;
     try {
       entryStat = await stat(entry);

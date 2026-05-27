@@ -62,11 +62,6 @@ const bootstrap = bootstrapProviders({ getCredential });
 const snapshotSubscribers = createSnapshotSubscribers();
 const snapshotManager = createSnapshotManager(snapshotSubscribers);
 
-// No built-in ribs ship. With no arguments, bootstrapRibs walks
-// `node_modules/@keelson/rib-*` and activates every package whose default
-// export is a valid Rib. `KEELSON_RIBS` (when set) filters that discovered
-// map to a subset. Embedders that prefer hand-wired activation can pass
-// `available: { … }` here instead — that path bypasses discovery entirely.
 const ribs = await bootstrapRibs({ snapshotManager });
 
 const PORT = Number(process.env.PORT ?? 7878);

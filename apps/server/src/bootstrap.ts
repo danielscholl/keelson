@@ -105,18 +105,12 @@ function isBuiltIn(id: string): id is BuiltInId {
 }
 
 export interface BootstrapRibsOptions {
-  // Operator-supplied manifest mapping rib id → Rib implementation. When
-  // omitted, the bootstrap walks `discoveryRoot` (defaulting to
-  // `<cwd>/node_modules/@keelson`) and dynamic-imports each `rib-*` package's
-  // default export. Passing an explicit map (even `{}`) bypasses discovery
-  // entirely — tests rely on this to stay deterministic.
+  // Omitted runs discovery; explicit (even `{}`) bypasses it.
   available?: Readonly<Record<string, Rib>>;
   // Shared SnapshotManager passed into RibContext and used to auto-register
   // each rib's `composeBundle`. Optional so unit tests for parseRibList /
   // applyRibs don't need to spin up a manager.
   snapshotManager?: SnapshotManager;
-  // Override the discovery root. Test seam; production callers omit this and
-  // accept the `<cwd>/node_modules/@keelson` default.
   discoveryRoot?: string;
 }
 
