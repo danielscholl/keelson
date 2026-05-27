@@ -46,6 +46,7 @@ import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { ReasoningEffortChip } from "../components/Chat/ReasoningEffortChip.tsx";
 import { ReasoningEffortPopover } from "../components/Chat/ReasoningEffortPopover.tsx";
+import { SlashCommandPopover } from "../components/Chat/SlashCommandPopover.tsx";
 import { ThinkingBlock } from "../components/Chat/ThinkingBlock.tsx";
 import { ThinkingChip } from "../components/Chat/ThinkingChip.tsx";
 import {
@@ -59,6 +60,12 @@ import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
+import {
+  filterSlashCommands,
+  isCommittedToCommand,
+  matchSlashCommand,
+  type SlashCommand,
+} from "../lib/slashCommands.ts";
 
 type Role = "user" | "assistant" | "system";
 
@@ -81,6 +88,7 @@ interface LocalMessage {
 const MODEL_PICKER_POPOVER_ID = "chat-model-picker-popover";
 const PROJECT_PICKER_POPOVER_ID = "chat-project-picker-popover";
 const REASONING_EFFORT_POPOVER_ID = "chat-reasoning-effort-popover";
+const SLASH_PICKER_POPOVER_ID = "chat-slash-picker-popover";
 const TOOLS_POPOVER_ID = "chat-tools-popover";
 
 const DEFAULT_REASONING_EFFORT: ReasoningEffortLevel = "medium";
@@ -353,6 +361,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
   // flushed only on a clean `done` frame.
   const queuedPromptRef = useRef<string | null>(null);
   const [queued, setQueued] = useState<string | null>(null);
+
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
 
   // Save-to-memory modal state. Open when a target message is set; the
   // submitting flag disables the modal's submit button + the per-message
@@ -1104,10 +1115,50 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
     [activeProjectId, projectList, refreshProjects, switchActiveProject],
   );
 
+  const slashFilteredItems = useMemo(() => filterSlashCommands(input), [input]);
+  const slashHelpCommand = useMemo(() => matchSlashCommand(input), [input]);
+  const slashMode: "list" | "help" = isCommittedToCommand(input) ? "help" : "list";
+
+  // Open the picker when the user starts a slash command; close it as soon as
+  // the input stops starting with `/`. Keeping selectedIndex in range as the
+  // filter shrinks the candidate set.
+  useEffect(() => {
+    if (input.startsWith("/")) {
+      setSlashOpen(true);
+      setSlashSelectedIndex((idx) =>
+        slashFilteredItems.length === 0
+          ? 0
+          : Math.min(Math.max(idx, 0), slashFilteredItems.length - 1),
+      );
+    } else {
+      setSlashOpen(false);
+      setSlashSelectedIndex(0);
+    }
+  }, [input, slashFilteredItems.length]);
+
+  // Bridge React state to the native popover element. `manual` mode means the
+  // browser won't toggle it for us; we explicitly call show/hide here and on
+  // Escape from the textarea below.
+  useEffect(() => {
+    const popoverEl = document.getElementById(SLASH_PICKER_POPOVER_ID);
+    if (!popoverEl) return;
+    if (slashOpen && !popoverEl.matches(":popover-open")) {
+      popoverEl.showPopover();
+    } else if (!slashOpen && popoverEl.matches(":popover-open")) {
+      popoverEl.hidePopover();
+    }
+  }, [slashOpen]);
+
+  const onSlashSelect = useCallback((cmd: SlashCommand) => {
+    setInput(`/${cmd.name} `);
+    setSlashSelectedIndex(0);
+  }, []);
+
   const onSubmit = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || hydrating) return;
-    if (trimmed === "/project" || trimmed.startsWith("/project ")) {
+    const matched = matchSlashCommand(trimmed);
+    if (matched) {
       // Refuse while a turn is in flight — `switchActiveProject` clears the
       // active conversation, which would orphan a live WS stream.
       if (streaming) {
@@ -1122,25 +1173,28 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         return;
       }
       setInput("");
-      const rest = trimmed.slice("/project".length).trim();
-      // Snapshot at submit so a slow command resolving after the user has
-      // switched conversations doesn't append its system message to the
-      // unrelated transcript that's now active.
-      const submitConvoId = conversationIdRef.current;
-      setMessages((prev) => [...prev, { id: newId(), role: "system", content: `> ${trimmed}` }]);
-      void dispatchProjectCommand(rest)
-        .then((result) => {
-          if (conversationIdRef.current !== submitConvoId) return;
-          setMessages((prev) => [...prev, { id: newId(), role: "system", content: result }]);
-        })
-        .catch((err: unknown) => {
-          if (conversationIdRef.current !== submitConvoId) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          setMessages((prev) => [
-            ...prev,
-            { id: newId(), role: "system", content: `error: ${msg}` },
-          ]);
-        });
+      setSlashOpen(false);
+      const rest = trimmed.slice(`/${matched.name}`.length).trim();
+      if (matched.name === "project") {
+        // Snapshot at submit so a slow command resolving after the user has
+        // switched conversations doesn't append its system message to the
+        // unrelated transcript that's now active.
+        const submitConvoId = conversationIdRef.current;
+        setMessages((prev) => [...prev, { id: newId(), role: "system", content: `> ${trimmed}` }]);
+        void dispatchProjectCommand(rest)
+          .then((result) => {
+            if (conversationIdRef.current !== submitConvoId) return;
+            setMessages((prev) => [...prev, { id: newId(), role: "system", content: result }]);
+          })
+          .catch((err: unknown) => {
+            if (conversationIdRef.current !== submitConvoId) return;
+            const msg = err instanceof Error ? err.message : String(err);
+            setMessages((prev) => [
+              ...prev,
+              { id: newId(), role: "system", content: `error: ${msg}` },
+            ]);
+          });
+      }
       return;
     }
     // Mid-turn: stash for auto-flush on clean `done`. Single-slot — a second
@@ -1165,12 +1219,37 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
 
   const onInputKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (slashOpen) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSlashOpen(false);
+          return;
+        }
+        if (slashMode === "list" && slashFilteredItems.length > 0) {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setSlashSelectedIndex((idx) => Math.min(idx + 1, slashFilteredItems.length - 1));
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setSlashSelectedIndex((idx) => Math.max(idx - 1, 0));
+            return;
+          }
+          if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+            e.preventDefault();
+            const cmd = slashFilteredItems[slashSelectedIndex] ?? slashFilteredItems[0];
+            if (cmd) onSlashSelect(cmd);
+            return;
+          }
+        }
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         onSubmit();
       }
     },
-    [onSubmit],
+    [onSlashSelect, onSubmit, slashFilteredItems, slashMode, slashOpen, slashSelectedIndex],
   );
 
   // Switching provider via the picker is only reachable on a fresh chat —
@@ -1578,6 +1657,15 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         {selectedProvider?.capabilities.tools === true && tools.length > 0 && (
           <ToolsPopover popoverId={TOOLS_POPOVER_ID} tools={tools} />
         )}
+
+        <SlashCommandPopover
+          popoverId={SLASH_PICKER_POPOVER_ID}
+          mode={slashMode}
+          items={slashFilteredItems}
+          selectedIndex={slashSelectedIndex}
+          helpCommand={slashHelpCommand}
+          onSelect={onSlashSelect}
+        />
       </div>
 
       {memoryTarget !== null && conversationId !== null && (
