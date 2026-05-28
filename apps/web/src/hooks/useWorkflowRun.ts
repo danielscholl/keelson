@@ -507,7 +507,16 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     // `running` (or `pending`) must NOT clobber that.
     winningStatus = snapshotSide.status;
   } else if (liveTerminal) winningStatus = liveSide.status;
-  else if (liveSide.status !== "pending") winningStatus = liveSide.status;
+  else if (liveSide.status === "awaiting" && snapshotSide.status === "pending") {
+    // Reconnect repair: live remembers an awaiting that we never received
+    // an `approval_resolved` for, but the snapshot has no row for the
+    // node. The server deletes the row on resume (both approval and
+    // interactive-loop paths), so "no snapshot row" means "the pause is
+    // gone, the loop has moved on." Drop the stale awaiting; otherwise the
+    // composer stays active and any submit returns 409 against a node with
+    // no pending resolver.
+    winningStatus = snapshotSide.status;
+  } else if (liveSide.status !== "pending") winningStatus = liveSide.status;
   else winningStatus = snapshotSide.status;
   const liveTextLen = totalTextLength(liveSide.contentParts);
   const snapTextLen = totalTextLength(snapshotSide.contentParts);
