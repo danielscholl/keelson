@@ -439,6 +439,60 @@ describe("makePromptHandler", () => {
     expect(warnings[0]!.message).not.toContain("allowed_tools");
   });
 
+  test("copilot does NOT warn for allowed_tools / denied_tools / Pre+PostToolUse hooks", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+      type: "copilot",
+    });
+    const emitted: NodeStreamEvent[] = [];
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      allowed_tools: ["Read", "Glob", "Grep"],
+      denied_tools: ["Write"],
+      hooks: {
+        PreToolUse: [{ matcher: "Bash", response: { decision: "block" } }],
+        PostToolUse: [{ matcher: "Read", response: { ok: true } }],
+      },
+    } as unknown as DagNode;
+    await handler.handle(node, buildCtx({ onEvent: (e) => emitted.push(e) }));
+    expect(emitted.some((e) => e.type === "node_warning")).toBe(false);
+  });
+
+  test("copilot warns only for hook events beyond Pre/PostToolUse", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+      type: "copilot",
+    });
+    const emitted: NodeStreamEvent[] = [];
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      hooks: {
+        PostToolUse: [{ matcher: "Read", response: { ok: true } }],
+        SessionStart: [{ response: { ok: true } }],
+      },
+    } as unknown as DagNode;
+    await handler.handle(node, buildCtx({ onEvent: (e) => emitted.push(e) }));
+    const warnings = emitted.filter(
+      (e): e is { type: "node_warning"; message: string } => e.type === "node_warning",
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toContain("copilot");
+    // The no-op list (after the colon) names only the unsupported event.
+    const noOpList = warnings[0]!.message.split("no-op:")[1] ?? "";
+    expect(noOpList).toContain("SessionStart");
+    expect(noOpList).not.toContain("PostToolUse");
+  });
+
   test("does NOT emit a node_warning when provider type is claude", async () => {
     const { provider } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],

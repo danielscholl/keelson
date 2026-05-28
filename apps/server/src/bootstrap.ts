@@ -263,11 +263,15 @@ export function bootstrapPromptHandler(): NodeHandler | undefined {
     }
     return getAgentProvider(target) as unknown as PromptHandlerProvider;
   };
-  // Per-node `allowed_tools` / `denied_tools` / `hooks` are honored only by
-  // the claude provider; signal at boot so operators know what the default
-  // will be when a workflow doesn't pin `provider:` itself. Per-workflow and
-  // per-node overrides surface their own `node_warning` at run time.
-  if (providerId !== "claude") {
+  // Per-node tool rails / hooks enforcement varies by provider; signal at boot
+  // so operators know what the default will be when a workflow doesn't pin
+  // `provider:` itself. Per-workflow and per-node overrides surface their own
+  // `node_warning` at run time.
+  if (providerId === "copilot") {
+    console.warn(
+      `[workflows] default workflow provider is 'copilot'; per-node 'allowed_tools' / 'denied_tools' are enforced by capability and PreToolUse / PostToolUse hooks are honored — other hook events are claude-only.`,
+    );
+  } else if (providerId !== "claude") {
     console.warn(
       `[workflows] default workflow provider is '${providerId}'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.`,
     );

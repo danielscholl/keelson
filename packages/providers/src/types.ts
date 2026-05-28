@@ -44,8 +44,9 @@ export interface SendQueryOptions {
   // ignore. Inline literal — this contract layer is zod-runtime-free.
   reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
   // SDK-level tool whitelist (built-ins + MCP). Distinct from `tools` above,
-  // which carries our MCP ToolDefinition objects to project. Only Claude
-  // honors these today; other providers ignore. Empty array = no tools.
+  // which carries our MCP ToolDefinition objects to project. Claude gates by
+  // name; Copilot gates the built-in capability the names map to (read / write
+  // / shell / …) via its permission handler. Empty array = no tools.
   allowedTools?: string[];
   // SDK-level tool blacklist (built-ins + MCP). Applied on top of `allowedTools`
   // when both are set, matching upstream Archon's semantics.
@@ -60,8 +61,8 @@ export interface SendQueryOptions {
   // Per-node hook matchers in the vendored workflowNodeHooksSchema shape:
   // `Record<eventName, Array<{matcher?, response, timeout?}>>`. Loose
   // structural typing so this contract layer stays free of a runtime
-  // dependency on `@keelson/workflows`. Only Claude honors these today;
-  // other providers ignore.
+  // dependency on `@keelson/workflows`. Claude honors all events; Copilot
+  // honors PreToolUse / PostToolUse (the rest stay claude-only).
   hooks?: Record<
     string,
     Array<{

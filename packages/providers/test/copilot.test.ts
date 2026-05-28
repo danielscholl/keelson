@@ -819,6 +819,137 @@ describe("CopilotProvider — SDK option wiring (P1 regression guards)", () => {
   });
 });
 
+describe("CopilotProvider — per-node tool rails + hooks", () => {
+  const makeProvider = (sdk: ReturnType<typeof makeMockSdk>) =>
+    new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+  const decisionKind = (r: unknown): string | undefined =>
+    r && typeof r === "object" ? ((r as Record<string, unknown>).kind as string) : undefined;
+
+  it("installs a gating permission handler when allowed_tools is set", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { allowedTools: ["Read", "Glob"] }),
+    );
+    const cfg = sdk.lastSessionConfig()!;
+    // No longer the bare approveAll — it's the gate.
+    expect(cfg.onPermissionRequest).not.toBe(sdk.approveAll);
+    const gate = cfg.onPermissionRequest as (req: unknown, inv: unknown) => unknown;
+    // read permitted (delegates to approveAll → mock's { kind: "permit" }).
+    expect(decisionKind(gate({ kind: "read" }, { sessionId: "s" }))).toBe("permit");
+    // write/shell denied — the actual rail the model can't write past.
+    expect(decisionKind(gate({ kind: "write" }, { sessionId: "s" }))).toBe("reject");
+    expect(decisionKind(gate({ kind: "shell" }, { sessionId: "s" }))).toBe("reject");
+  });
+
+  it("installs a gating permission handler when denied_tools is set", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { disallowedTools: ["Write"] }),
+    );
+    const gate = sdk.lastSessionConfig()!.onPermissionRequest as (
+      req: unknown,
+      inv: unknown,
+    ) => unknown;
+    expect(decisionKind(gate({ kind: "write" }, { sessionId: "s" }))).toBe("reject");
+    expect(decisionKind(gate({ kind: "read" }, { sessionId: "s" }))).toBe("permit");
+  });
+
+  it("keeps the bare approveAll when no rails are set", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { model: "auto" }));
+    expect(sdk.lastSessionConfig()!.onPermissionRequest).toBe(sdk.approveAll);
+  });
+
+  it("projects PreToolUse / PostToolUse hooks into the session config", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, {
+        hooks: {
+          PreToolUse: [{ matcher: "Bash", response: { decision: "block" } }],
+          PostToolUse: [
+            { matcher: "Read", response: { hookSpecificOutput: { additionalContext: "assess" } } },
+          ],
+        },
+      }),
+    );
+    const hooks = sdk.lastSessionConfig()!.hooks as {
+      onPreToolUse?: (i: { toolName: string }) => { permissionDecision?: string } | undefined;
+      onPostToolUse?: (i: { toolName: string }) => { additionalContext?: string } | undefined;
+    };
+    expect(hooks).toBeDefined();
+    expect(hooks.onPreToolUse?.({ toolName: "bash" })?.permissionDecision).toBe("deny");
+    expect(hooks.onPostToolUse?.({ toolName: "read_file" })?.additionalContext).toBe("assess");
+  });
+
+  it("omits hooks from config when only unsupported events are present", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, {
+        hooks: { SessionStart: [{ response: { ok: true } }] },
+      }),
+    );
+    expect(sdk.lastSessionConfig()!.hooks).toBeUndefined();
+  });
+
+  // A custom rib tool. Projected tools register with skipPermission, so the
+  // permission gate can't catch them — the provider must filter the list.
+  const ribTool = {
+    name: "cluster",
+    description: "Cluster status collector",
+    inputSchema: {
+      _output: {},
+      safeParse: () => ({ success: true, data: {} }),
+    } as unknown as import("@keelson/shared").ToolDefinition["inputSchema"],
+    execute: async () => {},
+  } as unknown as import("@keelson/shared").ToolDefinition;
+
+  it("drops custom tools not in allowedTools (provider self-enforces the rail)", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, {
+        tools: [ribTool],
+        allowedTools: ["Read", "Glob", "Grep"],
+      }),
+    );
+    // "cluster" isn't in the allowlist → no custom tools project.
+    expect(sdk.lastSessionConfig()!.tools).toBeUndefined();
+  });
+
+  it("keeps custom tools that ARE in allowedTools", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, {
+        tools: [ribTool],
+        allowedTools: ["Read", "cluster"],
+      }),
+    );
+    const tools = sdk.lastSessionConfig()!.tools as Array<{ name: string }>;
+    expect(tools.map((t) => t.name)).toEqual(["cluster"]);
+  });
+
+  it("drops custom tools listed in disallowedTools (mcp-qualified form matches)", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, {
+        tools: [ribTool],
+        disallowedTools: ["mcp__keelson__cluster"],
+      }),
+    );
+    expect(sdk.lastSessionConfig()!.tools).toBeUndefined();
+  });
+
+  it("allowedTools: [] projects no custom tools", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    await drain(
+      makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { tools: [ribTool], allowedTools: [] }),
+    );
+    expect(sdk.lastSessionConfig()!.tools).toBeUndefined();
+  });
+});
+
 describe("CopilotProvider — defaultModel + listModels", () => {
   it("capabilities pin 'auto' as the default model", () => {
     expect(COPILOT_DEFAULT_MODEL).toBe("auto");

@@ -90,11 +90,11 @@ const IGNORED_FIELDS_PER_NODE: readonly string[] = [
   "skills",
 ];
 
-// Per-node fields the runtime honors ONLY when the claude provider is the
-// active workflow provider. Surfaced as a `provider_specific_capability`
-// warning so authors know an architect-style workflow won't enforce these
-// rails under stub/copilot.
-const CLAUDE_ONLY_FIELDS_PER_NODE: readonly string[] = ["allowed_tools", "denied_tools", "hooks"];
+// Per-node fields whose enforcement varies by provider. `allowed_tools` /
+// `denied_tools` are now honored by both claude (by name) and copilot (by
+// capability). `hooks` is only partially portable — copilot covers PreToolUse /
+// PostToolUse, the rest stay claude-only — so it remains flagged here.
+const CLAUDE_ONLY_FIELDS_PER_NODE: readonly string[] = ["hooks"];
 
 const IGNORED_FIELDS_WORKFLOW: readonly string[] = [
   "sandbox",
@@ -179,7 +179,7 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
     });
   }
 
-  // Slice 4 — warn for fields the runtime DOES honor but only under claude.
+  // Slice 4 — warn for fields whose enforcement is provider-dependent.
   // AI-shaped fields on non-AI nodes are already covered by the
   // `ai_fields_on_non_ai_node` warning above, so skip them here.
   const claudeOnlyPresent = CLAUDE_ONLY_FIELDS_PER_NODE.filter(
@@ -190,7 +190,7 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
       filename: ctx.filename,
       nodeId: node.id,
       kind: "provider_specific_capability",
-      message: `These node fields are honored only by the claude provider; other providers silently ignore: ${claudeOnlyPresent.join(", ")}`,
+      message: `These node fields are fully honored only by the claude provider (copilot covers PreToolUse / PostToolUse hooks; other events and providers ignore the rest): ${claudeOnlyPresent.join(", ")}`,
     });
   }
 
