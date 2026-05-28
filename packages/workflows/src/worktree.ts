@@ -16,8 +16,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 const DEFAULT_BRANCH_TEMPLATE = "keelson/{workflow}/{run_id_short}";
 const GIT_TIMEOUT_MS = 30_000;
@@ -39,23 +38,6 @@ export class WorktreeCreationError extends Error {
     super(message);
     this.name = "WorktreeCreationError";
   }
-}
-
-/** Default worktree home: `~/.keelson/worktrees/`. */
-export function defaultWorktreeRoot(): string {
-  return resolve(homedir(), ".keelson", "worktrees");
-}
-
-/**
- * Workspace-scoped placement: `<root>/<project-name>/<branch-leaf>/`.
- */
-export function worktreePathFor(opts: {
-  root: string;
-  projectName: string;
-  branch: string;
-}): string {
-  const leaf = opts.branch.split("/").pop() ?? opts.branch;
-  return join(opts.root, opts.projectName, leaf);
 }
 
 /**

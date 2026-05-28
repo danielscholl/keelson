@@ -15,9 +15,8 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {
     name: "project",
     family: "project",
-    description: "Register and manage projects — clone, use, remove, layout",
-    usage:
-      "<url> [name]  ·  use <name>  ·  remove <name>  ·  layout <name> <mode>  ·  (no args: list)",
+    description: "Register and manage projects — clone, use, remove",
+    usage: "<url> [name]  ·  use <name>  ·  remove <name>  ·  (no args: list)",
   },
 ];
 

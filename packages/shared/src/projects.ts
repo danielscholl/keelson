@@ -8,15 +8,11 @@
 
 import { z } from "zod";
 
-export const worktreeLayoutSchema = z.enum(["workspace-scoped", "repo-local"]);
-export type WorktreeLayout = z.infer<typeof worktreeLayoutSchema>;
-
 export const projectSchema = z
   .object({
     id: z.string(),
     name: z.string(),
     rootPath: z.string(),
-    worktreeLayout: worktreeLayoutSchema,
     createdAt: z.string(),
   })
   .strict();
@@ -37,7 +33,6 @@ export const createProjectBodySchema = z
   .object({
     name: projectNameSchema,
     rootPath: z.string().min(1),
-    worktreeLayout: worktreeLayoutSchema.optional(),
   })
   .strict();
 export type CreateProjectBody = z.infer<typeof createProjectBodySchema>;
@@ -46,20 +41,15 @@ export const cloneProjectBodySchema = z
   .object({
     url: z.string().min(1),
     name: projectNameSchema.optional(),
-    worktreeLayout: worktreeLayoutSchema.optional(),
   })
   .strict();
 export type CloneProjectBody = z.infer<typeof cloneProjectBodySchema>;
 
 export const updateProjectBodySchema = z
   .object({
-    name: projectNameSchema.optional(),
-    worktreeLayout: worktreeLayoutSchema.optional(),
+    name: projectNameSchema,
   })
-  .strict()
-  .refine((v) => v.name !== undefined || v.worktreeLayout !== undefined, {
-    message: "patch must include at least one of name or worktreeLayout",
-  });
+  .strict();
 export type UpdateProjectBody = z.infer<typeof updateProjectBodySchema>;
 
 export const listProjectsResponseSchema = z.object({ projects: z.array(projectSchema) }).strict();
@@ -69,4 +59,3 @@ export const createProjectResponseSchema = z.object({ project: projectSchema }).
 export type CreateProjectResponse = z.infer<typeof createProjectResponseSchema>;
 
 export const DEFAULT_PROJECT_NAME = "default";
-export const DEFAULT_WORKTREE_LAYOUT: WorktreeLayout = "workspace-scoped";

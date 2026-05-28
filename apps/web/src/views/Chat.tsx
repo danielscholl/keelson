@@ -1,4 +1,4 @@
-import type { Project, WorktreeLayout } from "@keelson/shared";
+import type { Project } from "@keelson/shared";
 import {
   type ChatFrame,
   type Conversation,
@@ -20,7 +20,6 @@ import {
   fetchTools,
   getConversation,
   rememberChatMessage,
-  updateProject,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
 import { Sidebar } from "../components/Chat/Sidebar.tsx";
@@ -1048,7 +1047,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         if (list.length === 0) return "No projects yet.";
         const rows = list.map((p) => {
           const marker = p.id === activeProjectId ? "*" : " ";
-          return `${marker} ${p.name.padEnd(20)} ${p.rootPath}  [${p.worktreeLayout}]`;
+          return `${marker} ${p.name.padEnd(20)} ${p.rootPath}`;
         });
         return ["Projects:", ...rows].join("\n");
       };
@@ -1100,19 +1099,6 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         return ok(`Removed ${target.name}`);
       }
 
-      if (head === "layout" && tokens[1] && tokens[2]) {
-        const target = projects.find((p) => p.name === tokens[1]);
-        if (!target) return fail(`unknown project '${tokens[1]}'`);
-        const layoutRaw = tokens[2];
-        if (layoutRaw !== "workspace-scoped" && layoutRaw !== "repo-local") {
-          return fail(`layout must be workspace-scoped or repo-local`);
-        }
-        const layout: WorktreeLayout = layoutRaw;
-        const updated = await updateProject(target.id, { worktreeLayout: layout });
-        await refreshProjects();
-        return ok(`${updated.name} → ${updated.worktreeLayout}`);
-      }
-
       if (head === "use" && tokens[1]) {
         const target = projects.find((p) => p.name === tokens[1]);
         if (!target) return fail(`unknown project '${tokens[1]}'`);
@@ -1124,10 +1110,9 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         [
           "Usage:",
           "  /project                          list projects",
-          "  /project <url> [name]             clone a repo into the projects root",
+          "  /project <url> [name]             clone a repo into the workspace",
           "  /project <absolute-path>          register an existing local path",
           "  /project remove <name>            remove a project",
-          "  /project layout <name> <mode>     workspace-scoped | repo-local",
           "  /project use <name>               set active project",
         ].join("\n"),
       );

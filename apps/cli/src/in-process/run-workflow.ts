@@ -4,7 +4,7 @@
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import { getAgentProvider, isRegisteredProvider, registerStubProvider } from "@keelson/providers";
 import { getRegisteredTools } from "@keelson/skills";
@@ -12,7 +12,6 @@ import {
   bashHandler,
   createWorktree,
   defaultRunUntilBashProbe,
-  defaultWorktreeRoot,
   discoverWorkflows,
   isGitRepo,
   makeApprovalHandler,
@@ -30,7 +29,7 @@ import {
   resolveBranchTemplate,
   runWorkflow,
   type WorkflowDefinition,
-  worktreePathFor,
+  worktreePathForRepoLocal,
 } from "@keelson/workflows";
 
 import { defaultWorkflowsDir } from "../paths.ts";
@@ -82,19 +81,6 @@ export class MemoryRequiresServerError extends Error {
     );
     this.name = "MemoryRequiresServerError";
   }
-}
-
-// Mirrors the slugify helper the server uses to pick the
-// `~/.keelson/worktrees/<slug>/` bucket when there's no named project. Kept
-// identical so the same headless run reuses the same worktree home across
-// invocations (otherwise prune would see two near-identical orphans).
-function slugifyForPath(s: string): string {
-  return (
-    s
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 64) || "workspace"
-  );
 }
 
 // Find a workflow definition by name. Discovery walks the project's
@@ -255,10 +241,8 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         workflow: workflow.name,
         runId,
       });
-      const projectName = slugifyForPath(basename(opts.cwd));
-      const dest = worktreePathFor({
-        root: defaultWorktreeRoot(),
-        projectName,
+      const dest = worktreePathForRepoLocal({
+        projectRootPath: opts.cwd,
         branch,
       });
       try {

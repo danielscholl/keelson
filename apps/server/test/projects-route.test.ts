@@ -166,20 +166,20 @@ describe("projects routes", () => {
     expect(store.get(p.id)).toBeDefined();
   });
 
-  test("PATCH updates worktreeLayout", async () => {
+  test("PATCH updates name", async () => {
     const { app, store } = makeRig();
     const p = store.create({ name: "patchme", rootPath: tmpDir });
     const res = await app.fetch(
       new Request(`http://test/api/projects/${p.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json", origin: LOOPBACK_ORIGIN },
-        body: JSON.stringify({ worktreeLayout: "repo-local" }),
+        body: JSON.stringify({ name: "patched" }),
       }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { project: { worktreeLayout: string } };
-    expect(body.project.worktreeLayout).toBe("repo-local");
-    expect(store.get(p.id)?.worktreeLayout).toBe("repo-local");
+    const body = (await res.json()) as { project: { name: string } };
+    expect(body.project.name).toBe("patched");
+    expect(store.get(p.id)?.name).toBe("patched");
   });
 
   test("PATCH rejects renaming the default project", async () => {

@@ -11,7 +11,7 @@ import "./test-setup.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
 import { Hono } from "hono";
 
@@ -26,7 +26,6 @@ let tmpDir: string;
 let repoDir: string;
 let wfDir: string;
 let dbPath: string;
-let worktreeRoot: string;
 
 const ORIGIN = "http://127.0.0.1:5173";
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(TERMINAL_RUN_STATUSES);
@@ -56,7 +55,6 @@ beforeEach(() => {
   wfDir = join(tmpDir, "workflows");
   mkdirSync(wfDir);
   dbPath = join(tmpDir, "test.db");
-  worktreeRoot = join(tmpDir, "worktrees");
 });
 
 afterEach(() => {
@@ -75,7 +73,7 @@ function makeRig() {
   const project = projectsStore.create({ name: "repo", rootPath: repoDir });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const app = new Hono();
-  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore, worktreeRoot });
+  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore });
   return { app, store, projectId: project.id };
 }
 
@@ -144,11 +142,11 @@ nodes:
     expect(run.status).toBe("succeeded");
     // The bash node printed `pwd`; assert that path differs from the repo root
     // (sanity check that the worktree was actually used) and lives under the
-    // injected per-suite worktree root rather than the real ~/.keelson home.
+    // repo-local `.worktrees/` dir.
     const echoed = run.nodes[0]!.outputText?.trim();
     expect(echoed).toBeTruthy();
     expect(echoed).not.toBe(repoDir);
-    expect(echoed!.includes(worktreeRoot)).toBe(true);
+    expect(echoed!.includes(`${sep}.worktrees${sep}`)).toBe(true);
 
     // Sentinel was written to the worktree, not the source repo.
     expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
@@ -194,7 +192,7 @@ nodes:
     // pwd should be the repo root, not a worktree.
     const echoed = run.nodes[0]!.outputText?.trim();
     expect(echoed).toBeTruthy();
-    expect(echoed!.includes(worktreeRoot)).toBe(false);
+    expect(echoed!.includes(`${sep}.worktrees${sep}`)).toBe(false);
   });
 
   test("isolation requested but target is not a git repo: warns, runs in place", async () => {

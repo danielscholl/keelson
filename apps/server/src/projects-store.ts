@@ -7,17 +7,15 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { Database } from "bun:sqlite";
-import { DEFAULT_WORKTREE_LAYOUT, type Project, type WorktreeLayout } from "@keelson/shared";
+import type { Project } from "@keelson/shared";
 
 export interface CreateProjectInput {
   name: string;
   rootPath: string;
-  worktreeLayout?: WorktreeLayout;
 }
 
 export interface UpdateProjectPatch {
-  name?: string;
-  worktreeLayout?: WorktreeLayout;
+  name: string;
 }
 
 export interface ProjectsStore {
@@ -41,18 +39,14 @@ interface ProjectRow {
   id: string;
   name: string;
   root_path: string;
-  worktree_layout: string | null;
   created_at: string;
 }
 
 function rowToProject(row: ProjectRow): Project {
-  const layout: WorktreeLayout =
-    row.worktree_layout === "repo-local" ? "repo-local" : "workspace-scoped";
   return {
     id: row.id,
     name: row.name,
     rootPath: row.root_path,
-    worktreeLayout: layout,
     createdAt: row.created_at,
   };
 }
@@ -83,22 +77,19 @@ function isPathInside(parent: string, child: string): boolean {
 
 export function createProjectsStore(db: Database): ProjectsStore {
   const insertStmt = db.prepare(
-    "INSERT INTO keelson_projects(id, name, root_path, worktree_layout, created_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO keelson_projects(id, name, root_path, created_at) VALUES (?, ?, ?, ?)",
   );
   const listStmt = db.prepare(
-    "SELECT id, name, root_path, worktree_layout, created_at FROM keelson_projects ORDER BY name ASC",
+    "SELECT id, name, root_path, created_at FROM keelson_projects ORDER BY name ASC",
   );
   const getStmt = db.prepare(
-    "SELECT id, name, root_path, worktree_layout, created_at FROM keelson_projects WHERE id = ?",
+    "SELECT id, name, root_path, created_at FROM keelson_projects WHERE id = ?",
   );
   const getByNameStmt = db.prepare(
-    "SELECT id, name, root_path, worktree_layout, created_at FROM keelson_projects WHERE name = ?",
+    "SELECT id, name, root_path, created_at FROM keelson_projects WHERE name = ?",
   );
   const deleteStmt = db.prepare("DELETE FROM keelson_projects WHERE id = ?");
   const updateNameStmt = db.prepare("UPDATE keelson_projects SET name = ? WHERE id = ?");
-  const updateLayoutStmt = db.prepare(
-    "UPDATE keelson_projects SET worktree_layout = ? WHERE id = ?",
-  );
 
   return {
     list() {
@@ -131,9 +122,8 @@ export function createProjectsStore(db: Database): ProjectsStore {
     create(input) {
       const id = crypto.randomUUID();
       const createdAt = new Date().toISOString();
-      const layout: WorktreeLayout = input.worktreeLayout ?? DEFAULT_WORKTREE_LAYOUT;
       try {
-        insertStmt.run(id, input.name, input.rootPath, layout, createdAt);
+        insertStmt.run(id, input.name, input.rootPath, createdAt);
       } catch (err) {
         if (isUniqueConstraintError(err)) {
           throw new DuplicateProjectNameError(input.name);
@@ -144,14 +134,13 @@ export function createProjectsStore(db: Database): ProjectsStore {
         id,
         name: input.name,
         rootPath: input.rootPath,
-        worktreeLayout: layout,
         createdAt,
       };
     },
     update(id, patch) {
       const existing = getStmt.get(id) as ProjectRow | null;
       if (!existing) return undefined;
-      if (patch.name !== undefined && patch.name !== existing.name) {
+      if (patch.name !== existing.name) {
         try {
           updateNameStmt.run(patch.name, id);
         } catch (err) {
@@ -160,9 +149,6 @@ export function createProjectsStore(db: Database): ProjectsStore {
           }
           throw err;
         }
-      }
-      if (patch.worktreeLayout !== undefined) {
-        updateLayoutStmt.run(patch.worktreeLayout, id);
       }
       const refreshed = getStmt.get(id) as ProjectRow | null;
       return refreshed ? rowToProject(refreshed) : undefined;

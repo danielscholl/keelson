@@ -9,8 +9,7 @@
 import { statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, normalize, sep } from "node:path";
-import type { WorktreeLayout } from "@keelson/shared";
+import { isAbsolute, join, normalize, sep } from "node:path";
 import {
   type ContentBlock,
   type IsolationOverride,
@@ -35,7 +34,6 @@ import {
   createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
-  defaultWorktreeRoot,
   isGitRepo,
   type MemoryTools,
   makeApprovalHandler,
@@ -51,7 +49,6 @@ import {
   resolveBranchTemplate,
   runWorkflow,
   type WorkflowDefinition,
-  worktreePathFor,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
@@ -91,11 +88,6 @@ export interface WorkflowsHandlerOptions {
   // it undefined so a UI start without a project picker rejects 400 rather
   // than silently targeting the server's install dir.
   defaultCwd?: string;
-  // Override for the worktree home (defaults to `~/.keelson/worktrees/`).
-  // Test-only seam: production wiring leaves it undefined so isolated runs
-  // land in the documented global location; tests inject a per-suite temp
-  // dir so they don't pollute the developer's home.
-  worktreeRoot?: string;
   // Real prompt handler injected from the composition root. When omitted
   // (tests, env where no provider is registered), the placeholder fires and
   // prompt nodes fail with a "not registered" sentinel. Keeps the route
@@ -421,7 +413,6 @@ export function workflowsRoutes(
     conversationStore,
     projectsStore,
     defaultCwd,
-    worktreeRoot,
     promptHandler,
     memoryStore,
   } = opts;
@@ -528,7 +519,6 @@ export function workflowsRoutes(
     // lookup so runs anchored inside a registered project still get tagged.
     let resolvedProject: import("@keelson/shared").Project | null = null;
     let projectId: string | null = null;
-    let projectName: string | null = null;
     let workingDir: string;
     if (parsed.data.workingDir !== undefined && parsed.data.workingDir.trim().length > 0) {
       const raw = parsed.data.workingDir;
@@ -547,7 +537,6 @@ export function workflowsRoutes(
       }
       if (resolvedProject) {
         projectId = resolvedProject.id;
-        projectName = resolvedProject.name;
       }
     } else if (parsed.data.projectId !== undefined && parsed.data.projectId.length > 0) {
       if (!projectsStore) {
@@ -559,7 +548,6 @@ export function workflowsRoutes(
       }
       resolvedProject = project;
       projectId = project.id;
-      projectName = project.name;
       workingDir = project.rootPath;
     } else if (defaultCwd !== undefined) {
       workingDir = defaultCwd;
@@ -652,14 +640,12 @@ export function workflowsRoutes(
       pendingApprovals,
       isolation: isolationOn
         ? {
-            projectName: slugifyForPath(projectName ?? basename(workingDir)),
             branchTemplate,
-            worktreeRoot,
-            layout: resolvedProject?.worktreeLayout ?? "workspace-scoped",
-            // repo-local anchors at the project's rootPath whenever workingDir
-            // sits inside it (incl. equal) — that's the dir keelson worktree
-            // prune scans. Only fall back to workingDir when the caller forced
-            // a path that's not under the project (different repo entirely).
+            // Worktrees land at `<projectRootPath>/.worktrees/<branch>/` — the
+            // dir keelson worktree prune scans. Anchor at the project's
+            // rootPath whenever workingDir sits inside it (incl. equal); fall
+            // back to workingDir when the caller forced a path that's not under
+            // the project (different repo entirely).
             projectRootPath:
               resolvedProject &&
               (workingDir === resolvedProject.rootPath ||
@@ -934,16 +920,10 @@ export function workflowRunWebSocketHandlers(deps: {
 }
 
 interface IsolationConfig {
-  /** Project label used as the path segment under `<root>/<name>/<branch>`. */
-  projectName: string;
   /** YAML-supplied branch template; undefined → default. */
   branchTemplate: string | undefined;
-  /** Override for the workspace-scoped worktree home; undefined → `defaultWorktreeRoot()`. */
-  worktreeRoot: string | undefined;
-  /** repo-local → `<projectRootPath>/.worktrees/<branch>/`; otherwise workspace-scoped. */
-  layout: WorktreeLayout;
-  /** Source repo root; required for repo-local layout, ignored for workspace-scoped. */
-  projectRootPath: string | undefined;
+  /** Source repo root; worktrees land at `<projectRootPath>/.worktrees/<branch>/`. */
+  projectRootPath: string;
 }
 
 interface ExecuteRunArgs {
@@ -970,17 +950,6 @@ interface ExecuteRunArgs {
   projectId?: string;
   // Undefined when no MemoryStore was wired; executor memory hooks no-op in that case.
   memoryTools?: MemoryTools;
-}
-
-// Constrain a free-form filesystem segment to a slug git/posix paths accept.
-// Used as the per-project bucket under ~/.keelson/worktrees/<slug>/ when the
-// run isn't tied to a named project.
-function slugifyForPath(s: string): string {
-  const slug = s
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-  return !slug || /^\.+$/.test(slug) ? "workspace" : slug;
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
@@ -1035,17 +1004,10 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
         workflow: workflow.name,
         runId,
       });
-      const dest =
-        isolation.layout === "repo-local" && isolation.projectRootPath !== undefined
-          ? worktreePathForRepoLocal({
-              projectRootPath: isolation.projectRootPath,
-              branch,
-            })
-          : worktreePathFor({
-              root: isolation.worktreeRoot ?? defaultWorktreeRoot(),
-              projectName: isolation.projectName,
-              branch,
-            });
+      const dest = worktreePathForRepoLocal({
+        projectRootPath: isolation.projectRootPath,
+        branch,
+      });
       try {
         const created = await createWorktree({ repoPath: cwd, branch, dest });
         effectiveCwd = created.worktreePath;

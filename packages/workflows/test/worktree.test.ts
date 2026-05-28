@@ -20,7 +20,7 @@ import {
   repoPathFromWorktree,
   resolveBranchTemplate,
   WorktreeCreationError,
-  worktreePathFor,
+  worktreePathForRepoLocal,
 } from "../src/worktree.ts";
 
 let tmp: string;
@@ -74,15 +74,14 @@ describe("resolveBranchTemplate", () => {
   });
 });
 
-describe("worktreePathFor", () => {
-  test("uses the branch leaf as the directory name", () => {
+describe("worktreePathForRepoLocal", () => {
+  test("places the branch leaf under the repo's .worktrees dir", () => {
     expect(
-      worktreePathFor({
-        root: "/tmp/wt",
-        projectName: "work",
+      worktreePathForRepoLocal({
+        projectRootPath: "/repos/work",
         branch: "keelson/architect/abc",
       }),
-    ).toBe("/tmp/wt/work/abc");
+    ).toBe("/repos/work/.worktrees/abc");
   });
 });
 

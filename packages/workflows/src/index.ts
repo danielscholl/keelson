@@ -94,7 +94,6 @@ export {
   type CreateWorktreeOptions,
   type CreateWorktreeResult,
   createWorktree,
-  defaultWorktreeRoot,
   isGitRepo,
   listWorktrees,
   NotAGitRepoError,
@@ -104,6 +103,5 @@ export {
   repoPathFromWorktree,
   resolveBranchTemplate,
   WorktreeCreationError,
-  worktreePathFor,
   worktreePathForRepoLocal,
 } from "./worktree.ts";

@@ -42,6 +42,7 @@ import {
   workflowRunWebSocketHandlers,
   workflowsRoutes,
 } from "./workflows-handler.ts";
+import { migrateLegacyProjectsLayout } from "./workspace-migration.ts";
 
 // apps/server/src/index.ts → repo root is three levels up.
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -70,28 +71,23 @@ const HOSTNAME = "127.0.0.1";
 // SDK turns without holding sockets open forever.
 const IDLE_TIMEOUT_S = 60;
 const DB_PATH = process.env.KEELSON_DB ?? join(REPO_ROOT, ".keelson", "keelson.db");
-const PROJECTS_ROOT = resolve(
-  process.env.KEELSON_PROJECTS_ROOT?.trim() || join(homedir(), "keelson", "projects"),
-);
-const DEFAULT_PROJECT_PATH = join(PROJECTS_ROOT, "_default");
-// /api/projects/clone clones into PROJECTS_ROOT; make sure the directory
-// exists regardless of whether the default project row was just seeded.
-mkdirSync(PROJECTS_ROOT, { recursive: true });
+const WORKSPACE_ROOT = resolve(process.env.KEELSON_WORKSPACE?.trim() || join(homedir(), "keelson"));
+// The workspace root is the default project's cwd and the clone destination
+// for /api/projects/clone; make sure it exists before seeding or cloning.
+mkdirSync(WORKSPACE_ROOT, { recursive: true });
 const db = openDatabase({ path: DB_PATH });
 const store = createConversationStore(db);
 const workflowStore = createWorkflowStore(db);
 const memoryStore = createMemoryStore(db);
 const projectsStore = createProjectsStore(db);
+migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: WORKSPACE_ROOT });
 const existingDefault = projectsStore.getByName(DEFAULT_PROJECT_NAME);
 const defaultProject =
   existingDefault ??
-  (() => {
-    mkdirSync(DEFAULT_PROJECT_PATH, { recursive: true });
-    return projectsStore.create({
-      name: DEFAULT_PROJECT_NAME,
-      rootPath: DEFAULT_PROJECT_PATH,
-    });
-  })();
+  projectsStore.create({
+    name: DEFAULT_PROJECT_NAME,
+    rootPath: WORKSPACE_ROOT,
+  });
 // Idempotent backfills — safe to re-run because the WHERE clauses match
 // only legacy NULL rows that pre-date project scoping. Without these,
 // chat recall (now project-scoped) silently stops returning them and
@@ -182,7 +178,6 @@ workflowsRoutes(
     store: workflowStore,
     conversationStore: store,
     projectsStore,
-    worktreeRoot: join(PROJECTS_ROOT, "_worktrees"),
     ...(promptHandler ? { promptHandler } : {}),
     memoryStore,
   },
@@ -190,7 +185,7 @@ workflowsRoutes(
   workflowSubscribers,
 );
 snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
-projectsRoutes(app, { store: projectsStore, projectsRoot: PROJECTS_ROOT });
+projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
 memoryRoutes(app, { memoryStore });
 chatRememberRoutes(app, { conversationStore: store, memoryStore });
 credentialsRoutes(app, credentialStore, {

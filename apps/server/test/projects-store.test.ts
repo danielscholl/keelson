@@ -75,27 +75,12 @@ describe("ProjectsStore", () => {
     expect(list.map((p) => p.name)).toEqual(["alpha", "bravo", "charlie"]);
   });
 
-  test("worktreeLayout defaults to workspace-scoped and can be overridden", () => {
-    const db = openDatabase({ path: dbPath });
-    const store = createProjectsStore(db);
-    const a = store.create({ name: "default-layout", rootPath: "/tmp/a" });
-    const b = store.create({
-      name: "repo-local",
-      rootPath: "/tmp/b",
-      worktreeLayout: "repo-local",
-    });
-    expect(a.worktreeLayout).toBe("workspace-scoped");
-    expect(b.worktreeLayout).toBe("repo-local");
-    expect(store.get(b.id)?.worktreeLayout).toBe("repo-local");
-  });
-
-  test("update changes name and worktreeLayout in place", () => {
+  test("update changes name in place", () => {
     const db = openDatabase({ path: dbPath });
     const store = createProjectsStore(db);
     const p = store.create({ name: "before", rootPath: "/tmp/p" });
-    const after = store.update(p.id, { name: "after", worktreeLayout: "repo-local" });
+    const after = store.update(p.id, { name: "after" });
     expect(after?.name).toBe("after");
-    expect(after?.worktreeLayout).toBe("repo-local");
     expect(store.get(p.id)?.name).toBe("after");
     expect(store.getByName("before")).toBeUndefined();
     expect(store.getByName("after")?.id).toBe(p.id);

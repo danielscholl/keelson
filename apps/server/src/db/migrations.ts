@@ -12,6 +12,11 @@ interface Migration {
   version: number;
   description: string;
   up: (db: Database) => void;
+  // Table rebuilds that drop/recreate a table referenced by a foreign key must
+  // run with FK enforcement off, or the implicit DELETE during DROP TABLE fires
+  // ON DELETE actions on child rows. PRAGMA foreign_keys is a no-op inside a
+  // transaction, so the runner toggles it around (not within) the migration.
+  disablesForeignKeys?: boolean;
 }
 
 const migrations: Migration[] = [
@@ -304,6 +309,30 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 9,
+    description: "keelson_projects: drop worktree_layout column (repo-local-only)",
+    // The column's CHECK constraint blocks ALTER TABLE DROP COLUMN, so rebuild
+    // the table. keelson_projects is the parent of FKs on conversations and
+    // workflow_runs — disablesForeignKeys keeps the DROP from nulling those
+    // children via ON DELETE SET NULL.
+    disablesForeignKeys: true,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE keelson_projects_new (
+          id         TEXT PRIMARY KEY NOT NULL,
+          name       TEXT NOT NULL UNIQUE,
+          root_path  TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO keelson_projects_new (id, name, root_path, created_at)
+          SELECT id, name, root_path, created_at FROM keelson_projects;
+        DROP TABLE keelson_projects;
+        ALTER TABLE keelson_projects_new RENAME TO keelson_projects;
+        CREATE INDEX ix_keelson_projects_name ON keelson_projects(name);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
@@ -316,9 +345,28 @@ export function runMigrations(db: Database): void {
     .filter((m) => m.version > current)
     .sort((a, b) => a.version - b.version);
   for (const m of pending) {
-    db.transaction(() => {
+    const apply = db.transaction(() => {
       m.up(db);
+      if (m.disablesForeignKeys) {
+        const violations = db.query("PRAGMA foreign_key_check").all();
+        if (violations.length > 0) {
+          throw new Error(
+            `migration ${m.version} left foreign-key violations: ${JSON.stringify(violations)}`,
+          );
+        }
+      }
       db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(m.version);
-    })();
+    });
+    if (m.disablesForeignKeys) {
+      // Toggle outside the transaction — PRAGMA foreign_keys is ignored within one.
+      db.exec("PRAGMA foreign_keys = OFF;");
+      try {
+        apply();
+      } finally {
+        db.exec("PRAGMA foreign_keys = ON;");
+      }
+    } else {
+      apply();
+    }
   }
 }
