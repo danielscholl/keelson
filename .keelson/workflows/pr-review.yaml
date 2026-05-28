@@ -23,10 +23,12 @@ description: |
 # in YAML (issue #33), so pick it at the runtime layer instead:
 #   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run pr-review "review #42"
 #
-# Model strategy: unpinned nodes inherit the operator's Copilot default (set
-# high — gpt-5 family or equivalent). The heavy review lanes (code-review,
-# error-handling, test-coverage) and synthesize want that. The lightweight
-# nodes opt OUT via `model: auto` so Copilot routes them cheaply.
+# Model strategy: heavy review lanes (code-review, error-handling,
+# test-coverage, synthesize) pin `gpt-5` explicitly because Keelson's prompt
+# handler only forwards `node.model` when set — workflow-level `model:` is
+# currently dead config in the runtime, and an unpinned node falls through to
+# Copilot's own `auto` routing (cheap for short prompts). Lightweight nodes
+# pin `model: auto` so the routing is explicit on both ends.
 
 nodes:
   # ─────────────────────────────────────────────────────────────────────────
@@ -165,6 +167,7 @@ nodes:
   - id: code-review
     depends_on: [classify]
     when: "$classify.output.run_code_review == 'true'"
+    model: gpt-5
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
@@ -194,6 +197,7 @@ nodes:
   - id: error-handling
     depends_on: [classify]
     when: "$classify.output.run_error_handling == 'true'"
+    model: gpt-5
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
@@ -220,6 +224,7 @@ nodes:
   - id: test-coverage
     depends_on: [classify]
     when: "$classify.output.run_test_coverage == 'true'"
+    model: gpt-5
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
@@ -282,6 +287,7 @@ nodes:
   - id: synthesize
     depends_on: [code-review, error-handling, test-coverage, docs-impact]
     trigger_rule: one_success
+    model: gpt-5
     context: fresh
     prompt: |
       Synthesize the review lanes into a single PR-comment-ready report.
