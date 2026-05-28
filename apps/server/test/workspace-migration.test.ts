@@ -114,6 +114,47 @@ describe("migrateLegacyProjectsLayout", () => {
     db.close();
   });
 
+  test("repairs repo-local worktrees that ride along with a moved project dir", async () => {
+    const legacy = join(workspace, "projects");
+    const legacyBar = join(legacy, "bar");
+    mkdirSync(legacyBar, { recursive: true });
+    await initRepo(legacyBar);
+    // bar already used repo-local layout: its worktree lives inside the repo.
+    const legacyWorktree = join(legacyBar, ".worktrees", "br");
+    await git(["worktree", "add", "-b", "keelson/y/br", legacyWorktree], legacyBar);
+
+    const db = openDatabase({ path: dbPath });
+    const projectsStore = createProjectsStore(db);
+    const workflowStore = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const bar = projectsStore.create({ name: "bar", rootPath: legacyBar });
+    const conv = conversationStore.create({ providerId: "stub" });
+    workflowStore.createRun({
+      runId: "r1",
+      workflowName: "wf",
+      inputs: {},
+      startedAt: "2026-01-01T00:00:00.000Z",
+      conversationId: conv.id,
+      projectId: bar.id,
+      workingDir: legacyBar,
+      worktreePath: legacyWorktree,
+    });
+
+    migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: workspace });
+
+    const movedBar = join(workspace, "bar");
+    const movedWorktree = join(movedBar, ".worktrees", "br");
+    expect(projectsStore.get(bar.id)?.rootPath).toBe(movedBar);
+    // The run row that pointed at the old repo-local path now points at the new one.
+    expect(workflowStore.getRun("r1")?.worktreePath).toBe(movedWorktree);
+    // Git metadata was repaired: the moved worktree resolves and the repo lists
+    // no stale path under the old projects/ location.
+    expect((await git(["rev-parse", "--is-inside-work-tree"], movedWorktree)).trim()).toBe("true");
+    const list = await git(["worktree", "list", "--porcelain"], movedBar);
+    expect(list.includes(join("projects", "bar"))).toBe(false);
+    db.close();
+  });
+
   test("targets an externally-registered project's own rootPath for worktrees", () => {
     // foo is registered from a path OUTSIDE projects/; its workspace-scoped
     // worktree must migrate under foo's real rootPath, not <workspace>/foo.

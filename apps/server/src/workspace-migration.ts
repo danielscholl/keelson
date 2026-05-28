@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DEFAULT_PROJECT_NAME } from "@keelson/shared";
 
@@ -27,6 +27,31 @@ function isDir(path: string): boolean {
   }
 }
 
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// Move `src` to `dst`, falling back to copy+remove when rename can't cross a
+// filesystem boundary (EXDEV). Returns false and leaves `src` in place when
+// neither path works — one un-relocatable entry must not abort server boot.
+function safeMove(src: string, dst: string): boolean {
+  try {
+    renameSync(src, dst);
+    return true;
+  } catch {
+    try {
+      cpSync(src, dst, { recursive: true });
+      rmSync(src, { recursive: true, force: true });
+      return true;
+    } catch (err) {
+      console.warn(
+        `[keelson] workspace migration: could not move ${src} → ${dst}: ${errMessage(err)}; left in place`,
+      );
+      return false;
+    }
+  }
+}
+
 // Remove a directory only when it is empty; otherwise leave it for the operator
 // to inspect rather than silently deleting whatever survived a collision.
 function removeIfEmpty(dir: string): void {
@@ -40,7 +65,7 @@ function removeIfEmpty(dir: string): void {
 
 // A git worktree's administrative files store absolute paths in both directions
 // (the repo's `.git/worktrees/<id>/gitdir` and the worktree's own `.git` file).
-// A plain rename leaves those stale, so repair them from the source repo.
+// A move leaves those stale, so repair them from the source repo.
 function repairWorktree(repoRoot: string, worktreePath: string): void {
   try {
     const res = Bun.spawnSync({
@@ -55,9 +80,7 @@ function repairWorktree(repoRoot: string, worktreePath: string): void {
     }
   } catch (err) {
     console.warn(
-      `[keelson] workspace migration: git worktree repair errored for ${worktreePath}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      `[keelson] workspace migration: git worktree repair errored for ${worktreePath}: ${errMessage(err)}`,
     );
   }
 }
@@ -82,12 +105,27 @@ export function migrateLegacyProjectsLayout(opts: MigrateOptions): void {
     "UPDATE workflow_runs SET worktree_path = ? WHERE worktree_path = ?",
   );
 
+  // A project dir move carries its repo-local `.worktrees/` along; the moved
+  // worktrees' git metadata and the run rows that reference them still hold the
+  // pre-move absolute path. Repair both against the new project root.
+  const repairMovedWorktrees = (oldRoot: string, newRoot: string): void => {
+    const wtDir = join(newRoot, ".worktrees");
+    if (!isDir(wtDir)) return;
+    for (const leaf of readdirSync(wtDir)) {
+      const newPath = join(wtDir, leaf);
+      if (!isDir(newPath)) continue;
+      repairWorktree(newRoot, newPath);
+      updateRunPath.run(newPath, join(oldRoot, ".worktrees", leaf));
+    }
+  };
+
   for (const project of projectsStore.list()) {
     const old = project.rootPath;
     if (project.name === DEFAULT_PROJECT_NAME && old === legacyDefault) {
       // The default project's rootPath becomes the workspace root; move any
       // files it accumulated (a run's cwd was `_default`) up rather than
       // dropping them with the directory.
+      let worktreesMoved = false;
       if (isDir(legacyDefault)) {
         for (const entry of readdirSync(legacyDefault)) {
           const src = join(legacyDefault, entry);
@@ -98,22 +136,24 @@ export function migrateLegacyProjectsLayout(opts: MigrateOptions): void {
             );
             continue;
           }
-          renameSync(src, dst);
+          if (safeMove(src, dst) && entry === ".worktrees") worktreesMoved = true;
         }
       }
       updateRootPath.run(workspaceRoot, project.id);
+      if (worktreesMoved) repairMovedWorktrees(legacyDefault, workspaceRoot);
       continue;
     }
     // Named project living directly under projects/<name>.
     if (dirname(old) === legacyRoot) {
       const dest = join(workspaceRoot, basename(old));
-      if (existsSync(old) && !existsSync(dest)) {
-        renameSync(old, dest);
-      } else if (existsSync(old) && existsSync(dest)) {
+      if (existsSync(old) && existsSync(dest)) {
         console.warn(`[keelson] workspace migration: ${dest} already exists; left ${old} in place`);
         continue;
       }
+      if (existsSync(old) && !safeMove(old, dest)) continue;
       updateRootPath.run(dest, project.id);
+      // Repair any repo-local worktrees that rode along inside the moved dir.
+      repairMovedWorktrees(old, dest);
     }
   }
 
@@ -146,7 +186,7 @@ export function migrateLegacyProjectsLayout(opts: MigrateOptions): void {
           continue;
         }
         mkdirSync(destParent, { recursive: true });
-        renameSync(oldPath, newPath);
+        if (!safeMove(oldPath, newPath)) continue;
         repairWorktree(repoRoot, newPath);
         updateRunPath.run(newPath, oldPath);
       }
