@@ -465,6 +465,40 @@ describe("makeLoopHandler — until_bash probe", () => {
     expect(seen).toHaveLength(2);
   });
 
+  test("timeout (timedOut: true with exit code 0) still keeps iterating", async () => {
+    // Regression: a probe that traps SIGTERM and exits 0 after the
+    // timeout signal would otherwise be misread as a successful
+    // completion. Treat the timeout as authoritative.
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "step" },
+    }));
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async () => ({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        timedOut: true,
+      }),
+    });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "do work",
+        until: "DONE",
+        max_iterations: 2,
+        fresh_context: false,
+        until_bash: "trap '' TERM; sleep 99",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    // 2 iterations cap → succeeded with the last stripped output; the
+    // probe's exitCode 0 must NOT short-circuit iteration 1.
+    expect(result.status).toBe("succeeded");
+    expect(seen).toHaveLength(2);
+  });
+
   test("probe receives the script body verbatim — no substitution into the shell source", async () => {
     const { handler: promptHandler } = makeRecorderHandler((_, i) =>
       i === 0

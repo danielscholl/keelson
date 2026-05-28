@@ -240,17 +240,19 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
               upstreamOutputs: ctx.upstreamOutputs,
               ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
             });
-            if (probe.exitCode === 0) {
-              return { status: "succeeded", output: { kind: "text", text: stripped } };
-            }
-            // Non-zero (including timeouts) keeps iterating — matches
-            // Archon's behavior: the probe is a hint, not a fatal check.
+            // Timeout takes precedence over exit code: a probe that traps
+            // SIGTERM and then exits 0 still represents a timeout, not a
+            // successful completion. Order matters — check timedOut first.
             if (probe.timedOut === true) {
               ctx.emit({
                 type: "node_log",
                 line: `until_bash probe timed out (iteration ${String(i)}) — continuing`,
               });
+            } else if (probe.exitCode === 0) {
+              return { status: "succeeded", output: { kind: "text", text: stripped } };
             }
+            // Non-zero (and timeouts) keep iterating — matches Archon's
+            // behavior: the probe is a hint, not a fatal check.
           } catch (err) {
             // Probe runner threw (subprocess spawn failure, etc.). Surface
             // as a warning and keep iterating — the model's `until` signal
