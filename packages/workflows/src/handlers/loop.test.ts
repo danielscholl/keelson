@@ -465,6 +465,39 @@ describe("makeLoopHandler — until_bash probe", () => {
     expect(seen).toHaveLength(2);
   });
 
+  test("aborted probe (aborted: true with exit code 0) returns failed, not succeeded", async () => {
+    // Regression: a probe that traps SIGTERM and exits 0 AFTER the run
+    // was cancelled must not be misread as a successful completion. The
+    // abort propagates via the result's `aborted` flag (and ctx's signal
+    // — checked independently as belt-and-suspenders).
+    const { handler: promptHandler } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "step" },
+    }));
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async () => ({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        aborted: true,
+      }),
+    });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "do work",
+        until: "DONE",
+        max_iterations: 5,
+        fresh_context: false,
+        until_bash: "trap '' TERM; sleep 99",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("aborted");
+  });
+
   test("timeout (timedOut: true with exit code 0) still keeps iterating", async () => {
     // Regression: a probe that traps SIGTERM and exits 0 after the
     // timeout signal would otherwise be misread as a successful

@@ -40,6 +40,13 @@ export interface UntilBashResult {
   stdout: string;
   stderr: string;
   timedOut?: boolean;
+  /**
+   * True when the subprocess was killed by the abort signal (run cancel /
+   * DELETE during a long-running probe). Set independently of `exitCode`
+   * because a script that traps SIGTERM may still exit 0 after the kill,
+   * which would otherwise be misread as a successful completion.
+   */
+  aborted?: boolean;
 }
 
 export interface RunUntilBashProbeOptions {
@@ -102,6 +109,7 @@ export const defaultRunUntilBashProbe: RunUntilBashProbe = async (script, opts) 
       stdout: outcome.stdoutText,
       stderr: outcome.stderrTail,
       timedOut: outcome.killReason === "timeout",
+      aborted: outcome.killReason === "abort",
     };
   } catch (err) {
     if (err instanceof SubprocessSpawnError) {
@@ -240,9 +248,15 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
               upstreamOutputs: ctx.upstreamOutputs,
               ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
             });
-            // Timeout takes precedence over exit code: a probe that traps
-            // SIGTERM and then exits 0 still represents a timeout, not a
-            // successful completion. Order matters — check timedOut first.
+            // Order matters: abort > timeout > exit 0. A probe that traps
+            // SIGTERM and exits 0 after the kill must NOT be misread as a
+            // successful loop completion. Abort propagates through the
+            // signal too; the next iteration's top-of-loop check would
+            // catch it, but short-circuiting here returns a failed result
+            // with the right error message instead of looping once more.
+            if (probe.aborted === true || ctx.abortSignal.aborted) {
+              return failed(`Loop node '${node.id}': aborted`, stripped);
+            }
             if (probe.timedOut === true) {
               ctx.emit({
                 type: "node_log",

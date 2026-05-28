@@ -8,7 +8,7 @@ import type {
 } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cancelWorkflowRun, getWorkflowRun, submitApproval } from "../api.ts";
+import { cancelWorkflowRun, getWorkflowRun, StalePauseError, submitApproval } from "../api.ts";
 import type { NodeViewStatus } from "../lib/dagLayout.ts";
 import { createReconnectingWorkflowRunWs, type ReconnectingWsState } from "../ws.ts";
 
@@ -438,12 +438,22 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   // because the next `node_done` (or a snapshot reload) is the source of
   // truth for what happened. The pauseId (when known from the live
   // `approval_awaiting` frame) is echoed so a stale double-submit on a
-  // long-running interactive loop can't resolve the wrong iteration.
+  // long-running interactive loop can't resolve the wrong iteration. On a
+  // pauseId mismatch (the loop already advanced), trigger a fresh hydrate
+  // so the UI picks up the current pauseId, then re-throw so the composer
+  // can surface the rejection.
   const resume = useCallback(
     async (nodeId: string, text: string) => {
       if (!runId) return;
       const pauseId = latestNodesRef.current[nodeId]?.awaitingPauseId;
-      await submitApproval(runId, nodeId, text, pauseId);
+      try {
+        await submitApproval(runId, nodeId, text, pauseId);
+      } catch (err) {
+        if (err instanceof StalePauseError) {
+          openGenRef.current++;
+        }
+        throw err;
+      }
     },
     [runId],
   );
