@@ -44,6 +44,11 @@ export interface PromptHandlerProvider {
   // providers in tests can omit it; the handler treats the absence as
   // "unknown provider" and skips the warning.
   getType?(): string;
+  // Optional structural mirror of `IAgentProvider.getCapabilities()`.
+  // Consulted as the final fallback in the model-resolution chain so the
+  // routing decision stays visible to Keelson rather than deferring to
+  // the SDK's own default. Spy / fake providers may omit it.
+  getCapabilities?(): { defaultModel?: string };
 }
 
 export interface PromptHandlerSendOptions {
@@ -155,8 +160,18 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // `unknown`-shaped accessors because the executor's DagNode is a
       // discriminated union and these fields live on the prompt-shaped
       // member.
-      const nodeModel = (node as { model?: unknown }).model;
-      const model = typeof nodeModel === "string" && nodeModel.length > 0 ? nodeModel : undefined;
+      const nodeModelRaw = (node as { model?: unknown }).model;
+      const workflowModelRaw = ctx.workflow.model;
+      // Resolution chain: node.model → workflow.model → provider.defaultModel.
+      // The third step needs getProvider() and lives in the preflight try
+      // below so an unknown-provider id surfaces through consume()'s error
+      // path, not here.
+      let model: string | undefined;
+      if (typeof nodeModelRaw === "string" && nodeModelRaw.length > 0) {
+        model = nodeModelRaw;
+      } else if (typeof workflowModelRaw === "string" && workflowModelRaw.length > 0) {
+        model = workflowModelRaw;
+      }
       const nodeAllowed = readStringArray(node, "allowed_tools");
       const nodeDenied = readStringArray(node, "denied_tools");
       const nodeHooks = readHooksField(node);
@@ -190,7 +205,14 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // preflight throw as "skip the warning" and let the real failure
       // path own the diagnostic.
       try {
-        const providerType = opts.getProvider(effectiveProviderId).getType?.();
+        const previewProvider = opts.getProvider(effectiveProviderId);
+        if (model === undefined) {
+          const defaultModel = previewProvider.getCapabilities?.().defaultModel;
+          if (typeof defaultModel === "string" && defaultModel.length > 0) {
+            model = defaultModel;
+          }
+        }
+        const providerType = previewProvider.getType?.();
         if (providerType !== undefined && providerType !== "claude") {
           const usedFields: string[] = [];
           if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
