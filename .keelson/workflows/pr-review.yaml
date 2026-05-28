@@ -8,9 +8,10 @@
 # is the final `gh pr comment`. Note the rails are enforced at the harness
 # layer ONLY under the claude provider — Copilot ignores per-node tool
 # allow/deny lists and runs the SDK's allow-all permission handler, so under
-# `provider: copilot` (the default below) the model is trusted to honor the
-# prompts. Override with `KEELSON_WORKFLOW_PROVIDER=claude` if you want the
-# harness to gate writes for you.
+# `provider: copilot` (the pin below) the model is trusted to honor the
+# prompts. To get harness-side gating, edit `provider:` below to `claude` —
+# the YAML pin wins over `KEELSON_WORKFLOW_PROVIDER`, so the env var alone
+# cannot flip an explicitly-pinned workflow.
 
 name: pr-review
 provider: copilot
