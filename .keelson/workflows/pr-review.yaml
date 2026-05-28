@@ -3,10 +3,17 @@
 # Copilot models and Keelson's supported node types — no `command:` refs,
 # no `mcp:` blocks (notification is a stretch goal).
 #
-# Read-only: the review nodes run with no write tools and the only side
-# effect on the PR is a single `gh pr comment` at the end.
+# Read-only by prompt convention: every review lane sets
+# `allowed_tools: [Read, Glob, Grep]` and the only intended PR-mutating step
+# is the final `gh pr comment`. Note the rails are enforced at the harness
+# layer ONLY under the claude provider — Copilot ignores per-node tool
+# allow/deny lists and runs the SDK's allow-all permission handler, so under
+# `provider: copilot` (the default below) the model is trusted to honor the
+# prompts. Override with `KEELSON_WORKFLOW_PROVIDER=claude` if you want the
+# harness to gate writes for you.
 
 name: pr-review
+provider: copilot
 description: |
   Use when: User wants a smart, scoped code review of an existing GitHub PR
             that adapts to the PR's complexity and posts the synthesis as a
@@ -19,10 +26,6 @@ description: |
         synthesizes findings -> posts the synthesis as a PR comment.
   NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
 
-# Run with the Copilot provider — Keelson's loader rejects `provider: copilot`
-# in YAML (issue #33), so pick it at the runtime layer instead:
-#   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run pr-review "review #42"
-#
 # Model strategy: heavy review lanes (code-review, error-handling,
 # test-coverage, synthesize) pin `gpt-5` explicitly because Keelson's prompt
 # handler only forwards `node.model` when set — workflow-level `model:` is

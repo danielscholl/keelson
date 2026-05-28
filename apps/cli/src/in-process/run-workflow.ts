@@ -154,7 +154,21 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // node fails immediately with a clear message. Operators who need
   // approval should route through `keelson serve` + the SPA.
   const promptHandler = makePromptHandler({
-    getProvider: () => provider,
+    getProvider: (id) => {
+      // Headless runs register exactly one provider (stub by default; the
+      // claude/copilot bootstrap path requires keytar + credentials and only
+      // wires under `keelson serve`). If the workflow's `provider:` (or a
+      // node's override) names a different id, fail loudly rather than
+      // silently substituting — `keelson serve` is the only path that can
+      // dispatch to the full provider set.
+      if (id !== undefined && id !== providerId) {
+        throw new Error(
+          `workflow declares 'provider: ${id}' but headless mode only has '${providerId}'. ` +
+            `Run \`keelson serve\` and route this workflow through the server to use ${id}.`,
+        );
+      }
+      return provider;
+    },
     // Tools from `@keelson/skills` are `ToolDefinition` (typed name + schema);
     // `PromptHandlerProvider` accepts the structural `{ name; [k]: unknown }`
     // shape. Same boundary cast as the provider above.

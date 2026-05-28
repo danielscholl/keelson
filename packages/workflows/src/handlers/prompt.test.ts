@@ -78,10 +78,17 @@ interface BuildCtxOptions {
   onEvent?: (event: NodeStreamEvent) => void;
   runId?: string;
   nodeId?: string;
+  workflowProvider?: string;
 }
 
 function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
   const body = opts.resolvedBody ?? "say hi";
+  const workflow = {
+    name: "test",
+    description: "",
+    nodes: [],
+    ...(opts.workflowProvider !== undefined ? { provider: opts.workflowProvider } : {}),
+  } as unknown as WorkflowDefinition;
   return {
     runId: opts.runId ?? "test-run",
     nodeId: opts.nodeId ?? "n1",
@@ -92,7 +99,7 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     emit: (event) => opts.onEvent?.(event),
     resolvedBody: body,
     rawBody: body,
-    workflow: { name: "test", description: "", nodes: [] } as unknown as WorkflowDefinition,
+    workflow,
   };
 }
 
@@ -856,5 +863,75 @@ describe("makePromptHandler", () => {
     });
     await handler.handle(stubNode, buildCtx({ resolvedBody: "Summarize: hello world" }));
     expect(calls[0]!.prompt).toBe("Summarize: hello world");
+  });
+
+  test("getProvider receives node.provider when set (node overrides workflow)", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const requested: (string | undefined)[] = [];
+    const handler = makePromptHandler({
+      getProvider: (id) => {
+        requested.push(id);
+        return provider;
+      },
+      getRegisteredTools: () => [],
+    });
+    const node = { id: "n1", prompt: "", provider: "copilot" } as unknown as DagNode;
+    await handler.handle(node, buildCtx({ workflowProvider: "claude" }));
+    // Both call sites (preflight getType + consume sendQuery) should receive
+    // the resolved effective id — node.provider wins over workflow.provider.
+    expect(requested.every((id) => id === "copilot")).toBe(true);
+    expect(requested.length).toBeGreaterThan(0);
+  });
+
+  test("getProvider receives ctx.workflow.provider when node.provider is unset", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const requested: (string | undefined)[] = [];
+    const handler = makePromptHandler({
+      getProvider: (id) => {
+        requested.push(id);
+        return provider;
+      },
+      getRegisteredTools: () => [],
+    });
+    await handler.handle(stubNode, buildCtx({ workflowProvider: "copilot" }));
+    expect(requested.every((id) => id === "copilot")).toBe(true);
+  });
+
+  test("getProvider receives undefined when neither node nor workflow set provider", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const requested: (string | undefined)[] = [];
+    const handler = makePromptHandler({
+      getProvider: (id) => {
+        requested.push(id);
+        return provider;
+      },
+      getRegisteredTools: () => [],
+    });
+    await handler.handle(stubNode, buildCtx());
+    expect(requested.every((id) => id === undefined)).toBe(true);
+  });
+
+  test("getProvider throwing on an unknown id surfaces as a failed NodeResult", async () => {
+    // Mirrors the bootstrap.ts behavior: an unknown provider id throws with a
+    // clean "not registered" message inside the resolver. The preflight catch
+    // swallows it; consume() hits the same throw and turns it into the node's
+    // error. End result: failed NodeResult with the registry message.
+    const handler = makePromptHandler({
+      getProvider: (id) => {
+        throw new Error(`Provider '${id}' is not registered. Available: stub, copilot`);
+      },
+      getRegisteredTools: () => [],
+    });
+    const node = { id: "n1", prompt: "", provider: "not-a-real-provider" } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("not-a-real-provider");
+    expect(result.error).toContain("not registered");
   });
 });

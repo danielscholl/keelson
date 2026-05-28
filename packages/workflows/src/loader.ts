@@ -3,8 +3,9 @@
  *
  * - Warnings are returned as data on `WorkflowLoadResult.warnings` so the
  *   caller (CLI, server) renders them.
- * - Provider validation accepts `claude` (or omitted) by default. Other
- *   providers can be wired by the server's prompt handler.
+ * - `provider:` is passed through unchanged; the runtime (prompt handler)
+ *   is the source of truth for which provider ids are registered, mirroring
+ *   how `model:` is handled. An unknown provider surfaces at run time.
  * - `WorkflowLoadWarning` channel surfaces the "Adapted" / "Ignored"
  *   compatibility tiers (e.g. `hooks`, `agents`, `sandbox`, `script`).
  * - Discovery walks bundled defaults plus `<repo>/.keelson/workflows/`.
@@ -562,35 +563,13 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     };
   }
 
-  // Provider — Keelson only honors 'claude' (or omitted).
+  // Provider — pass through unchanged. Registry membership is the runtime's
+  // job, same as `model:` (see schema/dag-node.ts). Unknown provider ids
+  // surface at handler dispatch with the full registered list in the message.
   const provider =
     typeof obj.provider === "string" && obj.provider.trim().length > 0
       ? obj.provider.trim()
       : undefined;
-  if (provider !== undefined && provider !== "claude") {
-    return {
-      workflow: null,
-      warnings,
-      error: {
-        filename,
-        error: `Provider '${provider}' is not supported in Keelson; only 'claude' (or omitting the field) is accepted.`,
-        errorType: "validation_error",
-      },
-    };
-  }
-  for (const node of nodes) {
-    if (node.provider !== undefined && node.provider !== "claude") {
-      return {
-        workflow: null,
-        warnings,
-        error: {
-          filename,
-          error: `Node '${node.id}': provider '${node.provider}' is not supported in Keelson.`,
-          errorType: "validation_error",
-        },
-      };
-    }
-  }
 
   // Warn-and-ignore scalars
   const model = typeof obj.model === "string" ? obj.model : undefined;
