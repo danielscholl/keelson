@@ -49,6 +49,7 @@ export interface RunViewProps {
   projects?: Project[];
   selectedProjectId?: string | null;
   onSelectProject?: (projectId: string) => void;
+  onProjectDeleted?: (projectId: string) => void;
   // Fired when the picker edits a project (e.g. layout change). Parent
   // refreshes its list so the chip label and downstream views stay in sync.
   onProjectUpdated?: () => void;
@@ -69,6 +70,7 @@ export function RunView({
   selectedProjectId = null,
   onSelectProject,
   onProjectUpdated,
+  onProjectDeleted,
 }: RunViewProps) {
   const activeProject = projects.find((p) => p.id === selectedProjectId) ?? null;
   const preStart = runId === null;
@@ -296,6 +298,7 @@ export function RunView({
           activeProjectId={selectedProjectId}
           onSelect={onSelectProject}
           onProjectUpdated={() => onProjectUpdated?.()}
+          onProjectDeleted={(deletedId) => onProjectDeleted?.(deletedId)}
         />
       )}
     </div>

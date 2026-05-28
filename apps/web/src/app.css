@@ -6545,3 +6545,10 @@ button.tab:focus-visible {
   border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
 }
 .project-edit-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.project-edit-actions-spacer { flex: 1; }
+.project-edit-actions .project-edit-delete {
+  color: var(--red); border-color: var(--red);
+}
+.project-edit-actions .project-edit-delete:hover:not(:disabled) {
+  background: var(--red); color: var(--bg);
+}

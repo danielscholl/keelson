@@ -25,8 +25,15 @@ description: |
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
 # Run this with the Copilot provider — Keelson's loader rejects `provider:
-# copilot` at the YAML level, so pick it at the runtime layer instead:
+# copilot` at the YAML level (issue #33), so pick it at the runtime layer:
 #   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run fix-issue "fix #42"
+#
+# Model strategy: unpinned nodes inherit the operator's Copilot default (set
+# high — gpt-5 family or equivalent). The heavy nodes (investigate, plan,
+# implement, fix-validation, create-pr, self-review, self-fix) want that.
+# The trivially light nodes opt OUT via `model: auto` so Copilot routes them
+# to something cheap. (Workflow-level `model:` is currently dead config in
+# the runtime — see issue to be filed — so we pin per-node where it matters.)
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
@@ -39,7 +46,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: extract-issue
-    model: gpt-4o
+    model: auto
     prompt: |
       Find the GitHub issue number for this request.
 
@@ -72,7 +79,7 @@ nodes:
   # — that helper JSON-parses the node's output text and pulls the field.
   - id: classify
     depends_on: [fetch-issue]
-    model: gpt-4o
+    model: auto
     context: fresh
     prompt: |
       You are an issue classifier. Read the GitHub issue JSON below and label it.
@@ -107,7 +114,6 @@ nodes:
   - id: investigate
     depends_on: [classify]
     when: "$classify.output.issue_type == 'bug'"
-    model: gpt-5
     context: fresh
     prompt: |
       You are investigating a bug. Produce a precise root-cause analysis the
@@ -165,7 +171,6 @@ nodes:
   - id: plan
     depends_on: [classify]
     when: "$classify.output.issue_type != 'bug'"
-    model: claude-sonnet-4.5
     context: fresh
     prompt: |
       You are creating an implementation plan from a non-bug GitHub issue.
@@ -274,7 +279,6 @@ nodes:
 
   - id: implement
     depends_on: [approve-plan]
-    model: gpt-5
     context: fresh
     idle_timeout: 600000
     prompt: |
@@ -346,7 +350,6 @@ nodes:
 
   - id: fix-validation
     depends_on: [validate]
-    model: gpt-5
     context: fresh
     prompt: |
       Review the validation output below.
@@ -437,7 +440,6 @@ nodes:
 
   - id: self-review
     depends_on: [create-pr]
-    model: gpt-5
     context: fresh
     prompt: |
       You are a senior reviewer doing a code-review pass against `main` on the
@@ -461,7 +463,6 @@ nodes:
 
   - id: self-fix
     depends_on: [self-review]
-    model: gpt-5
     context: fresh
     prompt: |
       Apply the CRITICAL and HIGH findings from the review below. Skip MEDIUM
@@ -488,7 +489,7 @@ nodes:
 
   - id: report
     depends_on: [self-fix]
-    model: gpt-4o
+    model: auto
     context: fresh
     prompt: |
       Produce the final operator summary.

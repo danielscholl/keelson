@@ -2,9 +2,10 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { DEFAULT_PROJECT_NAME, type Project, type WorktreeLayout } from "@keelson/shared";
+import { DEFAULT_PROJECT_NAME, type Project } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { updateProject } from "../../api.ts";
+import { deleteProject, updateProject } from "../../api.ts";
+import { ConfirmModal } from "../ConfirmModal.tsx";
 
 interface ProjectPickerPopoverProps {
   popoverId: string;
@@ -12,6 +13,7 @@ interface ProjectPickerPopoverProps {
   activeProjectId: string | null;
   onSelect: (id: string) => void;
   onProjectUpdated: (project: Project) => void;
+  onProjectDeleted: (projectId: string) => void;
 }
 
 export function ProjectPickerPopover({
@@ -20,6 +22,7 @@ export function ProjectPickerPopover({
   activeProjectId,
   onSelect,
   onProjectUpdated,
+  onProjectDeleted,
 }: ProjectPickerPopoverProps) {
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -108,6 +111,10 @@ export function ProjectPickerPopover({
                       onProjectUpdated(updated);
                       setEditingId(null);
                     }}
+                    onDeleted={(deletedId) => {
+                      onProjectDeleted(deletedId);
+                      setEditingId(null);
+                    }}
                   />
                 ) : (
                   <ProjectRow
@@ -137,20 +144,28 @@ interface ProjectRowProps {
 }
 
 function ProjectRow({ popoverId, project, isActive, onSelect, onEdit }: ProjectRowProps) {
+  // Default project has no editable settings — it IS the workspace, not a
+  // user project. The slash-command `/project layout` still works for the
+  // rare case someone needs to change layout on a real project.
+  const isDefault = project.name === DEFAULT_PROJECT_NAME;
   return (
     <div className={`model-picker-popover-row${isActive ? " active" : ""}`}>
-      <button
-        type="button"
-        className="model-picker-popover-fav"
-        onClick={(e) => {
-          e.stopPropagation();
-          onEdit();
-        }}
-        aria-label="Edit project"
-        title="Edit name / worktree layout"
-      >
-        <span aria-hidden="true">⚙</span>
-      </button>
+      {isDefault ? (
+        <span className="model-picker-popover-fav" aria-hidden="true" />
+      ) : (
+        <button
+          type="button"
+          className="model-picker-popover-fav"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          aria-label="Edit project"
+          title="Rename or remove"
+        >
+          <span aria-hidden="true">⚙</span>
+        </button>
+      )}
       <button
         type="button"
         className="model-picker-popover-pick"
@@ -170,34 +185,45 @@ interface ProjectEditRowProps {
   project: Project;
   onCancel: () => void;
   onSaved: (project: Project) => void;
+  onDeleted: (projectId: string) => void;
 }
 
-function ProjectEditRow({ project, onCancel, onSaved }: ProjectEditRowProps) {
+function ProjectEditRow({ project, onCancel, onSaved, onDeleted }: ProjectEditRowProps) {
   const [name, setName] = useState(project.name);
-  const [layout, setLayout] = useState<WorktreeLayout>(project.worktreeLayout);
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isDefault = project.name === DEFAULT_PROJECT_NAME;
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const handleSave = useCallback(async () => {
-    const patch: { name?: string; worktreeLayout?: WorktreeLayout } = {};
-    if (!isDefault && name !== project.name) patch.name = name;
-    if (layout !== project.worktreeLayout) patch.worktreeLayout = layout;
-    if (Object.keys(patch).length === 0) {
+    if (name === project.name) {
       onCancel();
       return;
     }
-    setSaving(true);
+    setBusy(true);
     setError(null);
     try {
-      const updated = await updateProject(project.id, patch);
+      const updated = await updateProject(project.id, { name });
       onSaved(updated);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
-  }, [isDefault, layout, name, onCancel, onSaved, project]);
+  }, [name, onCancel, onSaved, project.id, project.name]);
+
+  const handleDelete = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteProject(project.id);
+      onDeleted(project.id);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+      setConfirmingDelete(false);
+    } finally {
+      setBusy(false);
+    }
+  }, [onDeleted, project.id]);
 
   return (
     <div className="model-picker-popover-row project-edit-row">
@@ -207,33 +233,45 @@ function ProjectEditRow({ project, onCancel, onSaved }: ProjectEditRowProps) {
           <input
             type="text"
             value={name}
-            disabled={isDefault || saving}
+            disabled={busy}
             onChange={(e) => setName(e.target.value)}
             aria-label="Project name"
           />
         </label>
-        <label className="project-edit-label">
-          Worktree layout
-          <select
-            value={layout}
-            disabled={saving}
-            onChange={(e) => setLayout(e.target.value as WorktreeLayout)}
-            aria-label="Worktree layout"
-          >
-            <option value="workspace-scoped">workspace-scoped</option>
-            <option value="repo-local">repo-local</option>
-          </select>
-        </label>
         {error && <div className="project-edit-error">{error}</div>}
         <div className="project-edit-actions">
-          <button type="button" onClick={onCancel} disabled={saving}>
+          <button
+            type="button"
+            className="project-edit-delete"
+            onClick={() => setConfirmingDelete(true)}
+            disabled={busy}
+          >
+            Remove
+          </button>
+          <span className="project-edit-actions-spacer" />
+          <button type="button" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
-          <button type="button" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
+          <button type="button" onClick={handleSave} disabled={busy}>
+            {busy ? "Saving…" : "Save"}
           </button>
         </div>
       </div>
+      <ConfirmModal
+        open={confirmingDelete}
+        title="Remove project"
+        body={
+          <>
+            Remove <strong>{project.name}</strong> from Keelson? This forgets the project in the
+            database — the repo on disk at <code>{project.rootPath}</code> is not touched.
+          </>
+        }
+        mode={{ kind: "simple" }}
+        confirmLabel="Remove"
+        danger
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }
