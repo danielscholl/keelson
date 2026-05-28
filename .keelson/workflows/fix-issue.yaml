@@ -5,15 +5,13 @@
 # loops — interactive loops are not yet supported, so a single approval
 # gate replaces the chat-style plan-refinement iterations).
 #
-# Provider is pinned to `copilot`. Models chosen from the curated set
-# the Copilot factory advertises:
-#   - gpt-5            — investigation, implementation, code review, validation fixes
-#   - gpt-4o           — fast classifiers behind `output_format`
-#   - claude-sonnet-4.5 — structured plan authoring
-#   - auto             — Copilot's own routing for everything else
+# Provider is pinned to `copilot`. Models in play:
+#   - gpt-5  — workflow-level default; every heavy node inherits it
+#   - auto   — explicit override on light classifier / extractor / report nodes
 
 name: fix-issue
 provider: copilot
+model: gpt-5
 description: |
   Use when: User wants to fix, resolve, or implement a GitHub issue end-to-end
             and open a draft PR.
@@ -25,12 +23,10 @@ description: |
         a self-review pass, applies the review's findings, and reports back.
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
-# Model strategy: every heavy node pins `gpt-5` explicitly because Keelson's
-# prompt handler only forwards `node.model` when set — workflow-level `model:`
-# is currently dead config in the runtime, and an unpinned node falls through
-# to Copilot's own `auto` routing (cheap for short prompts). Light nodes pin
-# `model: auto` so the routing is explicit on both ends, no operator-config
-# dependency anywhere.
+# Model strategy: the workflow header pins `model: gpt-5` so every heavy node
+# inherits it. Light classifier / extractor / report nodes opt into Copilot's
+# own routing with `model: auto` to keep cheap prompts off the heavy model.
+# Resolution order is node.model → workflow.model → provider.defaultModel.
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
@@ -110,7 +106,6 @@ nodes:
   - id: investigate
     depends_on: [classify]
     when: "$classify.output.issue_type == 'bug'"
-    model: gpt-5
     context: fresh
     prompt: |
       You are investigating a bug. Produce a precise root-cause analysis the
@@ -168,7 +163,6 @@ nodes:
   - id: plan
     depends_on: [classify]
     when: "$classify.output.issue_type != 'bug'"
-    model: gpt-5
     context: fresh
     prompt: |
       You are creating an implementation plan from a non-bug GitHub issue.
@@ -277,7 +271,6 @@ nodes:
 
   - id: implement
     depends_on: [approve-plan]
-    model: gpt-5
     context: fresh
     idle_timeout: 600000
     prompt: |
@@ -349,7 +342,6 @@ nodes:
 
   - id: fix-validation
     depends_on: [validate]
-    model: gpt-5
     context: fresh
     prompt: |
       Review the validation output below.
@@ -399,7 +391,6 @@ nodes:
 
   - id: create-pr
     depends_on: [revalidate]
-    model: gpt-5
     context: fresh
     prompt: |
       Push the branch and create a draft pull request that links the issue.
@@ -441,7 +432,6 @@ nodes:
 
   - id: self-review
     depends_on: [create-pr]
-    model: gpt-5
     context: fresh
     prompt: |
       You are a senior reviewer doing a code-review pass against `main` on the
@@ -465,7 +455,6 @@ nodes:
 
   - id: self-fix
     depends_on: [self-review]
-    model: gpt-5
     context: fresh
     prompt: |
       Apply the CRITICAL and HIGH findings from the review below. Skip MEDIUM

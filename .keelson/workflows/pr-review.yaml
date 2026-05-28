@@ -15,6 +15,7 @@
 
 name: pr-review
 provider: copilot
+model: gpt-5
 description: |
   Use when: User wants a smart, scoped code review of an existing GitHub PR
             that adapts to the PR's complexity and posts the synthesis as a
@@ -27,12 +28,10 @@ description: |
         synthesizes findings -> posts the synthesis as a PR comment.
   NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
 
-# Model strategy: heavy review lanes (code-review, error-handling,
-# test-coverage, synthesize) pin `gpt-5` explicitly because Keelson's prompt
-# handler only forwards `node.model` when set — workflow-level `model:` is
-# currently dead config in the runtime, and an unpinned node falls through to
-# Copilot's own `auto` routing (cheap for short prompts). Lightweight nodes
-# pin `model: auto` so the routing is explicit on both ends.
+# Model strategy: the workflow header pins `model: gpt-5` so every heavy
+# review lane inherits it. Lightweight classifier / extractor / docs-impact
+# nodes opt into Copilot's own routing with `model: auto`. Resolution order
+# is node.model → workflow.model → provider.defaultModel.
 
 nodes:
   # ─────────────────────────────────────────────────────────────────────────
@@ -191,7 +190,6 @@ nodes:
   - id: code-review
     depends_on: [classify]
     when: "$classify.output.run_code_review == 'true'"
-    model: gpt-5
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
@@ -221,7 +219,6 @@ nodes:
   - id: error-handling
     depends_on: [classify]
     when: "$classify.output.run_error_handling == 'true'"
-    model: gpt-5
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
@@ -248,7 +245,6 @@ nodes:
   - id: test-coverage
     depends_on: [classify]
     when: "$classify.output.run_test_coverage == 'true'"
-    model: gpt-5
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
@@ -311,7 +307,6 @@ nodes:
   - id: synthesize
     depends_on: [code-review, error-handling, test-coverage, docs-impact]
     trigger_rule: one_success
-    model: gpt-5
     context: fresh
     prompt: |
       Synthesize the review lanes into a single PR-comment-ready report.

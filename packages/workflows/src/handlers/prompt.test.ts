@@ -33,6 +33,10 @@ interface SpyProviderOptions {
   // string so the handler's provider-mismatch check has a value to inspect.
   // Omit to keep the structural-subset behavior used by existing tests.
   type?: string;
+  // When set, makeSpyProvider exposes `getCapabilities()` returning this
+  // shape so the model-resolution chain can fall through to a provider
+  // default. Omit to keep the prior structural-subset behavior.
+  capabilities?: { defaultModel?: string };
 }
 
 function makeSpyProvider(opts: SpyProviderOptions = {}): {
@@ -42,6 +46,7 @@ function makeSpyProvider(opts: SpyProviderOptions = {}): {
   const calls: SpyCall[] = [];
   const provider: PromptHandlerProvider = {
     ...(opts.type !== undefined ? { getType: () => opts.type! } : {}),
+    ...(opts.capabilities !== undefined ? { getCapabilities: () => opts.capabilities! } : {}),
     async *sendQuery(prompt, cwd, _resume, options) {
       calls.push({ prompt, cwd, options });
       const chunks = opts.chunks ?? [];
@@ -79,6 +84,7 @@ interface BuildCtxOptions {
   runId?: string;
   nodeId?: string;
   workflowProvider?: string;
+  workflowModel?: string;
 }
 
 function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
@@ -88,6 +94,7 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     description: "",
     nodes: [],
     ...(opts.workflowProvider !== undefined ? { provider: opts.workflowProvider } : {}),
+    ...(opts.workflowModel !== undefined ? { model: opts.workflowModel } : {}),
   } as unknown as WorkflowDefinition;
   return {
     runId: opts.runId ?? "test-run",
@@ -678,6 +685,80 @@ describe("makePromptHandler", () => {
     } as unknown as DagNode;
     await handler.handle(nodeWithModel, buildCtx());
     expect(calls[0]!.options?.model).toBe("gpt-5-3-mini");
+  });
+
+  describe("model fallback chain", () => {
+    test("workflow.model is forwarded when the node has no model", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      await handler.handle(stubNode, buildCtx({ workflowModel: "gpt-5" }));
+      expect(calls[0]!.options?.model).toBe("gpt-5");
+    });
+
+    test("node.model wins over workflow.model", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "gpt-4o" } as unknown as DagNode;
+      await handler.handle(node, buildCtx({ workflowModel: "gpt-5" }));
+      expect(calls[0]!.options?.model).toBe("gpt-4o");
+    });
+
+    test("provider.defaultModel is forwarded when neither node nor workflow set model", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "" }, { type: "done" }],
+        capabilities: { defaultModel: "gpt-5" },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      await handler.handle(stubNode, buildCtx());
+      expect(calls[0]!.options?.model).toBe("gpt-5");
+    });
+
+    test("empty-string defaultModel does not flow through as model", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "" }, { type: "done" }],
+        capabilities: { defaultModel: "" },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      await handler.handle(stubNode, buildCtx());
+      expect(calls[0]!.options?.model).toBeUndefined();
+    });
+
+    test("provider.defaultModel still resolves when preflight getProvider() throws but consume's succeeds", async () => {
+      // Guards against the fallback regressing to `undefined` if the preflight
+      // resolver lookup ever fails transiently (caught + swallowed) while the
+      // consume() lookup succeeds.
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "" }, { type: "done" }],
+        capabilities: { defaultModel: "gpt-5" },
+      });
+      let attempt = 0;
+      const handler = makePromptHandler({
+        getProvider: () => {
+          attempt++;
+          if (attempt === 1) throw new Error("registry blip on preflight");
+          return provider;
+        },
+        getRegisteredTools: () => [],
+      });
+      await handler.handle(stubNode, buildCtx());
+      expect(calls[0]!.options?.model).toBe("gpt-5");
+    });
   });
 
   test("times out even when the provider ignores its abortSignal (hung provider)", async () => {

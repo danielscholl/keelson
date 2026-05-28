@@ -44,6 +44,11 @@ export interface PromptHandlerProvider {
   // providers in tests can omit it; the handler treats the absence as
   // "unknown provider" and skips the warning.
   getType?(): string;
+  // Optional structural mirror of `IAgentProvider.getCapabilities()`.
+  // Consulted as the final fallback in the model-resolution chain so the
+  // routing decision stays visible to Keelson rather than deferring to
+  // the SDK's own default. Spy / fake providers may omit it.
+  getCapabilities?(): { defaultModel?: string };
 }
 
 export interface PromptHandlerSendOptions {
@@ -155,8 +160,19 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // `unknown`-shaped accessors because the executor's DagNode is a
       // discriminated union and these fields live on the prompt-shaped
       // member.
-      const nodeModel = (node as { model?: unknown }).model;
-      const model = typeof nodeModel === "string" && nodeModel.length > 0 ? nodeModel : undefined;
+      const nodeModelRaw = (node as { model?: unknown }).model;
+      const workflowModelRaw = ctx.workflow.model;
+      // Resolution chain: node.model → workflow.model → provider.defaultModel.
+      // The third step is deferred to consume(): it needs a successfully
+      // resolved provider, and resolving it there keeps the fallback on the
+      // same code path that surfaces unknown-provider errors as a failed
+      // NodeResult.
+      let model: string | undefined;
+      if (typeof nodeModelRaw === "string" && nodeModelRaw.length > 0) {
+        model = nodeModelRaw;
+      } else if (typeof workflowModelRaw === "string" && workflowModelRaw.length > 0) {
+        model = workflowModelRaw;
+      }
       const nodeAllowed = readStringArray(node, "allowed_tools");
       const nodeDenied = readStringArray(node, "denied_tools");
       const nodeHooks = readHooksField(node);
@@ -275,6 +291,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const consume = async (): Promise<void> => {
         try {
           const provider = opts.getProvider(effectiveProviderId);
+          if (model === undefined) {
+            const defaultModel = provider.getCapabilities?.().defaultModel;
+            if (typeof defaultModel === "string" && defaultModel.length > 0) {
+              model = defaultModel;
+            }
+          }
           const stream = provider.sendQuery(promptBody, ctx.cwd, undefined, {
             abortSignal: handlerExit.signal,
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
