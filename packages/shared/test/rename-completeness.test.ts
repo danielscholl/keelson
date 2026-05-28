@@ -29,6 +29,15 @@ const ALLOW_LIST: ReadonlyArray<{ readonly file: string; readonly reason: string
   // Vendor-attribution surfaces — required by the workflow schema's MIT chain.
   { file: "NOTICE", reason: "Archon MIT attribution (required by license)" },
   { file: "README.md", reason: "References the Archon GitHub URL in the license footer" },
+  {
+    file: ".keelson/workflows/fix-issue.yaml",
+    reason:
+      "Ported from Archon's archon-piv-loop + archon-fix-github-issue (MIT) — header credits upstream",
+  },
+  {
+    file: ".keelson/workflows/pr-review.yaml",
+    reason: "Ported from Archon's archon-smart-pr-review (MIT) — header credits upstream",
+  },
   // Self-reference — this file greps for the patterns.
   { file: "packages/shared/test/rename-completeness.test.ts", reason: "self-reference" },
   // Lockfile churn — bun.lock includes transitive package names that may

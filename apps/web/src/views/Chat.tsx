@@ -1680,6 +1680,10 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
           onProjectUpdated={() => {
             void refreshProjects();
           }}
+          onProjectDeleted={(deletedId) => {
+            void refreshProjects();
+            if (activeProjectId === deletedId) switchActiveProject(null);
+          }}
         />
 
         {selectedModelInfo?.supports?.reasoningEffort === true && (

@@ -20,8 +20,15 @@ description: |
   NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
 
 # Run with the Copilot provider — Keelson's loader rejects `provider: copilot`
-# in YAML, so pick it at the runtime layer instead:
+# in YAML (issue #33), so pick it at the runtime layer instead:
 #   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run pr-review "review #42"
+#
+# Model strategy: heavy review lanes (code-review, error-handling,
+# test-coverage, synthesize) pin `gpt-5` explicitly because Keelson's prompt
+# handler only forwards `node.model` when set — workflow-level `model:` is
+# currently dead config in the runtime, and an unpinned node falls through to
+# Copilot's own `auto` routing (cheap for short prompts). Lightweight nodes
+# pin `model: auto` so the routing is explicit on both ends.
 
 nodes:
   # ─────────────────────────────────────────────────────────────────────────
@@ -32,7 +39,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: extract-pr
-    model: gpt-4o
+    model: auto
     prompt: |
       Find the GitHub PR number for this request.
 
@@ -116,7 +123,7 @@ nodes:
   # that helper JSON-parses the node's output and pulls the value.
   - id: classify
     depends_on: [scope]
-    model: gpt-4o
+    model: auto
     context: fresh
     prompt: |
       You are a PR review classifier. Decide which review lanes to run based on
@@ -246,7 +253,7 @@ nodes:
   - id: docs-impact
     depends_on: [classify]
     when: "$classify.output.run_docs_impact == 'true'"
-    model: gpt-4o
+    model: auto
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |

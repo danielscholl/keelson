@@ -25,8 +25,15 @@ description: |
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
 # Run this with the Copilot provider — Keelson's loader rejects `provider:
-# copilot` at the YAML level, so pick it at the runtime layer instead:
+# copilot` at the YAML level (issue #33), so pick it at the runtime layer:
 #   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run fix-issue "fix #42"
+#
+# Model strategy: every heavy node pins `gpt-5` explicitly because Keelson's
+# prompt handler only forwards `node.model` when set — workflow-level `model:`
+# is currently dead config in the runtime, and an unpinned node falls through
+# to Copilot's own `auto` routing (cheap for short prompts). Light nodes pin
+# `model: auto` so the routing is explicit on both ends, no operator-config
+# dependency anywhere.
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
@@ -39,7 +46,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: extract-issue
-    model: gpt-4o
+    model: auto
     prompt: |
       Find the GitHub issue number for this request.
 
@@ -72,7 +79,7 @@ nodes:
   # — that helper JSON-parses the node's output text and pulls the field.
   - id: classify
     depends_on: [fetch-issue]
-    model: gpt-4o
+    model: auto
     context: fresh
     prompt: |
       You are an issue classifier. Read the GitHub issue JSON below and label it.
@@ -165,7 +172,7 @@ nodes:
   - id: plan
     depends_on: [classify]
     when: "$classify.output.issue_type != 'bug'"
-    model: claude-sonnet-4.5
+    model: gpt-5
     context: fresh
     prompt: |
       You are creating an implementation plan from a non-bug GitHub issue.
@@ -396,6 +403,7 @@ nodes:
 
   - id: create-pr
     depends_on: [revalidate]
+    model: gpt-5
     context: fresh
     prompt: |
       Push the branch and create a draft pull request that links the issue.
@@ -488,7 +496,7 @@ nodes:
 
   - id: report
     depends_on: [self-fix]
-    model: gpt-4o
+    model: auto
     context: fresh
     prompt: |
       Produce the final operator summary.

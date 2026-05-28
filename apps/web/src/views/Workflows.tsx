@@ -228,6 +228,10 @@ export function Workflows() {
           selectedProjectId={activeProjectId}
           onSelectProject={handleSelectProject}
           onProjectUpdated={() => void refreshProjects()}
+          onProjectDeleted={(deletedId) => {
+            void refreshProjects();
+            if (activeProjectId === deletedId) setActiveProject(null);
+          }}
         />
       </div>
     );
@@ -253,6 +257,10 @@ export function Workflows() {
         onSelect={setActiveProject}
         onProjectUpdated={() => {
           void refreshProjects();
+        }}
+        onProjectDeleted={(deletedId) => {
+          void refreshProjects();
+          if (activeProjectId === deletedId) setActiveProject(null);
         }}
       />
 
