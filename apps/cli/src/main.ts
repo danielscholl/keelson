@@ -15,6 +15,7 @@ import { runDoctor } from "./commands/doctor.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runServe } from "./commands/serve.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
+import { runWorkflowRespond } from "./commands/workflow-respond.ts";
 import { runWorkflowRun } from "./commands/workflow-run.ts";
 import { runWorkflowStatus } from "./commands/workflow-status.ts";
 import { runWorkflowValidate } from "./commands/workflow-validate.ts";
@@ -149,6 +150,33 @@ export function buildProgram(): Command {
         ...(runOpts.project ? { project: runOpts.project } : {}),
         ...(runOpts.workingDir ? { workingDir: runOpts.workingDir } : {}),
         ...(runOpts.worktree !== undefined ? { worktree: runOpts.worktree } : {}),
+      });
+    });
+
+  workflow
+    .command("respond <runId> <nodeId> <text>")
+    .description(
+      "resume a paused workflow run by sending text to the paused node (server-required)",
+    )
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .option(
+      "--pause-id <id>",
+      "per-pause token from the approval_awaiting frame; required to disambiguate retries against interactive loops",
+    )
+    .action(async function respondAction(
+      this: Command,
+      runId: string,
+      nodeId: string,
+      text: string,
+      respondOpts: { baseUrl?: string; pauseId?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", respondOpts.baseUrl);
+      const pauseId = requireNonEmpty(json, "--pause-id", respondOpts.pauseId);
+      await runWorkflowRespond(runId, nodeId, text, {
+        json,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(pauseId ? { pauseId } : {}),
       });
     });
 

@@ -254,14 +254,28 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
     .strict(),
   // Broadcast when an approval node opens. Flips the client's run status
   // to `paused` and surfaces the inline approval callout. The user's reply
-  // (or quick-action) lands via POST /api/workflows/runs/:runId/resume;
-  // resume emits the usual `node_done` for the approval node so no separate
-  // `approval_resolved` frame is needed.
+  // (or quick-action) lands via POST /api/workflows/runs/:runId/resume.
+  // `pauseId` is a per-pause token the client must echo back so a stale or
+  // duplicated POST for a prior iteration can't resolve a later interactive-
+  // loop pause that happens to reuse the same nodeId.
   z
     .object({
       type: z.literal("approval_awaiting"),
       nodeId: z.string(),
       message: z.string(),
+      pauseId: z.string(),
+    })
+    .strict(),
+  // Broadcast when a paused node is resumed via POST /resume. Tells live
+  // clients to clear the awaiting callout for `nodeId`. For approval nodes,
+  // `node_done` follows immediately; for interactive-loop nodes, the loop
+  // continues iterating without a node_done until terminal — without this
+  // frame, the SPA would keep the composer open across the next iteration's
+  // worth of work and retries would hit 409 on the now-cleared pending.
+  z
+    .object({
+      type: z.literal("approval_resolved"),
+      nodeId: z.string(),
     })
     .strict(),
 ]);
@@ -270,11 +284,16 @@ export type WorkflowFrame = z.infer<typeof workflowFrameSchema>;
 // POST /api/workflows/runs/:runId/resume body. Text is bounded so a runaway
 // reply (paste of a 50KB diff, etc.) can't blow up the route's memory; 16 KiB
 // is far larger than any plausible approval reply but small enough to reject
-// obvious abuse.
+// obvious abuse. `pauseId` is optional for back-compat with CLI clients that
+// don't yet know the token (e.g. operator-typed `keelson workflow respond`),
+// but when present the server MUST verify it matches the current pause —
+// otherwise a stale POST for iteration N could resolve iteration N+1 of an
+// interactive loop that reuses the same nodeId.
 export const resumeWorkflowRunBodySchema = z
   .object({
     nodeId: z.string().min(1),
     text: z.string().max(16_384),
+    pauseId: z.string().min(1).optional(),
   })
   .strict();
 export type ResumeWorkflowRunBody = z.infer<typeof resumeWorkflowRunBodySchema>;

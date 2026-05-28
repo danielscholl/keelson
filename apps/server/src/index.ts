@@ -212,6 +212,7 @@ const chatHandlers = chatWebSocketHandlers(store, { memoryStore, projectsStore }
 const workflowRunHandlers = workflowRunWebSocketHandlers({
   subscribers: workflowSubscribers,
   store: workflowStore,
+  activeRuns: activeWorkflowRuns,
 });
 const snapshotHandlers = snapshotWebSocketHandlers({
   subscribers: snapshotSubscribers,

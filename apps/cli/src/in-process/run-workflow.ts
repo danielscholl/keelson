@@ -11,6 +11,7 @@ import { getRegisteredTools } from "@keelson/skills";
 import {
   bashHandler,
   createWorktree,
+  defaultRunUntilBashProbe,
   defaultWorktreeRoot,
   discoverWorkflows,
   isGitRepo,
@@ -179,7 +180,10 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     ["approval", approvalHandler],
     ["cancel", cancelHandler],
     ["command", makeCommandHandler({ promptHandler })],
-    ["loop", makeLoopHandler({ promptHandler })],
+    // Headless fallback has no UI to pause on, so `loop.interactive: true`
+    // fails fast (no awaitInteraction wired). `loop.until_bash` is supported
+    // because it's an autonomous completion probe, not human-in-the-loop.
+    ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
     ["script", makeScriptHandler()],
   ]);
 

@@ -302,19 +302,50 @@ export async function deleteWorkflowRun(runId: string): Promise<void> {
   });
 }
 
-// Resume a paused approval node. Text becomes $<nodeId>.output. 404/409
-// means "no longer pending" — soft no-op so a double-click doesn't toast.
-export async function submitApproval(runId: string, nodeId: string, text: string): Promise<void> {
-  await apiRequest<void, void>(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {
+/**
+ * Thrown by `submitApproval` when the server rejects a resume because the
+ * supplied `pauseId` doesn't match the current pause (the loop has moved
+ * to a new iteration, or another client already resumed this one). The
+ * caller should refetch the run state and let the user retry against the
+ * new pauseId.
+ */
+export class StalePauseError extends Error {
+  constructor(message = "pauseId mismatch — pause has advanced") {
+    super(message);
+    this.name = "StalePauseError";
+  }
+}
+
+// Resume a paused approval node. Text becomes $<nodeId>.output.
+// `pauseId`, when provided, is verified server-side. 404 always falls
+// through as a soft no-op (run gone). 409 is a soft no-op ONLY when no
+// pauseId was sent (legacy double-submit case); when a pauseId was sent,
+// a 409 indicates a real mismatch and surfaces via `StalePauseError` so
+// the caller can refetch and prompt the user — silently swallowing it
+// would clear the composer text while the UI keeps stale state.
+export async function submitApproval(
+  runId: string,
+  nodeId: string,
+  text: string,
+  pauseId?: string,
+): Promise<void> {
+  const url = `/api/workflows/runs/${encodeURIComponent(runId)}/resume`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ nodeId, text }),
-    responseBody: "void",
-    errorBody: "json-error",
-    allowedStatuses: [404, 409],
-    allowedStatusValue: undefined,
-    label: `/api/workflows/runs/${runId}/resume`,
+    body: JSON.stringify(pauseId !== undefined ? { nodeId, text, pauseId } : { nodeId, text }),
   });
+  if (res.ok) return;
+  if (res.status === 404) return;
+  if (res.status === 409) {
+    if (pauseId !== undefined) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new StalePauseError(body?.error);
+    }
+    return;
+  }
+  const body = (await res.json().catch(() => null)) as { error?: string } | null;
+  throw new Error(body?.error ?? `submitApproval failed: ${res.status}`);
 }
 
 // === Memory ================================================================

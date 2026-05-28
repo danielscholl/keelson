@@ -8,7 +8,7 @@ import type {
 } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cancelWorkflowRun, getWorkflowRun, submitApproval } from "../api.ts";
+import { cancelWorkflowRun, getWorkflowRun, StalePauseError, submitApproval } from "../api.ts";
 import type { NodeViewStatus } from "../lib/dagLayout.ts";
 import { createReconnectingWorkflowRunWs, type ReconnectingWsState } from "../ws.ts";
 
@@ -38,6 +38,12 @@ export interface NodeView {
   // of an `awaiting` node row (the route layer writes the message there
   // at pause time so a page-reload mid-pause can rehydrate the callout).
   awaitingMessage?: string;
+  // Per-pause token from the most recent `approval_awaiting` frame. Echoed
+  // back on POST /resume so a stale POST for a prior interactive-loop
+  // iteration can't resolve a later pause that reuses the same nodeId.
+  // Absent on snapshot rehydrate (not persisted) — that path falls back to
+  // the optional-pauseId leg of the resume route.
+  awaitingPauseId?: string;
 }
 
 export interface RunView {
@@ -294,6 +300,11 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   useEffect(() => {
     latestNodesRef.current = nodes;
   }, [nodes]);
+  // Lifts the per-runId `hydrate` function out of the WS effect so the
+  // `resume` callback can trigger a fresh fetch when it observes a stale
+  // pauseId. Stays null until the WS effect installs one for the active
+  // runId (then nulled again on unmount / runId change).
+  const hydrateRef = useRef<((gen: number) => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (!runId) {
@@ -307,7 +318,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
     setRun({ runId, status: "loading", warnings: [] });
     setNodes({});
 
-    const hydrate = async (gen: number) => {
+    const hydrate = async (gen: number): Promise<void> => {
       try {
         const snapshot = await getWorkflowRun(runId);
         if (cancelled || gen !== openGenRef.current) return;
@@ -349,6 +360,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
 
     // Initial hydrate while WS connects in parallel — paints fast and
     // catches up post-WS-open via the onStateChange handler below.
+    hydrateRef.current = hydrate;
     const initialGen = ++openGenRef.current;
     void hydrate(initialGen);
 
@@ -361,10 +373,29 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
         // overwrites status to terminal), then trigger a fresh REST
         // hydrate so the persisted contentParts / outputText backfill
         // the empty live row.
+        //
+        // `approval_resolved` triggers a fresh hydrate for a different
+        // reason: the resolve path on the server deleted the awaiting
+        // row, but a hydrate fetched BEFORE resume could land after the
+        // frame and re-impose the now-stale `awaiting` via mergeNode's
+        // snapshot-awaiting-wins rule. Bumping the generation invalidates
+        // any in-flight stale fetch, and the fresh hydrate confirms the
+        // post-resume state.
+        //
+        // `approval_awaiting` needs both: invalidate any in-flight hydrate
+        // started BEFORE the pause opened (otherwise mergeNode's
+        // "snapshot.pending + live.awaiting → drop awaiting" reconnect
+        // repair would clobber the freshly-received pause), AND schedule
+        // a replacement hydrate. The replacement is load-bearing for the
+        // server's open-time replay: when the WS connects to an already-
+        // paused run, the open handler sends `approval_awaiting` BEFORE
+        // either initial or open-time REST hydrate has returned;
+        // invalidating without rescheduling would leave the view missing
+        // prior node outputs.
         const shouldRehydrateAfter =
           frame.type === "node_done"
             ? isLiveNodeEmpty(latestNodesRef.current[frame.nodeId])
-            : false;
+            : frame.type === "approval_resolved" || frame.type === "approval_awaiting";
         applyFrame(frame, setRun, setNodes);
         if (shouldRehydrateAfter) {
           const gen = ++openGenRef.current;
@@ -399,6 +430,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
 
     return () => {
       cancelled = true;
+      hydrateRef.current = null;
       handle.close();
     };
   }, [runId]);
@@ -411,11 +443,29 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   // Resume the paused approval node. The server flips run status back to
   // running and the executor proceeds; we don't optimistic-update here
   // because the next `node_done` (or a snapshot reload) is the source of
-  // truth for what happened.
+  // truth for what happened. The pauseId (when known from the live
+  // `approval_awaiting` frame) is echoed so a stale double-submit on a
+  // long-running interactive loop can't resolve the wrong iteration. On a
+  // pauseId mismatch (the loop already advanced), trigger a fresh hydrate
+  // so the UI picks up the current pauseId, then re-throw so the composer
+  // can surface the rejection.
   const resume = useCallback(
     async (nodeId: string, text: string) => {
       if (!runId) return;
-      await submitApproval(runId, nodeId, text);
+      const pauseId = latestNodesRef.current[nodeId]?.awaitingPauseId;
+      try {
+        await submitApproval(runId, nodeId, text, pauseId);
+      } catch (err) {
+        if (err instanceof StalePauseError) {
+          // Invalidate any in-flight hydrate AND schedule a fresh one so
+          // the UI picks up the current pauseId — without the replacement
+          // fetch the awaiting state stays bound to the now-rejected
+          // token, and every retry keeps hitting 409.
+          const gen = ++openGenRef.current;
+          if (hydrateRef.current) void hydrateRef.current(gen);
+        }
+        throw err;
+      }
     },
     [runId],
   );
@@ -490,7 +540,16 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     // `running` (or `pending`) must NOT clobber that.
     winningStatus = snapshotSide.status;
   } else if (liveTerminal) winningStatus = liveSide.status;
-  else if (liveSide.status !== "pending") winningStatus = liveSide.status;
+  else if (liveSide.status === "awaiting" && snapshotSide.status === "pending") {
+    // Reconnect repair: live remembers an awaiting that we never received
+    // an `approval_resolved` for, but the snapshot has no row for the
+    // node. The server deletes the row on resume (both approval and
+    // interactive-loop paths), so "no snapshot row" means "the pause is
+    // gone, the loop has moved on." Drop the stale awaiting; otherwise the
+    // composer stays active and any submit returns 409 against a node with
+    // no pending resolver.
+    winningStatus = snapshotSide.status;
+  } else if (liveSide.status !== "pending") winningStatus = liveSide.status;
   else winningStatus = snapshotSide.status;
   const liveTextLen = totalTextLength(liveSide.contentParts);
   const snapTextLen = totalTextLength(snapshotSide.contentParts);
@@ -508,11 +567,17 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   // When winningStatus is `awaiting`, the approval message must come from
   // whichever side actually has it (snapshot writes it at pause time; live
   // only has it if the WS approval_awaiting frame arrived). Live's spread
-  // would otherwise overwrite snapshot's message with undefined.
+  // would otherwise overwrite snapshot's message with undefined. The
+  // pauseId, in contrast, only ever lives on live — snapshot persists the
+  // message but not the per-pause token; the WS open handler replays a
+  // fresh `approval_awaiting` to a reconnecting client so live has the
+  // current token by the time this merge runs.
   const winningAwaitingMessage =
     winningStatus === "awaiting"
       ? (liveSide.awaitingMessage ?? snapshotSide.awaitingMessage)
       : undefined;
+  const winningAwaitingPauseId =
+    winningStatus === "awaiting" ? liveSide.awaitingPauseId : undefined;
   return {
     ...snapshotSide,
     ...liveSide,
@@ -525,6 +590,7 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     thinkingText: liveSide.thinkingText || snapshotSide.thinkingText,
     logLines: winningLogs,
     awaitingMessage: winningAwaitingMessage,
+    awaitingPauseId: winningAwaitingPauseId,
   };
 }
 
@@ -649,6 +715,30 @@ function applyFrame(
             status: "awaiting",
             startedAt: base.startedAt ?? Date.now(),
             awaitingMessage: frame.message,
+            awaitingPauseId: frame.pauseId,
+          },
+        };
+      });
+      return;
+
+    case "approval_resolved":
+      // Clear the awaiting callout. For approval nodes the immediately-
+      // following `node_done` will set the terminal status; for interactive
+      // loops there is no `node_done` until the parent loop terminates, so
+      // flip to `running` to reflect that the loop continues iterating.
+      // Skip the flip for terminal nodes to defend against an out-of-order
+      // run_done arriving first.
+      setNodes((prev) => {
+        const base = prev[frame.nodeId];
+        if (!base) return prev;
+        if (NODE_TERMINAL_STATUSES.has(base.status)) return prev;
+        return {
+          ...prev,
+          [frame.nodeId]: {
+            ...base,
+            status: "running",
+            awaitingMessage: undefined,
+            awaitingPauseId: undefined,
           },
         };
       });

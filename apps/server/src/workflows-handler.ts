@@ -30,9 +30,11 @@ import {
 } from "@keelson/shared";
 import {
   type AwaitApproval,
+  type AwaitInteraction,
   bashHandler,
   createWorktree,
   type DagNode,
+  defaultRunUntilBashProbe,
   defaultWorktreeRoot,
   isGitRepo,
   type MemoryTools,
@@ -189,6 +191,17 @@ const placeholderPromptHandler: NodeHandler = {
 // onEvent → store.updateRunStatus("cancelled") write lands before db.close().
 export interface PendingApproval {
   nodeId: string;
+  // Per-pause token the client must echo back on POST /resume. Defends
+  // against stale POSTs (e.g. CLI retry, racy double-click) resolving a
+  // LATER pause for an interactive-loop node that reuses the same nodeId
+  // across iterations. Generated fresh every time a pause opens, so the
+  // pre-resume client never knows the next iteration's pauseId.
+  pauseId: string;
+  // Gate message stored at pause time so the WS open handler can replay
+  // `approval_awaiting` to a reconnecting client without re-reading the
+  // store (and so the replay carries the right pauseId; SQLite never sees
+  // the token).
+  message: string;
   resolve: (text: string) => void;
   reject: (err: Error) => void;
 }
@@ -745,6 +758,20 @@ export function workflowsRoutes(
       // a nodeId that isn't currently paused.
       return c.json({ error: `no pending approval for node '${parsed.data.nodeId}'` }, 409);
     }
+    // pauseId guard. Interactive loops reuse the same nodeId across
+    // iterations; a stale POST for iteration N (e.g. a CLI retry whose
+    // first attempt actually succeeded) would otherwise resolve
+    // iteration N+1 with the wrong text. When the client knows the
+    // pauseId, require it to match — otherwise accept and rely on the
+    // operator to know what they're doing (CLI default path).
+    if (parsed.data.pauseId !== undefined && parsed.data.pauseId !== pending.pauseId) {
+      return c.json(
+        {
+          error: `pauseId mismatch for node '${parsed.data.nodeId}' — the pause has advanced; refetch the run state and retry`,
+        },
+        409,
+      );
+    }
     // Flip the run status back to running BEFORE we hand the text to the
     // executor — otherwise the snapshot could briefly report 'paused' after
     // the handler has already started writing the next node's state.
@@ -808,8 +835,15 @@ export function handleWorkflowRunUpgrade(
 export function workflowRunWebSocketHandlers(deps: {
   subscribers: WorkflowSubscribers;
   store: WorkflowStore;
+  // Optional so existing call sites that don't track in-flight runs (early
+  // wiring, isolated tests) still work; production wires it from the
+  // composition root. When present, the open handler replays the live
+  // `approval_awaiting` frames so a reconnecting client gets the current
+  // pauseId — which the persisted snapshot row alone cannot carry, since
+  // the token only lives in memory.
+  activeRuns?: ActiveRuns;
 }): WebSocketHandler<WsData> {
-  const { subscribers, store } = deps;
+  const { subscribers, store, activeRuns } = deps;
 
   function sendTerminal(ws: ServerWebSocket<WsData>, status: WorkflowRunStatus): void {
     const frame: WorkflowFrame = { type: "run_done", status };
@@ -847,15 +881,38 @@ export function workflowRunWebSocketHandlers(deps: {
       }
       // `paused` is a non-terminal state too. The run is still in flight,
       // waiting on POST /resume; a late subscriber needs the WS open so the
-      // resumed node's `node_done` reaches them. Snapshot rehydration
-      // (handled in the hook) already paints the approval callout from
-      // `getWorkflowRun`, so we don't need to replay the approval_awaiting
-      // frame on reconnect.
+      // resumed node's `node_done` reaches them. Snapshot rehydration paints
+      // the awaiting message from `getWorkflowRun`, but the pauseId only
+      // lives in memory — replay live pending pauses below so a reconnecting
+      // client gets the current token (otherwise a submit with the prior
+      // iteration's pauseId hits 409).
       if (run.status !== "running" && run.status !== "paused") {
         sendTerminal(ws, run.status);
         return;
       }
       subscribers.subscribe(runId, ws);
+      // Replay any currently-open pauses so the reconnecting client has the
+      // live pauseId + the freshest gate message. Send DIRECTLY to this ws
+      // rather than via broadcast — other subscribers already received the
+      // frame at pause-open time and don't need a redundant copy.
+      if (activeRuns) {
+        const entry = activeRuns.get(runId);
+        if (entry) {
+          for (const pending of entry.pendingApprovals.values()) {
+            const frame: WorkflowFrame = {
+              type: "approval_awaiting",
+              nodeId: pending.nodeId,
+              message: pending.message,
+              pauseId: pending.pauseId,
+            };
+            try {
+              ws.send(JSON.stringify(frame));
+            } catch {
+              // socket may have closed mid-send; nothing to do
+            }
+          }
+        }
+      }
       // Narrow re-check: the run could have terminated between the store
       // lookup above and the subscribe call. The store update fires before
       // activeRuns clearing (see executeRunInBackground's finally), so a
@@ -1030,9 +1087,32 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // (or DELETE / abortAll) settles.
   const awaitApproval: AwaitApproval = (nodeRunId, nodeId, message, signal) =>
     new Promise<string>((resolve, reject) => {
+      const pauseId = crypto.randomUUID();
       const settle = {
         resolve: (text: string) => {
           cleanup();
+          // Drop the awaiting row at resolve time — symmetric with
+          // awaitInteraction. The subsequent `node_done` write recreates
+          // the row with the terminal status. Without this, a fresh
+          // hydrate triggered by `approval_resolved` could land in the
+          // brief window before node_done and pull the stale `awaiting`
+          // row back into the SPA via mergeNode's snapshot-awaiting-wins
+          // rule.
+          try {
+            store.deleteNodeOutput(nodeRunId, nodeId);
+          } catch (err) {
+            console.warn(
+              `[workflows] failed to clear awaiting row for ${nodeRunId}:${nodeId} after approval resume: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+          // Tell live clients the pause cleared. Approval nodes also emit
+          // `node_done` immediately after the handler returns, but live
+          // clients depend on this frame to clear the composer between
+          // settle and the executor's next write — the gap is short for
+          // approval, long for interactive-loop iterations.
+          subscribers.broadcast(nodeRunId, { type: "approval_resolved", nodeId });
           resolve(text);
         },
         reject: (err: Error) => {
@@ -1059,6 +1139,8 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       }
       pendingApprovals.set(nodeId, {
         nodeId,
+        pauseId,
+        message,
         resolve: settle.resolve,
         reject: settle.reject,
       });
@@ -1092,6 +1174,124 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
         type: "approval_awaiting",
         nodeId,
         message,
+        pauseId,
+      });
+    });
+
+  // Interactive-loop sibling of awaitApproval. Shares the pendingApprovals
+  // map (keyed by nodeId) so the existing POST /resume + DELETE abort drain
+  // paths handle both pause types without branching. The only persisted
+  // difference is the node's `outputText` (gate message) at the iteration
+  // boundary; iteration count / sessionId are forward-declared on
+  // ApprovalContext but only used in-memory for now — the SPA renders the
+  // pause through the same approval_awaiting frame.
+  //
+  // Unlike approval, the loop handler does NOT return after resume — it
+  // continues into the next iteration. So on settle.resolve we MUST flip
+  // the node row from 'awaiting' back to 'running' (preserving the
+  // original startedAt) before unblocking the executor. Otherwise a client
+  // that reloads or reconnects mid-iteration-N+1 would hydrate a paused
+  // callout for a node with no pending resolver, and POST /resume would
+  // return 409.
+  const awaitInteraction: AwaitInteraction = (
+    nodeRunId,
+    nodeId,
+    message,
+    _iteration,
+    _sessionId,
+    signal,
+  ) =>
+    new Promise<string>((resolve, reject) => {
+      const pauseId = crypto.randomUUID();
+      const settle = {
+        resolve: (text: string) => {
+          cleanup();
+          // Drop the awaiting snapshot so a reload during the next iteration
+          // doesn't rehydrate a stale pause callout. The node row will be
+          // re-created at terminal (succeeded/failed/skipped) by the
+          // executor's normal node_done write path; there is no "running"
+          // status in workflowNodeStatusSchema, so "no row" is the correct
+          // pre-terminal representation. Best-effort: a SQLite failure here
+          // mustn't block the executor from receiving the user's reply.
+          try {
+            store.deleteNodeOutput(nodeRunId, nodeId);
+          } catch (err) {
+            console.warn(
+              `[workflows] failed to clear awaiting row for ${nodeRunId}:${nodeId} after resume: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+          // Tell live clients the pause cleared. Without this frame, an
+          // open RunView keeps the composer active for the entire next
+          // iteration (could be minutes) and retries 409.
+          subscribers.broadcast(nodeRunId, { type: "approval_resolved", nodeId });
+          resolve(text);
+        },
+        reject: (err: Error) => {
+          cleanup();
+          reject(err);
+        },
+      };
+      const onAbort = () => {
+        settle.reject(new Error("aborted"));
+      };
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+        pendingApprovals.delete(nodeId);
+      };
+      if (signal.aborted) {
+        reject(new Error("aborted"));
+        return;
+      }
+      pendingApprovals.set(nodeId, {
+        nodeId,
+        pauseId,
+        message,
+        resolve: settle.resolve,
+        reject: settle.reject,
+      });
+      signal.addEventListener("abort", onAbort);
+
+      try {
+        store.updateRunStatus({
+          runId: nodeRunId,
+          status: "paused",
+          completedAt: null,
+          error: null,
+        });
+        // Preserve the iteration's streamed prompt output on the awaiting
+        // row — a reload mid-pause needs to surface what the agent said so
+        // the user has context to respond. Approval nodes don't stream
+        // content of their own so the accumulator is typically empty
+        // there, but the loop handler's synthesized prompt iterations
+        // emit through the SAME parent-node id (the iteration suffix is
+        // an internal handle), so the loop node's accumulator is what's
+        // populated by the time the pause opens.
+        const acc = nodeAccumulators.get(nodeId);
+        const parts: ContentBlock[] | null = acc && acc.parts().length > 0 ? acc.parts() : null;
+        store.upsertNodeOutput({
+          runId: nodeRunId,
+          nodeId,
+          status: "awaiting",
+          outputText: message,
+          contentParts: parts,
+          startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
+          completedAt: null,
+          error: null,
+        });
+      } catch (err) {
+        console.warn(
+          `[workflows] failed to persist interactive-loop paused state for ${nodeRunId}:${nodeId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      subscribers.broadcast(nodeRunId, {
+        type: "approval_awaiting",
+        nodeId,
+        message,
+        pauseId,
       });
     });
 
@@ -1122,7 +1322,14 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     ["approval", makeApprovalHandler({ awaitApproval })],
     ["cancel", makeCancelHandler({ requestCancel })],
     ["command", makeCommandHandler({ promptHandler })],
-    ["loop", makeLoopHandler({ promptHandler })],
+    [
+      "loop",
+      makeLoopHandler({
+        promptHandler,
+        awaitInteraction,
+        runUntilBashProbe: defaultRunUntilBashProbe,
+      }),
+    ],
     ["script", makeScriptHandler()],
   ]);
 

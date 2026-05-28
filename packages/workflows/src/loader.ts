@@ -194,30 +194,6 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
     });
   }
 
-  // Interactive loops tie into the metadata-approval flow and are not yet
-  // wired in this engine. Flag at load so the user sees it before run.
-  if (isLoopNode(node) && node.loop.interactive === true) {
-    ctx.warnings.push({
-      filename: ctx.filename,
-      nodeId: node.id,
-      kind: "ignored_capability",
-      message: `'loop.interactive' is not yet supported in this engine; this node will fail at runtime`,
-    });
-  }
-
-  // `loop.until_bash` (per-iteration shell completion probe) is in the
-  // vendored schema but not yet implemented. Without an explicit warning, a
-  // workflow that relies on the bash check would silently keep iterating
-  // until the text `until` signal or max-iteration cap fires.
-  if (isLoopNode(node) && typeof node.loop.until_bash === "string") {
-    ctx.warnings.push({
-      filename: ctx.filename,
-      nodeId: node.id,
-      kind: "ignored_capability",
-      message: `'loop.until_bash' is not yet supported in this engine; this node will fail at runtime`,
-    });
-  }
-
   return node;
 }
 
@@ -658,7 +634,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         filename,
         kind: "interactive_loop_in_non_interactive_workflow",
         message:
-          "workflow has an interactive loop but is not marked top-level interactive — gate messages will not pause for input",
+          "workflow has an interactive loop but is not marked top-level interactive — those loops will fail at runtime unless workflow-level 'interactive: true' is set",
       });
     }
   }

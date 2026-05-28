@@ -28,6 +28,19 @@ export type AwaitApproval = (
   abortSignal: AbortSignal,
 ) => Promise<string>;
 
+// Interactive-loop sibling of AwaitApproval. Same Promise<string> / abort
+// semantics, plus the per-iteration metadata the route needs to populate the
+// half-wired ApprovalContext fields (type / iteration / sessionId) and any
+// future UI that wants to render "iteration N of M" alongside the gate.
+export type AwaitInteraction = (
+  runId: string,
+  nodeId: string,
+  message: string,
+  iteration: number,
+  sessionId: string | undefined,
+  abortSignal: AbortSignal,
+) => Promise<string>;
+
 export interface MakeApprovalHandlerOptions {
   awaitApproval: AwaitApproval;
 }
