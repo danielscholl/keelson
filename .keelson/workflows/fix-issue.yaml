@@ -5,12 +5,9 @@
 # loops — interactive loops are not yet supported, so a single approval
 # gate replaces the chat-style plan-refinement iterations).
 #
-# Provider is pinned to `copilot`. Models chosen from the curated set
-# the Copilot factory advertises:
-#   - gpt-5            — investigation, implementation, code review, validation fixes
-#   - gpt-4o           — fast classifiers behind `output_format`
-#   - claude-sonnet-4.5 — structured plan authoring
-#   - auto             — Copilot's own routing for everything else
+# Provider is pinned to `copilot`. Models in play:
+#   - gpt-5  — workflow-level default; every heavy node inherits it
+#   - auto   — explicit override on light classifier / extractor / report nodes
 
 name: fix-issue
 provider: copilot
