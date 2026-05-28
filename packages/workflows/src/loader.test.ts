@@ -231,26 +231,41 @@ nodes:
     ).toBe(false);
   });
 
-  test("provider_specific_capability warning fires when a prompt node uses claude-only fields", () => {
+  test("provider_specific_capability warning fires for hooks (only partially portable to copilot)", () => {
     const yaml = `
-name: claude-only-fields
-description: uses allowed_tools + hooks
+name: hooks-field
+description: uses hooks
 nodes:
   - id: a
     prompt: hi
-    allowed_tools: [Read]
     hooks:
       PreToolUse:
         - matcher: Bash
           response: { decision: deny }
 `;
-    const result = parseWorkflow(yaml, "claude-only.yaml");
+    const result = parseWorkflow(yaml, "hooks-field.yaml");
     expect(result.error).toBeNull();
     const warning = result.warnings.find((w) => w.kind === "provider_specific_capability");
     expect(warning).toBeDefined();
-    expect(warning!.message).toContain("allowed_tools");
     expect(warning!.message).toContain("hooks");
     expect(warning!.message).toContain("claude");
+  });
+
+  test("provider_specific_capability is NOT emitted for allowed_tools / denied_tools (both providers enforce)", () => {
+    const yaml = `
+name: tool-rails
+description: uses allowed_tools + denied_tools
+nodes:
+  - id: a
+    prompt: hi
+    allowed_tools: [Read, Glob, Grep]
+  - id: b
+    prompt: hi again
+    denied_tools: [Write]
+`;
+    const result = parseWorkflow(yaml, "tool-rails.yaml");
+    expect(result.error).toBeNull();
+    expect(result.warnings.some((w) => w.kind === "provider_specific_capability")).toBe(false);
   });
 
   test("provider_specific_capability is NOT emitted for nodes without claude-only fields", () => {

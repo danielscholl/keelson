@@ -1,14 +1,17 @@
 # Architectural sweep workflow — DAG of measure → analyze → plan → simplify →
 # validate → fix → revalidate → create-pr.
 #
-# Honored by Keelson's claude provider — when KEELSON_WORKFLOW_PROVIDER=claude:
-#   - allowed_tools / denied_tools         — per-node SDK whitelist/blacklist
-#   - hooks: PostToolUse / PreToolUse      — projected into the SDK hook protocol
+# Per-node rails honored at runtime:
+#   - allowed_tools / denied_tools         — claude gates by tool name; copilot
+#                                            gates the underlying capability
+#                                            (read / write / shell / …)
+#   - hooks: PreToolUse / PostToolUse      — projected into each provider's hook
+#                                            protocol (other hook events are
+#                                            claude-only)
 #   - $ARTIFACTS_DIR / $KEELSON_ARTIFACTS_DIR — per-run scratch dir under $TMPDIR
 #
-# Under stub / copilot the loader emits a `provider_specific_capability`
-# warning and the prompt handler bubbles a `run_warning` per node — the
-# fields silently no-op there.
+# Under stub the loader emits a `provider_specific_capability` warning and the
+# prompt handler bubbles a `run_warning` — the fields silently no-op there.
 
 name: architect
 description: |
@@ -75,9 +78,9 @@ nodes:
 
   # ═══════════════════════════════════════════════════════════════
   # PHASE 2: ANALYZE
-  # Read through hotspots with an architectural lens. `denied_tools`
-  # restricts the SDK's tool catalog (claude only); `context: fresh` is
-  # still a no-op (Phase 4.5 will use it).
+  # Read through hotspots with an architectural lens. `allowed_tools`
+  # restricts the SDK's tool catalog (claude by name, copilot by capability);
+  # `context: fresh` is still a no-op (Phase 4.5 will use it).
   # ═══════════════════════════════════════════════════════════════
 
   - id: analyze
@@ -140,7 +143,7 @@ nodes:
   # ═══════════════════════════════════════════════════════════════
   # PHASE 3: PLAN
   # Prioritize and scope the changes — pure reasoning, with Read as the
-  # only tool available to the SDK (claude only).
+  # only tool available to the SDK (claude by name, copilot by capability).
   # ═══════════════════════════════════════════════════════════════
 
   - id: plan

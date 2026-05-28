@@ -209,14 +209,29 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         const providerType = opts.getProvider(effectiveProviderId).getType?.();
         if (providerType !== undefined && providerType !== "claude") {
           const usedFields: string[] = [];
-          if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
-          if (nodeDenied !== undefined) usedFields.push("denied_tools");
-          if (nodeHooks !== undefined) usedFields.push("hooks");
-          if (usedFields.length > 0) {
-            ctx.emit({
-              type: "node_warning",
-              message: `Provider '${providerType}' does not enforce per-node ${usedFields.join(", ")} — these will silently no-op.`,
-            });
+          if (providerType === "copilot") {
+            // copilot enforces allowed_tools / denied_tools (by capability) and
+            // PreToolUse / PostToolUse hooks; only the other hook events no-op.
+            const unsupportedHookEvents =
+              nodeHooks === undefined
+                ? []
+                : Object.keys(nodeHooks).filter((e) => e !== "PreToolUse" && e !== "PostToolUse");
+            if (unsupportedHookEvents.length > 0) {
+              ctx.emit({
+                type: "node_warning",
+                message: `Provider 'copilot' enforces only PreToolUse / PostToolUse hooks — these events will silently no-op: ${unsupportedHookEvents.join(", ")}.`,
+              });
+            }
+          } else {
+            if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
+            if (nodeDenied !== undefined) usedFields.push("denied_tools");
+            if (nodeHooks !== undefined) usedFields.push("hooks");
+            if (usedFields.length > 0) {
+              ctx.emit({
+                type: "node_warning",
+                message: `Provider '${providerType}' does not enforce per-node ${usedFields.join(", ")} — these will silently no-op.`,
+              });
+            }
           }
         }
       } catch {

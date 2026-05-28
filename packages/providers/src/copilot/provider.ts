@@ -24,6 +24,8 @@ import {
   type CopilotToolProjectionContext,
   projectToolsForCopilot,
 } from "./factory.ts";
+import { buildCopilotSessionHooks } from "./hooks-shim.ts";
+import { buildPermissionGate } from "./permission-gate.ts";
 
 export const COPILOT_CREDENTIAL_SERVICE_ID = "copilot" as const;
 
@@ -356,12 +358,70 @@ function buildSessionConfig(
   if (options?.reasoningEffort) {
     config.reasoningEffort = options.reasoningEffort;
   }
-  // Empty arrays still forward (lets a caller explicitly disable inherited
-  // tools); only the absent case omits the field.
+  // Apply the same allow/deny rail to the projected custom tools so the
+  // provider enforces its own contract (`allowedTools: []` ⇒ no tools) rather
+  // than relying on the workflow handler's prefiltering. Built-in tools are
+  // gated separately via the permission handler below.
   if (options?.tools && options.tools.length > 0) {
-    config.tools = projectToolsForCopilot(options.tools, toolProjection);
+    const railed = filterToolsByRail(
+      options.tools,
+      options?.allowedTools,
+      options?.disallowedTools,
+    );
+    if (railed.length > 0) {
+      config.tools = projectToolsForCopilot(railed, toolProjection);
+    }
+  }
+  // Per-node `allowed_tools` / `denied_tools` gate the SDK's BUILT-IN tools
+  // (custom/rib tools are already filtered upstream). The permission handler
+  // only sees a coarse capability `kind`, so the rail is enforced there; with
+  // no rails set we pass the bare approveAll through unchanged.
+  if (options?.allowedTools !== undefined || options?.disallowedTools !== undefined) {
+    config.onPermissionRequest = buildPermissionGate({
+      approveAll: permissionHandler,
+      ...(options.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),
+      ...(options.disallowedTools !== undefined
+        ? { disallowedTools: options.disallowedTools }
+        : {}),
+    });
+  }
+  // Project per-node PreToolUse / PostToolUse matchers onto the SDK's native
+  // hooks. Other hook events have no Copilot equivalent and stay claude-only.
+  if (options?.hooks !== undefined) {
+    const sessionHooks = buildCopilotSessionHooks(options.hooks);
+    if (sessionHooks !== undefined) config.hooks = sessionHooks;
   }
   return config;
+}
+
+// MCP-projected tools register as `mcp__<server>__<tool>`; allow/deny lists may
+// use either the bare or qualified form. Strip the wrapper so both match — the
+// server segment is consumed up to the next `__` (mirrors the workflow handler).
+function stripMcpPrefix(name: string): string {
+  if (!name.startsWith("mcp__")) return name;
+  const serverEnd = name.indexOf("__", 5);
+  if (serverEnd < 0) return name;
+  return name.slice(serverEnd + 2);
+}
+
+// Intersect the projected tool list with `allowedTools` and subtract
+// `disallowedTools`, comparing on bare names. An empty `allowedTools` yields no
+// tools, satisfying the documented "no tools" contract.
+function filterToolsByRail<T extends { name: string }>(
+  tools: T[],
+  allowedTools: readonly string[] | undefined,
+  disallowedTools: readonly string[] | undefined,
+): T[] {
+  let result = tools;
+  if (allowedTools !== undefined) {
+    const allow = new Set(allowedTools.map(stripMcpPrefix));
+    result = result.filter((t) => allow.has(stripMcpPrefix(t.name)));
+  }
+  if (disallowedTools !== undefined) {
+    const deny = new Set(disallowedTools.map(stripMcpPrefix));
+    result = result.filter((t) => !deny.has(stripMcpPrefix(t.name)));
+  }
+  return result;
 }
 
 function readString(event: unknown, key: string): string | undefined {
