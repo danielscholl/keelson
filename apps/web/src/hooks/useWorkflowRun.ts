@@ -375,6 +375,15 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
         // snapshot-awaiting-wins rule. Bumping the generation invalidates
         // any in-flight stale fetch, and the fresh hydrate confirms the
         // post-resume state.
+        //
+        // `approval_awaiting` invalidates without re-fetching: a hydrate
+        // started BEFORE the pause opened could land with snapshot.pending
+        // for this node, and mergeNode's "snapshot.pending + live.awaiting"
+        // rule would otherwise drop the freshly-received pause. The live
+        // frame already carries everything we need; no second fetch.
+        if (frame.type === "approval_awaiting") {
+          openGenRef.current++;
+        }
         const shouldRehydrateAfter =
           frame.type === "node_done"
             ? isLiveNodeEmpty(latestNodesRef.current[frame.nodeId])
