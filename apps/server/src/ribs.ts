@@ -9,14 +9,14 @@
 /**
  * Rib loader.
  *
- * Keelson core ships with no built-in ribs. Operators bring ribs in by
- * importing `@keelson/rib-<id>` packages at the composition root and
- * passing them to `bootstrapRibs({ available })`. `KEELSON_RIBS=<id>,...`
- * filters which manifest entries activate; unset means activate all.
+ * Keelson core ships with no built-in ribs. Operators install `@keelson/rib-*`
+ * packages, which `bootstrapRibs()` discovers from `node_modules/@keelson/` at
+ * boot. `KEELSON_RIBS=<id>,...` filters which discovered ribs activate; unset
+ * means activate all.
  *
- * Dynamic discovery from `node_modules/@keelson/rib-*` is reserved for a
- * follow-up release. Today the loader takes the manifest from the caller so
- * unit tests stay deterministic and there's no implicit filesystem walk.
+ * Callers may pass an explicit `bootstrapRibs({ available })` manifest to
+ * bypass discovery — unit tests use this so they stay deterministic with no
+ * implicit filesystem walk.
  */
 
 import {
