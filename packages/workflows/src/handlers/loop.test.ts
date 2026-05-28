@@ -735,6 +735,43 @@ describe("makeLoopHandler — AI passthrough", () => {
   });
 });
 
+describe("makeLoopHandler — output_format is filtered from iteration prompts", () => {
+  test("synthesized iteration node does NOT carry output_format from the loop node", async () => {
+    // Forcing JSON-only replies would mask the plain-text `until` signal the
+    // loop relies on for completion detection.
+    const seenNodes: Array<Record<string, unknown>> = [];
+    const promptHandler: NodeHandler = {
+      type: "prompt",
+      async handle(node): Promise<NodeResult> {
+        seenNodes.push(node as Record<string, unknown>);
+        return { status: "succeeded", output: { kind: "text", text: "DONE" } };
+      },
+    };
+    const node = {
+      id: "summarize",
+      model: "claude-sonnet-4-6",
+      output_format: {
+        type: "object",
+        required: ["kind"],
+        properties: { kind: { type: "string" } },
+      },
+      loop: {
+        prompt: "do work: $LOOP_PREV_OUTPUT",
+        until: "DONE",
+        max_iterations: 2,
+        fresh_context: false,
+      },
+    } as unknown as DagNode;
+    const handler = makeLoopHandler({ promptHandler });
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(seenNodes).toHaveLength(1);
+    expect("output_format" in seenNodes[0]).toBe(false);
+    // The model field should still come through — only output_format is filtered.
+    expect(seenNodes[0].model).toBe("claude-sonnet-4-6");
+  });
+});
+
 describe("makeLoopHandler — substitution in loop.prompt", () => {
   test("expands $ARGUMENTS / $inputs.* / $X.output before $LOOP_PREV_OUTPUT", async () => {
     const { handler: promptHandler, seen } = makeRecorderHandler(() => ({

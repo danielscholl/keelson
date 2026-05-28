@@ -122,13 +122,41 @@ nodes:
   # Decide which review lanes are worth running.
   # ─────────────────────────────────────────────────────────────────────────
 
-  # Classifier emits raw JSON because Keelson currently drops `output_format`
-  # at runtime. Downstream `when:` clauses read `$classify.output.<field>` —
-  # that helper JSON-parses the node's output and pulls the value.
+  # Booleans are typed as string enums "true"/"false" so the downstream
+  # `when:` clauses can compare against a quoted literal — substitute renders
+  # JSON booleans as unquoted `true`/`false`, which wouldn't match `== 'true'`.
   - id: classify
     depends_on: [scope]
     model: auto
     context: fresh
+    output_format:
+      type: object
+      required:
+        [
+          run_code_review,
+          run_error_handling,
+          run_test_coverage,
+          run_docs_impact,
+          complexity,
+          reasoning,
+        ]
+      properties:
+        run_code_review:
+          type: string
+          enum: ["true", "false"]
+        run_error_handling:
+          type: string
+          enum: ["true", "false"]
+        run_test_coverage:
+          type: string
+          enum: ["true", "false"]
+        run_docs_impact:
+          type: string
+          enum: ["true", "false"]
+        complexity:
+          type: string
+          enum: [trivial, small, medium, large]
+        reasoning: { type: string }
     prompt: |
       You are a PR review classifier. Decide which review lanes to run based on
       the scope below.
@@ -153,14 +181,6 @@ nodes:
       - **small**: 1-3 files, no architectural change
       - **medium**: 4-10 files, moderate logic change
       - **large**: 10+ files, architectural change, new subsystem
-
-      ## Output
-
-      Respond with ONLY a single-line JSON object. No prose, no code fences.
-      Every boolean must be the STRING "true" or "false" — not a JSON bool —
-      so the workflow's `when:` substitution sees a string. Schema:
-
-      {"run_code_review":"true","run_error_handling":"true","run_test_coverage":"true","run_docs_impact":"true","complexity":"small","reasoning":"..."}
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 3: REVIEW LANES (conditional, parallel)

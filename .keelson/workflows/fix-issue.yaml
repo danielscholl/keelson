@@ -71,13 +71,19 @@ nodes:
       echo "$ISSUE_NUM" > "$KEELSON_ARTIFACTS_DIR/.issue-number"
       gh issue view "$ISSUE_NUM" --json number,title,body,labels,comments,state,url,author
 
-  # Classifier emits raw JSON because Keelson currently drops `output_format`
-  # at runtime. The downstream `when:` clauses use `$classify.output.issue_type`
-  # — that helper JSON-parses the node's output text and pulls the field.
   - id: classify
     depends_on: [fetch-issue]
     model: auto
     context: fresh
+    output_format:
+      type: object
+      required: [issue_type, title, reasoning]
+      properties:
+        issue_type:
+          type: string
+          enum: [bug, feature, enhancement, refactor, chore, documentation]
+        title: { type: string }
+        reasoning: { type: string }
     prompt: |
       You are an issue classifier. Read the GitHub issue JSON below and label it.
 
@@ -95,13 +101,6 @@ nodes:
       | refactor      | "clean up", "simplify", "reorganize" |
       | chore         | "update deps", "upgrade", maintenance |
       | documentation | "docs", "readme", "clarify", "examples" |
-
-      ## Output
-
-      Respond with ONLY a single-line JSON object. No prose, no markdown
-      code fences. Schema:
-
-      {"issue_type":"bug|feature|enhancement|refactor|chore|documentation","title":"...","reasoning":"..."}
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 2: INVESTIGATE (bugs) OR PLAN (everything else)

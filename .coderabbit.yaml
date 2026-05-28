@@ -13,6 +13,7 @@ tone_instructions: >-
 
 reviews:
   poem: false
+  in_progress_fortune: false
 
   path_instructions:
     - path: "apps/server/**"

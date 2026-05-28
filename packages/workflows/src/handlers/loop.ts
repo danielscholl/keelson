@@ -208,6 +208,9 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
           id: `${node.id}#${String(i)}`,
           prompt: iterationPrompt,
         });
+        // Drop output_format on iteration prompts — JSON-only replies would
+        // mask the plain-text `until` signal the loop relies on.
+        delete (synthesized as { output_format?: unknown }).output_format;
 
         const iterCtx = {
           ...ctx,
