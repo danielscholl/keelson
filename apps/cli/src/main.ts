@@ -280,7 +280,10 @@ export function buildProgram(): Command {
     .option("--model <id>", "model id passed to the provider (default: provider default)")
     .option("--conversation <id>", "continue an existing conversation (server-up only)")
     .option("--thinking", "enable Claude extended thinking for this turn")
-    .option("--reasoning-effort <level>", "Copilot reasoning tier (low|medium|high|xhigh)")
+    .option(
+      "--reasoning-effort <level>",
+      `Copilot reasoning tier (${reasoningEffortLevelSchema.options.join("|")})`,
+    )
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .action(async function chatAction(
       this: Command,
@@ -316,7 +319,7 @@ export function buildProgram(): Command {
         if (!parsed.success) {
           emit(
             {
-              error: `invalid --reasoning-effort '${chatOpts.reasoningEffort}'; expected one of low|medium|high|xhigh`,
+              error: `invalid --reasoning-effort '${chatOpts.reasoningEffort}'; expected one of ${reasoningEffortLevelSchema.options.join("|")}`,
               code: "BAD_INPUTS",
             },
             { json },

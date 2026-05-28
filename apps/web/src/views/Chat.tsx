@@ -104,12 +104,15 @@ const TOOLS_POPOVER_ID = "chat-tools-popover";
 
 const DEFAULT_REASONING_EFFORT: ReasoningEffortLevel = "medium";
 
-// Lowest-to-highest order for fallback when a model narrows its accepted set.
+// Seed-preference order when a model narrows its accepted set. "none" (skip
+// reasoning) is last so the fallback prefers the lowest real reasoning tier;
+// we only auto-seed "none" when it's the sole tier a model offers.
 const CANONICAL_REASONING_LEVELS: readonly ReasoningEffortLevel[] = [
   "low",
   "medium",
   "high",
   "xhigh",
+  "none",
 ] as const;
 
 // Never leave an unsupported tier selected: `doSend` forwards whatever is in

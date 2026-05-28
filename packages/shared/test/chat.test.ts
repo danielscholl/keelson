@@ -211,6 +211,7 @@ describe("clientMessageSchema", () => {
   });
 
   it.each([
+    "none",
     "low",
     "medium",
     "high",
@@ -590,11 +591,11 @@ describe("modelInfoSchema", () => {
       id: "claude-sonnet-4.5",
       displayName: "Claude Sonnet 4.5",
       supports: { tools: true, reasoningEffort: true },
-      supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+      supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
       defaultReasoningEffort: "medium",
     });
     expect(info.supports?.reasoningEffort).toBe(true);
-    expect(info.supportedReasoningEfforts).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(info.supportedReasoningEfforts).toEqual(["none", "low", "medium", "high", "xhigh"]);
     expect(info.defaultReasoningEffort).toBe("medium");
   });
 
