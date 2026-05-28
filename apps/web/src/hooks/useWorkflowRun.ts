@@ -300,6 +300,11 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   useEffect(() => {
     latestNodesRef.current = nodes;
   }, [nodes]);
+  // Lifts the per-runId `hydrate` function out of the WS effect so the
+  // `resume` callback can trigger a fresh fetch when it observes a stale
+  // pauseId. Stays null until the WS effect installs one for the active
+  // runId (then nulled again on unmount / runId change).
+  const hydrateRef = useRef<((gen: number) => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (!runId) {
@@ -313,7 +318,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
     setRun({ runId, status: "loading", warnings: [] });
     setNodes({});
 
-    const hydrate = async (gen: number) => {
+    const hydrate = async (gen: number): Promise<void> => {
       try {
         const snapshot = await getWorkflowRun(runId);
         if (cancelled || gen !== openGenRef.current) return;
@@ -355,6 +360,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
 
     // Initial hydrate while WS connects in parallel — paints fast and
     // catches up post-WS-open via the onStateChange handler below.
+    hydrateRef.current = hydrate;
     const initialGen = ++openGenRef.current;
     void hydrate(initialGen);
 
@@ -424,6 +430,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
 
     return () => {
       cancelled = true;
+      hydrateRef.current = null;
       handle.close();
     };
   }, [runId]);
@@ -450,7 +457,12 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
         await submitApproval(runId, nodeId, text, pauseId);
       } catch (err) {
         if (err instanceof StalePauseError) {
-          openGenRef.current++;
+          // Invalidate any in-flight hydrate AND schedule a fresh one so
+          // the UI picks up the current pauseId — without the replacement
+          // fetch the awaiting state stays bound to the now-rejected
+          // token, and every retry keeps hitting 409.
+          const gen = ++openGenRef.current;
+          if (hydrateRef.current) void hydrateRef.current(gen);
         }
         throw err;
       }
