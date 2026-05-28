@@ -50,7 +50,7 @@ Ribs ship as their own packages and repos:
 | GitHub repo | `keelson-rib-<name>` (e.g., `keelson-rib-osdu`) |
 | npm package | `@keelson/rib-<name>` |
 | TypeScript contract | `Rib` interface from `@keelson/shared` |
-| Activation | embedder-wired manifest, filtered by `KEELSON_RIBS` |
+| Activation | discovered from `node_modules/@keelson/`, filtered by `KEELSON_RIBS` |
 
 No ribs ship in-tree — the harness is the deliverable. Install any
 `@keelson/rib-*` package as a dependency and the server discovers it from

@@ -22,11 +22,11 @@ import { z } from "zod";
  *   - GitHub: `keelson-rib-<name>`
  *   - path:   `packages/rib-<name>/` (in-tree, when bundled)
  *
- * Activation is embedder-wired: the composition root imports the rib package
- * and passes it to `bootstrapRibs({ available })`. The `KEELSON_RIBS` env var
- * (comma-separated) filters which manifest entries actually activate; unset
- * means activate all of them. Dynamic discovery from
- * `node_modules/@keelson/rib-*` is reserved for a follow-up release.
+ * Activation: `bootstrapRibs()` discovers installed `@keelson/rib-*` packages
+ * from `node_modules/@keelson/` at boot; embedders can bypass discovery by
+ * passing an explicit `bootstrapRibs({ available })` map. The `KEELSON_RIBS`
+ * env var (comma-separated) filters which discovered ribs actually activate;
+ * unset means activate all of them.
  */
 
 // Rib IDs cross process boundaries via the KEELSON_RIBS env var and the

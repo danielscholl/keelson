@@ -39,7 +39,7 @@ Keelson is a **local-only agent harness**, not a hosted service. The harness is 
 - `packages/providers/` — pluggable coding-agent SDKs behind `IAgentProvider` (Copilot, Claude, stub).
 - `.keelson/` — runtime data home: `keelson.db` (SQLite), `workflows/`, `commands/`.
 
-**Rib activation is embedder-wired today (v0.3).** No in-tree ribs ship; no dynamic discovery yet. To activate a rib, edit `apps/server/src/index.ts` to import it and hand it to `bootstrapRibs({ available: { id: rib } })`. `KEELSON_RIBS=<id1>,<id2>` filters which manifest entries activate (unset = all). Dynamic discovery from `node_modules/@keelson/rib-*` is tracked for v0.4 in issue #4.
+**Rib activation is discovery-based.** No in-tree ribs ship. `bootstrapRibs()` discovers installed `@keelson/rib-*` packages from `node_modules/@keelson/` at boot (`apps/server/src/rib-discovery.ts`); `bun add @keelson/rib-osdu` is enough to wire one in. `KEELSON_RIBS=<id1>,<id2>` filters which discovered ribs activate (unset = all). Embedders can bypass discovery by handing `bootstrapRibs({ available: { id: rib } })` an explicit map — the path tests use.
 
 **State.** SQLite (sessions, runs, node outputs, memory rows) + keytar (credentials). Schema migrations live in `apps/server/src/db/migrations.ts`; `keelson doctor` checks `schema_version` matches.
 
