@@ -13,6 +13,7 @@ import { basename, join } from "node:path";
 
 import {
   createWorktree,
+  gitToplevel,
   isGitRepo,
   listWorktrees,
   NotAGitRepoError,
@@ -97,6 +98,21 @@ describe("isGitRepo", () => {
 
   test("returns false for a non-existent path", async () => {
     expect(await isGitRepo(join(tmp, "ghost"))).toBe(false);
+  });
+});
+
+describe("gitToplevel", () => {
+  test("resolves the repo root from a nested subdirectory", async () => {
+    await initRepo(tmp);
+    const sub = join(tmp, "a", "b");
+    mkdirSync(sub, { recursive: true });
+    expect(await gitToplevel(sub)).toBe(await gitToplevel(tmp));
+    // Functional anchor: the resolved root is a real work tree.
+    expect(await isGitRepo((await gitToplevel(sub))!)).toBe(true);
+  });
+
+  test("returns null for a plain directory", async () => {
+    expect(await gitToplevel(tmp)).toBeNull();
   });
 });
 

@@ -99,6 +99,19 @@ export async function isGitRepo(path: string): Promise<boolean> {
   return out.exitCode === 0 && out.stdout.trim() === "true";
 }
 
+/**
+ * Absolute path of the work tree's top-level directory, or null when `path`
+ * isn't inside a repo. Lets callers anchor repo-local worktrees at the repo
+ * root even when invoked from a nested subdirectory.
+ */
+export async function gitToplevel(path: string): Promise<string | null> {
+  if (!existsSync(path)) return null;
+  const out = await runGit(["rev-parse", "--show-toplevel"], path);
+  if (out.exitCode !== 0) return null;
+  const top = out.stdout.trim();
+  return top.length > 0 ? top : null;
+}
+
 export interface CreateWorktreeOptions {
   /** Source repo (project's root path). */
   repoPath: string;

@@ -94,6 +94,7 @@ export {
   type CreateWorktreeOptions,
   type CreateWorktreeResult,
   createWorktree,
+  gitToplevel,
   isGitRepo,
   listWorktrees,
   NotAGitRepoError,

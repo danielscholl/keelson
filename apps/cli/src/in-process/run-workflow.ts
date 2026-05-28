@@ -13,6 +13,7 @@ import {
   createWorktree,
   defaultRunUntilBashProbe,
   discoverWorkflows,
+  gitToplevel,
   isGitRepo,
   makeApprovalHandler,
   makeCancelHandler,
@@ -241,14 +242,19 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         workflow: workflow.name,
         runId,
       });
+      // Anchor at the repo top-level, not opts.cwd: a run started from a
+      // subdirectory must still place its worktree at `<repo>/.worktrees/` so a
+      // kept-on-failure worktree lands where it's discoverable, not orphaned
+      // under the subdir.
+      const repoRoot = (await gitToplevel(opts.cwd)) ?? opts.cwd;
       const dest = worktreePathForRepoLocal({
-        projectRootPath: opts.cwd,
+        projectRootPath: repoRoot,
         branch,
       });
       try {
-        const created = await createWorktree({ repoPath: opts.cwd, branch, dest });
+        const created = await createWorktree({ repoPath: repoRoot, branch, dest });
         effectiveCwd = created.worktreePath;
-        cleanupWorktree = { repoPath: opts.cwd, dest: created.worktreePath };
+        cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (isolationRequired) {
