@@ -31,7 +31,8 @@ const ALLOW_LIST: ReadonlyArray<{ readonly file: string; readonly reason: string
   { file: "README.md", reason: "References the Archon GitHub URL in the license footer" },
   {
     file: ".keelson/workflows/fix-issue.yaml",
-    reason: "Ported from Archon's archon-piv-loop + archon-fix-github-issue (MIT) — header credits upstream",
+    reason:
+      "Ported from Archon's archon-piv-loop + archon-fix-github-issue (MIT) — header credits upstream",
   },
   {
     file: ".keelson/workflows/pr-review.yaml",
