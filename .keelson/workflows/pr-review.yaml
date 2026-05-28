@@ -1,0 +1,338 @@
+# Smart PR review. Concept ported from Archon's archon-smart-pr-review
+# (MIT, see NOTICE), but rewritten as a self-contained DAG that uses only
+# Copilot models and Keelson's supported node types — no `command:` refs,
+# no `mcp:` blocks (notification is a stretch goal).
+#
+# Read-only: the review nodes run with no write tools and the only side
+# effect on the PR is a single `gh pr comment` at the end.
+
+name: pr-review
+description: |
+  Use when: User wants a smart, scoped code review of an existing GitHub PR
+            that adapts to the PR's complexity and posts the synthesis as a
+            PR comment.
+  Triggers: "review pr", "review #123", "smart pr review", "review this pr",
+            "code review pr".
+  Does: Fetches PR scope -> classifies complexity and which review lanes are
+        relevant -> runs only those lanes (code review always, plus error
+        handling / test coverage / docs impact when applicable) ->
+        synthesizes findings -> posts the synthesis as a PR comment.
+  NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
+
+# Run with the Copilot provider — Keelson's loader rejects `provider: copilot`
+# in YAML, so pick it at the runtime layer instead:
+#   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run pr-review "review #42"
+
+nodes:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 1: SCOPE
+  # Resolve the PR number, capture the diff scope, and persist a short
+  # markdown brief to $ARTIFACTS_DIR/scope.md that every downstream lane
+  # reads. Bash so we don't burn AI tokens on a `gh` call.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: extract-pr
+    model: gpt-4o
+    prompt: |
+      Find the GitHub PR number for this request.
+
+      Request: $ARGUMENTS
+
+      Rules:
+      - If the message contains an explicit PR number ("#42", "PR 42", "42"),
+        extract it.
+      - If the message is ambiguous, return the literal string CURRENT — the
+        next node will resolve it from the current branch.
+
+      CRITICAL: Output ONLY the bare integer, or the literal CURRENT. No quotes,
+      no markdown, no explanation.
+
+  - id: scope
+    depends_on: [extract-pr]
+    bash: |
+      set -euo pipefail
+      RAW=$(printf '%s' "$KEELSON_NODE_extract_pr_OUTPUT" | tr -d "'\"\`\n " )
+
+      if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
+        # Resolve from the current branch.
+        PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
+      else
+        PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
+      fi
+
+      if [ -z "$PR_NUM" ]; then
+        echo "Could not resolve a PR number — pass one like 'review pr 42' or run from a PR branch." >&2
+        exit 1
+      fi
+
+      echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
+      gh pr view "$PR_NUM" --json number,title,body,baseRefName,headRefName,author,labels,state,url > "$KEELSON_ARTIFACTS_DIR/pr.json"
+
+      BASE=$(jq -r '.baseRefName' "$KEELSON_ARTIFACTS_DIR/pr.json")
+      HEAD=$(jq -r '.headRefName' "$KEELSON_ARTIFACTS_DIR/pr.json")
+
+      # Make sure we have the base branch locally for diff comparison.
+      git fetch origin "$BASE" --quiet 2>/dev/null || true
+
+      DIFF_STAT=$(gh pr diff "$PR_NUM" --name-only 2>/dev/null || true)
+      DIFF_BODY=$(gh pr diff "$PR_NUM" 2>/dev/null || true)
+
+      printf '%s\n' "$DIFF_STAT" > "$KEELSON_ARTIFACTS_DIR/changed-files.txt"
+      printf '%s\n' "$DIFF_BODY" > "$KEELSON_ARTIFACTS_DIR/diff.patch"
+
+      FILE_COUNT=$(printf '%s\n' "$DIFF_STAT" | grep -c . || echo 0)
+      LINE_COUNT=$(printf '%s\n' "$DIFF_BODY" | wc -l | tr -d ' ')
+
+      cat > "$KEELSON_ARTIFACTS_DIR/scope.md" <<EOF
+      # PR #${PR_NUM} scope
+
+      - Title: $(jq -r '.title' "$KEELSON_ARTIFACTS_DIR/pr.json")
+      - Author: $(jq -r '.author.login' "$KEELSON_ARTIFACTS_DIR/pr.json")
+      - Base → Head: ${BASE} ← ${HEAD}
+      - Files changed: ${FILE_COUNT}
+      - Diff lines: ${LINE_COUNT}
+      - URL: $(jq -r '.url' "$KEELSON_ARTIFACTS_DIR/pr.json")
+
+      ## Changed files
+
+      \`\`\`
+      ${DIFF_STAT}
+      \`\`\`
+      EOF
+
+      echo "PR_NUMBER=${PR_NUM}"
+      echo "FILE_COUNT=${FILE_COUNT}"
+      echo "LINE_COUNT=${LINE_COUNT}"
+      echo ""
+      cat "$KEELSON_ARTIFACTS_DIR/scope.md"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 2: CLASSIFY
+  # Decide which review lanes are worth running.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # Classifier emits raw JSON because Keelson currently drops `output_format`
+  # at runtime. Downstream `when:` clauses read `$classify.output.<field>` —
+  # that helper JSON-parses the node's output and pulls the value.
+  - id: classify
+    depends_on: [scope]
+    model: gpt-4o
+    context: fresh
+    prompt: |
+      You are a PR review classifier. Decide which review lanes to run based on
+      the scope below.
+
+      ## Scope
+
+      $scope.output
+
+      ## Rules
+
+      - **Code review**: always run UNLESS the diff is empty or only touches
+        non-code files (README only, .yaml only, license).
+      - **Error handling**: run if the diff touches code with try/catch, error
+        handling, async/await, or adds new failure paths.
+      - **Test coverage**: run if the diff touches source code (i.e. anything
+        other than tests / docs / config).
+      - **Docs impact**: run if the diff adds, removes, or renames public
+        APIs, CLI flags, env vars, or user-facing features.
+
+      Pick a complexity bucket from the file count and diff size in the scope:
+      - **trivial**: typo / format / version bump / single-line
+      - **small**: 1-3 files, no architectural change
+      - **medium**: 4-10 files, moderate logic change
+      - **large**: 10+ files, architectural change, new subsystem
+
+      ## Output
+
+      Respond with ONLY a single-line JSON object. No prose, no code fences.
+      Every boolean must be the STRING "true" or "false" — not a JSON bool —
+      so the workflow's `when:` substitution sees a string. Schema:
+
+      {"run_code_review":"true","run_error_handling":"true","run_test_coverage":"true","run_docs_impact":"true","complexity":"small","reasoning":"..."}
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 3: REVIEW LANES (conditional, parallel)
+  # Each lane reads `$ARTIFACTS_DIR/diff.patch` directly so they don't
+  # collide on the same prompt context.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: code-review
+    depends_on: [classify]
+    when: "$classify.output.run_code_review == 'true'"
+    model: gpt-5
+    context: fresh
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      You are a senior reviewer. Do a correctness-and-conventions pass on the
+      PR diff at `$ARTIFACTS_DIR/diff.patch`.
+
+      ## Scope
+
+      $scope.output
+
+      ## Instructions
+
+      1. Read `CLAUDE.md` for project conventions before reading the diff.
+      2. Read the diff patch file. For each hunk worth flagging, write one finding.
+      3. Look for: correctness bugs, race conditions, missing input validation,
+         dead code, broken invariants, naming inconsistencies, CLAUDE.md drift.
+      4. Skip anything stylistic that Biome / TS will catch on its own.
+
+      ## Output
+
+      Markdown list. Each finding:
+      - `path:line` — `severity` (CRITICAL | HIGH | MEDIUM | LOW)
+      - **What**: one sentence
+      - **Why it matters**: one sentence
+      - **Suggested fix**: one or two lines, code where useful
+
+  - id: error-handling
+    depends_on: [classify]
+    when: "$classify.output.run_error_handling == 'true'"
+    model: gpt-5
+    context: fresh
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      Audit the error-handling story of the PR.
+
+      ## Scope
+
+      $scope.output
+
+      ## Instructions
+
+      Read `$ARTIFACTS_DIR/diff.patch`. For each new or modified failure path:
+      - Is the error caught at the right boundary?
+      - Is the error message actionable for the operator?
+      - Does the caller learn enough to recover (or fail loudly)?
+      - Are any `catch` blocks swallowing errors silently?
+      - Are promise rejections / async stack traces preserved?
+
+      ## Output
+
+      Same finding shape as the code review (path:line, severity, what, why, fix).
+      If the diff has no new error paths worth flagging, say so in one line.
+
+  - id: test-coverage
+    depends_on: [classify]
+    when: "$classify.output.run_test_coverage == 'true'"
+    model: gpt-5
+    context: fresh
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      Audit test coverage for the PR.
+
+      ## Scope
+
+      $scope.output
+
+      ## Instructions
+
+      1. Read `$ARTIFACTS_DIR/changed-files.txt`. Separate source files from
+         test files.
+      2. For every source file that changed, check whether a corresponding test
+         file was touched in the same PR.
+      3. For each newly-added branch / condition in the source, verify a test
+         exercises it. If not, flag it.
+      4. Don't demand tests for trivial pass-throughs or pure type changes.
+
+      ## Output
+
+      Same finding shape (path:line, severity, what, why, fix). Tag missing
+      tests with severity HIGH if the new code can branch on bad input or
+      external state; MEDIUM otherwise.
+
+  - id: docs-impact
+    depends_on: [classify]
+    when: "$classify.output.run_docs_impact == 'true'"
+    model: gpt-4o
+    context: fresh
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      Audit user-facing documentation impact for the PR.
+
+      ## Scope
+
+      $scope.output
+
+      ## Instructions
+
+      Read `$ARTIFACTS_DIR/diff.patch`. For each:
+      - Added / removed / renamed CLI flag, env var, command, or public API
+      - Behavior change visible to a human operator
+
+      Check whether `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, or other
+      user-facing docs were updated in the same PR. If not, flag it.
+
+      ## Output
+
+      Same finding shape (path:line, severity, what, why, fix). Skip if the
+      diff has no user-facing surface change.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 4: SYNTHESIZE
+  # Pull every lane that ran into one operator-readable report.
+  # `trigger_rule: one_success` so we proceed even if a conditional lane was
+  # skipped or one lane failed.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: synthesize
+    depends_on: [code-review, error-handling, test-coverage, docs-impact]
+    trigger_rule: one_success
+    model: gpt-5
+    context: fresh
+    prompt: |
+      Synthesize the review lanes into a single PR-comment-ready report.
+
+      ## Inputs
+
+      - Scope: $scope.output
+      - Classification: $classify.output
+
+      - Code review: $code-review.output
+      - Error handling: $error-handling.output
+      - Test coverage: $test-coverage.output
+      - Docs impact: $docs-impact.output
+
+      ## Output
+
+      Markdown — this is what gets posted as the PR comment. Shape:
+
+      ```markdown
+      ## Smart PR review — $classify.output.complexity
+
+      $classify.output.reasoning
+
+      ### Findings
+
+      <For each CRITICAL/HIGH/MEDIUM finding from the lanes above, one bullet:>
+      - **severity** — `path:line` — what / fix
+
+      <Group LOW into a collapsed list at the end if there are more than 3.>
+
+      ### Verdict
+
+      <One of: READY TO MERGE | NEEDS NITS | NEEDS FIXES — pick based on the
+       highest severity finding.>
+      ```
+
+      Save this report to `$ARTIFACTS_DIR/review.md` AND print it.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 5: POST COMMENT
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: post-comment
+    depends_on: [synthesize]
+    bash: |
+      set -euo pipefail
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number")
+      REPORT="$KEELSON_ARTIFACTS_DIR/review.md"
+      if [ ! -f "$REPORT" ]; then
+        echo "ERROR: synthesize did not write $REPORT" >&2
+        exit 1
+      fi
+      gh pr comment "$PR_NUM" --body-file "$REPORT"
+      echo "Posted review on PR #${PR_NUM}"
+      gh pr view "$PR_NUM" --json url -q '.url'

@@ -1,0 +1,530 @@
+# Fix a GitHub issue end-to-end. Concepts ported from Archon's
+# archon-piv-loop + archon-fix-github-issue workflows (MIT, see NOTICE),
+# rewritten as a single self-contained DAG that uses only Copilot models
+# and Keelson's supported node types (no `command:` refs, no interactive
+# loops — interactive loops are not yet supported, so a single approval
+# gate replaces the chat-style plan-refinement iterations).
+#
+# Provider is pinned to `copilot`. Models chosen from the curated set
+# the Copilot factory advertises:
+#   - gpt-5            — investigation, implementation, code review, validation fixes
+#   - gpt-4o           — fast classifiers behind `output_format`
+#   - claude-sonnet-4.5 — structured plan authoring
+#   - auto             — Copilot's own routing for everything else
+
+name: fix-issue
+description: |
+  Use when: User wants to fix, resolve, or implement a GitHub issue end-to-end
+            and open a draft PR.
+  Triggers: "fix issue", "fix #123", "resolve issue", "implement issue 123",
+            "fix this bug", "fix github issue".
+  Does: Fetches the issue, classifies it, investigates / plans, pauses for human
+        approval of the plan, implements the change, validates (typecheck +
+        tests), self-fixes failures, pushes the branch, creates a draft PR, runs
+        a self-review pass, applies the review's findings, and reports back.
+  NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
+
+# Run this with the Copilot provider — Keelson's loader rejects `provider:
+# copilot` at the YAML level, so pick it at the runtime layer instead:
+#   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run fix-issue "fix #42"
+
+# Mutates the working tree — branch, commits, push, PR. Run in an isolated
+# worktree by default so a fix-issue run can't trample editor state.
+worktree:
+  enabled: true
+
+nodes:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 1: FETCH & CLASSIFY
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: extract-issue
+    model: gpt-4o
+    prompt: |
+      Find the GitHub issue number for this request.
+
+      Request: $ARGUMENTS
+
+      Rules:
+      - If the message contains an explicit issue number (e.g. "#709", "issue 709",
+        "fix 709"), extract that number.
+      - If the message is ambiguous (e.g. "fix the SQLite timestamp bug"), use
+        `gh issue list` to search for the best match and pick it.
+
+      CRITICAL: Your final output must be ONLY the bare integer with no quotes,
+      no markdown, and no explanation. Example correct output: 709
+
+  - id: fetch-issue
+    depends_on: [extract-issue]
+    bash: |
+      set -euo pipefail
+      ISSUE_NUM=$(printf '%s' "$KEELSON_NODE_extract_issue_OUTPUT" \
+        | tr -d "'\"\`\n " | grep -oE '[0-9]+' | head -1)
+      if [ -z "$ISSUE_NUM" ]; then
+        echo "Failed to extract issue number from: $KEELSON_NODE_extract_issue_OUTPUT" >&2
+        exit 1
+      fi
+      echo "$ISSUE_NUM" > "$KEELSON_ARTIFACTS_DIR/.issue-number"
+      gh issue view "$ISSUE_NUM" --json number,title,body,labels,comments,state,url,author
+
+  # Classifier emits raw JSON because Keelson currently drops `output_format`
+  # at runtime. The downstream `when:` clauses use `$classify.output.issue_type`
+  # — that helper JSON-parses the node's output text and pulls the field.
+  - id: classify
+    depends_on: [fetch-issue]
+    model: gpt-4o
+    context: fresh
+    prompt: |
+      You are an issue classifier. Read the GitHub issue JSON below and label it.
+
+      ## Issue
+
+      $fetch-issue.output
+
+      ## Rules
+
+      | Type          | Indicators |
+      |---------------|------------|
+      | bug           | "broken", "error", "crash", stack traces, regression |
+      | feature       | "add", "new", "support", net-new capability |
+      | enhancement   | "improve", "extend", incremental improvement |
+      | refactor      | "clean up", "simplify", "reorganize" |
+      | chore         | "update deps", "upgrade", maintenance |
+      | documentation | "docs", "readme", "clarify", "examples" |
+
+      ## Output
+
+      Respond with ONLY a single-line JSON object. No prose, no markdown
+      code fences. Schema:
+
+      {"issue_type":"bug|feature|enhancement|refactor|chore|documentation","title":"...","reasoning":"..."}
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 2: INVESTIGATE (bugs) OR PLAN (everything else)
+  # Both write the same artifact path so downstream nodes don't branch.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: investigate
+    depends_on: [classify]
+    when: "$classify.output.issue_type == 'bug'"
+    model: gpt-5
+    context: fresh
+    prompt: |
+      You are investigating a bug. Produce a precise root-cause analysis the
+      implementation phase can act on.
+
+      ## Issue
+
+      $fetch-issue.output
+
+      ## Classification
+
+      $classify.output
+
+      ## Instructions
+
+      1. Read `CLAUDE.md` (and any project-level conventions) before anything else.
+      2. Reproduce the bug from the issue body — identify the failing call path.
+      3. Search the codebase for the involved symbols / files. Cite `path:line`.
+      4. Identify the root cause (not just the symptom). State it in one sentence.
+      5. Sketch the fix — files to change, the minimal diff, and any new tests.
+      6. Note risks: what could regress, what to test specifically.
+
+      ## Output
+
+      Write the investigation to `$ARTIFACTS_DIR/plan.md` using this template:
+
+      ```markdown
+      # Investigation: {Issue title}
+
+      ## Root cause
+      {One sentence}
+
+      ## Reproduction
+      {Steps / failing test}
+
+      ## Fix outline
+      - `{path}:{lines}` — {what changes and why}
+
+      ## Task list
+      ### Task 1: {action} `{file}`
+      **Action**: CREATE / UPDATE
+      **Details**: {exact change}
+      **Validate**: `{command}`
+
+      ## Tests
+      | File | Cases | Validates |
+      |------|-------|-----------|
+
+      ## Risks
+      | Risk | Impact | Mitigation |
+      ```
+
+      After writing the file, print a one-paragraph summary.
+
+  - id: plan
+    depends_on: [classify]
+    when: "$classify.output.issue_type != 'bug'"
+    model: claude-sonnet-4.5
+    context: fresh
+    prompt: |
+      You are creating an implementation plan from a non-bug GitHub issue.
+
+      ## Issue
+
+      $fetch-issue.output
+
+      ## Classification
+
+      $classify.output
+
+      ## Instructions
+
+      1. Read `CLAUDE.md` and any local conventions first.
+      2. Search the codebase for related code; cite `path:line` for files the
+         plan will touch.
+      3. Decide the architecture in 2-3 short paragraphs.
+      4. Write a task list — each task atomic, independently verifiable.
+
+      ## Output
+
+      Write the plan to `$ARTIFACTS_DIR/plan.md` using this template:
+
+      ```markdown
+      # Feature: {Title}
+
+      ## Summary
+      {1-2 sentences}
+
+      ## Success criteria
+      - [ ] {specific, testable}
+      - [ ] All validation passes
+
+      ## Scope
+      - IN: {what's included}
+      - OUT: {what's excluded — and why}
+
+      ## Codebase context
+      | File | Role | Action |
+      |------|------|--------|
+
+      ## Architecture
+      - {decision} — {rationale}
+
+      ## Task list
+      ### Task 1: {action} `{file}`
+      **Action**: CREATE / UPDATE
+      **Details**: {exact changes}
+      **Validate**: `{command}`
+
+      ## Tests
+      | File | Cases | Validates |
+      |------|-------|-----------|
+
+      ## Risks
+      | Risk | Impact | Mitigation |
+      ```
+
+      After writing the file, print a one-paragraph summary.
+
+  # Either investigate OR plan ran — funnel both into a single artifact path
+  # check before the human approval gate so the gate prompt can quote the
+  # plan content directly.
+  - id: plan-ready
+    depends_on: [investigate, plan]
+    trigger_rule: one_success
+    bash: |
+      set -euo pipefail
+      PLAN_FILE="$KEELSON_ARTIFACTS_DIR/plan.md"
+      if [ ! -f "$PLAN_FILE" ]; then
+        echo "ERROR: no plan written at $PLAN_FILE" >&2
+        exit 1
+      fi
+      TASK_COUNT=$(grep -c "^### Task [0-9]" "$PLAN_FILE" 2>/dev/null || echo 0)
+      if [ "$TASK_COUNT" -eq 0 ]; then
+        echo "ERROR: plan has no '### Task N:' sections" >&2
+        exit 1
+      fi
+      echo "PLAN_FILE=$PLAN_FILE"
+      echo "TASK_COUNT=$TASK_COUNT"
+      echo ""
+      echo "=== PLAN ==="
+      cat "$PLAN_FILE"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 3: HUMAN APPROVAL GATE
+  # The user can either click "Approve & continue" or reply with feedback —
+  # feedback is captured into $approve-plan.output and the implementation
+  # node is instructed to apply it before writing code.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: approve-plan
+    depends_on: [plan-ready]
+    approval:
+      message: |
+        Plan is ready at `$ARTIFACTS_DIR/plan.md`.
+
+        Review the plan above. Approve to begin implementation, or reply with
+        specific changes you want made to the plan before code is written.
+      capture_response: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 4: IMPLEMENT
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: implement
+    depends_on: [approve-plan]
+    model: gpt-5
+    context: fresh
+    idle_timeout: 600000
+    prompt: |
+      You are implementing the plan in `$ARTIFACTS_DIR/plan.md`.
+
+      ## Human feedback on the plan
+
+      $approve-plan.output
+
+      ## Rules
+
+      - If the feedback above is anything other than a bare "approved" / "looks
+        good" / "ship it", edit `$ARTIFACTS_DIR/plan.md` to incorporate it
+        BEFORE writing code, and note the changes at the top of the file.
+      - Follow the plan task-by-task. Don't introduce extra scope.
+      - Read each file before editing it. Type-check after each change:
+        `bun --filter '*' typecheck`.
+      - **Never** `git add -A` / `git add .` / `git add -u`. Stage files by name.
+      - **Never** commit anything under `$ARTIFACTS_DIR`, scratch files
+        (`*.scratch.md`, `*.tmp.md`), or PR-body drafts at the repo root.
+
+      ## Steps
+
+      1. Read `CLAUDE.md` and the plan.
+      2. Branch: if HEAD is `main`, create `fix-issue/<issue-number>-<slug>`.
+         Otherwise stay on the current branch.
+      3. For each `### Task N:` in the plan:
+         a. Read the target file.
+         b. Make the edit.
+         c. `bun --filter '*' typecheck` — fix breaks immediately.
+         d. Commit with a conventional message: `git add <files>; git commit -m "..."`.
+      4. After all tasks: append a section to `$ARTIFACTS_DIR/plan.md` summarizing
+         what was done, what was skipped, and any deviations.
+
+      Print a short status report when finished.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 5: VALIDATE
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: validate
+    depends_on: [implement]
+    timeout: 600000
+    bash: |
+      echo "=== TYPE CHECK ==="
+      bun --filter '*' typecheck 2>&1
+      TC=$?
+
+      echo ""
+      echo "=== TESTS ==="
+      bun --filter '*' test 2>&1
+      TEST=$?
+
+      echo ""
+      echo "=== BIOME CHECK ==="
+      bun run check 2>&1
+      BIO=$?
+
+      echo ""
+      echo "Type check: $([ $TC -eq 0 ] && echo PASS || echo FAIL)"
+      echo "Tests:      $([ $TEST -eq 0 ] && echo PASS || echo FAIL)"
+      echo "Biome:      $([ $BIO -eq 0 ] && echo PASS || echo FAIL)"
+
+      if [ $TC -eq 0 ] && [ $TEST -eq 0 ] && [ $BIO -eq 0 ]; then
+        echo "VALIDATION_STATUS: PASS"
+      else
+        echo "VALIDATION_STATUS: FAIL"
+      fi
+
+  - id: fix-validation
+    depends_on: [validate]
+    model: gpt-5
+    context: fresh
+    prompt: |
+      Review the validation output below.
+
+      ## Validation
+
+      $validate.output
+
+      ## Instructions
+
+      - If the output ends with `VALIDATION_STATUS: PASS`, respond with
+        "All checks passed — no fixes needed." and stop.
+      - Otherwise, fix ONLY what is broken. Do not add scope.
+      - If a fix requires behavior change (not just a type / format / lint
+        nudge), revert the offending commit instead of papering over it.
+      - Stage edited files by name. Never `git add -A`. Never commit anything
+        under `$ARTIFACTS_DIR`.
+      - After each fix, re-run the failing command to confirm.
+
+  - id: revalidate
+    depends_on: [fix-validation]
+    timeout: 600000
+    bash: |
+      echo "=== TYPE CHECK ==="
+      bun --filter '*' typecheck 2>&1
+      TC=$?
+
+      echo ""
+      echo "=== TESTS ==="
+      bun --filter '*' test 2>&1
+      TEST=$?
+
+      echo ""
+      echo "=== BIOME CHECK ==="
+      bun run check 2>&1
+      BIO=$?
+
+      if [ $TC -ne 0 ] || [ $TEST -ne 0 ] || [ $BIO -ne 0 ]; then
+        echo "VALIDATION_STATUS: FAIL — refusing to create PR with broken checks"
+        exit 1
+      fi
+      echo "VALIDATION_STATUS: PASS"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 6: PUSH + DRAFT PR
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: create-pr
+    depends_on: [revalidate]
+    context: fresh
+    prompt: |
+      Push the branch and create a draft pull request that links the issue.
+
+      ## Context
+
+      - Issue JSON: $fetch-issue.output
+      - Classification: $classify.output
+      - Plan path: `$ARTIFACTS_DIR/plan.md`
+
+      ## Instructions
+
+      1. Read the plan file for the implementation summary.
+      2. If `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
+         or `docs/PULL_REQUEST_TEMPLATE.md` exists, read it and follow its sections.
+      3. Verify HEAD is NOT `main`. If it is, refuse and stop.
+      4. Push: `git push -u origin HEAD`.
+      5. Check existing PRs: `gh pr list --head $(git branch --show-current)`.
+         If one exists, capture its number and skip creation.
+      6. Otherwise: `gh pr create --draft --base main`
+         - Title: under 70 chars, conventional commit style.
+         - Body: from the project's PR template if present, otherwise:
+           - **What**: 1-2 sentences
+           - **Why now**: motivation, link to the issue with `Fixes #<num>`
+           - **Test plan**: commands you actually ran with PASS/FAIL
+         - If you write the body to a file, put it at `$ARTIFACTS_DIR/pr-body.md`
+           — never at the repo root (the next commit would sweep it up).
+      7. Capture identifiers:
+         ```
+         gh pr view --json number -q '.number' > "$ARTIFACTS_DIR/.pr-number"
+         gh pr view --json url    -q '.url'    > "$ARTIFACTS_DIR/.pr-url"
+         ```
+      8. Verify base: `gh pr view --json baseRefName -q '.baseRefName'` must be `main`.
+         If not, `gh pr edit <num> --base main`.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 7: SELF-REVIEW + SELF-FIX
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: self-review
+    depends_on: [create-pr]
+    model: gpt-5
+    context: fresh
+    prompt: |
+      You are a senior reviewer doing a code-review pass against `main` on the
+      branch you just opened a PR for.
+
+      ## Instructions
+
+      1. `git diff main...HEAD --stat` to see scope, then `git diff main...HEAD`
+         for full review.
+      2. Check the change against `CLAUDE.md` conventions.
+      3. Look for: correctness bugs, missing error handling, missing tests for
+         new branches, comments that violate the repo's terse-comment rule,
+         and docs that should have been updated for new public surfaces.
+      4. Output findings as a numbered list. Each finding:
+         - `path:line` location
+         - severity: CRITICAL / HIGH / MEDIUM / LOW
+         - one-sentence problem statement
+         - suggested fix
+
+      Do NOT edit files in this step — the next node applies fixes.
+
+  - id: self-fix
+    depends_on: [self-review]
+    model: gpt-5
+    context: fresh
+    prompt: |
+      Apply the CRITICAL and HIGH findings from the review below. Skip MEDIUM
+      and LOW unless they're trivial one-liners.
+
+      ## Findings
+
+      $self-review.output
+
+      ## Rules
+
+      - For each fix: read the file, make the change, run `bun --filter '*' typecheck`.
+      - Stage edited files by name. Never `git add -A`. Never commit anything
+        under `$ARTIFACTS_DIR`.
+      - Commit with `fix: address self-review findings` (or split into multiple
+        commits if the fixes are logically distinct).
+      - If nothing needs fixing, say so and stop.
+      - After fixes: `bun --filter '*' typecheck && bun --filter '*' test && bun run check`.
+      - If checks pass and a commit was made, `git push`.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 8: REPORT
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: report
+    depends_on: [self-fix]
+    model: gpt-4o
+    context: fresh
+    prompt: |
+      Produce the final operator summary.
+
+      ## Inputs
+
+      - Issue: $fetch-issue.output
+      - Classification: $classify.output
+      - Plan summary: see `$ARTIFACTS_DIR/plan.md`
+      - Validation (post-fix): $revalidate.output
+      - Self-review findings: $self-review.output
+      - Self-fix outcome: $self-fix.output
+
+      ## Output
+
+      Print a single block in this shape:
+
+      ```
+      ===============================================================
+      FIX-ISSUE — COMPLETE
+      ===============================================================
+      Issue:   #{number} — {title}
+      Type:    {bug | feature | ...}
+      Branch:  {branch name}
+      PR:      {url, or "none — already existed"}
+
+      -- What changed --
+      {2-4 bullets}
+
+      -- Validation --
+      type-check:  PASS
+      tests:       PASS
+      biome:       PASS
+
+      -- Self-review --
+      {one line per CRITICAL/HIGH finding, with "fixed" or "deferred"}
+
+      ===============================================================
+      ```
