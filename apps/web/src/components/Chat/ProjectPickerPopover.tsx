@@ -151,7 +151,10 @@ function ProjectRow({ popoverId, project, isActive, onSelect, onEdit }: ProjectR
   return (
     <div className={`model-picker-popover-row${isActive ? " active" : ""}`}>
       {isDefault ? (
-        <span className="model-picker-popover-fav" aria-hidden="true" />
+        <span
+          className="model-picker-popover-fav model-picker-popover-fav--passive"
+          aria-hidden="true"
+        />
       ) : (
         <button
           type="button"
@@ -212,6 +215,8 @@ function ProjectEditRow({ project, onCancel, onSaved, onDeleted }: ProjectEditRo
   }, [name, onCancel, onSaved, project.id, project.name]);
 
   const handleDelete = useCallback(async () => {
+    if (busy) return;
+    setConfirmingDelete(false);
     setBusy(true);
     setError(null);
     try {
@@ -219,11 +224,10 @@ function ProjectEditRow({ project, onCancel, onSaved, onDeleted }: ProjectEditRo
       onDeleted(project.id);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
-      setConfirmingDelete(false);
     } finally {
       setBusy(false);
     }
-  }, [onDeleted, project.id]);
+  }, [busy, onDeleted, project.id]);
 
   return (
     <div className="model-picker-popover-row project-edit-row">

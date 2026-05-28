@@ -2369,6 +2369,10 @@ button.tab:focus-visible {
   outline-offset: -2px;
 }
 
+.model-picker-popover-fav--passive { cursor: default; }
+.model-picker-popover-fav--passive:hover { color: var(--dim); background: transparent; }
+.model-picker-popover-fav--passive:focus-visible { outline: none; }
+
 .model-picker-popover-pick {
   flex: 1 1 0;
   background: transparent;
