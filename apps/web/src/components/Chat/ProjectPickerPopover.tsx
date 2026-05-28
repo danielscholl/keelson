@@ -145,8 +145,7 @@ interface ProjectRowProps {
 
 function ProjectRow({ popoverId, project, isActive, onSelect, onEdit }: ProjectRowProps) {
   // Default project has no editable settings — it IS the workspace, not a
-  // user project. The slash-command `/project layout` still works for the
-  // rare case someone needs to change layout on a real project.
+  // user project.
   const isDefault = project.name === DEFAULT_PROJECT_NAME;
   return (
     <div className={`model-picker-popover-row${isActive ? " active" : ""}`}>
@@ -178,7 +177,7 @@ function ProjectRow({ popoverId, project, isActive, onSelect, onEdit }: ProjectR
         title={project.rootPath}
       >
         <span className="model-picker-popover-pick-id">{project.name}</span>
-        <span className="model-picker-popover-pick-meta">{project.worktreeLayout}</span>
+        <span className="model-picker-popover-pick-meta">{project.rootPath}</span>
       </button>
     </div>
   );

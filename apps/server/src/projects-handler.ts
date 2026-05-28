@@ -37,11 +37,11 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 
 export interface ProjectsHandlerOptions {
   store: ProjectsStore;
-  // Destination root for `/api/projects/clone`. Required so `/project <url>`
-  // lands in a predictable place; clone returns 500 when unset, and the
-  // composition root in apps/server/src/index.ts always passes an absolute
-  // path (resolve(process.env.KEELSON_PROJECTS_ROOT ?? join(homedir(),
-  // "keelson", "projects"))).
+  // Destination root for `/api/projects/clone` — the workspace root. Required
+  // so `/project <url>` lands in a predictable place; clone returns 500 when
+  // unset, and the composition root in apps/server/src/index.ts always passes
+  // an absolute path (resolve(process.env.KEELSON_WORKSPACE ?? join(homedir(),
+  // "keelson"))).
   projectsRoot?: string;
 }
 
@@ -152,9 +152,6 @@ export function projectsRoutes(app: Hono, opts: ProjectsHandlerOptions): void {
       const project = store.create({
         name: parsed.data.name,
         rootPath: normalized.path,
-        ...(parsed.data.worktreeLayout !== undefined
-          ? { worktreeLayout: parsed.data.worktreeLayout }
-          : {}),
       });
       return c.json(createProjectResponseSchema.parse({ project }), 201);
     } catch (err) {
@@ -203,9 +200,6 @@ export function projectsRoutes(app: Hono, opts: ProjectsHandlerOptions): void {
       const project = store.create({
         name,
         rootPath: dest,
-        ...(parsed.data.worktreeLayout !== undefined
-          ? { worktreeLayout: parsed.data.worktreeLayout }
-          : {}),
       });
       return c.json(createProjectResponseSchema.parse({ project }), 201);
     } catch (err) {

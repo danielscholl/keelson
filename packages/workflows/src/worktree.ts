@@ -16,8 +16,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 const DEFAULT_BRANCH_TEMPLATE = "keelson/{workflow}/{run_id_short}";
 const GIT_TIMEOUT_MS = 30_000;
@@ -39,23 +38,6 @@ export class WorktreeCreationError extends Error {
     super(message);
     this.name = "WorktreeCreationError";
   }
-}
-
-/** Default worktree home: `~/.keelson/worktrees/`. */
-export function defaultWorktreeRoot(): string {
-  return resolve(homedir(), ".keelson", "worktrees");
-}
-
-/**
- * Workspace-scoped placement: `<root>/<project-name>/<branch-leaf>/`.
- */
-export function worktreePathFor(opts: {
-  root: string;
-  projectName: string;
-  branch: string;
-}): string {
-  const leaf = opts.branch.split("/").pop() ?? opts.branch;
-  return join(opts.root, opts.projectName, leaf);
 }
 
 /**
@@ -115,6 +97,19 @@ export async function isGitRepo(path: string): Promise<boolean> {
   if (!existsSync(path)) return false;
   const out = await runGit(["rev-parse", "--is-inside-work-tree"], path);
   return out.exitCode === 0 && out.stdout.trim() === "true";
+}
+
+/**
+ * Absolute path of the work tree's top-level directory, or null when `path`
+ * isn't inside a repo. Lets callers anchor repo-local worktrees at the repo
+ * root even when invoked from a nested subdirectory.
+ */
+export async function gitToplevel(path: string): Promise<string | null> {
+  if (!existsSync(path)) return null;
+  const out = await runGit(["rev-parse", "--show-toplevel"], path);
+  if (out.exitCode !== 0) return null;
+  const top = out.stdout.trim();
+  return top.length > 0 ? top : null;
 }
 
 export interface CreateWorktreeOptions {

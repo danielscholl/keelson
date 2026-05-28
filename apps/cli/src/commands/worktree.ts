@@ -3,49 +3,15 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import type { Project } from "@keelson/shared";
-import {
-  defaultWorktreeRoot,
-  isGitRepo,
-  listWorktrees,
-  removeWorktree,
-  repoPathFromWorktree,
-} from "@keelson/workflows";
+import { isGitRepo, listWorktrees, removeWorktree, repoPathFromWorktree } from "@keelson/workflows";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
 import { isServerDownError, listPersistedWorktreePaths } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
 import { DEFAULT_SERVER_BASE_URL } from "../server-probe.ts";
-
-// Mirrors apps/server/src/index.ts; KEELSON_PROJECTS_ROOT must match between
-// the server and any prune invocation, otherwise managed worktrees under the
-// server's actual root will be invisible here.
-function resolveProjectsRoot(): string {
-  const raw = process.env.KEELSON_PROJECTS_ROOT?.trim();
-  return resolve(raw && raw.length > 0 ? raw : join(homedir(), "keelson", "projects"));
-}
-
-function workspaceScopedRoots(): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const add = (p: string) => {
-    let canonical = p;
-    try {
-      canonical = realpathSync(p);
-    } catch {
-      // Path may not exist; dedupe on the requested form instead.
-    }
-    if (seen.has(canonical)) return;
-    seen.add(canonical);
-    out.push(p);
-  };
-  add(defaultWorktreeRoot());
-  add(join(resolveProjectsRoot(), "_worktrees"));
-  return out;
-}
 
 export interface WorktreePruneOptions {
   json: boolean;
@@ -142,10 +108,9 @@ async function classifyWorktreeDir(args: {
   };
 }
 
-// Walks the workspace-scoped worktree roots and any repo-local `.worktrees`
-// dirs to collect every worktree directory we can see, paired with its
-// project's source repo (needed to call `git worktree remove` against the
-// right repo).
+// Walks each project's repo-local `.worktrees` dir to collect every worktree
+// directory we can see, paired with its project's source repo (needed to call
+// `git worktree remove` against the right repo).
 async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
   const candidates: PruneCandidate[] = [];
 
@@ -159,7 +124,6 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
       throw err;
     }
   }
-  const repoByProject = new Map(projects.map((p) => [p.name, p.rootPath]));
   const seenPaths = new Set<string>();
   const recordPath = (p: string): boolean => {
     let canonical = p;
@@ -172,32 +136,6 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
     seenPaths.add(canonical);
     return true;
   };
-
-  for (const root of workspaceScopedRoots()) {
-    if (!existsSync(root)) continue;
-    for (const projectName of readdirSync(root)) {
-      const projectDir = join(root, projectName);
-      try {
-        if (!statSync(projectDir).isDirectory()) continue;
-      } catch {
-        continue;
-      }
-      const repoPath = repoByProject.get(projectName) ?? null;
-      const liveByPath =
-        repoPath !== null ? await buildLiveByPath(repoPath) : new Map<string, string | null>();
-      for (const leaf of readdirSync(projectDir)) {
-        const path = join(projectDir, leaf);
-        if (!recordPath(path)) continue;
-        const c = await classifyWorktreeDir({
-          path,
-          projectName,
-          projectRepoPath: repoPath,
-          liveByPath,
-        });
-        if (c !== null) candidates.push(c);
-      }
-    }
-  }
 
   // Repo-local placement is `<project.rootPath>/.worktrees/<leaf>/`. This
   // directory lives *inside the user's repo*, so we must not enqueue plain
@@ -278,7 +216,7 @@ export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<neve
     // operator pointing prune at them is the documented cleanup path.
     // Worktrees on non-`keelson/` branches are user-managed; never auto-remove
     // those even with --force, since the operator may have intentionally
-    // co-located a worktree under ~/.keelson/worktrees/.
+    // co-located a worktree under the project's `.worktrees/`.
     const isManaged = c.branch === null || c.branch.startsWith("keelson/");
     if (c.reason === "tracked" && !isManaged) {
       continue;

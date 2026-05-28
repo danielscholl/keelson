@@ -13,6 +13,7 @@ import { basename, join } from "node:path";
 
 import {
   createWorktree,
+  gitToplevel,
   isGitRepo,
   listWorktrees,
   NotAGitRepoError,
@@ -20,7 +21,7 @@ import {
   repoPathFromWorktree,
   resolveBranchTemplate,
   WorktreeCreationError,
-  worktreePathFor,
+  worktreePathForRepoLocal,
 } from "../src/worktree.ts";
 
 let tmp: string;
@@ -74,15 +75,14 @@ describe("resolveBranchTemplate", () => {
   });
 });
 
-describe("worktreePathFor", () => {
-  test("uses the branch leaf as the directory name", () => {
+describe("worktreePathForRepoLocal", () => {
+  test("places the branch leaf under the repo's .worktrees dir", () => {
     expect(
-      worktreePathFor({
-        root: "/tmp/wt",
-        projectName: "work",
+      worktreePathForRepoLocal({
+        projectRootPath: "/repos/work",
         branch: "keelson/architect/abc",
       }),
-    ).toBe("/tmp/wt/work/abc");
+    ).toBe("/repos/work/.worktrees/abc");
   });
 });
 
@@ -98,6 +98,21 @@ describe("isGitRepo", () => {
 
   test("returns false for a non-existent path", async () => {
     expect(await isGitRepo(join(tmp, "ghost"))).toBe(false);
+  });
+});
+
+describe("gitToplevel", () => {
+  test("resolves the repo root from a nested subdirectory", async () => {
+    await initRepo(tmp);
+    const sub = join(tmp, "a", "b");
+    mkdirSync(sub, { recursive: true });
+    expect(await gitToplevel(sub)).toBe(await gitToplevel(tmp));
+    // Functional anchor: the resolved root is a real work tree.
+    expect(await isGitRepo((await gitToplevel(sub))!)).toBe(true);
+  });
+
+  test("returns null for a plain directory", async () => {
+    expect(await gitToplevel(tmp)).toBeNull();
   });
 });
 
