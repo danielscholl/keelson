@@ -9,7 +9,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,16 +31,41 @@ afterEach(() => {
   rmSync(workspace, { recursive: true, force: true });
 });
 
+async function git(args: string[], cwd: string): Promise<string> {
+  const proc = Bun.spawn({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
+  const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  if (code !== 0) {
+    const err = await new Response(proc.stderr).text();
+    throw new Error(`git ${args.join(" ")} in ${cwd}: ${err}`);
+  }
+  return out;
+}
+
+async function initRepo(path: string): Promise<void> {
+  await git(["init", "--initial-branch=main"], path);
+  await git(["config", "user.email", "t@t"], path);
+  await git(["config", "user.name", "t"], path);
+  writeFileSync(join(path, "README.md"), "x\n");
+  await git(["add", "README.md"], path);
+  await git(["commit", "-m", "init"], path);
+}
+
 describe("migrateLegacyProjectsLayout", () => {
-  test("flattens projects/, collapses _default, moves worktrees, updates rows", () => {
+  test("flattens projects/, preserves _default contents, repairs moved worktrees", async () => {
     const legacy = join(workspace, "projects");
     const legacyDefault = join(legacy, "_default");
     const legacyFoo = join(legacy, "foo");
-    const legacyWorktree = join(legacy, "_worktrees", "foo", "br");
     mkdirSync(legacyDefault, { recursive: true });
     mkdirSync(legacyFoo, { recursive: true });
-    mkdirSync(legacyWorktree, { recursive: true });
+    // A file the default project accumulated must survive the flatten.
+    writeFileSync(join(legacyDefault, "notes.md"), "keepme\n");
     writeFileSync(join(legacyFoo, "marker.txt"), "x\n");
+
+    // foo is a real repo with a real workspace-scoped worktree registered in it.
+    await initRepo(legacyFoo);
+    const legacyWorktree = join(legacy, "_worktrees", "foo", "br");
+    mkdirSync(join(legacy, "_worktrees", "foo"), { recursive: true });
+    await git(["worktree", "add", "-b", "keelson/x/br", legacyWorktree], legacyFoo);
 
     const db = openDatabase({ path: dbPath });
     const projectsStore = createProjectsStore(db);
@@ -62,8 +87,9 @@ describe("migrateLegacyProjectsLayout", () => {
 
     migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: workspace });
 
-    // Default project collapses into the workspace root itself.
+    // Default project collapses into the workspace root, contents and all.
     expect(projectsStore.get(def.id)?.rootPath).toBe(workspace);
+    expect(readFileSync(join(workspace, "notes.md"), "utf-8")).toBe("keepme\n");
     // Named project moves to <workspace>/foo with its contents.
     const movedFoo = join(workspace, "foo");
     expect(projectsStore.get(foo.id)?.rootPath).toBe(movedFoo);
@@ -72,6 +98,11 @@ describe("migrateLegacyProjectsLayout", () => {
     const movedWorktree = join(movedFoo, ".worktrees", "br");
     expect(existsSync(movedWorktree)).toBe(true);
     expect(workflowStore.getRun("r1")?.worktreePath).toBe(movedWorktree);
+    // Git metadata was repaired: the moved worktree is functional and the
+    // repo no longer lists the stale legacy path.
+    expect((await git(["rev-parse", "--is-inside-work-tree"], movedWorktree)).trim()).toBe("true");
+    const list = await git(["worktree", "list", "--porcelain"], movedFoo);
+    expect(list.includes("_worktrees")).toBe(false);
     // The legacy projects/ tree is gone.
     expect(existsSync(legacy)).toBe(false);
 
@@ -80,6 +111,47 @@ describe("migrateLegacyProjectsLayout", () => {
     expect(projectsStore.get(foo.id)?.rootPath).toBe(movedFoo);
     expect(existsSync(movedWorktree)).toBe(true);
 
+    db.close();
+  });
+
+  test("targets an externally-registered project's own rootPath for worktrees", () => {
+    // foo is registered from a path OUTSIDE projects/; its workspace-scoped
+    // worktree must migrate under foo's real rootPath, not <workspace>/foo.
+    const legacy = join(workspace, "projects");
+    const externalFoo = join(workspace, "external", "foo");
+    const legacyWorktree = join(legacy, "_worktrees", "foo", "br");
+    mkdirSync(externalFoo, { recursive: true });
+    mkdirSync(legacyWorktree, { recursive: true });
+
+    const db = openDatabase({ path: dbPath });
+    const projectsStore = createProjectsStore(db);
+    projectsStore.create({ name: "foo", rootPath: externalFoo });
+
+    migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: workspace });
+
+    expect(existsSync(join(externalFoo, ".worktrees", "br"))).toBe(true);
+    expect(existsSync(join(workspace, "foo"))).toBe(false);
+    db.close();
+  });
+
+  test("leaves a collided worktree (and its bucket) in place rather than deleting it", () => {
+    const legacy = join(workspace, "projects");
+    const fooRoot = join(workspace, "foo");
+    const legacyWorktree = join(legacy, "_worktrees", "foo", "br");
+    mkdirSync(legacyWorktree, { recursive: true });
+    // Destination already occupied → migration must skip AND not delete the source.
+    const occupied = join(fooRoot, ".worktrees", "br");
+    mkdirSync(occupied, { recursive: true });
+    writeFileSync(join(occupied, "existing.txt"), "keep\n");
+
+    const db = openDatabase({ path: dbPath });
+    const projectsStore = createProjectsStore(db);
+    projectsStore.create({ name: "foo", rootPath: fooRoot });
+
+    migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: workspace });
+
+    expect(existsSync(legacyWorktree)).toBe(true);
+    expect(readFileSync(join(occupied, "existing.txt"), "utf-8")).toBe("keep\n");
     db.close();
   });
 
