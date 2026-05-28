@@ -30,6 +30,7 @@ export {
 } from "./graph.ts";
 export {
   type AwaitApproval,
+  type AwaitInteraction,
   type MakeApprovalHandlerOptions,
   makeApprovalHandler,
 } from "./handlers/approval.ts";
@@ -52,8 +53,13 @@ export {
   type ScriptRuntime,
 } from "./handlers/discovery.ts";
 export {
+  defaultRunUntilBashProbe,
   type MakeLoopHandlerOptions,
   makeLoopHandler,
+  type RunUntilBashProbe,
+  type RunUntilBashProbeOptions,
+  UNTIL_BASH_TIMEOUT_MS,
+  type UntilBashResult,
 } from "./handlers/loop.ts";
 export {
   DEFAULT_TOOL_DENYLIST,

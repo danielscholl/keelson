@@ -122,8 +122,8 @@ describe("makeLoopHandler — failure propagation", () => {
   });
 });
 
-describe("makeLoopHandler — interactive rejection", () => {
-  test("interactive: true returns a clear failure without invoking the prompt handler", async () => {
+describe("makeLoopHandler — interactive/until_bash wiring required", () => {
+  test("interactive: true with no awaitInteraction wired fails fast", async () => {
     const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
       status: "succeeded",
       output: { kind: "text", text: "should not run" },
@@ -131,11 +131,11 @@ describe("makeLoopHandler — interactive rejection", () => {
     const handler = makeLoopHandler({ promptHandler });
     const result = await handler.handle(loopNode({ interactive: true }), buildCtx());
     expect(result.status).toBe("failed");
-    expect(result.error).toContain("interactive loops are not yet supported");
+    expect(result.error).toContain("interactive loops require server-side pause wiring");
     expect(seen).toHaveLength(0);
   });
 
-  test("until_bash returns a clear failure without invoking the prompt handler", async () => {
+  test("until_bash with no probe runner wired fails fast", async () => {
     const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
       status: "succeeded",
       output: { kind: "text", text: "should not run" },
@@ -154,8 +154,454 @@ describe("makeLoopHandler — interactive rejection", () => {
     const result = await handler.handle(node, buildCtx());
     expect(result.status).toBe("failed");
     expect(result.error).toContain("loop.until_bash");
-    expect(result.error).toContain("not yet supported");
+    expect(result.error).toContain("server-side probe wiring");
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe("makeLoopHandler — loop marker substitution is single-pass", () => {
+  test("prev iteration output containing literal $LOOP_USER_INPUT is NOT re-substituted", async () => {
+    // Regression: a previous iteration may emit text that mentions
+    // `$LOOP_USER_INPUT` (e.g. quoting the prompt back to the user). The
+    // second iteration's prompt resolution must NOT see that token and
+    // replace it with the (empty) user-input value — that would corrupt
+    // the prior output as it flows into $LOOP_PREV_OUTPUT.
+    const literalToken = "the literal token is $LOOP_USER_INPUT";
+    const { handler: promptHandler, seen } = makeRecorderHandler((_, i) =>
+      i === 0
+        ? { status: "succeeded", output: { kind: "text", text: literalToken } }
+        : { status: "succeeded", output: { kind: "text", text: "<promise>DONE</promise>" } },
+    );
+    const handler = makeLoopHandler({ promptHandler });
+    const node = {
+      id: "summarize",
+      loop: {
+        prompt: "prev=[$LOOP_PREV_OUTPUT] user=[$LOOP_USER_INPUT]",
+        until: "DONE",
+        max_iterations: 3,
+        fresh_context: false,
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    await handler.handle(node, buildCtx());
+    expect(seen).toHaveLength(2);
+    // Iter 2's prompt sees iter 1's full output verbatim — including the
+    // literal $LOOP_USER_INPUT token — and substitutes the user-input slot
+    // separately (empty here, non-interactive loop).
+    expect(seen[1].prompt).toBe(`prev=[${literalToken}] user=[]`);
+  });
+
+  test("token-prefix lookalikes are not greedily matched (upper/lower/digit suffixes)", async () => {
+    // `$LOOP_PREV_OUTPUT_TAIL`, `$LOOP_USER_INPUTfoo`, `$LOOP_USER_INPUT9`
+    // are all longer identifiers that share the marker prefix. The boundary
+    // anchor must stop the match before the substitution; otherwise the
+    // suffix gets stranded as literal text glued to the substituted value.
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "<promise>DONE</promise>" },
+    }));
+    const handler = makeLoopHandler({ promptHandler });
+    const literalLine = "$LOOP_PREV_OUTPUT_TAIL $LOOP_USER_INPUTfoo $LOOP_USER_INPUT9 keep";
+    const node = {
+      id: "summarize",
+      loop: {
+        prompt: literalLine,
+        until: "DONE",
+        max_iterations: 1,
+        fresh_context: false,
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    await handler.handle(node, buildCtx());
+    expect(seen[0].prompt).toBe(literalLine);
+  });
+});
+
+describe("makeLoopHandler — interactive loops", () => {
+  test("pauses between iterations and threads the user's reply into $LOOP_USER_INPUT", async () => {
+    const { handler: promptHandler, seen } = makeRecorderHandler((_, i) => {
+      if (i === 0) {
+        return { status: "succeeded", output: { kind: "text", text: "first turn output" } };
+      }
+      if (i === 1) {
+        return { status: "succeeded", output: { kind: "text", text: "<promise>DONE</promise>" } };
+      }
+      return { status: "succeeded", output: { kind: "text", text: "should not reach" } };
+    });
+    const awaitCalls: Array<{
+      runId: string;
+      nodeId: string;
+      message: string;
+      iteration: number;
+    }> = [];
+    const handler = makeLoopHandler({
+      promptHandler,
+      awaitInteraction: async (runId, nodeId, message, iteration) => {
+        awaitCalls.push({ runId, nodeId, message, iteration });
+        return "user said: keep going";
+      },
+    });
+    const node = {
+      id: "explore",
+      loop: {
+        prompt: "step | prev=$LOOP_PREV_OUTPUT | user=$LOOP_USER_INPUT",
+        until: "DONE",
+        max_iterations: 5,
+        fresh_context: false,
+        interactive: true,
+        gate_message: "answer or say done",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(seen).toHaveLength(2);
+    expect(seen[0].prompt).toBe("step | prev= | user=");
+    expect(seen[1].prompt).toBe("step | prev=first turn output | user=user said: keep going");
+    expect(awaitCalls).toHaveLength(1);
+    expect(awaitCalls[0].iteration).toBe(1);
+    expect(awaitCalls[0].message).toBe("answer or say done");
+  });
+
+  test("does not pause after the final iteration when max_iterations is hit", async () => {
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "still working" },
+    }));
+    let pauseCalls = 0;
+    const handler = makeLoopHandler({
+      promptHandler,
+      awaitInteraction: async () => {
+        pauseCalls++;
+        return "go";
+      },
+    });
+    const node = {
+      id: "explore",
+      loop: {
+        prompt: "step",
+        until: "DONE",
+        max_iterations: 2,
+        fresh_context: false,
+        interactive: true,
+        gate_message: "answer",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(seen).toHaveLength(2);
+    // One pause between iter 1 and iter 2; no pause after iter 2 (final).
+    expect(pauseCalls).toBe(1);
+  });
+
+  test("resolves $ARGUMENTS in gate_message before pausing", async () => {
+    const { handler: promptHandler } = makeRecorderHandler((_, i) =>
+      i === 0
+        ? { status: "succeeded", output: { kind: "text", text: "still working" } }
+        : { status: "succeeded", output: { kind: "text", text: "<promise>DONE</promise>" } },
+    );
+    const gates: string[] = [];
+    const handler = makeLoopHandler({
+      promptHandler,
+      awaitInteraction: async (_runId, _nodeId, message) => {
+        gates.push(message);
+        return "";
+      },
+    });
+    const node = {
+      id: "explore",
+      loop: {
+        prompt: "go",
+        until: "DONE",
+        max_iterations: 3,
+        fresh_context: false,
+        interactive: true,
+        gate_message: "user said: $ARGUMENTS",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const ctx = { ...buildCtx(), inputs: { ARGUMENTS: "hello world" } };
+    await handler.handle(node, ctx);
+    expect(gates).toEqual(["user said: hello world"]);
+  });
+
+  test("aborted pause returns a failed result with 'aborted' error", async () => {
+    const ac = new AbortController();
+    const { handler: promptHandler } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "still working" },
+    }));
+    const handler = makeLoopHandler({
+      promptHandler,
+      awaitInteraction: async () => {
+        ac.abort();
+        throw new Error("aborted");
+      },
+    });
+    const node = {
+      id: "explore",
+      loop: {
+        prompt: "go",
+        until: "DONE",
+        max_iterations: 3,
+        fresh_context: false,
+        interactive: true,
+        gate_message: "answer",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx({ abortSignal: ac.signal }));
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("aborted");
+  });
+});
+
+describe("makeLoopHandler — until_bash probe", () => {
+  test("exit 0 ends the loop on a SUCCESS with the stripped output", async () => {
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "iteration result" },
+    }));
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "do work",
+        until: "DONE",
+        max_iterations: 5,
+        fresh_context: false,
+        until_bash: "test -f /tmp/done",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(result.output).toEqual({ kind: "text", text: "iteration result" });
+    expect(seen).toHaveLength(1);
+  });
+
+  test("non-zero exit keeps iterating", async () => {
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "step" },
+    }));
+    let probeCalls = 0;
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async () => {
+        probeCalls++;
+        // Always fail — let max_iterations cap the loop.
+        return { exitCode: 1, stdout: "", stderr: "still failing" };
+      },
+    });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "do work",
+        until: "DONE",
+        max_iterations: 3,
+        fresh_context: false,
+        until_bash: "false",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(seen).toHaveLength(3);
+    expect(probeCalls).toBe(3);
+  });
+
+  test("timeout (timedOut: true with non-zero exit) keeps iterating", async () => {
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "step" },
+    }));
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async () => ({
+        exitCode: 124,
+        stdout: "",
+        stderr: "timeout",
+        timedOut: true,
+      }),
+    });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "do work",
+        until: "DONE",
+        max_iterations: 2,
+        fresh_context: false,
+        until_bash: "sleep 99",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(seen).toHaveLength(2);
+  });
+
+  test("probe receives the script body verbatim — no substitution into the shell source", async () => {
+    const { handler: promptHandler } = makeRecorderHandler((_, i) =>
+      i === 0
+        ? { status: "succeeded", output: { kind: "text", text: "first" } }
+        : { status: "succeeded", output: { kind: "text", text: "<promise>DONE</promise>" } },
+    );
+    const seenScripts: string[] = [];
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async (script) => {
+        seenScripts.push(script);
+        return { exitCode: 1, stdout: "", stderr: "" };
+      },
+    });
+    const rawScript = "echo prev=$LOOP_PREV_OUTPUT args=$ARGUMENTS";
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "go",
+        until: "DONE",
+        max_iterations: 2,
+        fresh_context: false,
+        until_bash: rawScript,
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const ctx = { ...buildCtx(), inputs: { ARGUMENTS: "hello" } };
+    await handler.handle(node, ctx);
+    // Script body MUST be passed unmodified — variable resolution happens
+    // shell-side via the env channel. Anything else would let model output
+    // containing `$(...)` execute on the next probe.
+    expect(seenScripts[0]).toBe(rawScript);
+  });
+
+  test("probe env channel carries loop + workflow + artifactsDir vars; not script-substituted", async () => {
+    const { handler: promptHandler } = makeRecorderHandler((_, i) =>
+      i === 0
+        ? { status: "succeeded", output: { kind: "text", text: "iter1-result" } }
+        : { status: "succeeded", output: { kind: "text", text: "<promise>DONE</promise>" } },
+    );
+    interface ProbeCall {
+      script: string;
+      env: Readonly<Record<string, string>> | undefined;
+      inputs: Readonly<Record<string, string>>;
+      artifactsDir: string | undefined;
+    }
+    const calls: ProbeCall[] = [];
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async (script, opts) => {
+        calls.push({
+          script,
+          env: opts.env,
+          inputs: opts.inputs,
+          artifactsDir: opts.artifactsDir,
+        });
+        return { exitCode: 1, stdout: "", stderr: "" };
+      },
+    });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "go",
+        until: "DONE",
+        max_iterations: 2,
+        fresh_context: false,
+        until_bash: "test -f sentinel",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const ctx = {
+      ...buildCtx(),
+      inputs: { ARGUMENTS: "hello", lane: "stable" },
+      artifactsDir: "/tmp/run-artifacts",
+    };
+    await handler.handle(node, ctx);
+    // First probe fires after iter 1 — LOOP_PREV_OUTPUT empty (no prior
+    // iteration), LOOP_USER_INPUT empty (no interactive resume).
+    expect(calls[0].env?.LOOP_PREV_OUTPUT).toBe("");
+    expect(calls[0].env?.LOOP_USER_INPUT).toBe("");
+    expect(calls[0].inputs.ARGUMENTS).toBe("hello");
+    expect(calls[0].inputs.lane).toBe("stable");
+    expect(calls[0].artifactsDir).toBe("/tmp/run-artifacts");
+    // Script body untouched.
+    expect(calls[0].script).toBe("test -f sentinel");
+  });
+
+  test("hostile prior-iteration output is NOT executed as command substitution in the script", async () => {
+    // Regression: prior model output containing `$(touch …)` must reach the
+    // probe as literal text via the env channel, not be concatenated into
+    // the script source. Sentinel filesystem effect would fire if the body
+    // were executed.
+    const sentinelPath = "/tmp/__keelson_until_bash_injection_canary__";
+    // Best-effort cleanup before the test in case a prior run leaked.
+    try {
+      await Bun.$`rm -f ${sentinelPath}`.quiet();
+    } catch {
+      // best-effort
+    }
+    const hostileOutput = `bad $(touch ${sentinelPath})`;
+    const { handler: promptHandler } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: hostileOutput },
+    }));
+    const probeEnvPrevs: (string | undefined)[] = [];
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async (_script, opts) => {
+        probeEnvPrevs.push(opts.env?.LOOP_PREV_OUTPUT);
+        return { exitCode: 1, stdout: "", stderr: "" };
+      },
+    });
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "go",
+        until: "DONE",
+        max_iterations: 3,
+        fresh_context: false,
+        until_bash: 'echo "$LOOP_PREV_OUTPUT"',
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    await handler.handle(node, buildCtx());
+    // Probe fires after each iteration; iter 1's probe sees empty
+    // LOOP_PREV_OUTPUT (no prior iteration), iter 2+'s probe receives the
+    // hostile output VERBATIM via env — not executed as command
+    // substitution into the script.
+    expect(probeEnvPrevs[0]).toBe("");
+    expect(probeEnvPrevs[1]).toBe(hostileOutput);
+    expect(probeEnvPrevs[2]).toBe(hostileOutput);
+    const canaryExists = await Bun.file(sentinelPath)
+      .exists()
+      .catch(() => false);
+    expect(canaryExists).toBe(false);
+  });
+
+  test("probe runner throws — surfaces a warning and keeps iterating", async () => {
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "step" },
+    }));
+    const handler = makeLoopHandler({
+      promptHandler,
+      runUntilBashProbe: async () => {
+        throw new Error("spawn ENOENT");
+      },
+    });
+    const warnings: string[] = [];
+    const ctx: NodeContext = {
+      ...buildCtx(),
+      emit: (e) => {
+        if (e.type === "node_warning") warnings.push(e.message);
+      },
+    };
+    const node = {
+      id: "retry",
+      loop: {
+        prompt: "go",
+        until: "DONE",
+        max_iterations: 2,
+        fresh_context: false,
+        until_bash: "bogus",
+      },
+    } as unknown as Parameters<typeof handler.handle>[0];
+    const result = await handler.handle(node, ctx);
+    expect(result.status).toBe("succeeded");
+    expect(seen).toHaveLength(2);
+    expect(warnings.some((w) => w.includes("spawn ENOENT"))).toBe(true);
   });
 });
 

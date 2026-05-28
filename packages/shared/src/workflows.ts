@@ -254,14 +254,24 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
     .strict(),
   // Broadcast when an approval node opens. Flips the client's run status
   // to `paused` and surfaces the inline approval callout. The user's reply
-  // (or quick-action) lands via POST /api/workflows/runs/:runId/resume;
-  // resume emits the usual `node_done` for the approval node so no separate
-  // `approval_resolved` frame is needed.
+  // (or quick-action) lands via POST /api/workflows/runs/:runId/resume.
   z
     .object({
       type: z.literal("approval_awaiting"),
       nodeId: z.string(),
       message: z.string(),
+    })
+    .strict(),
+  // Broadcast when a paused node is resumed via POST /resume. Tells live
+  // clients to clear the awaiting callout for `nodeId`. For approval nodes,
+  // `node_done` follows immediately; for interactive-loop nodes, the loop
+  // continues iterating without a node_done until terminal — without this
+  // frame, the SPA would keep the composer open across the next iteration's
+  // worth of work and retries would hit 409 on the now-cleared pending.
+  z
+    .object({
+      type: z.literal("approval_resolved"),
+      nodeId: z.string(),
     })
     .strict(),
 ]);

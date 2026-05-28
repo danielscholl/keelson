@@ -361,10 +361,18 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
         // overwrites status to terminal), then trigger a fresh REST
         // hydrate so the persisted contentParts / outputText backfill
         // the empty live row.
+        //
+        // `approval_resolved` triggers a fresh hydrate for a different
+        // reason: the resolve path on the server deleted the awaiting
+        // row, but a hydrate fetched BEFORE resume could land after the
+        // frame and re-impose the now-stale `awaiting` via mergeNode's
+        // snapshot-awaiting-wins rule. Bumping the generation invalidates
+        // any in-flight stale fetch, and the fresh hydrate confirms the
+        // post-resume state.
         const shouldRehydrateAfter =
           frame.type === "node_done"
             ? isLiveNodeEmpty(latestNodesRef.current[frame.nodeId])
-            : false;
+            : frame.type === "approval_resolved";
         applyFrame(frame, setRun, setNodes);
         if (shouldRehydrateAfter) {
           const gen = ++openGenRef.current;
@@ -649,6 +657,28 @@ function applyFrame(
             status: "awaiting",
             startedAt: base.startedAt ?? Date.now(),
             awaitingMessage: frame.message,
+          },
+        };
+      });
+      return;
+
+    case "approval_resolved":
+      // Clear the awaiting callout. For approval nodes the immediately-
+      // following `node_done` will set the terminal status; for interactive
+      // loops there is no `node_done` until the parent loop terminates, so
+      // flip to `running` to reflect that the loop continues iterating.
+      // Skip the flip for terminal nodes to defend against an out-of-order
+      // run_done arriving first.
+      setNodes((prev) => {
+        const base = prev[frame.nodeId];
+        if (!base) return prev;
+        if (NODE_TERMINAL_STATUSES.has(base.status)) return prev;
+        return {
+          ...prev,
+          [frame.nodeId]: {
+            ...base,
+            status: "running",
+            awaitingMessage: undefined,
           },
         };
       });

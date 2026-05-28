@@ -57,6 +57,12 @@ export interface WorkflowStore {
   createRun(input: CreateRunInput): void;
   updateRunStatus(input: UpdateRunStatusInput): void;
   upsertNodeOutput(input: UpsertNodeOutputInput): void;
+  // Removes a node's persisted snapshot row. Used by the interactive-loop
+  // resume path so the row stops reporting `awaiting` while the loop
+  // continues iterating — the row is recreated by the executor when the
+  // node reaches a terminal status (succeeded/failed/skipped) via
+  // upsertNodeOutput. Returns true if a row existed.
+  deleteNodeOutput(runId: string, nodeId: string): boolean;
   // Patches worktree_path after-the-fact (worktree creation is lazy, so the
   // path isn't known at createRun time when isolation is on).
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
@@ -208,6 +214,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );
   const deleteRunStmt = db.prepare("DELETE FROM workflow_runs WHERE id = ?");
+  const deleteNodeStmt = db.prepare(
+    "DELETE FROM workflow_node_outputs WHERE run_id = ? AND node_id = ?",
+  );
   const selectRunIdByConv = db.prepare("SELECT id FROM workflow_runs WHERE conversation_id = ?");
 
   return {
@@ -282,6 +291,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     },
     deleteRun(runId) {
       return deleteRunStmt.run(runId).changes > 0;
+    },
+    deleteNodeOutput(runId, nodeId) {
+      return deleteNodeStmt.run(runId, nodeId).changes > 0;
     },
     getRunIdByConversationId(conversationId) {
       const row = selectRunIdByConv.get(conversationId) as { id: string } | null;

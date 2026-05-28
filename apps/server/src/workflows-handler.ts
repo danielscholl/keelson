@@ -30,9 +30,11 @@ import {
 } from "@keelson/shared";
 import {
   type AwaitApproval,
+  type AwaitInteraction,
   bashHandler,
   createWorktree,
   type DagNode,
+  defaultRunUntilBashProbe,
   defaultWorktreeRoot,
   isGitRepo,
   type MemoryTools,
@@ -1033,6 +1035,12 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       const settle = {
         resolve: (text: string) => {
           cleanup();
+          // Tell live clients the pause cleared. Approval nodes also emit
+          // `node_done` immediately after the handler returns, but live
+          // clients depend on this frame to clear the composer between
+          // settle and the executor's next write — the gap is short for
+          // approval, long for interactive-loop iterations.
+          subscribers.broadcast(nodeRunId, { type: "approval_resolved", nodeId });
           resolve(text);
         },
         reject: (err: Error) => {
@@ -1095,6 +1103,109 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       });
     });
 
+  // Interactive-loop sibling of awaitApproval. Shares the pendingApprovals
+  // map (keyed by nodeId) so the existing POST /resume + DELETE abort drain
+  // paths handle both pause types without branching. The only persisted
+  // difference is the node's `outputText` (gate message) at the iteration
+  // boundary; iteration count / sessionId are forward-declared on
+  // ApprovalContext but only used in-memory for now — the SPA renders the
+  // pause through the same approval_awaiting frame.
+  //
+  // Unlike approval, the loop handler does NOT return after resume — it
+  // continues into the next iteration. So on settle.resolve we MUST flip
+  // the node row from 'awaiting' back to 'running' (preserving the
+  // original startedAt) before unblocking the executor. Otherwise a client
+  // that reloads or reconnects mid-iteration-N+1 would hydrate a paused
+  // callout for a node with no pending resolver, and POST /resume would
+  // return 409.
+  const awaitInteraction: AwaitInteraction = (
+    nodeRunId,
+    nodeId,
+    message,
+    _iteration,
+    _sessionId,
+    signal,
+  ) =>
+    new Promise<string>((resolve, reject) => {
+      const settle = {
+        resolve: (text: string) => {
+          cleanup();
+          // Drop the awaiting snapshot so a reload during the next iteration
+          // doesn't rehydrate a stale pause callout. The node row will be
+          // re-created at terminal (succeeded/failed/skipped) by the
+          // executor's normal node_done write path; there is no "running"
+          // status in workflowNodeStatusSchema, so "no row" is the correct
+          // pre-terminal representation. Best-effort: a SQLite failure here
+          // mustn't block the executor from receiving the user's reply.
+          try {
+            store.deleteNodeOutput(nodeRunId, nodeId);
+          } catch (err) {
+            console.warn(
+              `[workflows] failed to clear awaiting row for ${nodeRunId}:${nodeId} after resume: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+          // Tell live clients the pause cleared. Without this frame, an
+          // open RunView keeps the composer active for the entire next
+          // iteration (could be minutes) and retries 409.
+          subscribers.broadcast(nodeRunId, { type: "approval_resolved", nodeId });
+          resolve(text);
+        },
+        reject: (err: Error) => {
+          cleanup();
+          reject(err);
+        },
+      };
+      const onAbort = () => {
+        settle.reject(new Error("aborted"));
+      };
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+        pendingApprovals.delete(nodeId);
+      };
+      if (signal.aborted) {
+        reject(new Error("aborted"));
+        return;
+      }
+      pendingApprovals.set(nodeId, {
+        nodeId,
+        resolve: settle.resolve,
+        reject: settle.reject,
+      });
+      signal.addEventListener("abort", onAbort);
+
+      try {
+        store.updateRunStatus({
+          runId: nodeRunId,
+          status: "paused",
+          completedAt: null,
+          error: null,
+        });
+        store.upsertNodeOutput({
+          runId: nodeRunId,
+          nodeId,
+          status: "awaiting",
+          outputText: message,
+          contentParts: null,
+          startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
+          completedAt: null,
+          error: null,
+        });
+      } catch (err) {
+        console.warn(
+          `[workflows] failed to persist interactive-loop paused state for ${nodeRunId}:${nodeId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      subscribers.broadcast(nodeRunId, {
+        type: "approval_awaiting",
+        nodeId,
+        message,
+      });
+    });
+
   // Cancel-node side effect. The handler returns `failed` for the cancel
   // node itself; this callback writes 'cancelled' onto the run row and
   // trips the AbortController so downstream layers skip.
@@ -1122,7 +1233,14 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     ["approval", makeApprovalHandler({ awaitApproval })],
     ["cancel", makeCancelHandler({ requestCancel })],
     ["command", makeCommandHandler({ promptHandler })],
-    ["loop", makeLoopHandler({ promptHandler })],
+    [
+      "loop",
+      makeLoopHandler({
+        promptHandler,
+        awaitInteraction,
+        runUntilBashProbe: defaultRunUntilBashProbe,
+      }),
+    ],
     ["script", makeScriptHandler()],
   ]);
 

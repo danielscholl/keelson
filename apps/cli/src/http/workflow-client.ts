@@ -170,6 +170,33 @@ export async function listPausedRuns(baseUrl: string): Promise<ListRunsResponse>
   return (await res.json()) as ListRunsResponse;
 }
 
+export async function resumeRun(
+  baseUrl: string,
+  runId: string,
+  body: { nodeId: string; text: string },
+): Promise<void> {
+  const res = await fetch(url(baseUrl, `/api/workflows/runs/${encodeURIComponent(runId)}/resume`), {
+    method: "POST",
+    headers: { ...defaultHeaders(baseUrl), "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 404) throw new HttpError(404, `run '${runId}' not found or already terminal`);
+  if (res.status === 409) {
+    const detail = await res.text().catch(() => "");
+    throw new HttpError(
+      409,
+      `no pending approval for node '${body.nodeId}'${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new HttpError(
+      res.status,
+      `POST /workflows/runs/${runId}/resume failed: ${res.status} ${detail}`,
+    );
+  }
+}
+
 export interface AttachRunOptions {
   baseUrl: string;
   runId: string;
