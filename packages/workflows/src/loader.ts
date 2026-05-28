@@ -75,10 +75,10 @@ export interface WorkflowLoadWarning {
  * cross-runtime portability.
  *
  * Worktree integration, hooks, sandbox, MCP, inline agents, betas, fallback
- * model, max-budget, output-format JSON-schema validation, and script nodes
- * are tracked for future releases. Until those land, the loader
- * surfaces the warning and `--strict` refuses workflows that depend on them
- * so users aren't silently misled by the README's compatibility table.
+ * model, and max-budget are tracked for future releases. Until those land,
+ * the loader surfaces the warning and `--strict` refuses workflows that
+ * depend on them so users aren't silently misled by the README's
+ * compatibility table.
  */
 const IGNORED_FIELDS_PER_NODE: readonly string[] = [
   "agents",
@@ -88,7 +88,6 @@ const IGNORED_FIELDS_PER_NODE: readonly string[] = [
   "maxBudgetUsd",
   "mcp",
   "skills",
-  "output_format",
 ];
 
 // Per-node fields the runtime honors ONLY when the claude provider is the
@@ -176,7 +175,7 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
       filename: ctx.filename,
       nodeId: node.id,
       kind: "ignored_capability",
-      message: `Keelson does not honor these node fields in at runtime (workflow still runs, fields dropped): ${ignoredPresent.join(", ")}`,
+      message: `Keelson does not honor these node fields at runtime (workflow still runs, fields dropped): ${ignoredPresent.join(", ")}`,
     });
   }
 

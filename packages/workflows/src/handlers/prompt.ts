@@ -27,6 +27,7 @@
  */
 
 import type { NodeHandler, NodeResult } from "../executor.ts";
+import { buildOutputFormatSuffix, extractJsonOutput } from "./output-format.ts";
 
 // Loosely-typed handles to avoid pulling @keelson/providers and
 // @keelson/shared into this package's dep graph. The composition root
@@ -159,6 +160,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const nodeAllowed = readStringArray(node, "allowed_tools");
       const nodeDenied = readStringArray(node, "denied_tools");
       const nodeHooks = readHooksField(node);
+      const nodeOutputFormat = readOutputFormat(node);
 
       // Provider resolution: node.provider overrides workflow.provider, which
       // overrides the resolver's own default. Passed verbatim to getProvider;
@@ -265,10 +267,15 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       };
       const onHandlerExit = (): void => returnIterator();
 
+      const promptBody =
+        nodeOutputFormat !== undefined
+          ? ctx.resolvedBody + buildOutputFormatSuffix(nodeOutputFormat)
+          : ctx.resolvedBody;
+
       const consume = async (): Promise<void> => {
         try {
           const provider = opts.getProvider(effectiveProviderId);
-          const stream = provider.sendQuery(ctx.resolvedBody, ctx.cwd, undefined, {
+          const stream = provider.sendQuery(promptBody, ctx.cwd, undefined, {
             abortSignal: handlerExit.signal,
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
             ...(model !== undefined ? { model } : {}),
@@ -379,9 +386,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           error: providerError,
         };
       } else {
+        const normalized =
+          nodeOutputFormat !== undefined ? extractJsonOutput(assistantText) : assistantText;
         result = {
           status: "succeeded",
-          output: { kind: "text", text: assistantText },
+          output: { kind: "text", text: normalized },
         };
       }
 
@@ -439,4 +448,10 @@ function readHooksField(node: unknown): PromptHandlerSendOptions["hooks"] | unde
   if (!value || typeof value !== "object") return undefined;
   // Cast at the boundary: the loader has already validated the shape.
   return value as PromptHandlerSendOptions["hooks"];
+}
+
+function readOutputFormat(node: unknown): Record<string, unknown> | undefined {
+  const value = (node as Record<string, unknown>).output_format;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
 }

@@ -934,4 +934,98 @@ describe("makePromptHandler", () => {
     expect(result.error).toContain("not-a-real-provider");
     expect(result.error).toContain("not registered");
   });
+
+  describe("output_format", () => {
+    test("appends the schema instruction to the prompt sent to the provider", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: '{"kind":"bug"}' }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: {
+          type: "object",
+          properties: { kind: { type: "string" } },
+          required: ["kind"],
+        },
+      } as unknown as DagNode;
+      await handler.handle(node, buildCtx({ resolvedBody: "classify this" }));
+      expect(calls).toHaveLength(1);
+      const sent = calls[0]!.prompt;
+      expect(sent.startsWith("classify this")).toBe(true);
+      expect(sent).toContain("ONLY a single-line JSON object");
+      expect(sent).toContain('"type":"object"');
+    });
+
+    test("no suffix is appended when output_format is unset", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "hi" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      await handler.handle(stubNode, buildCtx({ resolvedBody: "say hi" }));
+      expect(calls[0]!.prompt).toBe("say hi");
+    });
+
+    test("clean JSON reply is normalized as the node output", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: '  {"kind":"bug","title":"oops"}  ' }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: { type: "object", properties: { kind: { type: "string" } } },
+      } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("succeeded");
+      const text = result.output.kind === "text" ? result.output.text : "";
+      expect(text).toBe('{"kind":"bug","title":"oops"}');
+    });
+
+    test("fenced JSON reply has fences stripped before being committed", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: '```json\n{"kind":"feature"}\n```' }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: { type: "object" },
+      } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      const text = result.output.kind === "text" ? result.output.text : "";
+      expect(text).toBe('{"kind":"feature"}');
+    });
+
+    test("non-JSON reply is preserved as-is (substitute layer's existing failure mode)", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "I think this is a bug." }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: { type: "object" },
+      } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      const text = result.output.kind === "text" ? result.output.text : "";
+      expect(text).toBe("I think this is a bug.");
+    });
+  });
 });

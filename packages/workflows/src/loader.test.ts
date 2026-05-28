@@ -281,11 +281,7 @@ nodes:
     expect(result.warnings.some((w) => w.kind === "ai_fields_on_non_ai_node")).toBe(true);
   });
 
-  test("output_format on a prompt node warns (Phase 1 doesn't honor structured output)", () => {
-    // Regression for the Codex review finding: `output_format` was missing
-    // from the ignored-capability list, so workflows that depend on
-    // structured-output dot access (`$nodeId.output.field`) ran with no
-    // warning and `--strict` did not refuse them.
+  test("output_format on a prompt node loads without an ignored_capability warning", () => {
     const yaml = `
 name: structured
 description: uses output_format
@@ -303,12 +299,12 @@ nodes:
     expect(result.error).toBeNull();
     expect(
       result.warnings.some(
-        (w) =>
-          w.kind === "ignored_capability" &&
-          w.nodeId === "classify" &&
-          /output_format/.test(w.message),
+        (w) => w.kind === "ignored_capability" && /output_format/.test(w.message),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    const node = result.workflow?.nodes[0];
+    expect(node?.output_format).toBeDefined();
+    expect((node?.output_format as { type?: unknown }).type).toBe("object");
   });
 
   test("script node loads without an 'unimplemented' warning (handler is wired now)", () => {
