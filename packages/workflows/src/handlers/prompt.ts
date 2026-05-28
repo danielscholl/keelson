@@ -79,8 +79,14 @@ export interface PromptHandlerLifecycle {
 }
 
 export interface MakePromptHandlerOptions {
-  /** Resolves the provider to use for this run. Called once per node invocation. */
-  getProvider: () => PromptHandlerProvider;
+  /**
+   * Resolves the provider to use for this node. Called once per invocation
+   * with the effective provider id (`node.provider ?? workflow.provider`),
+   * or undefined when neither is set — the resolver then picks its default.
+   * Throwing surfaces as a normal failed `NodeResult` via the handler's
+   * provider-error path.
+   */
+  getProvider: (id?: string) => PromptHandlerProvider;
   /** Registered tool catalog. Called once per node invocation so post-boot registrations are picked up. */
   getRegisteredTools: () => readonly { name: string; [k: string]: unknown }[];
   /** Tool names to exclude. Defaults to DEFAULT_TOOL_DENYLIST when undefined; an explicit empty array allows everything. */
@@ -154,6 +160,22 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const nodeDenied = readStringArray(node, "denied_tools");
       const nodeHooks = readHooksField(node);
 
+      // Provider resolution: node.provider overrides workflow.provider, which
+      // overrides the resolver's own default. Passed verbatim to getProvider;
+      // unknown ids throw inside the resolver and surface via consume()'s
+      // error path.
+      const nodeProviderRaw = (node as { provider?: unknown }).provider;
+      const nodeProvider =
+        typeof nodeProviderRaw === "string" && nodeProviderRaw.trim().length > 0
+          ? nodeProviderRaw.trim()
+          : undefined;
+      const workflowProviderRaw = ctx.workflow.provider;
+      const workflowProvider =
+        typeof workflowProviderRaw === "string" && workflowProviderRaw.trim().length > 0
+          ? workflowProviderRaw.trim()
+          : undefined;
+      const effectiveProviderId = nodeProvider ?? workflowProvider;
+
       // Slice 4 — surface a one-off `run_warning` when the active provider
       // can't honor the per-node config we just resolved. Only claude
       // implements the tool-gate / hook forwarding today; other providers
@@ -166,7 +188,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // preflight throw as "skip the warning" and let the real failure
       // path own the diagnostic.
       try {
-        const providerType = opts.getProvider().getType?.();
+        const providerType = opts.getProvider(effectiveProviderId).getType?.();
         if (providerType !== undefined && providerType !== "claude") {
           const usedFields: string[] = [];
           if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
@@ -245,7 +267,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       const consume = async (): Promise<void> => {
         try {
-          const stream = opts.getProvider().sendQuery(ctx.resolvedBody, ctx.cwd, undefined, {
+          const provider = opts.getProvider(effectiveProviderId);
+          const stream = provider.sendQuery(ctx.resolvedBody, ctx.cwd, undefined, {
             abortSignal: handlerExit.signal,
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
             ...(model !== undefined ? { model } : {}),

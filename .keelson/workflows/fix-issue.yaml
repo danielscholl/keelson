@@ -13,6 +13,7 @@
 #   - auto             — Copilot's own routing for everything else
 
 name: fix-issue
+provider: copilot
 description: |
   Use when: User wants to fix, resolve, or implement a GitHub issue end-to-end
             and open a draft PR.
@@ -24,10 +25,6 @@ description: |
         a self-review pass, applies the review's findings, and reports back.
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
-# Run this with the Copilot provider — Keelson's loader rejects `provider:
-# copilot` at the YAML level (issue #33), so pick it at the runtime layer:
-#   KEELSON_WORKFLOW_PROVIDER=copilot bun apps/cli/bin/keelson.ts workflow run fix-issue "fix #42"
-#
 # Model strategy: every heavy node pins `gpt-5` explicitly because Keelson's
 # prompt handler only forwards `node.model` when set — workflow-level `model:`
 # is currently dead config in the runtime, and an unpinned node falls through

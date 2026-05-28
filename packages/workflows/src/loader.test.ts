@@ -175,16 +175,37 @@ nodes:
     );
   });
 
-  test("provider other than 'claude' is rejected", () => {
+  test("workflow-level provider strings pass through the loader (runtime resolves)", () => {
     const yaml = `
-name: codex
-description: codex provider not yet supported
-provider: codex
+name: copilot-pin
+description: workflow pins copilot
+provider: copilot
 nodes:
   - id: a
     prompt: x
 `;
-    expect(parseWorkflow(yaml, "codex.yaml").error?.error).toMatch(/Keelson.*claude/);
+    const result = parseWorkflow(yaml, "copilot-pin.yaml");
+    expect(result.error).toBeNull();
+    expect(result.workflow?.provider).toBe("copilot");
+  });
+
+  test("per-node provider string passes through the loader (runtime resolves)", () => {
+    const yaml = `
+name: per-node-override
+description: workflow defaults claude, one node pins copilot
+provider: claude
+nodes:
+  - id: a
+    prompt: x
+  - id: b
+    depends_on: [a]
+    prompt: y
+    provider: copilot
+`;
+    const result = parseWorkflow(yaml, "per-node-override.yaml");
+    expect(result.error).toBeNull();
+    const nodeB = result.workflow?.nodes.find((n) => n.id === "b");
+    expect((nodeB as { provider?: string } | undefined)?.provider).toBe("copilot");
   });
 });
 

@@ -11,6 +11,7 @@ import {
   type CopilotAuthProbe,
   getAgentProvider,
   getProviderInfoList,
+  isRegisteredProvider,
   registerClaudeProvider,
   registerCopilotProvider,
   registerStubProvider,
@@ -249,15 +250,26 @@ export function bootstrapPromptHandler(): NodeHandler | undefined {
       );
     }
   }
-  const getProvider: () => PromptHandlerProvider = () => {
-    const p = getAgentProvider(providerId);
-    return p as unknown as PromptHandlerProvider;
+  const getProvider: (id?: string) => PromptHandlerProvider = (id) => {
+    const target = id ?? providerId;
+    if (!isRegisteredProvider(target)) {
+      const available = getProviderInfoList()
+        .map((p) => p.id)
+        .join(", ");
+      throw new Error(
+        `Provider '${target}' is not registered. Available: ${available}. ` +
+          `Set KEELSON_PROVIDERS to include it, or remove 'provider:' from the workflow.`,
+      );
+    }
+    return getAgentProvider(target) as unknown as PromptHandlerProvider;
   };
   // Per-node `allowed_tools` / `denied_tools` / `hooks` are honored only by
-  // the claude provider; signal at boot so operators know.
+  // the claude provider; signal at boot so operators know what the default
+  // will be when a workflow doesn't pin `provider:` itself. Per-workflow and
+  // per-node overrides surface their own `node_warning` at run time.
   if (providerId !== "claude") {
     console.warn(
-      `[workflows] workflow provider is '${providerId}'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.`,
+      `[workflows] default workflow provider is '${providerId}'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.`,
     );
   }
   const denylist = parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST);

@@ -372,9 +372,9 @@ export const LOOP_NODE_AI_FIELDS: readonly string[] = BASH_NODE_AI_FIELDS.filter
  * - retry not allowed on loop nodes
  * - timeout on bash must be positive
  *
- * Note: provider identity is validated in loader.ts (workflow-level) and at
- * execution time. Model strings are passed through unchanged — the runtime is
- * the source of truth for what model names exist.
+ * Note: provider and model strings are passed through unchanged. The
+ * runtime is the source of truth for which provider ids are registered
+ * and which model names a given provider accepts.
  */
 export const dagNodeSchema = dagNodeBaseSchema
   .extend({
