@@ -437,6 +437,23 @@ nodes:
     expect(result.error).toBeNull();
   });
 
+  test('loop node with empty until_bash is rejected (avoid `bash -c ""` exit-0 false positive)', () => {
+    const yaml = `
+name: empty-bash
+description: empty probe must not pass schema
+nodes:
+  - id: l
+    loop:
+      prompt: keep going
+      until: DONE
+      max_iterations: 3
+      until_bash: ""
+`;
+    const result = parseWorkflow(yaml, "eb.yaml");
+    expect(result.error).not.toBeNull();
+    expect(result.error?.error).toMatch(/until_bash/);
+  });
+
   test("loop node with until_bash loads without a runtime-unsupported warning (now wired)", () => {
     const yaml = `
 name: bash-probe-loop

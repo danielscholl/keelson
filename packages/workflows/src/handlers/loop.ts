@@ -228,7 +228,14 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
           return { status: "succeeded", output: { kind: "text", text: stripped } };
         }
 
-        if (typeof loop.until_bash === "string" && runUntilBashProbe !== undefined) {
+        // Schema already enforces min(1) on until_bash, but guard at the
+        // runtime boundary too — a blank script would `bash -c ""` to
+        // exit 0 and silently terminate the loop after iteration 1.
+        if (
+          typeof loop.until_bash === "string" &&
+          loop.until_bash.trim().length > 0 &&
+          runUntilBashProbe !== undefined
+        ) {
           // Script body is passed UNSUBSTITUTED to `bash -c` — author-controlled
           // markers like `$LOOP_PREV_OUTPUT` / `$KEELSON_INPUTS_X` reach the shell
           // literally and resolve through the env channel. Mirrors the bash /
