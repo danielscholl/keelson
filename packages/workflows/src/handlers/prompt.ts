@@ -163,9 +163,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const nodeModelRaw = (node as { model?: unknown }).model;
       const workflowModelRaw = ctx.workflow.model;
       // Resolution chain: node.model → workflow.model → provider.defaultModel.
-      // The third step needs getProvider() and lives in the preflight try
-      // below so an unknown-provider id surfaces through consume()'s error
-      // path, not here.
+      // The third step is deferred to consume(): it needs a successfully
+      // resolved provider, and resolving it there keeps the fallback on the
+      // same code path that surfaces unknown-provider errors as a failed
+      // NodeResult.
       let model: string | undefined;
       if (typeof nodeModelRaw === "string" && nodeModelRaw.length > 0) {
         model = nodeModelRaw;
@@ -205,14 +206,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // preflight throw as "skip the warning" and let the real failure
       // path own the diagnostic.
       try {
-        const previewProvider = opts.getProvider(effectiveProviderId);
-        if (model === undefined) {
-          const defaultModel = previewProvider.getCapabilities?.().defaultModel;
-          if (typeof defaultModel === "string" && defaultModel.length > 0) {
-            model = defaultModel;
-          }
-        }
-        const providerType = previewProvider.getType?.();
+        const providerType = opts.getProvider(effectiveProviderId).getType?.();
         if (providerType !== undefined && providerType !== "claude") {
           const usedFields: string[] = [];
           if (nodeAllowed !== undefined) usedFields.push("allowed_tools");
@@ -297,6 +291,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const consume = async (): Promise<void> => {
         try {
           const provider = opts.getProvider(effectiveProviderId);
+          if (model === undefined) {
+            const defaultModel = provider.getCapabilities?.().defaultModel;
+            if (typeof defaultModel === "string" && defaultModel.length > 0) {
+              model = defaultModel;
+            }
+          }
           const stream = provider.sendQuery(promptBody, ctx.cwd, undefined, {
             abortSignal: handlerExit.signal,
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),

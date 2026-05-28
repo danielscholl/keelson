@@ -738,6 +738,27 @@ describe("makePromptHandler", () => {
       await handler.handle(stubNode, buildCtx());
       expect(calls[0]!.options?.model).toBeUndefined();
     });
+
+    test("provider.defaultModel still resolves when preflight getProvider() throws but consume's succeeds", async () => {
+      // Guards against the fallback regressing to `undefined` if the preflight
+      // resolver lookup ever fails transiently (caught + swallowed) while the
+      // consume() lookup succeeds.
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "" }, { type: "done" }],
+        capabilities: { defaultModel: "gpt-5" },
+      });
+      let attempt = 0;
+      const handler = makePromptHandler({
+        getProvider: () => {
+          attempt++;
+          if (attempt === 1) throw new Error("registry blip on preflight");
+          return provider;
+        },
+        getRegisteredTools: () => [],
+      });
+      await handler.handle(stubNode, buildCtx());
+      expect(calls[0]!.options?.model).toBe("gpt-5");
+    });
   });
 
   test("times out even when the provider ignores its abortSignal (hung provider)", async () => {
