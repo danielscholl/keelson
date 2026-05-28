@@ -25,6 +25,7 @@ import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.t
 import {
   createActiveRuns,
   createWorkflowSubscribers,
+  workflowRunWebSocketHandlers,
   workflowsRoutes,
 } from "../src/workflows-handler.ts";
 
@@ -1354,6 +1355,77 @@ nodes:
       postRun(`http://test/api/workflows/runs/${runId}/resume`, {
         nodeId: "review",
         text: "approve",
+      }),
+    );
+    await pollUntilTerminal(app, runId);
+  });
+
+  test("WS open replays approval_awaiting with live pauseId for reconnecting clients", async () => {
+    writeWorkflow(
+      "pa-replay.yaml",
+      `name: pa-replay
+description: replay current pause to reconnects
+nodes:
+  - id: setup
+    bash: sleep 0.05
+  - id: review
+    depends_on: [setup]
+    approval:
+      message: please approve
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const subscribers = createWorkflowSubscribers();
+    const activeRuns = createActiveRuns();
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      {
+        catalog,
+        store,
+        conversationStore: createConversationStore(db),
+        defaultCwd: tmpDir,
+      },
+      activeRuns,
+      subscribers,
+    );
+    const wsHandlers = workflowRunWebSocketHandlers({ subscribers, store, activeRuns });
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/pa-replay/runs", { inputs: {}, workingDir: tmpDir }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    // Wait until the run is paused (approval handler has registered pendingApprovals).
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      const r = store.getRun(runId);
+      if (r?.status === "paused") break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // Simulate a fresh WS connection AFTER the pause opened. The open
+    // handler should replay the live approval_awaiting frame so the
+    // reconnecting client gets the current pauseId — the snapshot row
+    // alone doesn't carry the token.
+    const replayed: Array<{ type: string; pauseId?: string; nodeId?: string }> = [];
+    const fakeWs = {
+      data: { runId, kind: "workflowRun", abort: new AbortController() },
+      send: (raw: string) => {
+        replayed.push(JSON.parse(raw));
+      },
+      close: () => {},
+    } as unknown as Parameters<NonNullable<typeof wsHandlers.open>>[0];
+    wsHandlers.open?.(fakeWs);
+    const replay = replayed.find((f) => f.type === "approval_awaiting");
+    expect(replay).toBeDefined();
+    expect(replay?.nodeId).toBe("review");
+    expect(typeof replay?.pauseId).toBe("string");
+    // Cleanup.
+    await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume`, {
+        nodeId: "review",
+        text: "approve",
+        pauseId: replay?.pauseId,
       }),
     );
     await pollUntilTerminal(app, runId);

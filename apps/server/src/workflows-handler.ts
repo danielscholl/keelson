@@ -197,6 +197,11 @@ export interface PendingApproval {
   // across iterations. Generated fresh every time a pause opens, so the
   // pre-resume client never knows the next iteration's pauseId.
   pauseId: string;
+  // Gate message stored at pause time so the WS open handler can replay
+  // `approval_awaiting` to a reconnecting client without re-reading the
+  // store (and so the replay carries the right pauseId; SQLite never sees
+  // the token).
+  message: string;
   resolve: (text: string) => void;
   reject: (err: Error) => void;
 }
@@ -830,8 +835,15 @@ export function handleWorkflowRunUpgrade(
 export function workflowRunWebSocketHandlers(deps: {
   subscribers: WorkflowSubscribers;
   store: WorkflowStore;
+  // Optional so existing call sites that don't track in-flight runs (early
+  // wiring, isolated tests) still work; production wires it from the
+  // composition root. When present, the open handler replays the live
+  // `approval_awaiting` frames so a reconnecting client gets the current
+  // pauseId — which the persisted snapshot row alone cannot carry, since
+  // the token only lives in memory.
+  activeRuns?: ActiveRuns;
 }): WebSocketHandler<WsData> {
-  const { subscribers, store } = deps;
+  const { subscribers, store, activeRuns } = deps;
 
   function sendTerminal(ws: ServerWebSocket<WsData>, status: WorkflowRunStatus): void {
     const frame: WorkflowFrame = { type: "run_done", status };
@@ -869,15 +881,38 @@ export function workflowRunWebSocketHandlers(deps: {
       }
       // `paused` is a non-terminal state too. The run is still in flight,
       // waiting on POST /resume; a late subscriber needs the WS open so the
-      // resumed node's `node_done` reaches them. Snapshot rehydration
-      // (handled in the hook) already paints the approval callout from
-      // `getWorkflowRun`, so we don't need to replay the approval_awaiting
-      // frame on reconnect.
+      // resumed node's `node_done` reaches them. Snapshot rehydration paints
+      // the awaiting message from `getWorkflowRun`, but the pauseId only
+      // lives in memory — replay live pending pauses below so a reconnecting
+      // client gets the current token (otherwise a submit with the prior
+      // iteration's pauseId hits 409).
       if (run.status !== "running" && run.status !== "paused") {
         sendTerminal(ws, run.status);
         return;
       }
       subscribers.subscribe(runId, ws);
+      // Replay any currently-open pauses so the reconnecting client has the
+      // live pauseId + the freshest gate message. Send DIRECTLY to this ws
+      // rather than via broadcast — other subscribers already received the
+      // frame at pause-open time and don't need a redundant copy.
+      if (activeRuns) {
+        const entry = activeRuns.get(runId);
+        if (entry) {
+          for (const pending of entry.pendingApprovals.values()) {
+            const frame: WorkflowFrame = {
+              type: "approval_awaiting",
+              nodeId: pending.nodeId,
+              message: pending.message,
+              pauseId: pending.pauseId,
+            };
+            try {
+              ws.send(JSON.stringify(frame));
+            } catch {
+              // socket may have closed mid-send; nothing to do
+            }
+          }
+        }
+      }
       // Narrow re-check: the run could have terminated between the store
       // lookup above and the subscribe call. The store update fires before
       // activeRuns clearing (see executeRunInBackground's finally), so a
@@ -1105,6 +1140,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       pendingApprovals.set(nodeId, {
         nodeId,
         pauseId,
+        message,
         resolve: settle.resolve,
         reject: settle.reject,
       });
@@ -1211,6 +1247,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       pendingApprovals.set(nodeId, {
         nodeId,
         pauseId,
+        message,
         resolve: settle.resolve,
         reject: settle.reject,
       });

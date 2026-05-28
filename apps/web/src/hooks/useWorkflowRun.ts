@@ -525,11 +525,17 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   // When winningStatus is `awaiting`, the approval message must come from
   // whichever side actually has it (snapshot writes it at pause time; live
   // only has it if the WS approval_awaiting frame arrived). Live's spread
-  // would otherwise overwrite snapshot's message with undefined.
+  // would otherwise overwrite snapshot's message with undefined. The
+  // pauseId, in contrast, only ever lives on live — snapshot persists the
+  // message but not the per-pause token; the WS open handler replays a
+  // fresh `approval_awaiting` to a reconnecting client so live has the
+  // current token by the time this merge runs.
   const winningAwaitingMessage =
     winningStatus === "awaiting"
       ? (liveSide.awaitingMessage ?? snapshotSide.awaitingMessage)
       : undefined;
+  const winningAwaitingPauseId =
+    winningStatus === "awaiting" ? liveSide.awaitingPauseId : undefined;
   return {
     ...snapshotSide,
     ...liveSide,
@@ -542,6 +548,7 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     thinkingText: liveSide.thinkingText || snapshotSide.thinkingText,
     logLines: winningLogs,
     awaitingMessage: winningAwaitingMessage,
+    awaitingPauseId: winningAwaitingPauseId,
   };
 }
 

@@ -308,10 +308,10 @@ nodes:
     ).toBe(false);
   });
 
-  test("interactive loop node emits an unsupported-capability warning", () => {
+  test("interactive loop node loads without a runtime-unsupported warning (now wired)", () => {
     const yaml = `
 name: int-loop
-description: per-node interactive warning
+description: interactive loops are supported when the embedder injects the pause callback
 nodes:
   - id: l
     loop:
@@ -323,11 +323,20 @@ nodes:
 `;
     const result = parseWorkflow(yaml, "il.yaml");
     expect(result.error).toBeNull();
+    // No `'loop.interactive' is not yet supported …` warning — the engine
+    // now runs interactive loops via the AwaitInteraction callback wired
+    // from the server. `interactive_loop_in_non_interactive_workflow` is a
+    // separate kind (workflow-level interactive: false vs node-level true)
+    // and still fires; this assertion targets only the per-node
+    // ignored_capability message about runtime support.
     expect(
       result.warnings.some(
-        (w) => w.kind === "ignored_capability" && w.nodeId === "l" && /interactive/.test(w.message),
+        (w) =>
+          w.kind === "ignored_capability" &&
+          w.nodeId === "l" &&
+          /loop\.interactive.*not yet supported/.test(w.message),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("node id 'ARTIFACTS_DIR' is rejected (collides with the $ARTIFACTS_DIR substitution namespace)", () => {
@@ -428,10 +437,10 @@ nodes:
     expect(result.error).toBeNull();
   });
 
-  test("loop node with until_bash emits an unsupported-capability warning", () => {
+  test("loop node with until_bash loads without a runtime-unsupported warning (now wired)", () => {
     const yaml = `
 name: bash-probe-loop
-description: until_bash not yet wired
+description: until_bash is supported when the embedder injects the probe runner
 nodes:
   - id: l
     loop:
@@ -444,9 +453,12 @@ nodes:
     expect(result.error).toBeNull();
     expect(
       result.warnings.some(
-        (w) => w.kind === "ignored_capability" && w.nodeId === "l" && /until_bash/.test(w.message),
+        (w) =>
+          w.kind === "ignored_capability" &&
+          w.nodeId === "l" &&
+          /loop\.until_bash.*not yet supported/.test(w.message),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("invalid modelReasoningEffort warns and falls back", () => {
