@@ -159,18 +159,24 @@ export function buildProgram(): Command {
       "resume a paused workflow run by sending text to the paused node (server-required)",
     )
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .option(
+      "--pause-id <id>",
+      "per-pause token from the approval_awaiting frame; required to disambiguate retries against interactive loops",
+    )
     .action(async function respondAction(
       this: Command,
       runId: string,
       nodeId: string,
       text: string,
-      respondOpts: { baseUrl?: string },
+      respondOpts: { baseUrl?: string; pauseId?: string },
     ) {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", respondOpts.baseUrl);
+      const pauseId = requireNonEmpty(json, "--pause-id", respondOpts.pauseId);
       await runWorkflowRespond(runId, nodeId, text, {
         json,
         ...(baseUrl ? { baseUrl } : {}),
+        ...(pauseId ? { pauseId } : {}),
       });
     });
 

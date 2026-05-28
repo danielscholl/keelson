@@ -38,6 +38,12 @@ export interface NodeView {
   // of an `awaiting` node row (the route layer writes the message there
   // at pause time so a page-reload mid-pause can rehydrate the callout).
   awaitingMessage?: string;
+  // Per-pause token from the most recent `approval_awaiting` frame. Echoed
+  // back on POST /resume so a stale POST for a prior interactive-loop
+  // iteration can't resolve a later pause that reuses the same nodeId.
+  // Absent on snapshot rehydrate (not persisted) — that path falls back to
+  // the optional-pauseId leg of the resume route.
+  awaitingPauseId?: string;
 }
 
 export interface RunView {
@@ -419,11 +425,14 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
   // Resume the paused approval node. The server flips run status back to
   // running and the executor proceeds; we don't optimistic-update here
   // because the next `node_done` (or a snapshot reload) is the source of
-  // truth for what happened.
+  // truth for what happened. The pauseId (when known from the live
+  // `approval_awaiting` frame) is echoed so a stale double-submit on a
+  // long-running interactive loop can't resolve the wrong iteration.
   const resume = useCallback(
     async (nodeId: string, text: string) => {
       if (!runId) return;
-      await submitApproval(runId, nodeId, text);
+      const pauseId = latestNodesRef.current[nodeId]?.awaitingPauseId;
+      await submitApproval(runId, nodeId, text, pauseId);
     },
     [runId],
   );
@@ -657,6 +666,7 @@ function applyFrame(
             status: "awaiting",
             startedAt: base.startedAt ?? Date.now(),
             awaitingMessage: frame.message,
+            awaitingPauseId: frame.pauseId,
           },
         };
       });
@@ -679,6 +689,7 @@ function applyFrame(
             ...base,
             status: "running",
             awaitingMessage: undefined,
+            awaitingPauseId: undefined,
           },
         };
       });

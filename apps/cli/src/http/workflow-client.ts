@@ -173,12 +173,16 @@ export async function listPausedRuns(baseUrl: string): Promise<ListRunsResponse>
 export async function resumeRun(
   baseUrl: string,
   runId: string,
-  body: { nodeId: string; text: string },
+  body: { nodeId: string; text: string; pauseId?: string },
 ): Promise<void> {
+  const payload =
+    body.pauseId !== undefined
+      ? { nodeId: body.nodeId, text: body.text, pauseId: body.pauseId }
+      : { nodeId: body.nodeId, text: body.text };
   const res = await fetch(url(baseUrl, `/api/workflows/runs/${encodeURIComponent(runId)}/resume`), {
     method: "POST",
     headers: { ...defaultHeaders(baseUrl), "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
   if (res.status === 404) throw new HttpError(404, `run '${runId}' not found or already terminal`);
   if (res.status === 409) {

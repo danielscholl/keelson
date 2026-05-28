@@ -1341,10 +1341,14 @@ nodes:
       if (received.some((f) => f.type === "approval_awaiting")) break;
       await new Promise((r) => setTimeout(r, 25));
     }
-    const approvalFrame = received.find((f) => f.type === "approval_awaiting");
+    const approvalFrame = received.find((f) => f.type === "approval_awaiting") as
+      | { type: string; nodeId?: string; message?: string; pauseId?: string }
+      | undefined;
     expect(approvalFrame).toBeDefined();
     expect(approvalFrame?.nodeId).toBe("review");
     expect(approvalFrame?.message).toBe("please approve");
+    expect(typeof approvalFrame?.pauseId).toBe("string");
+    expect(approvalFrame?.pauseId?.length ?? 0).toBeGreaterThan(0);
     // Cleanup.
     await app.fetch(
       postRun(`http://test/api/workflows/runs/${runId}/resume`, {
@@ -1352,6 +1356,71 @@ nodes:
         text: "approve",
       }),
     );
+    await pollUntilTerminal(app, runId);
+  });
+
+  test("POST /resume rejects pauseId mismatch with 409", async () => {
+    writeWorkflow(
+      "pa-pauseid.yaml",
+      `name: pa-pauseid
+description: pauseId guard
+nodes:
+  - id: setup
+    bash: sleep 0.05
+  - id: review
+    depends_on: [setup]
+    approval:
+      message: please approve
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const subscribers = createWorkflowSubscribers();
+    const received: Array<{ type: string; nodeId?: string; pauseId?: string }> = [];
+    const fakeWs = {
+      send: (raw: string) => {
+        received.push(JSON.parse(raw));
+      },
+    } as unknown as Parameters<typeof subscribers.subscribe>[1];
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      {
+        catalog,
+        store,
+        conversationStore: createConversationStore(db),
+        defaultCwd: tmpDir,
+      },
+      undefined,
+      subscribers,
+    );
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/pa-pauseid/runs", { inputs: {}, workingDir: tmpDir }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    subscribers.subscribe(runId, fakeWs);
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      if (received.some((f) => f.type === "approval_awaiting")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // Stale POST with wrong pauseId → 409. Real pauseId still works after.
+    const stale = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume`, {
+        nodeId: "review",
+        text: "approve",
+        pauseId: "not-the-real-token",
+      }),
+    );
+    expect(stale.status).toBe(409);
+    const ok = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume`, {
+        nodeId: "review",
+        text: "approve",
+      }),
+    );
+    expect(ok.status).toBe(200);
     await pollUntilTerminal(app, runId);
   });
 

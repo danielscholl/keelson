@@ -191,6 +191,12 @@ const placeholderPromptHandler: NodeHandler = {
 // onEvent → store.updateRunStatus("cancelled") write lands before db.close().
 export interface PendingApproval {
   nodeId: string;
+  // Per-pause token the client must echo back on POST /resume. Defends
+  // against stale POSTs (e.g. CLI retry, racy double-click) resolving a
+  // LATER pause for an interactive-loop node that reuses the same nodeId
+  // across iterations. Generated fresh every time a pause opens, so the
+  // pre-resume client never knows the next iteration's pauseId.
+  pauseId: string;
   resolve: (text: string) => void;
   reject: (err: Error) => void;
 }
@@ -747,6 +753,20 @@ export function workflowsRoutes(
       // a nodeId that isn't currently paused.
       return c.json({ error: `no pending approval for node '${parsed.data.nodeId}'` }, 409);
     }
+    // pauseId guard. Interactive loops reuse the same nodeId across
+    // iterations; a stale POST for iteration N (e.g. a CLI retry whose
+    // first attempt actually succeeded) would otherwise resolve
+    // iteration N+1 with the wrong text. When the client knows the
+    // pauseId, require it to match — otherwise accept and rely on the
+    // operator to know what they're doing (CLI default path).
+    if (parsed.data.pauseId !== undefined && parsed.data.pauseId !== pending.pauseId) {
+      return c.json(
+        {
+          error: `pauseId mismatch for node '${parsed.data.nodeId}' — the pause has advanced; refetch the run state and retry`,
+        },
+        409,
+      );
+    }
     // Flip the run status back to running BEFORE we hand the text to the
     // executor — otherwise the snapshot could briefly report 'paused' after
     // the handler has already started writing the next node's state.
@@ -1032,9 +1052,26 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // (or DELETE / abortAll) settles.
   const awaitApproval: AwaitApproval = (nodeRunId, nodeId, message, signal) =>
     new Promise<string>((resolve, reject) => {
+      const pauseId = crypto.randomUUID();
       const settle = {
         resolve: (text: string) => {
           cleanup();
+          // Drop the awaiting row at resolve time — symmetric with
+          // awaitInteraction. The subsequent `node_done` write recreates
+          // the row with the terminal status. Without this, a fresh
+          // hydrate triggered by `approval_resolved` could land in the
+          // brief window before node_done and pull the stale `awaiting`
+          // row back into the SPA via mergeNode's snapshot-awaiting-wins
+          // rule.
+          try {
+            store.deleteNodeOutput(nodeRunId, nodeId);
+          } catch (err) {
+            console.warn(
+              `[workflows] failed to clear awaiting row for ${nodeRunId}:${nodeId} after approval resume: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
           // Tell live clients the pause cleared. Approval nodes also emit
           // `node_done` immediately after the handler returns, but live
           // clients depend on this frame to clear the composer between
@@ -1067,6 +1104,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       }
       pendingApprovals.set(nodeId, {
         nodeId,
+        pauseId,
         resolve: settle.resolve,
         reject: settle.reject,
       });
@@ -1100,6 +1138,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
         type: "approval_awaiting",
         nodeId,
         message,
+        pauseId,
       });
     });
 
@@ -1127,6 +1166,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     signal,
   ) =>
     new Promise<string>((resolve, reject) => {
+      const pauseId = crypto.randomUUID();
       const settle = {
         resolve: (text: string) => {
           cleanup();
@@ -1170,6 +1210,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       }
       pendingApprovals.set(nodeId, {
         nodeId,
+        pauseId,
         resolve: settle.resolve,
         reject: settle.reject,
       });
@@ -1203,6 +1244,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
         type: "approval_awaiting",
         nodeId,
         message,
+        pauseId,
       });
     });
 

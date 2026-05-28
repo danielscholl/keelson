@@ -304,11 +304,19 @@ export async function deleteWorkflowRun(runId: string): Promise<void> {
 
 // Resume a paused approval node. Text becomes $<nodeId>.output. 404/409
 // means "no longer pending" — soft no-op so a double-click doesn't toast.
-export async function submitApproval(runId: string, nodeId: string, text: string): Promise<void> {
+// `pauseId`, when provided, is verified server-side so a stale double-submit
+// for a prior interactive-loop iteration can't resolve a later pause on the
+// same nodeId.
+export async function submitApproval(
+  runId: string,
+  nodeId: string,
+  text: string,
+  pauseId?: string,
+): Promise<void> {
   await apiRequest<void, void>(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ nodeId, text }),
+    body: JSON.stringify(pauseId !== undefined ? { nodeId, text, pauseId } : { nodeId, text }),
     responseBody: "void",
     errorBody: "json-error",
     allowedStatuses: [404, 409],

@@ -10,6 +10,15 @@ import { probeServer } from "../server-probe.ts";
 export interface WorkflowRespondOptions {
   json: boolean;
   baseUrl?: string;
+  /**
+   * Per-pause token from the live `approval_awaiting` frame. Optional for
+   * operator ergonomics — when omitted the server falls back to
+   * "resolve whichever pause is currently open for this nodeId" (still
+   * safe for approval nodes, but lets a stale retry hit the wrong
+   * iteration of an interactive loop). Pass it via `--pause-id` when you
+   * have it.
+   */
+  pauseId?: string;
 }
 
 // Resume a paused workflow run by POSTing { nodeId, text } to the same
@@ -35,7 +44,11 @@ export async function runWorkflowRespond(
   }
 
   try {
-    await resumeRun(baseUrl, runId, { nodeId, text });
+    await resumeRun(baseUrl, runId, {
+      nodeId,
+      text,
+      ...(opts.pauseId !== undefined ? { pauseId: opts.pauseId } : {}),
+    });
     emit({ data: { resumed: true, runId, nodeId } }, { json: opts.json });
     process.exit(EXIT_OK);
   } catch (err) {
