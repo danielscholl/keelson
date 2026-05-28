@@ -1477,12 +1477,22 @@ nodes:
       if (received.some((f) => f.type === "approval_awaiting")) break;
       await new Promise((r) => setTimeout(r, 25));
     }
+    // Anchor the mismatch assertion to the OBSERVED pauseId. A hardcoded
+    // wrong token can still trip the broader "no pending approval" 409 if
+    // the broadcast loses the race against the POST below; deriving the
+    // stale token from the live frame guarantees we exercise the
+    // pauseId-mismatch branch specifically.
+    const approvalFrame = received.find((f) => f.type === "approval_awaiting") as
+      | { pauseId?: string }
+      | undefined;
+    expect(approvalFrame?.pauseId).toBeDefined();
+    const wrongPauseId = `${approvalFrame!.pauseId}-stale`;
     // Stale POST with wrong pauseId → 409. Real pauseId still works after.
     const stale = await app.fetch(
       postRun(`http://test/api/workflows/runs/${runId}/resume`, {
         nodeId: "review",
         text: "approve",
-        pauseId: "not-the-real-token",
+        pauseId: wrongPauseId,
       }),
     );
     expect(stale.status).toBe(409);
