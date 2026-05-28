@@ -151,6 +151,17 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
           `Loop node '${node.id}': interactive loops require server-side pause wiring (run via the server, not the in-process CLI fallback)`,
         );
       }
+      // Honor workflow-level interactive. A workflow declared autonomous
+      // (interactive !== true) MUST NOT pause for user input mid-run —
+      // otherwise CI / cron consumers block indefinitely on a workflow
+      // they thought was headless. Authors opt in with workflow-level
+      // `interactive: true`; the loader's `interactive_loop_in_non_interactive_workflow`
+      // warning fires for the mis-config so it surfaces at validate time.
+      if (loop.interactive === true && ctx.workflow.interactive !== true) {
+        return failed(
+          `Loop node '${node.id}': loop.interactive: true requires workflow-level 'interactive: true'; this workflow is declared autonomous`,
+        );
+      }
       if (typeof loop.until_bash === "string" && runUntilBashProbe === undefined) {
         return failed(
           `Loop node '${node.id}': 'loop.until_bash' requires server-side probe wiring (run via the server, not the in-process CLI fallback)`,

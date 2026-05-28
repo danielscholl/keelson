@@ -33,7 +33,9 @@ function makeRecorderHandler(responder: (call: SeenPrompt, callIndex: number) =>
   return { handler, seen };
 }
 
-function buildCtx(opts: { abortSignal?: AbortSignal } = {}): NodeContext {
+function buildCtx(
+  opts: { abortSignal?: AbortSignal; workflowInteractive?: boolean } = {},
+): NodeContext {
   return {
     runId: "run-loop-1",
     nodeId: "summarize",
@@ -44,7 +46,16 @@ function buildCtx(opts: { abortSignal?: AbortSignal } = {}): NodeContext {
     emit: () => undefined,
     resolvedBody: "",
     rawBody: "",
-    workflow: { name: "t", description: "", nodes: [] } as unknown as WorkflowDefinition,
+    // Default to interactive: true so the existing pause/resume tests (which
+    // were written before the workflow-level gate landed) keep exercising
+    // the pause path. Tests that need to exercise the autonomous-workflow
+    // rejection path opt in via `workflowInteractive: false`.
+    workflow: {
+      name: "t",
+      description: "",
+      nodes: [],
+      interactive: opts.workflowInteractive ?? true,
+    } as unknown as WorkflowDefinition,
   };
 }
 
@@ -132,6 +143,24 @@ describe("makeLoopHandler — interactive/until_bash wiring required", () => {
     const result = await handler.handle(loopNode({ interactive: true }), buildCtx());
     expect(result.status).toBe("failed");
     expect(result.error).toContain("interactive loops require server-side pause wiring");
+    expect(seen).toHaveLength(0);
+  });
+
+  test("interactive: true in an autonomous workflow (interactive !== true) fails fast", async () => {
+    const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "should not run" },
+    }));
+    const handler = makeLoopHandler({
+      promptHandler,
+      awaitInteraction: async () => "ignored",
+    });
+    const result = await handler.handle(
+      loopNode({ interactive: true }),
+      buildCtx({ workflowInteractive: false }),
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("workflow-level 'interactive: true'");
     expect(seen).toHaveLength(0);
   });
 

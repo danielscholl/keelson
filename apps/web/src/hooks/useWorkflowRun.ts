@@ -376,18 +376,20 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
         // any in-flight stale fetch, and the fresh hydrate confirms the
         // post-resume state.
         //
-        // `approval_awaiting` invalidates without re-fetching: a hydrate
-        // started BEFORE the pause opened could land with snapshot.pending
-        // for this node, and mergeNode's "snapshot.pending + live.awaiting"
-        // rule would otherwise drop the freshly-received pause. The live
-        // frame already carries everything we need; no second fetch.
-        if (frame.type === "approval_awaiting") {
-          openGenRef.current++;
-        }
+        // `approval_awaiting` needs both: invalidate any in-flight hydrate
+        // started BEFORE the pause opened (otherwise mergeNode's
+        // "snapshot.pending + live.awaiting → drop awaiting" reconnect
+        // repair would clobber the freshly-received pause), AND schedule
+        // a replacement hydrate. The replacement is load-bearing for the
+        // server's open-time replay: when the WS connects to an already-
+        // paused run, the open handler sends `approval_awaiting` BEFORE
+        // either initial or open-time REST hydrate has returned;
+        // invalidating without rescheduling would leave the view missing
+        // prior node outputs.
         const shouldRehydrateAfter =
           frame.type === "node_done"
             ? isLiveNodeEmpty(latestNodesRef.current[frame.nodeId])
-            : frame.type === "approval_resolved";
+            : frame.type === "approval_resolved" || frame.type === "approval_awaiting";
         applyFrame(frame, setRun, setNodes);
         if (shouldRehydrateAfter) {
           const gen = ++openGenRef.current;

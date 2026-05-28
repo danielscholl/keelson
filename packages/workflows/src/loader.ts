@@ -634,7 +634,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
         filename,
         kind: "interactive_loop_in_non_interactive_workflow",
         message:
-          "workflow has an interactive loop but is not marked top-level interactive — gate messages will not pause for input",
+          "workflow has an interactive loop but is not marked top-level interactive — those loops will fail at runtime unless workflow-level 'interactive: true' is set",
       });
     }
   }
