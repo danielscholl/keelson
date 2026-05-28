@@ -16,7 +16,10 @@ export const loopNodeConfigSchema = z
     /** Optional bash script run after each iteration; exit 0 = complete. */
     until_bash: z
       .string()
-      .min(1, "'loop.until_bash' must be a non-empty script (omit the field to disable the probe)")
+      .refine(
+        (s) => s.trim().length > 0,
+        "'loop.until_bash' must be a non-empty script (omit the field to disable the probe)",
+      )
       .optional(),
     /** When true, pause between iterations for user input via /workflow approve. */
     interactive: z.boolean().optional(),

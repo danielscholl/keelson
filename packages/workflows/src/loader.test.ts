@@ -437,6 +437,23 @@ nodes:
     expect(result.error).toBeNull();
   });
 
+  test("loop node with whitespace-only until_bash is rejected (handler would silently skip it)", () => {
+    const yaml = `
+name: ws-bash
+description: whitespace-only probe is silently ignored at runtime — reject upstream
+nodes:
+  - id: l
+    loop:
+      prompt: keep going
+      until: DONE
+      max_iterations: 3
+      until_bash: "   "
+`;
+    const result = parseWorkflow(yaml, "ws-bash.yaml");
+    expect(result.error).not.toBeNull();
+    expect(result.error?.error).toMatch(/until_bash/);
+  });
+
   test('loop node with empty until_bash is rejected (avoid `bash -c ""` exit-0 false positive)', () => {
     const yaml = `
 name: empty-bash

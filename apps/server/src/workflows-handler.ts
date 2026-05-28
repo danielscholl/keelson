@@ -1260,12 +1260,22 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           completedAt: null,
           error: null,
         });
+        // Preserve the iteration's streamed prompt output on the awaiting
+        // row — a reload mid-pause needs to surface what the agent said so
+        // the user has context to respond. Approval nodes don't stream
+        // content of their own so the accumulator is typically empty
+        // there, but the loop handler's synthesized prompt iterations
+        // emit through the SAME parent-node id (the iteration suffix is
+        // an internal handle), so the loop node's accumulator is what's
+        // populated by the time the pause opens.
+        const acc = nodeAccumulators.get(nodeId);
+        const parts: ContentBlock[] | null = acc && acc.parts().length > 0 ? acc.parts() : null;
         store.upsertNodeOutput({
           runId: nodeRunId,
           nodeId,
           status: "awaiting",
           outputText: message,
-          contentParts: null,
+          contentParts: parts,
           startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
           completedAt: null,
           error: null,
