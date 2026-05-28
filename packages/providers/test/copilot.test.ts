@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { z } from "zod";
 import type {
   CopilotClientLike,
@@ -32,7 +32,7 @@ interface MockSession extends CopilotSessionLike {
   // happened on the resume path.
   readonly setModelCalls: Array<{
     model: string;
-    options?: { reasoningEffort?: "low" | "medium" | "high" | "xhigh" };
+    options?: { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" };
   }>;
 }
 
@@ -85,7 +85,7 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
     let disconnected = false;
     const setModelCalls: Array<{
       model: string;
-      options?: { reasoningEffort?: "low" | "medium" | "high" | "xhigh" };
+      options?: { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" };
     }> = [];
 
     const session: MockSession = {
@@ -139,7 +139,7 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       },
       async setModel(
         model: string,
-        options?: { reasoningEffort?: "low" | "medium" | "high" | "xhigh" },
+        options?: { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" },
       ): Promise<void> {
         setModelCalls.push({ model, options });
       },
@@ -958,7 +958,7 @@ describe("CopilotProvider — defaultModel + listModels", () => {
           id: "claude-sonnet-4.5",
           name: "Claude Sonnet 4.5",
           capabilities: { supports: { reasoningEffort: true } },
-          supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+          supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
           defaultReasoningEffort: "medium",
         },
       ],
@@ -972,8 +972,47 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     expect(models[0]!.supports?.reasoningEffort).toBeUndefined();
     expect(models[0]!.supportedReasoningEfforts).toBeUndefined();
     expect(models[1]!.supports?.reasoningEffort).toBe(true);
-    expect(models[1]!.supportedReasoningEfforts).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(models[1]!.supportedReasoningEfforts).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
     expect(models[1]!.defaultReasoningEffort).toBe("medium");
+  });
+
+  it("listModels() retains the 'none' tier without warning (issue #31)", async () => {
+    // GitHub now ships "none" in supportedReasoningEfforts for most models.
+    // It's a known tier, so it survives projection and emits no drop warning.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const sdk = makeMockSdk({
+        models: [
+          {
+            id: "gpt-5.5",
+            name: "GPT-5.5",
+            capabilities: { supports: { reasoningEffort: true } },
+            supportedReasoningEfforts: ["none", "low", "medium", "high"],
+            defaultReasoningEffort: "none",
+          },
+        ],
+      });
+      const loader = loaderFor(sdk);
+      const provider = new CopilotProvider({
+        getCredential: async () => "tok",
+        clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      });
+      const models = await provider.listModels();
+      expect(models[0]!.supportedReasoningEfforts).toEqual(["none", "low", "medium", "high"]);
+      expect(models[0]!.defaultReasoningEffort).toBe("none");
+      const droppedNone = warn.mock.calls.some((args) =>
+        String(args[0]).includes("dropping unknown reasoning effort"),
+      );
+      expect(droppedNone).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("listModels() filters unknown reasoning-effort values shipped by the live SDK", async () => {
@@ -990,9 +1029,14 @@ describe("CopilotProvider — defaultModel + listModels", () => {
           // Cast: the wire-shape interface narrows to known values, but at
           // runtime the SDK ships whatever GitHub returns.
           supportedReasoningEfforts: ["minimal", "low", "medium", "high"] as unknown as Array<
-            "low" | "medium" | "high" | "xhigh"
+            "none" | "low" | "medium" | "high" | "xhigh"
           >,
-          defaultReasoningEffort: "minimal" as unknown as "low" | "medium" | "high" | "xhigh",
+          defaultReasoningEffort: "minimal" as unknown as
+            | "none"
+            | "low"
+            | "medium"
+            | "high"
+            | "xhigh",
         },
       ],
     });
@@ -1022,9 +1066,14 @@ describe("CopilotProvider — defaultModel + listModels", () => {
           name: "GPT-future",
           capabilities: { supports: { reasoningEffort: true } },
           supportedReasoningEfforts: ["minimal", "ultra"] as unknown as Array<
-            "low" | "medium" | "high" | "xhigh"
+            "none" | "low" | "medium" | "high" | "xhigh"
           >,
-          defaultReasoningEffort: "minimal" as unknown as "low" | "medium" | "high" | "xhigh",
+          defaultReasoningEffort: "minimal" as unknown as
+            | "none"
+            | "low"
+            | "medium"
+            | "high"
+            | "xhigh",
         },
       ],
     });

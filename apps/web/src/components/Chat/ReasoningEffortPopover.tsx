@@ -5,11 +5,17 @@
 import type { ReasoningEffortLevel } from "@keelson/shared";
 import { useCallback, useEffect, useRef } from "react";
 
-// All four tiers in the order users expect them surfaced. When the active
+// All five tiers in the order users expect them surfaced. When the active
 // model declares a narrowed `supportedReasoningEfforts`, the popover filters
 // against this canonical order so a model offering ["high","xhigh"] still
 // renders "HIGH" above "XHIGH".
-const ALL_LEVELS: readonly ReasoningEffortLevel[] = ["low", "medium", "high", "xhigh"] as const;
+const ALL_LEVELS: readonly ReasoningEffortLevel[] = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
 
 interface ReasoningEffortPopoverProps {
   // Element id the chip's popoverTarget attribute references. Anchoring is

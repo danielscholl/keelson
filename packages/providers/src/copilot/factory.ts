@@ -46,8 +46,8 @@ export interface CopilotModelInfo {
     multiplier?: number;
   };
   // Only populated for models whose supports.reasoningEffort is true.
-  supportedReasoningEfforts?: Array<"low" | "medium" | "high" | "xhigh">;
-  defaultReasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  supportedReasoningEfforts?: Array<"none" | "low" | "medium" | "high" | "xhigh">;
+  defaultReasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
 }
 
 // Buckets per GitHub's Copilot premium-request scale.
@@ -65,7 +65,7 @@ function copilotCostTier(multiplier: number | undefined): ModelInfo["costTier"] 
 // schema — without this filter, one unknown effort poisons the whole
 // /api/providers/:id/models response with a Zod parse error and the picker
 // falls back to the curated 5-item baseline.
-const KNOWN_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+const KNOWN_REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh"] as const;
 type KnownReasoningEffort = (typeof KNOWN_REASONING_EFFORTS)[number];
 function isKnownReasoningEffort(value: unknown): value is KnownReasoningEffort {
   return (
@@ -135,7 +135,7 @@ export interface CopilotSessionLike {
   setModel(
     model: string,
     options?: {
-      reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+      reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
     },
   ): Promise<void>;
 }

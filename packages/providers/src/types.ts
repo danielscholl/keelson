@@ -42,7 +42,7 @@ export interface SendQueryOptions {
   thinking?: boolean;
   // Provider-neutral: Copilot consumes this on reasoning models; others
   // ignore. Inline literal — this contract layer is zod-runtime-free.
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
   // SDK-level tool whitelist (built-ins + MCP). Distinct from `tools` above,
   // which carries our MCP ToolDefinition objects to project. Only Claude
   // honors these today; other providers ignore. Empty array = no tools.

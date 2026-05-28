@@ -18,7 +18,7 @@ export const SCHEMA_VERSION = "0.1" as const;
 // Copilot reasoning tier. Sibling of `thinking` (Anthropic's boolean
 // adaptive-thinking) rather than a polymorphic merge — both providers stream
 // through the same `thinking` MessageChunk channel.
-export const reasoningEffortLevelSchema = z.enum(["low", "medium", "high", "xhigh"]);
+export const reasoningEffortLevelSchema = z.enum(["none", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffortLevel = z.infer<typeof reasoningEffortLevelSchema>;
 
 export const messageChunkSchema = z.discriminatedUnion("type", [
