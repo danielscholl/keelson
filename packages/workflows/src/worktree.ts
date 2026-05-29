@@ -110,7 +110,13 @@ async function runBun(args: string[], cwd: string, abortSignal?: AbortSignal): P
     }
   };
   const timeout = setTimeout(kill, BUN_INSTALL_TIMEOUT_MS);
-  abortSignal?.addEventListener("abort", kill, { once: true });
+  // An already-aborted signal won't fire a fresh "abort" event, so kill now
+  // rather than waiting out the timeout.
+  if (abortSignal?.aborted) {
+    kill();
+  } else {
+    abortSignal?.addEventListener("abort", kill, { once: true });
+  }
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
