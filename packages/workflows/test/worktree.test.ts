@@ -214,6 +214,18 @@ describe("ensureWorktreeDeps", () => {
     expect(result.error).toBeNull();
   });
 
+  test("skips install when the run is already aborted", async () => {
+    await initRepo(tmp);
+    const dest = join(tmp, ".wt", "feature");
+    await createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest });
+    const ac = new AbortController();
+    ac.abort();
+    const result = await ensureWorktreeDeps({ worktreePath: dest, abortSignal: ac.signal });
+    expect(result.installed).toBe(false);
+    expect(result.skipped).toBe("aborted");
+    expect(result.error).toBeNull();
+  });
+
   test("skips a package with no bun lockfile", async () => {
     await initRepo(tmp);
     writeJson(join(tmp, "package.json"), { name: "no-lock", version: "0.0.0", private: true });

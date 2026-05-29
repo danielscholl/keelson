@@ -1023,7 +1023,10 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
             }`,
           );
         }
-        const deps = await ensureWorktreeDeps({ worktreePath: created.worktreePath });
+        const deps = await ensureWorktreeDeps({
+          worktreePath: created.worktreePath,
+          abortSignal: abort.signal,
+        });
         if (deps.error !== null) {
           subscribers.broadcast(runId, {
             type: "run_warning",

@@ -256,7 +256,10 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         const created = await createWorktree({ repoPath: repoRoot, branch, dest });
         effectiveCwd = created.worktreePath;
         cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
-        const deps = await ensureWorktreeDeps({ worktreePath: created.worktreePath });
+        const deps = await ensureWorktreeDeps({
+          worktreePath: created.worktreePath,
+          abortSignal: abort.signal,
+        });
         if (deps.error !== null) {
           console.warn(`[keelson] worktree dependency install failed; continuing: ${deps.error}`);
         }
