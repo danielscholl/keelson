@@ -15,6 +15,9 @@ package.json.bak
 # Workflow run state (per-context history, event logs).
 .keelson/runs/
 
+# Per-run isolation worktrees (now carry an installed node_modules).
+.worktrees/
+
 # Editor / IDE
 .idea/
 .vscode/

@@ -13,6 +13,7 @@ import { basename, join } from "node:path";
 
 import {
   createWorktree,
+  ensureWorktreeDeps,
   gitToplevel,
   isGitRepo,
   listWorktrees,
@@ -33,6 +34,19 @@ async function git(args: string[], cwd: string): Promise<void> {
     const err = await new Response(proc.stderr).text();
     throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${err}`);
   }
+}
+
+async function bun(args: string[], cwd: string): Promise<void> {
+  const proc = Bun.spawn({ cmd: ["bun", ...args], cwd, stdout: "pipe", stderr: "pipe" });
+  const code = await proc.exited;
+  if (code !== 0) {
+    const err = await new Response(proc.stderr).text();
+    throw new Error(`bun ${args.join(" ")} failed in ${cwd}: ${err}`);
+  }
+}
+
+function writeJson(path: string, value: unknown): void {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 async function initRepo(path: string): Promise<void> {
@@ -158,6 +172,59 @@ describe("createWorktree", () => {
     await expect(
       createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest }),
     ).rejects.toBeInstanceOf(WorktreeCreationError);
+  });
+});
+
+describe("ensureWorktreeDeps", () => {
+  test("installs the workspace graph into a fresh worktree", async () => {
+    await initRepo(tmp);
+    writeJson(join(tmp, "package.json"), {
+      name: "wt-deps-root",
+      version: "0.0.0",
+      private: true,
+      workspaces: ["pkg"],
+    });
+    mkdirSync(join(tmp, "pkg"), { recursive: true });
+    writeJson(join(tmp, "pkg", "package.json"), { name: "@wt-deps/pkg", version: "0.0.0" });
+    // Generate bun.lock against the committed manifests, then commit only the
+    // tracked files — node_modules stays untracked so the new worktree starts
+    // dependency-empty (the exact gap this guards).
+    await bun(["install"], tmp);
+    await git(["add", "package.json", "pkg/package.json", "bun.lock"], tmp);
+    await git(["commit", "-m", "add workspace"], tmp);
+
+    const dest = join(tmp, ".wt", "feature");
+    await createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest });
+    expect(existsSync(join(dest, "node_modules"))).toBe(false);
+
+    const result = await ensureWorktreeDeps({ worktreePath: dest });
+    expect(result.skipped).toBeNull();
+    expect(result.error).toBeNull();
+    expect(result.installed).toBe(true);
+    expect(existsSync(join(dest, "node_modules"))).toBe(true);
+  });
+
+  test("skips a worktree with no package.json", async () => {
+    await initRepo(tmp);
+    const dest = join(tmp, ".wt", "feature");
+    await createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest });
+    const result = await ensureWorktreeDeps({ worktreePath: dest });
+    expect(result.installed).toBe(false);
+    expect(result.skipped).toBe("no-manifest");
+    expect(result.error).toBeNull();
+  });
+
+  test("skips a package with no bun lockfile", async () => {
+    await initRepo(tmp);
+    writeJson(join(tmp, "package.json"), { name: "no-lock", version: "0.0.0", private: true });
+    await git(["add", "package.json"], tmp);
+    await git(["commit", "-m", "manifest only"], tmp);
+    const dest = join(tmp, ".wt", "feature");
+    await createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest });
+    const result = await ensureWorktreeDeps({ worktreePath: dest });
+    expect(result.installed).toBe(false);
+    expect(result.skipped).toBe("no-lockfile");
+    expect(result.error).toBeNull();
   });
 });
 

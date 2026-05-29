@@ -301,6 +301,44 @@ nodes:
     expect(summarize?.error).toContain("prompt handler not registered");
   });
 
+  test("failed run carries a run-level error and skips downstream nodes", async () => {
+    writeWorkflow(
+      "boomwf.yaml",
+      `name: boomwf
+description: a failing bash node with a downstream dependent
+nodes:
+  - id: boom
+    bash: |
+      echo "about to fail"
+      exit 3
+  - id: after
+    depends_on: [boom]
+    bash: echo nope
+`,
+    );
+    const { app } = makeRig();
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/boomwf/runs", { inputs: {} }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      error: string | null;
+      nodes: Array<{ nodeId: string; status: string; error: string | null }>;
+    };
+    expect(run.status).toBe("failed");
+    // Run-level error names the failing node so the run surface shows why.
+    expect(run.error).toBeTruthy();
+    expect(run.error).toContain("boom");
+    const boom = run.nodes.find((n) => n.nodeId === "boom");
+    const after = run.nodes.find((n) => n.nodeId === "after");
+    expect(boom?.status).toBe("failed");
+    expect(boom?.error).toBeTruthy();
+    // A node whose dependency failed is skipped, not failed — keeps a
+    // genuinely-unrun node distinguishable from the one that failed.
+    expect(after?.status).toBe("skipped");
+  });
+
   test("inputs flow through to bash as KEELSON_INPUTS_* env vars", async () => {
     writeWorkflow(
       "echoargs.yaml",

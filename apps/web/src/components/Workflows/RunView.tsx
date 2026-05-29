@@ -213,6 +213,15 @@ export function RunView({
         </div>
       )}
 
+      {!preStart && run.status === "failed" && run.error && (
+        <div className="run-error" role="alert">
+          <span className="run-error-glyph" aria-hidden="true">
+            ✕
+          </span>
+          <span>{run.error}</span>
+        </div>
+      )}
+
       {run.warnings.length > 0 && (
         <div className="run-warnings" role="status">
           {run.warnings.map((w, i) => (

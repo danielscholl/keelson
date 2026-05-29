@@ -20,6 +20,8 @@ import { dirname, join } from "node:path";
 
 const DEFAULT_BRANCH_TEMPLATE = "keelson/{workflow}/{run_id_short}";
 const GIT_TIMEOUT_MS = 30_000;
+// Resolving a fresh worktree's workspace graph is far slower than a git op.
+const BUN_INSTALL_TIMEOUT_MS = 300_000;
 
 export interface BranchTemplateContext {
   workflow: string;
@@ -83,6 +85,30 @@ async function runGit(args: string[], cwd?: string): Promise<GitOutcome> {
       // already gone
     }
   }, GIT_TIMEOUT_MS);
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  const exitCode = await proc.exited;
+  clearTimeout(timeout);
+  return { exitCode, stdout, stderr };
+}
+
+async function runBun(args: string[], cwd: string): Promise<GitOutcome> {
+  const proc = Bun.spawn({
+    cmd: ["bun", ...args],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+  });
+  const timeout = setTimeout(() => {
+    try {
+      proc.kill();
+    } catch {
+      // already gone
+    }
+  }, BUN_INSTALL_TIMEOUT_MS);
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -181,6 +207,49 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Creat
     branchCreated: branchExists.exitCode !== 0,
     adopted: false,
   };
+}
+
+export interface EnsureWorktreeDepsResult {
+  installed: boolean;
+  /** Why the install was skipped, or null when it ran. */
+  skipped: "no-manifest" | "no-lockfile" | null;
+  /** Set when `bun install` ran but exited non-zero. */
+  error: string | null;
+  durationMs: number;
+}
+
+/**
+ * Install a freshly-created worktree's dependencies. A worktree is a bare
+ * checkout with no `node_modules` (gitignored), so validate-style nodes
+ * (`bun run typecheck` / `test`) would fail on environment without this.
+ * Skips repos with no `package.json` / bun lockfile so non-JS projects are
+ * untouched. Never throws — the caller decides what a failed install means.
+ */
+export async function ensureWorktreeDeps(opts: {
+  worktreePath: string;
+}): Promise<EnsureWorktreeDepsResult> {
+  const startedAtMs = Date.now();
+  const elapsed = () => Date.now() - startedAtMs;
+  if (!existsSync(join(opts.worktreePath, "package.json"))) {
+    return { installed: false, skipped: "no-manifest", error: null, durationMs: elapsed() };
+  }
+  const hasLockfile =
+    existsSync(join(opts.worktreePath, "bun.lock")) ||
+    existsSync(join(opts.worktreePath, "bun.lockb"));
+  if (!hasLockfile) {
+    return { installed: false, skipped: "no-lockfile", error: null, durationMs: elapsed() };
+  }
+  const out = await runBun(["install", "--frozen-lockfile"], opts.worktreePath);
+  if (out.exitCode !== 0) {
+    const tail = (out.stderr.trim() || out.stdout.trim()).slice(-2000);
+    return {
+      installed: false,
+      skipped: null,
+      error: `bun install failed (exit ${out.exitCode}): ${tail}`,
+      durationMs: elapsed(),
+    };
+  }
+  return { installed: true, skipped: null, error: null, durationMs: elapsed() };
 }
 
 export interface RemoveWorktreeOptions {

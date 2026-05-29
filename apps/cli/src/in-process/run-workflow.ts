@@ -13,6 +13,7 @@ import {
   createWorktree,
   defaultRunUntilBashProbe,
   discoverWorkflows,
+  ensureWorktreeDeps,
   gitToplevel,
   isGitRepo,
   makeApprovalHandler,
@@ -255,6 +256,10 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         const created = await createWorktree({ repoPath: repoRoot, branch, dest });
         effectiveCwd = created.worktreePath;
         cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
+        const deps = await ensureWorktreeDeps({ worktreePath: created.worktreePath });
+        if (deps.error !== null) {
+          console.warn(`[keelson] worktree dependency install failed; continuing: ${deps.error}`);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (isolationRequired) {
