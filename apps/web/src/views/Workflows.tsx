@@ -1,5 +1,5 @@
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getWorkflowDetail, listWorkflows, startWorkflowRun } from "../api.ts";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
@@ -66,12 +66,15 @@ export function Workflows() {
     setActiveProject,
     refresh: refreshProjects,
   } = useActiveProject();
+  const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p] as const)), [projects]);
   // Bump on every kick so RecentRuns re-fetches.
   const [runsRefresh, setRunsRefresh] = useState(0);
   // Ref is the synchronous race gate; state drives the StartComposer
   // disabled / "Starting…" rendering.
   const startingRef = useRef(false);
   const [starting, setStarting] = useState(false);
+  const showWorkflowCatalog = workflowsViewMode !== "runs";
+  const showRecentRuns = workflowsViewMode !== "workflows";
 
   const handleSelectProject = useCallback(
     (projectId: string) => {
@@ -292,7 +295,7 @@ export function Workflows() {
         }}
       />
 
-      {workflowsViewMode !== "runs" && (
+      {showWorkflowCatalog && (
         <WorkflowList
           workflows={workflows}
           details={details}
@@ -300,7 +303,7 @@ export function Workflows() {
         />
       )}
 
-      {workflowsViewMode !== "workflows" && (
+      {showRecentRuns && (
         <>
           <div
             className={`section-divider workflows-runs-divider${
@@ -315,7 +318,7 @@ export function Workflows() {
             onOpenRun={handleOpenRun}
             refreshKey={runsRefresh}
             onRunDeleted={() => setRunsRefresh((n) => n + 1)}
-            projectsById={new Map(projects.map((p) => [p.id, p]))}
+            projectsById={projectsById}
           />
         </>
       )}
