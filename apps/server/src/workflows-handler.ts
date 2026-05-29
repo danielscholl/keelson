@@ -740,7 +740,14 @@ export function workflowsRoutes(
       const stat = fstatSync(fd);
       if (!stat.isFile()) return c.json({ error: `not a file: ${rel}` }, 400);
       if (stat.size > 1_000_000) return c.json({ error: "artifact too large" }, 400);
-      const content = readFileSync(fd, "utf8");
+      // Enforce the text-only contract: reject NUL bytes and any payload that
+      // doesn't round-trip as UTF-8 (a lossy decode swaps invalid bytes for
+      // U+FFFD, changing the byte length) rather than serving a mangled binary.
+      const bytes = readFileSync(fd);
+      const content = bytes.toString("utf8");
+      if (bytes.includes(0) || Buffer.byteLength(content, "utf8") !== bytes.length) {
+        return c.json({ error: `artifact is not UTF-8 text: ${rel}` }, 400);
+      }
       return c.json(getRunArtifactResponseSchema.parse({ path: rel, content }));
     } finally {
       closeSync(fd);

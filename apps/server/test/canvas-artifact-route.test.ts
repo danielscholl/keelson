@@ -144,4 +144,11 @@ describe("GET /api/workflows/runs/:runId/artifact", () => {
     const res = await app.fetch(get(RUN_ID, "big.md"));
     expect(res.status).toBe(400);
   });
+
+  test("400 rejects a binary (non-UTF-8) artifact", async () => {
+    writeFileSync(join(artifactsDir, "blob.bin"), Buffer.from([0x00, 0xff, 0xfe, 0x01]));
+    const { app } = makeRig("with-dir");
+    const res = await app.fetch(get(RUN_ID, "blob.bin"));
+    expect(res.status).toBe(400);
+  });
 });
