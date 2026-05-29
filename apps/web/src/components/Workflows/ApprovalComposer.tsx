@@ -13,13 +13,22 @@ export interface ApprovalComposerProps {
   nodeId: string;
   onSubmit: (text: string) => Promise<void>;
   onAbandon: () => Promise<void>;
+  // "dock" is the review-decision dock docked in the canvas footer (approval is
+  // the dominant action, abandon is muted); "inline" is the compact trace
+  // fallback shown when the canvas is dismissed.
+  variant?: "inline" | "dock";
 }
 
 // Free-text composer rendered inside the Trace pane's approval callout when a
 // run is paused on an `approval` node. Send routes the typed text through;
 // the "Approve & continue" shortcut sends the literal "approve" so downstream
 // `when:` rules can branch on it.
-export function ApprovalComposer({ nodeId, onSubmit, onAbandon }: ApprovalComposerProps) {
+export function ApprovalComposer({
+  nodeId,
+  onSubmit,
+  onAbandon,
+  variant = "inline",
+}: ApprovalComposerProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -64,34 +73,63 @@ export function ApprovalComposer({ nodeId, onSubmit, onAbandon }: ApprovalCompos
     }
   };
 
-  return (
-    <div className="approval-composer" data-node-id={nodeId}>
+  // Shared in both variants: an input card with an embedded Send (chat-composer
+  // pattern), then a decision row where Approve & continue is the primary action
+  // (far right) and Abandon is the muted/destructive escape.
+  const inputCard = (
+    <div className="approval-input">
       <textarea
-        className="approval-composer-input"
+        className="approval-input-text"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="Type a response… (Enter to send, Shift+Enter for newline)"
-        rows={2}
+        placeholder="Type requested changes or notes… (Enter to send, Shift+Enter for newline)"
+        rows={3}
         disabled={busy}
         aria-label="Workflow approval response"
       />
-      <div className="approval-actions">
+      {trimmed.length > 0 && (
         <button
           type="button"
-          className="btn primary"
+          className="chat-send"
           onClick={() => void submit(trimmed)}
           disabled={!canSend}
         >
           Send
         </button>
-        <button type="button" className="btn approve" onClick={onApproveClick} disabled={busy}>
-          ✓ Approve &amp; continue
-        </button>
-        <button type="button" className="btn danger" onClick={onAbandonClick} disabled={busy}>
-          ✕ Abandon run
-        </button>
+      )}
+    </div>
+  );
+  const decisionRow = (
+    <div className="approval-actions">
+      <button type="button" className="btn abandon" onClick={onAbandonClick} disabled={busy}>
+        ✕ Abandon run
+      </button>
+      <button type="button" className="btn primary" onClick={onApproveClick} disabled={busy}>
+        ✓ Approve &amp; continue
+      </button>
+    </div>
+  );
+
+  if (variant === "dock") {
+    return (
+      <div className="approval-dock" data-node-id={nodeId}>
+        <div className="approval-dock-head">
+          <span className="approval-dock-title">Review plan</span>
+          <span className="approval-dock-sub">
+            Approve this plan to continue, or send requested changes.
+          </span>
+        </div>
+        {inputCard}
+        {decisionRow}
       </div>
+    );
+  }
+
+  return (
+    <div className="approval-composer" data-node-id={nodeId}>
+      {inputCard}
+      {decisionRow}
     </div>
   );
 }

@@ -48,6 +48,10 @@ interface ToolCallsBlockProps {
   // Open during streaming so the user sees rows accumulate; auto-collapses
   // after `done` so the answer stays the focal point of the bubble.
   streaming: boolean;
+  // Chat (default) auto-expands while streaming. The workflow trace passes
+  // false: a node can fire 50+ tool calls, so it stays collapsed (uncontrolled
+  // — user can still expand it) to keep the trace scannable.
+  autoExpand?: boolean;
 }
 
 // Brief, single-line preview of the result string for tooltips on collapsed
@@ -60,14 +64,16 @@ function previewResult(result: string | undefined): string | undefined {
   return collapsed.length <= 140 ? collapsed : `${collapsed.slice(0, 139)}…`;
 }
 
-export function ToolCallsBlock({ toolCalls, streaming }: ToolCallsBlockProps) {
+export function ToolCallsBlock({ toolCalls, streaming, autoExpand = true }: ToolCallsBlockProps) {
   if (toolCalls.length === 0) return null;
   // `streaming` gate stops the pulse on a stalled turn that never resolves.
   const pendingCount = streaming
     ? toolCalls.reduce((n, tc) => (tc.result === undefined ? n + 1 : n), 0)
     : 0;
   return (
-    <details className="tool-calls-block" open={streaming}>
+    // When autoExpand is off the `open` prop is omitted entirely, leaving the
+    // element uncontrolled so a user expand survives re-renders mid-stream.
+    <details className="tool-calls-block" {...(autoExpand ? { open: streaming } : {})}>
       <summary className="tool-calls-summary">
         {pendingCount > 0
           ? `TOOL CALLS · ${pendingCount} RUNNING`

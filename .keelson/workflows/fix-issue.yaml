@@ -255,10 +255,9 @@ nodes:
     depends_on: [plan-ready]
     approval:
       message: |
-        Plan is ready at `$ARTIFACTS_DIR/plan.md`.
+        Approve this plan to continue, or send requested changes before code is written.
 
-        Review the plan above. Approve to begin implementation, or reply with
-        specific changes you want made to the plan before code is written.
+        $ARTIFACTS_DIR/plan.md
       capture_response: true
 
   # ─────────────────────────────────────────────────────────────────────────

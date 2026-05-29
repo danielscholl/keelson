@@ -4,9 +4,22 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { getRunArtifact } from "../../api.ts";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 
+// Optional host-side extras passed when opening. `footer` is a live ReactNode
+// (e.g. an approval composer), kept out of the serializable CanvasDocument so
+// the contract stays a pure data shape — the drawer just renders whatever it's
+// handed in a docked footer below the scrollable body.
+interface CanvasOpenOptions {
+  footer?: ReactNode;
+}
+
 interface CanvasApi {
-  openCanvas: (doc: CanvasDocument) => void;
+  openCanvas: (doc: CanvasDocument, opts?: CanvasOpenOptions) => void;
   close: () => void;
+}
+
+interface CanvasState {
+  doc: CanvasDocument;
+  footer: ReactNode;
 }
 
 const CanvasContext = createContext<CanvasApi | null>(null);
@@ -21,34 +34,46 @@ export function useCanvas(): CanvasApi {
   return ctx;
 }
 
-// App-level canvas surface: a right-side drawer that presents a CanvasDocument
-// at comfortable reading width. Deliberately NON-modal — no click-capturing
-// backdrop and no aria-modal/focus-trap — so an approval composer (or any
-// surface) underneath stays usable while the drawer is open. Escape and the
-// close button dismiss it.
+// App-level canvas surface: a full-width sheet that presents a CanvasDocument
+// at comfortable reading width and, optionally, a docked footer (e.g. the
+// approval composer for a paused workflow plan). Escape and the close button
+// dismiss it; dismissing never runs a footer action — only the footer's own
+// controls do.
 export function CanvasProvider({ children }: { children: ReactNode }) {
-  const [doc, setDoc] = useState<CanvasDocument | null>(null);
-  const openCanvas = useCallback((d: CanvasDocument) => setDoc(d), []);
-  const close = useCallback(() => setDoc(null), []);
+  const [state, setState] = useState<CanvasState | null>(null);
+  const openCanvas = useCallback(
+    (doc: CanvasDocument, opts?: CanvasOpenOptions) =>
+      setState({ doc, footer: opts?.footer ?? null }),
+    [],
+  );
+  const close = useCallback(() => setState(null), []);
 
   useEffect(() => {
-    if (!doc) return;
+    if (!state) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [doc, close]);
+  }, [state, close]);
 
   return (
     <CanvasContext.Provider value={{ openCanvas, close }}>
       {children}
-      {doc && <CanvasDrawer doc={doc} onClose={close} />}
+      {state && <CanvasDrawer doc={state.doc} footer={state.footer} onClose={close} />}
     </CanvasContext.Provider>
   );
 }
 
-function CanvasDrawer({ doc, onClose }: { doc: CanvasDocument; onClose: () => void }) {
+function CanvasDrawer({
+  doc,
+  footer,
+  onClose,
+}: {
+  doc: CanvasDocument;
+  footer: ReactNode;
+  onClose: () => void;
+}) {
   const title = doc.title ?? "Canvas";
   return (
     <aside className="canvas-drawer" role="dialog" aria-label={title}>
@@ -66,6 +91,7 @@ function CanvasDrawer({ doc, onClose }: { doc: CanvasDocument; onClose: () => vo
       <div className="canvas-drawer-body">
         <CanvasBody doc={doc} />
       </div>
+      {footer && <footer className="canvas-drawer-footer">{footer}</footer>}
     </aside>
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { CanvasDocument, WorkflowNodeSummary } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
 import type { NodeView } from "../src/hooks/useWorkflowRun.ts";
 
@@ -22,6 +22,7 @@ mock.module("../src/api.ts", () => ({
 
 const { CanvasProvider, useCanvas } = await import("../src/components/Canvas/CanvasHost.tsx");
 const { RunTrace } = await import("../src/components/Workflows/RunTrace.tsx");
+const { ToolCallsBlock } = await import("../src/components/Chat/ToolCallsBlock.tsx");
 
 function Opener({ doc }: { doc: CanvasDocument }) {
   const { openCanvas, close } = useCanvas();
@@ -78,6 +79,27 @@ describe("CanvasProvider / useCanvas", () => {
     fireEvent.click(screen.getByText("open"));
     fireEvent.click(screen.getByText("hook-close"));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("renders a docked footer when one is passed to openCanvas", () => {
+    function FooterOpener() {
+      const { openCanvas } = useCanvas();
+      return (
+        <button
+          type="button"
+          onClick={() => openCanvas(INLINE, { footer: <div>DOCKED FOOTER</div> })}
+        >
+          open-with-footer
+        </button>
+      );
+    }
+    render(
+      <CanvasProvider>
+        <FooterOpener />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open-with-footer"));
+    expect(screen.getByRole("dialog").textContent).toContain("DOCKED FOOTER");
   });
 
   test("reserved kinds render a not-yet-supported placeholder", () => {
@@ -231,10 +253,117 @@ describe("RunTrace canvas affordances", () => {
     expect(screen.getByText("open report(1).md")).toBeTruthy();
   });
 
+  test("strips $ARTIFACTS_DIR path hints from the displayed approval message", () => {
+    renderTrace(
+      [{ id: "approve", type: "approval" }],
+      {
+        approve: node({
+          nodeId: "approve",
+          status: "awaiting",
+          type: "approval",
+          awaitingMessage: "Approve this plan to continue.\n\n$ARTIFACTS_DIR/plan.md",
+        }),
+      },
+      "approve",
+    );
+    expect(screen.getByText(/Approve this plan to continue/)).toBeTruthy();
+    // The path is a machine hint for the View-plan affordance, not reader prose.
+    expect(screen.queryByText(/ARTIFACTS_DIR/)).toBeNull();
+    expect(screen.getByText("open plan.md")).toBeTruthy();
+  });
+
+  test("strips path-only hints even with balanced delimiters in the filename", () => {
+    renderTrace(
+      [{ id: "approve", type: "approval" }],
+      {
+        approve: node({
+          nodeId: "approve",
+          status: "awaiting",
+          type: "approval",
+          awaitingMessage: "Approve this plan.\n\n$ARTIFACTS_DIR/report(1).md",
+        }),
+      },
+      "approve",
+    );
+    expect(screen.getByText(/Approve this plan/)).toBeTruthy();
+    expect(screen.queryByText(/ARTIFACTS_DIR/)).toBeNull();
+    expect(screen.getByText("open report(1).md")).toBeTruthy();
+  });
+
+  test("keeps instructions when an artifact ref shares a line with prose", () => {
+    renderTrace(
+      [{ id: "approve", type: "approval" }],
+      {
+        approve: node({
+          nodeId: "approve",
+          status: "awaiting",
+          type: "approval",
+          awaitingMessage: "Plan is ready at `$ARTIFACTS_DIR/plan.md`. Review and approve.",
+        }),
+      },
+      "approve",
+    );
+    // Inline ref → only path-only lines are dropped, so the prose survives.
+    expect(screen.getByText(/Review and approve/)).toBeTruthy();
+    expect(screen.getByText("open plan.md")).toBeTruthy();
+  });
+
   test("no affordance when a node has no renderable text", () => {
     renderTrace([{ id: "empty", type: "prompt" }], {
       empty: node({ nodeId: "empty", status: "succeeded", type: "prompt" }),
     });
     expect(screen.queryByRole("button", { name: "Open empty output in canvas" })).toBeNull();
+  });
+
+  test("pausing on an approval with a plan artifact auto-opens it with a docked composer", async () => {
+    artifactImpl = async () => ({ path: "plan.md", content: "FETCHED PLAN" });
+    const onSubmit = mock(async () => {});
+    const onAbandon = mock(async () => {});
+    render(
+      <CanvasProvider>
+        <RunTrace
+          schemaNodes={[{ id: "approve-plan", type: "approval" }]}
+          nodes={{
+            "approve-plan": node({
+              nodeId: "approve-plan",
+              status: "awaiting",
+              type: "approval",
+              awaitingMessage: "Plan is ready at `$ARTIFACTS_DIR/plan.md`.",
+            }),
+          }}
+          runId="r1"
+          streaming
+          awaitingNodeId="approve-plan"
+          onSubmitApproval={onSubmit}
+          onAbandon={onAbandon}
+        />
+      </CanvasProvider>,
+    );
+    // Auto-opens the plan, with the approval composer docked inside the drawer.
+    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("FETCHED PLAN"));
+    expect(screen.getByRole("button", { name: /View plan/ })).toBeTruthy();
+    const approve = within(screen.getByRole("dialog")).getByRole("button", {
+      name: /Approve & continue/,
+    });
+    fireEvent.click(approve);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("approve"));
+    // The action closes the drawer.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+describe("ToolCallsBlock autoExpand", () => {
+  const calls = [{ id: "t1", toolName: "bash" }];
+
+  test("workflow trace (autoExpand=false) stays collapsed while streaming", () => {
+    const { container } = render(<ToolCallsBlock toolCalls={calls} streaming autoExpand={false} />);
+    const details = container.querySelector("details.tool-calls-block") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+  });
+
+  test("chat default auto-expands while streaming", () => {
+    const { container } = render(<ToolCallsBlock toolCalls={calls} streaming />);
+    const details = container.querySelector("details.tool-calls-block") as HTMLDetailsElement;
+    expect(details.open).toBe(true);
   });
 });

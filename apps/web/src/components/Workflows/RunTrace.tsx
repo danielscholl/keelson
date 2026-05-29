@@ -1,5 +1,5 @@
 import type { WorkflowNodeSummary } from "@keelson/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
@@ -84,6 +84,29 @@ function extractArtifactPaths(message: string): string[] {
   return [...out];
 }
 
+// A line that is *only* a `$ARTIFACTS_DIR/<path>` reference (optionally wrapped
+// in backticks/brackets, with trailing punctuation) is a machine hint for the
+// canvas — it becomes the View-plan button / auto-open, not reader prose — so
+// drop just those lines. Inline refs sharing a line with real instructions are
+// left intact so their surrounding prose survives. The token shape mirrors the
+// extractor's (`[^\s`'"]+`) so filenames with balanced delimiters — e.g.
+// `report(1).md` — are recognized too.
+function isArtifactHintLine(line: string): boolean {
+  if (!line.includes("$ARTIFACTS_DIR/")) return false;
+  const remainder = line
+    .replace(/`?\[?\(?\$ARTIFACTS_DIR\/[^\s`'"]+/g, "")
+    .replace(/[`'"()[\].,\s]/g, "");
+  return remainder.length === 0;
+}
+function stripArtifactRefs(message: string): string {
+  return message
+    .split("\n")
+    .filter((line) => !isArtifactHintLine(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 interface TraceRowProps {
   schema: WorkflowNodeSummary;
   view: NodeView;
@@ -99,7 +122,7 @@ interface TraceRowProps {
 }
 
 function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon }: TraceRowProps) {
-  const { openCanvas } = useCanvas();
+  const { openCanvas, close } = useCanvas();
   // Collapse by default for terminal nodes (much easier to scan a finished
   // run); auto-open live states so the user sees streaming output and
   // approval prompts without clicking.
@@ -139,6 +162,56 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
     toolCalls.length > 0 ||
     view.logLines.length > 0 ||
     Boolean(view.error);
+
+  // The artifact the approval message points at (e.g. plan.md). Opening it
+  // docks the approval composer in the canvas footer so the plan itself is the
+  // review surface, Send / Approve / Abandon attached at the bottom.
+  const primaryArtifact = artifactPaths[0] ?? null;
+  const canDockApproval = Boolean(
+    isAwaiting && runId && primaryArtifact && onSubmitApproval && onAbandon,
+  );
+  const openPlanCanvas = () => {
+    if (!runId || !primaryArtifact || !onSubmitApproval || !onAbandon) return;
+    openCanvas(
+      {
+        kind: "markdown",
+        source: { type: "artifact", runId, path: primaryArtifact },
+        title: primaryArtifact,
+      },
+      {
+        footer: (
+          <ApprovalComposer
+            nodeId={schema.id}
+            variant="dock"
+            onSubmit={async (text) => {
+              await onSubmitApproval(text);
+              close();
+            }}
+            onAbandon={async () => {
+              await onAbandon();
+              close();
+            }}
+          />
+        ),
+      },
+    );
+  };
+  // Auto-open the plan when the run pauses. Fires once per pause (not on every
+  // callback-identity change); resets when the node leaves the awaiting state.
+  // Closing the drawer doesn't reopen it — the inline composer below and the
+  // "View plan" button stay as re-open paths.
+  const openPlanRef = useRef(openPlanCanvas);
+  openPlanRef.current = openPlanCanvas;
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!canDockApproval) {
+      autoOpenedRef.current = false;
+      return;
+    }
+    if (autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    openPlanRef.current();
+  }, [canDockApproval]);
 
   return (
     <div className={`trace-row ${status}`}>
@@ -187,25 +260,36 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
             <div className="approval-callout" role="status">
               <div className="callout-head">◆ Approval required</div>
               <div className="callout-body">
-                <MarkdownContent source={view.awaitingMessage} />
+                <MarkdownContent source={stripArtifactRefs(view.awaitingMessage)} />
                 {runId !== null && artifactPaths.length > 0 && (
                   <div className="canvas-open-links">
-                    {artifactPaths.map((rel) => (
+                    {canDockApproval && (
                       <button
-                        key={rel}
                         type="button"
-                        className="canvas-open-link"
-                        onClick={() =>
-                          openCanvas({
-                            kind: "markdown",
-                            source: { type: "artifact", runId, path: rel },
-                            title: rel,
-                          })
-                        }
+                        className="btn primary canvas-open-plan"
+                        onClick={openPlanCanvas}
                       >
-                        open {rel}
+                        📄 View plan
                       </button>
-                    ))}
+                    )}
+                    {artifactPaths
+                      .filter((rel) => !(canDockApproval && rel === primaryArtifact))
+                      .map((rel) => (
+                        <button
+                          key={rel}
+                          type="button"
+                          className="canvas-open-link"
+                          onClick={() =>
+                            openCanvas({
+                              kind: "markdown",
+                              source: { type: "artifact", runId, path: rel },
+                              title: rel,
+                            })
+                          }
+                        >
+                          open {rel}
+                        </button>
+                      ))}
                   </div>
                 )}
                 {onSubmitApproval && onAbandon && (
@@ -227,7 +311,11 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
             <pre className="code-block">{textFromBlocks}</pre>
           )}
           {toolCalls.length > 0 && (
-            <ToolCallsBlock toolCalls={toolCalls} streaming={streaming && status === "running"} />
+            <ToolCallsBlock
+              toolCalls={toolCalls}
+              streaming={streaming && status === "running"}
+              autoExpand={false}
+            />
           )}
           {view.logLines.length > 0 && <pre className="code-block">{view.logLines.join("\n")}</pre>}
         </div>
