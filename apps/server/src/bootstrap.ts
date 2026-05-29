@@ -177,13 +177,18 @@ interface CatalogSnapshot {
 // Cheap fingerprint of the workflow dir: sorted name:mtime:size for each
 // *.yaml/*.yml. It changes when a workflow file is edited, added, or removed,
 // so the next access re-parses — without it, a static catalog would serve
-// stale definitions until the server restarts.
+// stale definitions until the server restarts. The readdir-failure and
+// empty-dir sentinels are distinct from each other and from any real entry
+// (which always contains a `:`): an unreadable dir surfaces a read_error
+// notice while an empty/missing one doesn't, so they must not share a
+// fingerprint or a stale snapshot would stick across the transition.
 function catalogSignature(dir: string): string {
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
-  } catch {
-    return "";
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? "unknown";
+    return `<readdir-failed:${code}>`;
   }
   const parts: string[] = [];
   for (const entry of entries.sort()) {
@@ -196,7 +201,7 @@ function catalogSignature(dir: string): string {
       // Unreadable entry — discoverWorkflows will surface it as a load error.
     }
   }
-  return parts.join("|");
+  return parts.length === 0 ? "<empty>" : parts.join("|");
 }
 
 // Scans `workflowDir`, parses each *.yaml via the workflows loader, and

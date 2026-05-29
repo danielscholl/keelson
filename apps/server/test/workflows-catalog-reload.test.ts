@@ -100,4 +100,22 @@ describe("bootstrapWorkflows re-scan", () => {
     expect(catalog.get("alpha")?.description).toBe("fixed");
     expect(catalog.discoveryNotices()).toHaveLength(0);
   });
+
+  test("returns an empty catalog without throwing when the dir is missing", () => {
+    const catalog = bootstrapWorkflows({ workflowDir: join(wfDir, "does-not-exist") });
+    expect(catalog.list()).toEqual([]);
+    expect(catalog.get("anything")).toBeUndefined();
+    // A missing dir is not an unreadable dir — no read_error notice.
+    expect(catalog.discoveryNotices()).toHaveLength(0);
+  });
+
+  test("re-scans to an empty catalog when the last workflow is removed", () => {
+    writeWorkflow("alpha.yaml", workflow("alpha", "only", "only"));
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    expect(catalog.list().map((w) => w.name)).toEqual(["alpha"]);
+
+    unlinkSync(join(wfDir, "alpha.yaml"));
+    expect(catalog.list()).toEqual([]);
+    expect(catalog.get("alpha")).toBeUndefined();
+  });
 });
