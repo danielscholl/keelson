@@ -34,6 +34,7 @@ import {
   createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
+  ensureWorktreeDeps,
   isGitRepo,
   type MemoryTools,
   makeApprovalHandler,
@@ -1022,6 +1023,17 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
             }`,
           );
         }
+        const deps = await ensureWorktreeDeps({
+          worktreePath: created.worktreePath,
+          abortSignal: abort.signal,
+        });
+        if (deps.error !== null) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: `worktree dependency install failed; continuing: ${deps.error}`,
+          });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         subscribers.broadcast(runId, {
@@ -1458,11 +1470,19 @@ function dispatchRunEvent(args: DispatchArgs): void {
       break;
     case "run_done": {
       const status: WorkflowRunStatus = event.status;
+      let error: string | null = null;
+      if (status === "failed") {
+        const failures: string[] = [];
+        for (const [nodeId, node] of Object.entries(event.summary.nodes)) {
+          if (node.state === "failed") failures.push(`${nodeId}: ${node.error}`);
+        }
+        error = failures.length > 0 ? failures.join("; ") : "run failed";
+      }
       store.updateRunStatus({
         runId,
         status,
         completedAt: new Date().toISOString(),
-        error: null,
+        error,
       });
       subscribers.broadcast(runId, { type: "run_done", status });
       break;
