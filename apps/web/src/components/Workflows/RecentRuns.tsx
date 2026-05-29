@@ -13,6 +13,10 @@ import { SkeletonStack } from "../Skeleton.tsx";
 import { useToast } from "../Toast.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 
+// Poll so runs started outside the UI (e.g. via the keelson CLI) appear and
+// advance status without a manual refresh.
+const RUNS_POLL_INTERVAL_MS = 4000;
+
 // Map the wire-schema run status onto the badge's NodeViewStatus surface.
 // `paused` maps to `awaiting` (same magenta accent the per-node awaiting
 // badge uses; cf. statusBadgeStatus in RunView.tsx). Without this explicit
@@ -99,42 +103,58 @@ export function RecentRuns({
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a deliberate refetch trigger from the parent (bumped after run kick / delete); see comment at the dep array below
   useEffect(() => {
     let cancelled = false;
-    setError(null);
-    setFailedWorkflows([]);
-    Promise.all(
-      workflows.map((w) =>
-        listRuns(w.name).then(
-          (runs) => ({ kind: "ok" as const, name: w.name, runs }),
-          (err) => ({
-            kind: "err" as const,
-            name: w.name,
-            error: err instanceof Error ? err.message : String(err),
-          }),
+    let running = false;
+
+    const fetchRuns = () => {
+      // Skip when a previous fetch is still in flight so slow responses can't
+      // stack up behind the poll interval.
+      if (running) return;
+      running = true;
+      Promise.all(
+        workflows.map((w) =>
+          listRuns(w.name).then(
+            (runs) => ({ kind: "ok" as const, name: w.name, runs }),
+            (err) => ({
+              kind: "err" as const,
+              name: w.name,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          ),
         ),
-      ),
-    )
-      .then((perWorkflow) => {
-        if (cancelled) return;
-        const merged: RunRow[] = [];
-        const failed: Array<{ name: string; error: string }> = [];
-        for (const r of perWorkflow) {
-          if (r.kind === "ok") merged.push(...r.runs);
-          else failed.push({ name: r.name, error: r.error });
-        }
-        merged.sort((a, b) => {
-          // Newest first by startedAt; the column is ISO so string sort works.
-          return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0;
+      )
+        .then((perWorkflow) => {
+          if (cancelled) return;
+          const merged: RunRow[] = [];
+          const failed: Array<{ name: string; error: string }> = [];
+          for (const r of perWorkflow) {
+            if (r.kind === "ok") merged.push(...r.runs);
+            else failed.push({ name: r.name, error: r.error });
+          }
+          merged.sort((a, b) => {
+            // Newest first by startedAt; the column is ISO so string sort works.
+            return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0;
+          });
+          // Keep the table small — top 20 entries by recency. Update banners
+          // atomically with the rows so a background poll doesn't flash an
+          // empty error/warning state mid-fetch.
+          setRows(merged.slice(0, 20));
+          setFailedWorkflows(failed);
+          setError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => {
+          running = false;
         });
-        // Keep the table small — top 20 entries by recency.
-        setRows(merged.slice(0, 20));
-        setFailedWorkflows(failed);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
-      });
+    };
+
+    fetchRuns();
+    const timer = setInterval(fetchRuns, RUNS_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
     // `refreshKey` is in the dep list intentionally — the parent bumps it
     // to force a refetch after a run kick or delete, even when the
