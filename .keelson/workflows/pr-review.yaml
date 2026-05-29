@@ -12,7 +12,7 @@
 
 name: pr-review
 provider: copilot
-model: gpt-5
+model: auto
 description: |
   Use when: User wants a smart, scoped code review of an existing GitHub PR
             that adapts to the PR's complexity and posts the synthesis as a
@@ -25,10 +25,10 @@ description: |
         synthesizes findings -> posts the synthesis as a PR comment.
   NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
 
-# Model strategy: the workflow header pins `model: gpt-5` so every heavy
-# review lane inherits it. Lightweight classifier / extractor / docs-impact
-# nodes opt into Copilot's own routing with `model: auto`. Resolution order
-# is node.model → workflow.model → provider.defaultModel.
+# Model `auto` lets Copilot route each node and keeps this bundled workflow
+# portable — a hard-pinned id fails on accounts that don't expose it. Pin a
+# specific available id here or per-node for determinism. Resolution order is
+# node.model → workflow.model → provider.defaultModel.
 
 nodes:
   # ─────────────────────────────────────────────────────────────────────────
