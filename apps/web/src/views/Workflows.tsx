@@ -247,7 +247,7 @@ export function Workflows() {
 
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header workflows-page-header">
         <h1 className="page-title">Workflows</h1>
         <span className="page-sub">
           {workflows.length} workflow{workflows.length === 1 ? "" : "s"} discovered
@@ -302,7 +302,11 @@ export function Workflows() {
 
       {workflowsViewMode !== "workflows" && (
         <>
-          <div className="section-divider workflows-runs-divider">
+          <div
+            className={`section-divider workflows-runs-divider${
+              workflowsViewMode === "runs" ? " is-focused" : ""
+            }`}
+          >
             <h2>Recent runs</h2>
             <span className="section-sub">latest first</span>
           </div>
