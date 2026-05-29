@@ -20,8 +20,19 @@ export function App() {
 function AppInner() {
   const { settings, setTheme } = useSettings();
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
+  // A run started from chat (`/workflow run`) — switches to the Workflows tab
+  // and deep-links the run; Workflows consumes and clears it on mount.
+  const [pendingWorkflowRun, setPendingWorkflowRun] = useState<{
+    workflowName: string;
+    runId: string;
+  } | null>(null);
   const pausedRunCount = usePausedRunCount();
   const pendingMemoryCount = usePendingMemoryCount();
+
+  const handleOpenWorkflowRun = useCallback((workflowName: string, runId: string) => {
+    setPendingWorkflowRun({ workflowName, runId });
+    setActiveTab("workflows");
+  }, []);
 
   const themePreference = settings.theme ?? "system";
   useEffect(() => {
@@ -56,7 +67,16 @@ function AppInner() {
         pendingMemoryCount={pendingMemoryCount}
         onNewChat={handleNewChat}
       />
-      {activeTab === "workflows" ? <Workflows /> : activeTab === "memory" ? <Memory /> : <Chat />}
+      {activeTab === "workflows" ? (
+        <Workflows
+          pendingRun={pendingWorkflowRun}
+          onPendingRunConsumed={() => setPendingWorkflowRun(null)}
+        />
+      ) : activeTab === "memory" ? (
+        <Memory />
+      ) : (
+        <Chat onOpenWorkflowRun={handleOpenWorkflowRun} />
+      )}
     </div>
   );
 }

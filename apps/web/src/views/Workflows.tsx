@@ -50,7 +50,13 @@ function persistSeenNotices(set: Set<string>): void {
   }
 }
 
-export function Workflows() {
+export interface WorkflowsProps {
+  // A run started elsewhere (e.g. a chat `/workflow run`) to open on mount.
+  pendingRun?: { workflowName: string; runId: string } | null;
+  onPendingRunConsumed?: () => void;
+}
+
+export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps = {}) {
   const toast = useToast();
   const { settings, setWorkflowsViewMode } = useSettings();
   const workflowsViewMode = settings.workflowsViewMode ?? "both";
@@ -205,6 +211,15 @@ export function Workflows() {
     setScreen({ kind: "catalog" });
     setRunsRefresh((n) => n + 1);
   }, []);
+
+  // Open a run handed in from another surface once the catalog has loaded so
+  // handleOpenRun can resolve workflow detail. Consume it so a tab revisit
+  // doesn't reopen a stale run.
+  useEffect(() => {
+    if (!pendingRun || workflows === null) return;
+    void handleOpenRun(pendingRun.runId, pendingRun.workflowName);
+    onPendingRunConsumed?.();
+  }, [pendingRun, workflows, handleOpenRun, onPendingRunConsumed]);
 
   if (loadError) {
     return (

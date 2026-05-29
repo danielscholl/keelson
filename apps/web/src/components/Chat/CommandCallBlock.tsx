@@ -8,21 +8,26 @@ export interface CommandCallPayload {
   command: string;
   args: string;
   family: SlashCommandFamily;
-  result?: { ok: boolean; message: string };
+  result?: { ok: boolean; message: string; runId?: string; workflowName?: string };
 }
 
 interface CommandCallBlockProps {
   commandCall: CommandCallPayload;
+  onOpenRun?: (workflowName: string, runId: string) => void;
 }
 
 function familyLabel(family: SlashCommandFamily): string {
   return family.toUpperCase();
 }
 
-export function CommandCallBlock({ commandCall }: CommandCallBlockProps) {
+export function CommandCallBlock({ commandCall, onOpenRun }: CommandCallBlockProps) {
   const { command, args, family, result } = commandCall;
   const isRunning = result === undefined;
   const isError = result !== undefined && !result.ok;
+  const runLink =
+    result?.ok && result.runId && result.workflowName
+      ? { runId: result.runId, workflowName: result.workflowName }
+      : null;
   return (
     <details className="command-call-block" open={isRunning || isError}>
       <summary className="command-call-summary">
@@ -57,6 +62,15 @@ export function CommandCallBlock({ commandCall }: CommandCallBlockProps) {
           >
             {result.message}
           </pre>
+        ) : null}
+        {runLink && onOpenRun ? (
+          <button
+            type="button"
+            className="command-call-open-run"
+            onClick={() => onOpenRun(runLink.workflowName, runLink.runId)}
+          >
+            Open in Workflows →
+          </button>
         ) : null}
       </div>
     </details>
