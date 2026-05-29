@@ -6,12 +6,21 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import { statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import {
   type ContentBlock,
+  getRunArtifactResponseSchema,
   type IsolationOverride,
   listWorkflowsResponseSchema,
   type MessageChunk,
@@ -205,6 +214,10 @@ export interface ActiveRunEntry {
   // Keyed by nodeId so two parallel approval nodes in one layer can pause
   // and resume independently.
   pendingApprovals: Map<string, PendingApproval>;
+  // Per-run artifacts tmpdir, set once created. Lets the read-only artifact
+  // route resolve files while the run is live/paused; gone when the entry is
+  // deleted on terminal status (the dir is cleaned at the same moment).
+  artifactsDir?: string;
 }
 
 export interface ActiveRuns {
@@ -670,6 +683,75 @@ export function workflowsRoutes(
     const run = store.getRun(runId);
     if (!run) return c.json({ error: `unknown run '${runId}'` }, 404);
     return c.json({ run: workflowRunDetailSchema.parse(run) });
+  });
+
+  // Read-only fetch of a file under a run's per-run artifacts dir, sandboxed
+  // to that dir. Only resolves while the run is live/paused (the dir is an
+  // ephemeral tmpdir cleaned on terminal status). Read-only GET → no origin
+  // gate; the /api/* CORS middleware already restricts origins.
+  app.get("/api/workflows/runs/:runId/artifact", (c) => {
+    const runId = c.req.param("runId");
+    const rel = c.req.query("path");
+    if (!rel) return c.json({ error: "path query is required" }, 400);
+
+    const baseDir = activeRuns.get(runId)?.artifactsDir;
+    // 410 (not 404): the dir only lives while the run does, so a gone/unknown
+    // run is distinct from a missing file in a live run (404). The client maps
+    // 410 → "no longer available" but surfaces a real error for a 404.
+    if (baseDir === undefined) {
+      return c.json({ error: `no live artifacts for run '${runId}'` }, 410);
+    }
+
+    if (isAbsolute(rel) || normalize(rel).split(sep).includes("..")) {
+      return c.json({ error: "invalid artifact path" }, 400);
+    }
+
+    // Resolve symlinks before validating containment — a lexical
+    // resolve()+startsWith() check alone would let a symlink *inside* the dir
+    // point outside it. realpath the base too: tmpdir() can itself be a
+    // symlink (e.g. macOS /tmp → /private/tmp). A non-existent path throws.
+    let realBase: string;
+    try {
+      realBase = realpathSync(baseDir);
+    } catch {
+      return c.json({ error: `no live artifacts for run '${runId}'` }, 410);
+    }
+    let realPath: string;
+    try {
+      realPath = realpathSync(resolve(baseDir, rel));
+    } catch {
+      return c.json({ error: `artifact not found: ${rel}` }, 404);
+    }
+    if (realPath !== realBase && !realPath.startsWith(`${realBase}${sep}`)) {
+      return c.json({ error: "invalid artifact path" }, 400);
+    }
+
+    // Read through a single no-follow fd so the type/size check and the read
+    // act on the same inode we validated — not a path re-resolved per call,
+    // which a concurrent symlink swap could race. O_NOFOLLOW also rejects a
+    // final-component symlink planted after the realpath check.
+    let fd: number;
+    try {
+      fd = openSync(realPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch {
+      return c.json({ error: `artifact not found: ${rel}` }, 404);
+    }
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile()) return c.json({ error: `not a file: ${rel}` }, 400);
+      if (stat.size > 1_000_000) return c.json({ error: "artifact too large" }, 400);
+      // Enforce the text-only contract: reject NUL bytes and any payload that
+      // doesn't round-trip as UTF-8 (a lossy decode swaps invalid bytes for
+      // U+FFFD, changing the byte length) rather than serving a mangled binary.
+      const bytes = readFileSync(fd);
+      const content = bytes.toString("utf8");
+      if (bytes.includes(0) || Buffer.byteLength(content, "utf8") !== bytes.length) {
+        return c.json({ error: `artifact is not UTF-8 text: ${rel}` }, 400);
+      }
+      return c.json(getRunArtifactResponseSchema.parse({ path: rel, content }));
+    } finally {
+      closeSync(fd);
+    }
   });
 
   // Cancellation (default) or purge (?purge=1). Cancel: triggers the
@@ -1308,6 +1390,13 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   ]);
 
   const artifacts = await RunArtifactsDir.create(runId);
+  const artifactsDir = artifacts.runWorkflowOptions().artifactsDir;
+  if (artifactsDir !== undefined) {
+    // The entry is registered (POST handler) before this awaited create runs,
+    // so it's present; the field clears when activeRuns.delete fires below.
+    const entry = activeRuns.get(runId);
+    if (entry) entry.artifactsDir = artifactsDir;
+  }
 
   try {
     await runWorkflow({

@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+export * from "./canvas.ts";
 export * from "./chat.ts";
 export * from "./memory.ts";
 export * from "./projects.ts";

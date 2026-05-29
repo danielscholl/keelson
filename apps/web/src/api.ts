@@ -10,6 +10,8 @@ import {
   copilotCliStatusSchema,
   createProjectResponseSchema,
   credentialStatusSchema,
+  type GetRunArtifactResponse,
+  getRunArtifactResponseSchema,
   getWorkflowDetailResponseSchema,
   getWorkflowRunResponseSchema,
   type ListWorkflowsResponse,
@@ -276,6 +278,25 @@ export async function getWorkflowRun(runId: string): Promise<WorkflowRunDetail> 
       label: `/api/workflows/runs/${runId}`,
     }),
   ).run;
+}
+
+// Fetch a file from a run's sandboxed artifacts dir. Returns null on 410 — the
+// dir only exists while the run is live/paused, so a finished/unknown run reads
+// as "no longer available". A 404 (missing file in a live run) still throws.
+export async function getRunArtifact(
+  runId: string,
+  path: string,
+): Promise<GetRunArtifactResponse | null> {
+  const res = await apiRequest<unknown, null>(
+    `/api/workflows/runs/${encodeURIComponent(runId)}/artifact?path=${encodeURIComponent(path)}`,
+    {
+      label: `/api/workflows/runs/${runId}/artifact`,
+      errorBody: "json-error",
+      allowedStatuses: [410],
+      allowedStatusValue: null,
+    },
+  );
+  return res === null ? null : getRunArtifactResponseSchema.parse(res);
 }
 
 // 404 is treated as "already done / unknown" — surface no error so the UI
