@@ -15,6 +15,7 @@ export interface ModelRef {
 // "system" means follow prefers-color-scheme; the picker shows three states
 // but the rendered `data-theme` attribute is always "light" or "dark".
 export type ThemePreference = "light" | "dark" | "system";
+export type WorkflowsViewMode = "both" | "workflows" | "runs";
 
 export interface Settings {
   // Insertion-order list shown at the top of the picker.
@@ -25,6 +26,8 @@ export interface Settings {
   sidebarCollapsed?: boolean;
   // Missing = "system".
   theme?: ThemePreference;
+  // Missing = "both".
+  workflowsViewMode?: WorkflowsViewMode;
 }
 
 const DEFAULTS: Settings = { favorites: [], lastUsed: null };
@@ -32,6 +35,11 @@ const DEFAULTS: Settings = { favorites: [], lastUsed: null };
 const THEME_VALUES = ["light", "dark", "system"] as const;
 function isThemePreference(v: unknown): v is ThemePreference {
   return typeof v === "string" && (THEME_VALUES as readonly string[]).includes(v);
+}
+
+const WORKFLOWS_VIEW_MODE_VALUES = ["both", "workflows", "runs"] as const;
+function isWorkflowsViewMode(v: unknown): v is WorkflowsViewMode {
+  return typeof v === "string" && (WORKFLOWS_VIEW_MODE_VALUES as readonly string[]).includes(v);
 }
 
 function isModelRef(v: unknown): v is ModelRef {
@@ -50,6 +58,7 @@ function isSettings(v: unknown): v is Settings {
     return false;
   }
   if (o.theme !== undefined && !isThemePreference(o.theme)) return false;
+  if (o.workflowsViewMode !== undefined && !isWorkflowsViewMode(o.workflowsViewMode)) return false;
   return true;
 }
 
@@ -122,6 +131,7 @@ export interface UseSettingsResult {
   setLastUsed: (ref: ModelRef) => void;
   setSidebarCollapsed: (value: boolean) => void;
   setTheme: (value: ThemePreference) => void;
+  setWorkflowsViewMode: (value: WorkflowsViewMode) => void;
 }
 
 export function useSettings(): UseSettingsResult {
@@ -162,6 +172,13 @@ export function useSettings(): UseSettingsResult {
     });
   }, []);
 
+  const setWorkflowsViewMode = useCallback((value: WorkflowsViewMode) => {
+    update((prev) => {
+      if ((prev.workflowsViewMode ?? "both") === value) return prev;
+      return { ...prev, workflowsViewMode: value };
+    });
+  }, []);
+
   return {
     settings,
     toggleFavorite,
@@ -169,5 +186,6 @@ export function useSettings(): UseSettingsResult {
     setLastUsed,
     setSidebarCollapsed,
     setTheme,
+    setWorkflowsViewMode,
   };
 }

@@ -1,5 +1,5 @@
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getWorkflowDetail, listWorkflows, startWorkflowRun } from "../api.ts";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
@@ -11,8 +11,14 @@ import { RunView } from "../components/Workflows/RunView.tsx";
 import type { StartRequest } from "../components/Workflows/StartComposer.tsx";
 import { WorkflowList } from "../components/Workflows/WorkflowList.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
+import { useSettings, type WorkflowsViewMode } from "../hooks/useSettings.ts";
 
 const PROJECT_PICKER_POPOVER_ID = "workflows-project-picker-popover";
+const WORKFLOWS_VIEW_MODE_OPTIONS: Array<{ value: WorkflowsViewMode; label: string }> = [
+  { value: "both", label: "Both" },
+  { value: "workflows", label: "Workflows" },
+  { value: "runs", label: "Runs" },
+];
 
 // `runId: null` is the pre-start state — RunView paints the DAG with all
 // nodes pending and pins the StartComposer to the bottom; the API call
@@ -46,6 +52,8 @@ function persistSeenNotices(set: Set<string>): void {
 
 export function Workflows() {
   const toast = useToast();
+  const { settings, setWorkflowsViewMode } = useSettings();
+  const workflowsViewMode = settings.workflowsViewMode ?? "both";
 
   const [workflows, setWorkflows] = useState<WorkflowSummary[] | null>(null);
   const [details, setDetails] = useState<Map<string, WorkflowDetail>>(new Map());
@@ -58,12 +66,15 @@ export function Workflows() {
     setActiveProject,
     refresh: refreshProjects,
   } = useActiveProject();
+  const projectsById = useMemo(() => new Map(projects.map((p) => [p.id, p] as const)), [projects]);
   // Bump on every kick so RecentRuns re-fetches.
   const [runsRefresh, setRunsRefresh] = useState(0);
   // Ref is the synchronous race gate; state drives the StartComposer
   // disabled / "Starting…" rendering.
   const startingRef = useRef(false);
   const [starting, setStarting] = useState(false);
+  const showWorkflowCatalog = workflowsViewMode !== "runs";
+  const showRecentRuns = workflowsViewMode !== "workflows";
 
   const handleSelectProject = useCallback(
     (projectId: string) => {
@@ -239,15 +250,35 @@ export function Workflows() {
 
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header workflows-page-header">
         <h1 className="page-title">Workflows</h1>
         <span className="page-sub">
           {workflows.length} workflow{workflows.length === 1 ? "" : "s"} discovered
         </span>
-        <ProjectChip
-          projectName={activeProject?.name ?? "default"}
-          popoverId={PROJECT_PICKER_POPOVER_ID}
-        />
+        <div className="workflows-header-actions">
+          <ProjectChip
+            projectName={activeProject?.name ?? "default"}
+            popoverId={PROJECT_PICKER_POPOVER_ID}
+          />
+          <div className="workflows-view-toggle" role="radiogroup" aria-label="Workflows view">
+            {WORKFLOWS_VIEW_MODE_OPTIONS.map((opt) => {
+              const active = workflowsViewMode === opt.value;
+              return (
+                // biome-ignore lint/a11y/useSemanticElements: custom-styled radio group follows the existing ThemePicker pattern
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={`workflows-view-toggle-btn${active ? " active" : ""}`}
+                  onClick={() => setWorkflowsViewMode(opt.value)}
+                  role="radio"
+                  aria-checked={active}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <ProjectPickerPopover
@@ -264,23 +295,33 @@ export function Workflows() {
         }}
       />
 
-      <WorkflowList
-        workflows={workflows}
-        details={details}
-        onRun={(w) => void handleRunRequest(w)}
-      />
+      {showWorkflowCatalog && (
+        <WorkflowList
+          workflows={workflows}
+          details={details}
+          onRun={(w) => void handleRunRequest(w)}
+        />
+      )}
 
-      <div className="section-divider">
-        <h2>Recent runs</h2>
-        <span className="section-sub">latest first</span>
-      </div>
-      <RecentRuns
-        workflows={workflows}
-        onOpenRun={handleOpenRun}
-        refreshKey={runsRefresh}
-        onRunDeleted={() => setRunsRefresh((n) => n + 1)}
-        projectsById={new Map(projects.map((p) => [p.id, p]))}
-      />
+      {showRecentRuns && (
+        <>
+          <div
+            className={`section-divider workflows-runs-divider${
+              workflowsViewMode === "runs" ? " is-focused" : ""
+            }`}
+          >
+            <h2>Recent runs</h2>
+            <span className="section-sub">latest first</span>
+          </div>
+          <RecentRuns
+            workflows={workflows}
+            onOpenRun={handleOpenRun}
+            refreshKey={runsRefresh}
+            onRunDeleted={() => setRunsRefresh((n) => n + 1)}
+            projectsById={projectsById}
+          />
+        </>
+      )}
     </div>
   );
 }

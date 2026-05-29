@@ -5456,6 +5456,54 @@ button.tab:focus-visible {
 }
 .page-title { font-size: 20px; font-weight: 700; color: var(--fg-strong); margin: 0; }
 .page-sub { font-size: 12px; color: var(--muted); }
+.workflows-page-header {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.workflows-header-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.workflows-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--bg-soft);
+}
+.workflows-view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  height: 26px;
+  padding: 0 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 80ms ease, color 80ms ease;
+}
+.workflows-view-toggle-btn:hover {
+  color: var(--fg);
+}
+.workflows-view-toggle-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+.workflows-view-toggle-btn.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
 
 .workflows-toolbar,
 .toolbar {
@@ -5611,6 +5659,7 @@ button.tab:focus-visible {
   color: var(--fg-strong); letter-spacing: 0.02em;
 }
 .section-divider .section-sub { font-size: 11px; color: var(--muted); }
+.workflows-runs-divider.is-focused { margin-top: 0; }
 
 /* Recent runs table. Rows are <button> for keyboard navigability. */
 .runs-table {
@@ -6029,6 +6078,17 @@ button.tab:focus-visible {
 @media (max-width: 900px) {
   .run-body { grid-template-columns: 1fr; }
   .dag-stage { min-height: 320px; }
+}
+
+@media (max-width: 720px) {
+  .workflows-page-header {
+    align-items: flex-start;
+  }
+  .workflows-header-actions {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
