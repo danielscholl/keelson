@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-export type SlashCommandFamily = "project";
+export type SlashCommandFamily = "project" | "workflow";
 
 export interface SlashCommand {
   name: string;
@@ -17,6 +17,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     family: "project",
     description: "Register and manage projects — clone, use, remove",
     usage: "<url> [name]  ·  use <name>  ·  remove <name>  ·  (no args: list)",
+  },
+  {
+    name: "workflow",
+    family: "workflow",
+    description: "List workflows and start a run",
+    usage: "run <name> [arguments]  ·  (no args: list)",
   },
 ];
 
@@ -33,6 +39,27 @@ export function filterSlashCommands(input: string): SlashCommand[] {
   const q = head.toLowerCase();
   if (q.length === 0) return [...SLASH_COMMANDS];
   return SLASH_COMMANDS.filter((c) => c.name.toLowerCase().includes(q));
+}
+
+// Parses the text after `/workflow` into a sub-action. `run` keeps everything
+// after the name as free-form $ARGUMENTS text (preserving spaces and `#`)
+// rather than splitting it into key=value pairs, which silently dropped tokens.
+export type WorkflowCommand =
+  | { kind: "list" }
+  | { kind: "run"; name: string; args: string }
+  | { kind: "usage" };
+
+export function parseWorkflowCommand(rest: string): WorkflowCommand {
+  const trimmed = rest.trim();
+  if (trimmed.length === 0) return { kind: "list" };
+  const head = trimmed.split(/\s/, 1)[0];
+  if (head === "list") return { kind: "list" };
+  if (head === "run") {
+    const match = trimmed.match(/^run\s+(\S+)(?:\s+([\s\S]*))?$/);
+    if (!match) return { kind: "usage" };
+    return { kind: "run", name: match[1]!, args: (match[2] ?? "").trim() };
+  }
+  return { kind: "usage" };
 }
 
 // Returns true when the input is `/<name> ` (name followed by whitespace) —

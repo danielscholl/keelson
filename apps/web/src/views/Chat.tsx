@@ -2,6 +2,7 @@ import type { Project } from "@keelson/shared";
 import {
   type ChatFrame,
   type Conversation,
+  DEFAULT_PROJECT_NAME,
   type ModelInfo,
   type ProviderInfo,
   type ReasoningEffortLevel,
@@ -19,7 +20,10 @@ import {
   fetchProviders,
   fetchTools,
   getConversation,
+  listProjects,
+  listWorkflows,
   rememberChatMessage,
+  startWorkflowRun,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
 import { Sidebar } from "../components/Chat/Sidebar.tsx";
@@ -60,22 +64,33 @@ import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
+import { parseWorkflowDescription } from "../lib/parseWorkflowDescription.ts";
 import {
   filterSlashCommands,
   isCommittedToCommand,
   matchSlashCommand,
+  parseWorkflowCommand,
   type SlashCommand,
   type SlashCommandFamily,
 } from "../lib/slashCommands.ts";
 
 type Role = "user" | "assistant" | "system" | "command";
 
+// runId/workflowName populate only for a started `/workflow run`, so the
+// result block can offer a link into the Workflows view.
+interface CommandResult {
+  ok: boolean;
+  message: string;
+  runId?: string;
+  workflowName?: string;
+}
+
 interface CommandCall {
   command: string;
   args: string;
   family: SlashCommandFamily;
   // Undefined while the dispatcher is in flight; populated on resolution.
-  result?: { ok: boolean; message: string };
+  result?: CommandResult;
 }
 
 interface LocalMessage {
@@ -284,9 +299,12 @@ export interface ChatProps {
     name: string;
   } | null;
   onSeedConsumed?: () => void;
+  // Opens a started workflow run in the Workflows view (from a `/workflow run`
+  // result block). App lifts this so it can switch tabs and deep-link the run.
+  onOpenWorkflowRun?: (workflowName: string, runId: string) => void;
 }
 
-export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
+export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatProps = {}) {
   const { conversationId, setConversationId } = useConversation();
   const conversationIdRef = useRef<string | null>(conversationId);
   useEffect(() => {
@@ -1120,6 +1138,64 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
     [activeProjectId, projectList, refreshProjects, switchActiveProject],
   );
 
+  const dispatchWorkflowCommand = useCallback(
+    async (rest: string): Promise<CommandResult> => {
+      const ok = (message: string, extra?: Partial<CommandResult>): CommandResult => ({
+        ok: true,
+        message,
+        ...extra,
+      });
+      const fail = (message: string): CommandResult => ({ ok: false, message });
+
+      const parsed = parseWorkflowCommand(rest);
+
+      if (parsed.kind === "list") {
+        const { workflows } = await listWorkflows();
+        if (workflows.length === 0) return ok("No workflows discovered.");
+        const rows = workflows.map((w) => {
+          const desc = parseWorkflowDescription(w.description);
+          const summary = (desc.useWhen ?? desc.body ?? "").split(/\r?\n/)[0]?.trim() ?? "";
+          return summary ? `  ${w.name} — ${summary}` : `  ${w.name}`;
+        });
+        return ok(["Workflows:", ...rows].join("\n"));
+      }
+
+      if (parsed.kind === "run") {
+        const { name, args } = parsed;
+        // The start route requires a project; activeProjectId is null until the
+        // project catalog loads (or if its fetch failed). Resolve the default
+        // the way useActiveProject does so a fresh/slow load still starts a run.
+        let projectId = activeProjectId;
+        if (!projectId) {
+          const list = projectList.length > 0 ? projectList : await listProjects().catch(() => []);
+          projectId = (list.find((p) => p.name === DEFAULT_PROJECT_NAME) ?? list[0])?.id ?? null;
+        }
+        if (!projectId) {
+          return fail("No project available yet — try again once projects finish loading.");
+        }
+        try {
+          const { runId } = await startWorkflowRun(name, {
+            projectId,
+            ...(args ? { inputs: { ARGUMENTS: args } } : {}),
+          });
+          return ok(`Started ${name} — run ${runId}`, { runId, workflowName: name });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return fail(`Couldn't start ${name}: ${msg}`);
+        }
+      }
+
+      return fail(
+        [
+          "Usage:",
+          "  /workflow                      list workflows",
+          "  /workflow run <name> [args]    start a run ($ARGUMENTS)",
+        ].join("\n"),
+      );
+    },
+    [activeProjectId, projectList],
+  );
+
   const slashFilteredItems = useMemo(() => filterSlashCommands(input), [input]);
   const slashHelpCommand = useMemo(() => matchSlashCommand(input), [input]);
   const slashMode: "list" | "help" = isCommittedToCommand(input) ? "help" : "list";
@@ -1180,7 +1256,13 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
       setInput("");
       setSlashOpen(false);
       const rest = trimmed.slice(`/${matched.name}`.length).trim();
-      if (matched.name === "project") {
+      const dispatcher =
+        matched.name === "project"
+          ? dispatchProjectCommand
+          : matched.name === "workflow"
+            ? dispatchWorkflowCommand
+            : null;
+      if (dispatcher) {
         const commandMessageId = newId();
         setMessages((prev) => [
           ...prev,
@@ -1201,7 +1283,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
         // no-op. A conversation-id check would over-fire — a command issued
         // before any chat existed (submitConvoId=null) and resolved after
         // `doSend` created one would leave the row stuck running.
-        const patchResult = (result: { ok: boolean; message: string }) => {
+        const patchResult = (result: CommandResult) => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === commandMessageId && m.commandCall
@@ -1210,7 +1292,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
             ),
           );
         };
-        void dispatchProjectCommand(rest)
+        void dispatcher(rest)
           .then(patchResult)
           .catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -1229,7 +1311,7 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
     }
     setInput("");
     void doSend(trimmed);
-  }, [dispatchProjectCommand, doSend, hydrating, input, streaming]);
+  }, [dispatchProjectCommand, dispatchWorkflowCommand, doSend, hydrating, input, streaming]);
 
   // Cancels auto-send by returning the prompt to the textarea for editing.
   const onCancelQueue = useCallback(() => {
@@ -1532,7 +1614,10 @@ export function Chat({ pendingSeed, onSeedConsumed }: ChatProps = {}) {
                           )}
                         </>
                       ) : m.role === "command" && m.commandCall ? (
-                        <CommandCallBlock commandCall={m.commandCall} />
+                        <CommandCallBlock
+                          commandCall={m.commandCall}
+                          onOpenRun={onOpenWorkflowRun}
+                        />
                       ) : (
                         m.content
                       )}

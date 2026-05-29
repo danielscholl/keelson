@@ -2192,6 +2192,23 @@ button.tab:focus-visible {
   color: var(--danger, #e06666);
 }
 
+.command-call-open-run {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--accent, #5b9aff);
+  border-radius: 4px;
+  color: var(--accent, #5b9aff);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.command-call-open-run:hover {
+  background: var(--accent, #5b9aff);
+  color: var(--bg);
+}
+
 /* --- F10.4: Live thinking-summary render inside assistant chat bubbles -- */
 /* Sits above .tool-calls-block (which is above .markdown-content). Live-  */
 /* only render — not persisted, so reload removes the block entirely.      */
