@@ -248,7 +248,17 @@ export async function ensureWorktreeDeps(opts: {
   if (!hasLockfile) {
     return { installed: false, skipped: "no-lockfile", error: null, durationMs: elapsed() };
   }
-  const out = await runBun(["install", "--frozen-lockfile"], opts.worktreePath, opts.abortSignal);
+  let out: GitOutcome;
+  try {
+    out = await runBun(["install", "--frozen-lockfile"], opts.worktreePath, opts.abortSignal);
+  } catch (err) {
+    return {
+      installed: false,
+      skipped: null,
+      error: `bun install could not be spawned: ${err instanceof Error ? err.message : String(err)}`,
+      durationMs: elapsed(),
+    };
+  }
   if (opts.abortSignal?.aborted) {
     return { installed: false, skipped: "aborted", error: null, durationMs: elapsed() };
   }
