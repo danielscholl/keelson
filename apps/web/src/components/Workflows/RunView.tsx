@@ -261,6 +261,7 @@ export function RunView({
               <RunTrace
                 schemaNodes={workflow.nodes}
                 nodes={nodes}
+                runId={runId}
                 streaming={isRunning}
                 awaitingNodeId={run.awaitingNodeId}
                 onSubmitApproval={handleSubmitApproval}
@@ -278,6 +279,7 @@ export function RunView({
             <RunTrace
               schemaNodes={workflow.nodes}
               nodes={nodes}
+              runId={runId}
               streaming={isRunning}
               awaitingNodeId={run.awaitingNodeId}
               onSubmitApproval={handleSubmitApproval}

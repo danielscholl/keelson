@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
 import { ToastHost } from "./components/Toast.tsx";
 import { type ActiveTab, TopBar } from "./components/TopBar.tsx";
 import { useConversation } from "./hooks/useConversation.ts";
@@ -12,7 +13,9 @@ import { Workflows } from "./views/Workflows.tsx";
 export function App() {
   return (
     <ToastHost>
-      <AppInner />
+      <CanvasProvider>
+        <AppInner />
+      </CanvasProvider>
     </ToastHost>
   );
 }
