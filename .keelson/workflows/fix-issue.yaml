@@ -11,7 +11,7 @@
 
 name: fix-issue
 provider: copilot
-model: gpt-5
+model: auto
 description: |
   Use when: User wants to fix, resolve, or implement a GitHub issue end-to-end
             and open a draft PR.
@@ -23,10 +23,10 @@ description: |
         a self-review pass, applies the review's findings, and reports back.
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
-# Model strategy: the workflow header pins `model: gpt-5` so every heavy node
-# inherits it. Light classifier / extractor / report nodes opt into Copilot's
-# own routing with `model: auto` to keep cheap prompts off the heavy model.
-# Resolution order is node.model → workflow.model → provider.defaultModel.
+# Model `auto` lets Copilot route each node and keeps this bundled workflow
+# portable — a hard-pinned id fails on accounts that don't expose it. Pin a
+# specific available id here or per-node for determinism. Resolution order is
+# node.model → workflow.model → provider.defaultModel.
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
