@@ -114,11 +114,11 @@ function insertMemory(db: Database, row: MemoryRow): void {
   db.prepare(INSERT_MEMORY_SQL).run(params);
 }
 
-describe("Memory layer schema (v2 + v3 migrations)", () => {
-  test("migrations apply cleanly and schema_version reaches 9", () => {
+describe("Memory layer schema (baseline)", () => {
+  test("migrations apply cleanly and schema_version reaches 1", () => {
     const db = openDatabase({ path: dbPath });
     const row = db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number };
-    expect(row.v).toBe(9);
+    expect(row.v).toBe(1);
     db.close();
   });
 
@@ -144,7 +144,7 @@ describe("Memory layer schema (v2 + v3 migrations)", () => {
     db.close();
   });
 
-  test("v3 drops the unused memory_relations table", () => {
+  test("baseline omits the unused memory_relations table", () => {
     const db = openDatabase({ path: dbPath });
     const tables = db
       .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table'")
@@ -345,7 +345,7 @@ describe("Memory layer schema (v2 + v3 migrations)", () => {
     const versionRow = db.query("SELECT MAX(version) AS v FROM schema_version").get() as {
       v: number;
     };
-    expect(versionRow.v).toBe(9);
+    expect(versionRow.v).toBe(1);
 
     const conv = db
       .query<{ id: string }, []>("SELECT id FROM conversations WHERE id = 'conv-1'")

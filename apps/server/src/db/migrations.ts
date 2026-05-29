@@ -12,19 +12,22 @@ interface Migration {
   version: number;
   description: string;
   up: (db: Database) => void;
-  // Table rebuilds that drop/recreate a table referenced by a foreign key must
-  // run with FK enforcement off, or the implicit DELETE during DROP TABLE fires
-  // ON DELETE actions on child rows. PRAGMA foreign_keys is a no-op inside a
-  // transaction, so the runner toggles it around (not within) the migration.
-  disablesForeignKeys?: boolean;
 }
 
 const migrations: Migration[] = [
   {
     version: 1,
-    description: "initial schema: conversations, messages, workflow_runs",
+    description: "baseline schema: conversations, messages, workflow runs, projects, memory layer",
     up: (db) => {
       db.exec(`
+        CREATE TABLE keelson_projects (
+          id         TEXT PRIMARY KEY NOT NULL,
+          name       TEXT NOT NULL UNIQUE,
+          root_path  TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX ix_keelson_projects_name ON keelson_projects(name);
+
         CREATE TABLE conversations (
           id                TEXT PRIMARY KEY NOT NULL,
           providerId        TEXT NOT NULL,
@@ -33,8 +36,10 @@ const migrations: Migration[] = [
           name              TEXT,
           seedSystemPrompt  TEXT,
           createdAt         TEXT NOT NULL,
-          updatedAt         TEXT NOT NULL
+          updatedAt         TEXT NOT NULL,
+          project_id        TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL
         );
+        CREATE INDEX ix_conversations_project ON conversations(project_id);
 
         CREATE TABLE messages (
           id              TEXT PRIMARY KEY NOT NULL,
@@ -46,7 +51,6 @@ const migrations: Migration[] = [
           createdAt       TEXT NOT NULL,
           FOREIGN KEY (conversationId) REFERENCES conversations(id) ON DELETE CASCADE
         );
-
         CREATE INDEX idx_messages_conv_created
           ON messages (conversationId, createdAt);
 
@@ -58,13 +62,20 @@ const migrations: Migration[] = [
           completed_at    TEXT,
           inputs_json     TEXT NOT NULL DEFAULT '{}',
           error           TEXT,
-          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          project_id      TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL,
+          working_dir     TEXT,
+          worktree_path   TEXT
         );
         CREATE INDEX ix_workflow_runs_name_started
           ON workflow_runs(workflow_name, started_at DESC);
         CREATE UNIQUE INDEX ix_workflow_runs_conversation
           ON workflow_runs(conversation_id)
           WHERE conversation_id IS NOT NULL;
+        CREATE INDEX ix_workflow_runs_status_started
+          ON workflow_runs(status, started_at DESC);
+        CREATE INDEX ix_workflow_runs_project_started
+          ON workflow_runs(project_id, started_at DESC);
 
         CREATE TABLE workflow_node_outputs (
           run_id             TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
@@ -77,14 +88,7 @@ const migrations: Migration[] = [
           error              TEXT,
           PRIMARY KEY (run_id, node_id)
         );
-      `);
-    },
-  },
-  {
-    version: 2,
-    description: "memory layer: memories + adjacency tables + FTS5 + instruction-promotion gate",
-    up: (db) => {
-      db.exec(`
+
         CREATE TABLE memories (
           id                                     TEXT PRIMARY KEY NOT NULL,
           type                                   TEXT NOT NULL CHECK (type IN (
@@ -130,7 +134,6 @@ const migrations: Migration[] = [
             OR provenance IN ('user_confirmed','imported')
           )
         );
-
         CREATE INDEX idx_memories_runtime_created_at
           ON memories(runtime, created_at DESC);
         CREATE INDEX idx_memories_scope_lifecycle
@@ -153,15 +156,6 @@ const migrations: Migration[] = [
           kind        TEXT NOT NULL,
           content     TEXT NOT NULL,
           FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE memory_relations (
-          memory_id          TEXT NOT NULL,
-          related_memory_id  TEXT NOT NULL,
-          kind               TEXT NOT NULL,
-          PRIMARY KEY (memory_id, related_memory_id, kind),
-          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
-          FOREIGN KEY (related_memory_id) REFERENCES memories(id) ON DELETE CASCADE
         );
 
         CREATE TABLE memory_review_actions (
@@ -233,106 +227,6 @@ const migrations: Migration[] = [
       `);
     },
   },
-  {
-    version: 3,
-    description: "drop unused memory_relations table",
-    up: (db) => {
-      // memory_relations is unread/unwritten — anticipated a relation-walk feature that never landed.
-      db.exec("DROP TABLE IF EXISTS memory_relations;");
-    },
-  },
-  {
-    version: 4,
-    description: "index workflow_runs(status, started_at DESC) for paused-run polling",
-    up: (db) => {
-      db.exec(`
-        CREATE INDEX IF NOT EXISTS ix_workflow_runs_status_started
-          ON workflow_runs(status, started_at DESC);
-      `);
-    },
-  },
-  {
-    version: 5,
-    description: "projects: named pointers to local directories that workflow runs target",
-    up: (db) => {
-      db.exec(`
-        CREATE TABLE keelson_projects (
-          id         TEXT PRIMARY KEY NOT NULL,
-          name       TEXT NOT NULL UNIQUE,
-          root_path  TEXT NOT NULL,
-          created_at TEXT NOT NULL
-        );
-        CREATE INDEX ix_keelson_projects_name ON keelson_projects(name);
-      `);
-    },
-  },
-  {
-    version: 6,
-    description: "workflow_runs: project + working_dir + worktree_path targeting columns",
-    up: (db) => {
-      // All three columns are nullable for back-compat with pre-v6 rows. The
-      // route layer requires at least one of project_id / working_dir on new
-      // runs; worktree_path is populated by the executor only when isolation
-      // is on (lands in slice 3). FK is SET NULL on project delete so removing
-      // a project doesn't cascade-purge historical runs that reference it.
-      db.exec(`
-        ALTER TABLE workflow_runs
-          ADD COLUMN project_id TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL;
-        ALTER TABLE workflow_runs
-          ADD COLUMN working_dir TEXT;
-        ALTER TABLE workflow_runs
-          ADD COLUMN worktree_path TEXT;
-        CREATE INDEX ix_workflow_runs_project_started
-          ON workflow_runs(project_id, started_at DESC);
-      `);
-    },
-  },
-  {
-    version: 7,
-    description: "conversations: add project_id FK + index",
-    up: (db) => {
-      db.exec(`
-        ALTER TABLE conversations
-          ADD COLUMN project_id TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL;
-        CREATE INDEX ix_conversations_project ON conversations(project_id);
-      `);
-    },
-  },
-  {
-    version: 8,
-    description: "keelson_projects: add worktree_layout column",
-    up: (db) => {
-      db.exec(`
-        ALTER TABLE keelson_projects
-          ADD COLUMN worktree_layout TEXT NOT NULL DEFAULT 'workspace-scoped'
-          CHECK (worktree_layout IN ('workspace-scoped','repo-local'));
-      `);
-    },
-  },
-  {
-    version: 9,
-    description: "keelson_projects: drop worktree_layout column (repo-local-only)",
-    // The column's CHECK constraint blocks ALTER TABLE DROP COLUMN, so rebuild
-    // the table. keelson_projects is the parent of FKs on conversations and
-    // workflow_runs — disablesForeignKeys keeps the DROP from nulling those
-    // children via ON DELETE SET NULL.
-    disablesForeignKeys: true,
-    up: (db) => {
-      db.exec(`
-        CREATE TABLE keelson_projects_new (
-          id         TEXT PRIMARY KEY NOT NULL,
-          name       TEXT NOT NULL UNIQUE,
-          root_path  TEXT NOT NULL,
-          created_at TEXT NOT NULL
-        );
-        INSERT INTO keelson_projects_new (id, name, root_path, created_at)
-          SELECT id, name, root_path, created_at FROM keelson_projects;
-        DROP TABLE keelson_projects;
-        ALTER TABLE keelson_projects_new RENAME TO keelson_projects;
-        CREATE INDEX ix_keelson_projects_name ON keelson_projects(name);
-      `);
-    },
-  },
 ];
 
 export function runMigrations(db: Database): void {
@@ -347,26 +241,8 @@ export function runMigrations(db: Database): void {
   for (const m of pending) {
     const apply = db.transaction(() => {
       m.up(db);
-      if (m.disablesForeignKeys) {
-        const violations = db.query("PRAGMA foreign_key_check").all();
-        if (violations.length > 0) {
-          throw new Error(
-            `migration ${m.version} left foreign-key violations: ${JSON.stringify(violations)}`,
-          );
-        }
-      }
       db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(m.version);
     });
-    if (m.disablesForeignKeys) {
-      // Toggle outside the transaction — PRAGMA foreign_keys is ignored within one.
-      db.exec("PRAGMA foreign_keys = OFF;");
-      try {
-        apply();
-      } finally {
-        db.exec("PRAGMA foreign_keys = ON;");
-      }
-    } else {
-      apply();
-    }
+    apply();
   }
 }
