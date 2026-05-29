@@ -1167,8 +1167,13 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
         // the way useActiveProject does so a fresh/slow load still starts a run.
         let projectId = activeProjectId;
         if (!projectId) {
-          const list = projectList.length > 0 ? projectList : await listProjects().catch(() => []);
-          projectId = (list.find((p) => p.name === DEFAULT_PROJECT_NAME) ?? list[0])?.id ?? null;
+          try {
+            const list = projectList.length > 0 ? projectList : await listProjects();
+            projectId = (list.find((p) => p.name === DEFAULT_PROJECT_NAME) ?? list[0])?.id ?? null;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return fail(`Couldn't load projects: ${msg}`);
+          }
         }
         if (!projectId) {
           return fail("No project available yet — try again once projects finish loading.");
