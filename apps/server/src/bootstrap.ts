@@ -6,6 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   type ClaudeAuthProbe,
   type CopilotAuthProbe,
@@ -166,34 +168,82 @@ export interface WorkflowCatalog {
   discoveryNotices(): WorkflowDiscoveryNotice[];
 }
 
+interface CatalogSnapshot {
+  signature: string;
+  byName: Map<string, WorkflowDefinition>;
+  notices: WorkflowDiscoveryNotice[];
+}
+
+// Cheap fingerprint of the workflow dir: sorted name:mtime:size for each
+// *.yaml/*.yml. It changes when a workflow file is edited, added, or removed,
+// so the next access re-parses — without it, a static catalog would serve
+// stale definitions until the server restarts.
+function catalogSignature(dir: string): string {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return "";
+  }
+  const parts: string[] = [];
+  for (const entry of entries.sort()) {
+    if (!entry.endsWith(".yaml") && !entry.endsWith(".yml")) continue;
+    try {
+      const st = fs.statSync(path.join(dir, entry));
+      if (!st.isFile()) continue;
+      parts.push(`${entry}:${st.mtimeMs}:${st.size}`);
+    } catch {
+      // Unreadable entry — discoverWorkflows will surface it as a load error.
+    }
+  }
+  return parts.join("|");
+}
+
 // Scans `workflowDir`, parses each *.yaml via the workflows loader, and
 // returns a name → definition lookup. Parse errors log a warning and skip
-// the file so a single broken workflow doesn't take the catalog down.
+// the file so a single broken workflow doesn't take the catalog down. Each
+// accessor re-scans when the dir fingerprint changes, so YAML edits land on
+// the next run without a server restart; an unchanged fingerprint is a cache
+// hit (no re-parse), keeping the polling-heavy run/list reads cheap.
 export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCatalog {
-  const result = discoverWorkflows([{ dir: opts.workflowDir, source: "project" }]);
-  const notices: WorkflowDiscoveryNotice[] = [];
-  for (const error of result.errors) {
-    console.warn(`[workflows] failed to load ${error.filename}: ${error.error}`);
-    notices.push({
-      level: "error",
-      filename: error.filename,
-      message: `failed to load: ${error.error}`,
-    });
-  }
-  for (const warning of result.warnings) {
-    const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
-    console.warn(`[workflows] ${warning.filename}${nodeRef}: ${warning.message}`);
-    notices.push(toDiscoveryNotice(warning));
-  }
-  const byName = new Map<string, WorkflowDefinition>();
-  for (const entry of result.workflows) {
-    byName.set(entry.workflow.name, entry.workflow);
-  }
-  console.log(`[workflows] discovered ${byName.size} workflows`);
+  const dir = opts.workflowDir;
+  let cached: CatalogSnapshot | undefined;
+
+  const scan = (): CatalogSnapshot => {
+    const signature = catalogSignature(dir);
+    if (cached && cached.signature === signature) return cached;
+    const result = discoverWorkflows([{ dir, source: "project" }]);
+    const notices: WorkflowDiscoveryNotice[] = [];
+    for (const error of result.errors) {
+      console.warn(`[workflows] failed to load ${error.filename}: ${error.error}`);
+      notices.push({
+        level: "error",
+        filename: error.filename,
+        message: `failed to load: ${error.error}`,
+      });
+    }
+    for (const warning of result.warnings) {
+      const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
+      console.warn(`[workflows] ${warning.filename}${nodeRef}: ${warning.message}`);
+      notices.push(toDiscoveryNotice(warning));
+    }
+    const byName = new Map<string, WorkflowDefinition>();
+    for (const entry of result.workflows) {
+      byName.set(entry.workflow.name, entry.workflow);
+    }
+    console.log(`[workflows] discovered ${byName.size} workflows`);
+    cached = { signature, byName, notices };
+    return cached;
+  };
+
+  // Prime once so the discovery count logs at boot and a broken dir surfaces
+  // immediately, matching the previous build-at-boot behavior.
+  scan();
+
   return {
-    list: () => Array.from(byName.values()),
-    get: (name) => byName.get(name),
-    discoveryNotices: () => notices,
+    list: () => Array.from(scan().byName.values()),
+    get: (name) => scan().byName.get(name),
+    discoveryNotices: () => scan().notices,
   };
 }
 
