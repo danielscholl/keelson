@@ -1,0 +1,768 @@
+# Plan → Act → Evaluate — the GitHub/Microsoft agent lifecycle loop, run as a
+# Keelson DAG. Concepts from the GH-600 "Prepare Agent Architecture and SDLC
+# Processes" domain (Microsoft Learn) fused with Archon's PIV loop (MIT, see
+# NOTICE) and Keelson's tested fix-issue mechanics.
+#
+# Stack-agnostic by design: this workflow can be pointed at ANY repo. It assumes
+# nothing about the language, package manager, or test runner — it discovers a
+# project's verify commands from the repo's own docs/config and treats the PR's
+# remote CI as the authoritative signal.
+#
+# The lifecycle this encodes (and where each idea lands in the DAG):
+#
+#   PLAN     The plan is an INSPECTABLE artifact in the system of record.
+#            The planner runs under a hard READ-ONLY capability boundary
+#            (allowed_tools: [Read, Glob, Grep] — no write, no shell). It emits
+#            the plan as text; a deterministic bash node records it as a GitHub
+#            ISSUE (new issue, or a comment on the issue you passed in) and to a
+#            local plan.md the approval canvas renders.
+#
+#   (gate)   Plan-first (Pattern A): a human approves the plan BEFORE any code,
+#            in the docked plan canvas. The reply ALSO picks how to Act.
+#
+#   ACT      Two bounded paths, chosen at the gate:
+#            • LOCAL    — the harness implements on an isolated worktree branch,
+#                         commits by name, never pushes the default branch.
+#            • DELEGATE — assign the plan issue to the GitHub Copilot coding
+#                         agent (reply "delegate"). Copilot branches, commits,
+#                         and opens its own PR — GitHub's native bounded action.
+#
+#   EVALUATE Grounded in OBJECTIVE SYSTEM SIGNALS, not the agent's confidence —
+#            and the canonical signal is the PR's own CI, whatever this repo
+#            defines. LOCAL: an AI review-and-improve LOOP runs the project's own
+#            checks (discovered from its docs/config) and fixes until satisfied,
+#            then opens a draft PR. DELEGATE: the AI reviews Copilot's PR and
+#            renders a formal PR review (request-changes feeds Copilot; approve
+#            hands off). Both read back the PR's remote CI; a human gates merge.
+#
+#   AUDIT    A 6-element audit-trail report (goal → plan → changeset → evidence →
+#            judgment → outcome). LOCAL's judgment is the evaluate loop; DELEGATE's
+#            is the posted PR review.
+#
+# Per-node rails honored at runtime (see architect.yaml / pr-review.yaml):
+#   - allowed_tools / denied_tools — claude gates by tool name; copilot (the pin
+#     below) gates the underlying capability (read / write / shell).
+#   - $ARGUMENTS / $<node>.output / $ARTIFACTS_DIR in prompts; the env channel
+#     ($KEELSON_ARGUMENTS / $KEELSON_NODE_<id>_OUTPUT / $KEELSON_ARTIFACTS_DIR)
+#     in bash. Node-id hyphens become underscores in env (approve-plan →
+#     KEELSON_NODE_approve_plan_OUTPUT).
+#
+# Prerequisites: a GitHub remote with Issues enabled and `gh` authenticated.
+# Because the authoritative check is the PR's remote CI, this is best paired with
+# a repo that has CI configured (without it, the run falls back to the agent's
+# best-effort local checks + human PR review). The DELEGATE path additionally
+# needs the Copilot coding agent enabled on the repo/org (it must appear in
+# `suggestedActors(capabilities:[CAN_BE_ASSIGNED])` as `copilot-swe-agent`).
+
+name: plan-act-evaluate
+provider: copilot
+model: auto
+description: |
+  Use when: User wants to build a feature or land a change in ANY repo under the
+            GitHub Plan→Act→Evaluate lifecycle — plan recorded as a GitHub issue,
+            a human gate before any code, then a choice to implement locally OR
+            delegate to the GitHub Copilot coding agent, with the PR's CI as the
+            authoritative check.
+  Triggers: "plan act evaluate", "pae loop", "plan first", "lifecycle loop",
+            "plan-act-evaluate", "build with a plan issue", "delegate to copilot".
+  Does: Normalizes the request (issue # / free text / plan file), drafts a plan
+        under a read-only capability boundary, records it as a GitHub issue,
+        pauses for human approval, then either implements locally (AI review loop
+        on the project's own checks → draft PR) or assigns the issue to the
+        Copilot coding agent and reviews its PR. Reads back remote CI, and reports
+        the audit trail. Assumes nothing about the project's stack.
+  NOT for: Quick single-file or known-bug fixes (use fix-issue). PR review (use
+           pr-review). Architectural sweeps (use architect). PRD / brainstorming.
+
+# Model `auto` lets Copilot route each node and keeps this bundled workflow
+# portable. Resolution order is node.model → workflow.model → provider default.
+
+# Mutates the working tree on the LOCAL path — branch, commits, push, PR. Run in
+# an isolated worktree by default so a run can't trample editor state. (The
+# DELEGATE path works entirely on GitHub; the worktree is just an idle checkout.)
+worktree:
+  enabled: true
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PLAN — input (the task contract)
+  # Deterministic intake: classify the request, fetch context, detect the repo's
+  # default branch. Writes nothing to source — only to the per-run scratch dir.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: intake
+    bash: |
+      set -euo pipefail
+      ART="$KEELSON_ARTIFACTS_DIR"
+      RAW="$KEELSON_ARGUMENTS"
+      printf 'REQUEST: %s\n' "$RAW"
+
+      # Explicit issue reference only: "#123", "issue 123", or a bare integer.
+      # A loose number inside prose (e.g. "the v2 bug") must NOT be treated as an
+      # issue — match the reference token first, then pull the number from it.
+      ISSUE_NUM=$(printf '%s' "$RAW" \
+        | grep -oiE '#[0-9]+|issue[[:space:]]+#?[0-9]+|^[0-9]+$' \
+        | grep -oE '[0-9]+' | head -1 || true)
+
+      if [ -n "$ISSUE_NUM" ]; then
+        echo "SOURCE: existing GitHub issue #$ISSUE_NUM (plan will be added as a comment)"
+        gh issue view "$ISSUE_NUM" \
+          --json number,title,body,labels,comments,state,url,author > "$ART/issue.json"
+        echo "$ISSUE_NUM" > "$ART/.issue-number"
+        echo "ISSUE_TITLE: $(gh issue view "$ISSUE_NUM" --json title -q '.title')"
+      elif [ -f "$RAW" ]; then
+        echo "SOURCE: plan/PRD file at $RAW (a new issue will be created from the plan)"
+        cp "$RAW" "$ART/task.md"
+      else
+        echo "SOURCE: free-text request (a new issue will be created from the plan)"
+        printf '%s\n' "$RAW" > "$ART/task.md"
+      fi
+
+      # Default branch — never assume "main". Used as the PR base and diff base.
+      DEFAULT=$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || true)
+      [ -z "$DEFAULT" ] && DEFAULT=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)
+      [ -z "$DEFAULT" ] && DEFAULT=main
+      printf '%s' "$DEFAULT" > "$ART/.default-branch"
+      echo "DEFAULT_BRANCH: $DEFAULT"
+
+      echo ""
+      echo "=== Recent history (last 15 commits) ==="
+      git log --oneline -15 2>/dev/null || echo "(no git history)"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PLAN — author the plan under a READ-ONLY capability boundary
+  # allowed_tools: [Read, Glob, Grep] hard-blocks write + shell. The planner
+  # CANNOT edit source, run code, branch, or commit — GH-600's "capability
+  # boundary > instructions". The plan is produced as text and recorded to GitHub
+  # by the next (deterministic) node.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: plan
+    depends_on: [intake]
+    context: fresh
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      You are in the **PLAN** phase of a Plan→Act→Evaluate lifecycle. You have
+      **read-only tools only** — no write, no shell. This is an enforced
+      capability boundary, not a guideline: you physically cannot edit code,
+      run commands, branch, or commit. Your one job is to produce an inspectable
+      plan that a human will approve before any code is written.
+
+      ## Inputs (read these from disk)
+
+      The intake step recorded the request here — read whichever exists:
+      - `$ARTIFACTS_DIR/issue.json` — the GitHub issue (if the request named one)
+      - `$ARTIFACTS_DIR/task.md` — the free-text request or a plan/PRD file
+
+      Intake summary:
+
+      $intake.output
+
+      ## Do your homework (read-only) — you do not know this codebase yet
+
+      1. Read whichever exist: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`,
+         `README.md` — and the build config (package.json, Makefile,
+         pyproject.toml, Cargo.toml, go.mod, …). These define the conventions and
+         the verify commands the implementer will use. Assume no specific stack.
+      2. Search the codebase for related code; read the files the plan will
+         touch. Cite real `path:line` references — do not invent them.
+      3. Decide the approach against what already exists.
+
+      ## Output contract — IMPORTANT
+
+      Your entire response is recorded verbatim as a **GitHub issue** (the system
+      of record) and is what the implementer — local or Copilot — will follow.
+      Output **only** the issue, in GitHub-flavored markdown:
+
+      - The FIRST line must be `TITLE: <imperative summary, under 70 chars>`.
+      - Then a blank line, then the issue body using the template below.
+      - No preamble, no sign-off, and do not wrap the whole thing in a code fence.
+      - Do NOT narrate your process or restate these instructions. Your very
+        first characters must be `TITLE:` — anything before it is discarded.
+
+      ```
+      TITLE: <concise imperative title>
+
+      ## Goal
+      {1-2 sentences: the intent to satisfy — NOT "make tests pass"}
+
+      ## Success criteria
+      - [ ] {specific, testable — the underlying intent is satisfied}
+      - [ ] The project's own checks pass (type-check / tests / lint / build, as applicable)
+      - [ ] No regressions in existing tests
+
+      ## Scope
+      - IN: {what this change includes}
+      - OUT: {what it explicitly excludes — and why}
+
+      ## Codebase context
+      | File | Role | Action |
+      |------|------|--------|
+      | `{path}` | {what it does} | CREATE / UPDATE |
+
+      ## Approach
+      - {decision} — {rationale}
+
+      ## Task list
+      Each task is atomic and independently verifiable.
+
+      ### Task 1: {ACTION} `{file}`
+      **Action**: CREATE / UPDATE
+      **Details**: {exact change — specific enough for an agent with no context}
+      **Validate**: `{the project's command to verify this task}`
+
+      ## Tests
+      | File | Cases | Validates |
+      |------|-------|-----------|
+
+      ## Risks & rollback
+      | Risk | Impact | Mitigation / rollback |
+      |------|--------|------------------------|
+
+      ## Evidence plan
+      {Which checks / CI runs will objectively prove the success criteria hold.}
+      ```
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PLAN — record the plan as a GitHub issue (system of record)
+  # Deterministic: the AI planner had no write/shell access, so this node is the
+  # only thing that touches GitHub. `plan.md` is also the in-UI review surface.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: publish-plan
+    depends_on: [plan]
+    bash: |
+      set -euo pipefail
+      ART="$KEELSON_ARTIFACTS_DIR"
+      RAW="$KEELSON_NODE_plan_OUTPUT"
+
+      # First `TITLE:` marker → issue title; everything after its line → body.
+      # The marker is matched ANYWHERE, not just at column 0: providers (copilot
+      # especially) sometimes leak reasoning preamble before it, even mid-line
+      # ("…plan concrete.TITLE: …"). We take the text from the first `TITLE:` to
+      # end of line as the title, drop everything up to and including that line,
+      # and keep the rest as the body — so leaked preamble never reaches GitHub.
+      # Portable across BSD/GNU (no GNU-only `sed '0,/re/d'`); a missing marker
+      # falls back to the whole output so the body is never empty. `plan.md` is
+      # BOTH the issue body and the in-UI review surface — the approval node
+      # points the plan canvas at it, so the human reviews without leaving Keelson.
+      if printf '%s\n' "$RAW" | grep -q 'TITLE:'; then
+        TITLE=$(printf '%s\n' "$RAW" | grep -m1 -o 'TITLE:.*' | sed 's/^TITLE:[[:space:]]*//')
+        printf '%s\n' "$RAW" | awk 'found{print} !found && /TITLE:/{found=1}' > "$ART/plan.md"
+      else
+        TITLE=""
+        printf '%s\n' "$RAW" > "$ART/plan.md"
+      fi
+      if [ -z "$TITLE" ]; then
+        TITLE="Plan: $(printf '%s' "$KEELSON_ARGUMENTS" | tr '\n' ' ' | cut -c1-60)"
+      fi
+
+      N=$(cat "$ART/.issue-number" 2>/dev/null || true)
+      if [ -n "$N" ]; then
+        echo "Existing issue #$N — recording the plan as a comment."
+        gh issue comment "$N" --body-file "$ART/plan.md" >/dev/null
+        URL=$(gh issue view "$N" --json url -q '.url')
+      else
+        echo "No issue supplied — creating one as the plan artifact."
+        URL=$(gh issue create --title "$TITLE" --body-file "$ART/plan.md")
+        N=$(printf '%s' "$URL" | grep -oE '[0-9]+$' || true)
+        printf '%s' "$N" > "$ART/.issue-number"
+      fi
+      printf '%s' "$URL" > "$ART/.issue-url"
+
+      # Prepend the system-of-record link so the in-UI plan canvas shows where
+      # the durable copy lives — review and approve right here in the viewer.
+      { printf '> 📋 Recorded in GitHub as issue #%s — %s\n\n' "$N" "$URL"; cat "$ART/plan.md"; } \
+        > "$ART/plan.md.tmp" && mv "$ART/plan.md.tmp" "$ART/plan.md"
+
+      echo ""
+      echo "PLAN_ISSUE=#$N"
+      echo "PLAN_ISSUE_URL=$URL"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # GATE — plan-first human approval + Act-mode choice
+  # The plan canvas auto-opens on $ARTIFACTS_DIR/plan.md with the approval
+  # composer docked. The REPLY also chooses how to Act:
+  #   • "Approve & continue" (or any approval text) → implement LOCALLY
+  #   • reply "delegate" (or "assign to copilot")   → hand off to Copilot
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: approve-plan
+    depends_on: [publish-plan]
+    approval:
+      capture_response: true
+      message: |
+        Review the plan below, then choose how to proceed:
+
+        •  **Approve & continue**  → implement it here (the harness writes the code).
+        •  reply **"delegate"**    → assign the issue to the GitHub Copilot coding
+                                     agent to implement it in the cloud and open a PR.
+
+        Or send requested changes to fold in before any code is written.
+
+        $ARTIFACTS_DIR/plan.md
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ACT — choose the path from the human's reply
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: select-mode
+    depends_on: [approve-plan]
+    context: fresh
+    output_format:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [local, delegate]
+        reason: { type: string }
+    prompt: |
+      Decide the execution mode from the reviewer's reply to the plan approval.
+
+      Reviewer reply: $approve-plan.output
+
+      Rules:
+      - If they asked to delegate / "assign to copilot" / hand off / let the
+        coding agent do it → mode = **delegate**.
+      - Otherwise (an approval like "approve"/"looks good", an empty reply, or
+        plan feedback to fold in) → mode = **local**.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ACT — LOCAL: the harness implements in bounded surfaces
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: act-local
+    depends_on: [select-mode]
+    when: "$select-mode.output.mode == 'local'"
+    context: fresh
+    idle_timeout: 600000
+    prompt: |
+      You are in the **ACT** phase (local implementation). Implement the approved
+      plan in bounded surfaces — never push the default branch, never widen scope.
+      You do not know this codebase in advance; learn it as you go.
+
+      ## Reviewer feedback on the plan
+
+      $approve-plan.output
+
+      ## Rules
+
+      - The canonical plan is the GitHub issue. Read `$ARTIFACTS_DIR/.issue-number`,
+        then `gh issue view <N> --comments` to load the plan you must follow.
+      - Learn this project's conventions and verify commands first — read whichever
+        exist: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, plus its
+        build config (package.json scripts, Makefile, pyproject.toml, Cargo.toml,
+        go.mod, …). Run THAT project's checks after each change — assume no tool.
+      - If the feedback above is more than a bare approval, record a short
+        `gh issue comment <N>` noting the agreed change BEFORE coding.
+      - Read each file before editing it. Stage files **by name** — never
+        `git add -A` / `git add .` / `git add -u`.
+      - Never commit anything under `$ARTIFACTS_DIR`, scratch files, or PR drafts.
+
+      ## Steps
+
+      1. Read the issue plan and the project's conventions.
+      2. Confirm the branch: read `$ARTIFACTS_DIR/.default-branch`; if HEAD is that
+         branch, create `plan-act-evaluate/<issue>-<slug>`; otherwise stay on the
+         current (worktree) branch.
+      3. For each `### Task N:` in the plan: read the target file, make the edit,
+         run the project's checks, then commit with a conventional message.
+      4. Print a short status report: tasks done, anything deferred, deviations.
+
+  # EVALUATE (LOCAL) — AI review-and-improve loop. The agent reviews its own
+  # change (contributor-model lens) + the project's own checks and fixes until it
+  # is satisfied; its `EVALUATION_COMPLETE` signal ends the loop. The PR's remote
+  # CI is the authoritative gate (see ci-signals); a human gates the merge.
+  - id: evaluate
+    depends_on: [act-local]
+    when: "$select-mode.output.mode == 'local'"
+    idle_timeout: 600000
+    loop:
+      max_iterations: 5
+      until: EVALUATION_COMPLETE
+      prompt: |
+        # EVALUATE — local AI review-and-improve loop
+
+        Review your own implementation against the plan and improve it until you
+        are genuinely satisfied. This loops; a human reviews the PR afterward and
+        the PR's own CI is the authoritative check — so be your own toughest
+        reviewer here, not a rubber stamp.
+
+        The canonical plan is the GitHub issue: read `$ARTIFACTS_DIR/.issue-number`,
+        then `gh issue view <N> --comments`. The base branch is in
+        `$ARTIFACTS_DIR/.default-branch`.
+
+        Previous iteration's review (empty on the first pass):
+        $LOOP_PREV_OUTPUT
+
+        ## Each pass
+
+        1. Read the change so far: `git diff <base>...HEAD`.
+        2. Judge it with the contributor-model lens:
+           - Intent — does it actually solve the plan's goal (not just run)?
+           - Scope — bounded to the plan? No unrelated edits or dead scaffolding?
+           - Evidence — are new branches covered by tests?
+           - Ownership — the project's own conventions honored?
+           - Policy — no secrets, comments/style rules respected?
+           - Fallback — is the change cleanly revertible?
+        3. Discover and run THIS project's own checks: read its docs (CLAUDE.md /
+           AGENTS.md / CONTRIBUTING.md / README) and build config (package.json,
+           Makefile, pyproject.toml, Cargo.toml, go.mod, …) to find the
+           type-check / lint / test / build commands, then run them. Assume no
+           specific tool.
+        4. If you find ANY problem — a failing check, a missing test, weak or
+           incorrect code, a convention violation, scope creep — FIX it, stage by
+           name, commit `fix: <what>` (revert the offending commit if the fix is a
+           behavior change rather than a nudge), and let the loop run again.
+        5. ONLY when the change is correct, complete against the plan,
+           conventions-clean, AND the project's checks pass: print a short review
+           summary and the signal `EVALUATION_COMPLETE`.
+
+        Do NOT emit `EVALUATION_COMPLETE` just to exit the loop. Never `git add -A`.
+        Never commit anything under `$ARTIFACTS_DIR`.
+
+  - id: open-pr
+    depends_on: [evaluate]
+    when: "$select-mode.output.mode == 'local'"
+    context: fresh
+    prompt: |
+      Push the branch and open a **draft** PR that links the plan issue. The PR's
+      CI is the authoritative check, so getting it open is the point.
+
+      ## Context
+
+      - Plan issue: $publish-plan.output
+      - Implementation report: $act-local.output
+
+      ## Instructions
+
+      1. Read `$ARTIFACTS_DIR/.default-branch` (the base) and
+         `$ARTIFACTS_DIR/.issue-number` (the issue).
+      2. Verify HEAD is NOT the base branch. If it is, refuse and stop.
+      3. If a PR template exists (`.github/pull_request_template.md`,
+         `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/PULL_REQUEST_TEMPLATE.md`),
+         read it and follow its sections.
+      4. `git push -u origin HEAD`.
+      5. `gh pr list --head "$(git branch --show-current)"` — if a PR exists,
+         reuse its number and skip creation.
+      6. Otherwise `gh pr create --draft --base <base>`:
+         - Title: under 70 chars, conventional-commit style.
+         - Body: the project's template if present, otherwise **What** /
+           **Why now** / **Test plan**. Link the issue with `Fixes #<num>`.
+         - Write any body draft to `$ARTIFACTS_DIR/pr-body.md`, never the repo root.
+      7. Capture identifiers:
+         `gh pr view --json number -q '.number' > "$ARTIFACTS_DIR/.pr-number"`
+         `gh pr view --json url    -q '.url'    > "$ARTIFACTS_DIR/.pr-url"`
+      8. Confirm the base; if wrong, `gh pr edit <num> --base <base>`.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ACT — DELEGATE: assign the issue to the GitHub Copilot coding agent
+  # GitHub's own "act in bounded surfaces" — Copilot branches, commits, and opens
+  # a PR in the cloud. Evaluation is then the PR's CI + review (system signals).
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: act-delegate
+    depends_on: [select-mode]
+    when: "$select-mode.output.mode == 'delegate'"
+    bash: |
+      set -euo pipefail
+      ART="$KEELSON_ARTIFACTS_DIR"
+      N=$(cat "$ART/.issue-number")
+      OWNER=$(gh repo view --json owner -q '.owner.login')
+      NAME=$(gh repo view --json name -q '.name')
+
+      # Carry any substantive reviewer note onto the issue so Copilot sees it.
+      REPLY="$KEELSON_NODE_approve_plan_OUTPUT"
+      TRIMMED=$(printf '%s' "$REPLY" | tr '[:upper:]' '[:lower:]' \
+        | sed 's/delegate//g; s/assign to copilot//g; s/copilot//g; s/approve[d]*//g' \
+        | tr -d '[:space:]')
+      if [ -n "$TRIMMED" ]; then
+        printf 'Supervisor note before delegating to Copilot:\n\n%s\n' "$REPLY" \
+          | gh issue comment "$N" --body-file -
+      fi
+
+      echo "Resolving the Copilot coding agent on $OWNER/$NAME…"
+      BOT=$(gh api graphql -f query='query($o:String!,$n:String!){repository(owner:$o,name:$n){
+        suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:50){nodes{login ... on Bot{id}}}}}' \
+        -F o="$OWNER" -F n="$NAME" \
+        --jq '.data.repository.suggestedActors.nodes[]|select(.login=="copilot-swe-agent").id')
+      if [ -z "$BOT" ]; then
+        echo "ERROR: the Copilot coding agent is not assignable on $OWNER/$NAME" >&2
+        echo "       (enable it for the repo/org, or pick the local path)." >&2
+        exit 1
+      fi
+
+      ISSUE_ID=$(gh issue view "$N" --json id -q '.id')
+      echo "Assigning issue #$N to Copilot…"
+      gh api graphql -f query='mutation($a:ID!,$b:ID!){replaceActorsForAssignable(
+        input:{assignableId:$a,actorIds:[$b]}){assignable{... on Issue{number}}}}' \
+        -F a="$ISSUE_ID" -F b="$BOT" >/dev/null
+      echo "DELEGATED: issue #$N assigned to copilot-swe-agent. Copilot will open a PR."
+
+  - id: await-copilot
+    depends_on: [act-delegate]
+    when: "$select-mode.output.mode == 'delegate'"
+    timeout: 1800000
+    bash: |
+      set -uo pipefail
+      ART="$KEELSON_ARTIFACTS_DIR"
+      N=$(cat "$ART/.issue-number")
+      DEADLINE=$(( $(date +%s) + 1700 ))   # ~28 min, inside the node timeout
+      echo "Waiting for Copilot to open a PR for issue #$N (polling every 90s)…"
+
+      PR=""
+      while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+        # Copilot's PR is authored by the bot and/or links the issue in its body.
+        PR=$(gh pr list --state open --json number,author,body \
+          | jq -r --arg n "$N" '.[]
+              | select((.author.login // "" | test("copilot";"i"))
+                       or ((.body // "") | test("#"+$n+"\\b|/issues/"+$n+"\\b")))
+              | .number' | head -1)
+        if [ -n "$PR" ]; then
+          DRAFT=$(gh pr view "$PR" --json isDraft -q '.isDraft' 2>/dev/null || echo true)
+          echo "  found PR #$PR (draft=$DRAFT)"
+          [ "$DRAFT" = "false" ] && break
+        fi
+        sleep 90
+      done
+
+      if [ -z "$PR" ]; then
+        echo "TIMEOUT: no Copilot PR linked to issue #$N within the window." >&2
+        echo "         Check the PR list and re-run, or escalate to a human." >&2
+        exit 1
+      fi
+      printf '%s' "$PR" > "$ART/.pr-number"
+      gh pr view "$PR" --json url -q '.url' > "$ART/.pr-url"
+      DRAFT=$(gh pr view "$PR" --json isDraft -q '.isDraft')
+      [ "$DRAFT" = "true" ] && echo "NOTE: PR #$PR is still a draft — evaluating its current state."
+      echo "COPILOT_PR=#$PR"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # EVALUATE — read back REMOTE CI as the AUTHORITATIVE system signal (both paths)
+  # GH-600: agent evaluation is grounded in system signals (workflow runs, status
+  # checks), not the agent's word. This is the canonical check — whatever the repo
+  # defines. Reconverges the local + delegate branches.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: ci-signals
+    depends_on: [open-pr, await-copilot]
+    trigger_rule: one_success
+    timeout: 600000
+    bash: |
+      set -uo pipefail
+      ART="$KEELSON_ARTIFACTS_DIR"
+      PR=$(cat "$ART/.pr-number" 2>/dev/null || true)
+      if [ -z "$PR" ]; then
+        echo "CI_SIGNALS: SKIPPED (no PR number recorded)"
+        exit 0
+      fi
+      echo "=== Remote CI checks for PR #$PR (gh pr checks --watch) ==="
+      OUT=$(gh pr checks "$PR" --watch 2>&1); code=$?
+      printf '%s\n' "$OUT"
+      if printf '%s' "$OUT" | grep -qi 'no checks'; then
+        echo "CI_SIGNALS: NONE (no CI configured on this repo — falling back to local checks + human PR review)"
+      elif [ "$code" -eq 0 ]; then
+        echo "CI_SIGNALS: PASS"
+      else
+        echo "CI_SIGNALS: FAIL (gh exit $code) — the PR must not merge until these are green"
+      fi
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AUDIT (DELEGATE path) — review Copilot's PR and render a formal PR review.
+  # The LOCAL path already reviewed-and-fixed inside the evaluate loop, so it
+  # skips straight from ci-signals to the report.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: capture-diff
+    depends_on: [ci-signals]
+    when: "$select-mode.output.mode == 'delegate'"
+    bash: |
+      set -uo pipefail
+      ART="$KEELSON_ARTIFACTS_DIR"
+      PR=$(cat "$ART/.pr-number" 2>/dev/null || true)
+      if [ -n "$PR" ]; then
+        gh pr diff "$PR" > "$ART/diff.patch" 2>/dev/null || true
+        gh pr view "$PR" --json files \
+          -q '.files[] | "\(.path) (+\(.additions)/-\(.deletions))"' > "$ART/diff.stat" 2>/dev/null || true
+      fi
+      # Fallback to the local worktree diff if the PR diff was unavailable.
+      if [ ! -s "$ART/diff.patch" ]; then
+        BASE=$(cat "$ART/.default-branch" 2>/dev/null || echo main)
+        git diff "$BASE"...HEAD > "$ART/diff.patch" 2>/dev/null || true
+      fi
+      echo "=== Changed files ==="
+      cat "$ART/diff.stat" 2>/dev/null || echo "(none)"
+
+  - id: self-review
+    depends_on: [capture-diff]
+    when: "$select-mode.output.mode == 'delegate'"
+    context: fresh
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      You are a senior reviewer applying the **contributor model**: Copilot's
+      work is held to the same bar as human work. You do NOT know this codebase
+      in advance — learn its bar before you judge.
+
+      ## Orient (read-only)
+
+      1. Read whichever exist: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`,
+         `README.md`. That is the project's own definition of correct, idiomatic,
+         tested, and safe. Infer the language/stack from the diff — assume nothing.
+      2. Read the PR diff at `$ARTIFACTS_DIR/diff.patch` (stat:
+         `$ARTIFACTS_DIR/diff.stat`) against the plan (`$ARTIFACTS_DIR/plan.md`).
+
+      ## What to surface (high-signal first; skip whatever the project's own
+      linters / formatters already catch — don't spend findings on style)
+
+      - **Correctness** — logic errors, wrong edge cases, off-by-one, null/None,
+        broken invariants, race conditions, swallowed errors / unhandled rejections.
+      - **Security** — untrusted input reaching a sink (command / SQL injection,
+        path traversal, SSRF), secrets committed, missing authz, unsafe
+        deserialization. Flag these even if no scanner is configured.
+      - **Tests** — does each new branch / condition have a test? Missing coverage
+        for code that branches on input or external state is HIGH.
+      - **Reuse & simplicity** — duplicates something that already exists,
+        over-engineered, wrong abstraction level, dead code.
+      - **Conventions** — drift from the project's own documented conventions.
+
+      ## Contributor-model verdict (drives approve vs request-changes)
+
+      Score each PASS / CONCERN with a one-line justification:
+
+      | Dimension | The question |
+      |-----------|--------------|
+      | Intent    | Does it solve the plan's goal (not just run)? |
+      | Scope     | Bounded to the plan? No unrelated edits? |
+      | Evidence  | Do tests / CI back the success criteria? |
+      | Ownership | Project conventions honored? |
+      | Policy    | No secrets; license / security clean? |
+      | Fallback  | Cleanly revertible? |
+
+      ## Findings (house shape, matches the pr-review workflow)
+
+      - `path:line` — `severity` (CRITICAL | HIGH | MEDIUM | LOW) · `confidence` (high/med/low)
+      - **What**: one sentence
+      - **Why it matters**: one sentence
+      - **Suggested fix**: one or two lines, code where useful
+
+      Lead with high-confidence, high-severity items. Do NOT edit files — the next
+      node renders this as a formal PR review.
+
+  # DELEGATE only — Copilot owns its PR branch, so the AI can't fix the code; it
+  # renders judgment as a formal PR REVIEW. `--request-changes` feeds Copilot
+  # (it revises PRs in response) and is a control-plane review signal; `--approve`
+  # hands a clean PR to the human. GH-600: "code review feedback (requested
+  # changes, approvals)" is an evaluation signal.
+  - id: pr-review
+    depends_on: [self-review]
+    when: "$select-mode.output.mode == 'delegate'"
+    context: fresh
+    prompt: |
+      Copilot wrote this PR — you may NOT edit its branch. Render your judgment as
+      a formal GitHub PR review so Copilot can revise and a human can gate it.
+
+      Read `$ARTIFACTS_DIR/.pr-number` for the PR number, then submit ONE review:
+
+      - If the contributor-model review below has NO unresolved CRITICAL or HIGH
+        findings → approve:
+        `gh pr review <PR> --approve --body "<one-paragraph verdict>"`
+      - Otherwise → request changes, listing the CRITICAL/HIGH findings in the
+        body so Copilot can act on them:
+        `gh pr review <PR> --request-changes --body "<findings>"`
+
+      Use a HEREDOC for `--body` to preserve markdown. Do not edit any files.
+
+      ## Review
+
+      $self-review.output
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AUDIT — final report: the six-element audit trail
+  # goal → plan → changeset → evidence → judgment → outcome
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Deterministic on purpose: the audit trail is the trustworthy record of the
+  # run, so it must be FACTS pulled from real artifacts — not an AI summary that
+  # can hallucinate the goal/domain or hang on the final node and fail an
+  # otherwise-green run. Every field below comes from disk, git, or gh.
+  - id: report
+    depends_on: [ci-signals, pr-review]
+    trigger_rule: one_success
+    bash: |
+      set -uo pipefail
+      ART="$KEELSON_ARTIFACTS_DIR"
+
+      ISSUE_URL=$(cat "$ART/.issue-url" 2>/dev/null || echo "(none)")
+      PR_URL=$(cat "$ART/.pr-url" 2>/dev/null || echo "(none)")
+      PR=$(cat "$ART/.pr-number" 2>/dev/null || true)
+      BASE=$(cat "$ART/.default-branch" 2>/dev/null || echo main)
+
+      # Mode from select-mode's JSON output (jq, then a grep fallback).
+      MODE=$(printf '%s' "${KEELSON_NODE_select_mode_OUTPUT:-}" | jq -r '.mode' 2>/dev/null || true)
+      case "$MODE" in
+        local|delegate) ;;
+        *) MODE=$(printf '%s' "${KEELSON_NODE_select_mode_OUTPUT:-}" \
+             | grep -oE '"mode"[[:space:]]*:[[:space:]]*"(local|delegate)"' \
+             | grep -oE '(local|delegate)' | head -1 || true) ;;
+      esac
+      [ -z "$MODE" ] && MODE=local
+      if [ "$MODE" = "delegate" ]; then ACT="delegate (GitHub Copilot coding agent)"; else ACT="local (harness)"; fi
+
+      # Goal: the plan's `## Goal` section, verbatim (no inference).
+      GOAL=$(awk '/^## Goal/{f=1;next} /^## /{f=0} f' "$ART/plan.md" 2>/dev/null \
+        | sed '/^[[:space:]]*$/d' | head -3)
+      [ -z "$GOAL" ] && GOAL="(see plan: $ISSUE_URL)"
+
+      # Branch + changeset from the real PR (uniform for local and delegate).
+      BRANCH="(n/a)"; CHANGES="(no PR diff available)"
+      if [ -n "$PR" ]; then
+        BRANCH=$(gh pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || echo "?")
+        CHANGES=$(gh pr view "$PR" --json files \
+          -q '.files[] | "• \(.path)  (+\(.additions)/-\(.deletions))"' 2>/dev/null)
+        [ -z "$CHANGES" ] && CHANGES=$(git diff "$BASE"...HEAD --stat 2>/dev/null | sed 's/^/• /' || echo "(none)")
+      fi
+
+      # Remote CI verdict, parsed from ci-signals' own classification.
+      CI=$(printf '%s' "${KEELSON_NODE_ci_signals_OUTPUT:-}" \
+        | grep -oE 'CI_SIGNALS:[[:space:]]*(PASS|FAIL|NONE)' | grep -oE '(PASS|FAIL|NONE)' | head -1 || true)
+      [ -z "$CI" ] && CI="UNKNOWN"
+
+      if [ "$MODE" = "delegate" ]; then
+        JUDGMENT="Copilot's PR reviewed under the contributor model (see pr-review)."
+        LOOP="n/a (delegate)"
+      else
+        JUDGMENT="Self-reviewed and fixed in the local evaluate loop until satisfied."
+        LOOP="satisfied (reached open-pr)"
+      fi
+      case "$CI" in
+        PASS) OUTCOME="draft PR open, CI green — ready for human review → merge: $PR_URL" ;;
+        FAIL) OUTCOME="draft PR open but CI RED — must not merge until green: $PR_URL" ;;
+        NONE) OUTCOME="draft PR open, no CI on this repo — human review gates merge: $PR_URL" ;;
+        *)    OUTCOME="draft PR: $PR_URL" ;;
+      esac
+
+      cat <<REPORT
+      ===============================================================
+      PLAN -> ACT -> EVALUATE — COMPLETE
+      ===============================================================
+      Goal:     $GOAL
+      Plan:     $ISSUE_URL
+      Act:      $ACT
+      Branch:   $BRANCH
+      PR:       $PR_URL
+
+      -- Changeset --
+      $CHANGES
+
+      -- Evidence (system signals) --
+      remote CI:  $CI  <- authoritative
+      local loop: $LOOP
+
+      -- Judgment (contributor model) --
+      $JUDGMENT
+
+      -- Outcome --
+      $OUTCOME
+      ===============================================================
+      REPORT
