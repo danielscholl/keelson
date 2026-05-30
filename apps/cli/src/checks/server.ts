@@ -24,7 +24,7 @@ export async function runServerCheck(deps: ServerDeps = {}): Promise<CategoryRes
     ? {
         name: "GET /api/health",
         status: "ok",
-        detail: `${info.name} phase ${info.phase}, schema ${info.schemaVersion} @ ${info.baseUrl}`,
+        detail: `${info.name}${info.phase !== undefined ? ` phase ${info.phase}` : ""}, schema ${info.schemaVersion} @ ${info.baseUrl}`,
       }
     : {
         // Server-down is a warn, not a fail — the operator chooses when the

@@ -8,7 +8,7 @@ export const DEFAULT_PROBE_TIMEOUT_MS = 250;
 export interface ServerInfo {
   baseUrl: string;
   name: string;
-  phase: number;
+  phase?: number;
   schemaVersion: string;
 }
 
@@ -27,12 +27,13 @@ interface HealthPayload {
 function parseHealth(baseUrl: string, payload: HealthPayload): ServerInfo | null {
   if (payload.ok !== true) return null;
   if (typeof payload.name !== "string") return null;
-  if (typeof payload.phase !== "number") return null;
   if (typeof payload.schema_version !== "string") return null;
   return {
     baseUrl,
     name: payload.name,
-    phase: payload.phase,
+    // `phase` is optional: the health route stopped emitting it, so requiring
+    // it here made every probe fail (server seen as down while actually up).
+    ...(typeof payload.phase === "number" ? { phase: payload.phase } : {}),
     schemaVersion: payload.schema_version,
   };
 }
