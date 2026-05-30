@@ -509,9 +509,14 @@ nodes:
       ART="$KEELSON_ARTIFACTS_DIR"
       N=$(cat "$ART/.issue-number")
       DEADLINE=$(( $(date +%s) + 1700 ))   # ~28 min, inside the node timeout
-      echo "Waiting for Copilot to open a PR for issue #$N (polling every 90s)…"
+      echo "Waiting for Copilot to open a PR for issue #${N} (polling every 90s)..."
 
-      PR=""
+      # "Done" detection: Copilot opens a PR and may EITHER mark it ready-for-review
+      # OR leave it a draft (it often leaves the draft for a human to ready). So we
+      # don't only wait for non-draft — that would stall until the deadline. We also
+      # treat an unchanged head SHA across two consecutive polls as "Copilot stopped
+      # pushing" = finished, and proceed to review the PR in its current state.
+      PR=""; PREV_SHA=""
       while [ "$(date +%s)" -lt "$DEADLINE" ]; do
         # Copilot's PR is authored by the bot and/or links the issue in its body.
         PR=$(gh pr list --state open --json number,author,body \
@@ -521,22 +526,28 @@ nodes:
               | .number' | head -1)
         if [ -n "$PR" ]; then
           DRAFT=$(gh pr view "$PR" --json isDraft -q '.isDraft' 2>/dev/null || echo true)
-          echo "  found PR #$PR (draft=$DRAFT)"
+          SHA=$(gh pr view "$PR" --json headRefOid -q '.headRefOid' 2>/dev/null || echo "")
+          echo "  found PR #${PR} (draft=${DRAFT}, head=${SHA:0:7})"
           [ "$DRAFT" = "false" ] && break
+          if [ -n "$SHA" ] && [ "$SHA" = "$PREV_SHA" ]; then
+            echo "  head unchanged across polls — Copilot appears finished; proceeding"
+            break
+          fi
+          PREV_SHA="$SHA"
         fi
         sleep 90
       done
 
       if [ -z "$PR" ]; then
-        echo "TIMEOUT: no Copilot PR linked to issue #$N within the window." >&2
+        echo "TIMEOUT: no Copilot PR linked to issue #${N} within the window." >&2
         echo "         Check the PR list and re-run, or escalate to a human." >&2
         exit 1
       fi
       printf '%s' "$PR" > "$ART/.pr-number"
       gh pr view "$PR" --json url -q '.url' > "$ART/.pr-url"
       DRAFT=$(gh pr view "$PR" --json isDraft -q '.isDraft')
-      [ "$DRAFT" = "true" ] && echo "NOTE: PR #$PR is still a draft — evaluating its current state."
-      echo "COPILOT_PR=#$PR"
+      [ "$DRAFT" = "true" ] && echo "NOTE: PR #${PR} is still a draft — a maintainer must mark it ready (and approve its CI) before it can merge."
+      echo "COPILOT_PR=#${PR}"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # EVALUATE — read back REMOTE CI as the AUTHORITATIVE system signal (both paths)
@@ -557,11 +568,26 @@ nodes:
         echo "CI_SIGNALS: SKIPPED (no PR number recorded)"
         exit 0
       fi
-      echo "=== Remote CI checks for PR #$PR (gh pr checks --watch) ==="
+      echo "=== Remote CI checks for PR #${PR} (gh pr checks --watch) ==="
       OUT=$(gh pr checks "$PR" --watch 2>&1); code=$?
       printf '%s\n' "$OUT"
       if printf '%s' "$OUT" | grep -qi 'no checks'; then
-        echo "CI_SIGNALS: NONE (no CI configured on this repo — falling back to local checks + human PR review)"
+        # "No checks" is ambiguous: either the repo genuinely has no CI, OR CI
+        # exists but is gated behind maintainer approval (the common case for a
+        # bot / first-time-contributor PR like Copilot's — its runs sit in
+        # `action_required` and gh reports them as no checks). Distinguish them so
+        # the audit trail doesn't claim "no CI" when CI is merely waiting on a human.
+        BRANCH=$(gh pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || echo "")
+        GATED=0
+        if [ -n "$BRANCH" ]; then
+          GATED=$(gh run list --branch "$BRANCH" --json status,conclusion \
+            -q '[.[] | select(.conclusion=="action_required")] | length' 2>/dev/null || echo 0)
+        fi
+        if [ "${GATED:-0}" -gt 0 ]; then
+          echo "CI_SIGNALS: PENDING_APPROVAL (CI exists but is awaiting maintainer approval — a human must 'Approve workflows to run' on the PR before it reports)"
+        else
+          echo "CI_SIGNALS: NONE (no CI configured on this repo — falling back to local checks + human PR review)"
+        fi
       elif [ "$code" -eq 0 ]; then
         echo "CI_SIGNALS: PASS"
       else
@@ -725,7 +751,7 @@ nodes:
 
       # Remote CI verdict, parsed from ci-signals' own classification.
       CI=$(printf '%s' "${KEELSON_NODE_ci_signals_OUTPUT:-}" \
-        | grep -oE 'CI_SIGNALS:[[:space:]]*(PASS|FAIL|NONE)' | grep -oE '(PASS|FAIL|NONE)' | head -1 || true)
+        | grep -oE 'CI_SIGNALS:[[:space:]]*(PASS|FAIL|NONE|PENDING_APPROVAL)' | grep -oE '(PASS|FAIL|NONE|PENDING_APPROVAL)' | head -1 || true)
       [ -z "$CI" ] && CI="UNKNOWN"
 
       if [ "$MODE" = "delegate" ]; then
@@ -739,6 +765,7 @@ nodes:
         PASS) OUTCOME="draft PR open, CI green — ready for human review → merge: $PR_URL" ;;
         FAIL) OUTCOME="draft PR open but CI RED — must not merge until green: $PR_URL" ;;
         NONE) OUTCOME="draft PR open, no CI on this repo — human review gates merge: $PR_URL" ;;
+        PENDING_APPROVAL) OUTCOME="PR open; CI is gated behind maintainer approval — a human must approve its workflow, then review to merge: $PR_URL" ;;
         *)    OUTCOME="draft PR: $PR_URL" ;;
       esac
 
