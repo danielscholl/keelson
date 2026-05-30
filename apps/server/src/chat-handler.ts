@@ -23,6 +23,7 @@ import {
   type RecallResponse,
   registeredToolInfoSchema,
   renameConversationBodySchema,
+  type ToolDefinition,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
@@ -222,6 +223,10 @@ export function handleChatUpgrade(req: Request, server: Server<WsData>): Respons
 export interface ChatWebSocketDeps {
   memoryStore?: MemoryStore;
   projectsStore?: ProjectsStore;
+  // Harness-native workflow tools, appended to the registry-derived tool set on
+  // every turn so the LLM can fire / approve / monitor workflows. Injected here
+  // (not registered globally) so they never leak into workflow `prompt` nodes.
+  workflowTools?: ToolDefinition[];
 }
 
 export function chatWebSocketHandlers(
@@ -250,6 +255,7 @@ export function chatWebSocketHandlers(
         abortSignal: ws.data.abort.signal,
         ...(deps.memoryStore !== undefined ? { memoryStore: deps.memoryStore } : {}),
         ...(deps.projectsStore !== undefined ? { projectsStore: deps.projectsStore } : {}),
+        ...(deps.workflowTools !== undefined ? { workflowTools: deps.workflowTools } : {}),
       });
     },
     close(ws) {
@@ -268,7 +274,17 @@ export interface ChatDeps {
   // Resolves the conversation's projectId → rootPath used as the agent's cwd.
   // Undefined → falls back to process.cwd().
   projectsStore?: ProjectsStore;
+  // Workflow chat tools appended to the registry tools for this turn.
+  workflowTools?: ToolDefinition[];
 }
+
+// One-line system hint that teaches the model the workflow tools exist and the
+// approval protocol — kept O(1) so the base prompt doesn't grow with the
+// catalog (workflows are discovered on demand via workflow_list).
+const WORKFLOW_TOOLS_HINT =
+  "You can run human-authored deterministic workflows via the workflow_* tools. " +
+  "When a request matches a repeatable or automatable task, call workflow_list to find a matching workflow, then workflow_run to start it. " +
+  "Some workflows pause for plan approval — relay the plan to the user, and when they approve or give feedback, call workflow_respond with the runId/nodeId/pauseId from the earlier tool result.";
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
 // populated store can't bloat every turn's prompt.
@@ -359,7 +375,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   const acc = createContentPartsAccumulator();
   let streamFailed = false;
 
-  const tools = getRegisteredTools();
+  const tools = [...getRegisteredTools(), ...(deps.workflowTools ?? [])];
 
   // A projectId is always required for project-scoped recall; without it,
   // MemoryStore.recall would skip the filter and inject memories from every
@@ -381,6 +397,9 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   if (recallSection !== undefined) systemPromptParts.push(recallSection);
   if (typeof conv.seedSystemPrompt === "string" && conv.seedSystemPrompt.length > 0) {
     systemPromptParts.push(conv.seedSystemPrompt);
+  }
+  if (deps.workflowTools && deps.workflowTools.length > 0) {
+    systemPromptParts.push(WORKFLOW_TOOLS_HINT);
   }
   const systemPrompt = systemPromptParts.length > 0 ? systemPromptParts.join("\n\n") : undefined;
 

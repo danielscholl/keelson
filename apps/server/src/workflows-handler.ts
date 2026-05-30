@@ -24,12 +24,16 @@ import {
   type IsolationOverride,
   listWorkflowsResponseSchema,
   type MessageChunk,
+  type Project,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
   startWorkflowRunBodySchema,
+  TERMINAL_RUN_STATUSES,
   type WorkflowFrame,
   type WorkflowNodeStatus,
+  type WorkflowRunDetail,
   type WorkflowRunStatus,
+  type WorkflowRunSummary,
   type WorkflowSummary,
   workflowDetailSchema,
   workflowRunDetailSchema,
@@ -323,10 +327,17 @@ export interface WorkflowSubscribers {
   broadcast(runId: string, frame: WorkflowFrame): void;
   hasRun(runId: string): boolean;
   closeRun(runId: string, code?: number, reason?: string): void;
+  // In-process frame listener — the same frames the WS sockets receive, fanned
+  // to an in-process consumer. Powers the WorkflowController's
+  // awaitPauseOrTerminal so a chat tool can follow a run without opening a
+  // loopback WebSocket. Returns an unsubscribe fn; listeners self-manage their
+  // lifecycle (closeRun does not touch them).
+  onFrame(runId: string, listener: (frame: WorkflowFrame) => void): () => void;
 }
 
 class WorkflowSubscriberRegistry implements WorkflowSubscribers {
   private readonly subscribers = new Map<string, Set<ServerWebSocket<WsData>>>();
+  private readonly listeners = new Map<string, Set<(frame: WorkflowFrame) => void>>();
 
   subscribe(runId: string, ws: ServerWebSocket<WsData>): void {
     let set = this.subscribers.get(runId);
@@ -346,15 +357,43 @@ class WorkflowSubscriberRegistry implements WorkflowSubscribers {
 
   broadcast(runId: string, frame: WorkflowFrame): void {
     const set = this.subscribers.get(runId);
-    if (!set || set.size === 0) return;
-    const json = JSON.stringify(frame);
-    for (const ws of set) {
-      try {
-        ws.send(json);
-      } catch {
-        // socket closed mid-send; close handler will drain it
+    if (set && set.size > 0) {
+      const json = JSON.stringify(frame);
+      for (const ws of set) {
+        try {
+          ws.send(json);
+        } catch {
+          // socket closed mid-send; close handler will drain it
+        }
       }
     }
+    const listeners = this.listeners.get(runId);
+    if (listeners && listeners.size > 0) {
+      // Snapshot before iterating — a listener that resolves on this frame
+      // (e.g. run_done) unsubscribes synchronously, mutating the set mid-loop.
+      for (const fn of [...listeners]) {
+        try {
+          fn(frame);
+        } catch {
+          // listener errors are isolated from the broadcast and other listeners
+        }
+      }
+    }
+  }
+
+  onFrame(runId: string, listener: (frame: WorkflowFrame) => void): () => void {
+    let set = this.listeners.get(runId);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(runId, set);
+    }
+    set.add(listener);
+    return () => {
+      const current = this.listeners.get(runId);
+      if (!current) return;
+      current.delete(listener);
+      if (current.size === 0) this.listeners.delete(runId);
+    };
   }
 
   hasRun(runId: string): boolean {
@@ -415,25 +454,17 @@ class RunArtifactsDir {
   }
 }
 
-export function workflowsRoutes(
-  app: Hono,
-  opts: WorkflowsHandlerOptions,
-  activeRuns: ActiveRuns = createActiveRuns(),
-  subscribers: WorkflowSubscribers = createWorkflowSubscribers(),
-): void {
-  const {
-    catalog,
-    store,
-    conversationStore,
-    projectsStore,
-    defaultCwd,
-    promptHandler,
-    memoryStore,
-  } = opts;
-  const effectivePromptHandler = promptHandler ?? placeholderPromptHandler;
-  // Re-parse with the Zod wire schemas at the adapter boundary so executor-built requests
-  // satisfy the same constraints as the HTTP route (text-length caps, source-ref shape, etc.).
-  // Without this, an in-process workflow could persist values the HTTP path would reject.
+// Resolves the prompt handler + memory tools an executor run needs from the
+// handler options. Shared by workflowsRoutes and createWorkflowController so
+// both the HTTP and chat-tool start paths build runs with identical wiring.
+// The memory tools re-parse with the Zod wire schemas at the adapter boundary
+// so executor-built requests satisfy the same constraints as the HTTP route.
+function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
+  promptHandler: NodeHandler;
+  memoryTools: MemoryTools | undefined;
+} {
+  const promptHandler = opts.promptHandler ?? placeholderPromptHandler;
+  const memoryStore = opts.memoryStore;
   const memoryTools =
     memoryStore !== undefined
       ? {
@@ -447,6 +478,376 @@ export function workflowsRoutes(
           },
         }
       : undefined;
+  return { promptHandler, memoryTools };
+}
+
+interface StartRunCoreDeps {
+  store: WorkflowStore;
+  conversationStore: ConversationStore;
+  activeRuns: ActiveRuns;
+  subscribers: WorkflowSubscribers;
+  promptHandler: NodeHandler;
+  memoryTools: MemoryTools | undefined;
+}
+
+interface StartRunCoreParams {
+  workflow: WorkflowDefinition;
+  inputs: Record<string, string>;
+  workingDir: string;
+  projectId: string | null;
+  resolvedProject: Project | null;
+  isolationOn: boolean;
+  branchTemplate: string | undefined;
+}
+
+// Run-launch core: create the linked conversation + run row, spawn the
+// background executor, register the active run. Both the HTTP start route and
+// the WorkflowController call this after resolving inputs / working dir, so the
+// conversation→run→spawn→register sequence has a single definition. Throws
+// (after rolling back the orphan conversation) when the run row can't be
+// written — callers map that to a 500 / tool error.
+function startRunCore(
+  deps: StartRunCoreDeps,
+  params: StartRunCoreParams,
+): { runId: string; conversationId: string } {
+  const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
+  const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
+    params;
+  const name = workflow.name;
+  const runId = crypto.randomUUID();
+  const startedAt = new Date().toISOString();
+  // Create the conversation FIRST so the workflow_runs FK has a target.
+  const conversation = conversationStore.create({
+    providerId: "workflow",
+    name: `${name} · ${runId.slice(0, 6)}`,
+  });
+  try {
+    conversationStore.appendMessage(conversation.id, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: formatDispatchMessage(name, inputs),
+      createdAt: startedAt,
+    });
+    store.createRun({
+      runId,
+      workflowName: name,
+      inputs,
+      startedAt,
+      conversationId: conversation.id,
+      projectId,
+      workingDir,
+    });
+  } catch (err) {
+    // Orphan rollback: the conversation row exists only to anchor a run, so
+    // if createRun throws drop the empty conversation rather than leak it.
+    try {
+      conversationStore.delete(conversation.id);
+    } catch (cleanupErr) {
+      console.warn(
+        `[workflows] orphan-rollback failed for conversation ${conversation.id}: ${
+          cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+        }`,
+      );
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[workflows] createRun failed for ${name}: ${message}`);
+    throw new Error(`failed to create run: ${message}`);
+  }
+  const abort = new AbortController();
+  const pendingApprovals = new Map<string, PendingApproval>();
+  const done = executeRunInBackground({
+    workflow,
+    runId,
+    inputs,
+    cwd: workingDir,
+    store,
+    abort,
+    activeRuns,
+    subscribers,
+    promptHandler,
+    pendingApprovals,
+    isolation: isolationOn
+      ? {
+          branchTemplate,
+          // Anchor worktrees at the project's rootPath whenever workingDir sits
+          // inside it (incl. equal); fall back to workingDir otherwise.
+          projectRootPath:
+            resolvedProject &&
+            (workingDir === resolvedProject.rootPath ||
+              workingDir.startsWith(`${resolvedProject.rootPath}${sep}`))
+              ? resolvedProject.rootPath
+              : workingDir,
+        }
+      : null,
+    ...(projectId !== null ? { projectId } : {}),
+    ...(memoryTools !== undefined ? { memoryTools } : {}),
+  });
+  activeRuns.register(runId, { abort, done, pendingApprovals });
+  return { runId, conversationId: conversation.id };
+}
+
+export type ResolveApprovalResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "not_found" | "no_pending" | "stale_pause" | "settle_failed";
+      message: string;
+    };
+
+// Approval-resume core: look up the pending approval, guard the pauseId, flip
+// the run back to running (when no other approvals remain), and settle the
+// executor's awaited promise. Returns a discriminated result so the HTTP route
+// maps it to 404/409 and the chat tool maps it to a message.
+function resolveApprovalCore(
+  deps: { activeRuns: ActiveRuns; store: WorkflowStore },
+  runId: string,
+  body: { nodeId: string; text: string; pauseId?: string },
+): ResolveApprovalResult {
+  const { activeRuns, store } = deps;
+  const entry = activeRuns.get(runId);
+  if (!entry) {
+    return { ok: false, reason: "not_found", message: `unknown or completed run '${runId}'` };
+  }
+  const pending = entry.pendingApprovals.get(body.nodeId);
+  if (!pending) {
+    return {
+      ok: false,
+      reason: "no_pending",
+      message: `no pending approval for node '${body.nodeId}'`,
+    };
+  }
+  // pauseId guard — interactive loops reuse the same nodeId across iterations,
+  // so a stale resume for an earlier pause must not settle a later one.
+  if (body.pauseId !== undefined && body.pauseId !== pending.pauseId) {
+    return {
+      ok: false,
+      reason: "stale_pause",
+      message: `pauseId mismatch for node '${body.nodeId}' — the pause has advanced; refetch the run state and retry`,
+    };
+  }
+  // Flip back to running BEFORE handing the text to the executor so the
+  // snapshot can't briefly report 'paused' after the next node starts writing.
+  entry.pendingApprovals.delete(body.nodeId);
+  if (entry.pendingApprovals.size === 0) {
+    try {
+      store.updateRunStatus({ runId, status: "running", completedAt: null, error: null });
+    } catch (err) {
+      console.warn(
+        `[workflows] resume: failed to flip ${runId} back to running: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+  try {
+    pending.resolve(body.text);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "settle_failed",
+      message: `resume failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  return { ok: true };
+}
+
+// Result of awaitPauseOrTerminal — the run's next observable boundary.
+export type WatchResult =
+  | { kind: "paused"; nodeId: string; pauseId: string; message: string }
+  | { kind: "terminal"; status: WorkflowRunStatus }
+  | { kind: "running" }
+  | { kind: "unknown" };
+
+export interface AwaitPauseOrTerminalOptions {
+  // Forwarded the non-terminal, non-pause frames (node_started, node_chunk,
+  // node_log, run_warning) so a chat tool can stream live progress.
+  onFrame?: (frame: WorkflowFrame) => void;
+  // When aborted, watching detaches and resolves `running` — the run keeps
+  // executing in the background.
+  signal?: AbortSignal;
+  // Soft cap on a single watch so a long no-approval run doesn't pin a chat
+  // turn forever; on expiry resolves `running`.
+  deadlineMs?: number;
+}
+
+export type StartRunResult =
+  | { ok: true; runId: string; conversationId: string }
+  | { ok: false; message: string };
+
+// In-process facade over the workflow engine for non-HTTP callers (the chat
+// tools). Shares the SAME activeRuns + subscribers + store the HTTP routes use,
+// so a run started here is identical to one started over the API.
+export interface WorkflowController {
+  startRun(params: {
+    name: string;
+    inputs: Record<string, string>;
+    workingDir: string;
+    isolation?: IsolationOverride;
+  }): StartRunResult;
+  resolveApproval(
+    runId: string,
+    body: { nodeId: string; text: string; pauseId?: string },
+  ): ResolveApprovalResult;
+  awaitPauseOrTerminal(runId: string, opts?: AwaitPauseOrTerminalOptions): Promise<WatchResult>;
+  listRuns(opts?: { status?: WorkflowRunStatus }): WorkflowRunSummary[];
+  getRun(runId: string): WorkflowRunDetail | undefined;
+  // Live pending approvals for a run, including the in-memory `pauseId` that the
+  // persisted snapshot (getRun) cannot carry. Empty for a run with no live
+  // resolver (terminal, unknown, or paused-but-reconciled after restart).
+  pendingApprovals(runId: string): Array<{ nodeId: string; pauseId: string; message: string }>;
+}
+
+const DEFAULT_WATCH_DEADLINE_MS = 75_000;
+
+function isTerminalStatus(status: WorkflowRunStatus): boolean {
+  return TERMINAL_RUN_STATUSES.includes(status);
+}
+
+export function createWorkflowController(
+  opts: WorkflowsHandlerOptions,
+  activeRuns: ActiveRuns,
+  subscribers: WorkflowSubscribers,
+): WorkflowController {
+  const { catalog, store, conversationStore, projectsStore } = opts;
+  const { promptHandler, memoryTools } = buildExecutionDeps(opts);
+
+  return {
+    startRun({ name, inputs, workingDir, isolation }) {
+      const workflow = catalog.get(name);
+      if (!workflow) return { ok: false, message: `unknown workflow '${name}'` };
+      try {
+        if (!statSync(workingDir).isDirectory()) {
+          return { ok: false, message: `workingDir is not a directory: ${workingDir}` };
+        }
+      } catch {
+        return { ok: false, message: `workingDir does not exist: ${workingDir}` };
+      }
+      const resolvedProject = projectsStore?.findByPathPrefix(workingDir) ?? null;
+      const projectId = resolvedProject?.id ?? null;
+      const yamlEnabled = workflow.worktree?.enabled === true;
+      const isolationOn =
+        isolation === "worktree" ? true : isolation === "none" ? false : yamlEnabled;
+      try {
+        const { runId, conversationId } = startRunCore(
+          { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools },
+          {
+            workflow,
+            inputs,
+            workingDir,
+            projectId,
+            resolvedProject,
+            isolationOn,
+            branchTemplate: workflow.worktree?.branch,
+          },
+        );
+        return { ok: true, runId, conversationId };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    },
+
+    resolveApproval(runId, body) {
+      return resolveApprovalCore({ activeRuns, store }, runId, body);
+    },
+
+    awaitPauseOrTerminal(runId, options = {}) {
+      const { onFrame, signal, deadlineMs = DEFAULT_WATCH_DEADLINE_MS } = options;
+      const existing = store.getRun(runId);
+      if (!existing) return Promise.resolve<WatchResult>({ kind: "unknown" });
+      if (isTerminalStatus(existing.status)) {
+        return Promise.resolve<WatchResult>({ kind: "terminal", status: existing.status });
+      }
+      return new Promise<WatchResult>((resolve) => {
+        let settled = false;
+        let unsubscribe: () => void = () => {};
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = (result: WatchResult): void => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          if (signal) signal.removeEventListener("abort", onAbort);
+          unsubscribe();
+          resolve(result);
+        };
+        const onAbort = (): void => finish({ kind: "running" });
+        unsubscribe = subscribers.onFrame(runId, (frame) => {
+          if (frame.type === "approval_awaiting") {
+            finish({
+              kind: "paused",
+              nodeId: frame.nodeId,
+              pauseId: frame.pauseId,
+              message: frame.message,
+            });
+          } else if (frame.type === "run_done") {
+            finish({ kind: "terminal", status: frame.status });
+          } else if (onFrame) {
+            onFrame(frame);
+          }
+        });
+        if (signal) {
+          if (signal.aborted) {
+            finish({ kind: "running" });
+            return;
+          }
+          signal.addEventListener("abort", onAbort);
+        }
+        timer = setTimeout(() => finish({ kind: "running" }), deadlineMs);
+        // Post-subscribe race re-check: the pause/terminal frame may have fired
+        // between the initial store read and the onFrame attach above.
+        const after = store.getRun(runId);
+        if (!after) {
+          finish({ kind: "unknown" });
+          return;
+        }
+        if (isTerminalStatus(after.status)) {
+          finish({ kind: "terminal", status: after.status });
+          return;
+        }
+        if (after.status === "paused") {
+          const pending = activeRuns.get(runId)?.pendingApprovals.values().next().value;
+          if (pending) {
+            finish({
+              kind: "paused",
+              nodeId: pending.nodeId,
+              pauseId: pending.pauseId,
+              message: pending.message,
+            });
+          }
+          // A 'paused' row with no in-memory resolver (boot-reconciliation
+          // window) just keeps waiting; the deadline / abort releases it.
+        }
+      });
+    },
+
+    listRuns(opts2 = {}) {
+      if (opts2.status) return store.listRunsByStatus(opts2.status);
+      return [...store.listRunsByStatus("running"), ...store.listRunsByStatus("paused")];
+    },
+
+    getRun(runId) {
+      return store.getRun(runId);
+    },
+
+    pendingApprovals(runId) {
+      const entry = activeRuns.get(runId);
+      if (!entry) return [];
+      return [...entry.pendingApprovals.values()].map((p) => ({
+        nodeId: p.nodeId,
+        pauseId: p.pauseId,
+        message: p.message,
+      }));
+    },
+  };
+}
+
+export function workflowsRoutes(
+  app: Hono,
+  opts: WorkflowsHandlerOptions,
+  activeRuns: ActiveRuns = createActiveRuns(),
+  subscribers: WorkflowSubscribers = createWorkflowSubscribers(),
+): void {
+  const { catalog, store, conversationStore, projectsStore, defaultCwd } = opts;
+  const { promptHandler: effectivePromptHandler, memoryTools } = buildExecutionDeps(opts);
 
   app.get("/api/workflows", (c) => {
     const workflows = catalog.list().map(workflowToSummary);
@@ -592,90 +993,30 @@ export function workflowsRoutes(
       isolationOverride === "worktree" ? true : isolationOverride === "none" ? false : yamlEnabled;
     const branchTemplate = workflow.worktree?.branch;
 
-    const runId = crypto.randomUUID();
-    const startedAt = new Date().toISOString();
-    // Create the conversation FIRST so the workflow_runs FK has a target.
-    // Persist the dispatch user message synchronously — it's the only durable
-    // message; the trace renders virtually from useWorkflowRun on the client.
-    const conversation = conversationStore.create({
-      providerId: "workflow",
-      name: `${name} · ${runId.slice(0, 6)}`,
-    });
-    conversationStore.appendMessage(conversation.id, {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: formatDispatchMessage(name, parsed.data.inputs),
-      createdAt: startedAt,
-    });
     try {
-      store.createRun({
-        runId,
-        workflowName: name,
-        inputs: parsed.data.inputs,
-        startedAt,
-        conversationId: conversation.id,
-        projectId,
-        workingDir,
-      });
+      const { runId } = startRunCore(
+        {
+          store,
+          conversationStore,
+          activeRuns,
+          subscribers,
+          promptHandler: effectivePromptHandler,
+          memoryTools,
+        },
+        {
+          workflow,
+          inputs: parsed.data.inputs,
+          workingDir,
+          projectId,
+          resolvedProject,
+          isolationOn,
+          branchTemplate,
+        },
+      );
+      return c.json({ runId });
     } catch (err) {
-      // Orphan rollback: the conversation row exists only to anchor a run, so
-      // if createRun throws (FK validation, transient SQLite, etc.) drop the
-      // empty conversation rather than leave it dangling in the sidebar.
-      try {
-        conversationStore.delete(conversation.id);
-      } catch (cleanupErr) {
-        console.warn(
-          `[workflows] orphan-rollback failed for conversation ${conversation.id}: ${
-            cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
-          }`,
-        );
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[workflows] createRun failed for ${name}: ${message}`);
-      return c.json({ error: `failed to create run: ${message}` }, 500);
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
-    const abort = new AbortController();
-    // Per-run pending approval map. The approval handler awaits a Promise
-    // the route writes here; POST /resume resolves it.
-    const pendingApprovals = new Map<string, PendingApproval>();
-    // Capture the executeRun promise so shutdown can await settlement
-    // (the executor writes the run's terminal status to SQLite inside
-    // its onEvent run_done branch — db.close() must not race that).
-    const done = executeRunInBackground({
-      workflow,
-      runId,
-      inputs: parsed.data.inputs,
-      cwd: workingDir,
-      store,
-      abort,
-      activeRuns,
-      subscribers,
-      promptHandler: effectivePromptHandler,
-      pendingApprovals,
-      isolation: isolationOn
-        ? {
-            branchTemplate,
-            // Worktrees land at `<projectRootPath>/.worktrees/<branch>/` — the
-            // dir keelson worktree prune scans. Anchor at the project's
-            // rootPath whenever workingDir sits inside it (incl. equal); fall
-            // back to workingDir when the caller forced a path that's not under
-            // the project (different repo entirely).
-            projectRootPath:
-              resolvedProject &&
-              (workingDir === resolvedProject.rootPath ||
-                workingDir.startsWith(`${resolvedProject.rootPath}${sep}`))
-                ? resolvedProject.rootPath
-                : workingDir,
-          }
-        : null,
-      // Scope this run's memory recall/writeback to the target project so a
-      // workflow with `memory:` nodes doesn't bleed across projects.
-      ...(projectId !== null ? { projectId } : {}),
-      ...(memoryTools !== undefined ? { memoryTools } : {}),
-    });
-    activeRuns.register(runId, { abort, done, pendingApprovals });
-
-    return c.json({ runId });
   });
 
   app.get("/api/workflows/runs/:runId", (c) => {
@@ -809,10 +1150,10 @@ export function workflowsRoutes(
       return c.json({ error: "forbidden origin" }, 403);
     }
     const runId = c.req.param("runId");
-    const entry = activeRuns.get(runId);
-    if (!entry) {
-      // 404 covers both "never existed" and "already terminal" — same shape
-      // as DELETE so the client treats them uniformly.
+    // Early 404 before parsing the body — preserves the route's "unknown or
+    // completed run" semantics even for a malformed body. The shared core
+    // re-checks below (covering a terminate-mid-request race).
+    if (!activeRuns.get(runId)) {
       return c.json({ error: `unknown or completed run '${runId}'` }, 404);
     }
     const raw = await c.req.json().catch(() => null);
@@ -820,59 +1161,9 @@ export function workflowsRoutes(
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const pending = entry.pendingApprovals.get(parsed.data.nodeId);
-    if (!pending) {
-      // 409 — the run exists but no approval is open for that node. Could be
-      // a stale client retrying after a successful resume, or the user typed
-      // a nodeId that isn't currently paused.
-      return c.json({ error: `no pending approval for node '${parsed.data.nodeId}'` }, 409);
-    }
-    // pauseId guard. Interactive loops reuse the same nodeId across
-    // iterations; a stale POST for iteration N (e.g. a CLI retry whose
-    // first attempt actually succeeded) would otherwise resolve
-    // iteration N+1 with the wrong text. When the client knows the
-    // pauseId, require it to match — otherwise accept and rely on the
-    // operator to know what they're doing (CLI default path).
-    if (parsed.data.pauseId !== undefined && parsed.data.pauseId !== pending.pauseId) {
-      return c.json(
-        {
-          error: `pauseId mismatch for node '${parsed.data.nodeId}' — the pause has advanced; refetch the run state and retry`,
-        },
-        409,
-      );
-    }
-    // Flip the run status back to running BEFORE we hand the text to the
-    // executor — otherwise the snapshot could briefly report 'paused' after
-    // the handler has already started writing the next node's state.
-    // If other approvals are still pending we stay 'paused'.
-    entry.pendingApprovals.delete(parsed.data.nodeId);
-    if (entry.pendingApprovals.size === 0) {
-      try {
-        store.updateRunStatus({
-          runId,
-          status: "running",
-          completedAt: null,
-          error: null,
-        });
-      } catch (err) {
-        console.warn(
-          `[workflows] resume: failed to flip ${runId} back to running: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-    }
-    try {
-      pending.resolve(parsed.data.text);
-    } catch (err) {
-      // Resolver already settled (rare race with abort). Surface as 409 so
-      // the client knows the run state diverged.
-      return c.json(
-        {
-          error: `resume failed: ${err instanceof Error ? err.message : String(err)}`,
-        },
-        409,
-      );
+    const result = resolveApprovalCore({ activeRuns, store }, runId, parsed.data);
+    if (!result.ok) {
+      return c.json({ error: result.message }, result.reason === "not_found" ? 404 : 409);
     }
     return c.json({ resumed: true });
   });

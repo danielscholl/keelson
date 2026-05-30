@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseWorkflowDescription } from "../src/lib/parseWorkflowDescription.ts";
+import { parseWorkflowDescription } from "../src/description.ts";
 
 describe("parseWorkflowDescription", () => {
   test("empty input returns empty object", () => {
@@ -13,7 +13,7 @@ describe("parseWorkflowDescription", () => {
     expect(result).toEqual({ body: "Just a plain description." });
   });
 
-  test("recognizes Archon-style section labels", () => {
+  test("recognizes the structured section labels", () => {
     const result = parseWorkflowDescription(
       [
         "Use when: starting a new run",

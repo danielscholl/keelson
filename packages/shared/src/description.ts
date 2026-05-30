@@ -1,9 +1,18 @@
-// Splits a workflow `description:` body into Archon's metadata sections
-// (`Use when:`, `Triggers:`, `Does:`, `NOT for:`) when the convention is
-// used, and falls back to a single `body` when it isn't. Pre-existing
-// starter workflows (`.keelson/workflows/*.yaml`) ship without section
-// headers; they render as `{ body: <full text> }` so the card UI degrades
-// to a plain description block.
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+// Splits a workflow `description:` body into the structured metadata sections
+// (`Use when:`, `Triggers:`, `Does:`, `NOT for:`) when the convention is used,
+// and falls back to a single `body` when it isn't. Starter workflows that ship
+// without section headers render as `{ body: <full text> }`. Consumed by the
+// SPA workflow cards and by the server's `workflow_list` chat tool — lives here
+// (not in @keelson/workflows) because the browser bundle must not pull in the
+// node-only executor package.
 
 export interface ParsedWorkflowDescription {
   // Plain body — populated only when no section headers are recognized.
