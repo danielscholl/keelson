@@ -1,7 +1,9 @@
-import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
+import {
+  parseWorkflowDescription,
+  type WorkflowDetail,
+  type WorkflowSummary,
+} from "@keelson/shared";
 import { useMemo } from "react";
-
-import { parseWorkflowDescription } from "../../lib/parseWorkflowDescription.ts";
 
 export interface WorkflowCardProps {
   workflow: WorkflowSummary;

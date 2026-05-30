@@ -35,10 +35,13 @@ import {
   snapshotWebSocketHandlers,
 } from "./snapshots-handler.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
+import { createWorkflowChatTools } from "./workflow-tools.ts";
 import {
   createActiveRuns,
+  createWorkflowController,
   createWorkflowSubscribers,
   handleWorkflowRunUpgrade,
+  type WorkflowsHandlerOptions,
   workflowRunWebSocketHandlers,
   workflowsRoutes,
 } from "./workflows-handler.ts";
@@ -117,6 +120,28 @@ const workflowSubscribers = createWorkflowSubscribers();
 const promptHandler = bootstrapPromptHandler();
 const credentialStore = createKeyringStore();
 
+// Shared handler options so the HTTP routes and the in-process WorkflowController
+// drive runs through the identical wiring. The controller + chat tools are built
+// here (after the workflow subsystem exists, and NOT via the rib path which
+// bootstraps earlier) and injected only on the chat path.
+const workflowHandlerOptions: WorkflowsHandlerOptions = {
+  catalog: workflowCatalog,
+  store: workflowStore,
+  conversationStore: store,
+  projectsStore,
+  ...(promptHandler ? { promptHandler } : {}),
+  memoryStore,
+};
+const workflowController = createWorkflowController(
+  workflowHandlerOptions,
+  activeWorkflowRuns,
+  workflowSubscribers,
+);
+const workflowTools = createWorkflowChatTools({
+  controller: workflowController,
+  catalog: workflowCatalog,
+});
+
 // Async shutdown: drain workflow runs first (the executor's onEvent run_done
 // branch writes terminal state to SQLite, and that must happen before
 // db.close()), then dispose any activated ribs (which may hold sockets or
@@ -171,19 +196,7 @@ chatRoutes(
   },
   { projectsStore },
 );
-workflowsRoutes(
-  app,
-  {
-    catalog: workflowCatalog,
-    store: workflowStore,
-    conversationStore: store,
-    projectsStore,
-    ...(promptHandler ? { promptHandler } : {}),
-    memoryStore,
-  },
-  activeWorkflowRuns,
-  workflowSubscribers,
-);
+workflowsRoutes(app, workflowHandlerOptions, activeWorkflowRuns, workflowSubscribers);
 snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
 projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
 memoryRoutes(app, { memoryStore });
@@ -203,7 +216,7 @@ if (import.meta.main) {
   console.log(`keelson server listening on http://${HOSTNAME}:${PORT}`);
 }
 
-const chatHandlers = chatWebSocketHandlers(store, { memoryStore, projectsStore });
+const chatHandlers = chatWebSocketHandlers(store, { memoryStore, projectsStore, workflowTools });
 const workflowRunHandlers = workflowRunWebSocketHandlers({
   subscribers: workflowSubscribers,
   store: workflowStore,

@@ -5,6 +5,7 @@ import {
   DEFAULT_PROJECT_NAME,
   type ModelInfo,
   type ProviderInfo,
+  parseWorkflowDescription,
   type ReasoningEffortLevel,
   type RegisteredToolInfo,
   WIRE_PROTOCOL_VERSION,
@@ -64,7 +65,6 @@ import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
-import { parseWorkflowDescription } from "../lib/parseWorkflowDescription.ts";
 import {
   filterSlashCommands,
   isCommittedToCommand,
