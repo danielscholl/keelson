@@ -30,6 +30,7 @@ import {
 let tmpDir: string;
 let dbPath: string;
 let wfDir: string;
+let activeDispose: (() => void) | undefined;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "keelson-workflow-tools-"));
@@ -39,6 +40,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  activeDispose?.();
+  activeDispose = undefined;
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -46,6 +49,7 @@ interface Rig {
   controller: WorkflowController;
   tools: ToolDefinition[];
   cwd: string;
+  dispose: () => void;
 }
 
 function makeRig(): Rig {
@@ -65,7 +69,7 @@ function makeRig(): Rig {
   // Short watch deadline keeps the "still running" fallback from hanging a test,
   // while bash + approval fixtures reach their boundary well inside it.
   const tools = createWorkflowChatTools({ controller, catalog, watchDeadlineMs: 4000 });
-  return { controller, tools, cwd: tmpDir };
+  return { controller, tools, cwd: tmpDir, dispose: () => db.close() };
 }
 
 function writeWorkflow(filename: string, body: string): void {
@@ -146,7 +150,8 @@ nodes:
     bash: echo ok
 `,
     );
-    const { tools, cwd } = makeRig();
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
     const list = toolByName(tools, "workflow_list");
 
     const filtered = makeCtx(cwd);
@@ -165,7 +170,8 @@ nodes:
 
   test("workflow_run completes a no-approval workflow", async () => {
     writeWorkflow("done.yaml", NO_APPROVAL_WF);
-    const { tools, cwd } = makeRig();
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
     const run = toolByName(tools, "workflow_run");
 
     const { ctx, chunks } = makeCtx(cwd);
@@ -182,7 +188,8 @@ nodes:
   });
 
   test("workflow_run with an unknown name returns an error result", async () => {
-    const { tools, cwd } = makeRig();
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
     const run = toolByName(tools, "workflow_run");
     const { ctx, chunks } = makeCtx(cwd);
     await run.execute({ name: "nope" }, ctx);
@@ -193,7 +200,8 @@ nodes:
 
   test("workflow_run pauses on approval, carries ids, and workflow_respond resumes", async () => {
     writeWorkflow("pa.yaml", APPROVAL_WF);
-    const { tools, cwd } = makeRig();
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
     const run = toolByName(tools, "workflow_run");
     const respond = toolByName(tools, "workflow_respond");
 
@@ -218,7 +226,8 @@ nodes:
 
   test("workflow_respond rejects a stale pauseId", async () => {
     writeWorkflow("pa.yaml", APPROVAL_WF);
-    const { tools, cwd } = makeRig();
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
     const run = toolByName(tools, "workflow_run");
     const respond = toolByName(tools, "workflow_respond");
 
@@ -252,7 +261,8 @@ nodes:
 
   test("workflow_status lists active runs and returns per-run detail", async () => {
     writeWorkflow("pa.yaml", APPROVAL_WF);
-    const { tools, cwd } = makeRig();
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
     const run = toolByName(tools, "workflow_run");
     const respond = toolByName(tools, "workflow_respond");
     const status = toolByName(tools, "workflow_status");
@@ -286,7 +296,8 @@ nodes:
   });
 
   test("workflow_respond enforces the 16 KiB reply cap like POST /resume", async () => {
-    const { tools, cwd } = makeRig();
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
     const respond = toolByName(tools, "workflow_respond");
     const { ctx, chunks } = makeCtx(cwd);
     // Oversized text is rejected at the schema boundary, before resolveApproval —

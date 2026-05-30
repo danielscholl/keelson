@@ -521,13 +521,13 @@ function startRunCore(
     providerId: "workflow",
     name: `${name} · ${runId.slice(0, 6)}`,
   });
-  conversationStore.appendMessage(conversation.id, {
-    id: crypto.randomUUID(),
-    role: "user",
-    content: formatDispatchMessage(name, inputs),
-    createdAt: startedAt,
-  });
   try {
+    conversationStore.appendMessage(conversation.id, {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: formatDispatchMessage(name, inputs),
+      createdAt: startedAt,
+    });
     store.createRun({
       runId,
       workflowName: name,
