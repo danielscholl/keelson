@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   canvasDocumentSchema,
   canvasKindSchema,
+  canvasViewSchema,
   getRunArtifactResponseSchema,
 } from "../src/canvas.ts";
 
@@ -66,6 +67,68 @@ describe("canvasDocumentSchema", () => {
         foo: "bar",
       }),
     ).toThrow();
+  });
+});
+
+describe("canvasViewSchema", () => {
+  it("parses a table view", () => {
+    const v = canvasViewSchema.parse({
+      view: "table",
+      columns: [{ key: "name", label: "Name" }, { key: "status" }],
+      rows: [
+        { name: "alpha", status: "ok" },
+        { name: "beta", status: null },
+      ],
+      caption: "records",
+    });
+    expect(v.view).toBe("table");
+  });
+
+  it("parses a graph view", () => {
+    const v = canvasViewSchema.parse({
+      view: "graph",
+      nodes: [{ id: "a", label: "A", kind: "service" }, { id: "b" }],
+      edges: [{ source: "a", target: "b", label: "calls" }],
+    });
+    expect(v.view).toBe("graph");
+  });
+
+  it("rejects an unknown view discriminant", () => {
+    expect(() => canvasViewSchema.parse({ view: "pie", slices: [] })).toThrow();
+  });
+
+  it("rejects a graph with zero nodes and an edge missing a target", () => {
+    expect(() => canvasViewSchema.parse({ view: "graph", nodes: [], edges: [] })).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({ view: "graph", nodes: [{ id: "a" }], edges: [{ source: "a" }] }),
+    ).toThrow();
+  });
+
+  it("rejects a table with no columns and unknown keys (strict)", () => {
+    expect(() => canvasViewSchema.parse({ view: "table", columns: [], rows: [] })).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({ view: "table", columns: [{ key: "a" }], rows: [], extra: 1 }),
+    ).toThrow();
+  });
+
+  it("rejects duplicate column keys", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "table",
+        columns: [{ key: "a" }, { key: "a" }],
+        rows: [],
+      }),
+    ).toThrow(/unique/);
+  });
+
+  it("rejects duplicate node ids", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "graph",
+        nodes: [{ id: "a" }, { id: "a" }],
+        edges: [],
+      }),
+    ).toThrow(/unique/);
   });
 });
 

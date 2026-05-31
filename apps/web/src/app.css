@@ -2890,6 +2890,86 @@ button.tab:focus-visible {
   color: var(--fg);
 }
 
+/* Typed view canvases (kind: "view"). */
+.canvas-drawer-body .canvas-view-table {
+  max-width: 70ch;
+  margin-inline: auto;
+  overflow-x: auto;
+}
+.canvas-view-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.canvas-view-table caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 0 0 8px;
+}
+.canvas-view-table th,
+.canvas-view-table td {
+  text-align: left;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.canvas-view-table th {
+  background: color-mix(in srgb, var(--accent) 12%, var(--card-2));
+  color: var(--fg);
+  font-weight: 600;
+}
+.canvas-view-table tr:last-child td {
+  border-bottom: none;
+}
+.canvas-view-table td {
+  color: var(--fg-strong);
+  font-family: ui-monospace, monospace;
+}
+
+/* Graph view fills a tall reading panel; ReactFlow needs an explicit height. */
+.canvas-view-graph {
+  height: 70vh;
+  min-height: 420px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card-2);
+}
+.view-graph-node {
+  min-width: 120px;
+  max-width: 180px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+.vgn-kind {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.vgn-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-strong);
+  overflow-wrap: anywhere;
+}
+.view-graph-handle {
+  opacity: 0;
+}
+
 /* Not a bar — a scrim. The footer is absolutely positioned over the bottom of
    the scroll area so the plan scrolls *behind* it and dissolves into the reading
    surface before reaching the controls (the gradient is click-through). */
