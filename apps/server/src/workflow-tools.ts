@@ -23,6 +23,7 @@ import {
 } from "@keelson/shared";
 import { z } from "zod";
 import type { WorkflowCatalog } from "./bootstrap.ts";
+import { resolveWorkflowName } from "./workflow-resolve.ts";
 import type { WatchResult, WorkflowController } from "./workflows-handler.ts";
 
 export interface CreateWorkflowChatToolsDeps {
@@ -220,7 +221,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowRun: ToolDefinition = {
     name: "workflow_run",
     description:
-      "Start a deterministic workflow by name (discover names with workflow_list). `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.",
+      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
     inputSchema: runInputSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -229,7 +230,30 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
         return;
       }
-      const { name } = parsed.data;
+      const requested = parsed.data.name;
+      const names = catalog.list().map((w) => w.name);
+      const resolution = resolveWorkflowName(requested, names);
+      if (resolution.kind === "none") {
+        const avail =
+          names.length > 0
+            ? `Available workflows: ${names.join(", ")}.`
+            : "No workflows are available.";
+        emitResult(
+          ctx,
+          `No workflow matches "${requested}". ${avail} Call workflow_list for details.`,
+          true,
+        );
+        return;
+      }
+      if (resolution.kind === "suggest") {
+        emitResult(
+          ctx,
+          `No workflow named "${requested}". Did you mean: ${resolution.candidates.join(", ")}? Call workflow_run again with the exact name.`,
+          true,
+        );
+        return;
+      }
+      const name = resolution.name;
       const started = controller.startRun({
         name,
         inputs: { ARGUMENTS: parsed.data.arguments ?? "" },

@@ -14,8 +14,9 @@ description: |
   Triggers: "fix issue", "fix #123", "resolve issue", "implement issue 123",
             "fix this bug", "fix github issue".
   Does: Fetches the issue, classifies it, investigates / plans, pauses for human
-        approval of the plan, implements the change, validates (typecheck +
-        tests), self-fixes failures, pushes the branch, creates a draft PR, runs
+        approval of the plan, implements the change, validates against the
+        project's OWN checks (discovered from its docs/config — works in any
+        repo), self-fixes failures, pushes the branch, creates a draft PR, runs
         a self-review pass, applies the review's findings, and reports back.
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
@@ -117,7 +118,8 @@ nodes:
 
       ## Instructions
 
-      1. Read `CLAUDE.md` (and any project-level conventions) before anything else.
+      1. Read the project's conventions — whichever of `CLAUDE.md`, `AGENTS.md`,
+         `CONTRIBUTING.md`, `README.md` exist — before anything else.
       2. Reproduce the bug from the issue body — identify the failing call path.
       3. Search the codebase for the involved symbols / files. Cite `path:line`.
       4. Identify the root cause (not just the symptom). State it in one sentence.
@@ -173,7 +175,8 @@ nodes:
 
       ## Instructions
 
-      1. Read `CLAUDE.md` and any local conventions first.
+      1. Read the project's conventions — whichever of `CLAUDE.md`, `AGENTS.md`,
+         `CONTRIBUTING.md`, `README.md` exist — first.
       2. Search the codebase for related code; cite `path:line` for files the
          plan will touch.
       3. Decide the architecture in 2-3 short paragraphs.
@@ -281,21 +284,32 @@ nodes:
         good" / "ship it", edit `$ARTIFACTS_DIR/plan.md` to incorporate it
         BEFORE writing code, and note the changes at the top of the file.
       - Follow the plan task-by-task. Don't introduce extra scope.
-      - Read each file before editing it. Type-check after each change:
-        `bun --filter '*' typecheck`.
+      - Read each file before editing it. After each change, run the project's
+        own checks via `bash $ARTIFACTS_DIR/verify.sh` (you write that script in
+        step 1) and fix breaks immediately.
       - **Never** `git add -A` / `git add .` / `git add -u`. Stage files by name.
       - **Never** commit anything under `$ARTIFACTS_DIR`, scratch files
         (`*.scratch.md`, `*.tmp.md`), or PR-body drafts at the repo root.
 
       ## Steps
 
-      1. Read `CLAUDE.md` and the plan.
+      1. Read the project's conventions and the plan, and learn how THIS project
+         verifies itself — you do not know its stack. Read whichever exist:
+         `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, plus the build
+         config (package.json scripts, Makefile, pyproject.toml, Cargo.toml,
+         go.mod, …). Write the project's type-check / test / lint (or build)
+         commands to `$ARTIFACTS_DIR/verify.sh`. Start it with `set -euo pipefail`
+         so the FIRST failing check aborts with a non-zero status — never let a
+         later passing command mask an earlier failure. If the project genuinely
+         has no automated checks, write one that says so and exits 0. A later
+         deterministic node runs this exact script (fail-fast) to gate the PR, so
+         it MUST be runnable and exit-code-correct.
       2. Branch: if HEAD is `main`, create `fix-issue/<issue-number>-<slug>`.
          Otherwise stay on the current branch.
       3. For each `### Task N:` in the plan:
          a. Read the target file.
          b. Make the edit.
-         c. `bun --filter '*' typecheck` — fix breaks immediately.
+         c. `bash $ARTIFACTS_DIR/verify.sh` — fix breaks immediately.
          d. Commit with a conventional message: `git add <files>; git commit -m "..."`.
       4. After all tasks: append a section to `$ARTIFACTS_DIR/plan.md` summarizing
          what was done, what was skipped, and any deviations.
@@ -310,26 +324,26 @@ nodes:
     depends_on: [implement]
     timeout: 600000
     bash: |
-      echo "=== TYPE CHECK ==="
-      bun --filter '*' typecheck 2>&1
-      TC=$?
+      # Runs the project's OWN checks, which the implement node discovered and
+      # recorded to verify.sh. Always exits 0 so fix-validation can read the
+      # output and decide; a missing script is a FAIL the fixer can recover from.
+      VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
+      if [ ! -f "$VERIFY" ]; then
+        echo "No verify.sh recorded by the implement step — cannot verify the change."
+        echo "VALIDATION_STATUS: FAIL"
+        exit 0
+      fi
+
+      echo "=== PROJECT CHECKS ==="
+      # Force fail-fast so we never trust the agent-written script to aggregate
+      # statuses: a plain `cmd1; cmd2` would exit with cmd2's status, masking a
+      # cmd1 failure. With -e the first failing check makes the gate FAIL.
+      bash -e -o pipefail "$VERIFY" 2>&1
+      STATUS=$?
 
       echo ""
-      echo "=== TESTS ==="
-      bun --filter '*' test 2>&1
-      TEST=$?
-
-      echo ""
-      echo "=== BIOME CHECK ==="
-      bun run check 2>&1
-      BIO=$?
-
-      echo ""
-      echo "Type check: $([ $TC -eq 0 ] && echo PASS || echo FAIL)"
-      echo "Tests:      $([ $TEST -eq 0 ] && echo PASS || echo FAIL)"
-      echo "Biome:      $([ $BIO -eq 0 ] && echo PASS || echo FAIL)"
-
-      if [ $TC -eq 0 ] && [ $TEST -eq 0 ] && [ $BIO -eq 0 ]; then
+      echo "Checks: $([ $STATUS -eq 0 ] && echo PASS || echo FAIL)"
+      if [ $STATUS -eq 0 ]; then
         echo "VALIDATION_STATUS: PASS"
       else
         echo "VALIDATION_STATUS: FAIL"
@@ -349,32 +363,38 @@ nodes:
 
       - If the output ends with `VALIDATION_STATUS: PASS`, respond with
         "All checks passed — no fixes needed." and stop.
+      - If it failed because no `verify.sh` was recorded, discover this project's
+        verify commands now (read `CLAUDE.md` / `AGENTS.md` / `CONTRIBUTING.md` /
+        `README.md` and its build config — assume no specific stack), write them
+        to `$ARTIFACTS_DIR/verify.sh`, and run it.
       - Otherwise, fix ONLY what is broken. Do not add scope.
       - If a fix requires behavior change (not just a type / format / lint
         nudge), revert the offending commit instead of papering over it.
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
-      - After each fix, re-run the failing command to confirm.
+      - After each fix, re-run `bash $ARTIFACTS_DIR/verify.sh` to confirm.
 
   - id: revalidate
     depends_on: [fix-validation]
     timeout: 600000
     bash: |
-      echo "=== TYPE CHECK ==="
-      bun --filter '*' typecheck 2>&1
-      TC=$?
+      # Hard gate: exits non-zero (failing the node, skipping create-pr) if the
+      # project's own checks don't pass — or if no verify.sh was ever recorded,
+      # since opening a PR we never verified is worse than failing loudly.
+      VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
+      if [ ! -f "$VERIFY" ]; then
+        echo "VALIDATION_STATUS: FAIL — no verify.sh recorded; refusing to open an unverified PR"
+        exit 1
+      fi
 
-      echo ""
-      echo "=== TESTS ==="
-      bun --filter '*' test 2>&1
-      TEST=$?
+      echo "=== PROJECT CHECKS ==="
+      # Force fail-fast so we never trust the agent-written script to aggregate
+      # statuses: a plain `cmd1; cmd2` would exit with cmd2's status, masking a
+      # cmd1 failure. With -e the first failing check makes the gate FAIL.
+      bash -e -o pipefail "$VERIFY" 2>&1
+      STATUS=$?
 
-      echo ""
-      echo "=== BIOME CHECK ==="
-      bun run check 2>&1
-      BIO=$?
-
-      if [ $TC -ne 0 ] || [ $TEST -ne 0 ] || [ $BIO -ne 0 ]; then
+      if [ $STATUS -ne 0 ]; then
         echo "VALIDATION_STATUS: FAIL — refusing to create PR with broken checks"
         exit 1
       fi
@@ -436,7 +456,8 @@ nodes:
 
       1. `git diff main...HEAD --stat` to see scope, then `git diff main...HEAD`
          for full review.
-      2. Check the change against `CLAUDE.md` conventions.
+      2. Check the change against the project's conventions (whichever of
+         `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md` exist).
       3. Look for: correctness bugs, missing error handling, missing tests for
          new branches, comments that violate the repo's terse-comment rule,
          and docs that should have been updated for new public surfaces.
@@ -461,13 +482,13 @@ nodes:
 
       ## Rules
 
-      - For each fix: read the file, make the change, run `bun --filter '*' typecheck`.
+      - For each fix: read the file, make the change, run `bash $ARTIFACTS_DIR/verify.sh`.
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
       - Commit with `fix: address self-review findings` (or split into multiple
         commits if the fixes are logically distinct).
       - If nothing needs fixing, say so and stop.
-      - After fixes: `bun --filter '*' typecheck && bun --filter '*' test && bun run check`.
+      - After fixes: run `bash $ARTIFACTS_DIR/verify.sh` and confirm it passes.
       - If checks pass and a commit was made, `git push`.
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -506,10 +527,8 @@ nodes:
       -- What changed --
       {2-4 bullets}
 
-      -- Validation --
-      type-check:  PASS
-      tests:       PASS
-      biome:       PASS
+      -- Validation (the project's own checks) --
+      project checks: PASS
 
       -- Self-review --
       {one line per CRITICAL/HIGH finding, with "fixed" or "deferred"}

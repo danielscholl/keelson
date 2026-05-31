@@ -24,15 +24,9 @@ import {
 import { openDatabase } from "../src/db/init.ts";
 import { createMemoryStore, type MemoryStore } from "../src/memory-store.ts";
 
-const MEMORY_WORKFLOW_PATH = join(
-  import.meta.dir,
-  "..",
-  "..",
-  "..",
-  ".keelson",
-  "workflows",
-  "memory.yaml",
-);
+// Self-contained fixture (not a bundled `.keelson/workflows/` default) so this
+// memory-layer acceptance test stays valid regardless of which workflows ship.
+const MEMORY_WORKFLOW_PATH = join(import.meta.dir, "fixtures", "memory-workflow.yaml");
 
 function loadMemoryWorkflow(): WorkflowDefinition {
   const yaml = readFileSync(MEMORY_WORKFLOW_PATH, "utf8");

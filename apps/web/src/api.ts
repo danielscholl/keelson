@@ -255,7 +255,7 @@ export interface StartWorkflowRunOptions {
 export async function startWorkflowRun(
   workflowName: string,
   options: StartWorkflowRunOptions = {},
-): Promise<{ runId: string }> {
+): Promise<{ runId: string; workflowName?: string }> {
   return startWorkflowRunResponseSchema.parse(
     await apiRequest<unknown>(`/api/workflows/${encodeURIComponent(workflowName)}/runs`, {
       method: "POST",

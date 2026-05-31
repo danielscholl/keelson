@@ -1,0 +1,34 @@
+# Fixture for memory-acceptance.test.ts — a representative `memory:` recall +
+# writeback node. Lives here (not in .keelson/workflows/) so the memory-layer
+# acceptance coverage stays self-contained and doesn't depend on which
+# workflows ship as bundled defaults.
+
+name: memory
+description: |
+  Use when: Capturing an observation directly into project memory.
+  Does: Records the invocation argument as a lesson-typed memory entry
+        (provenance: generated, review_status: pending) and recalls related
+        prior captures.
+
+nodes:
+  - id: capture
+    # bash bodies are pre-substitution, so the argument arrives via the env
+    # channel ($KEELSON_ARGUMENTS) — NOT via $ARGUMENTS text substitution.
+    bash: |
+      echo "$KEELSON_ARGUMENTS"
+    memory:
+      recall:
+        # Substituted from inputs at pre-node time so the recall is content-
+        # aware. The capture node hasn't run yet here, so $capture.output is
+        # not available — $ARGUMENTS is.
+        query: $ARGUMENTS
+        limits: { maxItems: 5, recencyDays: 90 }
+      writeback:
+        on: success
+        type: lesson
+        summary: User observation
+        content: |
+          $capture.output
+        sourceRefs:
+          - kind: workflow_run
+            uri: memory

@@ -12,18 +12,23 @@ interface SlashCommandPopoverProps {
   anchorSelector?: string;
   // `list` shows filtered command rows for picking. `help` shows a single
   // usage strip for the command the user has already committed to (typed
-  // `/{name} ` with a trailing space).
-  mode: "list" | "help";
-  // Filtered candidate list when mode is `list`. Ignored in help mode.
+  // `/{name} ` with a trailing space). `args` shows workflow-name suggestions
+  // while the user is typing `/workflow run <partial>`.
+  mode: "list" | "help" | "args";
+  // Filtered candidate list when mode is `list`. Ignored otherwise.
   items: readonly SlashCommand[];
+  // Workflow-name suggestions when mode is `args`. Ignored otherwise.
+  argItems?: readonly { name: string; description?: string }[];
   // Index of the currently highlighted row (arrow-key controlled by the
   // composer's textarea — the popover is read-only for keyboard input).
   selectedIndex: number;
   // The committed command whose usage strip to render in help mode.
   helpCommand: SlashCommand | null;
-  // Fired when the user clicks a row. Should fill the input with `/{name} `
-  // and close the popover.
+  // Fired when the user clicks a command row. Should fill the input with
+  // `/{name} ` and close the popover.
   onSelect: (cmd: SlashCommand) => void;
+  // Fired when the user clicks a workflow-name row in `args` mode.
+  onSelectArg?: (name: string) => void;
 }
 
 function familyTag(family: SlashCommand["family"]): string {
@@ -35,9 +40,11 @@ export function SlashCommandPopover({
   anchorSelector = ".chat-composer",
   mode,
   items,
+  argItems = [],
   selectedIndex,
   helpCommand,
   onSelect,
+  onSelectArg,
 }: SlashCommandPopoverProps) {
   const popoverRef = useRef<HTMLDivElement | null>(null);
 
@@ -115,6 +122,32 @@ export function SlashCommandPopover({
       )}
       {mode === "list" && items.length === 0 && (
         <div className="slash-popover-empty">No matching commands.</div>
+      )}
+      {mode === "args" && argItems.length > 0 && (
+        <div className="slash-popover-body">
+          {argItems.map((item, idx) => (
+            <button
+              key={item.name}
+              type="button"
+              className="slash-popover-row"
+              role="option"
+              aria-selected={idx === selectedIndex}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onSelectArg?.(item.name);
+              }}
+            >
+              <span className="slash-popover-row-name">{item.name}</span>
+              <span className="slash-popover-row-tag">WORKFLOW</span>
+              {item.description !== undefined && (
+                <span className="slash-popover-row-desc">{item.description}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === "args" && argItems.length === 0 && (
+        <div className="slash-popover-empty">No matching workflows.</div>
       )}
       {mode === "help" && helpCommand !== null && (
         <div className="slash-popover-help">

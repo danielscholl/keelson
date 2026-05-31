@@ -162,8 +162,14 @@ export const startWorkflowRunBodySchema = z
   });
 export type StartWorkflowRunBody = z.infer<typeof startWorkflowRunBodySchema>;
 
-// POST /api/workflows/:name/runs response body.
-export const startWorkflowRunResponseSchema = z.object({ runId: z.string() }).strict();
+// POST /api/workflows/:name/runs response body. `workflowName` is the canonical
+// catalog name the run started under — it differs from the request-path name on
+// a fuzzy match (POST /runs/smoketst → smoke-test). Optional for back-compat;
+// clients should prefer it so follow-up routes ("open in Workflows", run detail)
+// use the real name, not the typo.
+export const startWorkflowRunResponseSchema = z
+  .object({ runId: z.string(), workflowName: z.string().optional() })
+  .strict();
 export type StartWorkflowRunResponse = z.infer<typeof startWorkflowRunResponseSchema>;
 
 // Non-fatal loader notices surfaced to the UI as toasts. `error`-level

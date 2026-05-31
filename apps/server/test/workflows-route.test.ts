@@ -270,6 +270,89 @@ nodes:
     expect(run.nodes[0]!.outputText).toContain("hello from W2");
   });
 
+  test("POST .../runs resolves a normalized name and runs the matched workflow", async () => {
+    writeWorkflow(
+      "smoke.yaml",
+      `name: smoke-test
+description: just echoes
+nodes:
+  - id: shout
+    bash: echo "resolved via normalized name"
+`,
+    );
+    const { app } = makeRig();
+    // "smoketest" (no hyphen) is the SAME name typed loosely — it auto-runs.
+    // A genuine fuzzy typo would 404 with suggestions instead (next test).
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/smoketest/runs", { inputs: {} }),
+    );
+    expect(startRes.status).toBe(200);
+    const { runId, workflowName } = (await startRes.json()) as {
+      runId: string;
+      workflowName: string;
+    };
+    expect(workflowName).toBe("smoke-test");
+
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ outputText: string | null }>;
+    };
+    expect(run.status).toBe("succeeded");
+    expect(run.nodes[0]!.outputText).toContain("resolved via normalized name");
+  });
+
+  test("POST .../runs 404s a genuine fuzzy typo (no auto-run) with suggestions", async () => {
+    writeWorkflow(
+      "smoke.yaml",
+      `name: smoke-test
+description: x
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+    );
+    const { app } = makeRig();
+    const res = await app.fetch(postRun("http://test/api/workflows/smoketst/runs", { inputs: {} }));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { suggestions?: string[] };
+    expect(body.suggestions).toContain("smoke-test");
+  });
+
+  test("POST .../runs returns 404 with suggestions for a weak guess", async () => {
+    writeWorkflow(
+      "smoke.yaml",
+      `name: smoke-test
+description: x
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+    );
+    const { app } = makeRig();
+    const res = await app.fetch(postRun("http://test/api/workflows/smo/runs", { inputs: {} }));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string; suggestions?: string[] };
+    expect(body.suggestions).toContain("smoke-test");
+    expect(body.error).toContain("Did you mean");
+  });
+
+  test("POST .../runs returns 404 with the available list when nothing matches", async () => {
+    writeWorkflow(
+      "smoke.yaml",
+      `name: smoke-test
+description: x
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+    );
+    const { app } = makeRig();
+    const res = await app.fetch(postRun("http://test/api/workflows/zzznope/runs", { inputs: {} }));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string; available?: string[] };
+    expect(body.available).toContain("smoke-test");
+  });
+
   test("POST .../runs on a prompt workflow fails the prompt node with W3 placeholder", async () => {
     writeWorkflow(
       "promptwf.yaml",

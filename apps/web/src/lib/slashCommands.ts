@@ -62,6 +62,33 @@ export function parseWorkflowCommand(rest: string): WorkflowCommand {
   return { kind: "usage" };
 }
 
+// When the input is `/workflow run <partial>` and the name token is still being
+// typed (no trailing space yet), returns that partial (`""` right after
+// `run `). Returns null otherwise. Drives name type-ahead in the picker.
+const WORKFLOW_RUN_NAME_RE = /^\/workflow\s+run\s+(\S*)$/;
+export function workflowRunNamePartial(input: string): string | null {
+  const m = WORKFLOW_RUN_NAME_RE.exec(input);
+  return m ? m[1]! : null;
+}
+
+// Forgiving filter for name type-ahead: compares on lowercased alphanumerics so
+// `smo`, `smoke`, and `smoke-t` all surface `smoke-test`. Empty partial lists
+// all. Capped so the popover never renders an unbounded set.
+export function filterWorkflowNames<T extends { name: string }>(
+  items: readonly T[],
+  partial: string,
+  limit = 8,
+): T[] {
+  const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const q = norm(partial);
+  // `/workflow run <name>` parses the first whitespace-delimited token as the
+  // name, so a name containing whitespace can't be expressed as a command —
+  // don't suggest one we couldn't actually run.
+  const runnable = items.filter((it) => !/\s/.test(it.name));
+  const matched = q === "" ? runnable : runnable.filter((it) => norm(it.name).includes(q));
+  return matched.slice(0, limit);
+}
+
 // Returns true when the input is `/<name> ` (name followed by whitespace) —
 // i.e. the user has committed to a command and is typing args. The picker
 // uses this to switch from list mode to help-strip mode.

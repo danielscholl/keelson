@@ -18,10 +18,12 @@ import {
   type RecallItem,
   type RecallRequest,
   type RecallResponse,
+  type ToolDefinition,
   WIRE_PROTOCOL_VERSION,
   type WritebackRequest,
   type WritebackResponse,
 } from "@keelson/shared";
+import { z } from "zod";
 import { handleChatRequest } from "../src/chat-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
@@ -275,6 +277,42 @@ describe("chat memory recall", () => {
     // No error frames in the stream — recall failure stays observable in logs
     // but never reaches the client.
     expect(sent.some((f) => (f as { event: { type: string } }).event.type === "error")).toBe(false);
+  });
+
+  test("injects the workflow index into systemPrompt when tools + catalog are wired", async () => {
+    const spyId = "spy-wf-index";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId, seedSystemPrompt: "seed" });
+
+    const noopTool: ToolDefinition = {
+      name: "workflow_run",
+      description: "stub",
+      inputSchema: z.object({}),
+      execute: async () => {},
+    };
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "run smoke-test"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+      workflowTools: [noopTool],
+      workflowCatalog: {
+        list: () => [
+          { name: "smoke-test", description: "Use when: verify the engine\nTriggers: smoke test" },
+        ],
+      },
+    });
+
+    const sp = captured!.systemPrompt!;
+    expect(sp).toContain("seed");
+    expect(sp).toContain("## Workflows");
+    expect(sp).toContain("- smoke-test");
+    expect(sp).toContain("Do NOT run the name as a shell command");
   });
 
   test("does not invoke recall for workflow-linked conversations", async () => {

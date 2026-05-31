@@ -67,11 +67,13 @@ import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
 import {
   filterSlashCommands,
+  filterWorkflowNames,
   isCommittedToCommand,
   matchSlashCommand,
   parseWorkflowCommand,
   type SlashCommand,
   type SlashCommandFamily,
+  workflowRunNamePartial,
 } from "../lib/slashCommands.ts";
 
 type Role = "user" | "assistant" | "system" | "command";
@@ -396,6 +398,11 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
 
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  // Workflow names for `/workflow run` type-ahead. Fetched lazily the first
+  // time the user enters that context; null until then.
+  const [workflowNames, setWorkflowNames] = useState<
+    { name: string; description?: string }[] | null
+  >(null);
 
   // Save-to-memory modal state. Open when a target message is set; the
   // submitting flag disables the modal's submit button + the per-message
@@ -1179,11 +1186,15 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
           return fail("No project available yet — try again once projects finish loading.");
         }
         try {
-          const { runId } = await startWorkflowRun(name, {
+          const { runId, workflowName } = await startWorkflowRun(name, {
             projectId,
             ...(args ? { inputs: { ARGUMENTS: args } } : {}),
           });
-          return ok(`Started ${name} — run ${runId}`, { runId, workflowName: name });
+          // Prefer the canonical name the server resolved (a fuzzy start like
+          // "smoketst" runs "smoke-test") so the run row + "open in Workflows"
+          // link use the real name, not what was typed.
+          const resolved = workflowName ?? name;
+          return ok(`Started ${resolved} — run ${runId}`, { runId, workflowName: resolved });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           return fail(`Couldn't start ${name}: ${msg}`);
@@ -1203,24 +1214,60 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
 
   const slashFilteredItems = useMemo(() => filterSlashCommands(input), [input]);
   const slashHelpCommand = useMemo(() => matchSlashCommand(input), [input]);
-  const slashMode: "list" | "help" = isCommittedToCommand(input) ? "help" : "list";
+  // Non-null while typing `/workflow run <partial>` — switches the picker to
+  // workflow-name suggestions.
+  const workflowRunPartial = useMemo(() => workflowRunNamePartial(input), [input]);
+  const slashArgItems = useMemo(
+    () =>
+      workflowRunPartial === null || workflowNames === null
+        ? []
+        : filterWorkflowNames(workflowNames, workflowRunPartial),
+    [workflowRunPartial, workflowNames],
+  );
+  const slashMode: "list" | "help" | "args" =
+    workflowRunPartial !== null ? "args" : isCommittedToCommand(input) ? "help" : "list";
+  // The navigable row count for the active mode (commands vs workflow names).
+  const slashActiveLength = slashMode === "args" ? slashArgItems.length : slashFilteredItems.length;
+
+  // Lazy-load workflow names the first time the user reaches `/workflow run`.
+  // A failed fetch leaves the list null — the picker just shows no suggestions.
+  useEffect(() => {
+    if (workflowRunPartial === null || workflowNames !== null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { workflows } = await listWorkflows();
+        if (cancelled) return;
+        setWorkflowNames(
+          workflows.map((w) => {
+            const d = parseWorkflowDescription(w.description);
+            const summary = (d.useWhen ?? d.body ?? "").split(/\r?\n/)[0]?.trim();
+            return summary ? { name: w.name, description: summary } : { name: w.name };
+          }),
+        );
+      } catch {
+        // Leave names null; type-ahead simply offers nothing this session.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowRunPartial, workflowNames]);
 
   // Open the picker when the user starts a slash command; close it as soon as
   // the input stops starting with `/`. Keeping selectedIndex in range as the
-  // filter shrinks the candidate set.
+  // active candidate set (commands or workflow names) shrinks.
   useEffect(() => {
     if (input.startsWith("/")) {
       setSlashOpen(true);
       setSlashSelectedIndex((idx) =>
-        slashFilteredItems.length === 0
-          ? 0
-          : Math.min(Math.max(idx, 0), slashFilteredItems.length - 1),
+        slashActiveLength === 0 ? 0 : Math.min(Math.max(idx, 0), slashActiveLength - 1),
       );
     } else {
       setSlashOpen(false);
       setSlashSelectedIndex(0);
     }
-  }, [input, slashFilteredItems.length]);
+  }, [input, slashActiveLength]);
 
   // Bridge React state to the native popover element. `manual` mode means the
   // browser won't toggle it for us; we explicitly call show/hide here and on
@@ -1237,6 +1284,13 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
 
   const onSlashSelect = useCallback((cmd: SlashCommand) => {
     setInput(`/${cmd.name} `);
+    setSlashSelectedIndex(0);
+  }, []);
+
+  // Completing a workflow-name suggestion leaves a trailing space so the user
+  // can append $ARGUMENTS, or press Enter to run immediately.
+  const onSlashArgSelect = useCallback((name: string) => {
+    setInput(`/workflow run ${name} `);
     setSlashSelectedIndex(0);
   }, []);
 
@@ -1352,13 +1406,40 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
             return;
           }
         }
+        if (slashMode === "args" && slashArgItems.length > 0) {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setSlashSelectedIndex((idx) => Math.min(idx + 1, slashArgItems.length - 1));
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setSlashSelectedIndex((idx) => Math.max(idx - 1, 0));
+            return;
+          }
+          if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+            e.preventDefault();
+            const item = slashArgItems[slashSelectedIndex] ?? slashArgItems[0];
+            if (item) onSlashArgSelect(item.name);
+            return;
+          }
+        }
       }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         onSubmit();
       }
     },
-    [onSlashSelect, onSubmit, slashFilteredItems, slashMode, slashOpen, slashSelectedIndex],
+    [
+      onSlashArgSelect,
+      onSlashSelect,
+      onSubmit,
+      slashArgItems,
+      slashFilteredItems,
+      slashMode,
+      slashOpen,
+      slashSelectedIndex,
+    ],
   );
 
   // Switching provider via the picker is only reachable on a fresh chat —
@@ -1781,9 +1862,11 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
           popoverId={SLASH_PICKER_POPOVER_ID}
           mode={slashMode}
           items={slashFilteredItems}
+          argItems={slashArgItems}
           selectedIndex={slashSelectedIndex}
           helpCommand={slashHelpCommand}
           onSelect={onSlashSelect}
+          onSelectArg={onSlashArgSelect}
         />
       </div>
 

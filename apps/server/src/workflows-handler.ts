@@ -72,6 +72,7 @@ import { z } from "zod";
 import type { WorkflowCatalog } from "./bootstrap.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
+import { resolveWorkflowName } from "./workflow-resolve.ts";
 
 // CSRF defense for state-changing routes — reject cross-origin POSTs that
 // the browser would otherwise send with the user's cookies.
@@ -902,10 +903,40 @@ export function workflowsRoutes(
     if (originForbidden(c)) {
       return c.json({ error: "forbidden origin" }, 403);
     }
-    const name = c.req.param("name");
-    const workflow = catalog.get(name);
+    const requested = c.req.param("name");
+    // Forgiving lookup: exact name wins; otherwise a confident typo resolves to
+    // the run while a weak guess returns suggestions rather than auto-starting a
+    // possibly-destructive workflow.
+    let workflow = catalog.get(requested);
     if (!workflow) {
-      return c.json({ error: `unknown workflow '${name}'` }, 404);
+      const resolution = resolveWorkflowName(
+        requested,
+        catalog.list().map((w) => w.name),
+      );
+      if (resolution.kind === "match") {
+        workflow = catalog.get(resolution.name);
+      } else if (resolution.kind === "suggest") {
+        return c.json(
+          {
+            error: `No workflow named '${requested}'. Did you mean: ${resolution.candidates.join(", ")}?`,
+            suggestions: resolution.candidates,
+          },
+          404,
+        );
+      }
+    }
+    if (!workflow) {
+      const available = catalog.list().map((w) => w.name);
+      return c.json(
+        {
+          error:
+            available.length > 0
+              ? `No workflow named '${requested}'. Available: ${available.join(", ")}.`
+              : `No workflow named '${requested}'.`,
+          ...(available.length > 0 ? { available } : {}),
+        },
+        404,
+      );
     }
     // Distinguish empty body from malformed JSON. An absent body is fine
     // (inputs defaults to {}); a body that's present but unparseable is a
@@ -1013,7 +1044,9 @@ export function workflowsRoutes(
           branchTemplate,
         },
       );
-      return c.json({ runId });
+      // Echo the canonical name so a fuzzy start (smoketst → smoke-test) hands
+      // the client the real name for run-detail / "open in Workflows" routes.
+      return c.json({ runId, workflowName: workflow.name });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }

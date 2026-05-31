@@ -168,6 +168,54 @@ nodes:
     expect(allResult.content).toContain("beta");
   });
 
+  test("workflow_run resolves a misspelled / unnormalized name", async () => {
+    writeWorkflow(
+      "smoke-test.yaml",
+      `name: smoke-test
+description: |
+  Use when: verifying the engine
+nodes:
+  - id: ok
+    bash: echo resolved-sentinel-456
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "smoketest", arguments: "" }, ctx);
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("completed successfully");
+    expect(result.content).toContain("resolved-sentinel-456");
+  });
+
+  test("workflow_run reports available names when nothing matches", async () => {
+    writeWorkflow(
+      "alpha.yaml",
+      `name: alpha
+description: |
+  Use when: a thing
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "nonesuch", arguments: "" }, ctx);
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("alpha");
+    expect(result.content).toContain("workflow_list");
+  });
+
   test("workflow_run completes a no-approval workflow", async () => {
     writeWorkflow("done.yaml", NO_APPROVAL_WF);
     const { tools, cwd, dispose } = makeRig();
@@ -195,7 +243,8 @@ nodes:
     await run.execute({ name: "nope" }, ctx);
     const result = lastToolResult(chunks);
     expect(result.isError).toBe(true);
-    expect(result.content).toContain("unknown workflow 'nope'");
+    expect(result.content).toContain('No workflow matches "nope"');
+    expect(result.content).toContain("No workflows are available");
   });
 
   test("workflow_run pauses on approval, carries ids, and workflow_respond resumes", async () => {
