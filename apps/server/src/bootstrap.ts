@@ -36,6 +36,7 @@ import {
   makePromptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
+  validateWorkflowInvariants,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
   workflowDefinitionSchema,
