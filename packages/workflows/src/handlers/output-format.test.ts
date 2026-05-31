@@ -9,7 +9,7 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { buildOutputFormatSuffix, extractJsonOutput } from "./output-format.ts";
+import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 
 describe("buildOutputFormatSuffix", () => {
   test("emits a single-line instruction with the stringified schema", () => {
@@ -25,38 +25,38 @@ describe("buildOutputFormatSuffix", () => {
   });
 });
 
-describe("extractJsonOutput", () => {
-  test("returns the normalized JSON when the reply is already a JSON object", () => {
+describe("extractJsonValue", () => {
+  test("parses a reply that is already a JSON object", () => {
     const raw = '  {"kind":"bug","title":"oops"}  ';
-    expect(extractJsonOutput(raw)).toBe('{"kind":"bug","title":"oops"}');
+    expect(extractJsonValue(raw)).toEqual({ kind: "bug", title: "oops" });
   });
 
   test("strips ```json fences before parsing", () => {
     const raw = '```json\n{"kind": "feature"}\n```';
-    expect(extractJsonOutput(raw)).toBe('{"kind":"feature"}');
+    expect(extractJsonValue(raw)).toEqual({ kind: "feature" });
   });
 
   test("strips bare ``` fences before parsing", () => {
     const raw = '```\n{"kind":"chore"}\n```';
-    expect(extractJsonOutput(raw)).toBe('{"kind":"chore"}');
+    expect(extractJsonValue(raw)).toEqual({ kind: "chore" });
   });
 
-  test("returns raw text unchanged when no JSON can be extracted", () => {
+  test("returns undefined when no JSON can be extracted", () => {
     const raw = "I think it is a bug.";
-    expect(extractJsonOutput(raw)).toBe(raw);
+    expect(extractJsonValue(raw)).toBeUndefined();
   });
 
-  test("returns raw text when fenced content is not valid JSON", () => {
+  test("returns undefined when fenced content is not valid JSON", () => {
     const raw = "```\nnot really json\n```";
-    expect(extractJsonOutput(raw)).toBe(raw);
+    expect(extractJsonValue(raw)).toBeUndefined();
   });
 
-  test("preserves an empty input verbatim", () => {
-    expect(extractJsonOutput("")).toBe("");
+  test("returns undefined for empty input", () => {
+    expect(extractJsonValue("")).toBeUndefined();
   });
 
-  test("normalizes nested objects and arrays", () => {
+  test("parses nested objects and arrays", () => {
     const raw = '{ "items": [1, 2, 3], "meta": { "ok": true } }';
-    expect(extractJsonOutput(raw)).toBe('{"items":[1,2,3],"meta":{"ok":true}}');
+    expect(extractJsonValue(raw)).toEqual({ items: [1, 2, 3], meta: { ok: true } });
   });
 });

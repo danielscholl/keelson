@@ -1108,7 +1108,7 @@ describe("makePromptHandler", () => {
       expect(calls[0]!.prompt).toBe("say hi");
     });
 
-    test("clean JSON reply is normalized as the node output", async () => {
+    test("clean JSON reply becomes structured node output", async () => {
       const { provider } = makeSpyProvider({
         chunks: [{ type: "text", content: '  {"kind":"bug","title":"oops"}  ' }, { type: "done" }],
       });
@@ -1123,11 +1123,12 @@ describe("makePromptHandler", () => {
       } as unknown as DagNode;
       const result = await handler.handle(node, buildCtx());
       expect(result.status).toBe("succeeded");
-      const text = result.output.kind === "text" ? result.output.text : "";
-      expect(text).toBe('{"kind":"bug","title":"oops"}');
+      expect(result.output.kind).toBe("structured");
+      const value = result.output.kind === "structured" ? result.output.value : undefined;
+      expect(value).toEqual({ kind: "bug", title: "oops" });
     });
 
-    test("fenced JSON reply has fences stripped before being committed", async () => {
+    test("fenced JSON reply becomes structured node output", async () => {
       const { provider } = makeSpyProvider({
         chunks: [{ type: "text", content: '```json\n{"kind":"feature"}\n```' }, { type: "done" }],
       });
@@ -1141,8 +1142,9 @@ describe("makePromptHandler", () => {
         output_format: { type: "object" },
       } as unknown as DagNode;
       const result = await handler.handle(node, buildCtx());
-      const text = result.output.kind === "text" ? result.output.text : "";
-      expect(text).toBe('{"kind":"feature"}');
+      expect(result.output.kind).toBe("structured");
+      const value = result.output.kind === "structured" ? result.output.value : undefined;
+      expect(value).toEqual({ kind: "feature" });
     });
 
     test("non-JSON reply is preserved as-is (substitute layer's existing failure mode)", async () => {

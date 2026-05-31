@@ -17,13 +17,13 @@
  *    the resolved prompt body asking the model for a single-line JSON object.
  *    The phrasing mirrors what bundled workflows already use by hand — the
  *    models behave with it.
- * 2. {@link extractJsonOutput} normalizes the model's reply so downstream
- *    `$nodeId.output.field` substitution
- *    (`packages/workflows/src/substitute.ts`) sees clean JSON.
+ * 2. {@link extractJsonValue} parses the model's reply into the value the
+ *    prompt handler emits as structured node output; the executor re-encodes
+ *    it to a JSON string for downstream `$nodeId.output.field` substitution.
  *
- * Three-branch extract: parse-as-is, strip ```json fences and retry, raw
- * passthrough. The substitute helper already swallows `JSON.parse` failures
- * silently, so the raw fallback preserves the existing failure mode.
+ * Three-branch extract: parse-as-is, strip ```json fences and retry, else
+ * `undefined` — on that miss the handler keeps the raw text as `kind: "text"`,
+ * preserving the substitute layer's existing JSON-parse failure mode.
  */
 
 const SUFFIX_HEADER =
@@ -36,20 +36,20 @@ export function buildOutputFormatSuffix(schema: Readonly<Record<string, unknown>
 
 const FENCED_JSON = /^```(?:json)?\s*([\s\S]*?)\s*```$/i;
 
-export function extractJsonOutput(raw: string): string {
+export function extractJsonValue(raw: string): unknown {
   const trimmed = raw.trim();
-  if (trimmed.length === 0) return raw;
+  if (trimmed.length === 0) return undefined;
 
   const direct = tryParse(trimmed);
-  if (direct !== undefined) return JSON.stringify(direct);
+  if (direct !== undefined) return direct;
 
   const fenced = FENCED_JSON.exec(trimmed);
   if (fenced?.[1]) {
     const inner = tryParse(fenced[1].trim());
-    if (inner !== undefined) return JSON.stringify(inner);
+    if (inner !== undefined) return inner;
   }
 
-  return raw;
+  return undefined;
 }
 
 function tryParse(text: string): unknown {
