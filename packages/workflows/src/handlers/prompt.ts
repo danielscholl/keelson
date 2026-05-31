@@ -423,13 +423,15 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           error: providerError,
         };
       } else if (nodeOutputFormat !== undefined) {
-        // output_format → structured output when the reply parses as JSON;
-        // otherwise keep the raw text (the substitute layer's existing miss path).
+        // output_format → structured output only when the reply parses to a JSON
+        // object or array. A bare scalar (null/true/42/"x") or a non-JSON reply
+        // stays raw text — the substitute layer's existing miss path, and the
+        // shape the canvas/typed-view renderers expect.
         const value = extractJsonValue(assistantText);
         result =
-          value === undefined
-            ? { status: "succeeded", output: { kind: "text", text: assistantText } }
-            : { status: "succeeded", output: { kind: "structured", value } };
+          value !== null && typeof value === "object"
+            ? { status: "succeeded", output: { kind: "structured", value } }
+            : { status: "succeeded", output: { kind: "text", text: assistantText } };
       } else {
         result = {
           status: "succeeded",

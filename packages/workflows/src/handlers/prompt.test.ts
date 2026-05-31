@@ -1164,5 +1164,24 @@ describe("makePromptHandler", () => {
       const text = result.output.kind === "text" ? result.output.text : "";
       expect(text).toBe("I think this is a bug.");
     });
+
+    test("a bare JSON scalar stays text, not structured", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "null" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: { type: "object" },
+      } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.output.kind).toBe("text");
+      const text = result.output.kind === "text" ? result.output.text : "";
+      expect(text).toBe("null");
+    });
   });
 });
