@@ -278,6 +278,32 @@ describe("rib workflow contribution + binding", () => {
     expect(accepted ? bindings.has(accepted) : false).toBe(true);
   });
 
+  test("a rib workflow violating loader invariants is rejected (reserved name, bad refs)", () => {
+    const contributions = [
+      {
+        ribId: "a",
+        // `runs` collides with the /api/workflows/runs route family.
+        definition: { name: "runs", description: "d", nodes: [{ id: "x", bash: "echo hi" }] },
+      },
+      {
+        ribId: "b",
+        // References an unknown node — the loader's output-ref check rejects it.
+        definition: {
+          name: "bad-ref",
+          description: "d",
+          nodes: [{ id: "x", bash: "echo $nope.output", depends_on: [] }],
+        },
+      },
+      {
+        ribId: "c",
+        definition: { name: "good", description: "d", nodes: [{ id: "x", bash: "echo hi" }] },
+      },
+    ];
+    const { definitions } = prepareRibWorkflows(contributions);
+    // Only the sound workflow survives; the reserved-name and bad-ref ones drop.
+    expect(definitions.map((d) => d.name)).toEqual(["good"]);
+  });
+
   test("publishing a valid payload composes the bound key; an invalid one fails closed", async () => {
     const { manager, ribs } = await makeRig();
     const { definitions, bindings } = prepareRibWorkflows(ribs.workflowContributions);

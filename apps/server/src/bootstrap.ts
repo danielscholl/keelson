@@ -206,6 +206,17 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       continue;
     }
     const definition = parsed.data as WorkflowDefinition;
+    // Apply the same structural invariants a YAML workflow gets at load —
+    // reserved name (e.g. `runs` collides with /api/workflows/runs), empty
+    // nodes, DAG shape, reserved node ids, output refs — so a rib can't smuggle
+    // a catalog entry that the loader would have rejected.
+    const invariantError = validateWorkflowInvariants(definition);
+    if (invariantError) {
+      console.warn(
+        `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${invariantError}; skipping`,
+      );
+      continue;
+    }
     definitions.push(definition);
     if (contribution.publish) {
       bindings.set(definition, { publish: contribution.publish });

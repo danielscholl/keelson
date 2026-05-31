@@ -80,6 +80,7 @@ export {
   discoverWorkflows,
   type ParseResult,
   parseWorkflow,
+  validateWorkflowInvariants,
   type WorkflowLoadWarning,
 } from "./loader.ts";
 export * from "./schema/index.ts";
