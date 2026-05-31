@@ -27,7 +27,7 @@
  */
 
 import type { NodeHandler, NodeResult } from "../executor.ts";
-import { buildOutputFormatSuffix, extractJsonOutput } from "./output-format.ts";
+import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 
 // Loosely-typed handles to avoid pulling @keelson/providers and
 // @keelson/shared into this package's dep graph. The composition root
@@ -422,12 +422,20 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           output: { kind: "text", text: assistantText },
           error: providerError,
         };
+      } else if (nodeOutputFormat !== undefined) {
+        // output_format → structured output only when the reply parses to a JSON
+        // object or array. A bare scalar (null/true/42/"x") or a non-JSON reply
+        // stays raw text — the substitute layer's existing miss path, and the
+        // shape the canvas/typed-view renderers expect.
+        const value = extractJsonValue(assistantText);
+        result =
+          value !== null && typeof value === "object"
+            ? { status: "succeeded", output: { kind: "structured", value } }
+            : { status: "succeeded", output: { kind: "text", text: assistantText } };
       } else {
-        const normalized =
-          nodeOutputFormat !== undefined ? extractJsonOutput(assistantText) : assistantText;
         result = {
           status: "succeeded",
-          output: { kind: "text", text: normalized },
+          output: { kind: "text", text: assistantText },
         };
       }
 

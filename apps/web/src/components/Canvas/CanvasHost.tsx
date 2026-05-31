@@ -2,6 +2,7 @@ import type { CanvasDocument } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { getRunArtifact } from "../../api.ts";
+import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 
 // Optional host-side extras passed when opening. `footer` is a live ReactNode
@@ -116,12 +117,14 @@ function CanvasBody({ doc }: { doc: CanvasDocument }) {
       />
     );
   }
-  // `snapshot` source is reserved — wired in a later stage.
-  return (
-    <p className="canvas-drawer-note">
-      This canvas source ('{doc.source.type}') is not yet supported.
-    </p>
-  );
+  if (doc.source.type === "snapshot") {
+    // Key by the snapshot key so switching keys remounts with fresh state.
+    return <SnapshotBody key={doc.source.key} snapshotKey={doc.source.key} />;
+  }
+  // CanvasSource is inline | artifact | snapshot — all handled above. A new
+  // member makes this a compile error rather than a silent blank render.
+  const exhaustive: never = doc.source;
+  return exhaustive;
 }
 
 type ArtifactState =
@@ -170,4 +173,32 @@ function ArtifactBody({ runId, path }: { runId: string; path: string }) {
     );
   }
   return <MarkdownContent source={state.text} />;
+}
+
+function SnapshotBody({ snapshotKey }: { snapshotKey: string }) {
+  const snapshot = useSnapshot(snapshotKey);
+  if (snapshot.status === "loading") {
+    return <p className="canvas-drawer-note">Loading…</p>;
+  }
+  if (snapshot.status === "error") {
+    return <p className="canvas-drawer-note canvas-drawer-error">Failed to load this snapshot.</p>;
+  }
+  if (snapshot.status === "empty") {
+    return <p className="canvas-drawer-note">Waiting for the first update…</p>;
+  }
+  return <MarkdownContent source={snapshotToMarkdown(snapshot.data)} />;
+}
+
+// Coerce a snapshot's opaque `data` to markdown. A plain string or a
+// `{ markdown }` / `{ text }` object renders directly; any other shape is shown
+// as a fenced JSON block so a structured payload stays visible until the typed
+// `view` kinds (#65) render it properly.
+function snapshotToMarkdown(data: unknown): string {
+  if (typeof data === "string") return data;
+  if (data !== null && typeof data === "object") {
+    const rec = data as Record<string, unknown>;
+    if (typeof rec.markdown === "string") return rec.markdown;
+    if (typeof rec.text === "string") return rec.text;
+  }
+  return `\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
 }

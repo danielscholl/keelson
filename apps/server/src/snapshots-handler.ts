@@ -27,15 +27,16 @@ export function snapshotsRoutes(app: Hono, deps: SnapshotsRoutesDeps): void {
     return c.json({ keys: manager.keys() });
   });
 
-  // 404 covers both unregistered keys and registered-but-never-composed keys.
-  // Reads never lazy-compose — recompose is explicit. Use /api/snapshots to introspect registration.
+  // 200 with the frame when composed; 204 when the key is registered but not
+  // yet composed (a producer warmed it but hasn't published); 404 when the key
+  // is unregistered/unknown. The 204-vs-404 split lets a live client tell
+  // "pending" from "gone" instead of guessing. Reads never lazy-compose.
   app.get("/api/snapshots/:key", (c) => {
     const key = c.req.param("key");
     const frame = manager.latest(key);
-    if (!frame) {
-      return c.json({ error: "snapshot not found" }, 404);
-    }
-    return c.json(frame);
+    if (frame) return c.json(frame);
+    if (manager.keys().includes(key)) return c.body(null, 204);
+    return c.json({ error: "snapshot not found" }, 404);
   });
 }
 

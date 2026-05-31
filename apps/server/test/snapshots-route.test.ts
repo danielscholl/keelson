@@ -44,11 +44,11 @@ describe("snapshots REST", () => {
     expect(((await res.json()) as { keys: string[] }).keys.sort()).toEqual(["alpha", "beta"]);
   });
 
-  test("GET /api/snapshots/:key 404s when key has never been composed", async () => {
+  test("GET /api/snapshots/:key 204s when the key is registered but never composed", async () => {
     const { app, manager } = makeRig();
     manager.register("k", () => 1);
     const res = await app.fetch(new Request("http://test/api/snapshots/k"));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(204);
   });
 
   test("GET /api/snapshots/:key returns the latest cached frame after recompose", async () => {

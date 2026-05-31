@@ -34,6 +34,8 @@ import {
   rememberChatMessageResponseSchema,
   reviewActionResponseSchema,
   reviewListResponseSchema,
+  type SnapshotFrame,
+  snapshotFrameSchema,
   startWorkflowRunResponseSchema,
   type UpdateProjectBody,
   type WorkflowDetail,
@@ -297,6 +299,26 @@ export async function getRunArtifact(
     },
   );
   return res === null ? null : getRunArtifactResponseSchema.parse(res);
+}
+
+export type SnapshotFetch =
+  | { kind: "frame"; frame: SnapshotFrame }
+  | { kind: "pending" }
+  | { kind: "gone" };
+
+// Hydrate a snapshot key. 200 → the latest frame; 204 → registered but not yet
+// composed ("pending", keep waiting); 404 → unregistered/unknown ("gone", the
+// producer dropped it). The live hook needs pending-vs-gone to decide whether
+// to keep the socket open or stop reconnecting.
+export async function getSnapshot(key: string): Promise<SnapshotFetch> {
+  const res = await fetch(`/api/snapshots/${encodeURIComponent(key)}`);
+  if (res.status === 204) return { kind: "pending" };
+  if (res.status === 404) return { kind: "gone" };
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`/api/snapshots/${key} ${res.status}: ${detail}`);
+  }
+  return { kind: "frame", frame: snapshotFrameSchema.parse(await res.json()) };
 }
 
 // 404 is treated as "already done / unknown" — surface no error so the UI

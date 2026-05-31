@@ -27,6 +27,7 @@ import {
   type Project,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
+  type SnapshotManager,
   startWorkflowRunBodySchema,
   TERMINAL_RUN_STATUSES,
   type WorkflowFrame,
@@ -110,6 +111,10 @@ export interface WorkflowsHandlerOptions {
   promptHandler?: NodeHandler;
   // Optional MemoryStore. Undefined → executor memory hooks no-op.
   memoryStore?: MemoryStore;
+  // Optional snapshot manager. When set, a run republishes its latest
+  // structured node output under a run-scoped key (the Tier-0 bridge, #73);
+  // undefined → runs never publish a snapshot.
+  snapshotManager?: SnapshotManager;
 }
 
 // Renders the user-facing dispatch bubble that anchors the workflow run inside
@@ -489,6 +494,7 @@ interface StartRunCoreDeps {
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
   memoryTools: MemoryTools | undefined;
+  snapshotManager?: SnapshotManager;
 }
 
 interface StartRunCoreParams {
@@ -512,6 +518,7 @@ function startRunCore(
   params: StartRunCoreParams,
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
+  const { snapshotManager } = deps;
   const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
     params;
   const name = workflow.name;
@@ -582,6 +589,7 @@ function startRunCore(
       : null,
     ...(projectId !== null ? { projectId } : {}),
     ...(memoryTools !== undefined ? { memoryTools } : {}),
+    ...(snapshotManager !== undefined ? { snapshotManager } : {}),
   });
   activeRuns.register(runId, { abort, done, pendingApprovals });
   return { runId, conversationId: conversation.id };
@@ -709,7 +717,7 @@ export function createWorkflowController(
   activeRuns: ActiveRuns,
   subscribers: WorkflowSubscribers,
 ): WorkflowController {
-  const { catalog, store, conversationStore, projectsStore } = opts;
+  const { catalog, store, conversationStore, projectsStore, snapshotManager } = opts;
   const { promptHandler, memoryTools } = buildExecutionDeps(opts);
 
   return {
@@ -730,7 +738,15 @@ export function createWorkflowController(
         isolation === "worktree" ? true : isolation === "none" ? false : yamlEnabled;
       try {
         const { runId, conversationId } = startRunCore(
-          { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools },
+          {
+            store,
+            conversationStore,
+            activeRuns,
+            subscribers,
+            promptHandler,
+            memoryTools,
+            ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+          },
           {
             workflow,
             inputs,
@@ -847,7 +863,7 @@ export function workflowsRoutes(
   activeRuns: ActiveRuns = createActiveRuns(),
   subscribers: WorkflowSubscribers = createWorkflowSubscribers(),
 ): void {
-  const { catalog, store, conversationStore, projectsStore, defaultCwd } = opts;
+  const { catalog, store, conversationStore, projectsStore, defaultCwd, snapshotManager } = opts;
   const { promptHandler: effectivePromptHandler, memoryTools } = buildExecutionDeps(opts);
 
   app.get("/api/workflows", (c) => {
@@ -1033,6 +1049,7 @@ export function workflowsRoutes(
           subscribers,
           promptHandler: effectivePromptHandler,
           memoryTools,
+          ...(snapshotManager !== undefined ? { snapshotManager } : {}),
         },
         {
           workflow,
@@ -1357,6 +1374,9 @@ interface ExecuteRunArgs {
   projectId?: string;
   // Undefined when no MemoryStore was wired; executor memory hooks no-op in that case.
   memoryTools?: MemoryTools;
+  // Tier-0 snapshot bridge (#73): when set, the run republishes its latest
+  // structured node output under the `workflow:run:<id>` snapshot key.
+  snapshotManager?: SnapshotManager;
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
@@ -1374,6 +1394,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     isolation,
     projectId,
     memoryTools,
+    snapshotManager,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -1722,6 +1743,27 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     if (entry) entry.artifactsDir = artifactsDir;
   }
 
+  // Tier-0 snapshot bridge (#73): expose this run's latest structured node
+  // output under a run-scoped key so a snapshot-backed canvas renders it live.
+  // The substrate stays domain-free — `data` is the structured value verbatim.
+  // Deferred to M7: per-key schema validation + redaction (the producer here is
+  // a trusted in-tree workflow and the snapshot WS is loopback-origin-gated).
+  let unregisterSnapshot: (() => void) | undefined;
+  let publishStructured: ((value: unknown) => void) | undefined;
+  // The most recent recompose, awaited before unregister so the final frame
+  // finishes composing/broadcasting before the key (and its WS subscribers) are
+  // dropped — otherwise a fast terminal run races the fire-and-forget publish.
+  let lastRecompose: Promise<unknown> = Promise.resolve();
+  if (snapshotManager !== undefined) {
+    const snapshotKey = `workflow:run:${runId}`;
+    let latestStructured: unknown;
+    unregisterSnapshot = snapshotManager.register(snapshotKey, () => latestStructured);
+    publishStructured = (value: unknown): void => {
+      latestStructured = value;
+      lastRecompose = snapshotManager.recompose(snapshotKey).catch(() => undefined);
+    };
+  }
+
   try {
     await runWorkflow({
       workflow,
@@ -1742,6 +1784,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           subscribers,
           nodeStart,
           nodeAccumulators,
+          ...(publishStructured !== undefined ? { publishStructured } : {}),
         });
       },
     });
@@ -1787,6 +1830,10 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     activeRuns.delete(runId);
     // Close any lingering WS subscribers — the run will emit no further frames.
     subscribers.closeRun(runId);
+    // Let the final structured frame finish composing/broadcasting, then drop
+    // the run-scoped snapshot key (also closes its WS subscribers).
+    await lastRecompose;
+    unregisterSnapshot?.();
     await artifacts.cleanup();
   }
 }
@@ -1798,10 +1845,13 @@ interface DispatchArgs {
   subscribers: WorkflowSubscribers;
   nodeStart: Map<string, string>;
   nodeAccumulators: Map<string, ReturnType<typeof createContentPartsAccumulator>>;
+  // Tier-0 snapshot bridge (#73): when set, a node's structured output is
+  // republished under the run-scoped snapshot key. Undefined → no publish.
+  publishStructured?: (value: unknown) => void;
 }
 
 function dispatchRunEvent(args: DispatchArgs): void {
-  const { event, runId, store, subscribers, nodeStart, nodeAccumulators } = args;
+  const { event, runId, store, subscribers, nodeStart, nodeAccumulators, publishStructured } = args;
   switch (event.type) {
     case "run_started":
       subscribers.broadcast(runId, {
@@ -1869,6 +1919,11 @@ function dispatchRunEvent(args: DispatchArgs): void {
         status,
         error: event.result.error ?? null,
       });
+      // Tier-0 bridge (#73): a structured node output becomes the latest frame
+      // on the run-scoped snapshot key.
+      if (event.result.output.kind === "structured") {
+        publishStructured?.(event.result.output.value);
+      }
       // Free the per-node accumulator now that we've persisted it; keeps the
       // map bounded for long-running multi-node workflows.
       nodeAccumulators.delete(event.nodeId);

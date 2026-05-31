@@ -1,6 +1,8 @@
 import {
   type ChatFrame,
   type ClientFrame,
+  type SnapshotFrame,
+  snapshotFrameSchema,
   type WorkflowFrame,
   workflowFrameSchema,
 } from "@keelson/shared";
@@ -18,6 +20,11 @@ function buildWsUrl(): string {
 function buildWorkflowRunWsUrl(runId: string): string {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   return `${scheme}://${window.location.host}/api/workflows/runs/${encodeURIComponent(runId)}/ws`;
+}
+
+function buildSnapshotWsUrl(key: string): string {
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${window.location.host}/api/snapshots/${encodeURIComponent(key)}/ws`;
 }
 
 export interface ChatWsCallbacks {
@@ -342,6 +349,115 @@ export function createReconnectingWorkflowRunWs(
     stopReconnecting: () => {
       stoppedReconnecting = true;
       reconnect.cancel();
+    },
+    getState: () => state,
+  };
+}
+
+// --- Snapshot WS ---
+
+export interface SnapshotWsCallbacks {
+  onFrame: (frame: SnapshotFrame) => void;
+  onClose: () => void;
+  onOpen?: () => void;
+  onError?: (e: Event) => void;
+}
+
+export interface SnapshotWsHandle {
+  close: () => void;
+}
+
+// Single-use snapshot stream for one key. The server does NOT replay the latest
+// frame on connect, so the hook layer hydrates via GET /api/snapshots/:key and
+// re-hydrates on each fresh open (see createReconnectingSnapshotWs.onOpen).
+export function openSnapshotWs(key: string, callbacks: SnapshotWsCallbacks): SnapshotWsHandle {
+  const ws = new WebSocket(buildSnapshotWsUrl(key));
+  ws.onopen = () => callbacks.onOpen?.();
+  ws.onmessage = (e) => {
+    try {
+      const frame = snapshotFrameSchema.parse(JSON.parse(e.data as string));
+      callbacks.onFrame(frame);
+    } catch {
+      // Malformed / version-mismatched frame — drop. Manager owns the shape.
+    }
+  };
+  ws.onclose = () => callbacks.onClose();
+  ws.onerror = (e) => callbacks.onError?.(e);
+  return { close: () => ws.close() };
+}
+
+export interface ReconnectingSnapshotWsCallbacks {
+  onFrame: (frame: SnapshotFrame) => void;
+  onStateChange?: (state: ReconnectingWsState) => void;
+  // Fired on each fresh OPEN. The server has no on-connect replay, so the hook
+  // re-hydrates via GET here (and uses that to detect a key that's gone).
+  onOpen?: () => void;
+}
+
+export interface ReconnectingSnapshotWsHandle {
+  close: () => void;
+  getState: () => ReconnectingWsState;
+}
+
+// Reconnecting snapshot stream. Unlike the workflow-run wrapper there is no
+// terminal frame, so it reconnects like the chat wrapper. The consumer (the
+// useSnapshot hook) calls close() when a re-hydrate shows the key is gone, so a
+// producer that unregistered its key doesn't drive an endless reopen loop.
+export function createReconnectingSnapshotWs(
+  key: string,
+  callbacks: ReconnectingSnapshotWsCallbacks,
+  options: ReconnectingWorkflowRunOptions = {},
+): ReconnectingSnapshotWsHandle {
+  const reconnect = createReconnectSchedule(options);
+  let state: ReconnectingWsState = "connecting";
+  let inner: SnapshotWsHandle | null = null;
+  let manualClose = false;
+
+  const setState = (next: ReconnectingWsState): void => {
+    if (state === next) return;
+    state = next;
+    callbacks.onStateChange?.(next);
+  };
+
+  const open = (): void => {
+    setState(reconnect.openingState());
+    inner = openSnapshotWs(key, {
+      onFrame: callbacks.onFrame,
+      onOpen: () => {
+        if (!inner || manualClose) return;
+        reconnect.resetAttempts();
+        setState("open");
+        callbacks.onOpen?.();
+      },
+      onClose: () => {
+        inner = null;
+        if (manualClose) {
+          setState("closed");
+          return;
+        }
+        scheduleReconnect();
+      },
+      onError: () => {
+        // close handler drives reconnect; avoid double-scheduling.
+      },
+    });
+  };
+
+  const scheduleReconnect = (): void => {
+    if (manualClose) return;
+    setState("reconnecting");
+    reconnect.schedule(open);
+  };
+
+  open();
+
+  return {
+    close: () => {
+      manualClose = true;
+      reconnect.cancel();
+      inner?.close();
+      inner = null;
+      setState("closed");
     },
     getState: () => state,
   };
