@@ -180,6 +180,9 @@ function SnapshotBody({ snapshotKey }: { snapshotKey: string }) {
   if (snapshot.status === "loading") {
     return <p className="canvas-drawer-note">Loading…</p>;
   }
+  if (snapshot.status === "error") {
+    return <p className="canvas-drawer-note canvas-drawer-error">Failed to load this snapshot.</p>;
+  }
   if (snapshot.status === "empty") {
     return <p className="canvas-drawer-note">Waiting for the first update…</p>;
   }

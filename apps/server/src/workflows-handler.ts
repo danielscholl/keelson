@@ -1750,13 +1750,17 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // a trusted in-tree workflow and the snapshot WS is loopback-origin-gated).
   let unregisterSnapshot: (() => void) | undefined;
   let publishStructured: ((value: unknown) => void) | undefined;
+  // The most recent recompose, awaited before unregister so the final frame
+  // finishes composing/broadcasting before the key (and its WS subscribers) are
+  // dropped — otherwise a fast terminal run races the fire-and-forget publish.
+  let lastRecompose: Promise<unknown> = Promise.resolve();
   if (snapshotManager !== undefined) {
     const snapshotKey = `workflow:run:${runId}`;
     let latestStructured: unknown;
     unregisterSnapshot = snapshotManager.register(snapshotKey, () => latestStructured);
     publishStructured = (value: unknown): void => {
       latestStructured = value;
-      void snapshotManager.recompose(snapshotKey);
+      lastRecompose = snapshotManager.recompose(snapshotKey).catch(() => undefined);
     };
   }
 
@@ -1826,7 +1830,9 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     activeRuns.delete(runId);
     // Close any lingering WS subscribers — the run will emit no further frames.
     subscribers.closeRun(runId);
-    // Drop the run-scoped snapshot key (also closes its WS subscribers).
+    // Let the final structured frame finish composing/broadcasting, then drop
+    // the run-scoped snapshot key (also closes its WS subscribers).
+    await lastRecompose;
     unregisterSnapshot?.();
     await artifacts.cleanup();
   }

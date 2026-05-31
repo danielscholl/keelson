@@ -301,17 +301,24 @@ export async function getRunArtifact(
   return res === null ? null : getRunArtifactResponseSchema.parse(res);
 }
 
-// Hydrate the latest frame for a snapshot key. Returns null on 404 — a key
-// that's registered-but-not-yet-composed and one that's gone both read as
-// "nothing to render yet"; the live WS upgrade delivers the first/next frame.
-export async function getSnapshot(key: string): Promise<SnapshotFrame | null> {
-  const res = await apiRequest<unknown, null>(`/api/snapshots/${encodeURIComponent(key)}`, {
-    label: `/api/snapshots/${key}`,
-    errorBody: "json-error",
-    allowedStatuses: [404],
-    allowedStatusValue: null,
-  });
-  return res === null ? null : snapshotFrameSchema.parse(res);
+export type SnapshotFetch =
+  | { kind: "frame"; frame: SnapshotFrame }
+  | { kind: "pending" }
+  | { kind: "gone" };
+
+// Hydrate a snapshot key. 200 → the latest frame; 204 → registered but not yet
+// composed ("pending", keep waiting); 404 → unregistered/unknown ("gone", the
+// producer dropped it). The live hook needs pending-vs-gone to decide whether
+// to keep the socket open or stop reconnecting.
+export async function getSnapshot(key: string): Promise<SnapshotFetch> {
+  const res = await fetch(`/api/snapshots/${encodeURIComponent(key)}`);
+  if (res.status === 204) return { kind: "pending" };
+  if (res.status === 404) return { kind: "gone" };
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`/api/snapshots/${key} ${res.status}: ${detail}`);
+  }
+  return { kind: "frame", frame: snapshotFrameSchema.parse(await res.json()) };
 }
 
 // 404 is treated as "already done / unknown" — surface no error so the UI
