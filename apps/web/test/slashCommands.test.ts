@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   filterSlashCommands,
+  filterWorkflowNames,
   isCommittedToCommand,
   matchSlashCommand,
   parseWorkflowCommand,
   SLASH_COMMANDS,
+  workflowRunNamePartial,
 } from "../src/lib/slashCommands.ts";
 
 describe("matchSlashCommand", () => {
@@ -123,5 +125,59 @@ describe("parseWorkflowCommand", () => {
     expect(parseWorkflowCommand("run")).toEqual({ kind: "usage" });
     expect(parseWorkflowCommand("run   ")).toEqual({ kind: "usage" });
     expect(parseWorkflowCommand("bogus")).toEqual({ kind: "usage" });
+  });
+});
+
+describe("workflowRunNamePartial", () => {
+  test("returns the partial once typing the name (incl. empty right after 'run ')", () => {
+    expect(workflowRunNamePartial("/workflow run ")).toBe("");
+    expect(workflowRunNamePartial("/workflow run smo")).toBe("smo");
+    expect(workflowRunNamePartial("/workflow run smoke-test")).toBe("smoke-test");
+  });
+
+  test("returns null before 'run ' or once the name token is complete", () => {
+    // No trailing space after run → not yet typing the name.
+    expect(workflowRunNamePartial("/workflow run")).toBeNull();
+    // Trailing space after the name → past the name, into $ARGUMENTS.
+    expect(workflowRunNamePartial("/workflow run smoke-test ")).toBeNull();
+    expect(workflowRunNamePartial("/workflow ")).toBeNull();
+    expect(workflowRunNamePartial("/project use foo")).toBeNull();
+  });
+});
+
+describe("filterWorkflowNames", () => {
+  const items = [
+    { name: "smoke-test" },
+    { name: "fix-issue" },
+    { name: "pr-review" },
+    { name: "plan-act-evaluate" },
+  ];
+
+  test("empty partial returns all (capped)", () => {
+    expect(filterWorkflowNames(items, "").map((i) => i.name)).toEqual([
+      "smoke-test",
+      "fix-issue",
+      "pr-review",
+      "plan-act-evaluate",
+    ]);
+  });
+
+  test("matches on normalized alphanumerics (ignores hyphens, case)", () => {
+    expect(filterWorkflowNames(items, "smo").map((i) => i.name)).toEqual(["smoke-test"]);
+    expect(filterWorkflowNames(items, "SMOKET").map((i) => i.name)).toEqual(["smoke-test"]);
+    expect(filterWorkflowNames(items, "review").map((i) => i.name)).toEqual(["pr-review"]);
+  });
+
+  test("respects the limit", () => {
+    expect(filterWorkflowNames(items, "", 2)).toHaveLength(2);
+  });
+
+  test("no match returns empty", () => {
+    expect(filterWorkflowNames(items, "deploy")).toEqual([]);
+  });
+
+  test("excludes names with whitespace the slash command can't represent", () => {
+    const withSpace = [{ name: "smoke-test" }, { name: "my flow" }];
+    expect(filterWorkflowNames(withSpace, "").map((i) => i.name)).toEqual(["smoke-test"]);
   });
 });

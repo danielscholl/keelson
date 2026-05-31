@@ -121,8 +121,9 @@ describe("buildCopilotSessionHooks", () => {
   });
 
   it("matches Claude-style alternation matchers (Write|Edit) by capability kind", () => {
-    // architect.yaml uses `matcher: "Write|Edit"` — must gate Copilot's write
-    // built-ins (str_replace_editor / create / apply_patch), not silently skip.
+    // Workflow nodes use `matcher: "Write|Edit"` (Claude-style) — must gate
+    // Copilot's write built-ins (str_replace_editor / create / apply_patch),
+    // not silently skip.
     const hooks = buildCopilotSessionHooks({
       PreToolUse: [{ matcher: "Write|Edit", response: { decision: "block" } }],
     });
@@ -153,7 +154,7 @@ describe("buildCopilotSessionHooks", () => {
   });
 
   it("maps a Claude systemMessage response onto Copilot additionalContext", () => {
-    // architect.yaml write/fix hooks carry `response: { systemMessage: ... }`.
+    // Workflow write/fix hooks carry `response: { systemMessage: ... }`.
     const hooks = buildCopilotSessionHooks({
       PreToolUse: [{ matcher: "Write|Edit", response: { systemMessage: "stay in scope" } }],
     });

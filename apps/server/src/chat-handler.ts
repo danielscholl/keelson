@@ -30,6 +30,7 @@ import { getRegisteredTools } from "@keelson/skills";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
+import { buildChatSystemPrompt, type WorkflowSummaryLike } from "./chat-prompt.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
@@ -227,6 +228,9 @@ export interface ChatWebSocketDeps {
   // every turn so the LLM can fire / approve / monitor workflows. Injected here
   // (not registered globally) so they never leak into workflow `prompt` nodes.
   workflowTools?: ToolDefinition[];
+  // Live workflow catalog, used to render the always-on workflow index into the
+  // system prompt so the model can match intent without a workflow_list call.
+  workflowCatalog?: { list(): readonly WorkflowSummaryLike[] };
 }
 
 export function chatWebSocketHandlers(
@@ -256,6 +260,7 @@ export function chatWebSocketHandlers(
         ...(deps.memoryStore !== undefined ? { memoryStore: deps.memoryStore } : {}),
         ...(deps.projectsStore !== undefined ? { projectsStore: deps.projectsStore } : {}),
         ...(deps.workflowTools !== undefined ? { workflowTools: deps.workflowTools } : {}),
+        ...(deps.workflowCatalog !== undefined ? { workflowCatalog: deps.workflowCatalog } : {}),
       });
     },
     close(ws) {
@@ -276,15 +281,9 @@ export interface ChatDeps {
   projectsStore?: ProjectsStore;
   // Workflow chat tools appended to the registry tools for this turn.
   workflowTools?: ToolDefinition[];
+  // Live workflow catalog for the system-prompt index (see chat-prompt.ts).
+  workflowCatalog?: { list(): readonly WorkflowSummaryLike[] };
 }
-
-// One-line system hint that teaches the model the workflow tools exist and the
-// approval protocol — kept O(1) so the base prompt doesn't grow with the
-// catalog (workflows are discovered on demand via workflow_list).
-const WORKFLOW_TOOLS_HINT =
-  "You can run human-authored deterministic workflows via the workflow_* tools. " +
-  "When a request matches a repeatable or automatable task, call workflow_list to find a matching workflow, then workflow_run to start it. " +
-  "Some workflows pause for plan approval — relay the plan to the user, and when they approve or give feedback, call workflow_respond with the runId/nodeId/pauseId from the earlier tool result.";
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
 // populated store can't bloat every turn's prompt.
@@ -393,15 +392,16 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     ...(recallProjectId !== undefined ? { projectId: recallProjectId } : {}),
   });
 
-  const systemPromptParts: string[] = [];
-  if (recallSection !== undefined) systemPromptParts.push(recallSection);
-  if (typeof conv.seedSystemPrompt === "string" && conv.seedSystemPrompt.length > 0) {
-    systemPromptParts.push(conv.seedSystemPrompt);
-  }
-  if (deps.workflowTools && deps.workflowTools.length > 0) {
-    systemPromptParts.push(WORKFLOW_TOOLS_HINT);
-  }
-  const systemPrompt = systemPromptParts.length > 0 ? systemPromptParts.join("\n\n") : undefined;
+  // Advertise workflows only when the tools are actually wired this turn, so the
+  // model is never told about a capability it can't invoke.
+  const workflowToolsActive = deps.workflowTools !== undefined && deps.workflowTools.length > 0;
+  const systemPrompt = buildChatSystemPrompt({
+    ...(recallSection !== undefined ? { recallSection } : {}),
+    ...(typeof conv.seedSystemPrompt === "string"
+      ? { seedSystemPrompt: conv.seedSystemPrompt }
+      : {}),
+    ...(workflowToolsActive ? { workflows: deps.workflowCatalog?.list() ?? [] } : {}),
+  });
 
   // Falls back to the default project's rootPath when conv.projectId was
   // NULLed (deleted project) or when the row's id no longer resolves; using
