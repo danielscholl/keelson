@@ -38,10 +38,14 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
         let auth: RibAuthStatus | undefined;
         if (probe) {
           try {
-            auth = await probe();
+            // A throwing probe OR a malformed result degrades just this rib to
+            // unauthenticated — one broken rib can't blank the whole panel via
+            // the response parse below.
+            const result = ribAuthStatusSchema.safeParse(await probe());
+            auth = result.success
+              ? result.data
+              : { authenticated: false, statusMessage: "invalid auth status" };
           } catch (err) {
-            // A throwing probe reports as unauthenticated rather than failing
-            // the whole list — one broken rib can't blank the panel.
             auth = {
               authenticated: false,
               statusMessage: err instanceof Error ? err.message : String(err),

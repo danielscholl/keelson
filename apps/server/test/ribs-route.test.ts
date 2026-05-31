@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Rib } from "@keelson/shared";
+import type { Rib, RibAuthStatus } from "@keelson/shared";
 import { Hono } from "hono";
 import { bootstrapRibs, bootstrapWorkflows, prepareRibWorkflows } from "../src/bootstrap.ts";
 import { ribsRoutes } from "../src/ribs-handler.ts";
@@ -100,6 +100,24 @@ describe("GET /api/ribs", () => {
     };
     expect(body.ribs[0]?.auth?.authenticated).toBe(false);
     expect(body.ribs[0]?.auth?.statusMessage).toMatch(/probe failed/);
+  });
+
+  test("a probe returning a malformed shape degrades to unauthenticated, not a 500", async () => {
+    const bad: Rib = {
+      id: "bad",
+      displayName: "Bad",
+      // Resolves to an invalid auth shape; without per-rib validation the
+      // whole-list response parse would 500.
+      authStatus: () => ({ authenticated: "yes" }) as unknown as RibAuthStatus,
+    };
+    const { app } = await makeRig({ available: { bad } });
+    const res = await app.fetch(get("/api/ribs"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ribs: Array<{ auth?: { authenticated: boolean; statusMessage?: string } }>;
+    };
+    expect(body.ribs[0]?.auth?.authenticated).toBe(false);
+    expect(body.ribs[0]?.auth?.statusMessage).toMatch(/invalid auth status/);
   });
 
   test("omits auth for a rib with no probe", async () => {
