@@ -13,6 +13,7 @@ import {
   type RibAuthStatus,
   type RibSummary,
   ribActionSchema,
+  ribAuthStatusSchema,
 } from "@keelson/shared";
 import type { Hono } from "hono";
 import type { RibManifest } from "./ribs.ts";
