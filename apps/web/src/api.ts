@@ -34,6 +34,8 @@ import {
   rememberChatMessageResponseSchema,
   reviewActionResponseSchema,
   reviewListResponseSchema,
+  type SnapshotFrame,
+  snapshotFrameSchema,
   startWorkflowRunResponseSchema,
   type UpdateProjectBody,
   type WorkflowDetail,
@@ -297,6 +299,19 @@ export async function getRunArtifact(
     },
   );
   return res === null ? null : getRunArtifactResponseSchema.parse(res);
+}
+
+// Hydrate the latest frame for a snapshot key. Returns null on 404 — a key
+// that's registered-but-not-yet-composed and one that's gone both read as
+// "nothing to render yet"; the live WS upgrade delivers the first/next frame.
+export async function getSnapshot(key: string): Promise<SnapshotFrame | null> {
+  const res = await apiRequest<unknown, null>(`/api/snapshots/${encodeURIComponent(key)}`, {
+    label: `/api/snapshots/${key}`,
+    errorBody: "json-error",
+    allowedStatuses: [404],
+    allowedStatusValue: null,
+  });
+  return res === null ? null : snapshotFrameSchema.parse(res);
 }
 
 // 404 is treated as "already done / unknown" — surface no error so the UI
