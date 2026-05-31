@@ -2,9 +2,22 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { credentialServiceIdSchema } from "@keelson/shared";
+import { credentialServiceIdSchema, ribIdSchema } from "@keelson/shared";
+import { z } from "zod";
 
 export const KEYRING_SERVICE = "keelson" as const;
+
+// A rib's credentials are stored under a namespaced keyring account
+// (`rib_<ribId>_<serviceId>`). The `_` separator can't appear in a kebab-case
+// id, so the split is unambiguous — rib `osdu-prod` reading `token` and rib
+// `osdu` reading `prod-token` resolve to distinct accounts, preserving per-rib
+// isolation. The composed account can exceed the 64-char public service id
+// ceiling, so it has its own (still traversal-safe) bound.
+const ribCredentialAccountSchema = z
+  .string()
+  .min(1)
+  .max(191)
+  .regex(/^[a-z][a-z0-9_-]*$/);
 
 // Interface kept Promise-returning so the underlying backend can be swapped
 // for an async implementation later without changing call sites.
@@ -22,10 +35,11 @@ async function loadKeyring(): Promise<KeyringModule> {
 }
 
 function assertServiceId(serviceId: string): void {
-  const parsed = credentialServiceIdSchema.safeParse(serviceId);
-  if (!parsed.success) {
-    throw new Error(`invalid serviceId '${serviceId}'`);
-  }
+  // Accept either a public service id or a namespaced rib account — widening
+  // only; never rejects a value the public schema already accepted.
+  if (credentialServiceIdSchema.safeParse(serviceId).success) return;
+  if (ribCredentialAccountSchema.safeParse(serviceId).success) return;
+  throw new Error(`invalid serviceId '${serviceId}'`);
 }
 
 // @napi-rs/keyring's NoEntry / NotFound errors come back as opaque `Error`
@@ -84,6 +98,22 @@ function defaultStore(): CredentialStore {
 
 export function getCredential(serviceId: string): Promise<string | undefined> {
   return defaultStore().get(serviceId);
+}
+
+// Build a read-only credential reader scoped to one rib's namespace. The rib
+// passes a bare serviceId; the accessor resolves it under `rib-<ribId>-…` so a
+// rib reads only the secrets stored for it.
+export function createRibCredentialAccessor(
+  store: CredentialStore,
+  ribId: string,
+): (serviceId: string) => Promise<string | undefined> {
+  ribIdSchema.parse(ribId);
+  return (serviceId: string) => {
+    if (!credentialServiceIdSchema.safeParse(serviceId).success) {
+      return Promise.reject(new Error(`invalid rib credential serviceId '${serviceId}'`));
+    }
+    return store.get(`rib_${ribId}_${serviceId}`);
+  };
 }
 export function setCredential(serviceId: string, value: string): Promise<void> {
   return defaultStore().set(serviceId, value);

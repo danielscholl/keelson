@@ -19,7 +19,15 @@ import {
   registerStubProvider,
   registerWorkflowProvider,
 } from "@keelson/providers";
-import type { Rib, RibContext, SnapshotManager, WorkflowDiscoveryNotice } from "@keelson/shared";
+import type {
+  Rib,
+  RibAction,
+  RibActionResult,
+  RibAuthStatus,
+  RibContext,
+  SnapshotManager,
+  WorkflowDiscoveryNotice,
+} from "@keelson/shared";
 import { runJSON, runText } from "@keelson/shared/exec";
 import { getRegisteredTools } from "@keelson/skills";
 import {
@@ -30,9 +38,16 @@ import {
   type PromptHandlerProvider,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
+  workflowDefinitionSchema,
 } from "@keelson/workflows";
 import { discoverRibs } from "./rib-discovery.ts";
-import { applyRibs, parseRibList, type RibManifest } from "./ribs.ts";
+import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
+
+// A bound rib workflow ready to feed the run path: the workflow name plus the
+// callback that republishes a structured run output to the rib's snapshot key.
+export interface RibWorkflowBinding {
+  publish: (value: unknown) => void;
+}
 
 export interface BootstrapProvidersOptions {
   getCredential: (serviceId: string) => Promise<string | undefined>;
@@ -114,10 +129,19 @@ export interface BootstrapRibsOptions {
   // each rib's `composeBundle`. Optional so unit tests for parseRibList /
   // applyRibs don't need to spin up a manager.
   snapshotManager?: SnapshotManager;
+  // Builds a rib's namespaced read-only credential reader. Optional so unit
+  // tests without a credential store stay deterministic.
+  getRibCredential?: (ribId: string, serviceId: string) => Promise<string | undefined>;
 }
 
 export interface RibBootstrap {
   readonly manifests: RibManifest[];
+  // Live auth-status probes keyed by rib id, resolved per-request by GET /api/ribs.
+  readonly probes: Map<string, () => Promise<RibAuthStatus>>;
+  // Inbound action handlers keyed by rib id, dispatched by POST /api/ribs/:id/action.
+  readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
+  // Raw workflow contributions, narrowed + merged into the catalog separately.
+  readonly workflowContributions: RibWorkflowContribution[];
   // Invoke every activated rib's optional `dispose()` hook. Errors from one
   // disposer log a warning and never block the rest — shutdown must
   // make forward progress.
@@ -129,18 +153,23 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const available = options.available ?? (await discoverRibs());
   const active = requested.length > 0 ? requested : Object.keys(available);
   const snapshotManager = options.snapshotManager;
+  // The template ctx carries only exec/sidecar; applyRibs layers a scoped
+  // snapshot manager + namespaced credential reader on top, per rib.
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
-    ...(snapshotManager ? { getSnapshotManager: () => snapshotManager } : {}),
   };
-  const { manifests, disposers } = applyRibs({
+  const { manifests, disposers, probes, actionHandlers, workflowContributions } = applyRibs({
     active,
     available,
     ctx,
     ...(snapshotManager ? { snapshotManager } : {}),
+    ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
   });
   return {
     manifests,
+    probes,
+    actionHandlers,
+    workflowContributions,
     async disposeAll() {
       for (const d of disposers) {
         try {
@@ -154,10 +183,45 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   };
 }
 
+// Narrow each rib workflow contribution against the workflow schema. Invalid
+// definitions warn and skip (a rib-package bug shouldn't down the server).
+// Returns the merge-ready definitions plus the run-path binding map, keyed by
+// the parsed definition *object* — the exact object the catalog stores for that
+// workflow. The run path looks a binding up by the definition it's about to run,
+// so a project workflow that shadows the name (or a same-name collision between
+// ribs) resolves to a different object and simply finds no binding. This stays
+// correct across catalog hot-reloads without any re-pruning.
+export function prepareRibWorkflows(contributions: readonly RibWorkflowContribution[]): {
+  definitions: WorkflowDefinition[];
+  bindings: Map<WorkflowDefinition, RibWorkflowBinding>;
+} {
+  const definitions: WorkflowDefinition[] = [];
+  const bindings = new Map<WorkflowDefinition, RibWorkflowBinding>();
+  for (const contribution of contributions) {
+    const parsed = workflowDefinitionSchema.safeParse(contribution.definition);
+    if (!parsed.success) {
+      console.warn(
+        `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${parsed.error.issues[0]?.message ?? "schema violation"}; skipping`,
+      );
+      continue;
+    }
+    const definition = parsed.data as WorkflowDefinition;
+    definitions.push(definition);
+    if (contribution.publish) {
+      bindings.set(definition, { publish: contribution.publish });
+    }
+  }
+  return { definitions, bindings };
+}
+
 export interface BootstrapWorkflowsOptions {
   // Directory to scan for `*.yaml` workflow files. Production callers pass
   // `${REPO_ROOT}/.keelson/workflows`; tests pass a fixture dir.
   workflowDir: string;
+  // Rib-contributed definitions merged into the catalog. A filesystem workflow
+  // of the same name wins (so an operator can override a rib's), and the
+  // collision surfaces as a discovery notice.
+  extra?: readonly WorkflowDefinition[];
 }
 
 export interface WorkflowCatalog {
@@ -212,6 +276,7 @@ function catalogSignature(dir: string): string {
 // hit (no re-parse), keeping the polling-heavy run/list reads cheap.
 export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCatalog {
   const dir = opts.workflowDir;
+  const extra = opts.extra ?? [];
   let cached: CatalogSnapshot | undefined;
 
   const scan = (): CatalogSnapshot => {
@@ -235,6 +300,22 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     const byName = new Map<string, WorkflowDefinition>();
     for (const entry of result.workflows) {
       byName.set(entry.workflow.name, entry.workflow);
+    }
+    // Rib-contributed workflows fill in around the filesystem set; a name
+    // collision keeps the filesystem definition so an operator can override.
+    for (const definition of extra) {
+      if (byName.has(definition.name)) {
+        console.warn(
+          `[workflows] rib workflow '${definition.name}' shadowed by a project workflow of the same name`,
+        );
+        notices.push({
+          level: "warning",
+          filename: `<rib:${definition.name}>`,
+          message: `rib workflow '${definition.name}' shadowed by a project workflow of the same name`,
+        });
+        continue;
+      }
+      byName.set(definition.name, definition);
     }
     console.log(`[workflows] discovered ${byName.size} workflows`);
     cached = { signature, byName, notices };

@@ -207,7 +207,7 @@ describe("bootstrapRibs", () => {
     expect(survived).toEqual(["beta"]);
   });
 
-  test("rib with composeBundle is auto-registered under its id in the snapshot manager", async () => {
+  test("rib with composeBundle is auto-registered under the namespaced rib:<id> key", async () => {
     delete process.env.KEELSON_RIBS;
     const { createSnapshotManager } = await import("../src/snapshot-manager.ts");
     const snapshotManager = createSnapshotManager();
@@ -222,8 +222,9 @@ describe("bootstrapRibs", () => {
       },
     };
     await bootstrapRibs({ available: { alpha: ribWithBundle }, snapshotManager });
-    expect(snapshotManager.keys()).toEqual(["alpha"]);
-    const frame = await snapshotManager.recompose<{ generation: number }>("alpha");
+    // The composeBundle key is namespaced under rib:<id> (M8), not the bare id.
+    expect(snapshotManager.keys()).toEqual(["rib:alpha"]);
+    const frame = await snapshotManager.recompose<{ generation: number }>("rib:alpha");
     expect(frame?.data).toEqual({ generation: 1 });
     expect(composeCalls).toBe(1);
   });
@@ -236,7 +237,7 @@ describe("bootstrapRibs", () => {
     expect(snapshotManager.keys()).toEqual([]);
   });
 
-  test("rib can imperatively register additional snapshots from registerTools via RibContext.getSnapshotManager", async () => {
+  test("rib can imperatively register namespaced snapshots from registerTools via RibContext.getSnapshotManager", async () => {
     delete process.env.KEELSON_RIBS;
     const { createSnapshotManager } = await import("../src/snapshot-manager.ts");
     const snapshotManager = createSnapshotManager();
@@ -245,13 +246,73 @@ describe("bootstrapRibs", () => {
       displayName: "alpha",
       registerTools: (ctx) => {
         const mgr = ctx.getSnapshotManager?.();
-        mgr?.register("alpha.partitions", () => ({ count: 3 }));
-        mgr?.register("alpha.users", () => ({ count: 12 }));
+        mgr?.register("rib:alpha:partitions", () => ({ count: 3 }));
+        mgr?.register("rib:alpha:users", () => ({ count: 12 }));
         return { registered: [] };
       },
     };
     await bootstrapRibs({ available: { alpha: multiSnapshotRib }, snapshotManager });
-    expect(snapshotManager.keys().sort()).toEqual(["alpha.partitions", "alpha.users"]);
+    expect(snapshotManager.keys().sort()).toEqual(["rib:alpha:partitions", "rib:alpha:users"]);
+  });
+
+  test("a rib registering a snapshot key outside its namespace throws at activation", async () => {
+    delete process.env.KEELSON_RIBS;
+    const { createSnapshotManager } = await import("../src/snapshot-manager.ts");
+    const snapshotManager = createSnapshotManager();
+    const rogue: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        ctx.getSnapshotManager?.().register("other:key", () => ({}));
+        return { registered: [] };
+      },
+    };
+    await expect(bootstrapRibs({ available: { alpha: rogue }, snapshotManager })).rejects.toThrow(
+      /may only register/,
+    );
+  });
+
+  test("a rib declaring a view key outside its namespace throws at activation", async () => {
+    delete process.env.KEELSON_RIBS;
+    const ribBadView: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      views: [{ key: "rib:other:graph", canvasKind: "view" }],
+    };
+    await expect(bootstrapRibs({ available: { alpha: ribBadView } })).rejects.toThrow(
+      /view key .* must be under/,
+    );
+  });
+
+  test("a rib declaring a malformed action descriptor throws at activation", async () => {
+    delete process.env.KEELSON_RIBS;
+    const ribBadAction = {
+      id: "alpha",
+      displayName: "alpha",
+      // Missing `label` — would otherwise corrupt the GET /api/ribs response.
+      actions: [{ type: "go" }],
+    } as unknown as Rib;
+    await expect(bootstrapRibs({ available: { alpha: ribBadAction } })).rejects.toThrow();
+  });
+
+  test("manifest carries views, actions, and hasOnAction; probes/handlers are returned", async () => {
+    delete process.env.KEELSON_RIBS;
+    const rib: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      views: [{ key: "rib:alpha:v", canvasKind: "view", title: "V" }],
+      actions: [{ type: "go", label: "Go" }],
+      onAction: () => ({ ok: true }),
+      authStatus: () => ({ authenticated: true }),
+    };
+    const { manifests, probes, actionHandlers } = await bootstrapRibs({
+      available: { alpha: rib },
+    });
+    expect(manifests[0]?.views).toEqual([{ key: "rib:alpha:v", canvasKind: "view", title: "V" }]);
+    expect(manifests[0]?.actions).toEqual([{ type: "go", label: "Go" }]);
+    expect(manifests[0]?.hasOnAction).toBe(true);
+    expect(await probes.get("alpha")?.()).toEqual({ authenticated: true });
+    expect(await actionHandlers.get("alpha")?.({ type: "go" })).toEqual({ ok: true });
   });
 
   describe("discovery", () => {

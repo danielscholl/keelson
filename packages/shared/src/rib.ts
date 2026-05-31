@@ -7,6 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
+import { canvasKindSchema } from "./canvas.ts";
 
 /**
  * Rib — Keelson's extension contract.
@@ -76,6 +77,74 @@ export interface RibContext {
   getSidecar?: () => Promise<unknown> | unknown;
   getExec: () => RibExec;
   getSnapshotManager?: () => import("./snapshots.ts").SnapshotManager;
+  // Resolves a credential scoped to THIS rib's own namespace (read-only). A
+  // rib reads only the secrets stored under its id; the harness rejects any
+  // attempt to reach another rib's keys. Optional so minimal test contexts
+  // without a credential store still satisfy the interface.
+  getCredential?: (serviceId: string) => Promise<string | undefined>;
+}
+
+// A view a rib declares so the harness surfaces a live canvas for one of the
+// rib's snapshot keys with no per-rib UI code. `canvasKind` is the closed
+// base enum; the payload published under `key` must satisfy the matching
+// renderer (the client gate fail-closes on a mismatch). Static metadata, not
+// a hook — the manifest is built without invoking rib code.
+export const ribViewDescriptorSchema = z
+  .object({
+    key: z.string().min(1),
+    canvasKind: canvasKindSchema,
+    title: z.string().optional(),
+  })
+  .strict();
+export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
+
+// A button the Ribs panel renders; clicking it dispatches `type` to onAction.
+export const ribActionDescriptorSchema = z
+  .object({
+    type: z.string().min(1),
+    label: z.string().min(1),
+  })
+  .strict();
+export type RibActionDescriptor = z.infer<typeof ribActionDescriptorSchema>;
+
+// Inbound action a rib receives over POST /api/ribs/:id/action. The base never
+// enumerates `type` (a rib-defined verb); `payload` stays opaque and the rib
+// narrows at its edge. The capability-token envelope + outbound dispatcher are
+// a later milestone — today this path is loopback-trusted.
+export const ribActionSchema = z
+  .object({
+    type: z.string().min(1),
+    payload: z.unknown().optional(),
+  })
+  .strict();
+export type RibAction = z.infer<typeof ribActionSchema>;
+
+export type RibActionResult = { ok: true; data?: unknown } | { ok: false; error: string };
+
+// Result of a rib's auth-status probe. The probe is not expected to throw; a
+// throwing probe is caught at the seam and reported as
+// `{ authenticated: false, statusMessage: <error> }`.
+export const ribAuthStatusSchema = z
+  .object({
+    authenticated: z.boolean(),
+    statusMessage: z.string().optional(),
+  })
+  .strict();
+export type RibAuthStatus = z.infer<typeof ribAuthStatusSchema>;
+
+// A workflow the rib contributes to the catalog at activation, optionally
+// bound so its structured run output republishes to a rib-namespaced snapshot
+// key. `definition` stays `unknown` at the contract floor — @keelson/shared
+// must not depend on @keelson/workflows; the server validates it against the
+// workflow schema when it merges the contribution.
+export interface RibWorkflowContribution {
+  definition: unknown;
+  bindSnapshotKey?: string;
+  // Producer-side fail-closed validator for the bound key (e.g. a zod
+  // `.parse`). Runs before the frame is cached/broadcast — an invalid payload
+  // is dropped and the prior value kept, so a bad workflow output never
+  // reaches a trusted renderer.
+  validate?: (data: unknown) => unknown;
 }
 
 // The harness/rib contract. Implementations live in @keelson/rib-* packages.
@@ -96,8 +165,49 @@ export interface Rib {
   displayName: string;
   registerTools?(ctx: RibContext): { registered: string[] };
   composeBundle?(ctx: RibContext): Promise<unknown>;
+  // Static view descriptors honored by the canvas-kind registry / Ribs panel.
+  // Each `key` must live under the rib's namespace (`rib:<id>` or
+  // `rib:<id>:*`); the harness rejects out-of-namespace keys at activation.
+  views?: readonly RibViewDescriptor[];
+  // Static action descriptors the Ribs panel renders as buttons. Each `type`
+  // is dispatched to `onAction`.
+  actions?: readonly RibActionDescriptor[];
+  // Workflow definitions the rib contributes to the catalog at activation,
+  // optionally each bound to a rib-namespaced snapshot key.
+  contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
+  // Inbound action handler reached via POST /api/ribs/:id/action.
+  onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
+  // Auth-status probe surfaced in GET /api/ribs (and, optionally, doctor).
+  authStatus?(ctx: RibContext): Promise<RibAuthStatus> | RibAuthStatus;
   // Sync or async — the harness awaits the returned promise (if any)
   // during shutdown so ribs holding sockets, watchers, or child
   // processes can tear down cleanly before db close.
   dispose?(): void | Promise<void>;
 }
+
+// Wire shape for GET /api/ribs — what the SPA consumes to discover active ribs
+// without an App.tsx edit. `views`/`actions` are always present (possibly
+// empty); `auth` is present only when the rib declares an `authStatus` probe.
+export const ribSummarySchema = z
+  .object({
+    id: ribIdSchema,
+    displayName: ribDisplayNameSchema,
+    registered: z.array(z.string()),
+    views: z.array(ribViewDescriptorSchema),
+    actions: z.array(ribActionDescriptorSchema),
+    hasOnAction: z.boolean(),
+    auth: ribAuthStatusSchema.optional(),
+  })
+  .strict();
+export type RibSummary = z.infer<typeof ribSummarySchema>;
+
+export const listRibsResponseSchema = z.object({ ribs: z.array(ribSummarySchema) }).strict();
+export type ListRibsResponse = z.infer<typeof listRibsResponseSchema>;
+
+// Wire shape for the POST /api/ribs/:id/action response — the discriminated
+// RibActionResult the rib's onAction returns.
+export const ribActionResponseSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), data: z.unknown().optional() }).strict(),
+  z.object({ ok: z.literal(false), error: z.string() }).strict(),
+]);
+export type RibActionResponse = z.infer<typeof ribActionResponseSchema>;

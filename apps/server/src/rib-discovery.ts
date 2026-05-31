@@ -14,7 +14,16 @@ export interface DiscoverRibsOptions {
   root?: string;
 }
 
-const HOOK_FIELDS = ["registerTools", "composeBundle", "dispose"] as const;
+const HOOK_FIELDS = [
+  "registerTools",
+  "composeBundle",
+  "dispose",
+  "contributeWorkflows",
+  "onAction",
+  "authStatus",
+] as const;
+
+const ARRAY_FIELDS = ["views", "actions"] as const;
 
 export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Record<string, Rib>> {
   const root = opts.root ?? join(process.cwd(), "node_modules", "@keelson");
@@ -83,6 +92,15 @@ export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Reco
     if (badHook) {
       console.warn(
         `[keelson] discovered '${name}': '${badHook}' is present but not a function; skipping`,
+      );
+      continue;
+    }
+    const badArray = ARRAY_FIELDS.find(
+      (k) => candidate[k] !== undefined && !Array.isArray(candidate[k]),
+    );
+    if (badArray) {
+      console.warn(
+        `[keelson] discovered '${name}': '${badArray}' is present but not an array; skipping`,
       );
       continue;
     }
