@@ -226,6 +226,36 @@ describe("rib workflow contribution + binding", () => {
     expect(bindings.has(catalogDef!)).toBe(false);
   });
 
+  test("binding resolves correctly across catalog hot-reloads (add/remove project shadow)", async () => {
+    const { ribs } = await makeRig();
+    const { definitions, bindings } = prepareRibWorkflows(ribs.workflowContributions);
+    const ribDef = definitions.find((d) => d.name === "v2-live");
+    expect(ribDef).toBeDefined();
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir, extra: definitions });
+    // The run path does `bindings.get(catalog.get(name))` — model that exactly.
+    const resolved = () => {
+      const def = catalog.get("v2-live");
+      return def ? bindings.get(def) : undefined;
+    };
+
+    // 1. No project file: catalog resolves the rib def → binding present.
+    expect(resolved()).toBeDefined();
+
+    // 2. Project file added after boot: catalog rescans (file set changed),
+    //    resolves the project def → no binding, so the project run can't write
+    //    the rib's snapshot key.
+    writeFileSync(
+      join(wfDir, "v2-live.yaml"),
+      "name: v2-live\ndescription: project override\nnodes:\n  - id: a\n    bash: echo hi\n",
+    );
+    expect(catalog.get("v2-live")?.description).toBe("project override");
+    expect(resolved()).toBeUndefined();
+
+    // 3. Project file removed: catalog re-resolves the rib def → binding back.
+    rmSync(join(wfDir, "v2-live.yaml"));
+    expect(resolved()).toBeDefined();
+  });
+
   test("two ribs contributing the same workflow name keep the accepted def's binding", async () => {
     const contributions = [
       {

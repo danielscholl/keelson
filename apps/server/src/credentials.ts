@@ -101,15 +101,22 @@ export function getCredential(serviceId: string): Promise<string | undefined> {
 }
 
 // Build a read-only credential reader scoped to one rib's namespace. The rib
-// passes a bare serviceId; the accessor resolves it under `rib-<ribId>-…` so a
-// rib reads only the secrets stored for it.
+// passes a bare serviceId; the accessor resolves it under `rib_<ribId>_<serviceId>`
+// so a rib reads only the secrets stored for it.
+//
+// Injectivity (no two distinct (ribId, serviceId) pairs share an account):
+// both components are validated kebab-case — `^[a-z][a-z0-9-]*$`, which cannot
+// contain `_` — so `_` is a delimiter that appears *only* between the three
+// fixed parts. The explicit `_`-guards below make that property local rather
+// than dependent on the shared schemas staying strict.
 export function createRibCredentialAccessor(
   store: CredentialStore,
   ribId: string,
 ): (serviceId: string) => Promise<string | undefined> {
   ribIdSchema.parse(ribId);
+  if (ribId.includes("_")) throw new Error(`rib id '${ribId}' must not contain '_'`);
   return (serviceId: string) => {
-    if (!credentialServiceIdSchema.safeParse(serviceId).success) {
+    if (!credentialServiceIdSchema.safeParse(serviceId).success || serviceId.includes("_")) {
       return Promise.reject(new Error(`invalid rib credential serviceId '${serviceId}'`));
     }
     return store.get(`rib_${ribId}_${serviceId}`);

@@ -1785,12 +1785,14 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     };
   }
   // When this run's workflow is bound to a rib-owned key (M8), fan the same
-  // structured output to it. Bindings are keyed by the definition *object* the
-  // catalog stores, so a project workflow that shadows the name (or a same-name
-  // rib collision) resolves to a different object here and finds no binding —
-  // the rib's key is only ever driven by the rib's own workflow. The rib-owned
-  // key was registered at activation and persists past the run, so it's never
-  // unregistered here — only the run-scoped key is. `publish` recomposes
+  // structured output to it. Bindings are keyed by the definition *object*, and
+  // `workflow` here is the object the catalog resolved for this run at start
+  // (`catalog.get(name)` in both run entry points). So a project file that
+  // shadows the name — even one added after boot, since the catalog hot-reloads
+  // and returns the project's object — resolves to a different object and finds
+  // no binding; the rib's key is only ever driven by the rib's own definition.
+  // That key was registered at activation and persists past the run, so it's
+  // never unregistered here — only the run-scoped key is. `publish` recomposes
   // (fail-closed) internally.
   const ribBinding = ribWorkflowBindings?.get(workflow);
   const publishRun: ((value: unknown) => void) | undefined =
