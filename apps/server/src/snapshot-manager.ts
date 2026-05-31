@@ -63,14 +63,16 @@ class SnapshotManagerImpl implements SnapshotManager {
     const promise = (async (): Promise<SnapshotFrame<unknown> | undefined> => {
       try {
         const raw = await compose();
+        // Drop stale completion if key was unregistered/re-registered/disposed
+        // mid-compose — before validating, so a frame that will be discarded
+        // never runs validator logic or emits a misleading failure log.
+        if (this.disposed || this.composers.get(key) !== compose) {
+          return undefined;
+        }
         // Fail-closed validate-on-publish: an invalid payload throws here and
         // is handled exactly like a throwing composer below — prior `latest`
         // kept, nothing broadcast — so a bad frame never reaches a renderer.
         const data = validate ? validate(raw) : raw;
-        // Drop stale completion if key was unregistered/re-registered.
-        if (this.disposed || this.composers.get(key) !== compose) {
-          return undefined;
-        }
         const nextVersion = (this.versions.get(key) ?? -1) + 1;
         const frame: SnapshotFrame<unknown> = {
           type: "snapshot_update",

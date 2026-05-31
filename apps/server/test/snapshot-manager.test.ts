@@ -267,6 +267,26 @@ describe("SnapshotManager", () => {
       expect(third?.version).toBe(1);
     });
 
+    test("does not validate a stale result whose key was unregistered mid-compose", async () => {
+      const { subscribers } = recordingSubscribers();
+      const mgr = createSnapshotManager(subscribers);
+      let validateCalls = 0;
+      let resolveCompose!: (v: number) => void;
+      const off = mgr.register("k", () => new Promise<number>((r) => (resolveCompose = r)), {
+        validate: (d) => {
+          validateCalls++;
+          return d;
+        },
+      });
+      const inflight = mgr.recompose<number>("k");
+      // Unregister while the compose is still in flight, then resolve it.
+      off();
+      resolveCompose(1);
+      expect(await inflight).toBeUndefined();
+      // The stale frame is dropped by the guard before validate runs.
+      expect(validateCalls).toBe(0);
+    });
+
     test("a key registered without a validator publishes unchanged", async () => {
       const rec = recordingSubscribers();
       const mgr = createSnapshotManager(rec.subscribers);
