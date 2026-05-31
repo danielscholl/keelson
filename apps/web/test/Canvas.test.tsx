@@ -20,6 +20,14 @@ mock.module("../src/api.ts", () => ({
   getRunArtifact: (runId: string, path: string) => artifactImpl(runId, path),
 }));
 
+// Stub the graph renderer so the dispatch is testable without mounting
+// ReactFlow under happy-dom; the layout itself is covered in viewGraphLayout.test.ts.
+mock.module("../src/components/Canvas/GraphView.tsx", () => ({
+  GraphView: ({ view }: { view: { nodes: unknown[] } }) => (
+    <div data-testid="graph-view">{view.nodes.length} nodes</div>
+  ),
+}));
+
 const { CanvasProvider, useCanvas } = await import("../src/components/Canvas/CanvasHost.tsx");
 const { RunTrace } = await import("../src/components/Workflows/RunTrace.tsx");
 const { ToolCallsBlock } = await import("../src/components/Chat/ToolCallsBlock.tsx");
@@ -102,14 +110,74 @@ describe("CanvasProvider / useCanvas", () => {
     expect(screen.getByRole("dialog").textContent).toContain("DOCKED FOOTER");
   });
 
-  test("reserved kinds render a not-yet-supported placeholder", () => {
+  test("the reserved html kind renders a not-yet-supported placeholder", () => {
     render(
       <CanvasProvider>
-        <Opener doc={{ kind: "view", source: { type: "inline", text: "x" }, title: "v" }} />
+        <Opener doc={{ kind: "html", source: { type: "inline", text: "<b>x</b>" }, title: "h" }} />
       </CanvasProvider>,
     );
     fireEvent.click(screen.getByText("open"));
-    expect(screen.getByRole("dialog").textContent).toContain("not yet supported");
+    expect(screen.getByRole("dialog").textContent).toContain("aren't supported yet");
+  });
+
+  test("inline view table renders headers and rows", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "table",
+          columns: [{ key: "name", label: "Name" }, { key: "status" }],
+          rows: [{ name: "alpha", status: "ok" }],
+        }),
+      },
+      title: "tbl",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Name");
+    expect(dialog.textContent).toContain("alpha");
+    expect(dialog.textContent).toContain("ok");
+  });
+
+  test("inline view graph dispatches to the graph renderer", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "graph",
+          nodes: [{ id: "a", label: "A" }, { id: "b" }],
+          edges: [{ source: "a", target: "b" }],
+        }),
+      },
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    expect(screen.getByTestId("graph-view").textContent).toContain("2 nodes");
+  });
+
+  test("malformed view data fails closed to an error note", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: { type: "inline", text: JSON.stringify({ view: "pie", slices: [] }) },
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    expect(screen.getByRole("dialog").textContent).toContain("didn't match a known view type");
   });
 
   test("artifact source fetches and renders content", async () => {

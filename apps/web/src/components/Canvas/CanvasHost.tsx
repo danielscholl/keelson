@@ -1,9 +1,10 @@
-import type { CanvasDocument } from "@keelson/shared";
+import type { CanvasDocument, CanvasSource } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { getRunArtifact } from "../../api.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
+import { ViewBody } from "./ViewBody.tsx";
 
 // Optional host-side extras passed when opening. `footer` is a live ReactNode
 // (e.g. an approval composer), kept out of the serializable CanvasDocument so
@@ -97,33 +98,62 @@ function CanvasDrawer({
   );
 }
 
+// Closed canvas-kind registry: every CanvasKind has an explicit branch, and a
+// new kind makes this a compile error rather than a silent blank render. `html`
+// stays reserved until the iframe-origin security pass.
 function CanvasBody({ doc }: { doc: CanvasDocument }) {
-  if (doc.kind !== "markdown") {
-    return (
-      <p className="canvas-drawer-note">This canvas type ('{doc.kind}') is not yet supported.</p>
-    );
+  switch (doc.kind) {
+    case "markdown":
+      return <MarkdownBody source={doc.source} />;
+    case "view":
+      // Key by source so switching sources remounts with fresh state.
+      return <ViewBody key={sourceKey(doc.source)} source={doc.source} />;
+    case "html":
+      return (
+        <p className="canvas-drawer-note">
+          HTML canvases aren't supported yet — pending the iframe-origin security review.
+        </p>
+      );
+    default: {
+      const exhaustive: never = doc.kind;
+      return exhaustive;
+    }
   }
-  if (doc.source.type === "inline") {
-    return <MarkdownContent source={doc.source.text} />;
+}
+
+function sourceKey(source: CanvasSource): string {
+  switch (source.type) {
+    case "inline":
+      return `inline:${source.text}`;
+    case "artifact":
+      return `artifact:${source.runId}/${source.path}`;
+    case "snapshot":
+      return `snapshot:${source.key}`;
   }
-  if (doc.source.type === "artifact") {
+}
+
+function MarkdownBody({ source }: { source: CanvasSource }) {
+  if (source.type === "inline") {
+    return <MarkdownContent source={source.text} />;
+  }
+  if (source.type === "artifact") {
     // Key by identity so switching to a different artifact while the drawer is
     // open remounts with fresh loading state (no stale-content flash).
     return (
       <ArtifactBody
-        key={`${doc.source.runId}/${doc.source.path}`}
-        runId={doc.source.runId}
-        path={doc.source.path}
+        key={`${source.runId}/${source.path}`}
+        runId={source.runId}
+        path={source.path}
       />
     );
   }
-  if (doc.source.type === "snapshot") {
+  if (source.type === "snapshot") {
     // Key by the snapshot key so switching keys remounts with fresh state.
-    return <SnapshotBody key={doc.source.key} snapshotKey={doc.source.key} />;
+    return <SnapshotBody key={source.key} snapshotKey={source.key} />;
   }
   // CanvasSource is inline | artifact | snapshot — all handled above. A new
   // member makes this a compile error rather than a silent blank render.
-  const exhaustive: never = doc.source;
+  const exhaustive: never = source;
   return exhaustive;
 }
 
@@ -189,10 +219,10 @@ function SnapshotBody({ snapshotKey }: { snapshotKey: string }) {
   return <MarkdownContent source={snapshotToMarkdown(snapshot.data)} />;
 }
 
-// Coerce a snapshot's opaque `data` to markdown. A plain string or a
-// `{ markdown }` / `{ text }` object renders directly; any other shape is shown
-// as a fenced JSON block so a structured payload stays visible until the typed
-// `view` kinds (#65) render it properly.
+// Coerce a snapshot's opaque `data` to markdown for a `markdown`-kind canvas. A
+// plain string or a `{ markdown }` / `{ text }` object renders directly; any
+// other shape is shown as a fenced JSON block. A producer wanting structured
+// rendering uses a `view`-kind canvas (see ViewBody) instead.
 function snapshotToMarkdown(data: unknown): string {
   if (typeof data === "string") return data;
   if (data !== null && typeof data === "object") {

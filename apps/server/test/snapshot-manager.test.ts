@@ -230,6 +230,53 @@ describe("SnapshotManager", () => {
     });
   });
 
+  describe("validate-on-publish (M7)", () => {
+    test("caches and broadcasts the validator's parsed return", async () => {
+      const rec = recordingSubscribers();
+      const mgr = createSnapshotManager(rec.subscribers);
+      mgr.register("k", () => ({ n: "7" }), {
+        validate: (d) => ({ n: Number((d as { n: string }).n) }),
+      });
+      const frame = await mgr.recompose("k");
+      expect(frame?.data).toEqual({ n: 7 });
+      expect(rec.broadcasts).toHaveLength(1);
+      expect(mgr.latest("k")?.data).toEqual({ n: 7 });
+    });
+
+    test("an invalid payload fails closed — no broadcast, prior latest kept", async () => {
+      const rec = recordingSubscribers();
+      const mgr = createSnapshotManager(rec.subscribers);
+      let attempt = 0;
+      mgr.register("k", () => ++attempt, {
+        validate: (d) => {
+          if (d === 2) throw new Error("invalid");
+          return d;
+        },
+      });
+      const first = await mgr.recompose<number>("k");
+      expect(first?.data).toBe(1);
+      const second = await mgr.recompose<number>("k");
+      expect(second).toBeUndefined();
+      // Prior good frame is preserved; the invalid payload never broadcast.
+      expect(mgr.latest<number>("k")?.data).toBe(1);
+      expect(mgr.latest<number>("k")?.version).toBe(0);
+      expect(rec.broadcasts).toHaveLength(1);
+      // Recovery: a subsequent valid payload publishes normally.
+      const third = await mgr.recompose<number>("k");
+      expect(third?.data).toBe(3);
+      expect(third?.version).toBe(1);
+    });
+
+    test("a key registered without a validator publishes unchanged", async () => {
+      const rec = recordingSubscribers();
+      const mgr = createSnapshotManager(rec.subscribers);
+      mgr.register("k", () => ({ anything: true }));
+      const frame = await mgr.recompose("k");
+      expect(frame?.data).toEqual({ anything: true });
+      expect(rec.broadcasts).toHaveLength(1);
+    });
+  });
+
   describe("dispose", () => {
     test("clears state and closes all subscribers", async () => {
       const rec = recordingSubscribers();

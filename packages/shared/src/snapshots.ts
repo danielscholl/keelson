@@ -32,13 +32,26 @@ export type SnapshotFrame<T = unknown> = {
 // manager always awaits the return.
 export type SnapshotComposer<T> = () => Promise<T> | T;
 
+// Validates a freshly-composed payload before it is cached and broadcast.
+// Throws on an invalid payload (a Zod `.parse` is the canonical form). The
+// manager runs it inside its compose try/catch, so a throw fails closed:
+// the bad frame is dropped, the prior `latest` is preserved, and nothing is
+// broadcast — an invalid frame never reaches a trusted renderer.
+export type SnapshotValidator<T> = (data: unknown) => T;
+
 // Multi-consumer snapshot surface owned by the harness composition root.
 // Ribs publish snapshots either through the typed `composeBundle` seam in
 // the `Rib` contract or imperatively via `RibContext.getSnapshotManager()`.
 export interface SnapshotManager {
   // Register a compose function under a key. Throws on duplicate key — call
-  // the returned unregister handle before re-registering.
-  register<T>(key: string, compose: SnapshotComposer<T>): () => void;
+  // the returned unregister handle before re-registering. An optional
+  // `validate` runs on each composed payload before caching/broadcast; an
+  // invalid payload fails closed (see SnapshotValidator).
+  register<T>(
+    key: string,
+    compose: SnapshotComposer<T>,
+    opts?: { validate?: SnapshotValidator<T> },
+  ): () => void;
 
   // Recompose a registered key, broadcast a `snapshot_update` frame to
   // subscribers, and cache the result for future `latest()` reads.

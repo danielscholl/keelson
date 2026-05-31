@@ -6,11 +6,17 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { SnapshotComposer, SnapshotFrame, SnapshotManager } from "@keelson/shared";
+import type {
+  SnapshotComposer,
+  SnapshotFrame,
+  SnapshotManager,
+  SnapshotValidator,
+} from "@keelson/shared";
 import { createSnapshotSubscribers, type SnapshotSubscribers } from "./snapshot-subscribers.ts";
 
 class SnapshotManagerImpl implements SnapshotManager {
   private readonly composers = new Map<string, SnapshotComposer<unknown>>();
+  private readonly validators = new Map<string, SnapshotValidator<unknown>>();
   private readonly cache = new Map<string, SnapshotFrame<unknown>>();
   private readonly versions = new Map<string, number>();
   private readonly inflight = new Map<string, Promise<SnapshotFrame<unknown> | undefined>>();
@@ -18,7 +24,11 @@ class SnapshotManagerImpl implements SnapshotManager {
 
   constructor(private readonly subscribers: SnapshotSubscribers) {}
 
-  register<T>(key: string, compose: SnapshotComposer<T>): () => void {
+  register<T>(
+    key: string,
+    compose: SnapshotComposer<T>,
+    opts?: { validate?: SnapshotValidator<T> },
+  ): () => void {
     if (this.disposed) throw new Error("SnapshotManager has been disposed");
     if (!key) throw new Error("snapshot key must be a non-empty string");
     if (this.composers.has(key)) {
@@ -26,12 +36,14 @@ class SnapshotManagerImpl implements SnapshotManager {
     }
     const erased = compose as SnapshotComposer<unknown>;
     this.composers.set(key, erased);
+    if (opts?.validate) this.validators.set(key, opts.validate as SnapshotValidator<unknown>);
     return () => {
       // Identity check guards against double-unregister and against a stale
       // handle calling after the key was re-registered with a new composer.
       if (this.composers.get(key) === erased) {
         this.inflight.delete(key);
         this.composers.delete(key);
+        this.validators.delete(key);
         this.cache.delete(key);
         this.versions.delete(key);
         this.subscribers.closeKey(key, 1000, "snapshot key unregistered");
@@ -47,9 +59,14 @@ class SnapshotManagerImpl implements SnapshotManager {
     }
     const compose = this.composers.get(key);
     if (!compose) return undefined;
+    const validate = this.validators.get(key);
     const promise = (async (): Promise<SnapshotFrame<unknown> | undefined> => {
       try {
-        const data = await compose();
+        const raw = await compose();
+        // Fail-closed validate-on-publish: an invalid payload throws here and
+        // is handled exactly like a throwing composer below — prior `latest`
+        // kept, nothing broadcast — so a bad frame never reaches a renderer.
+        const data = validate ? validate(raw) : raw;
         // Drop stale completion if key was unregistered/re-registered.
         if (this.disposed || this.composers.get(key) !== compose) {
           return undefined;
@@ -107,6 +124,7 @@ class SnapshotManagerImpl implements SnapshotManager {
     await Promise.allSettled(Array.from(this.inflight.values()));
     this.inflight.clear();
     this.composers.clear();
+    this.validators.clear();
     this.cache.clear();
     this.versions.clear();
     this.subscribers.closeAll(1000, "server shutting down");
