@@ -131,6 +131,7 @@ const workflowHandlerOptions: WorkflowsHandlerOptions = {
   projectsStore,
   ...(promptHandler ? { promptHandler } : {}),
   memoryStore,
+  snapshotManager,
 };
 const workflowController = createWorkflowController(
   workflowHandlerOptions,
