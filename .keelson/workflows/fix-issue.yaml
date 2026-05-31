@@ -373,6 +373,8 @@ nodes:
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
       - After each fix, re-run `bash $ARTIFACTS_DIR/verify.sh` to confirm.
+      - COMMIT the fixes before handing off — staging alone is dropped, since
+        create-pr later pushes HEAD: `git add <files>; git commit -m "fix: address validation failures"`.
 
   - id: revalidate
     depends_on: [fix-validation]
@@ -492,11 +494,36 @@ nodes:
       - If checks pass and a commit was made, `git push`.
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 8: REPORT
+  # PHASE 8: RE-VALIDATE AFTER SELF-FIX
+  # self-fix can commit + push code the pre-PR `revalidate` never saw, so re-run
+  # the project's own checks here. Exits 0 so `report` always renders; the report
+  # then surfaces this node's REAL status instead of assuming PASS.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: post-fix-validate
+    depends_on: [self-fix]
+    timeout: 600000
+    bash: |
+      VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
+      if [ ! -f "$VERIFY" ]; then
+        echo "VALIDATION_STATUS: FAIL — no verify.sh recorded"
+        exit 0
+      fi
+      echo "=== PROJECT CHECKS (after self-fix) ==="
+      bash -e -o pipefail "$VERIFY" 2>&1
+      STATUS=$?
+      if [ $STATUS -eq 0 ]; then
+        echo "VALIDATION_STATUS: PASS"
+      else
+        echo "VALIDATION_STATUS: FAIL — self-fix left checks broken; the pushed PR needs attention"
+      fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 9: REPORT
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: report
-    depends_on: [self-fix]
+    depends_on: [post-fix-validate]
     model: auto
     context: fresh
     prompt: |
@@ -507,7 +534,7 @@ nodes:
       - Issue: $fetch-issue.output
       - Classification: $classify.output
       - Plan summary: see `$ARTIFACTS_DIR/plan.md`
-      - Validation (post-fix): $revalidate.output
+      - Validation (after self-fix): $post-fix-validate.output
       - Self-review findings: $self-review.output
       - Self-fix outcome: $self-fix.output
 
@@ -527,8 +554,8 @@ nodes:
       -- What changed --
       {2-4 bullets}
 
-      -- Validation (the project's own checks) --
-      project checks: PASS
+      -- Validation (the project's own checks, after self-fix) --
+      {PASS or FAIL — read it from the post-fix-validate output above; do NOT assume PASS}
 
       -- Self-review --
       {one line per CRITICAL/HIGH finding, with "fixed" or "deferred"}

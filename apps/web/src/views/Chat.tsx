@@ -403,6 +403,9 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   const [workflowNames, setWorkflowNames] = useState<
     { name: string; description?: string }[] | null
   >(null);
+  // Guards the lazy fetch so rapid typing can't fire overlapping listWorkflows()
+  // calls while the first is still in flight.
+  const workflowNamesFetchingRef = useRef(false);
 
   // Save-to-memory modal state. Open when a target message is set; the
   // submitting flag disables the modal's submit button + the per-message
@@ -1233,6 +1236,8 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   // A failed fetch leaves the list null — the picker just shows no suggestions.
   useEffect(() => {
     if (workflowRunPartial === null || workflowNames !== null) return;
+    if (workflowNamesFetchingRef.current) return;
+    workflowNamesFetchingRef.current = true;
     let cancelled = false;
     void (async () => {
       try {
@@ -1247,6 +1252,10 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
         );
       } catch {
         // Leave names null; type-ahead simply offers nothing this session.
+      } finally {
+        // On failure names stay null, so clearing the guard lets a later
+        // keystroke retry; on success the names!==null check above takes over.
+        workflowNamesFetchingRef.current = false;
       }
     })();
     return () => {
