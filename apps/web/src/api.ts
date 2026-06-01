@@ -152,6 +152,28 @@ export async function putProjectNotebook(
   });
 }
 
+// `previousContent` is the notebook before the append, so a one-click Undo can
+// restore it with a follow-up putProjectNotebook (last-write-wins).
+export interface ProjectNotebookAppend extends ProjectNotebook {
+  previousContent: string;
+}
+
+export async function appendProjectNotebook(
+  projectId: string,
+  entry: string,
+  section?: string,
+): Promise<ProjectNotebookAppend> {
+  return apiRequest<ProjectNotebookAppend>(
+    `/api/projects/${encodeURIComponent(projectId)}/notebook/append`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ entry, ...(section !== undefined ? { section } : {}) }),
+      label: `/api/projects/${projectId}/notebook/append`,
+    },
+  );
+}
+
 // Returns null on 404 so callers can distinguish "server lost the conversation"
 // from a real network/server error.
 export async function getConversation(id: string): Promise<Conversation | null> {

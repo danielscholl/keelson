@@ -23,14 +23,14 @@ import {
   getConversation,
   listProjects,
   listWorkflows,
-  rememberChatMessage,
   startWorkflowRun,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
 import { Sidebar } from "../components/Chat/Sidebar.tsx";
-import { SaveToMemoryModal } from "../components/Memory/SaveToMemoryModal.tsx";
+import { AddToNotebookModal } from "../components/Memory/AddToNotebookModal.tsx";
 import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
+import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import {
   createReconnectingChatWs,
   type ReconnectingChatWsHandle,
@@ -407,15 +407,11 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   // calls while the first is still in flight.
   const workflowNamesFetchingRef = useRef(false);
 
-  // Save-to-memory modal state. Open when a target message is set; the
-  // submitting flag disables the modal's submit button + the per-message
-  // Save buttons so a double-click can't fire twice.
-  const [memoryTarget, setMemoryTarget] = useState<{
-    id: string;
-    role: "user" | "assistant";
-    content: string;
-  } | null>(null);
-  const [savingMemory, setSavingMemory] = useState(false);
+  // Add-to-notebook state. The modal opens when a target entry string is set
+  // (the "Edit…" path); the one-click button appends directly. `saving` gates
+  // both so a double-click can't fire two appends.
+  const [notebookTarget, setNotebookTarget] = useState<string | null>(null);
+  const { appendWithUndo, saving: savingNotebook } = useNotebookAppend(activeProjectId);
 
   // Seed + name from a lane Ask handoff. Captured on mount when no convo
   // is hydrated; doSend reads + clears them on the createConversation call
@@ -1717,11 +1713,10 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
                         m.content
                       )}
                     </div>
-                    {/* Save-to-memory only on persisted, non-streaming, non-system
-                        messages. The server route looks up the id in
-                        ConversationStore; until the done-frame reconcile above
-                        swaps the client-side `newId()` for the persisted UUID,
-                        the lookup would 404. `isPersistedMessageId` is the gate. */}
+                    {/* Add-to-notebook on persisted, non-streaming, non-system
+                        messages. Gated on isPersistedMessageId so the buttons
+                        only appear once the done-frame reconcile has swapped the
+                        client-side `newId()` for the persisted UUID. */}
                     {m.role !== "system" &&
                       m.role !== "command" &&
                       !m.streaming &&
@@ -1732,17 +1727,20 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
                           <button
                             type="button"
                             className="chat-message-action"
-                            title="Save this message to memory for review"
-                            disabled={savingMemory}
-                            onClick={() =>
-                              setMemoryTarget({
-                                id: m.id,
-                                role: m.role as "user" | "assistant",
-                                content: m.content,
-                              })
-                            }
+                            title="Append this message to the project notebook"
+                            disabled={savingNotebook}
+                            onClick={() => void appendWithUndo(m.content)}
                           >
-                            ★ Save to memory
+                            📓 Add to notebook
+                          </button>
+                          <button
+                            type="button"
+                            className="chat-message-action"
+                            title="Edit before adding to the notebook"
+                            disabled={savingNotebook}
+                            onClick={() => setNotebookTarget(m.content)}
+                          >
+                            ✎ Edit…
                           </button>
                         </div>
                       )}
@@ -1879,43 +1877,15 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
         />
       </div>
 
-      {memoryTarget !== null && conversationId !== null && (
-        <SaveToMemoryModal
+      {notebookTarget !== null && (
+        <AddToNotebookModal
           open={true}
-          conversationId={conversationId}
-          messageId={memoryTarget.id}
-          role={memoryTarget.role}
-          initialContent={memoryTarget.content}
-          submitting={savingMemory}
-          onClose={() => setMemoryTarget(null)}
-          onSubmit={async (draft) => {
-            setSavingMemory(true);
-            try {
-              const verdict = await rememberChatMessage(conversationId, memoryTarget.id, draft);
-              if (verdict.status === "ok") {
-                toast.push({
-                  kind: "ok",
-                  message: "Saved to memory — review it in the Memory tab.",
-                });
-                setMemoryTarget(null);
-              } else if (verdict.status === "deduped") {
-                toast.push({
-                  kind: "info",
-                  message: "Already saved.",
-                });
-                setMemoryTarget(null);
-              } else {
-                toast.push({
-                  kind: "error",
-                  message: `Blocked: ${verdict.reason}. Try editing the content.`,
-                });
-              }
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              toast.push({ kind: "error", message: `Save failed: ${msg}` });
-            } finally {
-              setSavingMemory(false);
-            }
+          initialEntry={notebookTarget}
+          submitting={savingNotebook}
+          onClose={() => setNotebookTarget(null)}
+          onSubmit={async (entry, section) => {
+            const ok = await appendWithUndo(entry, section);
+            if (ok) setNotebookTarget(null);
           }}
         />
       )}

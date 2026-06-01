@@ -3,16 +3,28 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 
 export type ToastKind = "ok" | "error" | "info";
 
+// An optional one-click action (e.g. Undo) rendered beside the dismiss button.
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastEntry {
   id: number;
   kind: ToastKind;
   message: string;
   // ttlMs of 0 means sticky — caller can dismiss manually.
   ttlMs: number;
+  action?: ToastAction;
 }
 
 interface ToastApi {
-  push: (toast: { kind: ToastKind; message: string; ttlMs?: number }) => number;
+  push: (toast: {
+    kind: ToastKind;
+    message: string;
+    ttlMs?: number;
+    action?: ToastAction;
+  }) => number;
   dismiss: (id: number) => void;
 }
 
@@ -53,10 +65,13 @@ export function ToastHost({ children }: { children: ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const push = useCallback<ToastApi["push"]>(({ kind, message, ttlMs }) => {
+  const push = useCallback<ToastApi["push"]>(({ kind, message, ttlMs, action }) => {
     const id = ++idRef.current;
     const ttl = ttlMs ?? DEFAULT_TTL_BY_KIND[kind];
-    setToasts((prev) => [...prev, { id, kind, message, ttlMs: ttl }]);
+    setToasts((prev) => [
+      ...prev,
+      { id, kind, message, ttlMs: ttl, ...(action ? { action } : {}) },
+    ]);
     if (ttl > 0) {
       const timer = setTimeout(() => {
         timersRef.current.delete(id);
@@ -84,6 +99,18 @@ export function ToastHost({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div key={t.id} className={`keelson-toast keelson-toast-${t.kind}`}>
             <span className="toast-message">{t.message}</span>
+            {t.action ? (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => {
+                  t.action?.onClick();
+                  dismiss(t.id);
+                }}
+              >
+                {t.action.label}
+              </button>
+            ) : null}
             <button
               type="button"
               className="toast-close"

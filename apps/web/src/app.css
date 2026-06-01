@@ -1674,6 +1674,21 @@ button.tab:focus-visible {
   flex: 1 1 0;
 }
 
+.toast-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.toast-action:hover {
+  background: var(--card-2);
+}
+
 .toast-close {
   background: transparent;
   border: none;
