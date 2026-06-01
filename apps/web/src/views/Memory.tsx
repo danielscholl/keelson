@@ -156,10 +156,11 @@ function NotebookPanel() {
     }
   }, [activeProjectId, content, toast]);
 
-  // Tidy operates on the server-stored notebook, so a dirty editor is disabled
-  // (Save first) to avoid clobbering unsaved edits with the tidied result.
+  // Tidy operates on the server-stored notebook, so it's gated on a settled
+  // editor: a dirty buffer (Save first, to avoid clobbering unsaved edits) and an
+  // in-flight load (a tidy POST must not race the initial GET) both block it.
   const handleTidy = useCallback(async () => {
-    if (!activeProjectId) return;
+    if (!activeProjectId || loading) return;
     const projectId = activeProjectId;
     setTidying(true);
     try {
@@ -201,7 +202,7 @@ function NotebookPanel() {
     } finally {
       setTidying(false);
     }
-  }, [activeProjectId, toast]);
+  }, [activeProjectId, loading, toast]);
 
   const overBudget = injectedLength(content) > NOTEBOOK_INJECTION_BUDGET;
 
@@ -241,7 +242,7 @@ function NotebookPanel() {
           <button
             type="button"
             className="memory-refresh"
-            disabled={dirty || saving || tidying}
+            disabled={loading || dirty || saving || tidying}
             onClick={handleTidy}
             title={dirty ? "Save your edits before tidying." : "Archive the oldest log entries."}
           >
@@ -250,7 +251,7 @@ function NotebookPanel() {
           <button
             type="button"
             className="memory-refresh"
-            disabled={!dirty || saving || tidying}
+            disabled={loading || !dirty || saving || tidying}
             onClick={handleSave}
           >
             {saving ? "Saving…" : "Save"}

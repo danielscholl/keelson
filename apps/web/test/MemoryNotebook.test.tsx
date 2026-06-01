@@ -5,6 +5,10 @@ import { __resetProjectStoreForTests } from "../src/hooks/useActiveProject.ts";
 
 let savedContent: string | null = null;
 let loadedContent = "## Gotchas\n- existing note";
+let getNotebookImpl: () => Promise<{ content: string; updatedAt: string | null }> = async () => ({
+  content: loadedContent,
+  updatedAt: null,
+});
 let tidyCalls: string[] = [];
 let putCalls: Array<{ id: string; content: string }> = [];
 let tidyResponse = {
@@ -19,7 +23,7 @@ mock.module("../src/api.ts", () => ({
   listProjects: async () => [
     { id: "p1", name: "demo", rootPath: "/tmp/demo", createdAt: "2026-01-01T00:00:00Z" },
   ],
-  getProjectNotebook: async () => ({ content: loadedContent, updatedAt: null }),
+  getProjectNotebook: async () => getNotebookImpl(),
   putProjectNotebook: async (id: string, content: string) => {
     savedContent = content;
     putCalls.push({ id, content });
@@ -45,6 +49,7 @@ describe("Memory notebook panel", () => {
   beforeEach(() => {
     savedContent = null;
     loadedContent = "## Gotchas\n- existing note";
+    getNotebookImpl = async () => ({ content: loadedContent, updatedAt: null });
     tidyCalls = [];
     putCalls = [];
     tidyResponse = {
@@ -154,6 +159,25 @@ describe("Memory notebook panel", () => {
     });
     expect(await screen.findByText(/still over budget/)).toBeDefined();
     expect(screen.queryByText(/Already within budget/)).toBeNull();
+  });
+
+  test("Tidy is disabled while the notebook is still loading, then enables", async () => {
+    let resolveGet: (nb: { content: string; updatedAt: string | null }) => void = () => {};
+    getNotebookImpl = () =>
+      new Promise((resolve) => {
+        resolveGet = resolve;
+      });
+    await renderMemory();
+    const tidy = (await screen.findByRole("button", { name: "Tidy" })) as HTMLButtonElement;
+    expect(tidy.disabled).toBe(true);
+    await act(async () => {
+      resolveGet({ content: "## Log\n- ok", updatedAt: null });
+    });
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Tidy" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
   });
 
   test("every ## Archive section is excluded from the over-budget calc", async () => {
