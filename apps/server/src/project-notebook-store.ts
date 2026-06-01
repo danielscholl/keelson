@@ -194,6 +194,22 @@ export function injectionView(content: string): string {
   return renderSections(parseSections(content).filter((s) => !isArchiveHeader(s))).trim();
 }
 
+export const NOTEBOOK_SECTION_HEADER = "## Project notebook";
+
+// The notebook formatted for injection into a system prompt — chat turns and
+// workflow prompt nodes share this so both surfaces see identical context. The
+// slice is a residual safety net for when even the un-archived view exceeds the
+// budget.
+export function formatNotebookSection(content: string): string | undefined {
+  const visible = injectionView(content);
+  if (visible.length === 0) return undefined;
+  const body =
+    visible.length > NOTEBOOK_INJECTION_BUDGET
+      ? `${visible.slice(0, NOTEBOOK_INJECTION_BUDGET - 1)}…\n\n(notebook truncated — run Tidy)`
+      : visible;
+  return `${NOTEBOOK_SECTION_HEADER}\n\nDurable notes about this project, accumulated as you work. Treat as trusted background context.\n\n${body}`;
+}
+
 export interface TidyOptions {
   budget?: number;
   minRecent?: number;

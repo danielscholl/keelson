@@ -75,6 +75,9 @@ export {
   nodeMemoryRecallSchema,
   nodeMemoryWritebackSchema,
 } from "./memory-block.ts";
+export type { NodeNotebookBlock } from "./notebook-block.ts";
+// Notebook block
+export { nodeNotebookBlockSchema } from "./notebook-block.ts";
 export type {
   OutputSchema,
   OutputSchemaType,

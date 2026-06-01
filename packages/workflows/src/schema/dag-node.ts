@@ -17,6 +17,7 @@ import { isValidCommandName } from "./command-validation.ts";
 import { workflowNodeHooksSchema } from "./hooks.ts";
 import { loopNodeConfigSchema } from "./loop.ts";
 import { nodeMemoryBlockSchema } from "./memory-block.ts";
+import { nodeNotebookBlockSchema } from "./notebook-block.ts";
 import { outputSchemaSchema } from "./output-schema.ts";
 import { stepRetryConfigSchema } from "./retry.ts";
 
@@ -168,6 +169,7 @@ export const dagNodeBaseSchema = z.object({
   betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
   sandbox: sandboxSettingsSchema.optional(),
   memory: nodeMemoryBlockSchema.optional(),
+  notebook: nodeNotebookBlockSchema.optional(),
 });
 
 export type DagNodeBase = z.infer<typeof dagNodeBaseSchema>;
@@ -544,6 +546,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.trigger_rule !== undefined ? { trigger_rule: data.trigger_rule } : {}),
       ...(data.idle_timeout !== undefined ? { idle_timeout: data.idle_timeout } : {}),
       ...(data.memory !== undefined ? { memory: data.memory } : {}),
+      ...(data.notebook !== undefined ? { notebook: data.notebook } : {}),
       ...(data.output_schema !== undefined ? { output_schema: data.output_schema } : {}),
     };
 

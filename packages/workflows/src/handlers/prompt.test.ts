@@ -85,6 +85,7 @@ interface BuildCtxOptions {
   nodeId?: string;
   workflowProvider?: string;
   workflowModel?: string;
+  projectId?: string;
 }
 
 function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
@@ -107,6 +108,7 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     resolvedBody: body,
     rawBody: body,
     workflow,
+    ...(opts.projectId !== undefined ? { projectId: opts.projectId } : {}),
   };
 }
 
@@ -1183,5 +1185,64 @@ describe("makePromptHandler", () => {
       const text = result.output.kind === "text" ? result.output.text : "";
       expect(text).toBe("null");
     });
+  });
+});
+
+describe("makePromptHandler — project notebook injection", () => {
+  const doneOnly = (): ReturnType<typeof makeSpyProvider> =>
+    makeSpyProvider({ chunks: [{ type: "done" }] });
+
+  test("injects the notebook section for the node's projectId", async () => {
+    const { provider, calls } = doneOnly();
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      notebookSection: (id) => `## Project notebook\n\nnotes for ${id}`,
+    });
+    await handler.handle(stubNode, buildCtx({ projectId: "p1" }));
+    expect(calls[0]?.options?.systemPrompt).toBe("## Project notebook\n\nnotes for p1");
+  });
+
+  test("notebook is prepended to the factory seed system prompt", async () => {
+    const { provider, calls } = doneOnly();
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      systemPrompt: "SEED",
+      notebookSection: () => "## Project notebook\n\nnotes",
+    });
+    await handler.handle(stubNode, buildCtx({ projectId: "p1" }));
+    const sp = calls[0]?.options?.systemPrompt ?? "";
+    expect(sp).toContain("## Project notebook");
+    expect(sp).toContain("SEED");
+    expect(sp.indexOf("## Project notebook")).toBeLessThan(sp.indexOf("SEED"));
+  });
+
+  test("no projectId → notebook resolver is never called; seed-only", async () => {
+    const { provider, calls } = doneOnly();
+    let called = false;
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      systemPrompt: "SEED",
+      notebookSection: () => {
+        called = true;
+        return "should not happen";
+      },
+    });
+    await handler.handle(stubNode, buildCtx());
+    expect(called).toBe(false);
+    expect(calls[0]?.options?.systemPrompt).toBe("SEED");
+  });
+
+  test("an empty notebook (resolver returns undefined) and no seed → no systemPrompt", async () => {
+    const { provider, calls } = doneOnly();
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      notebookSection: () => undefined,
+    });
+    await handler.handle(stubNode, buildCtx({ projectId: "p1" }));
+    expect(calls[0]?.options?.systemPrompt).toBeUndefined();
   });
 });

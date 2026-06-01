@@ -13,6 +13,7 @@ import { buildTopologicalLayers, type DagShapeError, validateDagShape } from "./
 import type {
   DagNode,
   NodeMemoryBlock,
+  NodeNotebookBlock,
   NodeOutput,
   OutputSchema,
   WorkflowDefinition,
@@ -66,6 +67,13 @@ export interface MemoryTools {
   writeback(req: unknown): Promise<WritebackResponseLike>;
 }
 
+// Project-notebook append handle, pre-bound to the run's project by the
+// composition root. Loosely typed so this package stays free of apps/server.
+// `ok: false` signals the notebook is full (or the append was rejected).
+export interface NotebookContribute {
+  append(entry: string, section?: string): { ok: boolean };
+}
+
 export interface NodeContext {
   runId: string;
   nodeId: string;
@@ -80,6 +88,10 @@ export interface NodeContext {
   rawBody: string;
   /** Workflow-level config (model/provider defaults, etc.) — forward-compat for handler factories. */
   workflow: WorkflowDefinition;
+  // Project this run is bound to. Lets handlers fetch project-scoped context
+  // (e.g. the prompt handler injects the project notebook). Undefined when the
+  // run isn't project-bound.
+  projectId?: string;
   /**
    * Per-run scratch directory; absent when the run wasn't given one. Bash /
    * script nodes see it as `$KEELSON_ARTIFACTS_DIR` in their env channel;
@@ -124,7 +136,9 @@ export type NodeStreamEvent =
   | { type: "node_warning"; message: string }
   // Memory observability — emitted by the executor (not handlers) at pre-run / post-run hook boundaries.
   | { type: "memory_recalled"; traceId: string | null; returned: number }
-  | { type: "memory_written"; memoryId: string };
+  | { type: "memory_written"; memoryId: string }
+  // Notebook contribute — emitted by the executor's post-run hook on append.
+  | { type: "notebook_written"; section: string };
 
 export interface RunOptions {
   workflow: WorkflowDefinition;
@@ -140,6 +154,8 @@ export interface RunOptions {
   memoryTools?: MemoryTools;
   // Populates scope.projectId on every memory envelope this run produces.
   projectId?: string;
+  // Project-notebook append handle. Undefined → the `notebook:` contribute hook is a no-op.
+  notebook?: NotebookContribute;
 }
 
 export type RunStreamEvent =
@@ -406,6 +422,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     artifactsDir,
     memoryTools,
     projectId,
+    notebook,
   } = opts;
   // Absorb user callback throws so a misbehaving onEvent can't kill the run
   // or leave a node without recorded state. Handles both sync throws and
@@ -461,6 +478,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
           ...(artifactsDir !== undefined ? { artifactsDir } : {}),
           ...(memoryTools !== undefined ? { memoryTools } : {}),
           ...(projectId !== undefined ? { projectId } : {}),
+          ...(notebook !== undefined ? { notebook } : {}),
         }),
       ),
     );
@@ -515,6 +533,8 @@ interface RunCtx {
   memoryTools?: MemoryTools;
   /** Optional scope.projectId for memory envelopes — see RunOptions.projectId. */
   projectId?: string;
+  /** Project-notebook append handle — see RunOptions.notebook. */
+  notebook?: NotebookContribute;
 }
 
 async function runNodeOnce(node: DagNode, ctx: RunCtx): Promise<void> {
@@ -614,6 +634,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     rawBody,
     workflow: ctx.workflow,
+    ...(ctx.projectId !== undefined ? { projectId: ctx.projectId } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
     ...(ctx.memoryTools !== undefined ? { memory: ctx.memoryTools } : {}),
   };
@@ -662,6 +683,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     // so subscribers see writeback events as node-scoped. Gated on `on === "always" || succeeded`.
     // provenance and idempotencyKey are hard-coded — author-uncontrollable — to keep evidence-default.
     await runPostWriteback(node, ctx, nodeOutputs, recordedOutput, result, emit, memoryRecall);
+    await runNotebookContribute(node, ctx, nodeOutputs, recordedOutput, result, emit, memoryRecall);
     emit({ type: "node_done", nodeId: node.id, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -677,6 +699,15 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     // `memory.writeback.on: always` must also fire on thrown handler errors, not just returned NodeResults.
     const failedNodeResult = failedResult(message);
     await runPostWriteback(
+      node,
+      ctx,
+      nodeOutputs,
+      recordedOutput,
+      failedNodeResult,
+      emit,
+      memoryRecall,
+    );
+    await runNotebookContribute(
       node,
       ctx,
       nodeOutputs,
@@ -703,6 +734,11 @@ function nodeMemoryOf(node: DagNode): NodeMemoryBlock | undefined {
 function outputSchemaOf(node: DagNode): OutputSchema | undefined {
   // `output_schema` lives on dagNodeBaseSchema; read defensively (see nodeMemoryOf).
   return (node as { output_schema?: OutputSchema }).output_schema;
+}
+
+function nodeNotebookOf(node: DagNode): NodeNotebookBlock | undefined {
+  // `notebook` lives on dagNodeBaseSchema; read defensively (see nodeMemoryOf).
+  return (node as { notebook?: NodeNotebookBlock }).notebook;
 }
 
 /**
@@ -892,6 +928,48 @@ async function runPostWriteback(
       type: "run_warning",
       nodeId: node.id,
       message: `memory writeback failed: ${message}`,
+    });
+  }
+}
+
+// Deterministic project-notebook append. Gated like writeback (success | always)
+// and resolves `append` against the same self-inclusive output map, so
+// `$<thisNode>.output` works. A full notebook warns rather than failing the node.
+async function runNotebookContribute(
+  node: DagNode,
+  ctx: RunCtx,
+  nodeOutputs: ReadonlyMap<string, NodeOutput>,
+  recordedOutput: NodeOutput,
+  result: NodeResult,
+  emit: (event: RunStreamEvent) => void,
+  memoryRecall: MemoryRecallContext | undefined,
+): Promise<void> {
+  const block = nodeNotebookOf(node);
+  if (!block || !ctx.notebook) return;
+
+  const nodeSucceeded = result.status === "succeeded";
+  const shouldWrite = block.on === "always" || (block.on === "success" && nodeSucceeded);
+  if (!shouldWrite) return;
+
+  const outputsWithSelf = new Map(nodeOutputs);
+  outputsWithSelf.set(node.id, recordedOutput);
+  const entry = resolveBody(block.append, ctx.inputs, outputsWithSelf, {
+    ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+    ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+  });
+
+  const { ok } = ctx.notebook.append(entry, block.section);
+  if (ok) {
+    emit({
+      type: "node_event",
+      nodeId: node.id,
+      event: { type: "notebook_written", section: block.section ?? "" },
+    });
+  } else {
+    emit({
+      type: "run_warning",
+      nodeId: node.id,
+      message: "notebook append skipped: the project notebook is full (run Tidy)",
     });
   }
 }

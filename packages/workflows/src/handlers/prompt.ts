@@ -103,6 +103,12 @@ export interface MakePromptHandlerOptions {
   lifecycle?: PromptHandlerLifecycle;
   /** Optional system prompt to seed every prompt-node session. */
   systemPrompt?: string;
+  /**
+   * Resolves a per-project system-prompt prefix (the project notebook) for the
+   * node's `ctx.projectId`. Server-supplied so notebook formatting stays out of
+   * this package's dep graph; undefined → no project context injected.
+   */
+  notebookSection?: (projectId: string) => string | undefined;
 }
 
 // Default denylist is empty — Keelson core has no built-in tools, and ribs
@@ -303,6 +309,13 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           ? ctx.resolvedBody + buildOutputFormatSuffix(nodeOutputFormat)
           : ctx.resolvedBody;
 
+      // Project notebook (read) prepended to the factory seed — the prompt node
+      // inherits the same project context chat sees.
+      const notebook = ctx.projectId ? opts.notebookSection?.(ctx.projectId) : undefined;
+      const effectiveSystemPrompt =
+        [notebook, systemPrompt].filter((s) => s !== undefined && s.length > 0).join("\n\n") ||
+        undefined;
+
       const consume = async (): Promise<void> => {
         try {
           const provider = opts.getProvider(effectiveProviderId);
@@ -316,7 +329,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             abortSignal: handlerExit.signal,
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
             ...(model !== undefined ? { model } : {}),
-            ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+            ...(effectiveSystemPrompt !== undefined ? { systemPrompt: effectiveSystemPrompt } : {}),
             ...(nodeAllowed !== undefined ? { allowedTools: nodeAllowed } : {}),
             ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
             ...(nodeHooks !== undefined ? { hooks: nodeHooks } : {}),
