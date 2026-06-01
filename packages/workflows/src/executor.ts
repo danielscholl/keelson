@@ -638,11 +638,21 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     if (result.status === "succeeded") {
       const schema = outputSchemaOf(node);
       if (schema !== undefined) {
-        const validation = validateOutput(capturedValueForSchema(result.output), schema);
+        const captured = capturedValueForSchema(result.output);
+        const validation = validateOutput(captured, schema);
         if (!validation.ok) {
           const error = `output_schema validation failed: ${validation.error}`;
           emit({ type: "run_warning", nodeId: node.id, message: error });
           result = { status: "failed", output: { kind: "text", text: "" }, error };
+        } else if (
+          result.output.kind === "text" &&
+          typeof captured === "object" &&
+          captured !== null
+        ) {
+          // A node that declares output_schema and emits JSON is a structured
+          // producer: surface it as structured so $nodeId.output addressing and
+          // the snapshot publish bridge see the value, not raw text.
+          result = { status: "succeeded", output: { kind: "structured", value: captured } };
         }
       }
     }

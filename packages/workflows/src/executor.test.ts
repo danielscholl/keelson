@@ -2432,4 +2432,55 @@ nodes:
     });
     expect(bad.nodes.produce.state).toBe("failed");
   });
+
+  test("text output with output_schema is upgraded to a structured node_done (drives the snapshot publish bridge)", async () => {
+    const wf = parseInline(`
+name: t
+description: test
+nodes:
+  - id: produce
+    bash: echo json
+    output_schema:
+      type: object
+      required: [nodes, edges]
+`);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([
+        ["bash", cannedHandler({ produce: '{"nodes":[{"id":"a"}],"edges":[]}' }, "bash")],
+      ]),
+      onEvent,
+    });
+    expect(summary.nodes.produce.state).toBe("completed");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "produce");
+    expect(done?.type).toBe("node_done");
+    if (done?.type === "node_done") {
+      expect(done.result.output.kind).toBe("structured");
+      if (done.result.output.kind === "structured") {
+        expect(done.result.output.value).toEqual({ nodes: [{ id: "a" }], edges: [] });
+      }
+    }
+  });
+
+  test("the structured upgrade is gated on output_schema — JSON stdout without a schema stays text", async () => {
+    const wf = parseInline(`
+name: t
+description: test
+nodes:
+  - id: produce
+    bash: echo json
+`);
+    const { events, onEvent } = recordEvents();
+    await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["bash", cannedHandler({ produce: '{"k":1}' }, "bash")]]),
+      onEvent,
+    });
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "produce");
+    expect(done?.type).toBe("node_done");
+    if (done?.type === "node_done") {
+      expect(done.result.output.kind).toBe("text");
+    }
+  });
 });
