@@ -21,7 +21,9 @@ concurrency:
 jobs:
   sync-lockfile:
     name: Sync bun.lock
-    if: github.actor == 'dependabot[bot]'
+    # Gate on Dependabot's immutable numeric user id, not the spoofable
+    # `github.actor` string (49699333 is the dependabot[bot] account).
+    if: github.event.pull_request.user.id == 49699333
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
