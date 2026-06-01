@@ -11,13 +11,21 @@ export const KEYRING_SERVICE = "keelson" as const;
 // (`rib_<ribId>_<serviceId>`). The `_` separator can't appear in a kebab-case
 // id, so the split is unambiguous — rib `osdu-prod` reading `token` and rib
 // `osdu` reading `prod-token` resolve to distinct accounts, preserving per-rib
-// isolation. The composed account can exceed the 64-char public service id
-// ceiling, so it has its own (still traversal-safe) bound.
-export const ribCredentialAccountSchema = z
-  .string()
-  .min(1)
-  .max(191)
-  .regex(/^[a-z][a-z0-9_-]*$/);
+// isolation. Validate the EXACT shape (not a broad underscore regex): both
+// segments must be valid kebab ids, so `copilot_token`, `rib_osdu_`, and
+// `rib__token` are all rejected rather than minted as unreadable entries.
+export const ribCredentialAccountSchema = z.string().max(191).refine(isRibCredentialAccount);
+
+function isRibCredentialAccount(value: string): boolean {
+  if (!value.startsWith("rib_")) return false;
+  const rest = value.slice("rib_".length);
+  const sep = rest.indexOf("_");
+  if (sep <= 0 || sep >= rest.length - 1) return false;
+  return (
+    ribIdSchema.safeParse(rest.slice(0, sep)).success &&
+    credentialServiceIdSchema.safeParse(rest.slice(sep + 1)).success
+  );
+}
 
 // Interface kept Promise-returning so the underlying backend can be swapped
 // for an async implementation later without changing call sites.

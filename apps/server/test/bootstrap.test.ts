@@ -118,6 +118,19 @@ describe("bootstrapRibs", () => {
     expect(manifests[0]?.registered).toEqual(["ok.tool"]);
   });
 
+  test("a non-array registerTools result doesn't crash bootstrap", async () => {
+    delete process.env.KEELSON_RIBS;
+    const ribNonArray = {
+      id: "alpha",
+      displayName: "alpha",
+      // A JS rib could return a non-array; the boundary must coerce to [] rather
+      // than throw on `.filter` and prevent the server from starting.
+      registerTools: () => ({ registered: "tool" }) as unknown as { registered: string[] },
+    } as unknown as Rib;
+    const { manifests } = await bootstrapRibs({ available: { alpha: ribNonArray } });
+    expect(manifests[0]?.registered).toEqual([]);
+  });
+
   test("malformed ids in KEELSON_RIBS are rejected by the schema", async () => {
     process.env.KEELSON_RIBS = "Alpha,al_pha,alpha";
     const { manifests } = await bootstrapRibs({

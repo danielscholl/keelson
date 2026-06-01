@@ -185,10 +185,13 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     manifests.push({
       id: rib.id,
       displayName: rib.displayName,
-      // Sanitize at the boundary: a JS rib could return a non-string entry,
-      // which would later throw in GET /api/ribs' listRibsResponseSchema.parse
-      // and blank the whole panel. Drop anything that isn't a string.
-      registered: (result?.registered ?? []).filter((t): t is string => typeof t === "string"),
+      // Sanitize at the boundary: a JS rib could return a non-array `registered`
+      // (which would throw here) or non-string entries (which would later throw
+      // in GET /api/ribs' listRibsResponseSchema.parse and blank the panel).
+      // Coerce to a string-only array.
+      registered: Array.isArray(result?.registered)
+        ? result.registered.filter((t): t is string => typeof t === "string")
+        : [],
       views,
       actions,
       hasOnAction: typeof rib.onAction === "function",
