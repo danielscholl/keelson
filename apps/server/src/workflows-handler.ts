@@ -70,7 +70,7 @@ import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
 
-import type { WorkflowCatalog } from "./bootstrap.ts";
+import type { RibWorkflowBinding, WorkflowCatalog } from "./bootstrap.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { resolveWorkflowName } from "./workflow-resolve.ts";
@@ -115,6 +115,10 @@ export interface WorkflowsHandlerOptions {
   // structured node output under a run-scoped key (the Tier-0 bridge, #73);
   // undefined → runs never publish a snapshot.
   snapshotManager?: SnapshotManager;
+  // Rib-contributed workflows bound to a rib-namespaced snapshot key, by
+  // workflow name. A bound run fans its structured output to the rib's key in
+  // addition to the run-scoped one.
+  ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
 }
 
 // Renders the user-facing dispatch bubble that anchors the workflow run inside
@@ -495,6 +499,7 @@ interface StartRunCoreDeps {
   promptHandler: NodeHandler;
   memoryTools: MemoryTools | undefined;
   snapshotManager?: SnapshotManager;
+  ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
 }
 
 interface StartRunCoreParams {
@@ -518,7 +523,7 @@ function startRunCore(
   params: StartRunCoreParams,
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
-  const { snapshotManager } = deps;
+  const { snapshotManager, ribWorkflowBindings } = deps;
   const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
     params;
   const name = workflow.name;
@@ -590,6 +595,7 @@ function startRunCore(
     ...(projectId !== null ? { projectId } : {}),
     ...(memoryTools !== undefined ? { memoryTools } : {}),
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+    ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
   });
   activeRuns.register(runId, { abort, done, pendingApprovals });
   return { runId, conversationId: conversation.id };
@@ -717,7 +723,8 @@ export function createWorkflowController(
   activeRuns: ActiveRuns,
   subscribers: WorkflowSubscribers,
 ): WorkflowController {
-  const { catalog, store, conversationStore, projectsStore, snapshotManager } = opts;
+  const { catalog, store, conversationStore, projectsStore, snapshotManager, ribWorkflowBindings } =
+    opts;
   const { promptHandler, memoryTools } = buildExecutionDeps(opts);
 
   return {
@@ -746,6 +753,7 @@ export function createWorkflowController(
             promptHandler,
             memoryTools,
             ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+            ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           },
           {
             workflow,
@@ -863,7 +871,15 @@ export function workflowsRoutes(
   activeRuns: ActiveRuns = createActiveRuns(),
   subscribers: WorkflowSubscribers = createWorkflowSubscribers(),
 ): void {
-  const { catalog, store, conversationStore, projectsStore, defaultCwd, snapshotManager } = opts;
+  const {
+    catalog,
+    store,
+    conversationStore,
+    projectsStore,
+    defaultCwd,
+    snapshotManager,
+    ribWorkflowBindings,
+  } = opts;
   const { promptHandler: effectivePromptHandler, memoryTools } = buildExecutionDeps(opts);
 
   app.get("/api/workflows", (c) => {
@@ -1050,6 +1066,7 @@ export function workflowsRoutes(
           promptHandler: effectivePromptHandler,
           memoryTools,
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+          ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
         },
         {
           workflow,
@@ -1377,6 +1394,9 @@ interface ExecuteRunArgs {
   // Tier-0 snapshot bridge (#73): when set, the run republishes its latest
   // structured node output under the `workflow:run:<id>` snapshot key.
   snapshotManager?: SnapshotManager;
+  // Rib-contributed workflow bindings by name; a bound run also fans its
+  // structured output to the rib's namespaced key.
+  ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
@@ -1395,6 +1415,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     projectId,
     memoryTools,
     snapshotManager,
+    ribWorkflowBindings,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -1763,6 +1784,24 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       lastRecompose = snapshotManager.recompose(snapshotKey).catch(() => undefined);
     };
   }
+  // When this run's workflow is bound to a rib-owned key (M8), fan the same
+  // structured output to it. Bindings are keyed by the definition *object*, and
+  // `workflow` here is the object the catalog resolved for this run at start
+  // (`catalog.get(name)` in both run entry points). So a project file that
+  // shadows the name — even one added after boot, since the catalog hot-reloads
+  // and returns the project's object — resolves to a different object and finds
+  // no binding; the rib's key is only ever driven by the rib's own definition.
+  // That key was registered at activation and persists past the run, so it's
+  // never unregistered here — only the run-scoped key is. `publish` recomposes
+  // (fail-closed) internally.
+  const ribBinding = ribWorkflowBindings?.get(workflow);
+  const publishRun: ((value: unknown) => void) | undefined =
+    ribBinding !== undefined
+      ? (value) => {
+          publishStructured?.(value);
+          ribBinding.publish(value);
+        }
+      : publishStructured;
 
   try {
     await runWorkflow({
@@ -1784,7 +1823,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           subscribers,
           nodeStart,
           nodeAccumulators,
-          ...(publishStructured !== undefined ? { publishStructured } : {}),
+          ...(publishRun !== undefined ? { publishStructured: publishRun } : {}),
         });
       },
     });

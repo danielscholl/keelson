@@ -1,7 +1,7 @@
 import type { ThemePreference } from "../hooks/useSettings.ts";
 import { ThemePicker } from "./ThemePicker.tsx";
 
-export type ActiveTab = "chat" | "workflows" | "memory";
+export type ActiveTab = "chat" | "workflows" | "memory" | "ribs";
 
 export interface TopBarProps {
   activeTab: ActiveTab;
@@ -89,6 +89,14 @@ export function TopBar(props: TopBarProps) {
                 {memoryCount}
               </span>
             )}
+          </button>
+          <button
+            type="button"
+            className={`nav-tab${activeTab === "ribs" ? " is-active" : ""}`}
+            aria-pressed={activeTab === "ribs"}
+            onClick={() => onTabChange("ribs")}
+          >
+            Ribs
           </button>
         </nav>
       </div>

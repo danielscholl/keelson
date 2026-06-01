@@ -8,6 +8,7 @@ import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
+import { Ribs } from "./views/Ribs.tsx";
 import { Workflows } from "./views/Workflows.tsx";
 
 export function App() {
@@ -77,6 +78,8 @@ function AppInner() {
         />
       ) : activeTab === "memory" ? (
         <Memory />
+      ) : activeTab === "ribs" ? (
+        <Ribs />
       ) : (
         <Chat onOpenWorkflowRun={handleOpenWorkflowRun} />
       )}

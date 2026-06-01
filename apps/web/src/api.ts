@@ -16,6 +16,7 @@ import {
   getWorkflowRunResponseSchema,
   type ListWorkflowsResponse,
   listProjectsResponseSchema,
+  listRibsResponseSchema,
   listRunsResponseSchema,
   listWorkflowsResponseSchema,
   type MemoryListQuery,
@@ -31,9 +32,13 @@ import {
   type ReviewActionResponse,
   type ReviewListQuery,
   type ReviewListResponse,
+  type RibAction,
+  type RibActionResponse,
+  type RibSummary,
   rememberChatMessageResponseSchema,
   reviewActionResponseSchema,
   reviewListResponseSchema,
+  ribActionResponseSchema,
   type SnapshotFrame,
   snapshotFrameSchema,
   startWorkflowRunResponseSchema,
@@ -425,6 +430,24 @@ export async function postReviewAction(req: ReviewActionRequest): Promise<Review
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(req),
+      errorBody: "json-error",
+    }),
+  );
+}
+
+// === Ribs ==================================================================
+
+export async function getRibs(): Promise<RibSummary[]> {
+  return listRibsResponseSchema.parse(await apiRequest<unknown>("/api/ribs")).ribs;
+}
+
+export async function postRibAction(id: string, action: RibAction): Promise<RibActionResponse> {
+  return ribActionResponseSchema.parse(
+    await apiRequest<unknown>(`/api/ribs/${encodeURIComponent(id)}/action`, {
+      label: `/api/ribs/${id}/action`,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(action),
       errorBody: "json-error",
     }),
   );

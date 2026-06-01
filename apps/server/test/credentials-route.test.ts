@@ -105,6 +105,35 @@ describe("POST /api/credentials/:serviceId", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  test("204 for a rib-namespaced account so the rib accessor's key is provisionable", async () => {
+    const { app, store } = makeRig();
+    const res = await app.fetch(
+      new Request("http://test/api/credentials/rib_osdu_token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value: "tok-rib" }),
+      }),
+    );
+    expect(res.status).toBe(204);
+    expect(await store.get("rib_osdu_token")).toBe("tok-rib");
+  });
+
+  test("400 for underscore shapes that aren't a valid rib_<id>_<svc> account", async () => {
+    const { app } = makeRig();
+    // copilot_token (no rib_ prefix), rib_osdu_ (empty service), rib__token
+    // (empty id) — all rejected so a typo can't mint an unreadable entry.
+    for (const bad of ["copilot_token", "rib_osdu_", "rib__token"]) {
+      const res = await app.fetch(
+        new Request(`http://test/api/credentials/${bad}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ value: "x" }),
+        }),
+      );
+      expect(res.status).toBe(400);
+    }
+  });
 });
 
 describe("DELETE /api/credentials/:serviceId", () => {

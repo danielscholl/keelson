@@ -16,8 +16,15 @@ import {
   setCredentialBodySchema,
 } from "@keelson/shared";
 import type { Hono } from "hono";
-import type { CredentialStore } from "./credentials.ts";
+import { z } from "zod";
+import { type CredentialStore, ribCredentialAccountSchema } from "./credentials.ts";
 import { isAllowedOrigin } from "./server-context.ts";
+
+// The credential routes accept either a public kebab service id (copilot,
+// claude, …) or a rib-namespaced account (`rib_<id>_<svc>`) so the rib
+// credential accessor's keys are provisionable through this same route. This
+// mirrors the store's own `assertServiceId`, keeping route and store in sync.
+const SERVICE_ID_SCHEMA = z.union([credentialServiceIdSchema, ribCredentialAccountSchema]);
 
 export interface CredentialsRoutesDeps {
   // Optional — present only when Copilot is among the registered providers.
@@ -57,7 +64,7 @@ export function credentialsRoutes(
   });
 
   app.post("/api/credentials/:serviceId", async (c) => {
-    const idParsed = credentialServiceIdSchema.safeParse(c.req.param("serviceId"));
+    const idParsed = SERVICE_ID_SCHEMA.safeParse(c.req.param("serviceId"));
     if (!idParsed.success) {
       return c.json({ error: "invalid serviceId" }, 400);
     }
@@ -81,7 +88,7 @@ export function credentialsRoutes(
   });
 
   app.delete("/api/credentials/:serviceId", async (c) => {
-    const idParsed = credentialServiceIdSchema.safeParse(c.req.param("serviceId"));
+    const idParsed = SERVICE_ID_SCHEMA.safeParse(c.req.param("serviceId"));
     if (!idParsed.success) {
       return c.json({ error: "invalid serviceId" }, 400);
     }
@@ -96,7 +103,7 @@ export function credentialsRoutes(
   });
 
   app.get("/api/credentials/:serviceId/status", async (c) => {
-    const idParsed = credentialServiceIdSchema.safeParse(c.req.param("serviceId"));
+    const idParsed = SERVICE_ID_SCHEMA.safeParse(c.req.param("serviceId"));
     if (!idParsed.success) {
       return c.json({ error: "invalid serviceId" }, 400);
     }

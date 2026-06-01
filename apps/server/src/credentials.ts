@@ -2,9 +2,30 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { credentialServiceIdSchema } from "@keelson/shared";
+import { credentialServiceIdSchema, ribIdSchema } from "@keelson/shared";
+import { z } from "zod";
 
 export const KEYRING_SERVICE = "keelson" as const;
+
+// A rib's credentials are stored under a namespaced keyring account
+// (`rib_<ribId>_<serviceId>`). The `_` separator can't appear in a kebab-case
+// id, so the split is unambiguous — rib `osdu-prod` reading `token` and rib
+// `osdu` reading `prod-token` resolve to distinct accounts, preserving per-rib
+// isolation. Validate the EXACT shape (not a broad underscore regex): both
+// segments must be valid kebab ids, so `copilot_token`, `rib_osdu_`, and
+// `rib__token` are all rejected rather than minted as unreadable entries.
+export const ribCredentialAccountSchema = z.string().max(191).refine(isRibCredentialAccount);
+
+function isRibCredentialAccount(value: string): boolean {
+  if (!value.startsWith("rib_")) return false;
+  const rest = value.slice("rib_".length);
+  const sep = rest.indexOf("_");
+  if (sep <= 0 || sep >= rest.length - 1) return false;
+  return (
+    ribIdSchema.safeParse(rest.slice(0, sep)).success &&
+    credentialServiceIdSchema.safeParse(rest.slice(sep + 1)).success
+  );
+}
 
 // Interface kept Promise-returning so the underlying backend can be swapped
 // for an async implementation later without changing call sites.
@@ -22,10 +43,11 @@ async function loadKeyring(): Promise<KeyringModule> {
 }
 
 function assertServiceId(serviceId: string): void {
-  const parsed = credentialServiceIdSchema.safeParse(serviceId);
-  if (!parsed.success) {
-    throw new Error(`invalid serviceId '${serviceId}'`);
-  }
+  // Accept either a public service id or a namespaced rib account — widening
+  // only; never rejects a value the public schema already accepted.
+  if (credentialServiceIdSchema.safeParse(serviceId).success) return;
+  if (ribCredentialAccountSchema.safeParse(serviceId).success) return;
+  throw new Error(`invalid serviceId '${serviceId}'`);
 }
 
 // @napi-rs/keyring's NoEntry / NotFound errors come back as opaque `Error`
@@ -84,6 +106,29 @@ function defaultStore(): CredentialStore {
 
 export function getCredential(serviceId: string): Promise<string | undefined> {
   return defaultStore().get(serviceId);
+}
+
+// Build a read-only credential reader scoped to one rib's namespace. The rib
+// passes a bare serviceId; the accessor resolves it under `rib_<ribId>_<serviceId>`
+// so a rib reads only the secrets stored for it.
+//
+// Injectivity (no two distinct (ribId, serviceId) pairs share an account):
+// both components are validated kebab-case — `^[a-z][a-z0-9-]*$`, which cannot
+// contain `_` — so `_` is a delimiter that appears *only* between the three
+// fixed parts. The explicit `_`-guards below make that property local rather
+// than dependent on the shared schemas staying strict.
+export function createRibCredentialAccessor(
+  store: CredentialStore,
+  ribId: string,
+): (serviceId: string) => Promise<string | undefined> {
+  ribIdSchema.parse(ribId);
+  if (ribId.includes("_")) throw new Error(`rib id '${ribId}' must not contain '_'`);
+  return (serviceId: string) => {
+    if (!credentialServiceIdSchema.safeParse(serviceId).success || serviceId.includes("_")) {
+      return Promise.reject(new Error(`invalid rib credential serviceId '${serviceId}'`));
+    }
+    return store.get(`rib_${ribId}_${serviceId}`);
+  };
 }
 export function setCredential(serviceId: string, value: string): Promise<void> {
   return defaultStore().set(serviceId, value);

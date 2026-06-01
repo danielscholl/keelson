@@ -14,11 +14,12 @@ import {
   bootstrapProviders,
   bootstrapRibs,
   bootstrapWorkflows,
+  prepareRibWorkflows,
 } from "./bootstrap.ts";
 import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
 import { chatRememberRoutes } from "./chat-remember-handler.ts";
 import { createConversationStore } from "./conversation-store.ts";
-import { createKeyringStore, getCredential } from "./credentials.ts";
+import { createKeyringStore, createRibCredentialAccessor, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
 import { memoryRoutes } from "./memory-handler.ts";
@@ -26,6 +27,7 @@ import { createMemoryStore } from "./memory-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
 import { createProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
+import { ribsRoutes } from "./ribs-handler.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { createSnapshotManager } from "./snapshot-manager.ts";
 import { createSnapshotSubscribers } from "./snapshot-subscribers.ts";
@@ -65,7 +67,18 @@ const bootstrap = bootstrapProviders({ getCredential });
 const snapshotSubscribers = createSnapshotSubscribers();
 const snapshotManager = createSnapshotManager(snapshotSubscribers);
 
-const ribs = await bootstrapRibs({ snapshotManager });
+// Keyring store is needed before ribs so each rib gets a namespaced, read-only
+// credential reader scoped to its own keys.
+const credentialStore = createKeyringStore();
+
+const ribs = await bootstrapRibs({
+  snapshotManager,
+  getRibCredential: (ribId, serviceId) =>
+    createRibCredentialAccessor(credentialStore, ribId)(serviceId),
+});
+// Narrow rib-contributed workflow definitions and collect the run-path bindings
+// that republish a bound run's structured output to the rib's snapshot key.
+const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);
 
 const PORT = Number(process.env.PORT ?? 7878);
 const HOSTNAME = "127.0.0.1";
@@ -103,6 +116,7 @@ db.prepare("UPDATE conversations SET project_id = ? WHERE project_id IS NULL").r
 );
 const workflowCatalog = bootstrapWorkflows({
   workflowDir: join(REPO_ROOT, ".keelson", "workflows"),
+  extra: ribWorkflows.definitions,
 });
 // Composition-root ownership of in-flight runs — the shutdown handler
 // drains via this same handle so a SIGINT can abort active executions and
@@ -118,7 +132,6 @@ const workflowSubscribers = createWorkflowSubscribers();
 // Undefined when no providers are registered — workflowsRoutes falls back to
 // the placeholder handler in that case.
 const promptHandler = bootstrapPromptHandler();
-const credentialStore = createKeyringStore();
 
 // Shared handler options so the HTTP routes and the in-process WorkflowController
 // drive runs through the identical wiring. The controller + chat tools are built
@@ -132,6 +145,7 @@ const workflowHandlerOptions: WorkflowsHandlerOptions = {
   ...(promptHandler ? { promptHandler } : {}),
   memoryStore,
   snapshotManager,
+  ribWorkflowBindings: ribWorkflows.bindings,
 };
 const workflowController = createWorkflowController(
   workflowHandlerOptions,
@@ -199,6 +213,11 @@ chatRoutes(
 );
 workflowsRoutes(app, workflowHandlerOptions, activeWorkflowRuns, workflowSubscribers);
 snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });
+ribsRoutes(app, {
+  manifests: ribs.manifests,
+  probes: ribs.probes,
+  actionHandlers: ribs.actionHandlers,
+});
 projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
 memoryRoutes(app, { memoryStore });
 chatRememberRoutes(app, { conversationStore: store, memoryStore });

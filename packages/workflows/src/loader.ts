@@ -235,6 +235,50 @@ function validateReservedNodeIds(nodes: readonly DagNode[]): string | null {
   return null;
 }
 
+function formatShapeErrors(shapeErrors: ReturnType<typeof validateDagShape>): string {
+  return shapeErrors
+    .map((e): string => {
+      switch (e.kind) {
+        case "duplicate_id":
+          return `Duplicate node id: '${e.id}'`;
+        case "unknown_dependency":
+          return `Node '${e.nodeId}' depends_on unknown node '${e.missing}'`;
+        case "self_dependency":
+          return `Node '${e.nodeId}' depends on itself`;
+        case "cycle":
+          return `Cycle detected among nodes: ${e.nodeIds.join(", ")}`;
+        default: {
+          // Compile-time exhaustiveness: a new ShapeError variant errors here.
+          const _exhaustive: never = e;
+          return _exhaustive;
+        }
+      }
+    })
+    .join("; ");
+}
+
+/**
+ * Structural invariants applied to a parsed workflow, beyond the field-level
+ * `workflowDefinitionSchema`: reserved name, non-empty nodes, DAG shape
+ * (duplicate ids / unknown deps / cycles), reserved node ids, and cross-node
+ * `$nodeId.output` references. Returns the first error message, or null when
+ * the workflow is sound. Shared by the YAML loader (`parseWorkflow`) and the
+ * rib-contribution path so both reject the same way.
+ */
+export function validateWorkflowInvariants(workflow: WorkflowDefinition): string | null {
+  if (RESERVED_WORKFLOW_NAMES.has(workflow.name)) {
+    return `Workflow name '${workflow.name}' is reserved (collides with the /api/workflows/${workflow.name}/* route family); rename the workflow.`;
+  }
+  if (workflow.nodes.length === 0) {
+    return "Workflow must have a non-empty 'nodes:' array";
+  }
+  const shapeErrors = validateDagShape(workflow.nodes);
+  if (shapeErrors.length > 0) return formatShapeErrors(shapeErrors);
+  const reservedError = validateReservedNodeIds(workflow.nodes);
+  if (reservedError) return reservedError;
+  return validateOutputRefs(workflow.nodes);
+}
+
 /**
  * Build the transitive depends_on closure for every node. Assumes the DAG is
  * acyclic — callers must run `validateDagShape` first.
@@ -514,30 +558,10 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
   // validateDagStructure for ids/deps/cycles, but returns structured errors).
   const shapeErrors = validateDagShape(nodes);
   if (shapeErrors.length > 0) {
-    const messages = shapeErrors
-      .map((e): string => {
-        switch (e.kind) {
-          case "duplicate_id":
-            return `Duplicate node id: '${e.id}'`;
-          case "unknown_dependency":
-            return `Node '${e.nodeId}' depends_on unknown node '${e.missing}'`;
-          case "self_dependency":
-            return `Node '${e.nodeId}' depends on itself`;
-          case "cycle":
-            return `Cycle detected among nodes: ${e.nodeIds.join(", ")}`;
-          default: {
-            // Compile-time exhaustiveness: if a new ShapeError variant lands,
-            // TS errors here until the switch is extended.
-            const _exhaustive: never = e;
-            return _exhaustive;
-          }
-        }
-      })
-      .join("; ");
     return {
       workflow: null,
       warnings,
-      error: { filename, error: messages, errorType: "validation_error" },
+      error: { filename, error: formatShapeErrors(shapeErrors), errorType: "validation_error" },
     };
   }
 
