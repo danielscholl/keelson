@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Rib, RibAuthStatus } from "@keelson/shared";
+import type { Rib, RibActionResult, RibAuthStatus } from "@keelson/shared";
 import { Hono } from "hono";
 import { bootstrapRibs, bootstrapWorkflows, prepareRibWorkflows } from "../src/bootstrap.ts";
 import { ribsRoutes } from "../src/ribs-handler.ts";
@@ -187,6 +187,23 @@ describe("POST /api/ribs/:id/action", () => {
     expect((await res.json()) as { ok: boolean; error: string }).toEqual({
       ok: false,
       error: "kaboom",
+    });
+  });
+
+  test("500 with a controlled error when the handler returns a malformed result", async () => {
+    const bad: Rib = {
+      id: "badaction",
+      displayName: "Bad Action",
+      // A JS rib can return a value the TS contract forbids; the route must
+      // not 200 it and break the SPA's ribActionResponseSchema.parse.
+      onAction: () => ({ nope: true }) as unknown as RibActionResult,
+    };
+    const { app } = await makeRig({ available: { bad } });
+    const res = await app.fetch(post("/api/ribs/badaction/action", { type: "x" }));
+    expect(res.status).toBe(500);
+    expect((await res.json()) as { ok: boolean; error: string }).toEqual({
+      ok: false,
+      error: "rib returned a malformed action result",
     });
   });
 });
