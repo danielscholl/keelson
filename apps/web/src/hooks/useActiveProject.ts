@@ -102,6 +102,8 @@ export function __resetProjectStoreForTests(): void {
   currentActiveId = readStoredId();
   inflight = null;
   latestGen = 0;
+  listeners.clear();
+  projectListeners.clear();
 }
 
 export function useActiveProject(): ActiveProjectState {
