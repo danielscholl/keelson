@@ -138,6 +138,24 @@ describe("Memory notebook panel", () => {
     expect(screen.queryByText(/Over budget/)).toBeNull();
   });
 
+  test("Tidy that can't archive anything but stays over budget warns instead of claiming success", async () => {
+    const big = `## Log\n- 2026-06-01: ${"y".repeat(7000)}\n`;
+    loadedContent = big;
+    tidyResponse = {
+      content: big,
+      updatedAt: "2026-06-01T00:00:00Z",
+      previousContent: big,
+      archivedCount: 0,
+    };
+    await renderMemory();
+    await screen.findByLabelText("Project notebook");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Tidy" }));
+    });
+    expect(await screen.findByText(/still over budget/)).toBeDefined();
+    expect(screen.queryByText(/Already within budget/)).toBeNull();
+  });
+
   test("every ## Archive section is excluded from the over-budget calc", async () => {
     const big = "y".repeat(7000);
     loadedContent = `## Log\n- 2026-06-01: small\n\n## Archive\n- ${big}\n\n## Archive\n- ${big}\n`;

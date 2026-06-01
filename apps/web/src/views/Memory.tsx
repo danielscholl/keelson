@@ -187,6 +187,11 @@ function NotebookPanel() {
             },
           },
         });
+      } else if (injectedLength(res.content) > NOTEBOOK_INJECTION_BUDGET) {
+        toast.push({
+          kind: "info",
+          message: "Nothing left to archive — still over budget; trim the notebook by hand.",
+        });
       } else {
         toast.push({ kind: "info", message: "Already within budget — nothing to tidy." });
       }
