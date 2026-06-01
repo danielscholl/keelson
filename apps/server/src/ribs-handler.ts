@@ -92,9 +92,15 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
     if (!parsed.success) {
       return c.json({ error: parsed.error.issues[0]?.message ?? "invalid action" }, 400);
     }
-    let raw: unknown;
     try {
-      raw = await handler(parsed.data);
+      // Validate the rib's result against the wire schema before returning — a
+      // JS/third-party rib can return a malformed value despite the TS
+      // contract, which would otherwise 200 and break the SPA's response parse.
+      const result = ribActionResponseSchema.safeParse(await handler(parsed.data));
+      if (!result.success) {
+        return c.json({ ok: false, error: "rib returned a malformed action result" }, 500);
+      }
+      return c.json(result.data);
     } catch (err) {
       const result: RibActionResult = {
         ok: false,
@@ -102,25 +108,5 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
       };
       return c.json(result, 500);
     }
-    // Validate the rib's result against the wire schema before returning — a
-    // JS/third-party rib can return a malformed value despite the TS contract,
-    // which would otherwise 200 and break the SPA's response parse. The
-    // discriminated union throws (not just fails) when the `ok` key is absent,
-    // so the safeParse itself is wrapped.
-    let valid = false;
-    let data: RibActionResponse | undefined;
-    try {
-      const validated = ribActionResponseSchema.safeParse(raw);
-      if (validated.success) {
-        valid = true;
-        data = validated.data;
-      }
-    } catch {
-      // fall through to the malformed-result response
-    }
-    if (!valid) {
-      return c.json({ ok: false, error: "rib returned a malformed action result" }, 500);
-    }
-    return c.json(data);
   });
 }
