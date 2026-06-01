@@ -43,6 +43,7 @@ export function Memory() {
 
   const [filters, setFilters] = useState<FilterState>({});
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is a deliberate re-fetch trigger bumped after a review action
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
