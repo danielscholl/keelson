@@ -42,10 +42,11 @@ function rowToNotebook(row: NotebookRow): ProjectNotebook {
   return { projectId: row.project_id, content: row.content, updatedAt: row.updated_at };
 }
 
-// A raw newline in a bullet breaks the list and could inject a spurious `##`
-// header, so message-content / free-text entries are folded to one line.
-function flattenEntry(entry: string): string {
-  return entry.replace(/\s*\n\s*/g, " ").trim();
+// A raw newline in a header injects a spurious `##` boundary and in a bullet
+// breaks the list, so section names and free-text entries are folded to one
+// line before composition.
+function flattenInline(text: string): string {
+  return text.replace(/\s*\n\s*/g, " ").trim();
 }
 
 // A section boundary is an H2 header; deeper headers (`### …`) are content
@@ -64,8 +65,8 @@ export function appendEntryToSection(
   entry: string,
   date: string,
 ): string {
-  const header = `## ${section.trim()}`;
-  const bullet = `- ${date}: ${flattenEntry(entry)}`;
+  const header = `## ${flattenInline(section)}`;
+  const bullet = `- ${date}: ${flattenInline(entry)}`;
 
   if (content.trim() === "") {
     return `${header}\n${bullet}\n`;

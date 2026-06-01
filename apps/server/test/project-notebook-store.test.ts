@@ -82,6 +82,11 @@ describe("appendEntryToSection", () => {
     expect(out).toBe("## Log\n- 2026-06-01: line one line two\n");
   });
 
+  test("newlines in the section name are folded so no extra header is injected", () => {
+    const out = appendEntryToSection("", "Log\n## Injected", "x", D);
+    expect(out).toBe("## Log ## Injected\n- 2026-06-01: x\n");
+  });
+
   test("strict H2 match — ## Logger does not absorb a Log append", () => {
     const out = appendEntryToSection("## Logger\n- a\n", "Log", "new", D);
     expect(out).toBe("## Logger\n- a\n\n## Log\n- 2026-06-01: new\n");
