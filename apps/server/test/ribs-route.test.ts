@@ -198,7 +198,7 @@ describe("POST /api/ribs/:id/action", () => {
       // not 200 it and break the SPA's ribActionResponseSchema.parse.
       onAction: () => ({ nope: true }) as unknown as RibActionResult,
     };
-    const { app } = await makeRig({ available: { bad } });
+    const { app } = await makeRig({ available: { badaction: bad } });
     const res = await app.fetch(post("/api/ribs/badaction/action", { type: "x" }));
     expect(res.status).toBe(500);
     expect((await res.json()) as { ok: boolean; error: string }).toEqual({
