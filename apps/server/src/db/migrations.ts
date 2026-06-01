@@ -227,6 +227,19 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    description: "project notebooks: per-project always-on markdown context",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE project_notebooks (
+          project_id TEXT PRIMARY KEY NOT NULL REFERENCES keelson_projects(id) ON DELETE CASCADE,
+          content    TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

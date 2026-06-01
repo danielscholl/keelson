@@ -34,6 +34,7 @@ import { buildChatSystemPrompt, type WorkflowSummaryLike } from "./chat-prompt.t
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import type { ProjectNotebookStore } from "./project-notebook-store.ts";
 import type { ProjectsStore } from "./projects-store.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
@@ -224,6 +225,7 @@ export function handleChatUpgrade(req: Request, server: Server<WsData>): Respons
 export interface ChatWebSocketDeps {
   memoryStore?: MemoryStore;
   projectsStore?: ProjectsStore;
+  projectNotebookStore?: ProjectNotebookStore;
   // Harness-native workflow tools, appended to the registry-derived tool set on
   // every turn so the LLM can fire / approve / monitor workflows. Injected here
   // (not registered globally) so they never leak into workflow `prompt` nodes.
@@ -259,6 +261,9 @@ export function chatWebSocketHandlers(
         abortSignal: ws.data.abort.signal,
         ...(deps.memoryStore !== undefined ? { memoryStore: deps.memoryStore } : {}),
         ...(deps.projectsStore !== undefined ? { projectsStore: deps.projectsStore } : {}),
+        ...(deps.projectNotebookStore !== undefined
+          ? { projectNotebookStore: deps.projectNotebookStore }
+          : {}),
         ...(deps.workflowTools !== undefined ? { workflowTools: deps.workflowTools } : {}),
         ...(deps.workflowCatalog !== undefined ? { workflowCatalog: deps.workflowCatalog } : {}),
       });
@@ -279,6 +284,8 @@ export interface ChatDeps {
   // Resolves the conversation's projectId → rootPath used as the agent's cwd.
   // Undefined → falls back to process.cwd().
   projectsStore?: ProjectsStore;
+  // Always-on per-project notebook injected into the system prompt. Undefined → skipped.
+  projectNotebookStore?: ProjectNotebookStore;
   // Workflow chat tools appended to the registry tools for this turn.
   workflowTools?: ToolDefinition[];
   // Live workflow catalog for the system-prompt index (see chat-prompt.ts).
@@ -290,6 +297,20 @@ export interface ChatDeps {
 const MEMORY_RECALL_MAX_ITEMS = 5;
 const MEMORY_RECALL_CONTENT_CHARS = 200;
 const MEMORY_SECTION_HEADER = "## Relevant prior memory";
+
+const NOTEBOOK_MAX_CHARS = 6000;
+const NOTEBOOK_SECTION_HEADER = "## Project notebook";
+
+// Soft-cap the notebook so an oversized one can't crowd out the rest of the turn.
+function buildNotebookSection(content: string): string | undefined {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return undefined;
+  const body =
+    trimmed.length > NOTEBOOK_MAX_CHARS
+      ? `${trimmed.slice(0, NOTEBOOK_MAX_CHARS - 1)}…\n\n(notebook truncated — run Tidy)`
+      : trimmed;
+  return `${NOTEBOOK_SECTION_HEADER}\n\nDurable notes about this project, accumulated as you work. Treat as trusted background context.\n\n${body}`;
+}
 
 export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Promise<void> {
   const { conversationId } = frame;
@@ -395,7 +416,16 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // Advertise workflows only when the tools are actually wired this turn, so the
   // model is never told about a capability it can't invoke.
   const workflowToolsActive = deps.workflowTools !== undefined && deps.workflowTools.length > 0;
+
+  const notebookContent =
+    recallProjectId !== undefined
+      ? deps.projectNotebookStore?.get(recallProjectId)?.content
+      : undefined;
+  const notebookSection =
+    notebookContent !== undefined ? buildNotebookSection(notebookContent) : undefined;
+
   const systemPrompt = buildChatSystemPrompt({
+    ...(notebookSection !== undefined ? { notebookSection } : {}),
     ...(recallSection !== undefined ? { recallSection } : {}),
     ...(typeof conv.seedSystemPrompt === "string"
       ? { seedSystemPrompt: conv.seedSystemPrompt }
