@@ -8,7 +8,7 @@ import type {
   RibSummary,
   RibViewDescriptor,
 } from "@keelson/shared";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 import { postRibAction } from "../api.ts";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
@@ -104,9 +104,10 @@ export function Ribs() {
 function RibCard(props: {
   rib: RibSummary;
   onOpenView: (view: RibViewDescriptor) => void;
-  onRunAction: (ribId: string, action: RibActionDescriptor) => void;
+  onRunAction: (ribId: string, action: RibActionDescriptor) => Promise<void>;
 }) {
   const { rib, onOpenView, onRunAction } = props;
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
   return (
     <li className="rib-card">
       <div className="rib-card-head">
@@ -139,7 +140,16 @@ function RibCard(props: {
               type="button"
               key={action.type}
               className="rib-action-button"
-              onClick={() => onRunAction(rib.id, action)}
+              disabled={pendingAction === action.type}
+              onClick={async () => {
+                if (pendingAction === action.type) return;
+                setPendingAction(action.type);
+                try {
+                  await onRunAction(rib.id, action);
+                } finally {
+                  setPendingAction(null);
+                }
+              }}
             >
               {action.label}
             </button>

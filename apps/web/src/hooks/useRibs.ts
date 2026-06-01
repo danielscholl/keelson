@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { RibSummary } from "@keelson/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getRibs } from "../api.ts";
 
 export interface UseRibsState {
@@ -25,6 +25,7 @@ export function useRibs(): UseRibsState {
   const [status, setStatus] = useState<UseRibsState["status"]>("loading");
   const [ribs, setRibs] = useState<RibSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
 
   // A single loader drives both the mount fetch and manual/visibility refreshes;
   // its returned canceller doubles as the mount effect's cleanup. Keeping the
@@ -32,16 +33,17 @@ export function useRibs(): UseRibsState {
   // exhaustive-deps trigger dependency.
   const load = useCallback(() => {
     let cancelled = false;
+    const seq = ++requestSeq.current;
     setStatus("loading");
     setError(null);
     getRibs()
       .then((list) => {
-        if (cancelled) return;
+        if (cancelled || seq !== requestSeq.current) return;
         setRibs(list);
         setStatus("ready");
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (cancelled || seq !== requestSeq.current) return;
         setError(err instanceof Error ? err.message : String(err));
         setStatus("error");
       });
