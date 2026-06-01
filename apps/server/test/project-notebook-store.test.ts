@@ -8,7 +8,10 @@ import {
   appendEntryToSection,
   createProjectNotebookStore,
   DEFAULT_NOTEBOOK_SECTION,
+  injectionView,
   NOTEBOOK_CONTENT_LIMIT,
+  NOTEBOOK_INJECTION_BUDGET,
+  tidyNotebook,
 } from "../src/project-notebook-store.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 
@@ -127,5 +130,135 @@ describe("project notebook store — appendEntry", () => {
     if (result.ok) throw new Error("expected failure");
     expect(result.reason).toBe("notebook_full");
     expect(notebooks.get(project.id)?.content).toBe(big);
+  });
+});
+
+describe("injectionView", () => {
+  test("returns the whole doc (normalized) when there is no archive", () => {
+    expect(injectionView("## Log\n- a\n- b\n")).toBe("## Log\n- a\n- b");
+  });
+
+  test("strips a trailing ## Archive section", () => {
+    const doc = "## Log\n- recent\n\n## Archive\n- old1\n- old2\n";
+    expect(injectionView(doc)).toBe("## Log\n- recent");
+  });
+
+  test("strips an ## Archive section that precedes another section", () => {
+    const doc = "## Archive\n- old\n\n## Log\n- recent\n";
+    expect(injectionView(doc)).toBe("## Log\n- recent");
+  });
+
+  test("empty content yields an empty view", () => {
+    expect(injectionView("")).toBe("");
+  });
+});
+
+describe("tidyNotebook", () => {
+  test("within-budget notebook is returned unchanged", () => {
+    const doc = "## Log\n- 2026-01-01: a\n";
+    expect(tidyNotebook(doc, { budget: 1000, minRecent: 1 })).toEqual({
+      content: doc,
+      archivedCount: 0,
+    });
+  });
+
+  test("moves the oldest bullet under ## Archive with a clean seam", () => {
+    const doc = "## Log\n- 2026-01-01: a\n- 2026-01-02: b\n";
+    const { content, archivedCount } = tidyNotebook(doc, { budget: 20, minRecent: 1 });
+    expect(archivedCount).toBe(1);
+    expect(content).toBe("## Log\n- 2026-01-02: b\n\n## Archive\n- 2026-01-01: a\n");
+  });
+
+  test("appends to an existing ## Archive, keeping it chronological", () => {
+    const doc =
+      "## Log\n- 2026-02-01: new\n- 2026-02-02: newer\n\n## Archive\n- 2026-01-01: ancient\n";
+    const { content, archivedCount } = tidyNotebook(doc, { budget: 25, minRecent: 1 });
+    expect(archivedCount).toBeGreaterThanOrEqual(1);
+    expect(content.match(/^## Archive$/gm)?.length).toBe(1);
+    const ancientIdx = content.indexOf("ancient");
+    const newIdx = content.indexOf("2026-02-01: new");
+    expect(ancientIdx).toBeGreaterThan(content.indexOf("## Archive"));
+    expect(newIdx).toBeGreaterThan(ancientIdx);
+  });
+
+  test("keeps the recent floor even when curated sections exceed the budget", () => {
+    const doc = `## Conventions\n- ${"x".repeat(100)}\n\n## Log\n- 2026-03-01: a\n- 2026-03-02: b\n- 2026-03-03: c\n`;
+    const { content, archivedCount } = tidyNotebook(doc, { budget: 10, minRecent: 2 });
+    expect(archivedCount).toBe(1);
+    const view = injectionView(content);
+    expect(view).toContain("2026-03-02: b");
+    expect(view).toContain("2026-03-03: c");
+    expect(view).not.toContain("2026-03-01: a");
+    expect(content).toContain("## Conventions");
+    expect(content).toContain("## Archive");
+  });
+
+  test("no ## Log section → no-op even when over budget", () => {
+    const doc = `## Conventions\n- ${"x".repeat(100)}\n`;
+    expect(tidyNotebook(doc, { budget: 10, minRecent: 1 })).toEqual({
+      content: doc,
+      archivedCount: 0,
+    });
+  });
+
+  test("running tidy twice is a no-op the second time", () => {
+    const opts = { budget: 20, minRecent: 1 };
+    const doc = "## Log\n- 2026-01-01: a\n- 2026-01-02: b\n";
+    const once = tidyNotebook(doc, opts);
+    const twice = tidyNotebook(once.content, opts);
+    expect(twice.archivedCount).toBe(0);
+    expect(twice.content).toBe(once.content);
+  });
+
+  test("preserves content from every existing ## Archive section", () => {
+    const doc =
+      "## Log\n- 2026-03-01: a\n- 2026-03-02: b\n\n## Archive\n- old1\n\n## Notes\n- keep\n\n## Archive\n- old2\n";
+    const { content, archivedCount } = tidyNotebook(doc, { budget: 15, minRecent: 1 });
+    expect(archivedCount).toBeGreaterThanOrEqual(1);
+    expect(content).toContain("old1");
+    expect(content).toContain("old2");
+    expect(content).toContain("## Notes\n- keep");
+    expect(content.match(/^## Archive$/gm)?.length).toBe(1);
+  });
+
+  test("archives a multi-line log entry as a whole block, counting it as one entry", () => {
+    const doc = "## Log\n- 2026-03-01: title\n  detail line\n  more detail\n- 2026-03-02: recent\n";
+    const { content, archivedCount } = tidyNotebook(doc, { budget: 20, minRecent: 1 });
+    expect(archivedCount).toBe(1);
+    const view = injectionView(content);
+    expect(view).not.toContain("title");
+    expect(view).not.toContain("detail line");
+    expect(view).not.toContain("more detail");
+    expect(content).toContain("- 2026-03-01: title\n  detail line\n  more detail");
+    expect(view).toContain("2026-03-02: recent");
+  });
+});
+
+describe("project notebook store — tidy", () => {
+  test("archives oldest log entries, returns previousContent + archivedCount, and persists", () => {
+    const { notebooks, project } = setup();
+    const body = Array.from(
+      { length: 50 },
+      (_, i) => `- 2026-06-${String(i + 1).padStart(2, "0")}: ${"y".repeat(200)}`,
+    ).join("\n");
+    const big = `## Log\n${body}\n`;
+    notebooks.upsert(project.id, big);
+
+    const res = notebooks.tidy(project.id);
+    expect(res.archivedCount).toBeGreaterThan(0);
+    expect(res.previousContent).toBe(big);
+    expect(res.notebook.content).toContain("## Archive");
+    expect(injectionView(res.notebook.content).length).toBeLessThanOrEqual(
+      NOTEBOOK_INJECTION_BUDGET,
+    );
+    expect(notebooks.get(project.id)?.content).toBe(res.notebook.content);
+  });
+
+  test("within-budget notebook is left unchanged with archivedCount 0", () => {
+    const { notebooks, project } = setup();
+    notebooks.upsert(project.id, "## Log\n- 2026-06-01: small\n");
+    const res = notebooks.tidy(project.id);
+    expect(res.archivedCount).toBe(0);
+    expect(res.notebook.content).toBe("## Log\n- 2026-06-01: small\n");
   });
 });

@@ -35,7 +35,11 @@ import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import { createNoteProjectTool } from "./note-project-tool.ts";
-import type { ProjectNotebookStore } from "./project-notebook-store.ts";
+import {
+  injectionView,
+  NOTEBOOK_INJECTION_BUDGET,
+  type ProjectNotebookStore,
+} from "./project-notebook-store.ts";
 import type { ProjectsStore } from "./projects-store.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
@@ -299,17 +303,18 @@ const MEMORY_RECALL_MAX_ITEMS = 5;
 const MEMORY_RECALL_CONTENT_CHARS = 200;
 const MEMORY_SECTION_HEADER = "## Relevant prior memory";
 
-const NOTEBOOK_MAX_CHARS = 6000;
 const NOTEBOOK_SECTION_HEADER = "## Project notebook";
 
-// Soft-cap the notebook so an oversized one can't crowd out the rest of the turn.
+// Inject everything except the archived entries, soft-capped so an oversized
+// notebook can't crowd out the rest of the turn. The slice is a residual
+// safety net for the case where even the un-archived view exceeds the budget.
 function buildNotebookSection(content: string): string | undefined {
-  const trimmed = content.trim();
-  if (trimmed.length === 0) return undefined;
+  const visible = injectionView(content);
+  if (visible.length === 0) return undefined;
   const body =
-    trimmed.length > NOTEBOOK_MAX_CHARS
-      ? `${trimmed.slice(0, NOTEBOOK_MAX_CHARS - 1)}…\n\n(notebook truncated — run Tidy)`
-      : trimmed;
+    visible.length > NOTEBOOK_INJECTION_BUDGET
+      ? `${visible.slice(0, NOTEBOOK_INJECTION_BUDGET - 1)}…\n\n(notebook truncated — run Tidy)`
+      : visible;
   return `${NOTEBOOK_SECTION_HEADER}\n\nDurable notes about this project, accumulated as you work. Treat as trusted background context.\n\n${body}`;
 }
 

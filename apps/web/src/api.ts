@@ -174,6 +174,23 @@ export async function appendProjectNotebook(
   );
 }
 
+// `archivedCount` is how many log entries Tidy moved to `## Archive`; 0 means the
+// notebook was already within the injection budget.
+export interface ProjectNotebookTidy extends ProjectNotebookAppend {
+  archivedCount: number;
+}
+
+export async function tidyProjectNotebook(projectId: string): Promise<ProjectNotebookTidy> {
+  return apiRequest<ProjectNotebookTidy>(
+    `/api/projects/${encodeURIComponent(projectId)}/notebook/tidy`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      label: `/api/projects/${projectId}/notebook/tidy`,
+    },
+  );
+}
+
 // Returns null on 404 so callers can distinguish "server lost the conversation"
 // from a real network/server error.
 export async function getConversation(id: string): Promise<Conversation | null> {
