@@ -131,3 +131,40 @@ describe("chat project-notebook injection", () => {
     expect(sp.indexOf("## Project notebook")).toBeLessThan(sp.indexOf(seed));
   });
 });
+
+describe("chat note_project tool wiring", () => {
+  test("note_project is offered when a notebook store and project are present", async () => {
+    let captured: SendQueryOptions | undefined;
+    const spyId = "spy-note-tool-present";
+    const { store, notebooks, project } = setup(spyId, (o) => {
+      captured = o;
+    });
+    const conv = store.create({ providerId: spyId, projectId: project.id });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      projectNotebookStore: notebooks,
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(captured?.tools?.some((t) => t.name === "note_project")).toBe(true);
+  });
+
+  test("note_project is omitted when no notebook store is wired", async () => {
+    let captured: SendQueryOptions | undefined;
+    const spyId = "spy-note-tool-absent";
+    const { store, project } = setup(spyId, (o) => {
+      captured = o;
+    });
+    const conv = store.create({ providerId: spyId, projectId: project.id });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(captured?.tools?.some((t) => t.name === "note_project") ?? false).toBe(false);
+  });
+});

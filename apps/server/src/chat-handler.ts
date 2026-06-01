@@ -34,6 +34,7 @@ import { buildChatSystemPrompt, type WorkflowSummaryLike } from "./chat-prompt.t
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import { createNoteProjectTool } from "./note-project-tool.ts";
 import type { ProjectNotebookStore } from "./project-notebook-store.ts";
 import type { ProjectsStore } from "./projects-store.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
@@ -403,6 +404,14 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // (e.g. a row whose project was deleted, FK SET NULL).
   const recallProjectId = conv.projectId ?? deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME)?.id;
 
+  // note_project is built per-request closing over the resolved project so it can
+  // only write to this conversation's notebook; omitted when there's no project.
+  const noteTool =
+    recallProjectId !== undefined && deps.projectNotebookStore !== undefined
+      ? createNoteProjectTool({ store: deps.projectNotebookStore, projectId: recallProjectId })
+      : undefined;
+  const allTools = noteTool ? [...tools, noteTool] : tools;
+
   // Recall failures warn-and-continue with the section omitted; the turn
   // proceeds with whatever systemPrompt the seed would have produced.
   const recallSection = await runChatRecall({
@@ -452,7 +461,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       ...(message.reasoningEffort !== undefined
         ? { reasoningEffort: message.reasoningEffort }
         : {}),
-      ...(tools.length > 0 ? { tools } : {}),
+      ...(allTools.length > 0 ? { tools: allTools } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     })) {
       if (deps.abortSignal.aborted) return;
