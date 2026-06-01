@@ -97,4 +97,20 @@ export function projectNotebookRoutes(app: Hono, deps: ProjectNotebookRoutesDeps
       previousContent: result.previousContent,
     });
   });
+
+  // Compact the notebook by archiving the oldest log entries (deterministic, no
+  // body). Returns previousContent so the UI can offer a one-click Undo via PUT.
+  app.post("/api/projects/:id/notebook/tidy", (c) => {
+    const id = c.req.param("id");
+    if (!projectsStore.get(id)) {
+      return c.json({ error: "project not found" }, 404);
+    }
+    const result = store.tidy(id);
+    return c.json({
+      content: result.notebook.content,
+      updatedAt: result.notebook.updatedAt,
+      previousContent: result.previousContent,
+      archivedCount: result.archivedCount,
+    });
+  });
 }

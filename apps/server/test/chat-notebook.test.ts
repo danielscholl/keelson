@@ -130,6 +130,31 @@ describe("chat project-notebook injection", () => {
     expect(sp).toContain(seed);
     expect(sp.indexOf("## Project notebook")).toBeLessThan(sp.indexOf(seed));
   });
+
+  test("the ## Archive section is held back from the injected notebook", async () => {
+    let captured: SendQueryOptions | undefined;
+    const spyId = "spy-notebook-archive";
+    const { store, notebooks, project } = setup(spyId, (o) => {
+      captured = o;
+    });
+    notebooks.upsert(
+      project.id,
+      "## Log\n- 2026-06-01: recent thing\n\n## Archive\n- 2026-01-01: ancient thing\n",
+    );
+    const conv = store.create({ providerId: spyId, projectId: project.id });
+
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      projectNotebookStore: notebooks,
+      abortSignal: new AbortController().signal,
+    });
+
+    const sp = captured!.systemPrompt!;
+    expect(sp).toContain("recent thing");
+    expect(sp).not.toContain("ancient thing");
+    expect(sp).not.toContain("## Archive");
+  });
 });
 
 describe("chat note_project tool wiring", () => {

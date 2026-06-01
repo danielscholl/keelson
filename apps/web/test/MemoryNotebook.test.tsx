@@ -1,19 +1,33 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
 import { __resetProjectStoreForTests } from "../src/hooks/useActiveProject.ts";
 
 let savedContent: string | null = null;
+let loadedContent = "## Gotchas\n- existing note";
+let tidyCalls: string[] = [];
+let putCalls: Array<{ id: string; content: string }> = [];
+let tidyResponse = {
+  content: "## Log\n- recent\n\n## Archive\n- old\n",
+  updatedAt: "2026-06-01T00:00:00Z",
+  previousContent: "PREV_CONTENT",
+  archivedCount: 3,
+};
 
 mock.module("../src/api.ts", () => ({
   ...realApi,
   listProjects: async () => [
     { id: "p1", name: "demo", rootPath: "/tmp/demo", createdAt: "2026-01-01T00:00:00Z" },
   ],
-  getProjectNotebook: async () => ({ content: "## Gotchas\n- existing note", updatedAt: null }),
-  putProjectNotebook: async (_id: string, content: string) => {
+  getProjectNotebook: async () => ({ content: loadedContent, updatedAt: null }),
+  putProjectNotebook: async (id: string, content: string) => {
     savedContent = content;
+    putCalls.push({ id, content });
     return { content, updatedAt: "2026-06-01T00:00:00Z" };
+  },
+  tidyProjectNotebook: async (id: string) => {
+    tidyCalls.push(id);
+    return tidyResponse;
   },
 }));
 
@@ -30,6 +44,15 @@ async function renderMemory() {
 describe("Memory notebook panel", () => {
   beforeEach(() => {
     savedContent = null;
+    loadedContent = "## Gotchas\n- existing note";
+    tidyCalls = [];
+    putCalls = [];
+    tidyResponse = {
+      content: "## Log\n- recent\n\n## Archive\n- old\n",
+      updatedAt: "2026-06-01T00:00:00Z",
+      previousContent: "PREV_CONTENT",
+      archivedCount: 3,
+    };
     localStorage.clear();
     __resetProjectStoreForTests();
   });
@@ -62,5 +85,56 @@ describe("Memory notebook panel", () => {
     expect(screen.getByRole("tab", { name: "Ledger (advanced)" })).toBeDefined();
     // Notebook is the default surface.
     expect(await screen.findByLabelText("Project notebook")).toBeDefined();
+  });
+
+  test("Tidy archives entries, shows a toast, and Undo restores previous content", async () => {
+    await renderMemory();
+    await screen.findByLabelText("Project notebook");
+    const tidy = screen.getByRole("button", { name: "Tidy" });
+    await act(async () => {
+      fireEvent.click(tidy);
+    });
+    expect(tidyCalls).toEqual(["p1"]);
+    expect(await screen.findByText(/moved 3 entries to Archive/)).toBeDefined();
+
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    await act(async () => {
+      fireEvent.click(undo);
+    });
+    const editor = (await screen.findByLabelText("Project notebook")) as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toBe("PREV_CONTENT"));
+    expect(putCalls).toContainEqual({ id: "p1", content: "PREV_CONTENT" });
+  });
+
+  test("Tidy with nothing to archive shows an info toast and no Undo", async () => {
+    tidyResponse = {
+      content: loadedContent,
+      updatedAt: "2026-06-01T00:00:00Z",
+      previousContent: loadedContent,
+      archivedCount: 0,
+    };
+    await renderMemory();
+    await screen.findByLabelText("Project notebook");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Tidy" }));
+    });
+    expect(await screen.findByText(/nothing to tidy/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  test("over-budget notebook shows the Tidy-recommended flag", async () => {
+    loadedContent = `## Log\n${Array.from(
+      { length: 400 },
+      () => `- 2026-06-01: ${"y".repeat(20)}`,
+    ).join("\n")}\n`;
+    await renderMemory();
+    await screen.findByLabelText("Project notebook");
+    expect(screen.getByText(/Over budget/)).toBeDefined();
+  });
+
+  test("within-budget notebook hides the over-budget flag", async () => {
+    await renderMemory();
+    await screen.findByLabelText("Project notebook");
+    expect(screen.queryByText(/Over budget/)).toBeNull();
   });
 });

@@ -17,6 +17,7 @@ import {
   listPendingMemories,
   postReviewAction,
   putProjectNotebook,
+  tidyProjectNotebook,
 } from "../api.ts";
 import { MemoryItem } from "../components/Memory/MemoryItem.tsx";
 import { useToast } from "../components/Toast.tsx";
@@ -30,6 +31,26 @@ const REVIEW_ACTOR = "operator";
 
 // "Already resolved" toast verbiage for the silent-no-op shape.
 const ALREADY_RESOLVED = "Already resolved (probably by another tab).";
+
+// Mirrors apps/server NOTEBOOK_INJECTION_BUDGET — the always-on chat budget. Used
+// only to flag when the notebook is over budget so the user can run Tidy.
+const NOTEBOOK_INJECTION_BUDGET = 6000;
+
+// What chat actually injects: everything except the `## Archive` section Tidy
+// parks old entries under. Length-only mirror of the server's injectionView.
+function injectedLength(content: string): number {
+  const lines = content.split("\n");
+  const headerIdx = lines.findIndex((l) => l.trim() === "## Archive");
+  if (headerIdx === -1) return content.trim().length;
+  let end = lines.length;
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    if (lines[i]?.trim().startsWith("## ")) {
+      end = i;
+      break;
+    }
+  }
+  return [...lines.slice(0, headerIdx), ...lines.slice(end)].join("\n").trim().length;
+}
 
 interface FilterState {
   scopeVisibility?: ScopeVisibility;
@@ -88,6 +109,7 @@ function NotebookPanel() {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [tidying, setTidying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Last persisted content — the dirty check compares against this, not the
   // initial empty string, so a freshly loaded notebook isn't reported dirty.
@@ -137,6 +159,50 @@ function NotebookPanel() {
     }
   }, [activeProjectId, content, toast]);
 
+  // Tidy operates on the server-stored notebook, so a dirty editor is disabled
+  // (Save first) to avoid clobbering unsaved edits with the tidied result.
+  const handleTidy = useCallback(async () => {
+    if (!activeProjectId) return;
+    const projectId = activeProjectId;
+    setTidying(true);
+    try {
+      const res = await tidyProjectNotebook(projectId);
+      savedRef.current = res.content;
+      setContent(res.content);
+      if (res.archivedCount > 0) {
+        const previous = res.previousContent;
+        const n = res.archivedCount;
+        toast.push({
+          kind: "ok",
+          message: `Tidied — moved ${n} ${n === 1 ? "entry" : "entries"} to Archive.`,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              void putProjectNotebook(projectId, previous)
+                .then((nb) => {
+                  savedRef.current = nb.content;
+                  setContent(nb.content);
+                })
+                .catch((err) => {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  toast.push({ kind: "error", message: `Undo failed: ${msg}` });
+                });
+            },
+          },
+        });
+      } else {
+        toast.push({ kind: "info", message: "Already within budget — nothing to tidy." });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.push({ kind: "error", message: `Tidy failed: ${msg}` });
+    } finally {
+      setTidying(false);
+    }
+  }, [activeProjectId, toast]);
+
+  const overBudget = injectedLength(content) > NOTEBOOK_INJECTION_BUDGET;
+
   if (!activeProjectId) {
     return (
       <div className="empty-state">
@@ -157,15 +223,37 @@ function NotebookPanel() {
           margin: "12px 0",
         }}
       >
-        <span className="page-sub">Project · {activeProject?.name ?? "…"}</span>
-        <button
-          type="button"
-          className="memory-refresh"
-          disabled={!dirty || saving}
-          onClick={handleSave}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+        <span className="page-sub" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          Project · {activeProject?.name ?? "…"}
+          {overBudget && (
+            <span
+              role="status"
+              title="The notebook exceeds the always-on chat budget; Tidy archives the oldest log entries."
+              style={{ color: "var(--warn, #b58900)", fontWeight: 600 }}
+            >
+              Over budget — Tidy recommended.
+            </span>
+          )}
+        </span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="memory-refresh"
+            disabled={dirty || saving || tidying}
+            onClick={handleTidy}
+            title={dirty ? "Save your edits before tidying." : "Archive the oldest log entries."}
+          >
+            {tidying ? "Tidying…" : "Tidy"}
+          </button>
+          <button
+            type="button"
+            className="memory-refresh"
+            disabled={!dirty || saving || tidying}
+            onClick={handleSave}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
       </div>
       {loading && (
         <div className="page-sub" style={{ padding: "20px 0" }}>

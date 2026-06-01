@@ -22,14 +22,33 @@ export const DEFAULT_NOTEBOOK_SECTION = "Log";
 // the PUT route so hand-edits and appends reject at the same ceiling.
 export const NOTEBOOK_CONTENT_LIMIT = 200_000;
 
+// What gets injected always-on into the chat prompt. The `## Archive` section is
+// held back from injection so Tidy can bound injected size losslessly. The web
+// over-budget flag mirrors this value.
+export const NOTEBOOK_INJECTION_BUDGET = 6_000;
+
+// Tidy parks the oldest `## Log` bullets under this section; excluded from
+// injection but kept in the stored doc so nothing is lost.
+export const ARCHIVE_SECTION = "Archive";
+
+// Tidy never empties the Log — the most recent entries always stay injected.
+export const TIDY_MIN_RECENT_BULLETS = 5;
+
 export type AppendResult =
   | { ok: true; notebook: ProjectNotebook; previousContent: string }
   | { ok: false; reason: "notebook_full" };
+
+export interface TidyResult {
+  notebook: ProjectNotebook;
+  previousContent: string;
+  archivedCount: number;
+}
 
 export interface ProjectNotebookStore {
   get(projectId: string): ProjectNotebook | undefined;
   upsert(projectId: string, content: string): ProjectNotebook;
   appendEntry(projectId: string, entry: string, section?: string, date?: string): AppendResult;
+  tidy(projectId: string): TidyResult;
 }
 
 interface NotebookRow {
@@ -98,6 +117,120 @@ export function appendEntryToSection(
   return result.endsWith("\n") ? result : `${result}\n`;
 }
 
+interface NotebookSection {
+  // The raw `## …` header line, or null for any preamble before the first header.
+  header: string | null;
+  body: string[];
+}
+
+function parseSections(content: string): NotebookSection[] {
+  const sections: NotebookSection[] = [];
+  let current: NotebookSection | null = null;
+  for (const line of content.split("\n")) {
+    if (isSectionBoundary(line.trim())) {
+      current = { header: line, body: [] };
+      sections.push(current);
+    } else {
+      if (!current) {
+        current = { header: null, body: [] };
+        sections.push(current);
+      }
+      current.body.push(line);
+    }
+  }
+  return sections;
+}
+
+// Re-emit sections with one blank line between them and a single trailing
+// newline; leading/trailing blank lines inside a section are trimmed but
+// internal blanks are preserved. Empty headerless preamble is dropped.
+function renderSections(sections: NotebookSection[]): string {
+  const blocks: string[] = [];
+  for (const s of sections) {
+    const body = [...s.body];
+    while (body.length > 0 && body[body.length - 1]!.trim() === "") body.pop();
+    while (body.length > 0 && body[0]!.trim() === "") body.shift();
+    if (s.header === null) {
+      if (body.length > 0) blocks.push(body.join("\n"));
+    } else {
+      blocks.push([s.header, ...body].join("\n"));
+    }
+  }
+  const joined = blocks.join("\n\n");
+  return joined === "" ? "" : `${joined.replace(/\n+$/, "")}\n`;
+}
+
+function isArchiveHeader(section: NotebookSection): boolean {
+  return section.header !== null && section.header.trim() === `## ${ARCHIVE_SECTION}`;
+}
+
+function isLogHeader(section: NotebookSection): boolean {
+  return section.header !== null && section.header.trim() === `## ${DEFAULT_NOTEBOOK_SECTION}`;
+}
+
+// The notebook as chat sees it: everything except `## Archive`, normalized. The
+// chat handler injects this; Tidy measures against it. Single source of truth
+// for "what counts toward the injection budget".
+export function injectionView(content: string): string {
+  return renderSections(parseSections(content).filter((s) => !isArchiveHeader(s))).trim();
+}
+
+export interface TidyOptions {
+  budget?: number;
+  minRecent?: number;
+}
+
+// Pure + deterministic. While the injection view exceeds the budget, move the
+// oldest top-level `## Log` bullet under `## Archive` (created at the end of the
+// doc when absent), never dropping below the recent-bullet floor. Curated and
+// non-Log sections are never touched, and nothing is deleted. Returns the
+// original content verbatim when already within budget or nothing is movable.
+export function tidyNotebook(
+  content: string,
+  opts?: TidyOptions,
+): { content: string; archivedCount: number } {
+  const budget = opts?.budget ?? NOTEBOOK_INJECTION_BUDGET;
+  const minRecent = opts?.minRecent ?? TIDY_MIN_RECENT_BULLETS;
+
+  if (injectionView(content).length <= budget) {
+    return { content, archivedCount: 0 };
+  }
+
+  const sections = parseSections(content);
+  const log = sections.find(isLogHeader);
+  if (!log) {
+    return { content, archivedCount: 0 };
+  }
+
+  const base = sections.filter((s) => !isArchiveHeader(s));
+  const archiveBody = sections.find(isArchiveHeader)?.body.slice() ?? [];
+  const moved: string[] = [];
+
+  const build = (): string => {
+    const assembled = [...base];
+    if (archiveBody.length + moved.length > 0) {
+      assembled.push({ header: `## ${ARCHIVE_SECTION}`, body: [...archiveBody, ...moved] });
+    }
+    return renderSections(assembled);
+  };
+
+  const oldestBulletIndex = (): number => log.body.findIndex((l) => l.trim().startsWith("- "));
+  const bulletCount = (): number => log.body.filter((l) => l.trim().startsWith("- ")).length;
+
+  while (injectionView(build()).length > budget) {
+    if (bulletCount() <= minRecent) break;
+    const idx = oldestBulletIndex();
+    if (idx === -1) break;
+    moved.push(log.body[idx]!);
+    log.body.splice(idx, 1);
+  }
+
+  if (moved.length === 0) {
+    return { content, archivedCount: 0 };
+  }
+  return { content: build(), archivedCount: moved.length };
+}
+
 export function createProjectNotebookStore(db: Database): ProjectNotebookStore {
   const getStmt = db.prepare(
     "SELECT project_id, content, updated_at FROM project_notebooks WHERE project_id = ?",
@@ -130,6 +263,11 @@ export function createProjectNotebookStore(db: Database): ProjectNotebookStore {
         return { ok: false, reason: "notebook_full" };
       }
       return { ok: true, notebook: upsert(projectId, nextContent), previousContent };
+    },
+    tidy(projectId) {
+      const previousContent = get(projectId)?.content ?? "";
+      const { content, archivedCount } = tidyNotebook(previousContent);
+      return { notebook: upsert(projectId, content), previousContent, archivedCount };
     },
   };
 }
