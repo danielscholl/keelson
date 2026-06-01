@@ -242,6 +242,43 @@ nodes:
     expect(content).toContain("done");
   });
 
+  test("a run in a subdirectory of the project root still writes the notebook", async () => {
+    const { store, conversationStore, projectsStore, projectNotebookStore, project } = setup();
+    const subDir = join(tmpDir, "packages", "app");
+    mkdirSync(subDir, { recursive: true });
+
+    writeWorkflow(
+      "nb-sub.yaml",
+      `name: nb-sub
+description: subdir containment
+nodes:
+  - id: build
+    bash: echo done
+    notebook:
+      append: subdir note
+`,
+    );
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, projectNotebookStore },
+      createActiveRuns(),
+    );
+
+    const startRes = await app.fetch(
+      new Request("http://test/api/workflows/nb-sub/runs", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {}, projectId: project.id, workingDir: subDir }),
+      }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    expect(await pollUntilTerminal(app, runId)).toBe("succeeded");
+
+    expect(projectNotebookStore.get(project.id)?.content ?? "").toContain("subdir note");
+  });
+
   test("on: success does not write when the node fails", async () => {
     const { store, conversationStore, projectsStore, projectNotebookStore, project } = setup();
 

@@ -9,7 +9,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "../src/db/init.ts";
-import { createProjectsStore, DuplicateProjectNameError } from "../src/projects-store.ts";
+import {
+  createProjectsStore,
+  DuplicateProjectNameError,
+  isPathInside,
+} from "../src/projects-store.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -112,5 +116,21 @@ describe("ProjectsStore", () => {
     expect(store.findByPathPrefix("/tmp/ab")?.name).toBe("ab");
     expect(store.findByPathPrefix("/tmp/ab/")?.name).toBe("ab");
     expect(store.findByPathPrefix("/tmp/ab/x")?.name).toBe("ab");
+  });
+});
+
+describe("isPathInside", () => {
+  test("equal paths and subdirectories are inside; siblings are not", () => {
+    expect(isPathInside("/tmp/work", "/tmp/work")).toBe(true);
+    expect(isPathInside("/tmp/work", "/tmp/work/repo/a.ts")).toBe(true);
+    expect(isPathInside("/tmp/work", "/tmp/work/")).toBe(true);
+    expect(isPathInside("/tmp/work", "/tmp/workshop")).toBe(false);
+    expect(isPathInside("/tmp/work", "/tmp")).toBe(false);
+  });
+
+  test("a project rooted at the filesystem root contains every absolute path", () => {
+    expect(isPathInside("/", "/")).toBe(true);
+    expect(isPathInside("/", "/repo")).toBe(true);
+    expect(isPathInside("/", "/repo/src/a.ts")).toBe(true);
   });
 });

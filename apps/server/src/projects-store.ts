@@ -67,7 +67,7 @@ function trimSlash(p: string): string {
 }
 
 // `${parent}/` boundary guards against `/a/bc` matching parent `/a/b`.
-function isPathInside(parent: string, child: string): boolean {
+export function isPathInside(parent: string, child: string): boolean {
   const p = trimSlash(parent);
   const c = trimSlash(child);
   if (c === p) return true;

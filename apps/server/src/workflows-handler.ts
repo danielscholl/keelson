@@ -85,7 +85,7 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
-import type { ProjectsStore } from "./projects-store.ts";
+import { isPathInside, type ProjectsStore } from "./projects-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
 export interface WorkflowsHandlerOptions {
@@ -539,9 +539,7 @@ function startRunCore(
   // `projectId` + an overriding `workingDir` outside that project must NOT read
   // or write its notebook — that id is a UI pointer, not the run's context.
   const workingDirInProject =
-    resolvedProject !== null &&
-    (workingDir === resolvedProject.rootPath ||
-      workingDir.startsWith(`${resolvedProject.rootPath}${sep}`));
+    resolvedProject !== null && isPathInside(resolvedProject.rootPath, workingDir);
   let notebook: NotebookAdapter | undefined;
   if (projectNotebookStore && projectId !== null && workingDirInProject) {
     const nbStore = projectNotebookStore;
