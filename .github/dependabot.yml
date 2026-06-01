@@ -2,10 +2,11 @@
 #
 # Bun monorepo: Dependabot's "npm" ecosystem doesn't natively understand
 # bun.lock, but it CAN bump versions in each workspace's package.json. CI
-# (bun install --frozen-lockfile) will reject any PR whose package.json
-# updates don't match the committed bun.lock — so Dependabot's PRs will
-# fail CI until the lockfile is refreshed locally with `bun install` and
-# pushed onto the PR branch. That's the pragmatic workflow today.
+# (bun install --frozen-lockfile) would reject any PR whose package.json
+# updates don't match the committed bun.lock. The dependabot-bun-lock.yml
+# workflow closes that gap: on every Dependabot PR it regenerates bun.lock
+# (`bun install --lockfile-only`) and pushes it onto the branch, so the
+# frozen-lockfile install passes without a manual refresh.
 #
 # One npm entry per workspace because Dependabot scans the `directory`
 # only, not the workspace tree.
