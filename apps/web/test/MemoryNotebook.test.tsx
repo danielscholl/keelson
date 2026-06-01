@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
+import { __resetProjectStoreForTests } from "../src/hooks/useActiveProject.ts";
 
 let savedContent: string | null = null;
 
@@ -29,6 +30,12 @@ async function renderMemory() {
 describe("Memory notebook panel", () => {
   beforeEach(() => {
     savedContent = null;
+    localStorage.clear();
+    __resetProjectStoreForTests();
+  });
+
+  afterEach(() => {
+    __resetProjectStoreForTests();
   });
 
   test("loads the active project's notebook into the editor", async () => {
