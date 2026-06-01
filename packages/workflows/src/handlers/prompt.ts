@@ -303,6 +303,19 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           ? ctx.resolvedBody + buildOutputFormatSuffix(nodeOutputFormat)
           : ctx.resolvedBody;
 
+      // Project notebook (read) prepended to the factory seed — the prompt node
+      // inherits the same project context chat sees. Best-effort: a throwing
+      // adapter must not take the node down.
+      let notebook: string | undefined;
+      try {
+        notebook = ctx.notebook?.read();
+      } catch {
+        notebook = undefined;
+      }
+      const effectiveSystemPrompt =
+        [notebook, systemPrompt].filter((s) => s !== undefined && s.length > 0).join("\n\n") ||
+        undefined;
+
       const consume = async (): Promise<void> => {
         try {
           const provider = opts.getProvider(effectiveProviderId);
@@ -316,7 +329,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             abortSignal: handlerExit.signal,
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
             ...(model !== undefined ? { model } : {}),
-            ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+            ...(effectiveSystemPrompt !== undefined ? { systemPrompt: effectiveSystemPrompt } : {}),
             ...(nodeAllowed !== undefined ? { allowedTools: nodeAllowed } : {}),
             ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
             ...(nodeHooks !== undefined ? { hooks: nodeHooks } : {}),

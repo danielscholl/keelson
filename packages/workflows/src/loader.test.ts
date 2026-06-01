@@ -946,3 +946,166 @@ nodes:
     expect(result.error).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// notebook: block
+// ---------------------------------------------------------------------------
+
+describe("parseWorkflow — notebook: block", () => {
+  test("valid notebook block parses with append + section + on", () => {
+    const yaml = `
+name: notebook-block-test
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: "result: $think.output"
+      section: Workflow Log
+      on: success
+`;
+    const result = parseWorkflow(yaml, "notebook.yaml");
+    expect(result.error).toBeNull();
+    expect(result.workflow?.nodes[0]).toMatchObject({
+      id: "think",
+      notebook: { append: "result: $think.output", section: "Workflow Log", on: "success" },
+    });
+  });
+
+  test("on defaults to success when omitted", () => {
+    const yaml = `
+name: notebook-default
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: a note
+`;
+    const result = parseWorkflow(yaml, "notebook-default.yaml");
+    expect(result.error).toBeNull();
+    const node = result.workflow?.nodes[0] as { notebook?: { on?: string; section?: string } };
+    expect(node?.notebook?.on).toBe("success");
+    expect(node?.notebook?.section).toBeUndefined();
+  });
+
+  test("notebook block is valid on a bash node (not just prompt)", () => {
+    const yaml = `
+name: notebook-bash
+description: test
+nodes:
+  - id: build
+    bash: echo done
+    notebook:
+      append: "built: $build.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-bash.yaml");
+    expect(result.error).toBeNull();
+  });
+
+  test("empty append is rejected", () => {
+    const yaml = `
+name: notebook-empty
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: ""
+`;
+    const result = parseWorkflow(yaml, "notebook-empty.yaml");
+    expect(result.error).toBeDefined();
+  });
+
+  test("unknown notebook keys are rejected (strict)", () => {
+    const yaml = `
+name: notebook-strict
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: a note
+      bogus: nope
+`;
+    const result = parseWorkflow(yaml, "notebook-strict.yaml");
+    expect(result.error).toBeDefined();
+  });
+
+  test("workflows without notebook: parse unchanged (backward compat)", () => {
+    const yaml = `
+name: notebook-absent
+description: test
+nodes:
+  - id: think
+    prompt: hello
+`;
+    const result = parseWorkflow(yaml, "notebook-absent.yaml");
+    expect(result.error).toBeNull();
+    const node = result.workflow?.nodes[0] as { notebook?: unknown };
+    expect(node?.notebook).toBeUndefined();
+  });
+
+  test("notebook.append self-reference ($thisNode.output) is allowed", () => {
+    const yaml = `
+name: notebook-selfref
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    notebook:
+      append: "ran: $think.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-selfref.yaml");
+    expect(result.error).toBeNull();
+  });
+
+  test("notebook.append referencing an unknown node is rejected", () => {
+    const yaml = `
+name: notebook-bad-ref
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    notebook:
+      append: "leaks $ghost.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-bad-ref.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/unknown node.*ghost/);
+  });
+
+  test("notebook.append referencing a non-ancestor is rejected", () => {
+    const yaml = `
+name: notebook-non-ancestor
+description: test
+nodes:
+  - id: a
+    bash: echo a
+  - id: think
+    bash: echo done
+    notebook:
+      append: "uses $a.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-non-ancestor.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/depends_on/);
+  });
+
+  test("notebook.append referencing an ancestor is allowed", () => {
+    const yaml = `
+name: notebook-ancestor
+description: test
+nodes:
+  - id: a
+    bash: echo a
+  - id: think
+    depends_on: [a]
+    bash: echo done
+    notebook:
+      append: "uses $a.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-ancestor.yaml");
+    expect(result.error).toBeNull();
+  });
+});

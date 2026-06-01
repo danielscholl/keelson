@@ -58,6 +58,7 @@ import {
   makeScriptHandler,
   type NodeHandler,
   type NodeResult,
+  type NotebookAdapter,
   type RequestCancel,
   type RunStreamEvent,
   removeWorktree,
@@ -83,7 +84,8 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
-import type { ProjectsStore } from "./projects-store.ts";
+import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
+import { isPathInside, type ProjectsStore } from "./projects-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
 export interface WorkflowsHandlerOptions {
@@ -111,6 +113,10 @@ export interface WorkflowsHandlerOptions {
   promptHandler?: NodeHandler;
   // Optional MemoryStore. Undefined → executor memory hooks no-op.
   memoryStore?: MemoryStore;
+  // Optional project notebook store. When set with a resolved project, prompt
+  // nodes inherit the notebook and `notebook:` blocks append to it; undefined →
+  // both are no-ops.
+  projectNotebookStore?: ProjectNotebookStore;
   // Optional snapshot manager. When set, a run republishes its latest
   // structured node output under a run-scoped key (the Tier-0 bridge, #73);
   // undefined → runs never publish a snapshot.
@@ -472,6 +478,7 @@ class RunArtifactsDir {
 function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
   promptHandler: NodeHandler;
   memoryTools: MemoryTools | undefined;
+  projectNotebookStore: ProjectNotebookStore | undefined;
 } {
   const promptHandler = opts.promptHandler ?? placeholderPromptHandler;
   const memoryStore = opts.memoryStore;
@@ -488,7 +495,7 @@ function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
           },
         }
       : undefined;
-  return { promptHandler, memoryTools };
+  return { promptHandler, memoryTools, projectNotebookStore: opts.projectNotebookStore };
 }
 
 interface StartRunCoreDeps {
@@ -498,6 +505,7 @@ interface StartRunCoreDeps {
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
   memoryTools: MemoryTools | undefined;
+  projectNotebookStore?: ProjectNotebookStore;
   snapshotManager?: SnapshotManager;
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
 }
@@ -523,9 +531,27 @@ function startRunCore(
   params: StartRunCoreParams,
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
-  const { snapshotManager, ribWorkflowBindings } = deps;
+  const { snapshotManager, ribWorkflowBindings, projectNotebookStore } = deps;
   const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
     params;
+  // Bind the notebook (read + contribute) only when the working dir actually
+  // resolves inside the resolved project. A run started with a display-only
+  // `projectId` + an overriding `workingDir` outside that project must NOT read
+  // or write its notebook — that id is a UI pointer, not the run's context.
+  const workingDirInProject =
+    resolvedProject !== null && isPathInside(resolvedProject.rootPath, workingDir);
+  let notebook: NotebookAdapter | undefined;
+  if (projectNotebookStore && projectId !== null && workingDirInProject) {
+    const nbStore = projectNotebookStore;
+    const pid = projectId;
+    notebook = {
+      read: () => {
+        const content = nbStore.get(pid)?.content;
+        return content ? formatNotebookSection(content) : undefined;
+      },
+      append: (entry, section) => ({ ok: nbStore.appendEntry(pid, entry, section).ok }),
+    };
+  }
   const name = workflow.name;
   const runId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
@@ -594,6 +620,7 @@ function startRunCore(
       : null,
     ...(projectId !== null ? { projectId } : {}),
     ...(memoryTools !== undefined ? { memoryTools } : {}),
+    ...(notebook !== undefined ? { notebook } : {}),
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
   });
@@ -725,7 +752,7 @@ export function createWorkflowController(
 ): WorkflowController {
   const { catalog, store, conversationStore, projectsStore, snapshotManager, ribWorkflowBindings } =
     opts;
-  const { promptHandler, memoryTools } = buildExecutionDeps(opts);
+  const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
   return {
     startRun({ name, inputs, workingDir, isolation }) {
@@ -752,6 +779,7 @@ export function createWorkflowController(
             subscribers,
             promptHandler,
             memoryTools,
+            ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
             ...(snapshotManager !== undefined ? { snapshotManager } : {}),
             ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           },
@@ -880,7 +908,11 @@ export function workflowsRoutes(
     snapshotManager,
     ribWorkflowBindings,
   } = opts;
-  const { promptHandler: effectivePromptHandler, memoryTools } = buildExecutionDeps(opts);
+  const {
+    promptHandler: effectivePromptHandler,
+    memoryTools,
+    projectNotebookStore,
+  } = buildExecutionDeps(opts);
 
   app.get("/api/workflows", (c) => {
     const workflows = catalog.list().map(workflowToSummary);
@@ -1065,6 +1097,7 @@ export function workflowsRoutes(
           subscribers,
           promptHandler: effectivePromptHandler,
           memoryTools,
+          ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
         },
@@ -1391,6 +1424,9 @@ interface ExecuteRunArgs {
   projectId?: string;
   // Undefined when no MemoryStore was wired; executor memory hooks no-op in that case.
   memoryTools?: MemoryTools;
+  // Project-notebook handle, pre-bound + gated to a project the working dir sits
+  // inside. Undefined → prompt nodes inject nothing and the `notebook:` hook no-ops.
+  notebook?: NotebookAdapter;
   // Tier-0 snapshot bridge (#73): when set, the run republishes its latest
   // structured node output under the `workflow:run:<id>` snapshot key.
   snapshotManager?: SnapshotManager;
@@ -1414,6 +1450,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     isolation,
     projectId,
     memoryTools,
+    notebook,
     snapshotManager,
     ribWorkflowBindings,
   } = args;
@@ -1814,6 +1851,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       ...artifacts.runWorkflowOptions(),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(projectId !== undefined ? { projectId } : {}),
+      ...(notebook !== undefined ? { notebook } : {}),
       onEvent: (event) => {
         if (event.type === "run_done") terminalStatus = event.status;
         dispatchRunEvent({

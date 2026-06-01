@@ -147,6 +147,7 @@ const workflowHandlerOptions: WorkflowsHandlerOptions = {
   projectsStore,
   ...(promptHandler ? { promptHandler } : {}),
   memoryStore,
+  projectNotebookStore,
   snapshotManager,
   ribWorkflowBindings: ribWorkflows.bindings,
 };

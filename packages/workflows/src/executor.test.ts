@@ -7,6 +7,7 @@ import {
   ExecutorValidationError,
   type MemoryTools,
   type NodeHandler,
+  type NotebookAdapter,
   type RecallResponseLike,
   type RunOptions,
   type RunStreamEvent,
@@ -2293,6 +2294,238 @@ nodes:
     expect(summary.status).toBe("succeeded");
     expect(promptResolvedBodies).toHaveLength(1);
     expect(promptResolvedBodies[0]).toContain(JSON.stringify(items));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// notebook: block
+// ---------------------------------------------------------------------------
+
+interface NotebookAppendRecord {
+  entry: string;
+  section?: string;
+}
+
+function mockNotebook(opts: { full?: boolean; appendThrows?: boolean } = {}): {
+  notebook: NotebookAdapter;
+  appends: NotebookAppendRecord[];
+} {
+  const appends: NotebookAppendRecord[] = [];
+  const notebook: NotebookAdapter = {
+    read: () => undefined,
+    append(entry, section) {
+      appends.push(section !== undefined ? { entry, section } : { entry });
+      if (opts.appendThrows) throw new Error("notebook adapter blew up");
+      return { ok: !opts.full };
+    },
+  };
+  return { notebook, appends };
+}
+
+describe("runWorkflow — notebook: block", () => {
+  test("append fires after node success and resolves $node.output", async () => {
+    const workflow = parseInline(`
+name: nb-success
+description: test
+nodes:
+  - id: think
+    prompt: do the thing
+    notebook:
+      append: "result: $think.output"
+      section: Workflow Log
+`);
+    const nb = mockNotebook();
+    const { handler } = echoHandler("prompt");
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      notebook: nb.notebook,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(nb.appends).toHaveLength(1);
+    expect(nb.appends[0]?.entry).toBe("result: echo:think:do the thing");
+    expect(nb.appends[0]?.section).toBe("Workflow Log");
+  });
+
+  test("on defaults to success — no append after node failure", async () => {
+    const workflow = parseInline(`
+name: nb-default
+description: test
+nodes:
+  - id: fail
+    prompt: doomed
+    notebook:
+      append: should not write
+`);
+    const nb = mockNotebook();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", failingHandler("prompt", "kaboom")]]),
+      notebook: nb.notebook,
+    });
+
+    expect(nb.appends).toHaveLength(0);
+  });
+
+  test("on: always appends even after node failure (incl. a thrown handler)", async () => {
+    const workflow = parseInline(`
+name: nb-always
+description: test
+nodes:
+  - id: doomed
+    prompt: please throw
+    notebook:
+      append: failure note
+      on: always
+`);
+    const throwingHandler: NodeHandler = {
+      type: "prompt",
+      async handle() {
+        throw new Error("kaboom");
+      },
+    };
+    const nb = mockNotebook();
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", throwingHandler]]),
+      notebook: nb.notebook,
+    });
+
+    expect(summary.status).toBe("failed");
+    expect(nb.appends).toHaveLength(1);
+    expect(nb.appends[0]?.entry).toBe("failure note");
+  });
+
+  test("emits a notebook_written event on the node_event channel", async () => {
+    const workflow = parseInline(`
+name: nb-event
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: note
+      section: Decisions
+`);
+    const nb = mockNotebook();
+    const { handler } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      notebook: nb.notebook,
+      onEvent,
+    });
+
+    const written = events
+      .filter((e): e is Extract<RunStreamEvent, { type: "node_event" }> => e.type === "node_event")
+      .map((e) => e.event)
+      .find((ev) => ev.type === "notebook_written");
+    expect(written).toEqual({ type: "notebook_written", section: "Decisions" });
+  });
+
+  test("a full notebook warns and the node still succeeds", async () => {
+    const workflow = parseInline(`
+name: nb-full
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: note
+`);
+    const nb = mockNotebook({ full: true });
+    const { handler } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      notebook: nb.notebook,
+      onEvent,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(nb.appends).toHaveLength(1);
+    const warning = events.find(
+      (e): e is Extract<RunStreamEvent, { type: "run_warning" }> => e.type === "run_warning",
+    );
+    expect(warning?.message).toContain("notebook");
+    expect(warning?.message).toContain("full");
+  });
+
+  test("a throwing append adapter warns and the node still succeeds", async () => {
+    const workflow = parseInline(`
+name: nb-throw
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: note
+`);
+    const nb = mockNotebook({ appendThrows: true });
+    const { handler } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      notebook: nb.notebook,
+      onEvent,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    const warning = events.find(
+      (e): e is Extract<RunStreamEvent, { type: "run_warning" }> => e.type === "run_warning",
+    );
+    expect(warning?.message).toContain("notebook append failed");
+  });
+
+  test("notebook: blocks are no-ops when no notebook adapter is wired", async () => {
+    const workflow = parseInline(`
+name: nb-no-adapter
+description: test
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: note
+`);
+    const { handler } = echoHandler("prompt");
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      // notebook intentionally omitted
+    });
+
+    expect(summary.status).toBe("succeeded");
+  });
+
+  test("workflows without notebook: never call the adapter", async () => {
+    const workflow = parseInline(`
+name: nb-none
+description: test
+nodes:
+  - id: think
+    prompt: hello
+`);
+    const nb = mockNotebook();
+    const { handler } = echoHandler("prompt");
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      notebook: nb.notebook,
+    });
+
+    expect(nb.appends).toHaveLength(0);
   });
 });
 
