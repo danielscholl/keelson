@@ -92,10 +92,26 @@ describe("substituteNodeOutputRefs", () => {
     expect(substituteNodeOutputRefs("Got=$n.output.field", outputs)).toBe("Got=");
   });
 
-  test("object/null fields resolve to empty string", () => {
-    const json = JSON.stringify({ a: { nested: 1 }, b: null });
+  test("object/array fields JSON-encode; null renders as null; missing stays empty", () => {
+    const json = JSON.stringify({ a: { nested: 1 }, list: [1, 2], b: null });
     const outputs = new Map([["n", completed(json)]]);
-    expect(substituteNodeOutputRefs("$n.output.a-$n.output.b", outputs)).toBe("-");
+    expect(substituteNodeOutputRefs("$n.output.a", outputs)).toBe('{"nested":1}');
+    expect(substituteNodeOutputRefs("$n.output.list", outputs)).toBe("[1,2]");
+    expect(substituteNodeOutputRefs("$n.output.b", outputs)).toBe("null");
+    expect(substituteNodeOutputRefs("$n.output.missing", outputs)).toBe("");
+  });
+
+  test("escapedForBash=true single-quotes a JSON-encoded object section", () => {
+    const outputs = new Map([["n", completed(JSON.stringify({ a: { x: 1 } }))]]);
+    expect(substituteNodeOutputRefs("echo $n.output.a", outputs, true)).toBe(`echo '{"x":1}'`);
+  });
+
+  test("prototype-named fields are treated as missing (own-property only)", () => {
+    const outputs = new Map([["n", completed(JSON.stringify({ a: 1 }))]]);
+    expect(substituteNodeOutputRefs("$n.output.__proto__-$n.output.constructor", outputs)).toBe(
+      "-",
+    );
+    expect(substituteNodeOutputRefs("echo $n.output.constructor", outputs, true)).toBe("echo ''");
   });
 
   test("escapedForBash=true wraps strings in single quotes", () => {

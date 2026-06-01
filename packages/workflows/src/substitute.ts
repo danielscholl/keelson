@@ -54,12 +54,13 @@ export function substituteWorkflowVariables(text: string, args: string[]): strin
  * - `$nodeId.output` — full text output of the node
  * - `$nodeId.output.field` — value of `field` after JSON-parsing the output
  *
- * Behavior matches Archon:
+ * Behavior:
  * - Unknown node id → empty string (silent — substitution is best-effort)
  * - Empty/falsy output → empty string
  * - Field lookup on non-JSON or missing field → empty string
- * - Object/null/undefined values → empty string (only string/number/boolean
- *   values render)
+ * - Object/array/null values → JSON-encoded so a structured section passes
+ *   through intact (matches the executor's resolveBody); strings/numbers/
+ *   booleans render as their plain value
  *
  * @param escapedForBash — when true, substituted values are wrapped via
  *   {@link shellQuote} so they're safe inside `bash -c '...'`. Numbers and
@@ -81,6 +82,11 @@ export function substituteNodeOutputRefs(
       }
       try {
         const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
+        // Own-property only: a prototype-named ref (`__proto__`, `constructor`)
+        // is a missing field, not the inherited member bracket-access returns.
+        if (typeof parsed !== "object" || parsed === null || !Object.hasOwn(parsed, field)) {
+          return escapedForBash ? "''" : "";
+        }
         const value = parsed[field];
         if (typeof value === "string") {
           return escapedForBash ? shellQuote(value) : value;
@@ -90,7 +96,9 @@ export function substituteNodeOutputRefs(
         if (typeof value === "number" || typeof value === "boolean") {
           return String(value);
         }
-        return escapedForBash ? "''" : "";
+        // Object/array/null sections JSON-encode (own JSON values always stringify).
+        const encoded = JSON.stringify(value);
+        return escapedForBash ? shellQuote(encoded) : encoded;
       } catch {
         return escapedForBash ? "''" : "";
       }
