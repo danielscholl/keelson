@@ -513,11 +513,11 @@ function LedgerPanel() {
           <div className="empty-state-body">
             {subTab === "pending" ? (
               <>
-                Memories arrive here from chat (click "Save to memory" on a message) or from
-                workflows with a <code>memory:</code> block.
+                Memories arrive here from workflows with a <code>memory:</code> block. For always-on
+                project context, use the Notebook tab.
               </>
             ) : (
-              "Try widening the filter — or save something from chat to seed the list."
+              "Try widening the filter — workflow memory: blocks seed this ledger."
             )}
           </div>
         </div>
