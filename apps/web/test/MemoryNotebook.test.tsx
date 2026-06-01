@@ -137,4 +137,12 @@ describe("Memory notebook panel", () => {
     await screen.findByLabelText("Project notebook");
     expect(screen.queryByText(/Over budget/)).toBeNull();
   });
+
+  test("every ## Archive section is excluded from the over-budget calc", async () => {
+    const big = "y".repeat(7000);
+    loadedContent = `## Log\n- 2026-06-01: small\n\n## Archive\n- ${big}\n\n## Archive\n- ${big}\n`;
+    await renderMemory();
+    await screen.findByLabelText("Project notebook");
+    expect(screen.queryByText(/Over budget/)).toBeNull();
+  });
 });

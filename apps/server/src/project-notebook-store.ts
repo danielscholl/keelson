@@ -173,6 +173,20 @@ function isLogHeader(section: NotebookSection): boolean {
   return section.header !== null && section.header.trim() === `## ${DEFAULT_NOTEBOOK_SECTION}`;
 }
 
+// Split a Log body into the leading preamble (lines before the first bullet) and
+// one block per entry. An entry is a top-level `- ` bullet plus any following
+// continuation/nested lines up to the next top-level bullet, so a multi-line
+// entry stays intact as a unit.
+function splitLogEntries(body: string[]): { preamble: string[]; entries: string[][] } {
+  const starts: number[] = [];
+  body.forEach((line, i) => {
+    if (line.startsWith("- ")) starts.push(i);
+  });
+  const preamble = starts.length > 0 ? body.slice(0, starts[0]!) : [...body];
+  const entries = starts.map((s, i) => body.slice(s, starts[i + 1] ?? body.length));
+  return { preamble, entries };
+}
+
 // The notebook as chat sees it: everything except `## Archive`, normalized. The
 // chat handler injects this; Tidy measures against it. Single source of truth
 // for "what counts toward the injection budget".
@@ -211,38 +225,42 @@ export function tidyNotebook(
   // Carry over every existing Archive section (a hand-edited notebook may have
   // more than one), edge-trimmed so concatenation doesn't inject stray blanks.
   const archiveBody = sections.filter(isArchiveHeader).flatMap((s) => trimEdges(s.body));
-  const moved: string[] = [];
 
-  const build = (): string => {
-    const assembled = [...base];
-    if (archiveBody.length + moved.length > 0) {
-      assembled.push({ header: `## ${ARCHIVE_SECTION}`, body: [...archiveBody, ...moved] });
-    }
-    return renderSections(assembled);
-  };
-
-  // An entry is a top-level `- ` bullet plus any following continuation/nested
-  // lines up to the next top-level bullet; the whole block moves as a unit so an
-  // entry's details never get detached from its bullet. The floor counts entries.
-  const entryStarts = (): number[] =>
-    log.body.reduce<number[]>((acc, line, i) => {
-      if (line.startsWith("- ")) acc.push(i);
-      return acc;
-    }, []);
-
-  while (injectionView(build()).length > budget) {
-    const starts = entryStarts();
-    if (starts.length <= minRecent) break;
-    const start = starts[0]!;
-    const end = starts[1] ?? log.body.length;
-    moved.push(...trimEdges(log.body.slice(start, end)));
-    log.body.splice(start, end - start);
-  }
-
-  if (moved.length === 0) {
+  const { preamble, entries } = splitLogEntries(log.body);
+  const maxArchivable = Math.max(0, entries.length - minRecent);
+  if (maxArchivable === 0) {
     return { content, archivedCount: 0 };
   }
-  return { content: build(), archivedCount: moved.length };
+
+  // Injected length with the k oldest entries removed; `base` excludes Archive,
+  // so this equals what the chat handler injects. Removing more entries only
+  // shrinks it, so binary-search the fewest oldest entries that fit the budget —
+  // O(n log n) instead of re-rendering the whole notebook per entry.
+  const injectedLenAfter = (k: number): number => {
+    log.body = [...preamble, ...entries.slice(k).flat()];
+    return renderSections(base).trim().length;
+  };
+
+  let lo = 0;
+  let hi = maxArchivable;
+  let archived = maxArchivable;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (injectedLenAfter(mid) <= budget) {
+      archived = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+
+  log.body = [...preamble, ...entries.slice(archived).flat()];
+  const moved = entries.slice(0, archived).flatMap((block) => trimEdges(block));
+  const assembled = [
+    ...base,
+    { header: `## ${ARCHIVE_SECTION}`, body: [...archiveBody, ...moved] },
+  ];
+  return { content: renderSections(assembled), archivedCount: archived };
 }
 
 export function createProjectNotebookStore(db: Database): ProjectNotebookStore {

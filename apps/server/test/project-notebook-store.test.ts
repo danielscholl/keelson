@@ -221,9 +221,10 @@ describe("tidyNotebook", () => {
     expect(content.match(/^## Archive$/gm)?.length).toBe(1);
   });
 
-  test("archives a multi-line log entry as a whole block", () => {
+  test("archives a multi-line log entry as a whole block, counting it as one entry", () => {
     const doc = "## Log\n- 2026-03-01: title\n  detail line\n  more detail\n- 2026-03-02: recent\n";
-    const { content } = tidyNotebook(doc, { budget: 20, minRecent: 1 });
+    const { content, archivedCount } = tidyNotebook(doc, { budget: 20, minRecent: 1 });
+    expect(archivedCount).toBe(1);
     const view = injectionView(content);
     expect(view).not.toContain("title");
     expect(view).not.toContain("detail line");

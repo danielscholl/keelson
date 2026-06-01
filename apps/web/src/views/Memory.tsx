@@ -36,20 +36,17 @@ const ALREADY_RESOLVED = "Already resolved (probably by another tab).";
 // only to flag when the notebook is over budget so the user can run Tidy.
 const NOTEBOOK_INJECTION_BUDGET = 6000;
 
-// What chat actually injects: everything except the `## Archive` section Tidy
+// What chat actually injects: everything except every `## Archive` section Tidy
 // parks old entries under. Length-only mirror of the server's injectionView.
 function injectedLength(content: string): number {
-  const lines = content.split("\n");
-  const headerIdx = lines.findIndex((l) => l.trim() === "## Archive");
-  if (headerIdx === -1) return content.trim().length;
-  let end = lines.length;
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    if (lines[i]?.trim().startsWith("## ")) {
-      end = i;
-      break;
-    }
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("## ")) skipping = trimmed === "## Archive";
+    if (!skipping) kept.push(line);
   }
-  return [...lines.slice(0, headerIdx), ...lines.slice(end)].join("\n").trim().length;
+  return kept.join("\n").trim().length;
 }
 
 interface FilterState {
