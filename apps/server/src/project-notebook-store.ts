@@ -141,15 +141,20 @@ function parseSections(content: string): NotebookSection[] {
   return sections;
 }
 
+function trimEdges(lines: string[]): string[] {
+  const out = [...lines];
+  while (out.length > 0 && out[out.length - 1]!.trim() === "") out.pop();
+  while (out.length > 0 && out[0]!.trim() === "") out.shift();
+  return out;
+}
+
 // Re-emit sections with one blank line between them and a single trailing
 // newline; leading/trailing blank lines inside a section are trimmed but
 // internal blanks are preserved. Empty headerless preamble is dropped.
 function renderSections(sections: NotebookSection[]): string {
   const blocks: string[] = [];
   for (const s of sections) {
-    const body = [...s.body];
-    while (body.length > 0 && body[body.length - 1]!.trim() === "") body.pop();
-    while (body.length > 0 && body[0]!.trim() === "") body.shift();
+    const body = trimEdges(s.body);
     if (s.header === null) {
       if (body.length > 0) blocks.push(body.join("\n"));
     } else {
@@ -203,7 +208,9 @@ export function tidyNotebook(
   }
 
   const base = sections.filter((s) => !isArchiveHeader(s));
-  const archiveBody = sections.find(isArchiveHeader)?.body.slice() ?? [];
+  // Carry over every existing Archive section (a hand-edited notebook may have
+  // more than one), edge-trimmed so concatenation doesn't inject stray blanks.
+  const archiveBody = sections.filter(isArchiveHeader).flatMap((s) => trimEdges(s.body));
   const moved: string[] = [];
 
   const build = (): string => {
@@ -214,15 +221,22 @@ export function tidyNotebook(
     return renderSections(assembled);
   };
 
-  const oldestBulletIndex = (): number => log.body.findIndex((l) => l.trim().startsWith("- "));
-  const bulletCount = (): number => log.body.filter((l) => l.trim().startsWith("- ")).length;
+  // An entry is a top-level `- ` bullet plus any following continuation/nested
+  // lines up to the next top-level bullet; the whole block moves as a unit so an
+  // entry's details never get detached from its bullet. The floor counts entries.
+  const entryStarts = (): number[] =>
+    log.body.reduce<number[]>((acc, line, i) => {
+      if (line.startsWith("- ")) acc.push(i);
+      return acc;
+    }, []);
 
   while (injectionView(build()).length > budget) {
-    if (bulletCount() <= minRecent) break;
-    const idx = oldestBulletIndex();
-    if (idx === -1) break;
-    moved.push(log.body[idx]!);
-    log.body.splice(idx, 1);
+    const starts = entryStarts();
+    if (starts.length <= minRecent) break;
+    const start = starts[0]!;
+    const end = starts[1] ?? log.body.length;
+    moved.push(...trimEdges(log.body.slice(start, end)));
+    log.body.splice(start, end - start);
   }
 
   if (moved.length === 0) {

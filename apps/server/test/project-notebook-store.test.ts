@@ -209,6 +209,28 @@ describe("tidyNotebook", () => {
     expect(twice.archivedCount).toBe(0);
     expect(twice.content).toBe(once.content);
   });
+
+  test("preserves content from every existing ## Archive section", () => {
+    const doc =
+      "## Log\n- 2026-03-01: a\n- 2026-03-02: b\n\n## Archive\n- old1\n\n## Notes\n- keep\n\n## Archive\n- old2\n";
+    const { content, archivedCount } = tidyNotebook(doc, { budget: 15, minRecent: 1 });
+    expect(archivedCount).toBeGreaterThanOrEqual(1);
+    expect(content).toContain("old1");
+    expect(content).toContain("old2");
+    expect(content).toContain("## Notes\n- keep");
+    expect(content.match(/^## Archive$/gm)?.length).toBe(1);
+  });
+
+  test("archives a multi-line log entry as a whole block", () => {
+    const doc = "## Log\n- 2026-03-01: title\n  detail line\n  more detail\n- 2026-03-02: recent\n";
+    const { content } = tidyNotebook(doc, { budget: 20, minRecent: 1 });
+    const view = injectionView(content);
+    expect(view).not.toContain("title");
+    expect(view).not.toContain("detail line");
+    expect(view).not.toContain("more detail");
+    expect(content).toContain("- 2026-03-01: title\n  detail line\n  more detail");
+    expect(view).toContain("2026-03-02: recent");
+  });
 });
 
 describe("project notebook store — tidy", () => {
