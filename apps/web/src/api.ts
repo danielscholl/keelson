@@ -129,6 +129,29 @@ export async function fetchTools(): Promise<RegisteredToolInfo[]> {
   return body.tools;
 }
 
+export interface ProjectNotebook {
+  content: string;
+  updatedAt: string | null;
+}
+
+export async function getProjectNotebook(projectId: string): Promise<ProjectNotebook> {
+  return apiRequest<ProjectNotebook>(`/api/projects/${encodeURIComponent(projectId)}/notebook`, {
+    label: `/api/projects/${projectId}/notebook`,
+  });
+}
+
+export async function putProjectNotebook(
+  projectId: string,
+  content: string,
+): Promise<ProjectNotebook> {
+  return apiRequest<ProjectNotebook>(`/api/projects/${encodeURIComponent(projectId)}/notebook`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content }),
+    label: `/api/projects/${projectId}/notebook`,
+  });
+}
+
 // Returns null on 404 so callers can distinguish "server lost the conversation"
 // from a real network/server error.
 export async function getConversation(id: string): Promise<Conversation | null> {

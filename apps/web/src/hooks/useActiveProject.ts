@@ -95,6 +95,17 @@ async function fetchProjects({ force = false }: { force?: boolean } = {}): Promi
   return promise;
 }
 
+// Test seam: the project list + active id are process-shared singletons, so
+// same-process test files must reset them to stay isolated from each other.
+export function __resetProjectStoreForTests(): void {
+  cachedProjects = null;
+  currentActiveId = readStoredId();
+  inflight = null;
+  latestGen = 0;
+  listeners.clear();
+  projectListeners.clear();
+}
+
 export function useActiveProject(): ActiveProjectState {
   const activeProjectId = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const projects = useSyncExternalStore(

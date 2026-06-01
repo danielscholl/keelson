@@ -3,7 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 // Single source of truth for a chat turn's system prompt. Composes, in order,
-// the memory-recall section, the conversation seed, and — when workflow tools
+// the always-on project notebook, the memory-recall section, the conversation
+// seed, and — when workflow tools
 // are active — guidance that NAMES the available workflows and steers the model
 // to run them via workflow_run rather than executing their names in a shell.
 // The catalog index is the standing anchor that lets the model match a request
@@ -15,6 +16,8 @@ export interface WorkflowSummaryLike {
 }
 
 export interface BuildChatSystemPromptInput {
+  // Always-on per-project notebook — the highest-priority project context.
+  notebookSection?: string;
   recallSection?: string;
   seedSystemPrompt?: string;
   // Pass only when the workflow_* tools are active this turn; an empty/omitted
@@ -70,6 +73,9 @@ export function buildWorkflowGuidance(workflows: readonly WorkflowSummaryLike[])
 
 export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string | undefined {
   const parts: string[] = [];
+  if (input.notebookSection !== undefined && input.notebookSection.length > 0) {
+    parts.push(input.notebookSection);
+  }
   if (input.recallSection !== undefined && input.recallSection.length > 0) {
     parts.push(input.recallSection);
   }

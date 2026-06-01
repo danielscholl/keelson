@@ -24,6 +24,8 @@ import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
+import { projectNotebookRoutes } from "./project-notebook-handler.ts";
+import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
 import { createProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
@@ -96,6 +98,7 @@ const store = createConversationStore(db);
 const workflowStore = createWorkflowStore(db);
 const memoryStore = createMemoryStore(db);
 const projectsStore = createProjectsStore(db);
+const projectNotebookStore = createProjectNotebookStore(db);
 migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: WORKSPACE_ROOT });
 const existingDefault = projectsStore.getByName(DEFAULT_PROJECT_NAME);
 const defaultProject =
@@ -220,6 +223,7 @@ ribsRoutes(app, {
 });
 projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
 memoryRoutes(app, { memoryStore });
+projectNotebookRoutes(app, { store: projectNotebookStore, projectsStore });
 chatRememberRoutes(app, { conversationStore: store, memoryStore });
 credentialsRoutes(app, credentialStore, {
   copilotAuthProbe: bootstrap.copilotAuthProbe,
@@ -239,6 +243,7 @@ if (import.meta.main) {
 const chatHandlers = chatWebSocketHandlers(store, {
   memoryStore,
   projectsStore,
+  projectNotebookStore,
   workflowTools,
   workflowCatalog,
 });

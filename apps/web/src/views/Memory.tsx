@@ -9,12 +9,20 @@ import type {
   ReviewStatus,
   ScopeVisibility,
 } from "@keelson/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { listMemories, listPendingMemories, postReviewAction } from "../api.ts";
+import {
+  getProjectNotebook,
+  listMemories,
+  listPendingMemories,
+  postReviewAction,
+  putProjectNotebook,
+} from "../api.ts";
 import { MemoryItem } from "../components/Memory/MemoryItem.tsx";
 import { useToast } from "../components/Toast.tsx";
+import { useActiveProject } from "../hooks/useActiveProject.ts";
 
+type TopTab = "notebook" | "ledger";
 type SubTab = "pending" | "all";
 
 // Stable actor string for review actions. Single-user local — multi-user would replace this.
@@ -30,6 +38,174 @@ interface FilterState {
 }
 
 export function Memory() {
+  const [topTab, setTopTab] = useState<TopTab>("notebook");
+
+  return (
+    <div className="page memory-page">
+      <header className="page-header">
+        <div>
+          <h1 className="page-title">Memory</h1>
+          <div className="page-sub">
+            {topTab === "notebook"
+              ? "The project notebook is durable context injected into every chat for the active project. Edit it freely — it lives only in this Keelson, never in the repo."
+              : "Review governed memories before they shape future runs. Confirm promotes a row to instruction-grade; reject discards it."}
+          </div>
+        </div>
+      </header>
+
+      <div className="memory-subtabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={topTab === "notebook"}
+          className={`memory-subtab${topTab === "notebook" ? " is-active" : ""}`}
+          onClick={() => setTopTab("notebook")}
+        >
+          Notebook
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={topTab === "ledger"}
+          className={`memory-subtab${topTab === "ledger" ? " is-active" : ""}`}
+          onClick={() => setTopTab("ledger")}
+        >
+          Ledger (advanced)
+        </button>
+      </div>
+
+      {topTab === "notebook" ? <NotebookPanel /> : <LedgerPanel />}
+    </div>
+  );
+}
+
+// Always-on per-project notebook: a plain markdown doc injected into every chat
+// for the active project. Editing here is the primary way to seed it (PR1);
+// agent-driven growth and compaction land in later slices.
+function NotebookPanel() {
+  const toast = useToast();
+  const { activeProject, activeProjectId } = useActiveProject();
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Last persisted content — the dirty check compares against this, not the
+  // initial empty string, so a freshly loaded notebook isn't reported dirty.
+  const savedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getProjectNotebook(activeProjectId)
+      .then((nb) => {
+        if (cancelled) return;
+        setContent(nb.content);
+        savedRef.current = nb.content;
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId]);
+
+  const dirty = savedRef.current !== null && content !== savedRef.current;
+
+  const handleSave = useCallback(async () => {
+    if (!activeProjectId) return;
+    setSaving(true);
+    try {
+      const nb = await putProjectNotebook(activeProjectId, content);
+      savedRef.current = nb.content;
+      setContent(nb.content);
+      toast.push({ kind: "ok", message: "Notebook saved." });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.push({ kind: "error", message: `Save failed: ${msg}` });
+    } finally {
+      setSaving(false);
+    }
+  }, [activeProjectId, content, toast]);
+
+  if (!activeProjectId) {
+    return (
+      <div className="empty-state">
+        <div className="empty-state-title">No active project</div>
+        <div className="empty-state-body">Pick a project in Chat to give it a notebook.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          margin: "12px 0",
+        }}
+      >
+        <span className="page-sub">Project · {activeProject?.name ?? "…"}</span>
+        <button
+          type="button"
+          className="memory-refresh"
+          disabled={!dirty || saving}
+          onClick={handleSave}
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      {loading && (
+        <div className="page-sub" style={{ padding: "20px 0" }}>
+          Loading…
+        </div>
+      )}
+      {error && (
+        <div className="empty-state" role="alert">
+          <div className="empty-state-title">Couldn't load the notebook</div>
+          <div className="empty-state-body">{error}</div>
+        </div>
+      )}
+      {!loading && !error && (
+        <textarea
+          aria-label="Project notebook"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          spellCheck={false}
+          placeholder={
+            "## Conventions\n## Gotchas\n## Decisions\n\nNotes about this project the agent should always know…"
+          }
+          style={{
+            width: "100%",
+            minHeight: 360,
+            boxSizing: "border-box",
+            padding: 12,
+            fontFamily: "var(--font-mono, ui-monospace, monospace)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            resize: "vertical",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// The governed memory ledger — provenance-tracked, review-gated rows. Demoted
+// behind the notebook (the primary surface); kept for audited workflow memories.
+function LedgerPanel() {
   const toast = useToast();
 
   const [subTab, setSubTab] = useState<SubTab>("pending");
@@ -119,14 +295,35 @@ export function Memory() {
   );
 
   return (
-    <div className="page memory-page">
-      <header className="page-header">
-        <div>
-          <h1 className="page-title">Memory</h1>
-          <div className="page-sub">
-            Review memories before they shape future runs. Confirm promotes a row to
-            instruction-grade; reject discards it.
-          </div>
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          margin: "12px 0",
+        }}
+      >
+        <div className="memory-subtabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={subTab === "pending"}
+            className={`memory-subtab${subTab === "pending" ? " is-active" : ""}`}
+            onClick={() => setSubTab("pending")}
+          >
+            Pending
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={subTab === "all"}
+            className={`memory-subtab${subTab === "all" ? " is-active" : ""}`}
+            onClick={() => setSubTab("all")}
+          >
+            All
+          </button>
         </div>
         <button
           type="button"
@@ -135,27 +332,6 @@ export function Memory() {
           title="Refresh"
         >
           Refresh
-        </button>
-      </header>
-
-      <div className="memory-subtabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={subTab === "pending"}
-          className={`memory-subtab${subTab === "pending" ? " is-active" : ""}`}
-          onClick={() => setSubTab("pending")}
-        >
-          Pending
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={subTab === "all"}
-          className={`memory-subtab${subTab === "all" ? " is-active" : ""}`}
-          onClick={() => setSubTab("all")}
-        >
-          All
         </button>
       </div>
 
