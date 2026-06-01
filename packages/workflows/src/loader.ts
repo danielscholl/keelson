@@ -394,6 +394,18 @@ function validateOutputRefs(nodes: readonly DagNode[]): string | null {
         }
       }
     }
+    // notebook.append flows through the same resolveBody (with the current
+    // node's output added before substitution, like writeback), so validate
+    // $nodeId.output refs here — a typo or missing depends_on would otherwise
+    // silently append an empty/partial entry at runtime.
+    if (node.notebook !== undefined) {
+      sources.push({
+        text: node.notebook.append,
+        label: "notebook.append",
+        allowReservedNamespace: true,
+        allowSelfReference: true,
+      });
+    }
     for (const source of sources) {
       for (const m of source.text.matchAll(refPattern)) {
         const refId = m[1];

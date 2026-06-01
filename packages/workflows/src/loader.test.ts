@@ -1045,4 +1045,67 @@ nodes:
     const node = result.workflow?.nodes[0] as { notebook?: unknown };
     expect(node?.notebook).toBeUndefined();
   });
+
+  test("notebook.append self-reference ($thisNode.output) is allowed", () => {
+    const yaml = `
+name: notebook-selfref
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    notebook:
+      append: "ran: $think.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-selfref.yaml");
+    expect(result.error).toBeNull();
+  });
+
+  test("notebook.append referencing an unknown node is rejected", () => {
+    const yaml = `
+name: notebook-bad-ref
+description: test
+nodes:
+  - id: think
+    bash: echo done
+    notebook:
+      append: "leaks $ghost.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-bad-ref.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/unknown node.*ghost/);
+  });
+
+  test("notebook.append referencing a non-ancestor is rejected", () => {
+    const yaml = `
+name: notebook-non-ancestor
+description: test
+nodes:
+  - id: a
+    bash: echo a
+  - id: think
+    bash: echo done
+    notebook:
+      append: "uses $a.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-non-ancestor.yaml");
+    expect(result.error).toBeDefined();
+    expect(result.error?.error).toMatch(/depends_on/);
+  });
+
+  test("notebook.append referencing an ancestor is allowed", () => {
+    const yaml = `
+name: notebook-ancestor
+description: test
+nodes:
+  - id: a
+    bash: echo a
+  - id: think
+    depends_on: [a]
+    bash: echo done
+    notebook:
+      append: "uses $a.output"
+`;
+    const result = parseWorkflow(yaml, "notebook-ancestor.yaml");
+    expect(result.error).toBeNull();
+  });
 });
