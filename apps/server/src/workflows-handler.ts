@@ -58,7 +58,7 @@ import {
   makeScriptHandler,
   type NodeHandler,
   type NodeResult,
-  type NotebookContribute,
+  type NotebookAdapter,
   type RequestCancel,
   type RunStreamEvent,
   removeWorktree,
@@ -84,7 +84,7 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
-import type { ProjectNotebookStore } from "./project-notebook-store.ts";
+import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import type { ProjectsStore } from "./projects-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
@@ -534,16 +534,26 @@ function startRunCore(
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore } = deps;
   const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
     params;
-  // Bind the contribute adapter to this run's project so `notebook:` blocks
-  // append to the right notebook; absent without a store or a resolved project.
-  const notebook: NotebookContribute | undefined =
-    projectNotebookStore && projectId !== null
-      ? {
-          append: (entry, section) => ({
-            ok: projectNotebookStore.appendEntry(projectId, entry, section).ok,
-          }),
-        }
-      : undefined;
+  // Bind the notebook (read + contribute) only when the working dir actually
+  // resolves inside the resolved project. A run started with a display-only
+  // `projectId` + an overriding `workingDir` outside that project must NOT read
+  // or write its notebook — that id is a UI pointer, not the run's context.
+  const workingDirInProject =
+    resolvedProject !== null &&
+    (workingDir === resolvedProject.rootPath ||
+      workingDir.startsWith(`${resolvedProject.rootPath}${sep}`));
+  let notebook: NotebookAdapter | undefined;
+  if (projectNotebookStore && projectId !== null && workingDirInProject) {
+    const nbStore = projectNotebookStore;
+    const pid = projectId;
+    notebook = {
+      read: () => {
+        const content = nbStore.get(pid)?.content;
+        return content ? formatNotebookSection(content) : undefined;
+      },
+      append: (entry, section) => ({ ok: nbStore.appendEntry(pid, entry, section).ok }),
+    };
+  }
   const name = workflow.name;
   const runId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
@@ -1416,9 +1426,9 @@ interface ExecuteRunArgs {
   projectId?: string;
   // Undefined when no MemoryStore was wired; executor memory hooks no-op in that case.
   memoryTools?: MemoryTools;
-  // Project-notebook append adapter, pre-bound to projectId. Undefined → the
-  // `notebook:` contribute hook no-ops.
-  notebook?: NotebookContribute;
+  // Project-notebook handle, pre-bound + gated to a project the working dir sits
+  // inside. Undefined → prompt nodes inject nothing and the `notebook:` hook no-ops.
+  notebook?: NotebookAdapter;
   // Tier-0 snapshot bridge (#73): when set, the run republishes its latest
   // structured node output under the `workflow:run:<id>` snapshot key.
   snapshotManager?: SnapshotManager;

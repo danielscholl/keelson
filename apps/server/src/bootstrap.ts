@@ -41,7 +41,6 @@ import {
   type WorkflowLoadWarning,
   workflowDefinitionSchema,
 } from "@keelson/workflows";
-import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import { discoverRibs } from "./rib-discovery.ts";
 import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
 
@@ -365,9 +364,7 @@ function toDiscoveryNotice(w: WorkflowLoadWarning): WorkflowDiscoveryNotice {
 // Returns undefined when no providers are registered — keeps `workflowsRoutes`
 // on its placeholder-fallback path so the catalog still serves bash-only
 // workflows when prompt nodes can't run.
-export function bootstrapPromptHandler(opts?: {
-  projectNotebookStore?: ProjectNotebookStore;
-}): NodeHandler | undefined {
+export function bootstrapPromptHandler(): NodeHandler | undefined {
   const providers = getProviderInfoList();
   if (providers.length === 0) {
     console.warn(
@@ -429,19 +426,11 @@ export function bootstrapPromptHandler(opts?: {
   }
   const denylist = parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST);
   const timeoutMs = parsePromptTimeoutMs(process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S);
-  const notebookStore = opts?.projectNotebookStore;
-  const notebookSection = notebookStore
-    ? (projectId: string): string | undefined => {
-        const content = notebookStore.get(projectId)?.content;
-        return content ? formatNotebookSection(content) : undefined;
-      }
-    : undefined;
   return makePromptHandler({
     getProvider,
     getRegisteredTools: () => getRegisteredTools() as unknown as readonly { name: string }[],
     denylist,
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    ...(notebookSection !== undefined ? { notebookSection } : {}),
   });
 }
 

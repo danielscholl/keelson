@@ -15,7 +15,7 @@ export {
   type NodeOutputBody,
   type NodeResult,
   type NodeStreamEvent,
-  type NotebookContribute,
+  type NotebookAdapter,
   type RunOptions,
   type RunStatus,
   type RunStreamEvent,

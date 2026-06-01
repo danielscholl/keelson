@@ -133,7 +133,7 @@ nodes:
 `,
     );
     const catalog = bootstrapWorkflows({ workflowDir: wfDir });
-    const promptHandler = bootstrapPromptHandler({ projectNotebookStore });
+    const promptHandler = bootstrapPromptHandler();
     const app = new Hono();
     workflowsRoutes(
       app,
@@ -150,6 +150,60 @@ nodes:
     expect(sp).toContain("recent thing");
     expect(sp).not.toContain("ancient thing");
     expect(sp).not.toContain("## Archive");
+  });
+
+  test("a display-only projectId (workingDir outside the project) neither reads nor writes the notebook", async () => {
+    const { store, conversationStore, projectsStore, projectNotebookStore, project } = setup();
+    projectNotebookStore.upsert(project.id, "## Gotchas\n- secret project note\n");
+
+    let captured: SendQueryOptions | undefined;
+    const spyId = registerSpy((o) => {
+      captured = o;
+    });
+    process.env.KEELSON_WORKFLOW_PROVIDER = spyId;
+
+    // A directory the run actually executes in, OUTSIDE the project's root.
+    const outsideDir = mkdtempSync(join(tmpdir(), "keelson-wf-outside-"));
+    try {
+      writeWorkflow(
+        "nb-leak.yaml",
+        `name: nb-leak
+description: display-only projectId
+nodes:
+  - id: think
+    prompt: hello
+    notebook:
+      append: leaked note
+`,
+      );
+      const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+      const promptHandler = bootstrapPromptHandler();
+      const app = new Hono();
+      workflowsRoutes(
+        app,
+        { catalog, store, conversationStore, projectsStore, projectNotebookStore, promptHandler },
+        createActiveRuns(),
+      );
+
+      // projectId is preserved for display, but workingDir wins as the run target.
+      const startRes = await app.fetch(
+        new Request("http://test/api/workflows/nb-leak/runs", {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ inputs: {}, projectId: project.id, workingDir: outsideDir }),
+        }),
+      );
+      const { runId } = (await startRes.json()) as { runId: string };
+      await pollUntilTerminal(app, runId);
+
+      // Read: the project notebook must not have been injected as context.
+      expect(captured?.systemPrompt ?? "").not.toContain("secret project note");
+      // Contribute: the project notebook must be untouched.
+      const content = projectNotebookStore.get(project.id)?.content ?? "";
+      expect(content).not.toContain("leaked note");
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 });
 

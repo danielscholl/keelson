@@ -9,7 +9,7 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import type { NodeContext, NodeStreamEvent } from "../executor.ts";
+import type { NodeContext, NodeStreamEvent, NotebookAdapter } from "../executor.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "../schema/index.ts";
 import {
   DEFAULT_TOOL_DENYLIST,
@@ -85,7 +85,7 @@ interface BuildCtxOptions {
   nodeId?: string;
   workflowProvider?: string;
   workflowModel?: string;
-  projectId?: string;
+  notebook?: NotebookAdapter;
 }
 
 function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
@@ -108,7 +108,7 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     resolvedBody: body,
     rawBody: body,
     workflow,
-    ...(opts.projectId !== undefined ? { projectId: opts.projectId } : {}),
+    ...(opts.notebook !== undefined ? { notebook: opts.notebook } : {}),
   };
 }
 
@@ -1191,16 +1191,22 @@ describe("makePromptHandler", () => {
 describe("makePromptHandler — project notebook injection", () => {
   const doneOnly = (): ReturnType<typeof makeSpyProvider> =>
     makeSpyProvider({ chunks: [{ type: "done" }] });
+  const adapter = (read: () => string | undefined): NotebookAdapter => ({
+    read,
+    append: () => ({ ok: true }),
+  });
 
-  test("injects the notebook section for the node's projectId", async () => {
+  test("injects the notebook section from ctx.notebook.read()", async () => {
     const { provider, calls } = doneOnly();
     const handler = makePromptHandler({
       getProvider: () => provider,
       getRegisteredTools: () => [],
-      notebookSection: (id) => `## Project notebook\n\nnotes for ${id}`,
     });
-    await handler.handle(stubNode, buildCtx({ projectId: "p1" }));
-    expect(calls[0]?.options?.systemPrompt).toBe("## Project notebook\n\nnotes for p1");
+    await handler.handle(
+      stubNode,
+      buildCtx({ notebook: adapter(() => "## Project notebook\n\nnotes") }),
+    );
+    expect(calls[0]?.options?.systemPrompt).toBe("## Project notebook\n\nnotes");
   });
 
   test("notebook is prepended to the factory seed system prompt", async () => {
@@ -1209,40 +1215,54 @@ describe("makePromptHandler — project notebook injection", () => {
       getProvider: () => provider,
       getRegisteredTools: () => [],
       systemPrompt: "SEED",
-      notebookSection: () => "## Project notebook\n\nnotes",
     });
-    await handler.handle(stubNode, buildCtx({ projectId: "p1" }));
+    await handler.handle(
+      stubNode,
+      buildCtx({ notebook: adapter(() => "## Project notebook\n\nnotes") }),
+    );
     const sp = calls[0]?.options?.systemPrompt ?? "";
     expect(sp).toContain("## Project notebook");
     expect(sp).toContain("SEED");
     expect(sp.indexOf("## Project notebook")).toBeLessThan(sp.indexOf("SEED"));
   });
 
-  test("no projectId → notebook resolver is never called; seed-only", async () => {
+  test("no notebook adapter → seed-only", async () => {
     const { provider, calls } = doneOnly();
-    let called = false;
     const handler = makePromptHandler({
       getProvider: () => provider,
       getRegisteredTools: () => [],
       systemPrompt: "SEED",
-      notebookSection: () => {
-        called = true;
-        return "should not happen";
-      },
     });
     await handler.handle(stubNode, buildCtx());
-    expect(called).toBe(false);
     expect(calls[0]?.options?.systemPrompt).toBe("SEED");
   });
 
-  test("an empty notebook (resolver returns undefined) and no seed → no systemPrompt", async () => {
+  test("an empty notebook (read returns undefined) and no seed → no systemPrompt", async () => {
     const { provider, calls } = doneOnly();
     const handler = makePromptHandler({
       getProvider: () => provider,
       getRegisteredTools: () => [],
-      notebookSection: () => undefined,
     });
-    await handler.handle(stubNode, buildCtx({ projectId: "p1" }));
+    await handler.handle(stubNode, buildCtx({ notebook: adapter(() => undefined) }));
     expect(calls[0]?.options?.systemPrompt).toBeUndefined();
+  });
+
+  test("a throwing read() must not take the node down (best-effort context)", async () => {
+    const { provider, calls } = doneOnly();
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      systemPrompt: "SEED",
+    });
+    const result = await handler.handle(
+      stubNode,
+      buildCtx({
+        notebook: adapter(() => {
+          throw new Error("read blew up");
+        }),
+      }),
+    );
+    expect(result.status).toBe("succeeded");
+    expect(calls[0]?.options?.systemPrompt).toBe("SEED");
   });
 });

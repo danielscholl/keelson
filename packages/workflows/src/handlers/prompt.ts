@@ -103,12 +103,6 @@ export interface MakePromptHandlerOptions {
   lifecycle?: PromptHandlerLifecycle;
   /** Optional system prompt to seed every prompt-node session. */
   systemPrompt?: string;
-  /**
-   * Resolves a per-project system-prompt prefix (the project notebook) for the
-   * node's `ctx.projectId`. Server-supplied so notebook formatting stays out of
-   * this package's dep graph; undefined → no project context injected.
-   */
-  notebookSection?: (projectId: string) => string | undefined;
 }
 
 // Default denylist is empty — Keelson core has no built-in tools, and ribs
@@ -310,8 +304,14 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           : ctx.resolvedBody;
 
       // Project notebook (read) prepended to the factory seed — the prompt node
-      // inherits the same project context chat sees.
-      const notebook = ctx.projectId ? opts.notebookSection?.(ctx.projectId) : undefined;
+      // inherits the same project context chat sees. Best-effort: a throwing
+      // adapter must not take the node down.
+      let notebook: string | undefined;
+      try {
+        notebook = ctx.notebook?.read();
+      } catch {
+        notebook = undefined;
+      }
       const effectiveSystemPrompt =
         [notebook, systemPrompt].filter((s) => s !== undefined && s.length > 0).join("\n\n") ||
         undefined;

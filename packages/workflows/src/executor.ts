@@ -67,10 +67,13 @@ export interface MemoryTools {
   writeback(req: unknown): Promise<WritebackResponseLike>;
 }
 
-// Project-notebook append handle, pre-bound to the run's project by the
-// composition root. Loosely typed so this package stays free of apps/server.
-// `ok: false` signals the notebook is full (or the append was rejected).
-export interface NotebookContribute {
+// Project-notebook handle, pre-bound to the run's project by the composition
+// root (which also gates it on the working dir resolving inside that project).
+// Loosely typed so this package stays free of apps/server. `read` returns the
+// formatted notebook section for prompt injection; `append` reports `ok: false`
+// when the notebook is full or the write was rejected.
+export interface NotebookAdapter {
+  read(): string | undefined;
   append(entry: string, section?: string): { ok: boolean };
 }
 
@@ -88,10 +91,10 @@ export interface NodeContext {
   rawBody: string;
   /** Workflow-level config (model/provider defaults, etc.) — forward-compat for handler factories. */
   workflow: WorkflowDefinition;
-  // Project this run is bound to. Lets handlers fetch project-scoped context
-  // (e.g. the prompt handler injects the project notebook). Undefined when the
-  // run isn't project-bound.
-  projectId?: string;
+  // Project-notebook handle for this run. Present only when the run resolves to
+  // a project whose tree the working dir sits inside; the prompt handler injects
+  // `read()` and the `notebook:` contribute hook calls `append()`.
+  notebook?: NotebookAdapter;
   /**
    * Per-run scratch directory; absent when the run wasn't given one. Bash /
    * script nodes see it as `$KEELSON_ARTIFACTS_DIR` in their env channel;
@@ -154,8 +157,9 @@ export interface RunOptions {
   memoryTools?: MemoryTools;
   // Populates scope.projectId on every memory envelope this run produces.
   projectId?: string;
-  // Project-notebook append handle. Undefined → the `notebook:` contribute hook is a no-op.
-  notebook?: NotebookContribute;
+  // Project-notebook handle (read + contribute). Undefined → prompt nodes inject
+  // no notebook and the `notebook:` hook is a no-op.
+  notebook?: NotebookAdapter;
 }
 
 export type RunStreamEvent =
@@ -533,8 +537,8 @@ interface RunCtx {
   memoryTools?: MemoryTools;
   /** Optional scope.projectId for memory envelopes — see RunOptions.projectId. */
   projectId?: string;
-  /** Project-notebook append handle — see RunOptions.notebook. */
-  notebook?: NotebookContribute;
+  /** Project-notebook handle (read + contribute) — see RunOptions.notebook. */
+  notebook?: NotebookAdapter;
 }
 
 async function runNodeOnce(node: DagNode, ctx: RunCtx): Promise<void> {
@@ -634,7 +638,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     rawBody,
     workflow: ctx.workflow,
-    ...(ctx.projectId !== undefined ? { projectId: ctx.projectId } : {}),
+    ...(ctx.notebook !== undefined ? { notebook: ctx.notebook } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
     ...(ctx.memoryTools !== undefined ? { memory: ctx.memoryTools } : {}),
   };
@@ -958,7 +962,19 @@ async function runNotebookContribute(
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
   });
 
-  const { ok } = ctx.notebook.append(entry, block.section);
+  // Contribution is best-effort: a thrown adapter (e.g. the project was deleted
+  // mid-run and the FK rejects the upsert) warns rather than failing the node.
+  let ok: boolean;
+  try {
+    ok = ctx.notebook.append(entry, block.section).ok;
+  } catch (err) {
+    emit({
+      type: "run_warning",
+      nodeId: node.id,
+      message: `notebook append failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    return;
+  }
   if (ok) {
     emit({
       type: "node_event",

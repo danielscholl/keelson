@@ -134,7 +134,7 @@ const workflowSubscribers = createWorkflowSubscribers();
 // getProvider/getRegisteredTools closures resolve against populated registries.
 // Undefined when no providers are registered — workflowsRoutes falls back to
 // the placeholder handler in that case.
-const promptHandler = bootstrapPromptHandler({ projectNotebookStore });
+const promptHandler = bootstrapPromptHandler();
 
 // Shared handler options so the HTTP routes and the in-process WorkflowController
 // drive runs through the identical wiring. The controller + chat tools are built
