@@ -17,6 +17,7 @@ import { isValidCommandName } from "./command-validation.ts";
 import { workflowNodeHooksSchema } from "./hooks.ts";
 import { loopNodeConfigSchema } from "./loop.ts";
 import { nodeMemoryBlockSchema } from "./memory-block.ts";
+import { outputSchemaSchema } from "./output-schema.ts";
 import { stepRetryConfigSchema } from "./retry.ts";
 
 // ---------------------------------------------------------------------------
@@ -141,6 +142,7 @@ export const dagNodeBaseSchema = z.object({
   provider: z.string().trim().min(1).optional(),
   context: z.enum(["fresh", "shared"]).optional(),
   output_format: z.record(z.string(), z.unknown()).optional(),
+  output_schema: outputSchemaSchema.optional(),
   allowed_tools: z.array(z.string()).optional(),
   denied_tools: z.array(z.string()).optional(),
   idle_timeout: z.number().optional(),
@@ -542,6 +544,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.trigger_rule !== undefined ? { trigger_rule: data.trigger_rule } : {}),
       ...(data.idle_timeout !== undefined ? { idle_timeout: data.idle_timeout } : {}),
       ...(data.memory !== undefined ? { memory: data.memory } : {}),
+      ...(data.output_schema !== undefined ? { output_schema: data.output_schema } : {}),
     };
 
     // Shared optional fields (valid on AI and bash nodes)

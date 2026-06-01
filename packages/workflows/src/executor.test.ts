@@ -10,12 +10,13 @@ import {
   type RecallResponseLike,
   type RunOptions,
   type RunStreamEvent,
+  resolveBody,
   runWorkflow,
   type WritebackResponseLike,
 } from "./executor.ts";
 import { makeApprovalHandler } from "./handlers/approval.ts";
 import { parseWorkflow } from "./loader.ts";
-import type { DagNode, WorkflowDefinition } from "./schema/index.ts";
+import type { DagNode, NodeOutput, WorkflowDefinition } from "./schema/index.ts";
 
 /**
  * Local mirror of @keelson/shared's MessageChunk shape. Defined here
@@ -2292,5 +2293,143 @@ nodes:
     expect(summary.status).toBe("succeeded");
     expect(promptResolvedBodies).toHaveLength(1);
     expect(promptResolvedBodies[0]).toContain(JSON.stringify(items));
+  });
+});
+
+describe("resolveBody — structured $nodeId.output addressing", () => {
+  const structured = (value: unknown): NodeOutput => ({
+    state: "completed",
+    output: JSON.stringify(value),
+  });
+
+  test("object and array sections JSON-encode for a downstream body", () => {
+    const outputs = new Map<string, NodeOutput>([
+      ["collect", structured({ nodes: [{ id: "a" }], tags: ["x", "y"] })],
+    ]);
+    expect(resolveBody("g=$collect.output.nodes", {}, outputs)).toBe('g=[{"id":"a"}]');
+    expect(resolveBody("t=$collect.output.tags", {}, outputs)).toBe('t=["x","y"]');
+  });
+
+  test("scalars stay plain; null renders as null; absent field stays empty", () => {
+    const outputs = new Map<string, NodeOutput>([
+      ["c", structured({ count: 2, name: "topo", flag: null })],
+    ]);
+    expect(resolveBody("n=$c.output.count name=$c.output.name", {}, outputs)).toBe("n=2 name=topo");
+    expect(resolveBody("f=$c.output.flag x=$c.output.missing", {}, outputs)).toBe("f=null x=");
+  });
+
+  test("whole $nodeId.output returns the raw JSON string", () => {
+    const value = { nodes: [], edges: [] };
+    const outputs = new Map<string, NodeOutput>([["c", structured(value)]]);
+    expect(resolveBody("$c.output", {}, outputs)).toBe(JSON.stringify(value));
+  });
+
+  test("non-JSON output with a field ref resolves to empty", () => {
+    const outputs = new Map<string, NodeOutput>([["c", { state: "completed", output: "plain" }]]);
+    expect(resolveBody("v=$c.output.field", {}, outputs)).toBe("v=");
+  });
+
+  test("prototype-named fields are treated as missing (own-property only)", () => {
+    const outputs = new Map<string, NodeOutput>([["c", structured({ a: 1 })]]);
+    expect(resolveBody("p=$c.output.__proto__ k=$c.output.constructor", {}, outputs)).toBe("p= k=");
+    // an own property literally named __proto__ still resolves
+    const own = new Map<string, NodeOutput>([
+      ["c", { state: "completed", output: '{"__proto__":5}' }],
+    ]);
+    expect(resolveBody("v=$c.output.__proto__", {}, own)).toBe("v=5");
+  });
+});
+
+describe("runWorkflow — output_schema validation (fail-closed)", () => {
+  function structuredHandler(value: unknown, type = "prompt"): NodeHandler {
+    return {
+      type,
+      async handle() {
+        return { status: "succeeded", output: { kind: "structured", value } };
+      },
+    };
+  }
+
+  const graphWorkflow = () =>
+    parseInline(`
+name: t
+description: test
+nodes:
+  - id: produce
+    prompt: "make a graph"
+    output_schema:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes: { type: array }
+        edges: { type: array }
+`);
+
+  test("valid structured output passes and records completed", async () => {
+    const summary = await runWorkflow({
+      ...baseOpts(graphWorkflow()),
+      handlers: new Map([["prompt", structuredHandler({ nodes: [], edges: [] })]]),
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes.produce.state).toBe("completed");
+  });
+
+  test("malformed structured output fails closed with a schema error + run_warning", async () => {
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(graphWorkflow()),
+      handlers: new Map([["prompt", structuredHandler({ nodes: [] })]]),
+      onEvent,
+    });
+    expect(summary.status).toBe("failed");
+    const produce = summary.nodes.produce;
+    expect(produce.state).toBe("failed");
+    if (produce.state === "failed") {
+      expect(produce.error).toContain("output_schema validation failed");
+      expect(produce.error).toContain("missing required property 'edges'");
+    }
+    const warned = events.some(
+      (e) => e.type === "run_warning" && e.message.includes("output_schema validation failed"),
+    );
+    expect(warned).toBe(true);
+  });
+
+  test("structured value with a nested undefined required key fails after serialization", async () => {
+    // edges:undefined passes a live-object presence check but JSON.stringify
+    // drops it, so bodyToSchemaOutput records {"nodes":[]} and downstream
+    // $produce.output.edges is empty — validation must agree and fail closed.
+    const summary = await runWorkflow({
+      ...baseOpts(graphWorkflow()),
+      handlers: new Map([["prompt", structuredHandler({ nodes: [], edges: undefined })]]),
+    });
+    const produce = summary.nodes.produce;
+    expect(produce.state).toBe("failed");
+    if (produce.state === "failed") {
+      expect(produce.error).toContain("missing required property 'edges'");
+    }
+  });
+
+  test("text output that JSON-parses is validated as structured", async () => {
+    const wf = parseInline(`
+name: t
+description: test
+nodes:
+  - id: produce
+    bash: echo json
+    output_schema:
+      type: object
+      required: [k]
+`);
+    const ok = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["bash", cannedHandler({ produce: '{"k":1}' }, "bash")]]),
+    });
+    expect(ok.nodes.produce.state).toBe("completed");
+
+    const bad = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["bash", cannedHandler({ produce: "not json" }, "bash")]]),
+    });
+    expect(bad.nodes.produce.state).toBe("failed");
   });
 });

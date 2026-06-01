@@ -75,6 +75,18 @@ export {
   nodeMemoryRecallSchema,
   nodeMemoryWritebackSchema,
 } from "./memory-block.ts";
+export type {
+  OutputSchema,
+  OutputSchemaType,
+  OutputSchemaValidation,
+} from "./output-schema.ts";
+// Node output schema (JSON Schema subset)
+export {
+  OUTPUT_SCHEMA_TYPES,
+  outputSchemaSchema,
+  outputSchemaTypeSchema,
+  validateOutput,
+} from "./output-schema.ts";
 export type { StepRetryConfig } from "./retry.ts";
 // Retry configuration
 export { stepRetryConfigSchema } from "./retry.ts";

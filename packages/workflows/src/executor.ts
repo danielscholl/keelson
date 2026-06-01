@@ -10,7 +10,14 @@
 import { createHash } from "node:crypto";
 import { evaluateCondition } from "./conditions.ts";
 import { buildTopologicalLayers, type DagShapeError, validateDagShape } from "./graph.ts";
-import type { DagNode, NodeMemoryBlock, NodeOutput, WorkflowDefinition } from "./schema/index.ts";
+import type {
+  DagNode,
+  NodeMemoryBlock,
+  NodeOutput,
+  OutputSchema,
+  WorkflowDefinition,
+} from "./schema/index.ts";
+import { validateOutput } from "./schema/index.ts";
 import { checkTriggerRule } from "./triggers.ts";
 
 // Wire-protocol constants. Mirror the canonical values exported from
@@ -311,10 +318,17 @@ export function resolveBody(
         if (!field) return out.output;
         try {
           const parsed = JSON.parse(out.output) as Record<string, unknown>;
+          // Own-property only: a prototype-named ref (`__proto__`, `constructor`)
+          // is a missing field, not the inherited member bracket-access returns.
+          if (typeof parsed !== "object" || parsed === null || !Object.hasOwn(parsed, field)) {
+            return "";
+          }
           const value = parsed[field];
           if (typeof value === "string") return value;
           if (typeof value === "number" || typeof value === "boolean") return String(value);
-          return "";
+          // Object/array/null sections JSON-encode so a downstream body receives
+          // the structured value intact (own JSON values always stringify).
+          return JSON.stringify(value);
         } catch {
           return "";
         }
@@ -618,6 +632,20 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
         result = { status: "failed", output: { kind: "text", text: "" }, error };
       }
     }
+    // Fail-closed output_schema check: a node that declares a schema but emits
+    // the wrong shape fails here rather than feeding a malformed $nodeId.output
+    // downstream. Validates the same JSON view a consumer reads via substitution.
+    if (result.status === "succeeded") {
+      const schema = outputSchemaOf(node);
+      if (schema !== undefined) {
+        const validation = validateOutput(capturedValueForSchema(result.output), schema);
+        if (!validation.ok) {
+          const error = `output_schema validation failed: ${validation.error}`;
+          emit({ type: "run_warning", nodeId: node.id, message: error });
+          result = { status: "failed", output: { kind: "text", text: "" }, error };
+        }
+      }
+    }
     const recordedOutput = bodyToSchemaOutput(result, startedAtMs, Date.now());
     layerResults.set(node.id, recordedOutput);
     // 6. Memory writeback fires after the recorded output is captured but before `node_done`,
@@ -660,6 +688,35 @@ function nodeMemoryOf(node: DagNode): NodeMemoryBlock | undefined {
   // discriminated DagNode union surfaces it as an optional field that may be
   // absent at the type level. Read defensively.
   return (node as { memory?: NodeMemoryBlock }).memory;
+}
+
+function outputSchemaOf(node: DagNode): OutputSchema | undefined {
+  // `output_schema` lives on dagNodeBaseSchema; read defensively (see nodeMemoryOf).
+  return (node as { output_schema?: OutputSchema }).output_schema;
+}
+
+/**
+ * The value a node's `output_schema` validates against — the same JSON view that
+ * gets recorded and that a downstream `$nodeId.output` substitution reads.
+ * Structured output round-trips through JSON so a nested non-JSON value (e.g.
+ * `edges: undefined`, dropped by `bodyToSchemaOutput`'s stringify) is validated
+ * as it will actually be stored, not as the live JS object. Text output
+ * JSON-parses when it can (so a node emitting JSON stdout validates as
+ * structured) and otherwise stays the raw string.
+ */
+function capturedValueForSchema(output: NodeOutputBody): unknown {
+  if (output.kind === "structured") {
+    try {
+      return JSON.parse(JSON.stringify(output.value));
+    } catch {
+      return output.value;
+    }
+  }
+  try {
+    return JSON.parse(output.text);
+  } catch {
+    return output.text;
+  }
 }
 
 function buildMemoryScope(
