@@ -13,7 +13,7 @@ export const KEYRING_SERVICE = "keelson" as const;
 // `osdu` reading `prod-token` resolve to distinct accounts, preserving per-rib
 // isolation. The composed account can exceed the 64-char public service id
 // ceiling, so it has its own (still traversal-safe) bound.
-const ribCredentialAccountSchema = z
+export const ribCredentialAccountSchema = z
   .string()
   .min(1)
   .max(191)

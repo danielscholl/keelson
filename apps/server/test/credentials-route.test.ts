@@ -105,6 +105,19 @@ describe("POST /api/credentials/:serviceId", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  test("204 for a rib-namespaced account so the rib accessor's key is provisionable", async () => {
+    const { app, store } = makeRig();
+    const res = await app.fetch(
+      new Request("http://test/api/credentials/rib_osdu_token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value: "tok-rib" }),
+      }),
+    );
+    expect(res.status).toBe(204);
+    expect(await store.get("rib_osdu_token")).toBe("tok-rib");
+  });
 });
 
 describe("DELETE /api/credentials/:serviceId", () => {

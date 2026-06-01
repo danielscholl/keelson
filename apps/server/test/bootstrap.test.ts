@@ -105,6 +105,19 @@ describe("bootstrapRibs", () => {
     expect(manifests.map((m) => m.id)).toEqual(["alpha"]);
   });
 
+  test("non-string registerTools entries are dropped so GET /api/ribs can't 500", async () => {
+    delete process.env.KEELSON_RIBS;
+    const ribBadTools = {
+      id: "alpha",
+      displayName: "alpha",
+      // A JS rib could return a non-string entry; it must not reach the
+      // manifest (listRibsResponseSchema.parse would otherwise blank the panel).
+      registerTools: () => ({ registered: ["ok.tool", 42, null] }) as { registered: string[] },
+    } as unknown as Rib;
+    const { manifests } = await bootstrapRibs({ available: { alpha: ribBadTools } });
+    expect(manifests[0]?.registered).toEqual(["ok.tool"]);
+  });
+
   test("malformed ids in KEELSON_RIBS are rejected by the schema", async () => {
     process.env.KEELSON_RIBS = "Alpha,al_pha,alpha";
     const { manifests } = await bootstrapRibs({
