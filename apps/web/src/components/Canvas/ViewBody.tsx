@@ -1,5 +1,6 @@
 import { type CanvasSource, type CanvasView, canvasViewSchema } from "@keelson/shared";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
+import { BoardView } from "./BoardView.tsx";
 import { GraphView } from "./GraphView.tsx";
 import { TableView } from "./TableView.tsx";
 
@@ -11,6 +12,8 @@ function renderView(view: CanvasView) {
       return <TableView view={view} />;
     case "graph":
       return <GraphView view={view} />;
+    case "board":
+      return <BoardView view={view} />;
     default: {
       const exhaustive: never = view;
       return exhaustive;
