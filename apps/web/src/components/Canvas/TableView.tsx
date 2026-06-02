@@ -1,8 +1,13 @@
-import type { CanvasTableView } from "@keelson/shared";
+import type { CanvasCell, CanvasTableView } from "@keelson/shared";
 
-function formatCell(value: string | number | boolean | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  return String(value);
+type Tone = "ok" | "warn" | "error" | "neutral";
+
+function normalizeCell(cell: CanvasCell | undefined): { display: string; tone?: Tone } {
+  const wrapped =
+    cell !== null && typeof cell === "object" ? cell : { value: cell, tone: undefined };
+  const display =
+    wrapped.value === null || wrapped.value === undefined ? "—" : String(wrapped.value);
+  return wrapped.tone ? { display, tone: wrapped.tone } : { display };
 }
 
 export function TableView({ view }: { view: CanvasTableView }) {
@@ -31,9 +36,14 @@ export function TableView({ view }: { view: CanvasTableView }) {
         <tbody>
           {keyedRows.map(({ key, row }) => (
             <tr key={key}>
-              {view.columns.map((col) => (
-                <td key={col.key}>{formatCell(row[col.key])}</td>
-              ))}
+              {view.columns.map((col) => {
+                const { display, tone } = normalizeCell(row[col.key]);
+                return (
+                  <td key={col.key} data-tone={tone}>
+                    {display}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

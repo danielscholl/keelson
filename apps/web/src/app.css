@@ -2945,6 +2945,17 @@ button.tab:focus-visible {
   color: var(--fg-strong);
   font-family: ui-monospace, monospace;
 }
+/* Generic cell tone — a producer's optional {value, tone} drives the colour. */
+.canvas-view-table td[data-tone="ok"] {
+  color: var(--green);
+}
+.canvas-view-table td[data-tone="warn"] {
+  color: var(--yellow);
+}
+.canvas-view-table td[data-tone="error"] {
+  color: var(--red);
+  font-weight: 600;
+}
 
 /* Graph view fills a tall reading panel; ReactFlow needs an explicit height. */
 .canvas-view-graph {
@@ -2983,6 +2994,305 @@ button.tab:focus-visible {
 }
 .view-graph-handle {
   opacity: 0;
+}
+
+/* Composite "board" view — a stack of generic dashboard sections. */
+.canvas-drawer-body .canvas-view-board {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.cvb-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cvb-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.cvb-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cvb-section-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* A board's table section spans the section, not the centered standalone width. */
+.cvb-section .canvas-view-table {
+  max-width: none;
+  margin: 0;
+}
+
+/* segments — the "pulse" summary */
+.cvb-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.cvb-segment {
+  font-size: 12px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.cvb-segment-n {
+  font-weight: 700;
+  color: var(--fg-strong);
+  font-family: ui-monospace, monospace;
+}
+.cvb-segment[data-tone="ok"] .cvb-segment-n {
+  color: var(--green);
+}
+.cvb-segment[data-tone="warn"] .cvb-segment-n {
+  color: var(--yellow);
+}
+.cvb-segment[data-tone="error"] .cvb-segment-n {
+  color: var(--red);
+}
+
+/* stats — KPI tiles */
+.cvb-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+.cvb-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.cvb-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: var(--fg-strong);
+}
+.cvb-stat-value[data-tone="ok"] {
+  color: var(--green);
+}
+.cvb-stat-value[data-tone="warn"] {
+  color: var(--yellow);
+}
+.cvb-stat-value[data-tone="error"] {
+  color: var(--red);
+}
+.cvb-stat-label {
+  font-size: 11px;
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cvb-stat-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* bars — progress / severity */
+.cvb-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cvb-bar-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.cvb-bar-label {
+  color: var(--fg);
+}
+.cvb-bar-trailing {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.cvb-bar-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  overflow: hidden;
+}
+.cvb-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.cvb-bar-fill[data-tone="ok"] {
+  background: var(--green);
+}
+.cvb-bar-fill[data-tone="warn"] {
+  background: var(--yellow);
+}
+.cvb-bar-fill[data-tone="error"] {
+  background: var(--red);
+}
+
+/* cards — movers / CVEs / access */
+.cvb-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.cvb-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.cvb-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cvb-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-strong);
+  overflow-wrap: anywhere;
+}
+.cvb-card-bar {
+  margin: 2px 0;
+}
+.cvb-card-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+.cvb-field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.cvb-field-label {
+  color: var(--muted);
+}
+.cvb-field-value {
+  font-family: ui-monospace, monospace;
+  color: var(--fg);
+}
+.cvb-field-value[data-tone="ok"],
+.cvb-link[data-tone="ok"] {
+  color: var(--green);
+}
+.cvb-field-value[data-tone="warn"],
+.cvb-link[data-tone="warn"] {
+  color: var(--yellow);
+}
+.cvb-field-value[data-tone="error"],
+.cvb-link[data-tone="error"] {
+  color: var(--red);
+}
+.cvb-card-footnote {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* rows — lifecycle / feed */
+.cvb-rows {
+  display: flex;
+  flex-direction: column;
+}
+.cvb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+}
+.cvb-rows .cvb-row:last-child {
+  border-bottom: none;
+}
+.cvb-glyph {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  flex: none;
+}
+.cvb-glyph[data-tone="ok"] {
+  background: var(--green);
+}
+.cvb-glyph[data-tone="warn"] {
+  background: var(--yellow);
+}
+.cvb-glyph[data-tone="error"] {
+  background: var(--red);
+}
+.cvb-row-text {
+  color: var(--fg);
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.cvb-row-trailing {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  flex: none;
+}
+
+/* chips / pills / links / copy */
+.cvb-chip,
+.cvb-pill {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--card);
+  flex: none;
+}
+.cvb-pill[data-tone="ok"] {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
+}
+.cvb-pill[data-tone="warn"] {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 32%, transparent);
+}
+.cvb-pill[data-tone="error"] {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 32%, transparent);
+}
+.cvb-link {
+  color: var(--cyan);
+  text-decoration: none;
+}
+.cvb-link:hover {
+  text-decoration: underline;
+}
+.cvb-copy {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+.cvb-copy:hover {
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 /* Not a bar — a scrim. The footer is absolutely positioned over the bottom of

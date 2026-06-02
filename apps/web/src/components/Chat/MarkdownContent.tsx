@@ -1,6 +1,7 @@
 import remarkBreaks from "remark-breaks";
 import type { Components } from "streamdown";
 import { defaultRemarkPlugins, Streamdown } from "streamdown";
+import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { CodeBlock } from "./CodeBlock.tsx";
 
 // Streamdown handles the streaming + memoization wins (unterminated fences,
@@ -19,13 +20,9 @@ import { CodeBlock } from "./CodeBlock.tsx";
 // affordances (middle-click → new tab, right-click → copy link address,
 // browser tooltip showing the URL on hover). For a dashboard chat where
 // MR/CVE/Sonar links are the primary interaction, that regression hurts
-// more than the modal helps. Instead, we accept http(s) URLs at face
-// value (the primer instruction forbids URL invention; rib tool
-// responses come from trusted collectors) and refuse to render any other
-// scheme as a clickable link — javascript:, data:, file: etc. collapse
-// to plain text so they can't auto-execute on click.
-const isSafeLinkScheme = (href: unknown): href is string =>
-  typeof href === "string" && /^https?:\/\//i.test(href);
+// more than the modal helps. The http(s)-only scheme check (collapsing
+// javascript:/data:/file: to plain text) is shared with the board renderer
+// via isSafeLinkScheme.
 
 const components: Components = {
   pre: CodeBlock as Components["pre"],

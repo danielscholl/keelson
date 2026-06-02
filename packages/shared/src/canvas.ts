@@ -45,7 +45,19 @@ export type CanvasDocument = z.infer<typeof canvasDocumentSchema>;
 // a renderer from a closed catalog. Domain-free on purpose: `node.kind` is a
 // generic category a rib colours by, never a base-side enum. The catalog ships
 // `table` + `graph`; new members are additive union variants.
-const canvasCellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+//
+// `tone` is a generic visual category (never a domain enum) the renderer maps
+// to a colour. Shared by table cells and every board primitive below.
+const canvasToneSchema = z.enum(["ok", "warn", "error", "neutral"]);
+export type CanvasTone = z.infer<typeof canvasToneSchema>;
+
+// A cell is a bare scalar, or a scalar wrapped with a `tone`.
+const canvasCellScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const canvasCellSchema = z.union([
+  canvasCellScalarSchema,
+  z.object({ value: canvasCellScalarSchema, tone: canvasToneSchema.optional() }).strict(),
+]);
+export type CanvasCell = z.infer<typeof canvasCellSchema>;
 
 export const canvasTableViewSchema = z
   .object({
@@ -82,27 +94,165 @@ export const canvasGraphViewSchema = z
   })
   .strict();
 
+// Composite "board" view — an ordered stack of generic dashboard sections, so
+// one payload renders KPI tiles, summary pulses, bars, a table, cards, and
+// status rows together. Every piece is domain-free; a rib supplies the data.
+const canvasSegmentSchema = z
+  .object({ label: z.string().min(1), n: z.number(), tone: canvasToneSchema.optional() })
+  .strict();
+const canvasPillSchema = z
+  .object({ label: z.string().min(1), tone: canvasToneSchema.optional() })
+  .strict();
+
+// A card field / status cell that can link out (`href`) or expose a copy button
+// (`copyable`) — for portal URLs and credentials.
+const canvasFieldSchema = z
+  .object({
+    label: z.string().optional(),
+    value: canvasCellScalarSchema,
+    tone: canvasToneSchema.optional(),
+    href: z.string().optional(),
+    copyable: z.boolean().optional(),
+  })
+  .strict();
+
+const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("stats"),
+      title: z.string().optional(),
+      items: z.array(
+        z
+          .object({
+            label: z.string().min(1),
+            value: canvasCellScalarSchema,
+            sub: z.string().optional(),
+            tone: canvasToneSchema.optional(),
+          })
+          .strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("segments"),
+      title: z.string().optional(),
+      items: z.array(canvasSegmentSchema),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("bars"),
+      title: z.string().optional(),
+      items: z.array(
+        z
+          .object({
+            label: z.string().min(1),
+            value: z.number(),
+            total: z.number(),
+            tone: canvasToneSchema.optional(),
+            trailing: z.string().optional(),
+          })
+          .strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("table"),
+      title: z.string().optional(),
+      columns: z.array(z.object({ key: z.string().min(1), label: z.string().optional() })).min(1),
+      rows: z.array(z.record(z.string(), canvasCellSchema)),
+      caption: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("cards"),
+      title: z.string().optional(),
+      items: z.array(
+        z
+          .object({
+            title: z.string().min(1),
+            pill: canvasPillSchema.optional(),
+            href: z.string().optional(),
+            bar: z.object({ value: z.number(), total: z.number() }).strict().optional(),
+            fields: z.array(canvasFieldSchema).optional(),
+            footnote: z.string().optional(),
+          })
+          .strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("rows"),
+      title: z.string().optional(),
+      items: z.array(
+        z
+          .object({
+            glyph: canvasToneSchema.optional(),
+            chip: canvasPillSchema.optional(),
+            text: z.string().min(1),
+            href: z.string().optional(),
+            trailing: z.string().optional(),
+          })
+          .strict(),
+      ),
+    })
+    .strict(),
+]);
+
+export const canvasBoardViewSchema = z
+  .object({
+    view: z.literal("board"),
+    title: z.string().optional(),
+    header: z
+      .object({ chip: z.string().optional(), segments: z.array(canvasSegmentSchema).optional() })
+      .strict()
+      .optional(),
+    sections: z.array(canvasBoardSectionSchema),
+  })
+  .strict();
+
 // Uniqueness lives on the union (a `.refine` on a member would break the
 // discriminator). A duplicate column key / node id fails the parse, so the
 // fail-closed gate rejects it before a renderer keys on a non-unique value.
+function assertUniqueColumnKeys(
+  columns: { key: string }[],
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+) {
+  const keys = columns.map((c) => c.key);
+  if (new Set(keys).size !== keys.length) {
+    ctx.addIssue({ code: "custom", message: "column keys must be unique", path });
+  }
+}
+
 export const canvasViewSchema = z
-  .discriminatedUnion("view", [canvasTableViewSchema, canvasGraphViewSchema])
+  .discriminatedUnion("view", [canvasTableViewSchema, canvasGraphViewSchema, canvasBoardViewSchema])
   .superRefine((view, ctx) => {
     if (view.view === "table") {
-      const keys = view.columns.map((c) => c.key);
-      if (new Set(keys).size !== keys.length) {
-        ctx.addIssue({ code: "custom", message: "column keys must be unique", path: ["columns"] });
+      assertUniqueColumnKeys(view.columns, ctx, ["columns"]);
+      return;
+    }
+    if (view.view === "graph") {
+      const ids = view.nodes.map((n) => n.id);
+      if (new Set(ids).size !== ids.length) {
+        ctx.addIssue({ code: "custom", message: "node ids must be unique", path: ["nodes"] });
       }
       return;
     }
-    const ids = view.nodes.map((n) => n.id);
-    if (new Set(ids).size !== ids.length) {
-      ctx.addIssue({ code: "custom", message: "node ids must be unique", path: ["nodes"] });
-    }
+    view.sections.forEach((section, i) => {
+      if (section.kind === "table") {
+        assertUniqueColumnKeys(section.columns, ctx, ["sections", i, "columns"]);
+      }
+    });
   });
 export type CanvasView = z.infer<typeof canvasViewSchema>;
 export type CanvasTableView = z.infer<typeof canvasTableViewSchema>;
 export type CanvasGraphView = z.infer<typeof canvasGraphViewSchema>;
+export type CanvasBoardView = z.infer<typeof canvasBoardViewSchema>;
 
 // Wire shape for the sandboxed run-artifact endpoint. `path` echoes the
 // requested relative path; `content` is the file's UTF-8 text.

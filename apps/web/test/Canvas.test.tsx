@@ -145,6 +145,30 @@ describe("CanvasProvider / useCanvas", () => {
     expect(dialog.textContent).toContain("ok");
   });
 
+  test("inline view table renders a toned cell as a data-tone attribute", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "table",
+          columns: [{ key: "svc" }, { key: "gate" }],
+          rows: [{ svc: "alpha", gate: { value: "ERROR", tone: "error" } }],
+        }),
+      },
+      title: "tbl",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("ERROR");
+    expect(dialog.querySelector('td[data-tone="error"]')).not.toBeNull();
+  });
+
   test("inline view graph dispatches to the graph renderer", () => {
     const doc: CanvasDocument = {
       kind: "view",
@@ -164,6 +188,81 @@ describe("CanvasProvider / useCanvas", () => {
     );
     fireEvent.click(screen.getByText("open"));
     expect(screen.getByTestId("graph-view").textContent).toContain("2 nodes");
+  });
+
+  test("inline view board renders header, sections, a link and a copy button", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          title: "Quality",
+          header: { chip: "venus", segments: [{ label: "Fail", n: 9, tone: "error" }] },
+          sections: [
+            { kind: "stats", items: [{ label: "Services", value: 23 }] },
+            { kind: "table", columns: [{ key: "svc" }], rows: [{ svc: "alpha" }] },
+            {
+              kind: "cards",
+              items: [
+                {
+                  title: "Keycloak",
+                  href: "https://portal.test",
+                  fields: [{ label: "user", value: "admin", copyable: true }],
+                },
+              ],
+            },
+            {
+              kind: "rows",
+              items: [{ chip: { label: "CLUSTER" }, text: "job started", trailing: "21m" }],
+            },
+          ],
+        }),
+      },
+      title: "board",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Quality");
+    expect(dialog.textContent).toContain("Services");
+    expect(dialog.textContent).toContain("alpha");
+    expect(dialog.textContent).toContain("Keycloak");
+    expect(dialog.textContent).toContain("job started");
+    expect(dialog.querySelector('a[href="https://portal.test"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Copy user" })).toBeTruthy();
+  });
+
+  test("board collapses unsafe href schemes to plain text (no anchor)", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            { kind: "cards", items: [{ title: "evil card", href: "javascript:alert(1)" }] },
+            { kind: "rows", items: [{ text: "evil row", href: "data:text/html,<b>x</b>" }] },
+          ],
+        }),
+      },
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    // The labels still render, but never as clickable anchors.
+    expect(dialog.textContent).toContain("evil card");
+    expect(dialog.textContent).toContain("evil row");
+    expect(dialog.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect(dialog.querySelector('a[href^="data:"]')).toBeNull();
   });
 
   test("malformed view data fails closed to an error note", () => {

@@ -84,6 +84,36 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("table");
   });
 
+  it("parses a table view with toned cells", () => {
+    const v = canvasViewSchema.parse({
+      view: "table",
+      columns: [{ key: "name" }, { key: "gate" }],
+      rows: [
+        { name: "alpha", gate: { value: "OK", tone: "ok" } },
+        { name: "beta", gate: { value: "ERROR", tone: "error" } },
+        { name: "gamma", gate: { value: null } },
+      ],
+    });
+    expect(v.view).toBe("table");
+  });
+
+  it("rejects a cell with an unknown tone or an extra key (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "table",
+        columns: [{ key: "a" }],
+        rows: [{ a: { value: 1, tone: "danger" } }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "table",
+        columns: [{ key: "a" }],
+        rows: [{ a: { value: 1, extra: true } }],
+      }),
+    ).toThrow();
+  });
+
   it("parses a graph view", () => {
     const v = canvasViewSchema.parse({
       view: "graph",
@@ -129,6 +159,93 @@ describe("canvasViewSchema", () => {
         edges: [],
       }),
     ).toThrow(/unique/);
+  });
+
+  it("parses a board view with a header and every section kind", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      title: "Quality",
+      header: { chip: "venus", segments: [{ label: "Good", n: 2, tone: "ok" }] },
+      sections: [
+        {
+          kind: "stats",
+          title: "KPIs",
+          items: [{ label: "Services", value: 23, sub: "core", tone: "neutral" }],
+        },
+        { kind: "segments", items: [{ label: "Fail", n: 9, tone: "error" }] },
+        {
+          kind: "bars",
+          items: [{ label: "Unit", value: 5072, total: 5083, tone: "ok", trailing: "99.8%" }],
+        },
+        {
+          kind: "table",
+          title: "Sonar",
+          columns: [{ key: "svc" }, { key: "gate" }],
+          rows: [{ svc: "a", gate: { value: "OK", tone: "ok" } }],
+        },
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "Keycloak",
+              pill: { label: "ACTIVE", tone: "ok" },
+              href: "https://example.test",
+              bar: { value: 8, total: 9 },
+              fields: [
+                { label: "user", value: "admin", copyable: true },
+                { value: "open", href: "https://example.test", tone: "neutral" },
+              ],
+              footnote: "stale-61d",
+            },
+          ],
+        },
+        {
+          kind: "rows",
+          items: [
+            {
+              glyph: "ok",
+              chip: { label: "CLUSTER", tone: "neutral" },
+              text: "job started",
+              href: "https://x.test",
+              trailing: "21m",
+            },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("rejects an unknown board section kind and an extra section key (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({ view: "board", sections: [{ kind: "timeline", items: [] }] }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "segments", items: [], extra: 1 }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects duplicate column keys inside a board table section", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
+      }),
+    ).toThrow(/unique/);
+  });
+
+  it("rejects an unknown key on a card field (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "cards", items: [{ title: "x", fields: [{ value: "v", bogus: true }] }] },
+        ],
+      }),
+    ).toThrow();
   });
 });
 
