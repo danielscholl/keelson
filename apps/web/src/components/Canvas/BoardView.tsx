@@ -18,11 +18,21 @@ function copy(text: string) {
   void navigator.clipboard?.writeText(text);
 }
 
+function makeKeyer() {
+  const seen = new Map<string, number>();
+  return (base: string) => {
+    const dup = seen.get(base) ?? 0;
+    seen.set(base, dup + 1);
+    return dup === 0 ? base : `${base}#${dup}`;
+  };
+}
+
 function Segments({ items }: { items: Segment[] }) {
+  const key = makeKeyer();
   return (
     <div className="cvb-segments">
       {items.map((s) => (
-        <span key={s.label} className="cvb-segment" data-tone={s.tone}>
+        <span key={key(JSON.stringify(s))} className="cvb-segment" data-tone={s.tone}>
           <span className="cvb-segment-n">{s.n}</span> {s.label}
         </span>
       ))}
@@ -32,11 +42,12 @@ function Segments({ items }: { items: Segment[] }) {
 
 function Section({ section }: { section: BoardSection }) {
   switch (section.kind) {
-    case "stats":
+    case "stats": {
+      const key = makeKeyer();
       return (
         <div className="cvb-stats">
           {section.items.map((s) => (
-            <div key={s.label} className="cvb-stat">
+            <div key={key(JSON.stringify(s))} className="cvb-stat">
               <span className="cvb-stat-value" data-tone={s.tone}>
                 {scalarText(s.value)}
               </span>
@@ -46,13 +57,15 @@ function Section({ section }: { section: BoardSection }) {
           ))}
         </div>
       );
+    }
     case "segments":
       return <Segments items={section.items} />;
-    case "bars":
+    case "bars": {
+      const key = makeKeyer();
       return (
         <div className="cvb-bars">
           {section.items.map((b) => (
-            <div key={b.label} className="cvb-bar">
+            <div key={key(JSON.stringify(b))} className="cvb-bar">
               <div className="cvb-bar-head">
                 <span className="cvb-bar-label">{b.label}</span>
                 <span className="cvb-bar-trailing">
@@ -70,6 +83,7 @@ function Section({ section }: { section: BoardSection }) {
           ))}
         </div>
       );
+    }
     case "table":
       return (
         <TableView
@@ -81,82 +95,88 @@ function Section({ section }: { section: BoardSection }) {
           }}
         />
       );
-    case "cards":
+    case "cards": {
+      const key = makeKeyer();
       return (
         <div className="cvb-cards">
-          {section.items.map((c) => (
-            <div key={c.title} className="cvb-card">
-              <div className="cvb-card-head">
-                {isSafeLinkScheme(c.href) ? (
-                  <a
-                    className="cvb-link cvb-card-title"
-                    href={c.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {c.title}
-                  </a>
-                ) : (
-                  <span className="cvb-card-title">{c.title}</span>
-                )}
-                {c.pill && (
-                  <span className="cvb-pill" data-tone={c.pill.tone}>
-                    {c.pill.label}
-                  </span>
-                )}
-              </div>
-              {c.bar && (
-                <div className="cvb-bar-track cvb-card-bar">
-                  <div
-                    className="cvb-bar-fill"
-                    style={{ width: `${barPct(c.bar.value, c.bar.total)}%` }}
-                  />
-                </div>
-              )}
-              {c.fields && c.fields.length > 0 && (
-                <div className="cvb-card-fields">
-                  {c.fields.map((f) => (
-                    <span key={(f.label ?? "") + scalarText(f.value)} className="cvb-field">
-                      {f.label && <span className="cvb-field-label">{f.label}</span>}
-                      {isSafeLinkScheme(f.href) ? (
-                        <a
-                          className="cvb-link"
-                          href={f.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          data-tone={f.tone}
-                        >
-                          {scalarText(f.value)}
-                        </a>
-                      ) : (
-                        <span className="cvb-field-value" data-tone={f.tone}>
-                          {scalarText(f.value)}
-                        </span>
-                      )}
-                      {f.copyable && f.value !== null && (
-                        <button
-                          type="button"
-                          className="cvb-copy"
-                          aria-label={`Copy ${f.label ?? "value"}`}
-                          onClick={() => copy(String(f.value))}
-                        >
-                          copy
-                        </button>
-                      )}
+          {section.items.map((c) => {
+            const fieldKey = makeKeyer();
+            return (
+              <div key={key(JSON.stringify(c))} className="cvb-card">
+                <div className="cvb-card-head">
+                  {isSafeLinkScheme(c.href) ? (
+                    <a
+                      className="cvb-link cvb-card-title"
+                      href={c.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {c.title}
+                    </a>
+                  ) : (
+                    <span className="cvb-card-title">{c.title}</span>
+                  )}
+                  {c.pill && (
+                    <span className="cvb-pill" data-tone={c.pill.tone}>
+                      {c.pill.label}
                     </span>
-                  ))}
+                  )}
                 </div>
-              )}
-              {c.footnote && <div className="cvb-card-footnote">{c.footnote}</div>}
-            </div>
-          ))}
+                {c.bar && (
+                  <div className="cvb-bar-track cvb-card-bar">
+                    <div
+                      className="cvb-bar-fill"
+                      style={{ width: `${barPct(c.bar.value, c.bar.total)}%` }}
+                    />
+                  </div>
+                )}
+                {c.fields && c.fields.length > 0 && (
+                  <div className="cvb-card-fields">
+                    {c.fields.map((f) => (
+                      <span key={fieldKey(JSON.stringify(f))} className="cvb-field">
+                        {f.label && <span className="cvb-field-label">{f.label}</span>}
+                        {isSafeLinkScheme(f.href) ? (
+                          <a
+                            className="cvb-link"
+                            href={f.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-tone={f.tone}
+                          >
+                            {scalarText(f.value)}
+                          </a>
+                        ) : (
+                          <span className="cvb-field-value" data-tone={f.tone}>
+                            {scalarText(f.value)}
+                          </span>
+                        )}
+                        {f.copyable && f.value !== null && (
+                          <button
+                            type="button"
+                            className="cvb-copy"
+                            aria-label={`Copy ${f.label ?? "value"}`}
+                            onClick={() => copy(String(f.value))}
+                          >
+                            copy
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {c.footnote && <div className="cvb-card-footnote">{c.footnote}</div>}
+              </div>
+            );
+          })}
         </div>
       );
-    case "rows":
+    }
+    case "rows": {
+      const key = makeKeyer();
       return (
         <div className="cvb-rows">
           {section.items.map((r) => (
-            <div key={r.text} className="cvb-row">
+            <div key={key(JSON.stringify(r))} className="cvb-row">
               {r.glyph && <span className="cvb-glyph" data-tone={r.glyph} />}
               {r.chip && (
                 <span className="cvb-chip" data-tone={r.chip.tone}>
@@ -180,6 +200,7 @@ function Section({ section }: { section: BoardSection }) {
           ))}
         </div>
       );
+    }
     default: {
       const exhaustive: never = section;
       return exhaustive;
@@ -188,15 +209,11 @@ function Section({ section }: { section: BoardSection }) {
 }
 
 export function BoardView({ view }: { view: CanvasBoardView }) {
-  // Content-derived section keys (a duplicate-occurrence suffix keeps them
-  // unique) so we never key on the array index; sections carry no inherent id.
-  const seen = new Map<string, number>();
-  const keyedSections = view.sections.map((section) => {
-    const base = JSON.stringify(section);
-    const dup = seen.get(base) ?? 0;
-    seen.set(base, dup + 1);
-    return { key: dup === 0 ? base : `${base}#${dup}`, section };
-  });
+  const key = makeKeyer();
+  const keyedSections = view.sections.map((section) => ({
+    key: key(JSON.stringify(section)),
+    section,
+  }));
 
   return (
     <div className="canvas-view-board">
