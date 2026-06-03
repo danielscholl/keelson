@@ -28,6 +28,7 @@ mock.module("../src/components/Canvas/CanvasHost.tsx", () => ({
 }));
 
 const { ToastHost } = await import("../src/components/Toast.tsx");
+const { RibsProvider } = await import("../src/components/RibsProvider.tsx");
 const { Ribs } = await import("../src/views/Ribs.tsx");
 
 function rib(partial: Partial<RibSummary> & Pick<RibSummary, "id" | "displayName">): RibSummary {
@@ -44,7 +45,9 @@ function rib(partial: Partial<RibSummary> & Pick<RibSummary, "id" | "displayName
 async function renderRibs() {
   return render(
     <ToastHost>
-      <Ribs />
+      <RibsProvider>
+        <Ribs />
+      </RibsProvider>
     </ToastHost>,
   );
 }

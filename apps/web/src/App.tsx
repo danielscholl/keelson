@@ -1,12 +1,12 @@
 import type { RibSurfaceDescriptor } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
+import { RibsProvider, useRibsContext } from "./components/RibsProvider.tsx";
 import { ToastHost } from "./components/Toast.tsx";
 import { type ActiveTab, type SurfaceTab, TopBar } from "./components/TopBar.tsx";
 import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
 import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
-import { useRibs } from "./hooks/useRibs.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
@@ -18,7 +18,9 @@ export function App() {
   return (
     <ToastHost>
       <CanvasProvider>
-        <AppInner />
+        <RibsProvider>
+          <AppInner />
+        </RibsProvider>
       </CanvasProvider>
     </ToastHost>
   );
@@ -36,7 +38,7 @@ function AppInner() {
   const pausedRunCount = usePausedRunCount();
   const pendingMemoryCount = usePendingMemoryCount();
 
-  const { ribs } = useRibs();
+  const { ribs } = useRibsContext();
   const surfaceTabs = useMemo<SurfaceTab[]>(
     () =>
       ribs.flatMap((rib) =>
