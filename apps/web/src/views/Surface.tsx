@@ -2,11 +2,21 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { type CanvasBoardView, canvasViewSchema, type RibSurfaceDescriptor } from "@keelson/shared";
-import { useState } from "react";
+import {
+  type CanvasBoardView,
+  canvasViewSchema,
+  type RibAction,
+  type RibActionResult,
+  type RibSurfaceDescriptor,
+  ribIdFromKey,
+} from "@keelson/shared";
+import { useCallback, useState } from "react";
+import { postRibAction } from "../api.ts";
+import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
 import { BoardHeader } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { useToast } from "../components/Toast.tsx";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 
 interface Region {
@@ -44,6 +54,32 @@ function SurfaceRegion({ region }: { region: Region }) {
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
   const snap = useSnapshot(region.key);
   const { openCanvas } = useCanvas();
+  const toast = useToast();
+  const ribId = ribIdFromKey(region.key);
+
+  // Board actions dispatch to the region's owning rib; on success re-hydrate so
+  // the board reflects the new state (the producing workflow recompose is
+  // server-side). null ribId → no provider → buttons render disabled.
+  const dispatch = useCallback(
+    async (action: RibAction): Promise<RibActionResult> => {
+      if (!ribId) return { ok: false, error: "region key is not rib-namespaced" };
+      try {
+        const result = await postRibAction(ribId, action);
+        if (result.ok) {
+          toast.push({ kind: "ok", message: `${action.type} ✓` });
+          snap.reload();
+        } else {
+          toast.push({ kind: "error", message: `${action.type}: ${result.error}` });
+        }
+        return result;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.push({ kind: "error", message: `${action.type} failed: ${message}` });
+        return { ok: false, error: message };
+      }
+    },
+    [ribId, snap.reload, toast],
+  );
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
@@ -94,6 +130,10 @@ function SurfaceRegion({ region }: { region: Region }) {
         ) : (
           <p className="canvas-drawer-note">Collapsed.</p>
         )
+      ) : ribId ? (
+        <BoardActionProvider dispatch={dispatch}>
+          <SnapshotStateView snapshot={snap} />
+        </BoardActionProvider>
       ) : (
         <SnapshotStateView snapshot={snap} />
       )}

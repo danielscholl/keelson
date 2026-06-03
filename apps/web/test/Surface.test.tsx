@@ -144,6 +144,21 @@ describe("Surface", () => {
     expect(dialog.textContent).toContain("Services");
   });
 
+  test("a region's board actions render enabled (wired to the rib-namespaced dispatcher)", () => {
+    live("rib:demo:cluster", {
+      view: "board",
+      title: "Cluster",
+      sections: [{ kind: "actions", items: [{ type: "reconcile", label: "Reconcile" }] }],
+    });
+    renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:cluster" }] }] },
+    });
+    const btn = screen.getByRole("button", { name: "Reconcile" });
+    expect(btn).toHaveProperty("disabled", false);
+  });
+
   test("a region with no snapshot yet degrades to a waiting note, not a crash", () => {
     renderSurface({
       id: "cimpl",

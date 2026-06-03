@@ -1,5 +1,7 @@
 import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
+import { useState } from "react";
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
+import { useBoardActions } from "./BoardActionContext.tsx";
 import { TableView } from "./TableView.tsx";
 
 type BoardSection = CanvasBoardView["sections"][number];
@@ -35,6 +37,40 @@ function Segments({ items }: { items: Segment[] }) {
         <span key={key(JSON.stringify(s))} className="cvb-segment" data-tone={s.tone}>
           <span className="cvb-segment-n">{s.n}</span> {s.label}
         </span>
+      ))}
+    </div>
+  );
+}
+
+// Action buttons dispatch to the owning rib via the board-action context (a
+// surface region / the canvas drawer provides it, keyed off the snapshot
+// namespace). With no provider in scope the buttons render disabled.
+function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "actions" }> }) {
+  const ctx = useBoardActions();
+  const [pending, setPending] = useState<string | null>(null);
+  const key = makeKeyer();
+  return (
+    <div className="cvb-actions">
+      {section.items.map((a) => (
+        <button
+          type="button"
+          key={key(a.type)}
+          className={`cvb-action-button${a.destructive ? " is-destructive" : ""}`}
+          data-tone={a.tone}
+          disabled={!ctx || pending === a.type}
+          onClick={async () => {
+            if (!ctx || pending === a.type) return;
+            if (a.destructive && !window.confirm(`${a.label}?`)) return;
+            setPending(a.type);
+            try {
+              await ctx.dispatch({ type: a.type });
+            } finally {
+              setPending(null);
+            }
+          }}
+        >
+          {a.label}
+        </button>
       ))}
     </div>
   );
@@ -201,6 +237,8 @@ function Section({ section }: { section: BoardSection }) {
         </div>
       );
     }
+    case "actions":
+      return <ActionsSection section={section} />;
     default: {
       const exhaustive: never = section;
       return exhaustive;
