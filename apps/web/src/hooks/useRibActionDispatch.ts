@@ -23,7 +23,14 @@ export function useRibActionDispatch(
         const result = await postRibAction(ribId, action);
         if (result.ok) {
           toast.push({ kind: "ok", message: `${action.type} ✓` });
-          onSuccess?.(action, result);
+          // Isolate the callback: a throwing onSuccess must not turn a
+          // successful action into a failure result.
+          try {
+            onSuccess?.(action, result);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            toast.push({ kind: "error", message: `post-success handler failed: ${message}` });
+          }
         } else {
           toast.push({ kind: "error", message: `${action.type}: ${result.error}` });
         }
