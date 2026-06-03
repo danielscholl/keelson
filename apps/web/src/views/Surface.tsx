@@ -22,16 +22,19 @@ export function Surface({ descriptor }: { descriptor: RibSurfaceDescriptor }) {
   const { header, banner, rows, footer } = descriptor.layout;
   return (
     <div className="page surface-page">
-      {header && <SurfaceRegion region={header} />}
-      {banner && <SurfaceRegion region={banner} />}
-      {rows.map((row) => (
-        <div className="surface-row" key={row.columns.map((c) => c.key).join("|")}>
+      {/* Role-prefixed keys so a region remounts (re-reads its initial collapsed
+          flag) if the descriptor swaps it for a different one at this slot. */}
+      {header && <SurfaceRegion key={`header:${header.key}`} region={header} />}
+      {banner && <SurfaceRegion key={`banner:${banner.key}`} region={banner} />}
+      {rows.map((row, rowIndex) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: surface rows are a static descriptor array (never reordered), so the index is a stable, collision-free key — region keys are unconstrained and could collide if joined.
+        <div className="surface-row" key={`row:${rowIndex}`}>
           {row.columns.map((col) => (
             <SurfaceRegion key={col.key} region={col} />
           ))}
         </div>
       ))}
-      {footer && <SurfaceRegion region={footer} />}
+      {footer && <SurfaceRegion key={`footer:${footer.key}`} region={footer} />}
     </div>
   );
 }
