@@ -35,6 +35,7 @@ function rib(partial: Partial<RibSummary> & Pick<RibSummary, "id" | "displayName
     registered: [],
     views: [],
     actions: [],
+    surfaces: [],
     hasOnAction: false,
     ...partial,
   };

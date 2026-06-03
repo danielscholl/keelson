@@ -1,11 +1,22 @@
 import type { ThemePreference } from "../hooks/useSettings.ts";
 import { ThemePicker } from "./ThemePicker.tsx";
 
-export type ActiveTab = "chat" | "workflows" | "memory" | "ribs";
+export type BuiltinTab = "chat" | "workflows" | "memory" | "ribs";
+// Dynamic rib surfaces ride alongside the built-in tabs as opaque ids
+// (`surface:<ribId>:<surfaceId>`); the template-literal union keeps every
+// `activeTab === "workflows"` comparison compiling unchanged.
+export type ActiveTab = BuiltinTab | `surface:${string}`;
+
+// One nav tab per declared rib surface, derived from GET /api/ribs in App.
+export interface SurfaceTab {
+  id: `surface:${string}`;
+  title: string;
+}
 
 export interface TopBarProps {
   activeTab: ActiveTab;
   onTabChange: (tab: ActiveTab) => void;
+  surfaceTabs?: readonly SurfaceTab[];
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   // Count of workflow runs currently paused awaiting human input. Drives
@@ -24,6 +35,7 @@ export function TopBar(props: TopBarProps) {
   const {
     activeTab,
     onTabChange,
+    surfaceTabs,
     themePreference,
     onThemeChange,
     pausedRunCount,
@@ -98,6 +110,17 @@ export function TopBar(props: TopBarProps) {
           >
             Ribs
           </button>
+          {surfaceTabs?.map((tab) => (
+            <button
+              type="button"
+              key={tab.id}
+              className={`nav-tab${activeTab === tab.id ? " is-active" : ""}`}
+              aria-pressed={activeTab === tab.id}
+              onClick={() => onTabChange(tab.id)}
+            >
+              {tab.title}
+            </button>
+          ))}
         </nav>
       </div>
       <div className="topbar-right">

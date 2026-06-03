@@ -2996,8 +2996,9 @@ button.tab:focus-visible {
   opacity: 0;
 }
 
-/* Composite "board" view — a stack of generic dashboard sections. */
-.canvas-drawer-body .canvas-view-board {
+/* Composite "board" view — a stack of generic dashboard sections. Unscoped so
+   it renders the same in the canvas drawer and inside a surface region. */
+.canvas-view-board {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -3028,6 +3029,60 @@ button.tab:focus-visible {
 .cvb-section .canvas-view-table {
   max-width: none;
   margin: 0;
+}
+
+/* Surface — a rib's top-level page laying out region-bound boards. */
+.surface-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.surface-row {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.surface-row > .surface-region {
+  flex: 1 1 320px;
+  min-width: 320px;
+}
+.surface-region {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--bg-elevated, var(--bg));
+}
+.surface-region-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.surface-region-spacer {
+  flex: 1 1 auto;
+}
+.surface-region-toggle {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 0 4px;
+}
+.surface-region-action {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.surface-region-action:hover {
+  background: var(--bg-hover, rgba(127, 127, 127, 0.1));
 }
 
 /* segments — the "pulse" summary */

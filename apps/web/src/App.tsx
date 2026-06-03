@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import type { RibSurfaceDescriptor } from "@keelson/shared";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
 import { ToastHost } from "./components/Toast.tsx";
-import { type ActiveTab, TopBar } from "./components/TopBar.tsx";
+import { type ActiveTab, type SurfaceTab, TopBar } from "./components/TopBar.tsx";
 import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
 import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
+import { useRibs } from "./hooks/useRibs.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
 import { Ribs } from "./views/Ribs.tsx";
+import { Surface } from "./views/Surface.tsx";
 import { Workflows } from "./views/Workflows.tsx";
 
 export function App() {
@@ -32,6 +35,32 @@ function AppInner() {
   } | null>(null);
   const pausedRunCount = usePausedRunCount();
   const pendingMemoryCount = usePendingMemoryCount();
+
+  const { ribs } = useRibs();
+  const surfaceTabs = useMemo<SurfaceTab[]>(
+    () =>
+      ribs.flatMap((rib) =>
+        rib.surfaces.map((s) => ({ id: `surface:${rib.id}:${s.id}` as const, title: s.title })),
+      ),
+    [ribs],
+  );
+  const activeSurface = useMemo<RibSurfaceDescriptor | null>(() => {
+    if (!activeTab.startsWith("surface:")) return null;
+    for (const rib of ribs) {
+      for (const s of rib.surfaces) {
+        if (`surface:${rib.id}:${s.id}` === activeTab) return s;
+      }
+    }
+    return null;
+  }, [activeTab, ribs]);
+
+  // A surface tab can vanish (rib filtered out, list refetched). Once ribs have
+  // loaded, fall back to Chat if the active surface id is no longer present.
+  useEffect(() => {
+    if (activeTab.startsWith("surface:") && !surfaceTabs.some((t) => t.id === activeTab)) {
+      setActiveTab("chat");
+    }
+  }, [activeTab, surfaceTabs]);
 
   const handleOpenWorkflowRun = useCallback((workflowName: string, runId: string) => {
     setPendingWorkflowRun({ workflowName, runId });
@@ -65,13 +94,16 @@ function AppInner() {
       <TopBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        surfaceTabs={surfaceTabs}
         themePreference={themePreference}
         onThemeChange={setTheme}
         pausedRunCount={pausedRunCount}
         pendingMemoryCount={pendingMemoryCount}
         onNewChat={handleNewChat}
       />
-      {activeTab === "workflows" ? (
+      {activeSurface ? (
+        <Surface descriptor={activeSurface} />
+      ) : activeTab === "workflows" ? (
         <Workflows
           pendingRun={pendingWorkflowRun}
           onPendingRunConsumed={() => setPendingWorkflowRun(null)}

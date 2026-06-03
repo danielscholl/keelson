@@ -208,6 +208,21 @@ function Section({ section }: { section: BoardSection }) {
   }
 }
 
+// The board's header strip (chip + title + segments). Rendered inline at the
+// top of a full board, and standalone as the collapsed form of a surface region.
+export function BoardHeader({ view }: { view: Pick<CanvasBoardView, "title" | "header"> }) {
+  if (!view.title && !view.header) return null;
+  return (
+    <div className="cvb-header">
+      {view.header?.chip && <span className="cvb-chip cvb-header-chip">{view.header.chip}</span>}
+      {view.title && <span className="cvb-title">{view.title}</span>}
+      {view.header?.segments && view.header.segments.length > 0 && (
+        <Segments items={view.header.segments} />
+      )}
+    </div>
+  );
+}
+
 export function BoardView({ view }: { view: CanvasBoardView }) {
   const key = makeKeyer();
   const keyedSections = view.sections.map((section) => ({
@@ -217,17 +232,7 @@ export function BoardView({ view }: { view: CanvasBoardView }) {
 
   return (
     <div className="canvas-view-board">
-      {(view.title || view.header) && (
-        <div className="cvb-header">
-          {view.header?.chip && (
-            <span className="cvb-chip cvb-header-chip">{view.header.chip}</span>
-          )}
-          {view.title && <span className="cvb-title">{view.title}</span>}
-          {view.header?.segments && view.header.segments.length > 0 && (
-            <Segments items={view.header.segments} />
-          )}
-        </div>
-      )}
+      <BoardHeader view={view} />
       {keyedSections.map(({ key, section }) => (
         <section key={key} className="cvb-section">
           {section.title && <div className="cvb-section-title">{section.title}</div>}

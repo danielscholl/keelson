@@ -128,6 +128,66 @@ describe("GET /api/ribs", () => {
     expect(body.ribs[0]?.auth).toBeUndefined();
     expect(body.ribs[0]?.hasOnAction).toBe(false);
   });
+
+  test("returns an empty surfaces array for a rib that declares none", async () => {
+    const plain: Rib = { id: "plain", displayName: "Plain" };
+    const { app } = await makeRig({ available: { plain } });
+    const res = await app.fetch(get("/api/ribs"));
+    const body = (await res.json()) as { ribs: Array<{ surfaces: unknown }> };
+    expect(body.ribs[0]?.surfaces).toEqual([]);
+  });
+
+  test("serializes a declared surface descriptor", async () => {
+    const demo: Rib = {
+      id: "demo",
+      displayName: "Demo",
+      surfaces: [
+        {
+          id: "board",
+          title: "Board",
+          layout: {
+            header: { key: "rib:demo:topology", collapsible: true, collapsed: true },
+            rows: [{ columns: [{ key: "rib:demo:quality" }, { key: "rib:demo:security" }] }],
+          },
+        },
+      ],
+    };
+    const { app } = await makeRig({ available: { demo } });
+    const res = await app.fetch(get("/api/ribs"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ribs: Array<{ surfaces: Array<Record<string, unknown>> }>;
+    };
+    const surface = body.ribs[0]?.surfaces[0];
+    expect(surface?.id).toBe("board");
+    expect(surface?.title).toBe("Board");
+    expect((surface?.layout as { rows: unknown[] }).rows).toHaveLength(1);
+  });
+});
+
+describe("rib surface activation guards", () => {
+  test("rejects a surface region key outside the rib's namespace", async () => {
+    const stray: Rib = {
+      id: "stray",
+      displayName: "Stray",
+      surfaces: [
+        { id: "s", title: "S", layout: { rows: [{ columns: [{ key: "rib:other:x" }] }] } },
+      ],
+    };
+    await expect(makeRig({ available: { stray } })).rejects.toThrow(/surface region key/);
+  });
+
+  test("rejects two surfaces sharing an id", async () => {
+    const dup: Rib = {
+      id: "dup",
+      displayName: "Dup",
+      surfaces: [
+        { id: "same", title: "A", layout: { rows: [] } },
+        { id: "same", title: "B", layout: { rows: [] } },
+      ],
+    };
+    await expect(makeRig({ available: { dup } })).rejects.toThrow(/duplicate surface id/);
+  });
 });
 
 describe("POST /api/ribs/:id/action", () => {

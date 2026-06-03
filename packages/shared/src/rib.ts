@@ -98,6 +98,34 @@ export const ribViewDescriptorSchema = z
   .strict();
 export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
 
+// A rib's primary surface: one top-level nav tab laying out region-bound boards
+// (G1 stays "one panel"; the surface owns columns/header/footer). Each region
+// `key` must live under the rib's namespace, like view keys. Only the header
+// and footer collapse — banner and row columns always render full.
+const surfaceRegionSchema = z.object({ key: z.string().min(1) }).strict();
+const collapsibleRegionSchema = z
+  .object({
+    key: z.string().min(1),
+    collapsible: z.boolean().optional(),
+    collapsed: z.boolean().optional(),
+  })
+  .strict();
+export const ribSurfaceDescriptorSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    layout: z
+      .object({
+        header: collapsibleRegionSchema.optional(),
+        banner: surfaceRegionSchema.optional(),
+        rows: z.array(z.object({ columns: z.array(surfaceRegionSchema).min(1) }).strict()),
+        footer: collapsibleRegionSchema.optional(),
+      })
+      .strict(),
+  })
+  .strict();
+export type RibSurfaceDescriptor = z.infer<typeof ribSurfaceDescriptorSchema>;
+
 // A button the Ribs panel renders; clicking it dispatches `type` to onAction.
 export const ribActionDescriptorSchema = z
   .object({
@@ -172,6 +200,10 @@ export interface Rib {
   // Static action descriptors the Ribs panel renders as buttons. Each `type`
   // is dispatched to `onAction`.
   actions?: readonly RibActionDescriptor[];
+  // Static surface descriptors — primary nav tabs that lay out region-bound
+  // boards. Each region `key` must live under the rib's namespace, like view
+  // keys; the harness rejects out-of-namespace keys at activation.
+  surfaces?: readonly RibSurfaceDescriptor[];
   // Workflow definitions the rib contributes to the catalog at activation,
   // optionally each bound to a rib-namespaced snapshot key.
   contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
@@ -186,8 +218,9 @@ export interface Rib {
 }
 
 // Wire shape for GET /api/ribs — what the SPA consumes to discover active ribs
-// without an App.tsx edit. `views`/`actions` are always present (possibly
-// empty); `auth` is present only when the rib declares an `authStatus` probe.
+// without an App.tsx edit. `views`/`actions`/`surfaces` are always present
+// (possibly empty); `auth` is present only when the rib declares an
+// `authStatus` probe.
 export const ribSummarySchema = z
   .object({
     id: ribIdSchema,
@@ -195,6 +228,7 @@ export const ribSummarySchema = z
     registered: z.array(z.string()),
     views: z.array(ribViewDescriptorSchema),
     actions: z.array(ribActionDescriptorSchema),
+    surfaces: z.array(ribSurfaceDescriptorSchema),
     hasOnAction: z.boolean(),
     auth: ribAuthStatusSchema.optional(),
   })

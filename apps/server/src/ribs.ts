@@ -26,10 +26,12 @@ import {
   type RibActionResult,
   type RibAuthStatus,
   type RibContext,
+  type RibSurfaceDescriptor,
   type RibViewDescriptor,
   ribActionDescriptorSchema,
   ribDisplayNameSchema,
   ribIdSchema,
+  ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
   type SnapshotManager,
   type SnapshotValidator,
@@ -42,6 +44,7 @@ export interface RibManifest {
   readonly registered: readonly string[];
   readonly views: readonly RibViewDescriptor[];
   readonly actions: readonly RibActionDescriptor[];
+  readonly surfaces: readonly RibSurfaceDescriptor[];
   readonly hasOnAction: boolean;
 }
 
@@ -182,6 +185,25 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     for (const action of actions) {
       ribActionDescriptorSchema.parse(action);
     }
+    const surfaces = rib.surfaces ?? [];
+    const surfaceIds = new Set<string>();
+    for (const surface of surfaces) {
+      ribSurfaceDescriptorSchema.parse(surface);
+      if (surfaceIds.has(surface.id)) {
+        throw new Error(`rib '${rib.id}' declares duplicate surface id '${surface.id}'`);
+      }
+      surfaceIds.add(surface.id);
+      const { header, banner, rows, footer } = surface.layout;
+      const regionKeys = [
+        ...(header ? [header.key] : []),
+        ...(banner ? [banner.key] : []),
+        ...rows.flatMap((row) => row.columns.map((c) => c.key)),
+        ...(footer ? [footer.key] : []),
+      ];
+      for (const key of regionKeys) {
+        assertInNamespace(rib.id, namespace, key, "surface region key");
+      }
+    }
     manifests.push({
       id: rib.id,
       displayName: rib.displayName,
@@ -194,6 +216,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         : [],
       views,
       actions,
+      surfaces,
       hasOnAction: typeof rib.onAction === "function",
     });
 

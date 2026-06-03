@@ -5,6 +5,7 @@ import {
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
+  ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
 } from "../src/rib.ts";
 
@@ -60,12 +61,66 @@ describe("rib v2 wire schemas", () => {
           registered: ["osdu.search"],
           views: [{ key: "rib:osdu:graph", canvasKind: "view" }],
           actions: [{ type: "refresh", label: "Refresh" }],
+          surfaces: [],
           hasOnAction: true,
           auth: { authenticated: true },
         },
       ],
     });
     expect(res.ribs[0]?.id).toBe("osdu");
+  });
+});
+
+describe("rib surface descriptor schema", () => {
+  it("round-trips a surface with a collapsible header and a row of columns", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        header: { key: "rib:osdu:topology", collapsible: true, collapsed: true },
+        rows: [{ columns: [{ key: "rib:osdu:quality" }, { key: "rib:osdu:security" }] }],
+      },
+    });
+    expect(s.title).toBe("CIMPL");
+    expect(s.layout.header?.collapsed).toBe(true);
+    expect(s.layout.rows[0]?.columns).toHaveLength(2);
+  });
+
+  it("allows an empty rows array (no lanes declared yet)", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({ id: "x", title: "X", layout: { rows: [] } }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an unknown field, an empty region key, and a column-less row", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({ id: "x", title: "X", layout: { rows: [] }, extra: 1 })
+        .success,
+    ).toBe(false);
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { banner: { key: "" }, rows: [] },
+      }).success,
+    ).toBe(false);
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { rows: [{ columns: [] }] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects collapse flags on a banner region (only header/footer collapse)", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { banner: { key: "rib:osdu:queue", collapsible: true }, rows: [] },
+      }).success,
+    ).toBe(false);
   });
 });
 
