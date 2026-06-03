@@ -1,5 +1,5 @@
 import { type CanvasSource, type CanvasView, canvasViewSchema } from "@keelson/shared";
-import { useSnapshot } from "../../hooks/useSnapshot.ts";
+import { type SnapshotState, useSnapshot } from "../../hooks/useSnapshot.ts";
 import { BoardView } from "./BoardView.tsx";
 import { GraphView } from "./GraphView.tsx";
 import { TableView } from "./TableView.tsx";
@@ -24,7 +24,7 @@ function renderView(view: CanvasView) {
 // Fail-closed gate: structured data is validated against canvasViewSchema
 // before any typed renderer touches it. Invalid data renders a note, never a
 // trusted component over an unvalidated shape.
-function ViewFromData({ data }: { data: unknown }) {
+export function ViewFromData({ data }: { data: unknown }) {
   const parsed = canvasViewSchema.safeParse(data);
   if (!parsed.success) {
     return (
@@ -36,8 +36,10 @@ function ViewFromData({ data }: { data: unknown }) {
   return renderView(parsed.data);
 }
 
-function SnapshotView({ snapshotKey }: { snapshotKey: string }) {
-  const snapshot = useSnapshot(snapshotKey);
+// Renders an already-subscribed snapshot's status → view. Split out so a caller
+// holding its own `useSnapshot` state (a surface region) can render the same
+// loading/error/empty/live treatment without opening a second subscription.
+export function SnapshotStateView({ snapshot }: { snapshot: SnapshotState }) {
   if (snapshot.status === "loading") {
     return <p className="canvas-drawer-note">Loading…</p>;
   }
@@ -48,6 +50,11 @@ function SnapshotView({ snapshotKey }: { snapshotKey: string }) {
     return <p className="canvas-drawer-note">Waiting for the first update…</p>;
   }
   return <ViewFromData data={snapshot.data} />;
+}
+
+function SnapshotView({ snapshotKey }: { snapshotKey: string }) {
+  const snapshot = useSnapshot(snapshotKey);
+  return <SnapshotStateView snapshot={snapshot} />;
 }
 
 // Renders a `kind: "view"` canvas. A view needs structured JSON, so it binds to

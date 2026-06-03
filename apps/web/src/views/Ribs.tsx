@@ -12,11 +12,11 @@ import { useCallback, useState } from "react";
 
 import { postRibAction } from "../api.ts";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
+import { useRibsContext } from "../components/RibsProvider.tsx";
 import { useToast } from "../components/Toast.tsx";
-import { useRibs } from "../hooks/useRibs.ts";
 
 export function Ribs() {
-  const { status, ribs, error, refresh } = useRibs();
+  const { status, ribs, error, refresh } = useRibsContext();
   const { openCanvas } = useCanvas();
   const toast = useToast();
 
