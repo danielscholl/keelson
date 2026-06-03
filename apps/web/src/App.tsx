@@ -102,7 +102,9 @@ function AppInner() {
         onNewChat={handleNewChat}
       />
       {activeSurface ? (
-        <Surface descriptor={activeSurface} />
+        // Key by tab so switching surfaces remounts the tree — region collapse
+        // state must not leak from one surface's layout into another's.
+        <Surface key={activeTab} descriptor={activeSurface} />
       ) : activeTab === "workflows" ? (
         <Workflows
           pendingRun={pendingWorkflowRun}
