@@ -58,7 +58,7 @@ function SurfaceRegion({ region }: { region: Region }) {
   // server-side). null ribId → no provider → buttons render disabled.
   const reload = snap.reload;
   const onSuccess = useCallback(() => reload(), [reload]);
-  const dispatch = useRibActionDispatch(ribId, { onSuccess });
+  const actions = useRibActionDispatch(ribId, { onSuccess });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
@@ -110,7 +110,7 @@ function SurfaceRegion({ region }: { region: Region }) {
           <p className="canvas-drawer-note">Collapsed.</p>
         )
       ) : ribId ? (
-        <BoardActionProvider dispatch={dispatch}>
+        <BoardActionProvider run={actions.run} reveal={actions.reveal}>
           <SnapshotStateView snapshot={snap} />
         </BoardActionProvider>
       ) : (

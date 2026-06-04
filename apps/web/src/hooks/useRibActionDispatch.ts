@@ -1,22 +1,27 @@
 import type { RibAction, RibActionResult } from "@keelson/shared";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { postRibAction } from "../api.ts";
+import type { BoardActionApi } from "../components/Canvas/BoardActionContext.tsx";
 import { useToast } from "../components/Toast.tsx";
 
-// Dispatches a board action to its owning rib over POST /api/ribs/:id/action,
-// unifying the toast + error shaping shared by the surface region and the canvas
-// drawer. `onSuccess` lets a caller react to an ok result (e.g. re-hydrate the
-// region's snapshot). A null ribId yields a dispatcher that resolves to an error
-// without a request — callers gate the action UI on a non-null id.
+// Builds the two board-action dispatchers a region / the canvas drawer hands to
+// BoardActionProvider, over POST /api/ribs/:id/action:
+//   - `run`    — visible buttons: dispatch + toast + optional `onSuccess`
+//                (e.g. re-hydrate the region's snapshot).
+//   - `reveal` — copy-on-reveal fields: a raw round-trip with no toast and no
+//                reload; the caller writes the returned `data` to the clipboard.
+// A null ribId yields dispatchers that resolve to an error without a request —
+// callers gate the action UI on a non-null id.
 export function useRibActionDispatch(
   ribId: string | null,
   opts?: {
     onSuccess?: (action: RibAction, result: Extract<RibActionResult, { ok: true }>) => void;
   },
-): (action: RibAction) => Promise<RibActionResult> {
+): BoardActionApi {
   const toast = useToast();
   const onSuccess = opts?.onSuccess;
-  return useCallback(
+
+  const run = useCallback(
     async (action: RibAction): Promise<RibActionResult> => {
       if (!ribId) return { ok: false, error: "key is not rib-namespaced" };
       try {
@@ -43,4 +48,20 @@ export function useRibActionDispatch(
     },
     [ribId, toast, onSuccess],
   );
+
+  // Raw: no toast, no reload. The copy button shows its own flash and the
+  // returned secret goes straight to the clipboard — it never reaches state here.
+  const reveal = useCallback(
+    async (action: RibAction): Promise<RibActionResult> => {
+      if (!ribId) return { ok: false, error: "key is not rib-namespaced" };
+      try {
+        return await postRibAction(ribId, action);
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    [ribId],
+  );
+
+  return useMemo(() => ({ run, reveal }), [run, reveal]);
 }

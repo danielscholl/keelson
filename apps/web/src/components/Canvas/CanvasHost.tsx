@@ -129,10 +129,10 @@ function CanvasBody({ doc }: { doc: CanvasDocument }) {
 // post-success reload here — the drawer's open WS pushes the recomposed frame.
 function ViewCanvas({ source }: { source: CanvasSource }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
-  const dispatch = useRibActionDispatch(ribId);
+  const actions = useRibActionDispatch(ribId);
   if (!ribId) return <ViewBody source={source} />;
   return (
-    <BoardActionProvider dispatch={dispatch}>
+    <BoardActionProvider run={actions.run} reveal={actions.reveal}>
       <ViewBody source={source} />
     </BoardActionProvider>
   );

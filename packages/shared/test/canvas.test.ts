@@ -292,6 +292,146 @@ describe("canvasViewSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("parses an action item with a glyph and an opaque payload", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            { type: "reconcile", label: "Reconcile", glyph: "↻", payload: { context: "ctx-a" } },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("parses a board header with a toned status pill", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      header: { status: { label: "✓ Healthy", tone: "ok" }, chip: "kind-osdu" },
+      sections: [],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("parses a columns section nesting leaf sections", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "columns",
+          columns: [
+            {
+              weight: 1.4,
+              sections: [{ kind: "rows", title: "Lifecycle", items: [{ text: "ready" }] }],
+            },
+            {
+              weight: 1,
+              sections: [
+                { kind: "actions", title: "Actions", items: [{ type: "reconcile", label: "Go" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("rejects a columns section nesting another columns (one level deep)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "columns",
+            columns: [{ sections: [{ kind: "columns", columns: [{ sections: [] }] }] }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects duplicate column keys inside a nested table section", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "columns",
+            columns: [
+              {
+                sections: [{ kind: "table", columns: [{ key: "a" }, { key: "a" }], rows: [] }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/unique/);
+  });
+
+  it("parses a card with a status dot and a copy-on-reveal credential field", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "PostgreSQL",
+              dot: "neutral",
+              fields: [
+                {
+                  label: "admin",
+                  value: "postgres",
+                  copyAction: { type: "reveal-credential", payload: { service: "postgresql" } },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("rejects an unknown key on a copyAction (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "cards",
+            items: [
+              { title: "x", fields: [{ value: "v", copyAction: { type: "r", bogus: true } }] },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a field that sets both copyable and copyAction", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "cards",
+            items: [
+              {
+                title: "x",
+                fields: [{ value: "v", copyable: true, copyAction: { type: "reveal" } }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 });
 
 describe("getRunArtifactResponseSchema", () => {

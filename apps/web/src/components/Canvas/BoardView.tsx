@@ -1,5 +1,5 @@
-import type { CanvasBoardView, CanvasTone } from "@keelson/shared";
-import { useState } from "react";
+import type { CanvasBoardView, CanvasTone, RibAction } from "@keelson/shared";
+import { type CSSProperties, useEffect, useState } from "react";
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { useBoardActions } from "./BoardActionContext.tsx";
 import { TableView } from "./TableView.tsx";
@@ -63,16 +63,72 @@ function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "a
             if (a.destructive && !window.confirm(`${a.label}?`)) return;
             setPending(a.type);
             try {
-              await ctx.dispatch({ type: a.type });
+              await ctx.run(
+                a.payload !== undefined ? { type: a.type, payload: a.payload } : { type: a.type },
+              );
             } finally {
               setPending(null);
             }
           }}
         >
+          {a.glyph && (
+            <span className="cvb-action-glyph" aria-hidden="true">
+              {a.glyph}
+            </span>
+          )}
           {a.label}
         </button>
       ))}
     </div>
+  );
+}
+
+// Copy-on-reveal: dispatches the field's `copyAction` to the owning rib and
+// writes the returned `data` to the clipboard. The secret is fetched on click
+// and never held in React state — the local binding goes out of scope when the
+// handler returns. A brief flash reflects success/failure before reverting.
+function CopyActionButton({ action, label }: { action: RibAction; label?: string }) {
+  const ctx = useBoardActions();
+  const [state, setState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
+  useEffect(() => {
+    if (state !== "ok" && state !== "fail") return;
+    const timer = setTimeout(() => setState("idle"), 1200);
+    return () => clearTimeout(timer);
+  }, [state]);
+  const onClick = async () => {
+    if (!ctx || state === "busy") return;
+    // Confirm the clipboard can receive the value before revealing anything — no
+    // point fetching (and auditing) a secret we can't deliver.
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) {
+      setState("fail");
+      return;
+    }
+    setState("busy");
+    try {
+      const result = await ctx.reveal(action);
+      if (result.ok && result.data != null) {
+        await clipboard.writeText(String(result.data));
+        setState("ok");
+      } else {
+        setState("fail");
+      }
+    } catch {
+      setState("fail");
+    }
+  };
+  const glyph = state === "busy" ? "…" : state === "ok" ? "✓" : state === "fail" ? "✕" : "copy";
+  const flash = state === "ok" || state === "fail" ? ` flash-${state}` : "";
+  return (
+    <button
+      type="button"
+      className={`cvb-copy${flash}`}
+      aria-label={`Copy ${label ?? "value"}`}
+      disabled={!ctx || state === "busy"}
+      onClick={onClick}
+    >
+      {glyph}
+    </button>
   );
 }
 
@@ -140,6 +196,7 @@ function Section({ section }: { section: BoardSection }) {
             return (
               <div key={key(JSON.stringify(c))} className="cvb-card">
                 <div className="cvb-card-head">
+                  {c.dot && <span className="cvb-card-dot" data-tone={c.dot} />}
                   {isSafeLinkScheme(c.href) ? (
                     <a
                       className="cvb-link cvb-card-title"
@@ -185,6 +242,12 @@ function Section({ section }: { section: BoardSection }) {
                           <span className="cvb-field-value" data-tone={f.tone}>
                             {scalarText(f.value)}
                           </span>
+                        )}
+                        {f.copyAction && (
+                          <CopyActionButton
+                            action={{ type: f.copyAction.type, payload: f.copyAction.payload }}
+                            label={f.label}
+                          />
                         )}
                         {f.copyable && f.value !== null && (
                           <button
@@ -239,6 +302,24 @@ function Section({ section }: { section: BoardSection }) {
     }
     case "actions":
       return <ActionsSection section={section} />;
+    case "columns": {
+      const colKey = makeKeyer();
+      const template = section.columns.map((c) => `minmax(0, ${c.weight ?? 1}fr)`).join(" ");
+      return (
+        <div className="cvb-columns" style={{ "--cvb-cols": template } as CSSProperties}>
+          {section.columns.map((col) => {
+            const sectionKey = makeKeyer();
+            return (
+              <div key={colKey(JSON.stringify(col))} className="cvb-column">
+                {col.sections.map((s) => (
+                  <SectionBlock key={sectionKey(JSON.stringify(s))} section={s} />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
     default: {
       const exhaustive: never = section;
       return exhaustive;
@@ -246,12 +327,29 @@ function Section({ section }: { section: BoardSection }) {
   }
 }
 
-// The board's header strip (chip + title + segments). Rendered inline at the
-// top of a full board, and standalone as the collapsed form of a surface region.
+// A section's title strip + body. Shared by the board's top level and by the
+// columns layout so a nested leaf section renders identically to a top-level one.
+function SectionBlock({ section }: { section: BoardSection }) {
+  return (
+    <section className="cvb-section">
+      {section.title && <div className="cvb-section-title">{section.title}</div>}
+      <Section section={section} />
+    </section>
+  );
+}
+
+// The board's header strip (status pill + chip + title + segments). Rendered
+// inline at the top of a full board, and standalone as the collapsed form of a
+// surface region.
 export function BoardHeader({ view }: { view: Pick<CanvasBoardView, "title" | "header"> }) {
   if (!view.title && !view.header) return null;
   return (
     <div className="cvb-header">
+      {view.header?.status && (
+        <span className="cvb-header-status" data-tone={view.header.status.tone}>
+          {view.header.status.label}
+        </span>
+      )}
       {view.header?.chip && <span className="cvb-chip cvb-header-chip">{view.header.chip}</span>}
       {view.title && <span className="cvb-title">{view.title}</span>}
       {view.header?.segments && view.header.segments.length > 0 && (
@@ -263,19 +361,11 @@ export function BoardHeader({ view }: { view: Pick<CanvasBoardView, "title" | "h
 
 export function BoardView({ view }: { view: CanvasBoardView }) {
   const key = makeKeyer();
-  const keyedSections = view.sections.map((section) => ({
-    key: key(JSON.stringify(section)),
-    section,
-  }));
-
   return (
     <div className="canvas-view-board">
       <BoardHeader view={view} />
-      {keyedSections.map(({ key, section }) => (
-        <section key={key} className="cvb-section">
-          {section.title && <div className="cvb-section-title">{section.title}</div>}
-          <Section section={section} />
-        </section>
+      {view.sections.map((section) => (
+        <SectionBlock key={key(JSON.stringify(section))} section={section} />
       ))}
     </div>
   );

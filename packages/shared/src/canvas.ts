@@ -105,7 +105,8 @@ const canvasPillSchema = z
   .strict();
 
 // A card field / status cell that can link out (`href`) or expose a copy button
-// (`copyable`) — for portal URLs and credentials.
+// (`copyable` for a value already in the payload; `copyAction` to fetch the
+// value on demand) — for portal URLs and credentials.
 const canvasFieldSchema = z
   .object({
     label: z.string().optional(),
@@ -113,8 +114,22 @@ const canvasFieldSchema = z
     tone: canvasToneSchema.optional(),
     href: z.string().optional(),
     copyable: z.boolean().optional(),
+    // Reveal-on-copy: the field's copy button dispatches this action to the
+    // owning rib and writes the returned `data` to the clipboard, so a secret is
+    // fetched on click and never rides in the board payload, React state, or a
+    // snapshot. Mirrors ribActionSchema's `{ type, payload }`.
+    copyAction: z
+      .object({ type: z.string().min(1), payload: z.unknown().optional() })
+      .strict()
+      .optional(),
   })
-  .strict();
+  .strict()
+  // The two copy modes are mutually exclusive: a field with both would render
+  // two same-label copy buttons (one copying the visible value, one revealing
+  // via the rib), so a producer could silently copy the wrong value.
+  .refine((f) => !(f.copyable && f.copyAction), {
+    message: "a field sets at most one of copyable / copyAction",
+  });
 
 // An action button a board offers; clicking dispatches `type` to the owning
 // rib's onAction, resolved from the board's snapshot-key namespace. `type` is a
@@ -123,103 +138,152 @@ const canvasActionItemSchema = z
   .object({
     type: z.string().min(1),
     label: z.string().min(1),
+    glyph: z.string().optional(),
     tone: canvasToneSchema.optional(),
     destructive: z.boolean().optional(),
+    // Opaque rib-defined context dispatched with the action (mirrors
+    // ribActionSchema's `payload`), e.g. the cluster the board was built against
+    // so the rib can reject a stale action. The base never inspects it.
+    payload: z.unknown().optional(),
+  })
+  .strict();
+
+// The leaf board sections — every primitive except the layout-only `columns`.
+// Named so the same members compose both `leafBoardSectionSchema` (what a column
+// may nest) and the full `canvasBoardSectionSchema` below.
+const statsSectionSchema = z
+  .object({
+    kind: z.literal("stats"),
+    title: z.string().optional(),
+    items: z.array(
+      z
+        .object({
+          label: z.string().min(1),
+          value: canvasCellScalarSchema,
+          sub: z.string().optional(),
+          tone: canvasToneSchema.optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+const segmentsSectionSchema = z
+  .object({
+    kind: z.literal("segments"),
+    title: z.string().optional(),
+    items: z.array(canvasSegmentSchema),
+  })
+  .strict();
+const barsSectionSchema = z
+  .object({
+    kind: z.literal("bars"),
+    title: z.string().optional(),
+    items: z.array(
+      z
+        .object({
+          label: z.string().min(1),
+          value: z.number(),
+          total: z.number(),
+          tone: canvasToneSchema.optional(),
+          trailing: z.string().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+const tableSectionSchema = z
+  .object({
+    kind: z.literal("table"),
+    title: z.string().optional(),
+    columns: z.array(z.object({ key: z.string().min(1), label: z.string().optional() })).min(1),
+    rows: z.array(z.record(z.string(), canvasCellSchema)),
+    caption: z.string().optional(),
+  })
+  .strict();
+const cardsSectionSchema = z
+  .object({
+    kind: z.literal("cards"),
+    title: z.string().optional(),
+    items: z.array(
+      z
+        .object({
+          title: z.string().min(1),
+          dot: canvasToneSchema.optional(),
+          pill: canvasPillSchema.optional(),
+          href: z.string().optional(),
+          bar: z.object({ value: z.number(), total: z.number() }).strict().optional(),
+          fields: z.array(canvasFieldSchema).optional(),
+          footnote: z.string().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+const rowsSectionSchema = z
+  .object({
+    kind: z.literal("rows"),
+    title: z.string().optional(),
+    items: z.array(
+      z
+        .object({
+          glyph: canvasToneSchema.optional(),
+          chip: canvasPillSchema.optional(),
+          text: z.string().min(1),
+          href: z.string().optional(),
+          trailing: z.string().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+const actionsSectionSchema = z
+  .object({
+    kind: z.literal("actions"),
+    title: z.string().optional(),
+    items: z.array(canvasActionItemSchema),
+  })
+  .strict();
+
+const leafBoardSectionSchema = z.discriminatedUnion("kind", [
+  statsSectionSchema,
+  segmentsSectionSchema,
+  barsSectionSchema,
+  tableSectionSchema,
+  cardsSectionSchema,
+  rowsSectionSchema,
+  actionsSectionSchema,
+]);
+
+// `columns` lays leaf sections side by side (a two-column Lifecycle | Actions
+// body, etc.). Recursion is one level deep on purpose — a column nests leaf
+// sections only, never another `columns` — to keep the schema and renderer
+// simple. `weight` is a relative grid-track size (default 1).
+const columnsBoardSectionSchema = z
+  .object({
+    kind: z.literal("columns"),
+    title: z.string().optional(),
+    columns: z
+      .array(
+        z
+          .object({
+            weight: z.number().positive().optional(),
+            sections: z.array(leafBoardSectionSchema),
+          })
+          .strict(),
+      )
+      .min(1),
   })
   .strict();
 
 const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("stats"),
-      title: z.string().optional(),
-      items: z.array(
-        z
-          .object({
-            label: z.string().min(1),
-            value: canvasCellScalarSchema,
-            sub: z.string().optional(),
-            tone: canvasToneSchema.optional(),
-          })
-          .strict(),
-      ),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("segments"),
-      title: z.string().optional(),
-      items: z.array(canvasSegmentSchema),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("bars"),
-      title: z.string().optional(),
-      items: z.array(
-        z
-          .object({
-            label: z.string().min(1),
-            value: z.number(),
-            total: z.number(),
-            tone: canvasToneSchema.optional(),
-            trailing: z.string().optional(),
-          })
-          .strict(),
-      ),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("table"),
-      title: z.string().optional(),
-      columns: z.array(z.object({ key: z.string().min(1), label: z.string().optional() })).min(1),
-      rows: z.array(z.record(z.string(), canvasCellSchema)),
-      caption: z.string().optional(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("cards"),
-      title: z.string().optional(),
-      items: z.array(
-        z
-          .object({
-            title: z.string().min(1),
-            pill: canvasPillSchema.optional(),
-            href: z.string().optional(),
-            bar: z.object({ value: z.number(), total: z.number() }).strict().optional(),
-            fields: z.array(canvasFieldSchema).optional(),
-            footnote: z.string().optional(),
-          })
-          .strict(),
-      ),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("rows"),
-      title: z.string().optional(),
-      items: z.array(
-        z
-          .object({
-            glyph: canvasToneSchema.optional(),
-            chip: canvasPillSchema.optional(),
-            text: z.string().min(1),
-            href: z.string().optional(),
-            trailing: z.string().optional(),
-          })
-          .strict(),
-      ),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("actions"),
-      title: z.string().optional(),
-      items: z.array(canvasActionItemSchema),
-    })
-    .strict(),
+  statsSectionSchema,
+  segmentsSectionSchema,
+  barsSectionSchema,
+  tableSectionSchema,
+  cardsSectionSchema,
+  rowsSectionSchema,
+  actionsSectionSchema,
+  columnsBoardSectionSchema,
 ]);
 
 export const canvasBoardViewSchema = z
@@ -227,7 +291,11 @@ export const canvasBoardViewSchema = z
     view: z.literal("board"),
     title: z.string().optional(),
     header: z
-      .object({ chip: z.string().optional(), segments: z.array(canvasSegmentSchema).optional() })
+      .object({
+        status: canvasPillSchema.optional(),
+        chip: z.string().optional(),
+        segments: z.array(canvasSegmentSchema).optional(),
+      })
       .strict()
       .optional(),
     sections: z.array(canvasBoardSectionSchema),
@@ -265,6 +333,15 @@ export const canvasViewSchema = z
     view.sections.forEach((section, i) => {
       if (section.kind === "table") {
         assertUniqueColumnKeys(section.columns, ctx, ["sections", i, "columns"]);
+      } else if (section.kind === "columns") {
+        section.columns.forEach((col, c) => {
+          col.sections.forEach((leaf, s) => {
+            if (leaf.kind === "table") {
+              const path = ["sections", i, "columns", c, "sections", s, "columns"];
+              assertUniqueColumnKeys(leaf.columns, ctx, path);
+            }
+          });
+        });
       }
     });
   });
