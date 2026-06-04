@@ -42,6 +42,32 @@ describe("board actions", () => {
     await waitFor(() => expect(calls).toEqual([{ type: "reconcile" }]));
   });
 
+  test("dispatches an action's payload when present", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [{ type: "reconcile", label: "Reconcile", payload: { context: "ctx-a" } }],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile" }));
+    await waitFor(() =>
+      expect(calls).toEqual([{ type: "reconcile", payload: { context: "ctx-a" } }]),
+    );
+  });
+
   test("renders a leading glyph before the action label", () => {
     render(
       <BoardActionProvider run={okRun} reveal={okReveal}>

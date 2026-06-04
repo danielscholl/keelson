@@ -293,11 +293,16 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
-  it("parses an action item with a glyph", () => {
+  it("parses an action item with a glyph and an opaque payload", () => {
     const v = canvasViewSchema.parse({
       view: "board",
       sections: [
-        { kind: "actions", items: [{ type: "reconcile", label: "Reconcile", glyph: "↻" }] },
+        {
+          kind: "actions",
+          items: [
+            { type: "reconcile", label: "Reconcile", glyph: "↻", payload: { context: "ctx-a" } },
+          ],
+        },
       ],
     });
     expect(v.view).toBe("board");

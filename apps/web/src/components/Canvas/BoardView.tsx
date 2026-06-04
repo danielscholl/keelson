@@ -63,7 +63,9 @@ function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "a
             if (a.destructive && !window.confirm(`${a.label}?`)) return;
             setPending(a.type);
             try {
-              await ctx.run({ type: a.type });
+              await ctx.run(
+                a.payload !== undefined ? { type: a.type, payload: a.payload } : { type: a.type },
+              );
             } finally {
               setPending(null);
             }
