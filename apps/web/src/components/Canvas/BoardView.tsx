@@ -97,14 +97,18 @@ function CopyActionButton({ action, label }: { action: RibAction; label?: string
   }, [state]);
   const onClick = async () => {
     if (!ctx || state === "busy") return;
+    // Confirm the clipboard can receive the value before revealing anything — no
+    // point fetching (and auditing) a secret we can't deliver.
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) {
+      setState("fail");
+      return;
+    }
     setState("busy");
     try {
       const result = await ctx.reveal(action);
-      // A missing Clipboard API must read as failure: an optional-chain write
-      // would resolve to undefined, leaving the secret fetched but uncopied
-      // while the button still flashed success.
-      if (result.ok && result.data != null && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(String(result.data));
+      if (result.ok && result.data != null) {
+        await clipboard.writeText(String(result.data));
         setState("ok");
       } else {
         setState("fail");
