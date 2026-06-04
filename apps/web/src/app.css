@@ -3483,8 +3483,8 @@ a.cvb-card-title::after {
   color: var(--red);
 }
 .cvb-rows--boxed .cvb-row-text {
-  flex: 0 0 auto;
-  min-width: 96px;
+  flex: 0 0 96px;
+  overflow-wrap: anywhere;
 }
 .cvb-rows--boxed .cvb-row-trailing {
   flex: 1 1 auto;
