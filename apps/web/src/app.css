@@ -3014,6 +3014,37 @@ button.tab:focus-visible {
   font-weight: 600;
   color: var(--fg-strong);
 }
+/* Header status pill — a toned "✓ Healthy"-style chip (glyph baked into the
+   label by the producer). Heavier than the small uppercase .cvb-pill. */
+.cvb-header-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+}
+.cvb-header-status[data-tone="ok"] {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+.cvb-header-status[data-tone="warn"] {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
+  background: color-mix(in srgb, var(--yellow) 8%, transparent);
+}
+.cvb-header-status[data-tone="error"] {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+}
 .cvb-section {
   display: flex;
   flex-direction: column;
@@ -3029,6 +3060,26 @@ button.tab:focus-visible {
 .cvb-section .canvas-view-table {
   max-width: none;
   margin: 0;
+}
+
+/* columns — leaf sections laid out side by side (track sizes from each column's
+   weight). Collapses to a single column on narrow viewports. */
+.cvb-columns {
+  display: grid;
+  grid-template-columns: var(--cvb-cols, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.cvb-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .cvb-columns {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Surface — a rib's top-level page laying out region-bound boards. */
@@ -3113,22 +3164,32 @@ button.tab:focus-visible {
   color: var(--red);
 }
 
-/* actions — board-level buttons dispatched to the owning rib */
+/* actions — board-level buttons dispatched to the owning rib. Full-width
+   stacked column with a leading glyph slot so a narrow Actions column reads as
+   a deliberate list of affordances. */
 .cvb-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 .cvb-action-button {
   background: var(--bg-soft); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 6px;
-  padding: 5px 12px; font-size: 12px; font-family: inherit; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 12px; font-size: 12px; font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; justify-content: flex-start;
 }
 .cvb-action-button:hover:not(:disabled) { background: var(--card-2); }
 .cvb-action-button:disabled { opacity: 0.6; cursor: default; }
 .cvb-action-button.is-destructive {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.cvb-action-glyph {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  flex: none;
 }
 
 /* stats — KPI tiles */
@@ -3233,11 +3294,42 @@ button.tab:focus-visible {
   justify-content: space-between;
   gap: 8px;
 }
+.cvb-card-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--muted);
+}
+.cvb-card-dot[data-tone="ok"] {
+  background: var(--green);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--green) 55%, transparent);
+}
+/* Neutral reads as "internal / reachable, not externally exposed" — the brand
+   cyan, distinct from the muted default. */
+.cvb-card-dot[data-tone="neutral"] {
+  background: var(--cyan);
+}
+.cvb-card-dot[data-tone="warn"] {
+  background: var(--yellow);
+}
+.cvb-card-dot[data-tone="error"] {
+  background: var(--red);
+}
 .cvb-card-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-strong);
   overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* A linked card title carries an open-in-new-tab affordance without changing
+   the DOM text (so the title stays the accessible link name). */
+a.cvb-card-title::after {
+  content: " ↗";
+  color: var(--cyan);
+  font-weight: 400;
 }
 .cvb-card-bar {
   margin: 2px 0;
@@ -3363,9 +3455,23 @@ button.tab:focus-visible {
   color: var(--muted);
   cursor: pointer;
 }
-.cvb-copy:hover {
+.cvb-copy:hover:not(:disabled) {
   color: var(--fg);
   border-color: var(--accent);
+}
+.cvb-copy:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cvb-copy.flash-ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+.cvb-copy.flash-fail {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
 }
 
 /* Not a bar — a scrim. The footer is absolutely positioned over the bottom of
