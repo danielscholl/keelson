@@ -398,6 +398,19 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("board");
   });
 
+  it("parses boxed rows and boxed cards sections", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        { kind: "rows", boxed: true, items: [{ text: "Context", glyph: "ok", trailing: "kind" }] },
+        { kind: "cards", boxed: true, items: [{ title: "Airflow", dot: "ok" }] },
+      ],
+    });
+    const [rows, cards] = v.view === "board" ? v.sections : [];
+    expect(rows?.kind === "rows" && rows.boxed).toBe(true);
+    expect(cards?.kind === "cards" && cards.boxed).toBe(true);
+  });
+
   it("rejects an unknown key on a copyAction (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({
