@@ -102,7 +102,11 @@ describe("board actions", () => {
 describe("copy-on-reveal field", () => {
   const realClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   afterEach(() => {
-    if (realClipboard) Object.defineProperty(navigator, "clipboard", realClipboard);
+    if (realClipboard) {
+      Object.defineProperty(navigator, "clipboard", realClipboard);
+    } else {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   function credentialBoard(): CanvasBoardView {
