@@ -44,6 +44,14 @@ export const ribIdSchema = z
 
 export const ribDisplayNameSchema = z.string().min(1).max(80);
 
+// Extract the owning rib id from a rib-namespaced key (`rib:<id>` or
+// `rib:<id>:*`), or null when the key isn't in any rib's namespace. Mirrors the
+// server-side `assertInNamespace` rule so the SPA can route a board's actions to
+// the rib that published it.
+export function ribIdFromKey(key: string): string | null {
+  return /^rib:([a-z][a-z0-9-]*)(?::|$)/.exec(key)?.[1] ?? null;
+}
+
 // Result discriminant shared by both exec helpers.
 export type RibExecResult<T> =
   | { ok: true; data: T; exitCode?: number | null }

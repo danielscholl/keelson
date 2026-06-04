@@ -211,6 +211,14 @@ describe("canvasViewSchema", () => {
             },
           ],
         },
+        {
+          kind: "actions",
+          title: "Actions",
+          items: [
+            { type: "reconcile", label: "Reconcile" },
+            { type: "delete", label: "Delete", tone: "error", destructive: true },
+          ],
+        },
       ],
     });
     expect(v.view).toBe("board");
@@ -244,6 +252,43 @@ describe("canvasViewSchema", () => {
         sections: [
           { kind: "cards", items: [{ title: "x", fields: [{ value: "v", bogus: true }] }] },
         ],
+      }),
+    ).toThrow();
+  });
+
+  it("parses an actions section with and without tone/destructive", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            { type: "reconcile", label: "Reconcile" },
+            { type: "suspend", label: "Suspend", tone: "warn", destructive: true },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("rejects an action item missing type or label, and an unknown key (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ label: "Reconcile" }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "reconcile" }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "x", label: "X", bogus: true }] }],
       }),
     ).toThrow();
   });

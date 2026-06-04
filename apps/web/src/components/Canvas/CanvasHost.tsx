@@ -1,9 +1,12 @@
 import type { CanvasDocument, CanvasSource } from "@keelson/shared";
+import { ribIdFromKey } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { getRunArtifact } from "../../api.ts";
+import { useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
+import { BoardActionProvider } from "./BoardActionContext.tsx";
 import { ViewBody } from "./ViewBody.tsx";
 
 // Optional host-side extras passed when opening. `footer` is a live ReactNode
@@ -107,7 +110,7 @@ function CanvasBody({ doc }: { doc: CanvasDocument }) {
       return <MarkdownBody source={doc.source} />;
     case "view":
       // Key by source so switching sources remounts with fresh state.
-      return <ViewBody key={sourceKey(doc.source)} source={doc.source} />;
+      return <ViewCanvas key={sourceKey(doc.source)} source={doc.source} />;
     case "html":
       return (
         <p className="canvas-drawer-note">
@@ -119,6 +122,20 @@ function CanvasBody({ doc }: { doc: CanvasDocument }) {
       return exhaustive;
     }
   }
+}
+
+// A drawer-rendered board can carry an `actions` section; dispatch it to the
+// owning rib (id from the snapshot key). Unlike a surface region there's no
+// post-success reload here — the drawer's open WS pushes the recomposed frame.
+function ViewCanvas({ source }: { source: CanvasSource }) {
+  const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
+  const dispatch = useRibActionDispatch(ribId);
+  if (!ribId) return <ViewBody source={source} />;
+  return (
+    <BoardActionProvider dispatch={dispatch}>
+      <ViewBody source={source} />
+    </BoardActionProvider>
+  );
 }
 
 function sourceKey(source: CanvasSource): string {

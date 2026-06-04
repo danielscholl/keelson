@@ -5,9 +5,26 @@ import {
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
+  ribIdFromKey,
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
 } from "../src/rib.ts";
+
+describe("ribIdFromKey", () => {
+  it("extracts the rib id from a namespaced key", () => {
+    expect(ribIdFromKey("rib:demo")).toBe("demo");
+    expect(ribIdFromKey("rib:demo:quality")).toBe("demo");
+    expect(ribIdFromKey("rib:demo:a:b")).toBe("demo");
+    expect(ribIdFromKey("rib:my-rib:x")).toBe("my-rib");
+  });
+
+  it("returns null for a key outside any rib namespace", () => {
+    expect(ribIdFromKey("notarib:x")).toBeNull();
+    expect(ribIdFromKey("rib:")).toBeNull();
+    expect(ribIdFromKey("rib:Bad-CAPS")).toBeNull();
+    expect(ribIdFromKey("")).toBeNull();
+  });
+});
 
 describe("rib v2 wire schemas", () => {
   it("round-trips a view descriptor", () => {

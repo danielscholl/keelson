@@ -116,6 +116,18 @@ const canvasFieldSchema = z
   })
   .strict();
 
+// An action button a board offers; clicking dispatches `type` to the owning
+// rib's onAction, resolved from the board's snapshot-key namespace. `type` is a
+// rib-defined verb the base never enumerates (mirrors ribActionSchema).
+const canvasActionItemSchema = z
+  .object({
+    type: z.string().min(1),
+    label: z.string().min(1),
+    tone: canvasToneSchema.optional(),
+    destructive: z.boolean().optional(),
+  })
+  .strict();
+
 const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   z
     .object({
@@ -201,6 +213,13 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
       ),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("actions"),
+      title: z.string().optional(),
+      items: z.array(canvasActionItemSchema),
+    })
+    .strict(),
 ]);
 
 export const canvasBoardViewSchema = z
@@ -253,6 +272,7 @@ export type CanvasView = z.infer<typeof canvasViewSchema>;
 export type CanvasTableView = z.infer<typeof canvasTableViewSchema>;
 export type CanvasGraphView = z.infer<typeof canvasGraphViewSchema>;
 export type CanvasBoardView = z.infer<typeof canvasBoardViewSchema>;
+export type CanvasActionItem = z.infer<typeof canvasActionItemSchema>;
 
 // Wire shape for the sandboxed run-artifact endpoint. `path` echoes the
 // requested relative path; `content` is the file's UTF-8 text.

@@ -3113,6 +3113,24 @@ button.tab:focus-visible {
   color: var(--red);
 }
 
+/* actions — board-level buttons dispatched to the owning rib */
+.cvb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cvb-action-button {
+  background: var(--bg-soft); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 12px; font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.cvb-action-button:hover:not(:disabled) { background: var(--card-2); }
+.cvb-action-button:disabled { opacity: 0.6; cursor: default; }
+.cvb-action-button.is-destructive {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
 /* stats — KPI tiles */
 .cvb-stats {
   display: grid;

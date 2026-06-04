@@ -2,11 +2,18 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { type CanvasBoardView, canvasViewSchema, type RibSurfaceDescriptor } from "@keelson/shared";
-import { useState } from "react";
+import {
+  type CanvasBoardView,
+  canvasViewSchema,
+  type RibSurfaceDescriptor,
+  ribIdFromKey,
+} from "@keelson/shared";
+import { useCallback, useState } from "react";
+import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
 import { BoardHeader } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 
 interface Region {
@@ -44,6 +51,14 @@ function SurfaceRegion({ region }: { region: Region }) {
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
   const snap = useSnapshot(region.key);
   const { openCanvas } = useCanvas();
+  const ribId = ribIdFromKey(region.key);
+
+  // Board actions dispatch to the region's owning rib; on success re-hydrate so
+  // the board reflects the new state (the producing workflow recompose is
+  // server-side). null ribId → no provider → buttons render disabled.
+  const reload = snap.reload;
+  const onSuccess = useCallback(() => reload(), [reload]);
+  const dispatch = useRibActionDispatch(ribId, { onSuccess });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
@@ -94,6 +109,10 @@ function SurfaceRegion({ region }: { region: Region }) {
         ) : (
           <p className="canvas-drawer-note">Collapsed.</p>
         )
+      ) : ribId ? (
+        <BoardActionProvider dispatch={dispatch}>
+          <SnapshotStateView snapshot={snap} />
+        </BoardActionProvider>
       ) : (
         <SnapshotStateView snapshot={snap} />
       )}
