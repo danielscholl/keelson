@@ -408,6 +408,25 @@ describe("canvasViewSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects a field that sets both copyable and copyAction", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "cards",
+            items: [
+              {
+                title: "x",
+                fields: [{ value: "v", copyable: true, copyAction: { type: "reveal" } }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 });
 
 describe("getRunArtifactResponseSchema", () => {

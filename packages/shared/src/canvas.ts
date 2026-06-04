@@ -123,7 +123,13 @@ const canvasFieldSchema = z
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  // The two copy modes are mutually exclusive: a field with both would render
+  // two same-label copy buttons (one copying the visible value, one revealing
+  // via the rib), so a producer could silently copy the wrong value.
+  .refine((f) => !(f.copyable && f.copyAction), {
+    message: "a field sets at most one of copyable / copyAction",
+  });
 
 // An action button a board offers; clicking dispatches `type` to the owning
 // rib's onAction, resolved from the board's snapshot-key namespace. `type` is a
