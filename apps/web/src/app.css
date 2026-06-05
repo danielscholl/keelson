@@ -3111,6 +3111,7 @@ button.tab:focus-visible {
 .surface-region-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 12px 16px 10px;
   border-bottom: 1px solid var(--border-soft);
@@ -3590,6 +3591,15 @@ a.cvb-card-title::after {
 .cvb-glyph[data-tone="error"] {
   background: var(--red);
 }
+.cvb-glyph[data-tone="info"] {
+  background: var(--cyan);
+}
+.cvb-glyph[data-tone="caution"] {
+  background: var(--orange);
+}
+.cvb-glyph[data-tone="brand"] {
+  background: var(--magenta);
+}
 .cvb-row-text {
   color: var(--fg);
   flex: 1;
@@ -3638,6 +3648,18 @@ a.cvb-card-title::after {
 .cvb-rows--boxed .cvb-glyph[data-tone="error"]::before {
   content: "✕";
   color: var(--red);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="info"]::before {
+  content: "•";
+  color: var(--cyan);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="caution"]::before {
+  content: "•";
+  color: var(--orange);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="brand"]::before {
+  content: "•";
+  color: var(--magenta);
 }
 .cvb-rows--boxed .cvb-row-text {
   flex: 0 0 96px;
@@ -3725,15 +3747,6 @@ a.cvb-card-title::after {
   background: var(--orange);
 }
 .cvb-card-dot[data-tone="brand"] {
-  background: var(--magenta);
-}
-.cvb-glyph[data-tone="info"] {
-  background: var(--cyan);
-}
-.cvb-glyph[data-tone="caution"] {
-  background: var(--orange);
-}
-.cvb-glyph[data-tone="brand"] {
   background: var(--magenta);
 }
 .cvb-pill[data-tone="info"] {
