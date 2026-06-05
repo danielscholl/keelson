@@ -1160,7 +1160,9 @@ export function workflowsRoutes(
           workingDir: defaultCwd,
           projectId: null,
           resolvedProject: null,
-          isolationOn: false,
+          // Honor the producer's declared worktree policy, same as /runs — a
+          // collector that opts into isolation must not write the live checkout.
+          isolationOn: workflow.worktree?.enabled === true,
           branchTemplate: workflow.worktree?.branch,
         },
       );

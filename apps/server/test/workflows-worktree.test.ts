@@ -159,6 +159,54 @@ nodes:
     expect(cleared.worktreePath).toBeNull();
   });
 
+  test("refresh honors a bound producer's worktree.enabled policy", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "isoprod.yaml",
+      `name: isoprod
+description: a bound producer that opts into worktree isolation
+worktree:
+  enabled: true
+nodes:
+  - id: where
+    bash: pwd
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const producer = catalog.get("isoprod");
+    if (!producer) throw new Error("fixture workflow missing");
+    const bindings = new Map([[producer, { publish: () => {} }]]);
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore,
+      defaultCwd: repoDir,
+      ribWorkflowBindings: bindings,
+    });
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/isoprod/refresh", {
+        method: "POST",
+        headers: { origin: ORIGIN },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ outputText: string | null }>;
+    };
+    expect(run.status).toBe("succeeded");
+    // The refresh ran in an isolated worktree, not the live checkout — without
+    // honoring the policy this pwd would be `repoDir`.
+    const echoed = run.nodes[0]!.outputText?.trim();
+    expect(echoed).not.toBe(repoDir);
+    expect(echoed!.includes(`${sep}.worktrees${sep}`)).toBe(true);
+  });
+
   test("isolation:none override defeats YAML default and runs in place", async () => {
     await initRepo(repoDir);
     writeWorkflow(

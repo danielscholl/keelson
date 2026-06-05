@@ -40,15 +40,25 @@ export function useWorkflowTrigger(workflowName: string | undefined): WorkflowTr
     void (async () => {
       try {
         const { runId } = await refreshWorkflow(workflowName);
+        let settled = false;
         for (let i = 0; i < MAX_POLLS; i++) {
           await new Promise((r) => setTimeout(r, POLL_MS));
           if (cancelledRef.current) return;
           const run = await getWorkflowRun(runId);
-          if (run.status === "succeeded") break;
-          if (run.status === "failed" || run.status === "cancelled") {
-            if (!cancelledRef.current) setError(run.error ?? `workflow ${run.status}`);
+          if (run.status === "succeeded") {
+            settled = true;
             break;
           }
+          if (run.status === "failed" || run.status === "cancelled") {
+            if (!cancelledRef.current) setError(run.error ?? `workflow ${run.status}`);
+            settled = true;
+            break;
+          }
+        }
+        // Exhausted the poll budget while still running/paused — the server run
+        // may still be live, so signal a timeout rather than looking idle.
+        if (!settled && !cancelledRef.current) {
+          setError("refresh timed out — the run may still be going; check Workflows");
         }
       } catch (e) {
         if (!cancelledRef.current) setError(e instanceof Error ? e.message : String(e));
