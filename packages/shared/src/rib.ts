@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
-import { canvasKindSchema } from "./canvas.ts";
+import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
 
 /**
  * Rib — Keelson's extension contract.
@@ -111,14 +111,26 @@ export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
 // `key` must live under the rib's namespace, like view keys. Only the header
 // and footer collapse — banner and row columns always render full. `workflow`,
 // when set, is the catalog workflow a region's refresh re-runs to repopulate its
-// key (vs. a plain re-read of the cached frame).
+// key (vs. a plain re-read of the cached frame). `title`/`glyph` give the region
+// a static identity (a lane name + a toned glyph chip) shown in its head even
+// before data arrives — distinct from the board's own dynamic title.
+const regionGlyphSchema = z
+  .object({ char: z.string().min(1), tone: canvasToneSchema.optional() })
+  .strict();
 const surfaceRegionSchema = z
-  .object({ key: z.string().min(1), workflow: z.string().min(1).optional() })
+  .object({
+    key: z.string().min(1),
+    workflow: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    glyph: regionGlyphSchema.optional(),
+  })
   .strict();
 const collapsibleRegionSchema = z
   .object({
     key: z.string().min(1),
     workflow: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    glyph: regionGlyphSchema.optional(),
     collapsible: z.boolean().optional(),
     collapsed: z.boolean().optional(),
   })

@@ -79,8 +79,18 @@ describe("Surface", () => {
     const { container } = renderSurface({
       id: "cimpl",
       title: "CIMPL",
-      layout: { rows: [{ columns: [{ key: "rib:demo:quality" }, { key: "rib:demo:security" }] }] },
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:demo:quality", title: "Quality" },
+              { key: "rib:demo:security", title: "Security" },
+            ],
+          },
+        ],
+      },
     });
+    // The lane head shows the region's static title; the body renders its board.
     expect(screen.getByText("Quality")).toBeDefined();
     expect(screen.getByText("Security")).toBeDefined();
     expect(screen.getByText("Services")).toBeDefined();
@@ -112,9 +122,12 @@ describe("Surface", () => {
     renderSurface({
       id: "cimpl",
       title: "CIMPL",
-      layout: { header: { key: "rib:demo:cluster", collapsible: true, collapsed: true }, rows: [] },
+      layout: {
+        header: { key: "rib:demo:cluster", title: "Cluster", collapsible: true, collapsed: true },
+        rows: [],
+      },
     });
-    // The header strip (title + chip + segments) renders; the stats body does not.
+    // The lane head (title + chip + segments) renders; the stats body does not.
     expect(screen.getByText("Cluster")).toBeDefined();
     expect(screen.queryByText("Pods")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand region" }));

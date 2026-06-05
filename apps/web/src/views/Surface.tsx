@@ -4,13 +4,14 @@
 
 import {
   type CanvasBoardView,
+  type CanvasTone,
   canvasViewSchema,
   type RibSurfaceDescriptor,
   ribIdFromKey,
 } from "@keelson/shared";
 import { useCallback, useState } from "react";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
-import { BoardHeader } from "../components/Canvas/BoardView.tsx";
+import { BoardBody, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
@@ -20,6 +21,8 @@ import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 interface Region {
   key: string;
   workflow?: string;
+  title?: string;
+  glyph?: { char: string; tone?: CanvasTone };
   collapsible?: boolean;
   collapsed?: boolean;
 }
@@ -80,61 +83,91 @@ function SurfaceRegion({ region }: { region: Region }) {
       ...(board?.title ? { title: board.title } : {}),
     });
 
+  // The gradient lane head: static identity (glyph + title) the rib supplies,
+  // plus the board's live status/scope/pulse, and the region's own controls.
+  const head = (
+    <div className="surface-region-head">
+      {collapsible && (
+        <button
+          type="button"
+          className="surface-region-toggle"
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expand region" : "Collapse region"}
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
+      )}
+      {region.glyph && (
+        <span
+          className="surface-region-glyph-chip"
+          data-tone={region.glyph.tone}
+          aria-hidden="true"
+        >
+          {region.glyph.char}
+        </span>
+      )}
+      {region.title && <span className="surface-region-title">{region.title}</span>}
+      {board?.header?.status && (
+        <span className="cvb-header-status" data-tone={board.header.status.tone}>
+          {board.header.status.label}
+        </span>
+      )}
+      {board?.header?.chip && (
+        <span className="cvb-chip surface-region-scope">{board.header.chip}</span>
+      )}
+      {board?.header?.segments && board.header.segments.length > 0 && (
+        <Segments items={board.header.segments} />
+      )}
+      <span className="surface-region-spacer" />
+      {runRefresh.error && (
+        <span className="surface-region-error" title={runRefresh.error}>
+          Refresh failed
+        </span>
+      )}
+      <button
+        type="button"
+        className="surface-region-action surface-region-icon"
+        onClick={onRefresh}
+        disabled={busy}
+        aria-label="Refresh"
+        title={region.workflow ? "Refresh (re-run workflow)" : "Refresh this region"}
+      >
+        <span className={`surface-region-glyph${busy ? " is-spinning" : ""}`} aria-hidden="true">
+          ↻
+        </span>
+      </button>
+      <button
+        type="button"
+        className="surface-region-action surface-region-icon"
+        onClick={expand}
+        aria-label="Expand"
+        title="Open full view"
+      >
+        <span aria-hidden="true">⤢</span>
+      </button>
+    </div>
+  );
+
+  const body = board ? (
+    <BoardBody view={board} />
+  ) : (
+    <SnapshotStateView snapshot={snap} busy={busy} />
+  );
+
   return (
     <section className="surface-region" data-collapsed={collapsed || undefined}>
-      <div className="surface-region-bar">
-        {collapsible && (
-          <button
-            type="button"
-            className="surface-region-toggle"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? "Expand region" : "Collapse region"}
-            onClick={() => setCollapsed((c) => !c)}
-          >
-            {collapsed ? "▸" : "▾"}
-          </button>
-        )}
-        <span className="surface-region-spacer" />
-        {runRefresh.error && (
-          <span className="surface-region-error" title={runRefresh.error}>
-            Refresh failed
-          </span>
-        )}
-        <button
-          type="button"
-          className="surface-region-action surface-region-icon"
-          onClick={onRefresh}
-          disabled={busy}
-          aria-label="Refresh"
-          title={region.workflow ? "Refresh (re-run workflow)" : "Refresh this region"}
-        >
-          <span className={`surface-region-glyph${busy ? " is-spinning" : ""}`} aria-hidden="true">
-            ↻
-          </span>
-        </button>
-        <button
-          type="button"
-          className="surface-region-action surface-region-icon"
-          onClick={expand}
-          aria-label="Expand"
-          title="Open full view"
-        >
-          <span aria-hidden="true">⤢</span>
-        </button>
-      </div>
-      {collapsed ? (
-        board ? (
-          <BoardHeader view={board} />
+      {head}
+      {!collapsed &&
+        (ribId ? (
+          <div className="surface-region-body">
+            <BoardActionProvider run={actions.run} reveal={actions.reveal}>
+              {body}
+            </BoardActionProvider>
+          </div>
         ) : (
-          <p className="canvas-drawer-note">Collapsed.</p>
-        )
-      ) : ribId ? (
-        <BoardActionProvider run={actions.run} reveal={actions.reveal}>
-          <SnapshotStateView snapshot={snap} busy={busy} />
-        </BoardActionProvider>
-      ) : (
-        <SnapshotStateView snapshot={snap} busy={busy} />
-      )}
+          <div className="surface-region-body">{body}</div>
+        ))}
     </section>
   );
 }
