@@ -3370,6 +3370,37 @@ a.cvb-card-title::after {
   font-style: italic;
 }
 
+/* boxed cards — each field is an inset pill (value + copy icon), stacked, so a
+   service card reads as a list of copyable credentials / addresses. */
+.cvb-cards--boxed .cvb-card-fields {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 6px;
+}
+.cvb-cards--boxed .cvb-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+}
+.cvb-cards--boxed .cvb-field-label {
+  flex: none;
+}
+.cvb-cards--boxed .cvb-field-value,
+.cvb-cards--boxed .cvb-field .cvb-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cvb-cards--boxed .cvb-field .cvb-copy {
+  margin-left: auto;
+  flex: none;
+}
+
 /* rows — lifecycle / feed */
 .cvb-rows {
   display: flex;
@@ -3413,6 +3444,54 @@ a.cvb-card-title::after {
   flex: none;
 }
 
+/* boxed rows — a status list: each row is an inset card, the tone glyph reads
+   as a check/mark, and the value is left-aligned after a fixed label column. */
+.cvb-rows--boxed {
+  gap: 6px;
+}
+.cvb-rows--boxed .cvb-row,
+.cvb-rows--boxed .cvb-row:last-child {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.cvb-rows--boxed .cvb-glyph {
+  width: 14px;
+  height: auto;
+  border-radius: 0;
+  background: none;
+  display: inline-flex;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+}
+.cvb-rows--boxed .cvb-glyph::before {
+  content: "•";
+  color: var(--muted);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="ok"]::before {
+  content: "✓";
+  color: var(--green);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="warn"]::before {
+  content: "!";
+  color: var(--yellow);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="error"]::before {
+  content: "✕";
+  color: var(--red);
+}
+.cvb-rows--boxed .cvb-row-text {
+  flex: 0 0 96px;
+  overflow-wrap: anywhere;
+}
+.cvb-rows--boxed .cvb-row-trailing {
+  flex: 1 1 auto;
+  text-align: left;
+  color: var(--fg);
+}
+
 /* chips / pills / links / copy */
 .cvb-chip,
 .cvb-pill {
@@ -3447,8 +3526,9 @@ a.cvb-card-title::after {
   text-decoration: underline;
 }
 .cvb-copy {
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 6px;
   border-radius: 4px;
   border: 1px solid var(--border);
   background: var(--card);

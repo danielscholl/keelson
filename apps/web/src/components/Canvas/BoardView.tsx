@@ -117,7 +117,7 @@ function CopyActionButton({ action, label }: { action: RibAction; label?: string
       setState("fail");
     }
   };
-  const glyph = state === "busy" ? "…" : state === "ok" ? "✓" : state === "fail" ? "✕" : "copy";
+  const glyph = state === "busy" ? "…" : state === "ok" ? "✓" : state === "fail" ? "✕" : "⧉";
   const flash = state === "ok" || state === "fail" ? ` flash-${state}` : "";
   return (
     <button
@@ -190,7 +190,7 @@ function Section({ section }: { section: BoardSection }) {
     case "cards": {
       const key = makeKeyer();
       return (
-        <div className="cvb-cards">
+        <div className={`cvb-cards${section.boxed ? " cvb-cards--boxed" : ""}`}>
           {section.items.map((c) => {
             const fieldKey = makeKeyer();
             return (
@@ -246,17 +246,17 @@ function Section({ section }: { section: BoardSection }) {
                         {f.copyAction && (
                           <CopyActionButton
                             action={{ type: f.copyAction.type, payload: f.copyAction.payload }}
-                            label={f.label}
+                            label={f.label ?? (f.value !== null ? String(f.value) : undefined)}
                           />
                         )}
                         {f.copyable && f.value !== null && (
                           <button
                             type="button"
                             className="cvb-copy"
-                            aria-label={`Copy ${f.label ?? "value"}`}
+                            aria-label={`Copy ${f.label ?? String(f.value)}`}
                             onClick={() => copy(String(f.value))}
                           >
-                            copy
+                            ⧉
                           </button>
                         )}
                       </span>
@@ -273,7 +273,7 @@ function Section({ section }: { section: BoardSection }) {
     case "rows": {
       const key = makeKeyer();
       return (
-        <div className="cvb-rows">
+        <div className={`cvb-rows${section.boxed ? " cvb-rows--boxed" : ""}`}>
           {section.items.map((r) => (
             <div key={key(JSON.stringify(r))} className="cvb-row">
               {r.glyph && <span className="cvb-glyph" data-tone={r.glyph} />}

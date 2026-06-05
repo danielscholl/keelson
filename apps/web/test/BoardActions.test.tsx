@@ -244,6 +244,25 @@ describe("board layout primitives", () => {
     expect(container.querySelector('.cvb-card-dot[data-tone="ok"]')).not.toBeNull();
   });
 
+  test("boxed rows and boxed cards render their modifier classes", () => {
+    const view = {
+      view: "board",
+      sections: [
+        { kind: "rows", boxed: true, items: [{ text: "Context", glyph: "ok", trailing: "kind" }] },
+        {
+          kind: "cards",
+          boxed: true,
+          items: [{ title: "PostgreSQL", fields: [{ value: "postgres", copyable: true }] }],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    expect(container.querySelector(".cvb-rows.cvb-rows--boxed")).not.toBeNull();
+    expect(container.querySelector(".cvb-cards.cvb-cards--boxed")).not.toBeNull();
+    // A boxed credential field copies via an icon button, addressed by its value.
+    expect(screen.getByRole("button", { name: "Copy postgres" })).toBeDefined();
+  });
+
   test("the header renders a toned status pill", () => {
     const view = {
       view: "board",

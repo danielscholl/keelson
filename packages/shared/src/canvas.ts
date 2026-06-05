@@ -204,6 +204,10 @@ const cardsSectionSchema = z
   .object({
     kind: z.literal("cards"),
     title: z.string().optional(),
+    // Render each card's fields as stacked inset pills (value + copy) rather
+    // than inline text — for credential/address lists where each field is its
+    // own copyable affordance.
+    boxed: z.boolean().optional(),
     items: z.array(
       z
         .object({
@@ -223,6 +227,10 @@ const rowsSectionSchema = z
   .object({
     kind: z.literal("rows"),
     title: z.string().optional(),
+    // Render each row as an inset card (a status list) instead of a borderless
+    // feed: the tone glyph reads as a check/mark and the trailing value is
+    // left-aligned after a fixed label column.
+    boxed: z.boolean().optional(),
     items: z.array(
       z
         .object({
