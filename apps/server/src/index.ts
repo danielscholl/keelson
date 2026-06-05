@@ -150,10 +150,10 @@ const workflowHandlerOptions: WorkflowsHandlerOptions = {
   projectNotebookStore,
   snapshotManager,
   ribWorkflowBindings: ribWorkflows.bindings,
-  // Fallback cwd for runs started with neither a project nor a workingDir —
-  // e.g. a surface panel's refresh re-running a rib collector (its node uses
-  // absolute paths, so the cwd is nominal but the route still requires one).
-  defaultCwd: REPO_ROOT,
+  // Working dir for surface-panel refreshes (POST /:name/refresh) re-running a
+  // rib collector — its node uses absolute paths, so the cwd is nominal. Kept
+  // off `defaultCwd` so the generic /runs path still rejects target-less starts.
+  refreshCwd: REPO_ROOT,
 };
 const workflowController = createWorkflowController(
   workflowHandlerOptions,

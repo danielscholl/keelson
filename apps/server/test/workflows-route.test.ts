@@ -608,7 +608,7 @@ nodes:
     expect(body.error).toContain("projectId or workingDir");
   });
 
-  test("POST .../refresh re-runs a bound producer in the server's default cwd", async () => {
+  test("POST .../refresh re-runs a bound producer in the configured refresh cwd", async () => {
     writeWorkflow(
       "prod.yaml",
       `name: prod
@@ -630,7 +630,7 @@ nodes:
       catalog,
       store,
       conversationStore,
-      defaultCwd: tmpDir,
+      refreshCwd: tmpDir,
       ribWorkflowBindings: bindings,
     });
     const res = await app.fetch(
@@ -664,7 +664,7 @@ nodes:
       catalog,
       store: createWorkflowStore(db),
       conversationStore: createConversationStore(db),
-      defaultCwd: tmpDir,
+      refreshCwd: tmpDir,
     });
     const res = await app.fetch(
       new Request("http://test/api/workflows/loose/refresh", {

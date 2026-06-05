@@ -106,6 +106,11 @@ export interface WorkflowsHandlerOptions {
   // it undefined so a UI start without a project picker rejects 400 rather
   // than silently targeting the server's install dir.
   defaultCwd?: string;
+  // Working dir for `POST /:name/refresh` — re-running a rib producer needs a
+  // cwd, but its node uses absolute paths so the value is nominal. Kept separate
+  // from `defaultCwd` so wiring it in production can't widen the `/runs` target
+  // resolution (a blank `workingDir` there must still 400, not fall through).
+  refreshCwd?: string;
   // Real prompt handler injected from the composition root. When omitted
   // (tests, env where no provider is registered), the placeholder fires and
   // prompt nodes fail with a "not registered" sentinel. Keeps the route
@@ -905,6 +910,7 @@ export function workflowsRoutes(
     conversationStore,
     projectsStore,
     defaultCwd,
+    refreshCwd,
     snapshotManager,
     ribWorkflowBindings,
   } = opts;
@@ -1138,8 +1144,8 @@ export function workflowsRoutes(
     if (!ribWorkflowBindings?.has(workflow)) {
       return c.json({ error: `workflow '${requested}' is not a refreshable producer` }, 409);
     }
-    if (defaultCwd === undefined) {
-      return c.json({ error: "server has no default working directory" }, 400);
+    if (refreshCwd === undefined) {
+      return c.json({ error: "server has no refresh working directory" }, 400);
     }
     try {
       const { runId } = startRunCore(
@@ -1157,7 +1163,7 @@ export function workflowsRoutes(
         {
           workflow,
           inputs: {},
-          workingDir: defaultCwd,
+          workingDir: refreshCwd,
           projectId: null,
           resolvedProject: null,
           // Honor the producer's declared worktree policy, same as /runs — a

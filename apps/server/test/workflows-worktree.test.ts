@@ -184,7 +184,7 @@ nodes:
       catalog,
       store,
       conversationStore,
-      defaultCwd: repoDir,
+      refreshCwd: repoDir,
       ribWorkflowBindings: bindings,
     });
     const res = await app.fetch(
