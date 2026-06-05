@@ -3675,6 +3675,94 @@ a.cvb-card-title::after {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 32%, transparent);
 }
+
+/* Extended tones (info=cyan, caution=orange, brand=magenta) for every data-tone
+   consumer, so a producer can use the full ramp (e.g. A–E grade chips) anywhere
+   — not just the segment bullets / glyph chip that introduced them. */
+.canvas-view-table td[data-tone="info"] {
+  color: var(--cyan);
+}
+.canvas-view-table td[data-tone="caution"] {
+  color: var(--orange);
+}
+.canvas-view-table td[data-tone="brand"] {
+  color: var(--magenta);
+}
+.cvb-stat-value[data-tone="info"] {
+  color: var(--cyan);
+}
+.cvb-stat-value[data-tone="caution"] {
+  color: var(--orange);
+}
+.cvb-stat-value[data-tone="brand"] {
+  color: var(--magenta);
+}
+.cvb-field-value[data-tone="info"],
+.cvb-link[data-tone="info"] {
+  color: var(--cyan);
+}
+.cvb-field-value[data-tone="caution"],
+.cvb-link[data-tone="caution"] {
+  color: var(--orange);
+}
+.cvb-field-value[data-tone="brand"],
+.cvb-link[data-tone="brand"] {
+  color: var(--magenta);
+}
+.cvb-bar-fill[data-tone="info"] {
+  background: var(--cyan);
+}
+.cvb-bar-fill[data-tone="caution"] {
+  background: var(--orange);
+}
+.cvb-bar-fill[data-tone="brand"] {
+  background: var(--magenta);
+}
+.cvb-card-dot[data-tone="info"] {
+  background: var(--cyan);
+}
+.cvb-card-dot[data-tone="caution"] {
+  background: var(--orange);
+}
+.cvb-card-dot[data-tone="brand"] {
+  background: var(--magenta);
+}
+.cvb-glyph[data-tone="info"] {
+  background: var(--cyan);
+}
+.cvb-glyph[data-tone="caution"] {
+  background: var(--orange);
+}
+.cvb-glyph[data-tone="brand"] {
+  background: var(--magenta);
+}
+.cvb-pill[data-tone="info"] {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 32%, transparent);
+}
+.cvb-pill[data-tone="caution"] {
+  color: var(--orange);
+  border-color: color-mix(in srgb, var(--orange) 32%, transparent);
+}
+.cvb-pill[data-tone="brand"] {
+  color: var(--magenta);
+  border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
+}
+.cvb-header-status[data-tone="info"] {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 45%, transparent);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
+}
+.cvb-header-status[data-tone="caution"] {
+  color: var(--orange);
+  border-color: color-mix(in srgb, var(--orange) 45%, transparent);
+  background: color-mix(in srgb, var(--orange) 8%, transparent);
+}
+.cvb-header-status[data-tone="brand"] {
+  color: var(--magenta);
+  border-color: color-mix(in srgb, var(--magenta) 45%, transparent);
+  background: color-mix(in srgb, var(--magenta) 8%, transparent);
+}
 .cvb-link {
   color: var(--cyan);
   text-decoration: none;

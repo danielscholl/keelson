@@ -98,6 +98,18 @@ describe("Surface", () => {
     expect(container.querySelectorAll(".surface-row > .surface-region")).toHaveLength(2);
   });
 
+  test("a region without a static title falls back to the board's title in the head", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:quality" }] }] },
+    });
+    // No region.title, but the board's own title still labels the lane.
+    expect(screen.getByText("Quality")).toBeDefined();
+    expect(screen.getByText("Services")).toBeDefined();
+  });
+
   test("each region subscribes to its own key", () => {
     live("rib:demo:cluster", board("Cluster", "Pods", 8));
     live("rib:demo:quality", board("Quality", "Services", 23));

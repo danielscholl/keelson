@@ -107,7 +107,9 @@ function SurfaceRegion({ region }: { region: Region }) {
           {region.glyph.char}
         </span>
       )}
-      {region.title && <span className="surface-region-title">{region.title}</span>}
+      {(region.title ?? board?.title) && (
+        <span className="surface-region-title">{region.title ?? board?.title}</span>
+      )}
       {board?.header?.status && (
         <span className="cvb-header-status" data-tone={board.header.status.tone}>
           {board.header.status.label}
