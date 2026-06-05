@@ -150,6 +150,10 @@ const workflowHandlerOptions: WorkflowsHandlerOptions = {
   projectNotebookStore,
   snapshotManager,
   ribWorkflowBindings: ribWorkflows.bindings,
+  // Working dir for surface-panel refreshes (POST /:name/refresh) re-running a
+  // rib collector — its node uses absolute paths, so the cwd is nominal. Kept
+  // off `defaultCwd` so the generic /runs path still rejects target-less starts.
+  refreshCwd: REPO_ROOT,
 };
 const workflowController = createWorkflowController(
   workflowHandlerOptions,

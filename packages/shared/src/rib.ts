@@ -109,11 +109,16 @@ export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
 // A rib's primary surface: one top-level nav tab laying out region-bound boards
 // (G1 stays "one panel"; the surface owns columns/header/footer). Each region
 // `key` must live under the rib's namespace, like view keys. Only the header
-// and footer collapse — banner and row columns always render full.
-const surfaceRegionSchema = z.object({ key: z.string().min(1) }).strict();
+// and footer collapse — banner and row columns always render full. `workflow`,
+// when set, is the catalog workflow a region's refresh re-runs to repopulate its
+// key (vs. a plain re-read of the cached frame).
+const surfaceRegionSchema = z
+  .object({ key: z.string().min(1), workflow: z.string().min(1).optional() })
+  .strict();
 const collapsibleRegionSchema = z
   .object({
     key: z.string().min(1),
+    workflow: z.string().min(1).optional(),
     collapsible: z.boolean().optional(),
     collapsed: z.boolean().optional(),
   })

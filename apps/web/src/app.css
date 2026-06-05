@@ -3135,6 +3135,83 @@ button.tab:focus-visible {
 .surface-region-action:hover {
   background: var(--bg-hover, rgba(127, 127, 127, 0.1));
 }
+.surface-region-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.surface-region-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+.surface-region-glyph {
+  display: inline-block;
+}
+.surface-region-glyph.is-spinning {
+  animation: cv-spin 1s linear infinite;
+}
+.surface-region-error {
+  font-size: 11px;
+  color: var(--red, #f08793);
+}
+
+@keyframes cv-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Skeleton — shimmer placeholder while a panel has no data (initial load, a
+   never-run key, or a refresh run in flight). */
+.cv-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.cv-skeleton-stats {
+  display: flex;
+  gap: 10px;
+}
+.cv-skeleton-bar {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--card) 25%, var(--card-2) 50%, var(--card) 75%);
+  background-size: 200% 100%;
+  animation: cv-shimmer 1.4s ease-in-out infinite;
+}
+.cv-skeleton-tile {
+  flex: 1;
+  height: 36px;
+}
+.cv-skeleton-line {
+  height: 12px;
+}
+.cv-skeleton-line--short {
+  width: 60%;
+}
+@keyframes cv-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-skeleton-bar,
+  .surface-region-glyph.is-spinning {
+    animation: none;
+  }
+}
 
 /* segments — the "pulse" summary */
 .cvb-segments {

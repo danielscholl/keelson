@@ -15,9 +15,11 @@ import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
+import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 
 interface Region {
   key: string;
+  workflow?: string;
   collapsible?: boolean;
   collapsed?: boolean;
 }
@@ -60,6 +62,13 @@ function SurfaceRegion({ region }: { region: Region }) {
   const onSuccess = useCallback(() => reload(), [reload]);
   const actions = useRibActionDispatch(ribId, { onSuccess });
 
+  // Refresh re-runs the region's bound workflow (repopulating its key) when one
+  // is declared; otherwise it re-reads the cached frame. The run's new frame
+  // arrives over the live subscription, so there's no manual reload to chase.
+  const runRefresh = useWorkflowTrigger(region.workflow);
+  const busy = runRefresh.running;
+  const onRefresh = region.workflow ? runRefresh.trigger : snap.reload;
+
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
     parsed?.success && parsed.data.view === "board" ? parsed.data : null;
@@ -86,21 +95,31 @@ function SurfaceRegion({ region }: { region: Region }) {
           </button>
         )}
         <span className="surface-region-spacer" />
+        {runRefresh.error && (
+          <span className="surface-region-error" title={runRefresh.error}>
+            Refresh failed
+          </span>
+        )}
         <button
           type="button"
-          className="surface-region-action"
-          onClick={snap.reload}
-          title="Refresh this region"
+          className="surface-region-action surface-region-icon"
+          onClick={onRefresh}
+          disabled={busy}
+          aria-label="Refresh"
+          title={region.workflow ? "Refresh (re-run workflow)" : "Refresh this region"}
         >
-          Refresh
+          <span className={`surface-region-glyph${busy ? " is-spinning" : ""}`} aria-hidden="true">
+            ↻
+          </span>
         </button>
         <button
           type="button"
-          className="surface-region-action"
+          className="surface-region-action surface-region-icon"
           onClick={expand}
+          aria-label="Expand"
           title="Open full view"
         >
-          Expand
+          <span aria-hidden="true">⤢</span>
         </button>
       </div>
       {collapsed ? (
@@ -111,10 +130,10 @@ function SurfaceRegion({ region }: { region: Region }) {
         )
       ) : ribId ? (
         <BoardActionProvider run={actions.run} reveal={actions.reveal}>
-          <SnapshotStateView snapshot={snap} />
+          <SnapshotStateView snapshot={snap} busy={busy} />
         </BoardActionProvider>
       ) : (
-        <SnapshotStateView snapshot={snap} />
+        <SnapshotStateView snapshot={snap} busy={busy} />
       )}
     </section>
   );

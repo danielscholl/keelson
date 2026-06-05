@@ -106,6 +106,11 @@ export interface WorkflowsHandlerOptions {
   // it undefined so a UI start without a project picker rejects 400 rather
   // than silently targeting the server's install dir.
   defaultCwd?: string;
+  // Working dir for `POST /:name/refresh` — re-running a rib producer needs a
+  // cwd, but its node uses absolute paths so the value is nominal. Kept separate
+  // from `defaultCwd` so wiring it in production can't widen the `/runs` target
+  // resolution (a blank `workingDir` there must still 400, not fall through).
+  refreshCwd?: string;
   // Real prompt handler injected from the composition root. When omitted
   // (tests, env where no provider is registered), the placeholder fires and
   // prompt nodes fail with a "not registered" sentinel. Keeps the route
@@ -905,6 +910,7 @@ export function workflowsRoutes(
     conversationStore,
     projectsStore,
     defaultCwd,
+    refreshCwd,
     snapshotManager,
     ribWorkflowBindings,
   } = opts;
@@ -1113,6 +1119,59 @@ export function workflowsRoutes(
       );
       // Echo the canonical name so a fuzzy start (smoketst → smoke-test) hands
       // the client the real name for run-detail / "open in Workflows" routes.
+      return c.json({ runId, workflowName: workflow.name });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  // Re-run a rib producer workflow to repopulate its bound snapshot key — the
+  // "refresh" behind a surface panel's icon. Restricted to bound producers and
+  // run in the server's default working dir: a general workflow must still go
+  // through /runs with an explicit target (so it can't silently execute against
+  // the server's install dir), but a producer's node uses absolute paths, so the
+  // server owns the nominal cwd here. The new frame fans to the bound key, which
+  // the panel's live subscription picks up.
+  app.post("/api/workflows/:name/refresh", (c) => {
+    if (originForbidden(c)) {
+      return c.json({ error: "forbidden origin" }, 403);
+    }
+    const requested = c.req.param("name");
+    const workflow = catalog.get(requested);
+    if (!workflow) {
+      return c.json({ error: `No workflow named '${requested}'.` }, 404);
+    }
+    if (!ribWorkflowBindings?.has(workflow)) {
+      return c.json({ error: `workflow '${requested}' is not a refreshable producer` }, 409);
+    }
+    if (refreshCwd === undefined) {
+      return c.json({ error: "server has no refresh working directory" }, 400);
+    }
+    try {
+      const { runId } = startRunCore(
+        {
+          store,
+          conversationStore,
+          activeRuns,
+          subscribers,
+          promptHandler: effectivePromptHandler,
+          memoryTools,
+          ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
+          ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+          ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+        },
+        {
+          workflow,
+          inputs: {},
+          workingDir: refreshCwd,
+          projectId: null,
+          resolvedProject: null,
+          // Honor the producer's declared worktree policy, same as /runs — a
+          // collector that opts into isolation must not write the live checkout.
+          isolationOn: workflow.worktree?.enabled === true,
+          branchTemplate: workflow.worktree?.branch,
+        },
+      );
       return c.json({ runId, workflowName: workflow.name });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
