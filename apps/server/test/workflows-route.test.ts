@@ -608,6 +608,75 @@ nodes:
     expect(body.error).toContain("projectId or workingDir");
   });
 
+  test("POST .../refresh re-runs a bound producer in the server's default cwd", async () => {
+    writeWorkflow(
+      "prod.yaml",
+      `name: prod
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const bound = catalog.get("prod");
+    if (!bound) throw new Error("fixture workflow missing");
+    const bindings = new Map([[bound, { publish: () => {} }]]);
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore,
+      defaultCwd: tmpDir,
+      ribWorkflowBindings: bindings,
+    });
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/prod/refresh", {
+        method: "POST",
+        headers: { origin: ORIGIN },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    expect(runId).toBeTruthy();
+    const run = await pollUntilTerminal(app, runId);
+    expect(run.workingDir).toBe(tmpDir);
+  });
+
+  test("POST .../refresh refuses a workflow that isn't a bound producer", async () => {
+    writeWorkflow(
+      "loose.yaml",
+      `name: loose
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const app = new Hono();
+    // No ribWorkflowBindings → nothing is refreshable.
+    workflowsRoutes(app, {
+      catalog,
+      store: createWorkflowStore(db),
+      conversationStore: createConversationStore(db),
+      defaultCwd: tmpDir,
+    });
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/loose/refresh", {
+        method: "POST",
+        headers: { origin: ORIGIN },
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not a refreshable producer");
+  });
+
   test("POST .../runs rejects workingDir pointing at a file (not a directory)", async () => {
     writeWorkflow(
       "to-file.yaml",

@@ -26,6 +26,20 @@ mock.module("../src/hooks/useSnapshot.ts", () => ({
   },
 }));
 
+// Stub the trigger hook (not api.ts) so refresh-run wiring is observable without
+// the api.ts module mock that other suites set process-globally.
+const triggerCalls: string[] = [];
+let triggerRunning = false;
+mock.module("../src/hooks/useWorkflowTrigger.ts", () => ({
+  useWorkflowTrigger: (name?: string) => ({
+    running: name ? triggerRunning : false,
+    error: null,
+    trigger: () => {
+      if (name) triggerCalls.push(name);
+    },
+  }),
+}));
+
 const { CanvasProvider } = await import("../src/components/Canvas/CanvasHost.tsx");
 const { Surface } = await import("../src/views/Surface.tsx");
 
@@ -54,6 +68,8 @@ beforeEach(() => {
   for (const k of Object.keys(snapStates)) delete snapStates[k];
   for (const k of Object.keys(reloadCalls)) delete reloadCalls[k];
   useSnapshotKeys.length = 0;
+  triggerCalls.length = 0;
+  triggerRunning = false;
 });
 
 describe("Surface", () => {
@@ -117,7 +133,7 @@ describe("Surface", () => {
     expect(screen.queryByRole("button", { name: "Expand region" })).toBeNull();
   });
 
-  test("Refresh asks the region's snapshot to re-hydrate", () => {
+  test("a region with no workflow re-reads the cached frame on Refresh", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     renderSurface({
       id: "cimpl",
@@ -127,6 +143,41 @@ describe("Surface", () => {
     expect(reloadCalls["rib:demo:quality"]).toBeUndefined();
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(reloadCalls["rib:demo:quality"]).toBe(1);
+    expect(triggerCalls).toEqual([]);
+  });
+
+  test("a region with a workflow re-runs it on Refresh (not a plain reload)", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:quality", workflow: "osdu-quality" }] }] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(triggerCalls).toEqual(["osdu-quality"]);
+    expect(reloadCalls["rib:demo:quality"]).toBeUndefined();
+  });
+
+  test("the refresh icon spins and disables while its run is in flight", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    triggerRunning = true;
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:quality", workflow: "osdu-quality" }] }] },
+    });
+    expect(container.querySelector(".surface-region-glyph.is-spinning")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh" })).toHaveProperty("disabled", true);
+  });
+
+  test("a region with no data renders a shimmer skeleton, not a waiting note", () => {
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:missing" }] }] },
+    });
+    expect(container.querySelector(".cv-skeleton")).not.toBeNull();
+    expect(screen.queryByText("Waiting for the first update…")).toBeNull();
   });
 
   test("Expand opens the region full-size in the canvas drawer", () => {
@@ -157,14 +208,5 @@ describe("Surface", () => {
     });
     const btn = screen.getByRole("button", { name: "Reconcile" });
     expect(btn).toHaveProperty("disabled", false);
-  });
-
-  test("a region with no snapshot yet degrades to a waiting note, not a crash", () => {
-    renderSurface({
-      id: "cimpl",
-      title: "CIMPL",
-      layout: { rows: [{ columns: [{ key: "rib:demo:missing" }] }] },
-    });
-    expect(screen.getByText("Waiting for the first update…")).toBeDefined();
   });
 });

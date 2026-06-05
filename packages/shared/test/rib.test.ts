@@ -109,6 +109,19 @@ describe("rib surface descriptor schema", () => {
     ).toBe(true);
   });
 
+  it("carries an optional refresh workflow on header and column regions", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        header: { key: "rib:osdu:cluster", collapsible: true, workflow: "osdu-cluster" },
+        rows: [{ columns: [{ key: "rib:osdu:quality", workflow: "osdu-quality" }] }],
+      },
+    });
+    expect(s.layout.header?.workflow).toBe("osdu-cluster");
+    expect(s.layout.rows[0]?.columns[0]?.workflow).toBe("osdu-quality");
+  });
+
   it("rejects an unknown field, an empty region key, and a column-less row", () => {
     expect(
       ribSurfaceDescriptorSchema.safeParse({ id: "x", title: "X", layout: { rows: [] }, extra: 1 })

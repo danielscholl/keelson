@@ -1119,6 +1119,57 @@ export function workflowsRoutes(
     }
   });
 
+  // Re-run a rib producer workflow to repopulate its bound snapshot key — the
+  // "refresh" behind a surface panel's icon. Restricted to bound producers and
+  // run in the server's default working dir: a general workflow must still go
+  // through /runs with an explicit target (so it can't silently execute against
+  // the server's install dir), but a producer's node uses absolute paths, so the
+  // server owns the nominal cwd here. The new frame fans to the bound key, which
+  // the panel's live subscription picks up.
+  app.post("/api/workflows/:name/refresh", (c) => {
+    if (originForbidden(c)) {
+      return c.json({ error: "forbidden origin" }, 403);
+    }
+    const requested = c.req.param("name");
+    const workflow = catalog.get(requested);
+    if (!workflow) {
+      return c.json({ error: `No workflow named '${requested}'.` }, 404);
+    }
+    if (!ribWorkflowBindings?.has(workflow)) {
+      return c.json({ error: `workflow '${requested}' is not a refreshable producer` }, 409);
+    }
+    if (defaultCwd === undefined) {
+      return c.json({ error: "server has no default working directory" }, 400);
+    }
+    try {
+      const { runId } = startRunCore(
+        {
+          store,
+          conversationStore,
+          activeRuns,
+          subscribers,
+          promptHandler: effectivePromptHandler,
+          memoryTools,
+          ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
+          ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+          ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+        },
+        {
+          workflow,
+          inputs: {},
+          workingDir: defaultCwd,
+          projectId: null,
+          resolvedProject: null,
+          isolationOn: false,
+          branchTemplate: workflow.worktree?.branch,
+        },
+      );
+      return c.json({ runId, workflowName: workflow.name });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
   app.get("/api/workflows/runs/:runId", (c) => {
     const runId = c.req.param("runId");
     const run = store.getRun(runId);
