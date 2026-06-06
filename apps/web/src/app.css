@@ -3101,16 +3101,69 @@ button.tab:focus-visible {
 .surface-region {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 16px;
-  background: var(--bg-elevated, var(--bg));
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
-.surface-region-bar {
+/* Gradient lane head: a top-lit strip carrying the region's identity + controls. */
+.surface-region-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
+}
+.surface-region[data-collapsed] .surface-region-head {
+  border-bottom: none;
+}
+.surface-region-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.surface-region-glyph-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft);
+  font-size: 13px;
+  flex: none;
+  color: var(--fg);
+}
+.surface-region-glyph-chip[data-tone="brand"] {
+  color: var(--magenta);
+}
+.surface-region-glyph-chip[data-tone="info"] {
+  color: var(--cyan);
+}
+.surface-region-glyph-chip[data-tone="caution"] {
+  color: var(--orange);
+}
+.surface-region-glyph-chip[data-tone="ok"] {
+  color: var(--green);
+}
+.surface-region-glyph-chip[data-tone="warn"] {
+  color: var(--yellow);
+}
+.surface-region-glyph-chip[data-tone="error"] {
+  color: var(--red);
+}
+.surface-region-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.surface-region-scope {
+  flex: none;
 }
 .surface-region-spacer {
   flex: 1 1 auto;
@@ -3213,32 +3266,60 @@ button.tab:focus-visible {
   }
 }
 
-/* segments — the "pulse" summary */
+/* segments — the "pulse" summary: a glowing toned bullet + muted {n} {label},
+   joined by `·` separators. */
 .cvb-segments {
-  display: flex;
+  display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
 }
 .cvb-segment {
-  font-size: 12px;
-  color: var(--muted);
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 5px;
+  white-space: nowrap;
 }
-.cvb-segment-n {
-  font-weight: 700;
-  color: var(--fg-strong);
-  font-family: ui-monospace, monospace;
+.cvb-segment:not(:first-child)::before {
+  content: "·";
+  color: var(--dim);
+  margin-right: 6px;
 }
-.cvb-segment[data-tone="ok"] .cvb-segment-n {
-  color: var(--green);
+.cvb-segment-bullet {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--dim);
 }
-.cvb-segment[data-tone="warn"] .cvb-segment-n {
-  color: var(--yellow);
+.cvb-segment-bullet[data-tone="ok"] {
+  background: var(--green);
+  box-shadow: 0 0 4px var(--green);
 }
-.cvb-segment[data-tone="error"] .cvb-segment-n {
-  color: var(--red);
+.cvb-segment-bullet[data-tone="warn"] {
+  background: var(--yellow);
+  box-shadow: 0 0 4px var(--yellow);
+}
+.cvb-segment-bullet[data-tone="error"] {
+  background: var(--red);
+  box-shadow: 0 0 4px var(--red);
+}
+.cvb-segment-bullet[data-tone="info"] {
+  background: var(--cyan);
+  box-shadow: 0 0 4px var(--cyan);
+}
+.cvb-segment-bullet[data-tone="caution"] {
+  background: var(--orange);
+  box-shadow: 0 0 4px var(--orange);
+}
+.cvb-segment-bullet[data-tone="brand"] {
+  background: var(--magenta);
+  box-shadow: 0 0 4px var(--magenta);
+}
+.cvb-segment-text {
+  color: var(--muted);
 }
 
 /* actions — board-level buttons dispatched to the owning rib. Full-width
@@ -3510,6 +3591,15 @@ a.cvb-card-title::after {
 .cvb-glyph[data-tone="error"] {
   background: var(--red);
 }
+.cvb-glyph[data-tone="info"] {
+  background: var(--cyan);
+}
+.cvb-glyph[data-tone="caution"] {
+  background: var(--orange);
+}
+.cvb-glyph[data-tone="brand"] {
+  background: var(--magenta);
+}
 .cvb-row-text {
   color: var(--fg);
   flex: 1;
@@ -3559,6 +3649,18 @@ a.cvb-card-title::after {
   content: "✕";
   color: var(--red);
 }
+.cvb-rows--boxed .cvb-glyph[data-tone="info"]::before {
+  content: "•";
+  color: var(--cyan);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="caution"]::before {
+  content: "•";
+  color: var(--orange);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone="brand"]::before {
+  content: "•";
+  color: var(--magenta);
+}
 .cvb-rows--boxed .cvb-row-text {
   flex: 0 0 96px;
   overflow-wrap: anywhere;
@@ -3594,6 +3696,85 @@ a.cvb-card-title::after {
 .cvb-pill[data-tone="error"] {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 32%, transparent);
+}
+
+/* Extended tones (info=cyan, caution=orange, brand=magenta) for every data-tone
+   consumer, so a producer can use the full ramp (e.g. A–E grade chips) anywhere
+   — not just the segment bullets / glyph chip that introduced them. */
+.canvas-view-table td[data-tone="info"] {
+  color: var(--cyan);
+}
+.canvas-view-table td[data-tone="caution"] {
+  color: var(--orange);
+}
+.canvas-view-table td[data-tone="brand"] {
+  color: var(--magenta);
+}
+.cvb-stat-value[data-tone="info"] {
+  color: var(--cyan);
+}
+.cvb-stat-value[data-tone="caution"] {
+  color: var(--orange);
+}
+.cvb-stat-value[data-tone="brand"] {
+  color: var(--magenta);
+}
+.cvb-field-value[data-tone="info"],
+.cvb-link[data-tone="info"] {
+  color: var(--cyan);
+}
+.cvb-field-value[data-tone="caution"],
+.cvb-link[data-tone="caution"] {
+  color: var(--orange);
+}
+.cvb-field-value[data-tone="brand"],
+.cvb-link[data-tone="brand"] {
+  color: var(--magenta);
+}
+.cvb-bar-fill[data-tone="info"] {
+  background: var(--cyan);
+}
+.cvb-bar-fill[data-tone="caution"] {
+  background: var(--orange);
+}
+.cvb-bar-fill[data-tone="brand"] {
+  background: var(--magenta);
+}
+.cvb-card-dot[data-tone="info"] {
+  background: var(--cyan);
+}
+.cvb-card-dot[data-tone="caution"] {
+  background: var(--orange);
+}
+.cvb-card-dot[data-tone="brand"] {
+  background: var(--magenta);
+}
+.cvb-pill[data-tone="info"] {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 32%, transparent);
+}
+.cvb-pill[data-tone="caution"] {
+  color: var(--orange);
+  border-color: color-mix(in srgb, var(--orange) 32%, transparent);
+}
+.cvb-pill[data-tone="brand"] {
+  color: var(--magenta);
+  border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
+}
+.cvb-header-status[data-tone="info"] {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 45%, transparent);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
+}
+.cvb-header-status[data-tone="caution"] {
+  color: var(--orange);
+  border-color: color-mix(in srgb, var(--orange) 45%, transparent);
+  background: color-mix(in srgb, var(--orange) 8%, transparent);
+}
+.cvb-header-status[data-tone="brand"] {
+  color: var(--magenta);
+  border-color: color-mix(in srgb, var(--magenta) 45%, transparent);
+  background: color-mix(in srgb, var(--magenta) 8%, transparent);
 }
 .cvb-link {
   color: var(--cyan);

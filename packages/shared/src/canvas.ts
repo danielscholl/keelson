@@ -48,7 +48,18 @@ export type CanvasDocument = z.infer<typeof canvasDocumentSchema>;
 //
 // `tone` is a generic visual category (never a domain enum) the renderer maps
 // to a colour. Shared by table cells and every board primitive below.
-const canvasToneSchema = z.enum(["ok", "warn", "error", "neutral"]);
+// ok/warn/error/neutral are the semantic core; info (cyan), caution (orange),
+// and brand (violet) extend the ramp for decorative identity (lane glyphs) and
+// multi-step scales (e.g. an A–E grade chip: ok·info·warn·caution·error).
+export const canvasToneSchema = z.enum([
+  "ok",
+  "warn",
+  "error",
+  "neutral",
+  "info",
+  "caution",
+  "brand",
+]);
 export type CanvasTone = z.infer<typeof canvasToneSchema>;
 
 // A cell is a bare scalar, or a scalar wrapped with a `tone`.

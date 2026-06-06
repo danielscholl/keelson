@@ -29,13 +29,21 @@ function makeKeyer() {
   };
 }
 
-function Segments({ items }: { items: Segment[] }) {
+// A "pulse" strip: a glowing toned bullet + muted `{n} {label}`, segments joined
+// by `·` (via CSS). Zero-count segments are dropped so the strip collapses to
+// just what's live; an all-zero strip renders nothing.
+export function Segments({ items }: { items: Segment[] }) {
   const key = makeKeyer();
+  const visible = items.filter((s) => s.n > 0);
+  if (visible.length === 0) return null;
   return (
     <div className="cvb-segments">
-      {items.map((s) => (
-        <span key={key(JSON.stringify(s))} className="cvb-segment" data-tone={s.tone}>
-          <span className="cvb-segment-n">{s.n}</span> {s.label}
+      {visible.map((s) => (
+        <span key={key(JSON.stringify(s))} className="cvb-segment">
+          <span className="cvb-segment-bullet" data-tone={s.tone ?? "neutral"} aria-hidden="true" />
+          <span className="cvb-segment-text">
+            {s.n} {s.label}
+          </span>
         </span>
       ))}
     </div>
@@ -355,6 +363,19 @@ export function BoardHeader({ view }: { view: Pick<CanvasBoardView, "title" | "h
       {view.header?.segments && view.header.segments.length > 0 && (
         <Segments items={view.header.segments} />
       )}
+    </div>
+  );
+}
+
+// A board's section stack without the header strip. A surface region renders
+// this directly so its own gradient lane head owns the title/chip/pulse.
+export function BoardBody({ view }: { view: Pick<CanvasBoardView, "sections"> }) {
+  const key = makeKeyer();
+  return (
+    <div className="canvas-view-board">
+      {view.sections.map((section) => (
+        <SectionBlock key={key(JSON.stringify(section))} section={section} />
+      ))}
     </div>
   );
 }

@@ -1,6 +1,6 @@
-import type { CanvasCell, CanvasTableView } from "@keelson/shared";
+import type { CanvasCell, CanvasTableView, CanvasTone } from "@keelson/shared";
 
-type Tone = "ok" | "warn" | "error" | "neutral";
+type Tone = CanvasTone;
 
 function normalizeCell(cell: CanvasCell | undefined): { display: string; tone?: Tone } {
   const wrapped =
