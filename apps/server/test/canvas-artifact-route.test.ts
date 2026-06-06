@@ -52,6 +52,8 @@ function makeRig(entry: "with-dir" | "no-dir" | "none"): { app: Hono; activeRuns
       abort: new AbortController(),
       done: Promise.resolve(),
       pendingApprovals: new Map(),
+      dedupeKey: "artifact-test",
+      conversationId: "conv-test",
       ...(entry === "with-dir" ? { artifactsDir } : {}),
     });
   }

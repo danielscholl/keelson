@@ -193,15 +193,8 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         throw new Error(`rib '${rib.id}' declares duplicate surface id '${surface.id}'`);
       }
       surfaceIds.add(surface.id);
-      const { header, banner, rows, footer } = surface.layout;
-      const regionKeys = [
-        ...(header ? [header.key] : []),
-        ...(banner ? [banner.key] : []),
-        ...rows.flatMap((row) => row.columns.map((c) => c.key)),
-        ...(footer ? [footer.key] : []),
-      ];
-      for (const key of regionKeys) {
-        assertInNamespace(rib.id, namespace, key, "surface region key");
+      for (const region of allRegions(surface.layout)) {
+        assertInNamespace(rib.id, namespace, region.key, "surface region key");
       }
     }
     manifests.push({
@@ -300,4 +293,19 @@ function assertInNamespace(ribId: string, namespace: string, key: string, label:
   if (key !== namespace && !key.startsWith(`${namespace}:`)) {
     throw new Error(`rib '${ribId}' ${label} '${key}' must be under '${namespace}:*'`);
   }
+}
+
+// Every region of a surface layout, in render order (header, banner, row
+// columns, footer). The namespace check and the heartbeat scheduler share this
+// one walk so a region slot can't be honored by one and skipped by the other.
+export function allRegions(
+  layout: RibSurfaceDescriptor["layout"],
+): readonly { key: string; workflow?: string; cadenceMs?: number }[] {
+  const { header, banner, rows, footer } = layout;
+  return [
+    ...(header ? [header] : []),
+    ...(banner ? [banner] : []),
+    ...rows.flatMap((row) => row.columns),
+    ...(footer ? [footer] : []),
+  ];
 }
