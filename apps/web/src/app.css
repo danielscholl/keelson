@@ -4098,6 +4098,11 @@ a.cvb-card-title::after {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
 }
+.cvb-chip[data-tone="accent"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .cvb-header-status[data-tone="accent"] {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
