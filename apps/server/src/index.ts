@@ -30,6 +30,7 @@ import { projectsRoutes } from "./projects-handler.ts";
 import { createProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
 import { ribsRoutes } from "./ribs-handler.ts";
+import { createScheduler, deriveSurfaceSchedules, makeBoundKeyResolver } from "./scheduler.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { createSnapshotManager } from "./snapshot-manager.ts";
 import { createSnapshotSubscribers } from "./snapshot-subscribers.ts";
@@ -165,12 +166,34 @@ const workflowTools = createWorkflowChatTools({
   catalog: workflowCatalog,
 });
 
+// Server-side heartbeat: keep snapshot-backed surface regions fresh on their
+// declared cadence even when no client tab is mounted (and warm them after a
+// cold boot). Client SWR covers the tab-open case; this covers the rest. The
+// derivation also surfaces any cadence region whose workflow can't refresh it.
+const { schedules: surfaceSchedules, warnings: scheduleWarnings } = deriveSurfaceSchedules(
+  ribs.manifests,
+  makeBoundKeyResolver(workflowCatalog, ribWorkflows.bindings, ribWorkflows.boundKeys),
+);
+for (const warning of scheduleWarnings) {
+  console.warn(`[keelson] ${warning}`);
+}
+const scheduler = createScheduler({
+  schedules: surfaceSchedules,
+  controller: workflowController,
+  snapshotManager,
+  repoRoot: REPO_ROOT,
+  disabled: process.env.KEELSON_DISABLE_SCHEDULER === "1",
+});
+scheduler.start();
+
 // Async shutdown: drain workflow runs first (the executor's onEvent run_done
 // branch writes terminal state to SQLite, and that must happen before
 // db.close()), then dispose any activated ribs (which may hold sockets or
 // child processes), close the snapshot manager (closes lingering WS
 // subscribers and drains in-flight composes), then close the database.
 const shutdown = async (): Promise<void> => {
+  // Stop the heartbeat first so no tick enqueues a fresh run mid-drain.
+  scheduler.stop();
   try {
     await activeWorkflowRuns.abortAll();
   } catch (err) {

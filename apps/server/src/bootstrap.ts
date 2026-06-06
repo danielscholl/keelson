@@ -195,9 +195,14 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
 export function prepareRibWorkflows(contributions: readonly RibWorkflowContribution[]): {
   definitions: WorkflowDefinition[];
   bindings: Map<WorkflowDefinition, RibWorkflowBinding>;
+  // Workflow name → bound snapshot key, for boot-time surface-schedule
+  // validation only. Name-keyed (not object-identity like `bindings`) because
+  // its one consumer matches a region's declared `workflow` string.
+  boundKeys: Map<string, string>;
 } {
   const definitions: WorkflowDefinition[] = [];
   const bindings = new Map<WorkflowDefinition, RibWorkflowBinding>();
+  const boundKeys = new Map<string, string>();
   for (const contribution of contributions) {
     const parsed = workflowDefinitionSchema.safeParse(contribution.definition);
     if (!parsed.success) {
@@ -221,9 +226,12 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
     definitions.push(definition);
     if (contribution.publish) {
       bindings.set(definition, { publish: contribution.publish });
+      if (contribution.bindSnapshotKey !== undefined) {
+        boundKeys.set(definition.name, contribution.bindSnapshotKey);
+      }
     }
   }
-  return { definitions, bindings };
+  return { definitions, bindings, boundKeys };
 }
 
 export interface BootstrapWorkflowsOptions {

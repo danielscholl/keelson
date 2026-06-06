@@ -243,14 +243,36 @@ export interface ActiveRunEntry {
   // route resolve files while the run is live/paused; gone when the entry is
   // deleted on terminal status (the dir is cleaned at the same moment).
   artifactsDir?: string;
+  // Identity for the run-start de-dup lookup: a concurrent start with the same
+  // (workflow, workingDir, inputs) collapses onto this run. The heartbeat and a
+  // client refresh both target (collector, REPO_ROOT, {}). See runDedupeKey.
+  dedupeKey: string;
+  conversationId: string;
 }
 
 export interface ActiveRuns {
   register(runId: string, entry: ActiveRunEntry): void;
   get(runId: string): ActiveRunEntry | undefined;
+  // The live run matching `dedupeKey`, or undefined. Backs the run-start de-dup
+  // so an identical (workflow, workingDir, inputs) can't run twice concurrently.
+  findActive(dedupeKey: string): { runId: string; conversationId: string } | undefined;
   delete(runId: string): void;
   size(): number;
   abortAll(): Promise<void>;
+}
+
+// Canonical de-dup identity for a run start. Two starts collapse only when
+// workflow, workingDir, AND inputs all match; inputs are key-sorted so order
+// can't make identical inputs look distinct.
+export function runDedupeKey(
+  name: string,
+  workingDir: string,
+  inputs: Record<string, string>,
+): string {
+  const sorted = Object.keys(inputs)
+    .sort()
+    .map((k) => [k, inputs[k]] as const);
+  return JSON.stringify([name, workingDir, sorted]);
 }
 
 // Idempotent: abort the controller and unblock any paused approval node.
@@ -313,6 +335,15 @@ class ActiveRunRegistry implements ActiveRuns {
 
   get(runId: string): ActiveRunEntry | undefined {
     return this.runs.get(runId);
+  }
+
+  findActive(dedupeKey: string): { runId: string; conversationId: string } | undefined {
+    for (const [runId, entry] of this.runs) {
+      if (entry.dedupeKey === dedupeKey) {
+        return { runId, conversationId: entry.conversationId };
+      }
+    }
+    return undefined;
   }
 
   delete(runId: string): void {
@@ -558,6 +589,20 @@ function startRunCore(
     };
   }
   const name = workflow.name;
+  const dedupeKey = runDedupeKey(name, workingDir, inputs);
+  // De-dup only non-isolated producer refreshes (rib collectors fired by the
+  // heartbeat, /refresh, and client SWR): a concurrent start with an identical
+  // (workflow, workingDir, inputs) already live returns that run, serializing
+  // the cold-boot client-open vs server-tick race. Arbitrary /runs and chat
+  // starts aren't collapsed, so their inputs are untouched. Isolated runs are
+  // excluded because they linger in activeRuns through an awaited worktree
+  // teardown after `run_done` — de-duping them could hand back a terminal run.
+  // A non-isolated run is gone by `run_done` (prompt delete), so the live run
+  // matched here is never terminal.
+  if (ribWorkflowBindings?.has(workflow) && !isolationOn) {
+    const existing = activeRuns.findActive(dedupeKey);
+    if (existing) return existing;
+  }
   const runId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
   // Create the conversation FIRST so the workflow_runs FK has a target.
@@ -629,7 +674,13 @@ function startRunCore(
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
   });
-  activeRuns.register(runId, { abort, done, pendingApprovals });
+  activeRuns.register(runId, {
+    abort,
+    done,
+    pendingApprovals,
+    dedupeKey,
+    conversationId: conversation.id,
+  });
   return { runId, conversationId: conversation.id };
 }
 
@@ -731,6 +782,13 @@ export interface WorkflowController {
     workingDir: string;
     isolation?: IsolationOverride;
   }): StartRunResult;
+  // The live run for an identical (name, workingDir, inputs), or undefined — the
+  // heartbeat scheduler's pre-check so it won't re-fire a collector still running.
+  findActiveRun(
+    name: string,
+    workingDir: string,
+    inputs: Record<string, string>,
+  ): { runId: string; conversationId: string } | undefined;
   resolveApproval(
     runId: string,
     body: { nodeId: string; text: string; pauseId?: string },
@@ -802,6 +860,10 @@ export function createWorkflowController(
       } catch (err) {
         return { ok: false, message: err instanceof Error ? err.message : String(err) };
       }
+    },
+
+    findActiveRun(name, workingDir, inputs) {
+      return activeRuns.findActive(runDedupeKey(name, workingDir, inputs));
     },
 
     resolveApproval(runId, body) {
