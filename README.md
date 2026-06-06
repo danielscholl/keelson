@@ -196,6 +196,7 @@ in-tree — bring your own and activate them with `KEELSON_RIBS`.
 | `KEELSON_WORKFLOW_PROVIDER=claude` | Pin the provider workflows use for `prompt` nodes |
 | `KEELSON_WORKFLOW_TOOL_DENYLIST=tool_a,tool_b` | Operator floor: per-node tool denylist |
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S=600` | Per-prompt-node timeout in seconds |
+| `KEELSON_DISABLE_SCHEDULER=1` | Disable the server-side surface-refresh heartbeat (`1` = off; unset = on). Client-side auto-refresh is unaffected |
 | `KEELSON_DB=/tmp/scratch.db` | Override the SQLite path (default: `.keelson/keelson.db`) |
 | `KEELSON_WORKSPACE=~/code` | Override the workspace root (default: `~/keelson`). The bundled `default` project's rootPath *is* the workspace root; `/api/projects/clone` clones into `<workspace>/<name>/`, and per-run worktrees land at `<project>/.worktrees/<branch>/`. |
 | `PORT=7878` | Override the HTTP/WS listen port |
