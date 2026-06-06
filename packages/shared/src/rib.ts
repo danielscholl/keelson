@@ -114,8 +114,8 @@ export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
 // key (vs. a plain re-read of the cached frame). `title`/`glyph` give the region
 // a static identity (a lane name + a toned glyph chip) shown in its head even
 // before data arrives — distinct from the board's own dynamic title. `cadenceMs`,
-// when set, is the auto-refresh interval (ms) the harness re-runs `workflow` on
-// (client on open + a server heartbeat); floored to 30s.
+// when set, is the auto-refresh interval (ms) the SPA re-runs `workflow` on while
+// the surface is open (on open and on a ~30s heartbeat); floored to 30s.
 const regionGlyphSchema = z
   .object({ char: z.string().min(1), tone: canvasToneSchema.optional() })
   .strict();

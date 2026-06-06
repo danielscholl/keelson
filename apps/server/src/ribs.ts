@@ -237,9 +237,6 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       scoped.register(namespace, () => rib.composeBundle!(ribCtx));
     }
 
-    // workflow name → snapshot keys it binds, so a cadence-bearing region can be
-    // checked below against the producers this rib actually contributes.
-    const boundKeysByWorkflow = new Map<string, Set<string>>();
     if (rib.contributeWorkflows) {
       for (const contribution of rib.contributeWorkflows(ribCtx)) {
         const bindKey = contribution.bindSnapshotKey;
@@ -289,36 +286,6 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
           ...(bindKey !== undefined ? { bindSnapshotKey: bindKey } : {}),
           ...(publish ? { publish } : {}),
         });
-        const producerName = (contribution.definition as { name?: unknown }).name;
-        if (typeof producerName === "string" && bindKey !== undefined) {
-          const bound = boundKeysByWorkflow.get(producerName) ?? new Set<string>();
-          bound.add(bindKey);
-          boundKeysByWorkflow.set(producerName, bound);
-        }
-      }
-    }
-
-    // A surface region that declares a cadence relies on the harness re-running
-    // its `workflow` to repopulate its key. If that workflow isn't a producer
-    // this rib binds to that key, auto-refresh silently no-ops — warn at
-    // activation rather than 409 on every scheduled tick.
-    for (const surface of surfaces) {
-      const { header, banner, rows, footer } = surface.layout;
-      const regions = [
-        ...(header ? [header] : []),
-        ...(banner ? [banner] : []),
-        ...rows.flatMap((row) => row.columns),
-        ...(footer ? [footer] : []),
-      ];
-      for (const region of regions) {
-        if (region.cadenceMs === undefined) continue;
-        const ok = region.workflow && boundKeysByWorkflow.get(region.workflow)?.has(region.key);
-        if (!ok) {
-          console.warn(
-            `[ribs] rib '${rib.id}' region '${region.key}' sets cadenceMs but workflow ` +
-              `'${region.workflow ?? "(none)"}' is not bound to that key; auto-refresh will no-op`,
-          );
-        }
       }
     }
 

@@ -6,6 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import type { SnapshotStatus } from "./useSnapshot.ts";
 
 const TICK_MS = 30_000;
+// A region that has never loaded a frame retries this often instead of waiting a
+// full (possibly multi-hour) cadence, so a failed cold start recovers quickly.
+const COLD_RETRY_MS = 60_000;
 
 export interface Freshness {
   label: string | null;
@@ -49,15 +52,19 @@ export function useAutoRefresh(input: AutoRefreshInput): Freshness {
   liveRef.current = { running, trigger };
 
   useEffect(() => {
+    // Only a region declaring both a workflow and a cadence auto-refreshes;
+    // others mount no interval and never re-render on the heartbeat.
+    if (!workflow || !cadenceMs) return;
     const tick = () => {
       if (typeof document !== "undefined" && document.hidden) return;
       const now = Date.now();
       setNowMs(now);
-      if (!workflow || !cadenceMs || status === "loading" || liveRef.current.running) return;
+      if (status === "loading" || liveRef.current.running) return;
       const composedMs = composedAt ? Date.parse(composedAt) : Number.NaN;
-      const frameStale = Number.isNaN(composedMs) || now - composedMs >= cadenceMs;
-      const backoffOk = now - lastFiredRef.current >= cadenceMs;
-      if (frameStale && backoffOk) {
+      const noFrame = Number.isNaN(composedMs);
+      const frameStale = noFrame || now - composedMs >= cadenceMs;
+      const retryFloor = noFrame ? Math.min(cadenceMs, COLD_RETRY_MS) : cadenceMs;
+      if (frameStale && now - lastFiredRef.current >= retryFloor) {
         lastFiredRef.current = now;
         liveRef.current.trigger();
       }
@@ -74,12 +81,16 @@ export function useAutoRefresh(input: AutoRefreshInput): Freshness {
     };
   }, [workflow, cadenceMs, status, composedAt]);
 
+  // Only a cadence-bearing region carries a freshness contract.
+  if (!workflow || !cadenceMs) return { label: null, tone: null };
   if (running) return { label: "refreshing…", tone: null };
-  if (error) return { label: "refresh failed", tone: "error" };
-  if (!composedAt) return { label: null, tone: null };
-  const composedMs = Date.parse(composedAt);
-  if (Number.isNaN(composedMs)) return { label: null, tone: null };
-  const ageMs = Math.max(0, nowMs - composedMs);
-  const stale = cadenceMs != null && ageMs >= cadenceMs;
+  const composedMs = composedAt ? Date.parse(composedAt) : Number.NaN;
+  const hasFrame = !Number.isNaN(composedMs);
+  const ageMs = hasFrame ? Math.max(0, nowMs - composedMs) : Number.POSITIVE_INFINITY;
+  const stale = ageMs >= cadenceMs;
+  // A past error only matters while the data is actually stale or missing; a
+  // fresh frame (repopulated by any path) means current data, so show its age.
+  if (error && stale) return { label: "refresh failed", tone: "error" };
+  if (!hasFrame) return { label: null, tone: null };
   return { label: formatAge(ageMs), tone: stale ? "warn" : null };
 }

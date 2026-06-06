@@ -100,11 +100,19 @@ describe("useAutoRefresh — freshness label", () => {
     expect(result.current).toEqual({ label: "refreshing…", tone: null });
   });
 
-  test("shows the error readout when the last run errored", () => {
+  test("shows the error readout when a run errored and the data is stale", () => {
     const { result } = renderHook(() =>
-      useAutoRefresh({ ...base, composedAt: agoIso(1_000), error: "boom" }),
+      useAutoRefresh({ ...base, composedAt: agoIso(700_000), error: "boom" }),
     );
     expect(result.current).toEqual({ label: "refresh failed", tone: "error" });
+  });
+
+  test("ignores a past error once the frame is fresh again", () => {
+    const { result } = renderHook(() =>
+      useAutoRefresh({ ...base, composedAt: agoIso(120_000), error: "boom" }),
+    );
+    expect(result.current.label).toBe("updated 2m ago");
+    expect(result.current.tone).toBeNull();
   });
 
   test("shows a relative age, warn-toned once past the cadence", () => {
@@ -116,9 +124,16 @@ describe("useAutoRefresh — freshness label", () => {
     expect(stale.result.current.tone).toBe("warn");
   });
 
+  test("renders no readout for a region without a cadence", () => {
+    const { result } = renderHook(() =>
+      useAutoRefresh({ ...base, cadenceMs: undefined, composedAt: agoIso(1_000) }),
+    );
+    expect(result.current).toEqual({ label: null, tone: null });
+  });
+
   test("shows no readout before any frame arrives", () => {
     const { result } = renderHook(() =>
-      useAutoRefresh({ ...base, workflow: undefined, status: "empty", composedAt: null }),
+      useAutoRefresh({ ...base, status: "empty", composedAt: null }),
     );
     expect(result.current).toEqual({ label: null, tone: null });
   });

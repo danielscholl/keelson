@@ -3255,16 +3255,6 @@ button.tab:focus-visible {
   font-size: 14px;
   line-height: 1;
 }
-.surface-region-glyph {
-  display: inline-block;
-}
-.surface-region-glyph.is-spinning {
-  animation: cv-spin 1s linear infinite;
-}
-.surface-region-error {
-  font-size: 11px;
-  color: var(--red, #f08793);
-}
 .surface-region-freshness {
   flex: none;
   font-size: 11px;
@@ -3276,15 +3266,6 @@ button.tab:focus-visible {
 }
 .surface-region-freshness[data-tone="error"] {
   color: var(--red);
-}
-
-@keyframes cv-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* Skeleton — shimmer placeholder while a panel has no data (initial load, a
@@ -3325,8 +3306,7 @@ button.tab:focus-visible {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cv-skeleton-bar,
-  .surface-region-glyph.is-spinning {
+  .cv-skeleton-bar {
     animation: none;
   }
 }
