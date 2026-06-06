@@ -35,13 +35,15 @@ describe("useAutoRefresh — fire decision", () => {
 
   test("does not fire when the frame is fresh", () => {
     const t = counter();
-    renderHook(() => useAutoRefresh({ ...base, composedAt: agoIso(60_000), trigger: t.trigger }));
+    const composedAt = agoIso(60_000);
+    renderHook(() => useAutoRefresh({ ...base, composedAt, trigger: t.trigger }));
     expect(t.count()).toBe(0);
   });
 
   test("fires when the frame is older than the cadence", () => {
     const t = counter();
-    renderHook(() => useAutoRefresh({ ...base, composedAt: agoIso(700_000), trigger: t.trigger }));
+    const composedAt = agoIso(700_000);
+    renderHook(() => useAutoRefresh({ ...base, composedAt, trigger: t.trigger }));
     expect(t.count()).toBe(1);
   });
 
@@ -101,9 +103,8 @@ describe("useAutoRefresh — freshness label", () => {
   });
 
   test("shows the error readout when the last run errored", () => {
-    const { result } = renderHook(() =>
-      useAutoRefresh({ ...base, composedAt: agoIso(5_000), error: "boom" }),
-    );
+    const composedAt = agoIso(5_000);
+    const { result } = renderHook(() => useAutoRefresh({ ...base, composedAt, error: "boom" }));
     expect(result.current).toEqual({ label: "refresh failed", tone: "error" });
   });
 
@@ -128,17 +129,20 @@ describe("useAutoRefresh — freshness label", () => {
   });
 
   test("shows a relative age, warn-toned once past the cadence", () => {
-    const fresh = renderHook(() => useAutoRefresh({ ...base, composedAt: agoIso(120_000) }));
+    const freshAt = agoIso(120_000);
+    const fresh = renderHook(() => useAutoRefresh({ ...base, composedAt: freshAt }));
     expect(fresh.result.current.label).toBe("updated 2m ago");
     expect(fresh.result.current.tone).toBeNull();
 
-    const stale = renderHook(() => useAutoRefresh({ ...base, composedAt: agoIso(700_000) }));
+    const staleAt = agoIso(700_000);
+    const stale = renderHook(() => useAutoRefresh({ ...base, composedAt: staleAt }));
     expect(stale.result.current.tone).toBe("warn");
   });
 
   test("renders no readout for a region without a cadence", () => {
+    const composedAt = agoIso(1_000);
     const { result } = renderHook(() =>
-      useAutoRefresh({ ...base, cadenceMs: undefined, composedAt: agoIso(1_000) }),
+      useAutoRefresh({ ...base, cadenceMs: undefined, composedAt }),
     );
     expect(result.current).toEqual({ label: null, tone: null });
   });
