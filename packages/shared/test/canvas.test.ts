@@ -136,6 +136,13 @@ describe("canvasViewSchema", () => {
         rows: [{ a: { badges: [{ text: "X", weight: 1 }] } }],
       }),
     ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "table",
+        columns: [{ key: "a" }],
+        rows: [{ a: { badges: [{ tone: "ok" }] } }],
+      }),
+    ).toThrow();
   });
 
   it("rejects a cell with an unknown tone or an extra key (strict)", () => {
