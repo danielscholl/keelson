@@ -49,8 +49,9 @@ export type CanvasDocument = z.infer<typeof canvasDocumentSchema>;
 // `tone` is a generic visual category (never a domain enum) the renderer maps
 // to a colour. Shared by table cells and every board primitive below.
 // ok/warn/error/neutral are the semantic core; info (cyan), caution (orange),
-// and brand (violet) extend the ramp for decorative identity (lane glyphs) and
-// multi-step scales (e.g. an A–E grade chip: ok·info·warn·caution·error).
+// brand (violet), and accent (indigo) extend the ramp for decorative identity
+// (lane glyphs), multi-step scales (an A–E grade chip: ok·info·warn·caution·error),
+// and hash-keyed category hues where neighbouring items need distinct colours.
 export const canvasToneSchema = z.enum([
   "ok",
   "warn",
@@ -59,6 +60,7 @@ export const canvasToneSchema = z.enum([
   "info",
   "caution",
   "brand",
+  "accent",
 ]);
 export type CanvasTone = z.infer<typeof canvasToneSchema>;
 
@@ -189,6 +191,9 @@ const barsSectionSchema = z
   .object({
     kind: z.literal("bars"),
     title: z.string().optional(),
+    // Lay each bar out as one compact row (label · fixed-width track · trailing)
+    // instead of a stacked head-over-track, for a dense offender/meter list.
+    inline: z.boolean().optional(),
     items: z.array(
       z
         .object({
@@ -223,12 +228,22 @@ const cardsSectionSchema = z
       z
         .object({
           title: z.string().min(1),
+          // Colour + monospace the title for code-like identifiers (a CVE id, a
+          // ref) so the salient token reads as status, not prose.
+          titleTone: canvasToneSchema.optional(),
+          mono: z.boolean().optional(),
           dot: canvasToneSchema.optional(),
           pill: canvasPillSchema.optional(),
           href: z.string().optional(),
           bar: z.object({ value: z.number(), total: z.number() }).strict().optional(),
           fields: z.array(canvasFieldSchema).optional(),
           footnote: z.string().optional(),
+          // A labelled annotation line under the card body (dashed rule), e.g.
+          // `why flagged: stale-61d` — the label is dimmed, the text muted.
+          reason: z
+            .object({ label: z.string().optional(), text: z.string().min(1) })
+            .strict()
+            .optional(),
         })
         .strict(),
     ),
@@ -262,6 +277,24 @@ const actionsSectionSchema = z
     items: z.array(canvasActionItemSchema),
   })
   .strict();
+// A dense grid of labelled cells, each carrying a small toned badge — for a
+// compact at-a-glance matrix (a per-service grade grid, a status board) where
+// `cards` would be too heavy. Cells link out via `href`.
+const gridSectionSchema = z
+  .object({
+    kind: z.literal("grid"),
+    title: z.string().optional(),
+    cells: z.array(
+      z
+        .object({
+          label: z.string().min(1),
+          href: z.string().optional(),
+          badge: z.object({ text: z.string().min(1), tone: canvasToneSchema.optional() }).strict(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 
 const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   statsSectionSchema,
@@ -271,6 +304,7 @@ const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   cardsSectionSchema,
   rowsSectionSchema,
   actionsSectionSchema,
+  gridSectionSchema,
 ]);
 
 // `columns` lays leaf sections side by side (a two-column Lifecycle | Actions
@@ -302,6 +336,7 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   cardsSectionSchema,
   rowsSectionSchema,
   actionsSectionSchema,
+  gridSectionSchema,
   columnsBoardSectionSchema,
 ]);
 

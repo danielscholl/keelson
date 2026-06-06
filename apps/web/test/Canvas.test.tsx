@@ -237,6 +237,72 @@ describe("CanvasProvider / useCanvas", () => {
     expect(screen.getByRole("button", { name: "Copy user" })).toBeTruthy();
   });
 
+  test("board renders a grid, inline bars, and a toned-mono card title with a reason line", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            {
+              kind: "grid",
+              cells: [
+                {
+                  label: "partition",
+                  href: "https://sonar.test",
+                  badge: { text: "A", tone: "ok" },
+                },
+                { label: "legal", badge: { text: "E", tone: "error" } },
+              ],
+            },
+            {
+              kind: "bars",
+              inline: true,
+              items: [{ label: "wellbore", value: 3, total: 9, tone: "error", trailing: "2 crit" }],
+            },
+            {
+              kind: "cards",
+              items: [
+                {
+                  title: "CVE-2024-1234",
+                  titleTone: "error",
+                  mono: true,
+                  pill: { label: "wellbore", tone: "info" },
+                  reason: { label: "why flagged:", text: "stale-61d" },
+                },
+              ],
+            },
+          ],
+        }),
+      },
+      title: "board",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    // Grid: one cell per entry, the linked cell is an anchor, badges carry tone.
+    expect(dialog.querySelectorAll(".cvb-grid-cell").length).toBe(2);
+    expect(dialog.querySelector('a.cvb-grid-cell--link[href="https://sonar.test"]')).not.toBeNull();
+    expect(dialog.querySelector('.cvb-grid-badge[data-tone="error"]')?.textContent).toBe("E");
+    // Inline bars: the bars container carries the inline modifier.
+    expect(dialog.querySelector(".cvb-bars--inline")).not.toBeNull();
+    // Card title: toned + monospace, with the dashed reason line + dim label.
+    const title = dialog.querySelector(".cvb-card-title--mono");
+    expect(title?.getAttribute("data-tone")).toBe("error");
+    expect(title?.textContent).toBe("CVE-2024-1234");
+    const reason = dialog.querySelector(".cvb-card-reason");
+    expect(reason?.textContent).toContain("why flagged:");
+    expect(reason?.textContent).toContain("stale-61d");
+    expect(reason?.querySelector(".cvb-card-reason-label")?.textContent?.trim()).toBe(
+      "why flagged:",
+    );
+  });
+
   test("board collapses unsafe href schemes to plain text (no anchor)", () => {
     const doc: CanvasDocument = {
       kind: "view",

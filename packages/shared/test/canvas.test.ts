@@ -445,6 +445,112 @@ describe("canvasViewSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("parses the accent tone everywhere a tone is accepted", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      header: { status: { label: "ok", tone: "accent" } },
+      sections: [
+        { kind: "segments", items: [{ label: "x", n: 1, tone: "accent" }] },
+        {
+          kind: "cards",
+          items: [{ title: "id", titleTone: "accent", pill: { label: "svc", tone: "accent" } }],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("parses a card with a toned monospace title and a labelled reason line", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "CVE-2024-1234",
+              titleTone: "error",
+              mono: true,
+              pill: { label: "wellbore-ddms", tone: "info" },
+              reason: { label: "why flagged:", text: "stale-61d, unowned" },
+            },
+          ],
+        },
+      ],
+    });
+    const cards = v.view === "board" ? v.sections[0] : undefined;
+    expect(cards?.kind === "cards" && cards.items[0]?.mono).toBe(true);
+    expect(cards?.kind === "cards" && cards.items[0]?.reason?.label).toBe("why flagged:");
+  });
+
+  it("rejects an unknown key on a card reason and an empty reason text (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "x", reason: { text: "y", bogus: true } }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "x", reason: { text: "" } }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("parses a grid section with toned badges, incl. inside a column", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "grid",
+          title: "SAST",
+          cells: [
+            { label: "partition", href: "https://sonar.test", badge: { text: "A", tone: "ok" } },
+            { label: "legal", badge: { text: "—", tone: "neutral" } },
+          ],
+        },
+        {
+          kind: "columns",
+          columns: [
+            { sections: [{ kind: "grid", cells: [{ label: "s", badge: { text: "E" } }] }] },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("rejects a grid cell missing a badge or carrying an extra key (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "grid", cells: [{ label: "s" }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "grid", cells: [{ label: "s", badge: { text: "A" }, bogus: true }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("parses an inline bars section", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "bars",
+          inline: true,
+          items: [{ label: "svc", value: 3, total: 9, tone: "error", trailing: "2 crit · 1 high" }],
+        },
+      ],
+    });
+    const bars = v.view === "board" ? v.sections[0] : undefined;
+    expect(bars?.kind === "bars" && bars.inline).toBe(true);
+  });
 });
 
 describe("getRunArtifactResponseSchema", () => {
