@@ -162,16 +162,11 @@ function Section({ section }: { section: BoardSection }) {
       return <Segments items={section.items} />;
     case "bars": {
       const key = makeKeyer();
+      const inline = section.inline === true;
       return (
-        <div className="cvb-bars">
-          {section.items.map((b) => (
-            <div key={key(JSON.stringify(b))} className="cvb-bar">
-              <div className="cvb-bar-head">
-                <span className="cvb-bar-label">{b.label}</span>
-                <span className="cvb-bar-trailing">
-                  {b.trailing ?? `${barPct(b.value, b.total)}%`}
-                </span>
-              </div>
+        <div className={`cvb-bars${inline ? " cvb-bars--inline" : ""}`}>
+          {section.items.map((b) => {
+            const track = (
               <div className="cvb-bar-track">
                 <div
                   className="cvb-bar-fill"
@@ -179,8 +174,32 @@ function Section({ section }: { section: BoardSection }) {
                   style={{ width: `${barPct(b.value, b.total)}%` }}
                 />
               </div>
-            </div>
-          ))}
+            );
+            const trailing = (
+              <span className="cvb-bar-trailing">
+                {b.trailing ?? `${barPct(b.value, b.total)}%`}
+              </span>
+            );
+            return (
+              <div key={key(JSON.stringify(b))} className="cvb-bar">
+                {inline ? (
+                  <>
+                    <span className="cvb-bar-label">{b.label}</span>
+                    {track}
+                    {trailing}
+                  </>
+                ) : (
+                  <>
+                    <div className="cvb-bar-head">
+                      <span className="cvb-bar-label">{b.label}</span>
+                      {trailing}
+                    </div>
+                    {track}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       );
     }
@@ -207,15 +226,21 @@ function Section({ section }: { section: BoardSection }) {
                   {c.dot && <span className="cvb-card-dot" data-tone={c.dot} />}
                   {isSafeLinkScheme(c.href) ? (
                     <a
-                      className="cvb-link cvb-card-title"
+                      className={`cvb-link cvb-card-title${c.mono ? " cvb-card-title--mono" : ""}`}
                       href={c.href}
                       target="_blank"
                       rel="noopener noreferrer"
+                      data-tone={c.titleTone}
                     >
                       {c.title}
                     </a>
                   ) : (
-                    <span className="cvb-card-title">{c.title}</span>
+                    <span
+                      className={`cvb-card-title${c.mono ? " cvb-card-title--mono" : ""}`}
+                      data-tone={c.titleTone}
+                    >
+                      {c.title}
+                    </span>
                   )}
                   {c.pill && (
                     <span className="cvb-pill" data-tone={c.pill.tone}>
@@ -272,6 +297,14 @@ function Section({ section }: { section: BoardSection }) {
                   </div>
                 )}
                 {c.footnote && <div className="cvb-card-footnote">{c.footnote}</div>}
+                {c.reason && (
+                  <div className="cvb-card-reason">
+                    {c.reason.label && (
+                      <span className="cvb-card-reason-label">{c.reason.label} </span>
+                    )}
+                    {c.reason.text}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -310,6 +343,36 @@ function Section({ section }: { section: BoardSection }) {
     }
     case "actions":
       return <ActionsSection section={section} />;
+    case "grid": {
+      const key = makeKeyer();
+      return (
+        <div className="cvb-grid">
+          {section.cells.map((cell) =>
+            isSafeLinkScheme(cell.href) ? (
+              <a
+                key={key(JSON.stringify(cell))}
+                className="cvb-grid-cell cvb-grid-cell--link"
+                href={cell.href}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span className="cvb-grid-label">{cell.label}</span>
+                <span className="cvb-grid-badge" data-tone={cell.badge.tone}>
+                  {cell.badge.text}
+                </span>
+              </a>
+            ) : (
+              <div key={key(JSON.stringify(cell))} className="cvb-grid-cell">
+                <span className="cvb-grid-label">{cell.label}</span>
+                <span className="cvb-grid-badge" data-tone={cell.badge.tone}>
+                  {cell.badge.text}
+                </span>
+              </div>
+            ),
+          )}
+        </div>
+      );
+    }
     case "columns": {
       const colKey = makeKeyer();
       const template = section.columns.map((c) => `minmax(0, ${c.weight ?? 1}fr)`).join(" ");
