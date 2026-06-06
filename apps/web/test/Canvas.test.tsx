@@ -169,6 +169,49 @@ describe("CanvasProvider / useCanvas", () => {
     expect(dialog.querySelector('td[data-tone="error"]')).not.toBeNull();
   });
 
+  test("inline view table renders badge cells (value + grade chips, and badge-only)", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "table",
+          columns: [{ key: "service" }, { key: "quality" }, { key: "fail" }],
+          rows: [
+            {
+              service: "storage",
+              quality: {
+                value: "85%",
+                tone: "ok",
+                badges: [
+                  { text: "A", tone: "ok" },
+                  { text: "C", tone: "warn" },
+                ],
+              },
+              fail: { badges: [{ text: "34", tone: "error" }] },
+            },
+          ],
+        }),
+      },
+      title: "tbl",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    // Three chips total: the two grade badges + the standalone count badge.
+    expect(dialog.querySelectorAll(".canvas-cell-badge").length).toBe(3);
+    expect(dialog.querySelector('.canvas-cell-badge[data-tone="warn"]')?.textContent).toBe("C");
+    expect(dialog.querySelector('.canvas-cell-badge[data-tone="error"]')?.textContent).toBe("34");
+    // The Quality cell keeps its leading value alongside the chips.
+    expect(dialog.querySelector(".canvas-cell-value")?.textContent).toBe("85%");
+    // A badge-only cell shows the chip, never a "—" placeholder.
+    expect(dialog.textContent).not.toContain("—");
+  });
+
   test("inline view graph dispatches to the graph renderer", () => {
     const doc: CanvasDocument = {
       kind: "view",

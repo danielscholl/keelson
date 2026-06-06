@@ -64,13 +64,30 @@ export const canvasToneSchema = z.enum([
 ]);
 export type CanvasTone = z.infer<typeof canvasToneSchema>;
 
-// A cell is a bare scalar, or a scalar wrapped with a `tone`.
+// A cell is a bare scalar, or a scalar wrapped with a `tone` and/or small toned
+// `badges` — a coverage % beside R/S/M grade chips, a filled pass/skip/fail count
+// chip. Badges carry their own tone so they ride the full ramp the bare `td` tone
+// (ok/warn/error only) can't express.
 const canvasCellScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const canvasCellBadgeSchema = z
+  .object({ text: z.string().min(1), tone: canvasToneSchema.optional() })
+  .strict();
 const canvasCellSchema = z.union([
   canvasCellScalarSchema,
-  z.object({ value: canvasCellScalarSchema, tone: canvasToneSchema.optional() }).strict(),
+  z
+    .object({
+      value: canvasCellScalarSchema.optional(),
+      tone: canvasToneSchema.optional(),
+      badges: z.array(canvasCellBadgeSchema).optional(),
+    })
+    .strict()
+    // A wrapped cell must render something: a value, or at least one badge.
+    .refine((c) => c.value !== undefined || (c.badges?.length ?? 0) > 0, {
+      message: "a cell needs a value or at least one badge",
+    }),
 ]);
 export type CanvasCell = z.infer<typeof canvasCellSchema>;
+export type CanvasCellBadge = z.infer<typeof canvasCellBadgeSchema>;
 
 export const canvasTableViewSchema = z
   .object({
