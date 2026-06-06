@@ -4,21 +4,25 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 
 // Stub the snapshot hook (not api.ts/ws.ts) so this file's mocks don't collide
 // with Canvas.test.tsx's api.ts mock under bun's process-global mock.module.
-// Surface's contract is layout + collapse + refresh wiring; the hook's actual
-// re-hydrate is the hook's own concern.
-const snapStates: Record<string, { status: string; data: unknown }> = {};
+// Surface's contract is layout + collapse + auto-refresh wiring; the hook's
+// actual re-hydrate is the hook's own concern.
+const FRESH_ISO = new Date(Date.now() - 5_000).toISOString();
+const snapStates: Record<string, { status: string; data: unknown; composedAt?: string | null }> =
+  {};
 const reloadCalls: Record<string, number> = {};
 const useSnapshotKeys: string[] = [];
 
 mock.module("../src/hooks/useSnapshot.ts", () => ({
   useSnapshot: (key: string | null) => {
-    if (key === null) return { status: "empty", data: null, version: null, reload: () => {} };
+    if (key === null)
+      return { status: "empty", data: null, version: null, composedAt: null, reload: () => {} };
     useSnapshotKeys.push(key);
     const s = snapStates[key] ?? { status: "empty", data: null };
     return {
       status: s.status,
       data: s.data,
       version: 1,
+      composedAt: s.composedAt ?? (s.status === "live" ? FRESH_ISO : null),
       reload: () => {
         reloadCalls[key] = (reloadCalls[key] ?? 0) + 1;
       },
@@ -158,41 +162,45 @@ describe("Surface", () => {
     expect(screen.queryByRole("button", { name: "Expand region" })).toBeNull();
   });
 
-  test("a region with no workflow re-reads the cached frame on Refresh", () => {
+  test("renders no per-region refresh button — auto-refresh replaces it", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     renderSurface({
       id: "cimpl",
       title: "CIMPL",
       layout: { rows: [{ columns: [{ key: "rib:demo:quality" }] }] },
     });
-    expect(reloadCalls["rib:demo:quality"]).toBeUndefined();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(reloadCalls["rib:demo:quality"]).toBe(1);
-    expect(triggerCalls).toEqual([]);
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+    // Expand is the only head control that remains.
+    expect(screen.getByRole("button", { name: "Expand" })).toBeDefined();
   });
 
-  test("a region with a workflow re-runs it on Refresh (not a plain reload)", () => {
-    live("rib:demo:quality", board("Quality", "Services", 23));
+  test("an empty region with a workflow + cadence auto-runs it on mount", () => {
+    // No live() → the key is empty, so the region is stale and self-warms.
     renderSurface({
       id: "cimpl",
       title: "CIMPL",
-      layout: { rows: [{ columns: [{ key: "rib:demo:quality", workflow: "osdu-quality" }] }] },
+      layout: {
+        rows: [
+          { columns: [{ key: "rib:demo:quality", workflow: "osdu-quality", cadenceMs: 600_000 }] },
+        ],
+      },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(triggerCalls).toEqual(["osdu-quality"]);
-    expect(reloadCalls["rib:demo:quality"]).toBeUndefined();
   });
 
-  test("the refresh icon spins and disables while its run is in flight", () => {
+  test("shows a 'refreshing…' freshness readout while its run is in flight", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     triggerRunning = true;
-    const { container } = renderSurface({
+    renderSurface({
       id: "cimpl",
       title: "CIMPL",
-      layout: { rows: [{ columns: [{ key: "rib:demo:quality", workflow: "osdu-quality" }] }] },
+      layout: {
+        rows: [
+          { columns: [{ key: "rib:demo:quality", workflow: "osdu-quality", cadenceMs: 600_000 }] },
+        ],
+      },
     });
-    expect(container.querySelector(".surface-region-glyph.is-spinning")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Refresh" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("refreshing…")).toBeDefined();
   });
 
   test("a region with no data renders a shimmer skeleton, not a waiting note", () => {

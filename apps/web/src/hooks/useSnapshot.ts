@@ -17,6 +17,9 @@ interface SnapshotData {
   status: SnapshotStatus;
   data: unknown;
   version: number | null;
+  // The frame's server compose time, surfaced so a consumer can compute frame
+  // age (the auto-refresh staleness decision). null until a frame arrives.
+  composedAt: string | null;
 }
 
 // `reload()` re-hydrates the latest cached snapshot (re-runs the GET; the WS
@@ -26,8 +29,8 @@ export interface SnapshotState extends SnapshotData {
   reload: () => void;
 }
 
-const INITIAL: SnapshotData = { status: "loading", data: null, version: null };
-const EMPTY: SnapshotData = { status: "empty", data: null, version: null };
+const INITIAL: SnapshotData = { status: "loading", data: null, version: null, composedAt: null };
+const EMPTY: SnapshotData = { status: "empty", data: null, version: null, composedAt: null };
 
 // Subscribe to a server snapshot key: hydrate via GET, then live-update on each
 // WS frame, re-hydrating on every reconnect (the server has no on-connect
@@ -57,7 +60,12 @@ export function useSnapshot(key: string | null): SnapshotState {
     const applyFrame = (frame: SnapshotFrame): void => {
       if (cancelled || frame.version < seenVersion) return;
       seenVersion = frame.version;
-      setState({ status: "live", data: frame.data, version: frame.version });
+      setState({
+        status: "live",
+        data: frame.data,
+        version: frame.version,
+        composedAt: frame.composedAt,
+      });
     };
 
     // Hydrate on mount and on each fresh WS open. The in-flight guard collapses
@@ -82,7 +90,9 @@ export function useSnapshot(key: string | null): SnapshotState {
         if (!cancelled) {
           console.warn("[useSnapshot] hydrate failed:", err);
           setState((s) =>
-            s.status === "live" ? s : { status: "error", data: null, version: null },
+            s.status === "live"
+              ? s
+              : { status: "error", data: null, version: null, composedAt: null },
           );
         }
       } finally {

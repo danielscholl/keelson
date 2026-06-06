@@ -113,7 +113,9 @@ export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
 // when set, is the catalog workflow a region's refresh re-runs to repopulate its
 // key (vs. a plain re-read of the cached frame). `title`/`glyph` give the region
 // a static identity (a lane name + a toned glyph chip) shown in its head even
-// before data arrives — distinct from the board's own dynamic title.
+// before data arrives — distinct from the board's own dynamic title. `cadenceMs`,
+// when set, is the auto-refresh interval (ms) the SPA re-runs `workflow` on while
+// the surface is open (on open and on a ~30s heartbeat); floored to 30s.
 const regionGlyphSchema = z
   .object({ char: z.string().min(1), tone: canvasToneSchema.optional() })
   .strict();
@@ -121,6 +123,7 @@ const surfaceRegionSchema = z
   .object({
     key: z.string().min(1),
     workflow: z.string().min(1).optional(),
+    cadenceMs: z.number().int().min(30000).optional(),
     title: z.string().min(1).optional(),
     glyph: regionGlyphSchema.optional(),
   })
@@ -129,6 +132,7 @@ const collapsibleRegionSchema = z
   .object({
     key: z.string().min(1),
     workflow: z.string().min(1).optional(),
+    cadenceMs: z.number().int().min(30000).optional(),
     title: z.string().min(1).optional(),
     glyph: regionGlyphSchema.optional(),
     collapsible: z.boolean().optional(),
