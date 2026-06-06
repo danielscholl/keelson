@@ -97,6 +97,54 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("table");
   });
 
+  it("parses cells carrying badges (value + grade chips, and badge-only)", () => {
+    const v = canvasViewSchema.parse({
+      view: "table",
+      columns: [{ key: "service" }, { key: "quality" }, { key: "fail" }],
+      rows: [
+        {
+          service: "storage",
+          // coverage % beside R/S/M grade chips
+          quality: {
+            value: "85%",
+            tone: "ok",
+            badges: [
+              { text: "A", tone: "ok" },
+              { text: "C", tone: "warn" },
+            ],
+          },
+          // a filled count chip with no leading value
+          fail: { badges: [{ text: "34", tone: "error" }] },
+        },
+      ],
+    });
+    expect(v.view).toBe("table");
+  });
+
+  it("rejects an empty wrapped cell and a badge missing text / with extra key (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "table",
+        columns: [{ key: "a" }],
+        rows: [{ a: {} }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "table",
+        columns: [{ key: "a" }],
+        rows: [{ a: { badges: [{ text: "X", weight: 1 }] } }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "table",
+        columns: [{ key: "a" }],
+        rows: [{ a: { badges: [{ tone: "ok" }] } }],
+      }),
+    ).toThrow();
+  });
+
   it("rejects a cell with an unknown tone or an extra key (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({

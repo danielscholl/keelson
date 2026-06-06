@@ -1,13 +1,42 @@
-import type { CanvasCell, CanvasTableView, CanvasTone } from "@keelson/shared";
+import type { CanvasCell, CanvasCellBadge, CanvasTableView, CanvasTone } from "@keelson/shared";
 
 type Tone = CanvasTone;
 
-function normalizeCell(cell: CanvasCell | undefined): { display: string; tone?: Tone } {
-  const wrapped =
-    cell !== null && typeof cell === "object" ? cell : { value: cell, tone: undefined };
-  const display =
-    wrapped.value === null || wrapped.value === undefined ? "—" : String(wrapped.value);
-  return wrapped.tone ? { display, tone: wrapped.tone } : { display };
+function normalizeCell(cell: CanvasCell | undefined): {
+  display: string;
+  tone?: Tone;
+  badges?: CanvasCellBadge[];
+} {
+  const obj = cell !== null && typeof cell === "object" ? cell : null;
+  const value = obj ? obj.value : cell;
+  const badges = obj?.badges?.length ? obj.badges : undefined;
+  // A badge-only cell shows no dash placeholder; an empty value otherwise reads "—".
+  const display = value === null || value === undefined ? (badges ? "" : "—") : String(value);
+  return { display, ...(obj?.tone ? { tone: obj.tone } : {}), ...(badges ? { badges } : {}) };
+}
+
+// Small toned chips beside (or instead of) a cell value — A–E grade chips, a
+// filled pass/skip/fail count. Keyed by content so repeats stay stable.
+function CellBadges({ badges }: { badges: CanvasCellBadge[] }) {
+  const seen = new Map<string, number>();
+  return (
+    <span className="canvas-cell-badges">
+      {badges.map((b) => {
+        const base = `${b.text}:${b.tone ?? ""}`;
+        const dup = seen.get(base) ?? 0;
+        seen.set(base, dup + 1);
+        return (
+          <span
+            key={dup === 0 ? base : `${base}#${dup}`}
+            className="canvas-cell-badge"
+            data-tone={b.tone}
+          >
+            {b.text}
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 export function TableView({ view }: { view: CanvasTableView }) {
@@ -37,10 +66,17 @@ export function TableView({ view }: { view: CanvasTableView }) {
           {keyedRows.map(({ key, row }) => (
             <tr key={key}>
               {view.columns.map((col) => {
-                const { display, tone } = normalizeCell(row[col.key]);
+                const { display, tone, badges } = normalizeCell(row[col.key]);
                 return (
                   <td key={col.key} data-tone={tone}>
-                    {display}
+                    {badges ? (
+                      <>
+                        {display && <span className="canvas-cell-value">{display}</span>}
+                        <CellBadges badges={badges} />
+                      </>
+                    ) : (
+                      display
+                    )}
                   </td>
                 );
               })}
