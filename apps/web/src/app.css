@@ -3683,6 +3683,15 @@ a.cvb-card-title::after {
 .cvb-glyph[data-tone="brand"] {
   background: var(--magenta);
 }
+/* A leading glyph character (feed-row category icon), distinct from the tone dot. */
+.cvb-row-icon {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
 .cvb-row-text {
   color: var(--fg);
   flex: 1;
@@ -3848,6 +3857,40 @@ a.cvb-card-title::after {
 .cvb-pill[data-tone="brand"] {
   color: var(--magenta);
   border-color: color-mix(in srgb, var(--magenta) 32%, transparent);
+}
+
+/* Toned chips read as filled category pills (tinted fill + tone ring) — a feed
+   row's CLUSTER/PLATFORM category. A chip with no data-tone (the header chip)
+   keeps the neutral fill. */
+.cvb-chip[data-tone="ok"] {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+.cvb-chip[data-tone="warn"] {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 30%, transparent);
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+}
+.cvb-chip[data-tone="error"] {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+.cvb-chip[data-tone="info"] {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 30%, transparent);
+  background: color-mix(in srgb, var(--cyan) 14%, transparent);
+}
+.cvb-chip[data-tone="caution"] {
+  color: var(--orange);
+  border-color: color-mix(in srgb, var(--orange) 30%, transparent);
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+}
+.cvb-chip[data-tone="brand"] {
+  color: var(--magenta);
+  border-color: color-mix(in srgb, var(--magenta) 30%, transparent);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent);
 }
 .cvb-header-status[data-tone="info"] {
   color: var(--cyan);
@@ -4054,6 +4097,11 @@ a.cvb-card-title::after {
 .cvb-pill[data-tone="accent"] {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.cvb-chip[data-tone="accent"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .cvb-header-status[data-tone="accent"] {
   color: var(--accent);

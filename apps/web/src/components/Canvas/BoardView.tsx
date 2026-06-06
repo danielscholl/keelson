@@ -317,6 +317,11 @@ function Section({ section }: { section: BoardSection }) {
         <div className={`cvb-rows${section.boxed ? " cvb-rows--boxed" : ""}`}>
           {section.items.map((r) => (
             <div key={key(JSON.stringify(r))} className="cvb-row">
+              {r.icon && (
+                <span className="cvb-row-icon" aria-hidden="true">
+                  {r.icon}
+                </span>
+              )}
               {r.glyph && <span className="cvb-glyph" data-tone={r.glyph} />}
               {r.chip && (
                 <span className="cvb-chip" data-tone={r.chip.tone}>
