@@ -100,19 +100,31 @@ describe("useAutoRefresh — freshness label", () => {
     expect(result.current).toEqual({ label: "refreshing…", tone: null });
   });
 
-  test("shows the error readout when a run errored and the data is stale", () => {
+  test("shows the error readout when the last run errored", () => {
     const { result } = renderHook(() =>
-      useAutoRefresh({ ...base, composedAt: agoIso(700_000), error: "boom" }),
+      useAutoRefresh({ ...base, composedAt: agoIso(5_000), error: "boom" }),
     );
     expect(result.current).toEqual({ label: "refresh failed", tone: "error" });
   });
 
-  test("ignores a past error once the frame is fresh again", () => {
-    const { result } = renderHook(() =>
-      useAutoRefresh({ ...base, composedAt: agoIso(120_000), error: "boom" }),
-    );
-    expect(result.current.label).toBe("updated 2m ago");
+  test("clears the error once a newer frame supersedes the errored run", () => {
+    const { result, rerender } = renderHook((props: AutoRefreshInput) => useAutoRefresh(props), {
+      initialProps: { ...base, composedAt: agoIso(120_000), error: "boom" },
+    });
+    expect(result.current.tone).toBe("error");
+    rerender({ ...base, composedAt: agoIso(1_000), error: "boom" });
+    expect(result.current.label).toBe("updated just now");
     expect(result.current.tone).toBeNull();
+  });
+
+  test("keeps the error when a failed refresh produced no new frame", () => {
+    const frame = agoIso(5_000);
+    const { result, rerender } = renderHook((props: AutoRefreshInput) => useAutoRefresh(props), {
+      initialProps: { ...base, composedAt: frame, running: true },
+    });
+    expect(result.current.label).toBe("refreshing…");
+    rerender({ ...base, composedAt: frame, error: "boom", running: false });
+    expect(result.current).toEqual({ label: "refresh failed", tone: "error" });
   });
 
   test("shows a relative age, warn-toned once past the cadence", () => {

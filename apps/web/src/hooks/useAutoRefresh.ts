@@ -51,6 +51,17 @@ export function useAutoRefresh(input: AutoRefreshInput): Freshness {
   const liveRef = useRef({ running, trigger });
   liveRef.current = { running, trigger };
 
+  // An error stays visible only until a newer frame supersedes the errored run:
+  // capture the frame present when the error appeared. A later frame — a
+  // successful run, or the key repopulated by any other path — then clears the
+  // failure, while a failed refresh that produced no new frame keeps it shown.
+  const composedAtRef = useRef(composedAt);
+  composedAtRef.current = composedAt;
+  const [errorFrame, setErrorFrame] = useState<string | null>(null);
+  useEffect(() => {
+    setErrorFrame(error ? composedAtRef.current : null);
+  }, [error]);
+
   useEffect(() => {
     // Only a region declaring both a workflow and a cadence auto-refreshes;
     // others mount no interval and never re-render on the heartbeat.
@@ -84,13 +95,10 @@ export function useAutoRefresh(input: AutoRefreshInput): Freshness {
   // Only a cadence-bearing region carries a freshness contract.
   if (!workflow || !cadenceMs) return { label: null, tone: null };
   if (running) return { label: "refreshing…", tone: null };
+  if (error && composedAt === errorFrame) return { label: "refresh failed", tone: "error" };
   const composedMs = composedAt ? Date.parse(composedAt) : Number.NaN;
-  const hasFrame = !Number.isNaN(composedMs);
-  const ageMs = hasFrame ? Math.max(0, nowMs - composedMs) : Number.POSITIVE_INFINITY;
+  if (Number.isNaN(composedMs)) return { label: null, tone: null };
+  const ageMs = Math.max(0, nowMs - composedMs);
   const stale = ageMs >= cadenceMs;
-  // A past error only matters while the data is actually stale or missing; a
-  // fresh frame (repopulated by any path) means current data, so show its age.
-  if (error && stale) return { label: "refresh failed", tone: "error" };
-  if (!hasFrame) return { label: null, tone: null };
   return { label: formatAge(ageMs), tone: stale ? "warn" : null };
 }
