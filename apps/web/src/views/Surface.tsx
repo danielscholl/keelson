@@ -14,6 +14,7 @@ import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx
 import { BoardBody, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
@@ -21,6 +22,7 @@ import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 interface Region {
   key: string;
   workflow?: string;
+  cadenceMs?: number;
   title?: string;
   glyph?: { char: string; tone?: CanvasTone };
   collapsible?: boolean;
@@ -58,19 +60,30 @@ function SurfaceRegion({ region }: { region: Region }) {
   const { openCanvas } = useCanvas();
   const ribId = ribIdFromKey(region.key);
 
-  // Board actions dispatch to the region's owning rib; on success re-hydrate so
-  // the board reflects the new state (the producing workflow recompose is
-  // server-side). null ribId → no provider → buttons render disabled.
-  const reload = snap.reload;
-  const onSuccess = useCallback(() => reload(), [reload]);
-  const actions = useRibActionDispatch(ribId, { onSuccess });
-
-  // Refresh re-runs the region's bound workflow (repopulating its key) when one
-  // is declared; otherwise it re-reads the cached frame. The run's new frame
-  // arrives over the live subscription, so there's no manual reload to chase.
+  // The region's bound workflow re-runs on its cadence and on open while stale;
+  // the new frame arrives over the live subscription. `freshness` is the head's
+  // "updated Xm ago" readout — there is no manual per-region refresh control.
   const runRefresh = useWorkflowTrigger(region.workflow);
   const busy = runRefresh.running;
-  const onRefresh = region.workflow ? runRefresh.trigger : snap.reload;
+  const freshness = useAutoRefresh({
+    workflow: region.workflow,
+    cadenceMs: region.cadenceMs,
+    status: snap.status,
+    composedAt: snap.composedAt,
+    running: runRefresh.running,
+    error: runRefresh.error,
+    trigger: runRefresh.trigger,
+  });
+
+  // Board actions dispatch to the region's owning rib; on success re-run the
+  // bound workflow so the board reflects the new state (a plain frame re-read
+  // would show pre-action state). null ribId → no provider → buttons disabled.
+  const reload = snap.reload;
+  const onSuccess = useCallback(
+    () => (region.workflow ? runRefresh.trigger() : reload()),
+    [region.workflow, runRefresh.trigger, reload],
+  );
+  const actions = useRibActionDispatch(ribId, { onSuccess });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
@@ -122,23 +135,15 @@ function SurfaceRegion({ region }: { region: Region }) {
         <Segments items={board.header.segments} />
       )}
       <span className="surface-region-spacer" />
-      {runRefresh.error && (
-        <span className="surface-region-error" title={runRefresh.error}>
-          Refresh failed
+      {freshness.label && (
+        <span
+          className="surface-region-freshness"
+          data-tone={freshness.tone ?? undefined}
+          title={runRefresh.error ?? undefined}
+        >
+          {freshness.label}
         </span>
       )}
-      <button
-        type="button"
-        className="surface-region-action surface-region-icon"
-        onClick={onRefresh}
-        disabled={busy}
-        aria-label="Refresh"
-        title={region.workflow ? "Refresh (re-run workflow)" : "Refresh this region"}
-      >
-        <span className={`surface-region-glyph${busy ? " is-spinning" : ""}`} aria-hidden="true">
-          ↻
-        </span>
-      </button>
       <button
         type="button"
         className="surface-region-action surface-region-icon"

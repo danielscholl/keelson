@@ -122,6 +122,42 @@ describe("rib surface descriptor schema", () => {
     expect(s.layout.rows[0]?.columns[0]?.workflow).toBe("osdu-quality");
   });
 
+  it("carries an optional cadenceMs on header, banner, and column regions", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        header: { key: "rib:osdu:cluster", workflow: "osdu-cluster", cadenceMs: 600_000 },
+        banner: { key: "rib:osdu:release", workflow: "osdu-release", cadenceMs: 1_800_000 },
+        rows: [
+          {
+            columns: [{ key: "rib:osdu:quality", workflow: "osdu-quality", cadenceMs: 7_200_000 }],
+          },
+        ],
+      },
+    });
+    expect(s.layout.header?.cadenceMs).toBe(600_000);
+    expect(s.layout.banner?.cadenceMs).toBe(1_800_000);
+    expect(s.layout.rows[0]?.columns[0]?.cadenceMs).toBe(7_200_000);
+  });
+
+  it("rejects a cadenceMs below the 30s floor or non-integer", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { banner: { key: "rib:osdu:release", cadenceMs: 29_999 }, rows: [] },
+      }).success,
+    ).toBe(false);
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { banner: { key: "rib:osdu:release", cadenceMs: 60_000.5 }, rows: [] },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects an unknown field, an empty region key, and a column-less row", () => {
     expect(
       ribSurfaceDescriptorSchema.safeParse({ id: "x", title: "X", layout: { rows: [] }, extra: 1 })
