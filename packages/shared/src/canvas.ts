@@ -277,6 +277,9 @@ const rowsSectionSchema = z
     items: z.array(
       z
         .object({
+          // A leading glyph character (e.g. a feed-row category icon). Distinct
+          // from `glyph`, which is a tone rendered as a status dot.
+          icon: z.string().min(1).optional(),
           glyph: canvasToneSchema.optional(),
           chip: canvasPillSchema.optional(),
           text: z.string().min(1),

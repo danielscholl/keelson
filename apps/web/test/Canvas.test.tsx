@@ -257,7 +257,14 @@ describe("CanvasProvider / useCanvas", () => {
             },
             {
               kind: "rows",
-              items: [{ chip: { label: "CLUSTER" }, text: "job started", trailing: "21m" }],
+              items: [
+                {
+                  icon: "⎈",
+                  chip: { label: "CLUSTER", tone: "info" },
+                  text: "job started",
+                  trailing: "21m",
+                },
+              ],
             },
           ],
         }),
@@ -276,6 +283,10 @@ describe("CanvasProvider / useCanvas", () => {
     expect(dialog.textContent).toContain("alpha");
     expect(dialog.textContent).toContain("Keycloak");
     expect(dialog.textContent).toContain("job started");
+    // Feed row: leading icon char + a tone-colored category chip.
+    const feedRow = dialog.querySelector(".cvb-row");
+    expect(feedRow?.querySelector(".cvb-row-icon")?.textContent).toBe("⎈");
+    expect(feedRow?.querySelector('.cvb-chip[data-tone="info"]')?.textContent).toBe("CLUSTER");
     expect(dialog.querySelector('a[href="https://portal.test"]')).not.toBeNull();
     expect(screen.getByRole("button", { name: "Copy user" })).toBeTruthy();
   });

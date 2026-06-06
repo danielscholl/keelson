@@ -251,12 +251,13 @@ describe("canvasViewSchema", () => {
           kind: "rows",
           items: [
             {
-              glyph: "ok",
-              chip: { label: "CLUSTER", tone: "neutral" },
+              icon: "⎈",
+              chip: { label: "CLUSTER", tone: "info" },
               text: "job started",
               href: "https://x.test",
               trailing: "21m",
             },
+            { glyph: "ok", text: "Services", trailing: "29/29 ready" },
           ],
         },
         {
@@ -280,6 +281,15 @@ describe("canvasViewSchema", () => {
       canvasViewSchema.parse({
         view: "board",
         sections: [{ kind: "segments", items: [], extra: 1 }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a rows item with an empty icon", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "rows", items: [{ icon: "", text: "x" }] }],
       }),
     ).toThrow();
   });
