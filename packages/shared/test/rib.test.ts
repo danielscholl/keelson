@@ -205,5 +205,28 @@ describe("rib contract backward-compatibility", () => {
       }),
     };
     expect(ctx.getCredential).toBeUndefined();
+    // The C1 seam is optional too — a minimal context omits it (rooms fail closed).
+    expect(ctx.runAgentTurn).toBeUndefined();
+  });
+
+  it("accepts a context with the C1 agent-turn seam and exposes the dual-handle", async () => {
+    const ctx: RibContext = {
+      getExec: () => ({
+        runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+      runAgentTurn: (req) => ({
+        result: Promise.resolve({ status: "ok" as const, text: `echo:${req.prompt}` }),
+        stream: (async function* () {
+          yield { type: "text" as const, content: "echo" };
+          yield { type: "done" as const };
+        })(),
+      }),
+    };
+    const turn = ctx.runAgentTurn?.({ prompt: "hi" });
+    expect((await turn?.result)?.text).toBe("echo:hi");
+    const kinds: string[] = [];
+    for await (const c of turn?.stream ?? []) kinds.push(c.type);
+    expect(kinds).toEqual(["text", "done"]);
   });
 });

@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
+import type { MessageChunk } from "./chat.ts";
 
 /**
  * Rib — Keelson's extension contract.
@@ -74,6 +75,52 @@ export interface RibExec {
   runText(cmd: string, args: string[], opts?: RibExecOptions): Promise<RibExecResult<string>>;
 }
 
+// ---------------------------------------------------------------------------
+// Agent invocation (C1) — a rib runs one agent turn through the harness.
+//
+// Types only, no `@keelson/providers` back-dep: `MessageChunk` is the shared
+// chat streaming unit. The seam ships in two impls behind this one signature —
+// a CLI-backed MVP, then a registry-routed provider impl that inherits provider
+// pinning / redaction / credentials — so a rib's call site never changes when
+// the impl swaps.
+// ---------------------------------------------------------------------------
+
+export interface RibAgentTurnRequest {
+  prompt: string;
+  system?: string;
+  // A HINT, not a pin: undefined resolves to KEELSON_WORKFLOW_PROVIDER (or the
+  // first non-stub provider) once the registry-routed impl lands.
+  provider?: string;
+  model?: string;
+  // Omit for a text-only turn (the room default — no Bash/Edit between turns).
+  tools?: readonly { name: string; [k: string]: unknown }[];
+  allowedTools?: readonly string[];
+  disallowedTools?: readonly string[];
+  // The room's dispose() aborts in-flight turns via this signal.
+  abortSignal?: AbortSignal;
+  timeoutMs?: number;
+  cwd?: string;
+  // Accepted now, inert until provider capabilities allow session resumption.
+  resumeSessionId?: string;
+}
+
+export interface RibAgentTurnResult {
+  status: "ok" | "aborted" | "timeout" | "error";
+  text: string;
+  error?: string;
+  // "cli:<bin>" for the MVP impl; the real provider id once registry-routed.
+  providerId?: string;
+  sessionId?: string;
+}
+
+// A settled dual-handle, NOT a bare AsyncGenerator: `stream` is live progress,
+// `result` settles exactly once after the stream completes. The MVP impl yields
+// a single synthetic text chunk then a terminal `done`.
+export interface RibAgentTurn {
+  stream: AsyncIterable<MessageChunk>;
+  result: Promise<RibAgentTurnResult>;
+}
+
 // Dependency-injection surface the harness passes to every rib. The
 // `getSidecar` resolver intentionally returns `unknown` — each rib declares
 // its own structural narrowing and casts at the registration boundary.
@@ -90,6 +137,10 @@ export interface RibContext {
   // attempt to reach another rib's keys. Optional so minimal test contexts
   // without a credential store still satisfy the interface.
   getCredential?: (serviceId: string) => Promise<string | undefined>;
+  // Run one agent turn (C1). Optional, like the accessors above, so a rib that
+  // needs rooms but finds it absent fails closed. Provider routing is global,
+  // not namespace-scoped. See RibAgentTurn for the stream/result contract.
+  runAgentTurn?: (req: RibAgentTurnRequest) => RibAgentTurn;
 }
 
 // A view a rib declares so the harness surfaces a live canvas for one of the
