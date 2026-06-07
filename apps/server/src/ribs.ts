@@ -37,6 +37,7 @@ import {
   ribViewDescriptorSchema,
   type SnapshotManager,
   type SnapshotValidator,
+  type ToolDefinition,
 } from "@keelson/shared";
 import { createScopedSnapshotManager } from "./scoped-snapshot-manager.ts";
 
@@ -72,6 +73,11 @@ export interface ApplyRibsResult {
   readonly probes: Map<string, () => Promise<RibAuthStatus>>;
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
   readonly workflowContributions: RibWorkflowContribution[];
+  // Validated, de-duplicated tools across every active rib, in activation
+  // order. The composition root registers these into the shared tool registry
+  // (see `registerRibTools` in bootstrap.ts); `applyRibs` itself stays free of
+  // that global side effect so unit tests can run it repeatedly.
+  readonly tools: ToolDefinition[];
 }
 
 export function parseRibList(value: string | undefined): readonly string[] {
@@ -136,7 +142,11 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
   const probes = new Map<string, () => Promise<RibAuthStatus>>();
   const actionHandlers = new Map<string, (action: RibAction) => Promise<RibActionResult>>();
   const workflowContributions: RibWorkflowContribution[] = [];
+  const tools: ToolDefinition[] = [];
   const seen = new Set<string>();
+  // Tool names are a single global namespace shared across ribs; track claims
+  // so a later rib can't silently shadow an earlier rib's tool.
+  const claimedToolNames = new Set<string>();
   for (const id of opts.active) {
     const idCheck = ribIdSchema.safeParse(id);
     if (!idCheck.success) {
@@ -178,7 +188,12 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
     };
 
-    const result = rib.registerTools?.(ribCtx);
+    const ribToolNames = collectRibTools(
+      rib.id,
+      rib.registerTools?.(ribCtx),
+      claimedToolNames,
+      tools,
+    );
 
     // Validate view + action descriptors at the activation boundary (the same
     // spot the self-id is checked) so a malformed descriptor fails the rib
@@ -207,13 +222,8 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     manifests.push({
       id: rib.id,
       displayName: rib.displayName,
-      // Sanitize at the boundary: a JS rib could return a non-array `registered`
-      // (which would throw here) or non-string entries (which would later throw
-      // in GET /api/ribs' listRibsResponseSchema.parse and blank the panel).
-      // Coerce to a string-only array.
-      registered: Array.isArray(result?.registered)
-        ? result.registered.filter((t): t is string => typeof t === "string")
-        : [],
+      // Names of the tools that survived validation + de-dup, for GET /api/ribs.
+      registered: ribToolNames,
       views,
       actions,
       surfaces,
@@ -293,7 +303,54 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       disposers.push({ id: rib.id, dispose: rib.dispose.bind(rib) });
     }
   }
-  return { manifests, disposers, probes, actionHandlers, workflowContributions };
+  return { manifests, disposers, probes, actionHandlers, workflowContributions, tools };
+}
+
+// Narrow a rib's `registerTools` return into validated, non-colliding tools.
+// Defensive by design: a malformed entry or a non-array result warns and is
+// dropped rather than throwing, so one rib's bug can't take the server down or
+// blank GET /api/ribs. Pushes accepted tools onto `collected` and returns their
+// names (for the rib manifest), claiming each in the shared `claimed` set.
+function collectRibTools(
+  ribId: string,
+  raw: unknown,
+  claimed: Set<string>,
+  collected: ToolDefinition[],
+): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    console.warn(`[keelson] rib '${ribId}' registerTools did not return an array; ignoring`);
+    return [];
+  }
+  const names: string[] = [];
+  for (const entry of raw) {
+    if (!isToolDefinition(entry)) {
+      console.warn(`[keelson] rib '${ribId}' returned a malformed tool; skipping`);
+      continue;
+    }
+    if (claimed.has(entry.name)) {
+      console.warn(
+        `[keelson] rib '${ribId}' tool '${entry.name}' collides with an already-registered tool; skipping`,
+      );
+      continue;
+    }
+    claimed.add(entry.name);
+    collected.push(entry);
+    names.push(entry.name);
+  }
+  return names;
+}
+
+function isToolDefinition(value: unknown): value is ToolDefinition {
+  if (typeof value !== "object" || value === null) return false;
+  const t = value as Record<string, unknown>;
+  return (
+    typeof t.name === "string" &&
+    t.name.length > 0 &&
+    typeof t.description === "string" &&
+    typeof t.execute === "function" &&
+    t.inputSchema != null
+  );
 }
 
 function assertInNamespace(ribId: string, namespace: string, key: string, label: string): void {

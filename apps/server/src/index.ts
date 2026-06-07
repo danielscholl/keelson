@@ -15,6 +15,7 @@ import {
   bootstrapRibs,
   bootstrapWorkflows,
   prepareRibWorkflows,
+  registerRibTools,
 } from "./bootstrap.ts";
 import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
 import { chatRememberRoutes } from "./chat-remember-handler.ts";
@@ -79,6 +80,9 @@ const ribs = await bootstrapRibs({
   getRibCredential: (ribId, serviceId) =>
     createRibCredentialAccessor(credentialStore, ribId)(serviceId),
 });
+// Register rib-contributed tools into the shared registry so the chat agent,
+// /api/tools, and workflow prompt nodes all pick them up via getRegisteredTools.
+registerRibTools(ribs.tools);
 // Narrow rib-contributed workflow definitions and collect the run-path bindings
 // that republish a bound run's structured output to the rib's snapshot key.
 const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);

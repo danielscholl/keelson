@@ -28,10 +28,11 @@ import type {
   RibAuthStatus,
   RibContext,
   SnapshotManager,
+  ToolDefinition,
   WorkflowDiscoveryNotice,
 } from "@keelson/shared";
 import { runJSON, runText } from "@keelson/shared/exec";
-import { getRegisteredTools } from "@keelson/skills";
+import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
 import {
   DEFAULT_TOOL_DENYLIST,
   discoverWorkflows,
@@ -149,6 +150,11 @@ export interface RibBootstrap {
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
+  // Validated, de-duplicated tools across every active rib. The composition
+  // root registers these via `registerRibTools` so they reach chat + workflow
+  // prompt nodes; held here (not registered in this pure function) so the many
+  // tests that call bootstrapRibs don't accrue global registry state.
+  readonly tools: ToolDefinition[];
   // Invoke every activated rib's optional `dispose()` hook. Errors from one
   // disposer log a warning and never block the rest — shutdown must
   // make forward progress.
@@ -168,7 +174,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   // The CLI-backed C1 seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
   const runAgentTurn = options.runAgentTurn ?? makeRibAgentTurn();
-  const { manifests, disposers, probes, actionHandlers, workflowContributions } = applyRibs({
+  const { manifests, disposers, probes, actionHandlers, workflowContributions, tools } = applyRibs({
     active,
     available,
     ctx,
@@ -181,6 +187,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     probes,
     actionHandlers,
     workflowContributions,
+    tools,
     async disposeAll() {
       for (const d of disposers) {
         try {
@@ -192,6 +199,22 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       }
     },
   };
+}
+
+// Register a rib bootstrap's collected tools into the shared tool registry so
+// they reach the chat agent (and workflow `prompt` nodes) through the provider
+// tool adapters. Called once at real boot from the composition root; kept out
+// of bootstrapRibs so its many tests don't mutate the process-global registry.
+// Tolerant of an already-claimed name (warn + skip) so a re-boot in a
+// long-lived process can't crash on a duplicate.
+export function registerRibTools(tools: readonly ToolDefinition[]): void {
+  for (const tool of tools) {
+    if (isRegisteredTool(tool.name)) {
+      console.warn(`[keelson] tool '${tool.name}' is already registered; skipping`);
+      continue;
+    }
+    registerTool(tool);
+  }
 }
 
 // Narrow each rib workflow contribution against the workflow schema. Invalid

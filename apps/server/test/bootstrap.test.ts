@@ -13,14 +13,17 @@ import {
   type ProviderCapabilities,
   registerProvider,
 } from "@keelson/providers";
-import type { Rib } from "@keelson/shared";
+import type { Rib, ToolDefinition } from "@keelson/shared";
+import { clearRegistry, getRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
+import { z } from "zod";
 import {
   bootstrapPromptHandler,
   bootstrapRibs,
   parsePromptTimeoutMs,
   parseProviderList,
   parseToolDenylist,
+  registerRibTools,
 } from "../src/bootstrap.ts";
 import { discoverRibs } from "../src/rib-discovery.ts";
 import { parseRibList } from "../src/ribs.ts";
@@ -61,11 +64,15 @@ describe("bootstrapRibs", () => {
     else process.env.KEELSON_RIBS = envBefore;
   });
 
+  function fakeTool(name: string): ToolDefinition {
+    return { name, description: name, inputSchema: z.object({}), execute: async () => {} };
+  }
+
   function fakeRib(id: string, tools: string[] = []): Rib {
     return {
       id,
       displayName: id,
-      registerTools: () => ({ registered: tools }),
+      registerTools: () => tools.map(fakeTool),
     };
   }
 
@@ -105,17 +112,19 @@ describe("bootstrapRibs", () => {
     expect(manifests.map((m) => m.id)).toEqual(["alpha"]);
   });
 
-  test("non-string registerTools entries are dropped so GET /api/ribs can't 500", async () => {
+  test("malformed tool entries are dropped so GET /api/ribs can't 500", async () => {
     delete process.env.KEELSON_RIBS;
     const ribBadTools = {
       id: "alpha",
       displayName: "alpha",
-      // A JS rib could return a non-string entry; it must not reach the
-      // manifest (listRibsResponseSchema.parse would otherwise blank the panel).
-      registerTools: () => ({ registered: ["ok.tool", 42, null] }) as { registered: string[] },
+      // A JS rib could return non-tool entries among valid ones; they must not
+      // reach the manifest (listRibsResponseSchema.parse would blank the panel)
+      // nor the tool registry.
+      registerTools: () => [fakeTool("ok_tool"), 42, null],
     } as unknown as Rib;
-    const { manifests } = await bootstrapRibs({ available: { alpha: ribBadTools } });
-    expect(manifests[0]?.registered).toEqual(["ok.tool"]);
+    const { manifests, tools } = await bootstrapRibs({ available: { alpha: ribBadTools } });
+    expect(manifests[0]?.registered).toEqual(["ok_tool"]);
+    expect(tools.map((t) => t.name)).toEqual(["ok_tool"]);
   });
 
   test("a non-array registerTools result doesn't crash bootstrap", async () => {
@@ -124,11 +133,12 @@ describe("bootstrapRibs", () => {
       id: "alpha",
       displayName: "alpha",
       // A JS rib could return a non-array; the boundary must coerce to [] rather
-      // than throw on `.filter` and prevent the server from starting.
-      registerTools: () => ({ registered: "tool" }) as unknown as { registered: string[] },
+      // than throw and prevent the server from starting.
+      registerTools: () => "tool",
     } as unknown as Rib;
-    const { manifests } = await bootstrapRibs({ available: { alpha: ribNonArray } });
+    const { manifests, tools } = await bootstrapRibs({ available: { alpha: ribNonArray } });
     expect(manifests[0]?.registered).toEqual([]);
+    expect(tools).toEqual([]);
   });
 
   test("malformed ids in KEELSON_RIBS are rejected by the schema", async () => {
@@ -168,7 +178,7 @@ describe("bootstrapRibs", () => {
     const asyncRib = (id: string, delayMs: number): Rib => ({
       id,
       displayName: id,
-      registerTools: () => ({ registered: [] }),
+      registerTools: () => [],
       dispose: async () => {
         await new Promise((r) => setTimeout(r, delayMs));
         calls.push(id);
@@ -192,7 +202,7 @@ describe("bootstrapRibs", () => {
     const ribWithDispose = (id: string): Rib => ({
       id,
       displayName: id,
-      registerTools: () => ({ registered: [] }),
+      registerTools: () => [],
       dispose: () => {
         calls.push(id);
       },
@@ -241,7 +251,7 @@ describe("bootstrapRibs", () => {
     const ribWithBundle: Rib = {
       id: "alpha",
       displayName: "alpha",
-      registerTools: () => ({ registered: [] }),
+      registerTools: () => [],
       composeBundle: async () => {
         composeCalls++;
         return { generation: composeCalls };
@@ -274,7 +284,7 @@ describe("bootstrapRibs", () => {
         const mgr = ctx.getSnapshotManager?.();
         mgr?.register("rib:alpha:partitions", () => ({ count: 3 }));
         mgr?.register("rib:alpha:users", () => ({ count: 12 }));
-        return { registered: [] };
+        return [];
       },
     };
     await bootstrapRibs({ available: { alpha: multiSnapshotRib }, snapshotManager });
@@ -290,7 +300,7 @@ describe("bootstrapRibs", () => {
       displayName: "alpha",
       registerTools: (ctx) => {
         ctx.getSnapshotManager?.().register("other:key", () => ({}));
-        return { registered: [] };
+        return [];
       },
     };
     await expect(bootstrapRibs({ available: { alpha: rogue }, snapshotManager })).rejects.toThrow(
@@ -339,6 +349,43 @@ describe("bootstrapRibs", () => {
     expect(manifests[0]?.hasOnAction).toBe(true);
     expect(await probes.get("alpha")?.()).toEqual({ authenticated: true });
     expect(await actionHandlers.get("alpha")?.({ type: "go" })).toEqual({ ok: true });
+  });
+
+  describe("tool registration", () => {
+    beforeEach(() => clearRegistry());
+    afterEach(() => clearRegistry());
+
+    test("collects tools across ribs and skips a cross-rib name collision", async () => {
+      delete process.env.KEELSON_RIBS;
+      const { tools, manifests } = await bootstrapRibs({
+        available: {
+          alpha: fakeRib("alpha", ["alpha_one", "shared_tool"]),
+          beta: fakeRib("beta", ["beta_one", "shared_tool"]),
+        },
+      });
+      // alpha activates first and claims shared_tool; beta's copy is skipped.
+      expect(tools.map((t) => t.name)).toEqual(["alpha_one", "shared_tool", "beta_one"]);
+      expect(manifests.find((m) => m.id === "beta")?.registered).toEqual(["beta_one"]);
+    });
+
+    test("registerRibTools exposes a rib's tools through getRegisteredTools", async () => {
+      delete process.env.KEELSON_RIBS;
+      const { tools } = await bootstrapRibs({
+        available: { alpha: fakeRib("alpha", ["alpha_one", "alpha_two"]) },
+      });
+      registerRibTools(tools);
+      expect(
+        getRegisteredTools()
+          .map((t) => t.name)
+          .sort(),
+      ).toEqual(["alpha_one", "alpha_two"]);
+    });
+
+    test("registerRibTools skips an already-registered name", () => {
+      registerRibTools([fakeTool("dup")]);
+      registerRibTools([fakeTool("dup")]);
+      expect(getRegisteredTools().map((t) => t.name)).toEqual(["dup"]);
+    });
   });
 
   describe("discovery", () => {
