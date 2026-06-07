@@ -62,10 +62,14 @@ async function runCli(
     return { status: "aborted", text: "", providerId };
   }
 
-  const args = ["-p", req.prompt, "--output-format", "json", ...toolArgs(req)];
+  const args = ["-p", "--output-format", "json", ...toolArgs(req)];
   if (req.system) args.push("--append-system-prompt", req.system);
   if (req.model) args.push("--model", req.model);
   if (req.resumeSessionId) args.push("--resume", req.resumeSessionId);
+  // `--` terminates option parsing so a prompt that starts with "-" (a Markdown
+  // bullet, "--help", …) is read as input, not a CLI flag — `-p` is boolean and
+  // the prompt is the positional after it. Verified against the real CLI.
+  args.push("--", req.prompt);
 
   const res = await exec<ClaudeReply>(bin, args, {
     ...(req.timeoutMs ? { timeoutMs: req.timeoutMs } : {}),

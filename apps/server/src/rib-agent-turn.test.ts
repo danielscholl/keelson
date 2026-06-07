@@ -60,7 +60,6 @@ describe("makeRibAgentTurn (CLI MVP)", () => {
     }).result;
     expect(seen).toEqual([
       "-p",
-      "do x",
       "--output-format",
       "json",
       // no tool field requested => text-only (see tool-rail tests below)
@@ -72,7 +71,21 @@ describe("makeRibAgentTurn (CLI MVP)", () => {
       "opus",
       "--resume",
       "s0",
+      // prompt is the last positional, after `--`, so a leading dash is data
+      "--",
+      "do x",
     ]);
+  });
+
+  it("passes the prompt as the final positional after `--` (leading-dash safe)", async () => {
+    let seen: string[] = [];
+    const run = makeRibAgentTurn({
+      runJSON: fakeExec({ ok: true, data: { result: "x" } }, (_cmd, args) => {
+        seen = args;
+      }),
+    });
+    await run("chamber", { prompt: "- a bullet prompt" }).result;
+    expect(seen.slice(-2)).toEqual(["--", "- a bullet prompt"]);
   });
 
   it("maps a CLI failure to an error result + error chunk", async () => {
