@@ -23,6 +23,8 @@ import type {
   Rib,
   RibAction,
   RibActionResult,
+  RibAgentTurn,
+  RibAgentTurnRequest,
   RibAuthStatus,
   RibContext,
   SnapshotManager,
@@ -41,6 +43,7 @@ import {
   type WorkflowLoadWarning,
   workflowDefinitionSchema,
 } from "@keelson/workflows";
+import { makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { discoverRibs } from "./rib-discovery.ts";
 import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
 
@@ -133,6 +136,9 @@ export interface BootstrapRibsOptions {
   // Builds a rib's namespaced read-only credential reader. Optional so unit
   // tests without a credential store stay deterministic.
   getRibCredential?: (ribId: string, serviceId: string) => Promise<string | undefined>;
+  // Agent-turn factory (C1). Defaults to the CLI-backed makeRibAgentTurn;
+  // injectable so tests pass a fake instead of shelling a provider CLI.
+  runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
 }
 
 export interface RibBootstrap {
@@ -159,10 +165,14 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
   };
+  // The CLI-backed C1 seam (test override via options.runAgentTurn). Harmless
+  // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
+  const runAgentTurn = options.runAgentTurn ?? makeRibAgentTurn();
   const { manifests, disposers, probes, actionHandlers, workflowContributions } = applyRibs({
     active,
     available,
     ctx,
+    runAgentTurn,
     ...(snapshotManager ? { snapshotManager } : {}),
     ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
   });

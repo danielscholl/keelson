@@ -24,6 +24,8 @@ import {
   type RibAction,
   type RibActionDescriptor,
   type RibActionResult,
+  type RibAgentTurn,
+  type RibAgentTurnRequest,
   type RibAuthStatus,
   type RibContext,
   type RibSurfaceDescriptor,
@@ -93,6 +95,10 @@ export interface ApplyRibsOptions {
   // Builds a rib's namespaced read-only credential reader. Optional so unit
   // tests without a credential store stay deterministic.
   readonly getRibCredential?: (ribId: string, serviceId: string) => Promise<string | undefined>;
+  // Runs one agent turn for a rib (C1). NOT namespace-scoped — provider routing
+  // is global; `ribId` is passed for future per-rib policy/logging. Optional so
+  // test rigs without a provider/CLI stay deterministic.
+  readonly runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
 }
 
 /**
@@ -169,6 +175,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.getRibCredential
         ? { getCredential: (serviceId) => opts.getRibCredential!(rib.id, serviceId) }
         : {}),
+      ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
     };
 
     const result = rib.registerTools?.(ribCtx);
