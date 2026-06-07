@@ -3398,7 +3398,7 @@ button.tab:focus-visible {
 /* stats — KPI tiles */
 .cvb-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(var(--cvb-stat-cols, 4), minmax(0, 1fr));
   gap: 10px;
 }
 .cvb-stat {
@@ -3409,6 +3409,7 @@ button.tab:focus-visible {
   background: var(--card-2);
   border: 1px solid var(--border);
   border-radius: 8px;
+  min-width: 0;
 }
 .cvb-stat-value {
   font-size: 20px;
@@ -3478,9 +3479,9 @@ button.tab:focus-visible {
 
 /* cards — movers / CVEs / access */
 .cvb-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .cvb-card {
   display: flex;
@@ -3605,6 +3606,13 @@ a.cvb-card-title::after {
 
 /* boxed cards — each field is an inset pill (value + copy icon), stacked, so a
    service card reads as a list of copyable credentials / addresses. */
+/* Service cards stay a responsive gallery; plain cards (movers/stalled) keep the
+   base full-width stripe stack. */
+.cvb-cards--boxed {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
 .cvb-cards--boxed .cvb-card-fields {
   flex-direction: column;
   flex-wrap: nowrap;

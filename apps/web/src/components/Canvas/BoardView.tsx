@@ -145,7 +145,10 @@ function Section({ section }: { section: BoardSection }) {
     case "stats": {
       const key = makeKeyer();
       return (
-        <div className="cvb-stats">
+        <div
+          className="cvb-stats"
+          style={{ "--cvb-stat-cols": section.items.length } as CSSProperties}
+        >
           {section.items.map((s) => (
             <div key={key(JSON.stringify(s))} className="cvb-stat">
               <span className="cvb-stat-value" data-tone={s.tone}>
