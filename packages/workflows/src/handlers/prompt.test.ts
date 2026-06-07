@@ -276,6 +276,44 @@ describe("makePromptHandler", () => {
     expect(calls[0]!.options?.disallowedTools).toBeUndefined();
   });
 
+  test("defaultOffTools (rib tools) are excluded from a node with no allowed_tools", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "osdu_quality" }, { name: "repo_get_kube" }],
+      defaultOffTools: ["osdu_quality"],
+    });
+    await handler.handle(stubNode, buildCtx());
+    const toolNames = (calls[0]!.options?.tools ?? []).map((t) => t.name);
+    // A workflow inherits no rib tool it didn't ask for...
+    expect(toolNames).not.toContain("osdu_quality");
+    // ...but non-default-off registered tools still pass through.
+    expect(toolNames).toContain("repo_get_kube");
+  });
+
+  test("a node opts into a defaultOffTool by listing it in allowed_tools", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "osdu_quality" }, { name: "repo_get_kube" }],
+      defaultOffTools: ["osdu_quality"],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      allowed_tools: ["osdu_quality"],
+    } as unknown as DagNode;
+    await handler.handle(node, buildCtx());
+    const toolNames = (calls[0]!.options?.tools ?? []).map((t) => t.name);
+    // Explicit opt-in brings the rib tool into the node's catalog.
+    expect(toolNames).toContain("osdu_quality");
+    expect(toolNames).not.toContain("repo_get_kube");
+  });
+
   test("node.allowed_tools = [] forwards an empty whitelist (model gets no tools)", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],

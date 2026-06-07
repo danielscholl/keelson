@@ -138,8 +138,11 @@ const workflowSubscribers = createWorkflowSubscribers();
 // Constructed AFTER bootstrapProviders/bootstrapRibs so the prompt handler's
 // getProvider/getRegisteredTools closures resolve against populated registries.
 // Undefined when no providers are registered — workflowsRoutes falls back to
-// the placeholder handler in that case.
-const promptHandler = bootstrapPromptHandler();
+// the placeholder handler in that case. Rib tools are passed as default-off so
+// a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
+const promptHandler = bootstrapPromptHandler({
+  defaultOffTools: ribs.tools.map((t) => t.name),
+});
 
 // Shared handler options so the HTTP routes and the in-process WorkflowController
 // drive runs through the identical wiring. The controller + chat tools are built

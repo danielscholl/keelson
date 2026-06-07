@@ -405,7 +405,9 @@ function toDiscoveryNotice(w: WorkflowLoadWarning): WorkflowDiscoveryNotice {
 // Returns undefined when no providers are registered — keeps `workflowsRoutes`
 // on its placeholder-fallback path so the catalog still serves bash-only
 // workflows when prompt nodes can't run.
-export function bootstrapPromptHandler(): NodeHandler | undefined {
+export function bootstrapPromptHandler(
+  opts: { defaultOffTools?: readonly string[] } = {},
+): NodeHandler | undefined {
   const providers = getProviderInfoList();
   if (providers.length === 0) {
     console.warn(
@@ -471,6 +473,9 @@ export function bootstrapPromptHandler(): NodeHandler | undefined {
     getProvider,
     getRegisteredTools: () => getRegisteredTools() as unknown as readonly { name: string }[],
     denylist,
+    // Rib tools are off by default in workflow prompt nodes — a node must opt in
+    // via `allowed_tools` — so a workflow inherits no rib tool it didn't ask for.
+    ...(opts.defaultOffTools ? { defaultOffTools: opts.defaultOffTools } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
 }

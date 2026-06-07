@@ -97,6 +97,14 @@ export interface MakePromptHandlerOptions {
   getRegisteredTools: () => readonly { name: string; [k: string]: unknown }[];
   /** Tool names to exclude. Defaults to DEFAULT_TOOL_DENYLIST when undefined; an explicit empty array allows everything. */
   denylist?: readonly string[];
+  /**
+   * Tool names that are OFF by default in a prompt node and only appear when
+   * the node explicitly opts in via `allowed_tools`. The harness fills this
+   * with rib-registered tool names so a workflow inherits no rib tool it didn't
+   * ask for (least-privilege), while still being able to call one it lists.
+   * The global denylist always still applies on top.
+   */
+  defaultOffTools?: readonly string[];
   /** Per-node timeout in milliseconds. Defaults to 10 minutes. */
   timeoutMs?: number;
   /** Memory hook seam. Default is no-ops; reserved for the future memory layer. */
@@ -115,6 +123,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
   const denySet = new Set(opts.denylist ?? DEFAULT_TOOL_DENYLIST);
+  const defaultOffSet = new Set(opts.defaultOffTools ?? []);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const lifecycle = opts.lifecycle ?? {};
   const systemPrompt = opts.systemPrompt;
@@ -247,7 +256,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       //     these, minus anything the operator forbids").
       //   - `node.denied_tools` set → union with the global denylist
       //     (additive — author can deny MORE, never less).
-      //   - neither set → existing behavior (global denylist only).
+      //   - neither set → global denylist only, PLUS the default-off set (rib
+      //     tools), so a node inherits no rib tool it didn't explicitly allow.
       // SDK-level `allowedTools` / `disallowedTools` are forwarded so the
       // gate applies to SDK built-ins (Read/Write/Edit/Bash/Glob/Grep/…),
       // not just our MCP-projected tool catalog.
@@ -267,7 +277,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       } else {
         const effectiveDeny =
           nodeDeniedBare === undefined ? denySet : new Set([...denySet, ...nodeDeniedBare]);
-        filteredTools = allTools.filter((t) => !effectiveDeny.has(t.name));
+        // Default-off (rib) tools require an explicit allowed_tools opt-in, which
+        // this branch (no allow-list) is not — so exclude them here too.
+        filteredTools = allTools.filter(
+          (t) => !effectiveDeny.has(t.name) && !defaultOffSet.has(t.name),
+        );
       }
 
       let assistantText = "";
