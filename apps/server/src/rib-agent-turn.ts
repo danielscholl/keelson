@@ -62,7 +62,7 @@ async function runCli(
     return { status: "aborted", text: "", providerId };
   }
 
-  const args = ["-p", req.prompt, "--output-format", "json"];
+  const args = ["-p", req.prompt, "--output-format", "json", ...toolArgs(req)];
   if (req.system) args.push("--append-system-prompt", req.system);
   if (req.model) args.push("--model", req.model);
   if (req.resumeSessionId) args.push("--resume", req.resumeSessionId);
@@ -85,6 +85,26 @@ async function runCli(
     providerId,
     ...(res.data?.session_id ? { sessionId: res.data.session_id } : {}),
   };
+}
+
+// Translate the request's tool rails into claude CLI flags so a turn that asks
+// for no tools actually gets none. Without this a "text-only" room turn (the
+// room default — tools omitted) would run under the CLI's ambient tool policy
+// and could invoke Bash/Edit, violating the C1 contract. `--tools ""` disables
+// all tools; `--allowedTools` / `--disallowedTools` are the permission rails.
+function toolArgs(req: RibAgentTurnRequest): string[] {
+  const available = req.tools?.map((t) => t.name) ?? [];
+  const allowed = req.allowedTools ?? [];
+  const disallowed = req.disallowedTools ?? [];
+  // No tool field grants anything (the room default) => force a text-only turn.
+  if (available.length === 0 && allowed.length === 0 && disallowed.length === 0) {
+    return ["--tools", ""];
+  }
+  const args: string[] = [];
+  if (available.length > 0) args.push("--tools", available.join(","));
+  if (allowed.length > 0) args.push("--allowedTools", allowed.join(","));
+  if (disallowed.length > 0) args.push("--disallowedTools", disallowed.join(","));
+  return args;
 }
 
 // The MVP has no live token stream, so synthesize one from the settled result:

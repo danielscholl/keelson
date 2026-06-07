@@ -63,6 +63,9 @@ describe("makeRibAgentTurn (CLI MVP)", () => {
       "do x",
       "--output-format",
       "json",
+      // no tool field requested => text-only (see tool-rail tests below)
+      "--tools",
+      "",
       "--append-system-prompt",
       "be terse",
       "--model",
@@ -119,6 +122,51 @@ describe("makeRibAgentTurn (CLI MVP)", () => {
     const result = await run("chamber", { prompt: "hi" }).result;
     expect(cmd).toBe("codex");
     expect(result.providerId).toBe("cli:codex");
+  });
+});
+
+describe("makeRibAgentTurn tool rails", () => {
+  // Capture the CLI args produced for a given request's tool fields.
+  async function argsFor(
+    req: Parameters<ReturnType<typeof makeRibAgentTurn>>[1],
+  ): Promise<string[]> {
+    let seen: string[] = [];
+    const run = makeRibAgentTurn({
+      runJSON: fakeExec({ ok: true, data: { result: "x" } }, (_cmd, args) => {
+        seen = args;
+      }),
+    });
+    await run("chamber", req).result;
+    return seen;
+  }
+
+  it("forces a text-only turn when no tool field is set (the room default)", async () => {
+    const args = await argsFor({ prompt: "hi" });
+    expect(args).toContain("--tools");
+    // --tools "" disables all tools
+    expect(args[args.indexOf("--tools") + 1]).toBe("");
+    expect(args).not.toContain("--allowedTools");
+  });
+
+  it("treats an explicit empty allowedTools as text-only too", async () => {
+    const args = await argsFor({ prompt: "hi", allowedTools: [] });
+    expect(args[args.indexOf("--tools") + 1]).toBe("");
+  });
+
+  it("passes a requested available tool set, not the empty sentinel", async () => {
+    const args = await argsFor({ prompt: "hi", tools: [{ name: "Read" }, { name: "Edit" }] });
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read,Edit");
+  });
+
+  it("maps allow/deny rails and does not force no-tools when rails are present", async () => {
+    const allowed = await argsFor({ prompt: "hi", allowedTools: ["Bash(git:*)", "Read"] });
+    expect(allowed[allowed.indexOf("--allowedTools") + 1]).toBe("Bash(git:*),Read");
+    expect(allowed).not.toContain(""); // no text-only sentinel
+
+    const denied = await argsFor({ prompt: "hi", disallowedTools: ["Bash", "Edit"] });
+    expect(denied[denied.indexOf("--disallowedTools") + 1]).toBe("Bash,Edit");
+    // a deny-only request still leaves the rest of the tools available
+    expect(denied).not.toContain("--tools");
   });
 });
 
