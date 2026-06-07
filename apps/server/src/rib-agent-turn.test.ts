@@ -110,6 +110,23 @@ describe("makeRibAgentTurn (CLI MVP)", () => {
     expect((await run("chamber", { prompt: "hi" }).result).status).toBe("timeout");
   });
 
+  it("maps a zero-exit JSON error (is_error / non-success subtype) to an error result", async () => {
+    const flagged = makeRibAgentTurn({
+      runJSON: fakeExec({ ok: true, data: { result: "", is_error: true, session_id: "s1" } }),
+    });
+    const r1 = await flagged("chamber", { prompt: "hi" }).result;
+    expect(r1.status).toBe("error");
+    expect(r1.sessionId).toBe("s1");
+
+    const maxTurns = makeRibAgentTurn({
+      runJSON: fakeExec({ ok: true, data: { subtype: "error_max_turns", result: "partial" } }),
+    });
+    const r2 = await maxTurns("chamber", { prompt: "hi" }).result;
+    expect(r2.status).toBe("error");
+    expect(r2.text).toBe("partial");
+    expect(r2.error).toContain("error_max_turns");
+  });
+
   it("short-circuits an already-aborted turn without shelling the CLI", async () => {
     let called = false;
     const run = makeRibAgentTurn({
@@ -188,6 +205,12 @@ describe("makeRibAgentTurn tool rails", () => {
     expect(denied[denied.indexOf("--disallowedTools") + 1]).toBe("Bash,Edit");
     // a deny-only request still leaves the rest of the tools available
     expect(denied).not.toContain("--tools");
+  });
+
+  it("treats an empty deny list like no deny rail (default tools, not text-only)", async () => {
+    const args = await argsFor({ prompt: "hi", disallowedTools: [] });
+    expect(args).not.toContain("--tools"); // not the text-only sentinel
+    expect(args).not.toContain("--disallowedTools");
   });
 });
 

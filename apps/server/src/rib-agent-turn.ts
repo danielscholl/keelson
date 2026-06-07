@@ -37,6 +37,9 @@ export interface MakeRibAgentTurnDeps {
 interface ClaudeReply {
   result?: string;
   session_id?: string;
+  // claude can exit 0 yet flag a failed turn in the JSON.
+  is_error?: boolean;
+  subtype?: string;
 }
 
 export function makeRibAgentTurn(
@@ -82,12 +85,29 @@ async function runCli(
     return { status, text: "", error: res.error, providerId };
   }
 
-  const text = typeof res.data?.result === "string" ? res.data.result : "";
+  const data = res.data;
+  const text = typeof data?.result === "string" ? data.result : "";
+  const sessionId = data?.session_id;
+  // A zero exit isn't enough: claude reports a failed turn (max-turns,
+  // max-budget, execution error) as is_error / a non-"success" subtype while
+  // still returning JSON. Don't pass that off to the rib as a successful turn.
+  if (data?.is_error === true || (data?.subtype && data.subtype !== "success")) {
+    return {
+      status: "error",
+      text,
+      error:
+        data?.subtype && data.subtype !== "success"
+          ? `claude turn: ${data.subtype}`
+          : "claude reported an error",
+      providerId,
+      ...(sessionId ? { sessionId } : {}),
+    };
+  }
   return {
     status: "ok",
     text,
     providerId,
-    ...(res.data?.session_id ? { sessionId: res.data.session_id } : {}),
+    ...(sessionId ? { sessionId } : {}),
   };
 }
 
@@ -114,8 +134,10 @@ function toolArgs(req: RibAgentTurnRequest): string[] {
   const args: string[] = [];
   if (catalog.length > 0) {
     args.push("--tools", catalog.join(","));
-  } else if (explicitAllowList || disallowed.length === 0) {
-    args.push("--tools", ""); // text-only: the room default, or an empty allow-list
+  } else if (explicitAllowList || req.disallowedTools === undefined) {
+    // Text-only: the room default (no tool fields), or an explicit empty
+    // allow-list. A deny rail — even an empty one — leaves the rest available.
+    args.push("--tools", "");
   }
   if (allowed.length > 0) args.push("--allowedTools", allowed.join(","));
   if (disallowed.length > 0) args.push("--disallowedTools", disallowed.join(","));
