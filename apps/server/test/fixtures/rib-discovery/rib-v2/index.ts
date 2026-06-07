@@ -4,13 +4,16 @@
 // auth-status probe that reads a namespaced credential.
 
 import type { Rib } from "@keelson/shared";
+import { z } from "zod";
 
 const rib: Rib = {
   id: "v2",
   displayName: "V2 Rib",
   views: [{ key: "rib:v2:summary", canvasKind: "view", title: "V2 Summary" }],
   actions: [{ type: "ping", label: "Ping" }],
-  registerTools: () => ({ registered: ["v2.tool"] }),
+  registerTools: () => [
+    { name: "v2.tool", description: "v2 tool", inputSchema: z.object({}), execute: async () => {} },
+  ],
   composeBundle: async () => ({ ok: true }),
   contributeWorkflows: () => [
     {

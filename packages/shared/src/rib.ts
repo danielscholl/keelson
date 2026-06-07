@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
 import type { MessageChunk } from "./chat.ts";
+import type { ToolDefinition } from "./tools.ts";
 
 /**
  * Rib — Keelson's extension contract.
@@ -271,7 +272,14 @@ export interface Rib {
   // (e.g. "my-rib" → @keelson/rib-my-rib). Gated by KEELSON_RIBS.
   id: string;
   displayName: string;
-  registerTools?(ctx: RibContext): { registered: string[] };
+  // Returns the rib's chat/workflow tools. The harness registers them into the
+  // shared tool registry at boot, so they reach the chat agent (and workflow
+  // `prompt` nodes) through the provider tool adapters with no per-rib wiring.
+  // Tool names are global; a name already claimed by another rib is skipped
+  // with a warning. The factory receives the per-rib `ctx` so a tool's
+  // `execute` can close over the rib's exec/sidecar/credential resolvers — the
+  // same data layer its `composeBundle` snapshot draws from.
+  registerTools?(ctx: RibContext): readonly ToolDefinition[];
   composeBundle?(ctx: RibContext): Promise<unknown>;
   // Static view descriptors honored by the canvas-kind registry / Ribs panel.
   // Each `key` must live under the rib's namespace (`rib:<id>` or

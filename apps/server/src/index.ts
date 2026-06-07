@@ -15,6 +15,7 @@ import {
   bootstrapRibs,
   bootstrapWorkflows,
   prepareRibWorkflows,
+  registerRibTools,
 } from "./bootstrap.ts";
 import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
 import { chatRememberRoutes } from "./chat-remember-handler.ts";
@@ -79,6 +80,9 @@ const ribs = await bootstrapRibs({
   getRibCredential: (ribId, serviceId) =>
     createRibCredentialAccessor(credentialStore, ribId)(serviceId),
 });
+// Register rib-contributed tools into the shared registry so the chat agent,
+// /api/tools, and workflow prompt nodes all pick them up via getRegisteredTools.
+registerRibTools(ribs.tools);
 // Narrow rib-contributed workflow definitions and collect the run-path bindings
 // that republish a bound run's structured output to the rib's snapshot key.
 const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);
@@ -134,8 +138,11 @@ const workflowSubscribers = createWorkflowSubscribers();
 // Constructed AFTER bootstrapProviders/bootstrapRibs so the prompt handler's
 // getProvider/getRegisteredTools closures resolve against populated registries.
 // Undefined when no providers are registered — workflowsRoutes falls back to
-// the placeholder handler in that case.
-const promptHandler = bootstrapPromptHandler();
+// the placeholder handler in that case. Rib tools are passed as default-off so
+// a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
+const promptHandler = bootstrapPromptHandler({
+  defaultOffTools: ribs.tools.map((t) => t.name),
+});
 
 // Shared handler options so the HTTP routes and the in-process WorkflowController
 // drive runs through the identical wiring. The controller + chat tools are built

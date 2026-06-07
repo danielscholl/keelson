@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { RibSurfaceDescriptor } from "@keelson/shared";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
 
 // Stub the snapshot hook (not api.ts/ws.ts) so this file's mocks don't collide
 // with Canvas.test.tsx's api.ts mock under bun's process-global mock.module.
@@ -226,6 +227,58 @@ describe("Surface", () => {
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("Quality");
     expect(dialog.textContent).toContain("Services");
+  });
+
+  test("no Explore control renders when onExplore is absent", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:quality" }] }] },
+    });
+    expect(screen.queryByRole("button", { name: "Explore in chat" })).toBeNull();
+  });
+
+  test("Explore raises a chat seed built from the region's live snapshot", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    const seeds: ChatSeed[] = [];
+    render(
+      <CanvasProvider>
+        <Surface
+          descriptor={{
+            id: "cimpl",
+            title: "CIMPL",
+            layout: { rows: [{ columns: [{ key: "rib:demo:quality", title: "Quality" }] }] },
+          }}
+          onExplore={(s) => seeds.push(s)}
+        />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Explore in chat" }));
+    expect(seeds).toHaveLength(1);
+    expect(seeds[0]?.name).toBe("Quality");
+    expect(seeds[0]?.openingPrompt).toBe(OPENING_PROMPT);
+    // The board snapshot (no markdown/text field) primes as a fenced JSON block.
+    expect(seeds[0]?.systemPrompt).toContain("Quality");
+    expect(seeds[0]?.systemPrompt).toContain("BEGIN PANEL DATA");
+  });
+
+  test("no Explore control on a region still waiting for its first snapshot", () => {
+    const seeds: ChatSeed[] = [];
+    render(
+      <CanvasProvider>
+        <Surface
+          descriptor={{
+            id: "cimpl",
+            title: "CIMPL",
+            layout: { rows: [{ columns: [{ key: "rib:demo:missing" }] }] },
+          }}
+          onExplore={(s) => seeds.push(s)}
+        />
+      </CanvasProvider>,
+    );
+    // Gated on snap.status === "live" — an empty region offers nothing to prime.
+    expect(screen.queryByRole("button", { name: "Explore in chat" })).toBeNull();
   });
 
   test("a region's board actions render enabled (wired to the rib-namespaced dispatcher)", () => {

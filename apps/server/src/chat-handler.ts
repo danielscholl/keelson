@@ -382,7 +382,16 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   const acc = createContentPartsAccumulator();
   let streamFailed = false;
 
-  const tools = [...getRegisteredTools(), ...(deps.workflowTools ?? [])];
+  // Harness-owned tools (workflow_* and, below, note_project) are authoritative:
+  // a rib that registers a colliding name must not shadow them, and the SDK
+  // adapters don't dedupe by name. So drop any registered (rib) tool whose name
+  // a harness tool already claims; the harness copy is appended in allTools.
+  const workflowTools = deps.workflowTools ?? [];
+  const harnessNames = new Set(workflowTools.map((t) => t.name));
+  const tools = [
+    ...getRegisteredTools().filter((t) => !harnessNames.has(t.name)),
+    ...workflowTools,
+  ];
 
   // A projectId is always required for project-scoped recall; without it,
   // MemoryStore.recall would skip the filter and inject memories from every
@@ -396,7 +405,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     recallProjectId !== undefined && deps.projectNotebookStore !== undefined
       ? createNoteProjectTool({ store: deps.projectNotebookStore, projectId: recallProjectId })
       : undefined;
-  const allTools = noteTool ? [...tools, noteTool] : tools;
+  const allTools = noteTool ? [...tools.filter((t) => t.name !== noteTool.name), noteTool] : tools;
 
   // Recall failures warn-and-continue with the section omitted; the turn
   // proceeds with whatever systemPrompt the seed would have produced.

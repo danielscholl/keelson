@@ -1,5 +1,14 @@
+import { z } from "zod";
+
 export default {
   id: "test",
   displayName: "Test Rib",
-  registerTools: () => ({ registered: ["test.tool"] }),
+  registerTools: () => [
+    {
+      name: "test.tool",
+      description: "test tool",
+      inputSchema: z.object({}),
+      execute: async () => {},
+    },
+  ],
 };

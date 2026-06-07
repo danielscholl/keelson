@@ -232,7 +232,7 @@ describe("applyRibs wiring", () => {
       displayName: "Chamber",
       registerTools: (ctx) => {
         captured = ctx;
-        return { registered: [] };
+        return [];
       },
     };
     let seenRibId = "";
@@ -267,7 +267,7 @@ describe("applyRibs wiring", () => {
       displayName: "Chamber",
       registerTools: (ctx) => {
         captured = ctx;
-        return { registered: [] };
+        return [];
       },
     };
     applyRibs({
