@@ -6,6 +6,10 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+// Re-exported so out-of-tree ribs author tool `inputSchema`s with the harness's
+// own zod instance — the provider adapters call `z.toJSONSchema()` on those
+// schemas, which can break across two copies of zod.
+export { z } from "zod";
 export * from "./canvas.ts";
 export * from "./chat.ts";
 export * from "./description.ts";
