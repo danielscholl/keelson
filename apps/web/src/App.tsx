@@ -8,6 +8,7 @@ import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
 import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
 import { useSettings } from "./hooks/useSettings.ts";
+import type { ChatSeed } from "./lib/exploreSeed.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
 import { Ribs } from "./views/Ribs.tsx";
@@ -35,6 +36,10 @@ function AppInner() {
     workflowName: string;
     runId: string;
   } | null>(null);
+  // A panel "explore in chat" handoff — held here so it survives the tab swap
+  // from a surface to Chat (the two are never mounted together). Chat consumes
+  // it on mount and clears it via onSeedConsumed.
+  const [pendingSeed, setPendingSeed] = useState<ChatSeed | null>(null);
   const pausedRunCount = usePausedRunCount();
   const pendingMemoryCount = usePendingMemoryCount();
 
@@ -91,6 +96,17 @@ function AppInner() {
     setActiveTab("chat");
   }, [setConversationId]);
 
+  // Panel → chat: clear the active conversation (Chat's seed consumer requires
+  // no hydrated convo) so the seed mints a fresh chat, then flip to the Chat tab.
+  const handleExplore = useCallback(
+    (seed: ChatSeed) => {
+      setPendingSeed(seed);
+      setConversationId(null);
+      setActiveTab("chat");
+    },
+    [setConversationId],
+  );
+
   return (
     <div className="wrap">
       <TopBar
@@ -106,7 +122,7 @@ function AppInner() {
       {activeSurface ? (
         // Key by tab so switching surfaces remounts the tree — region collapse
         // state must not leak from one surface's layout into another's.
-        <Surface key={activeTab} descriptor={activeSurface} />
+        <Surface key={activeTab} descriptor={activeSurface} onExplore={handleExplore} />
       ) : activeTab === "workflows" ? (
         <Workflows
           pendingRun={pendingWorkflowRun}
@@ -117,7 +133,11 @@ function AppInner() {
       ) : activeTab === "ribs" ? (
         <Ribs />
       ) : (
-        <Chat onOpenWorkflowRun={handleOpenWorkflowRun} />
+        <Chat
+          onOpenWorkflowRun={handleOpenWorkflowRun}
+          pendingSeed={pendingSeed}
+          onSeedConsumed={() => setPendingSeed(null)}
+        />
       )}
     </div>
   );

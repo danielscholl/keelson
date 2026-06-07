@@ -18,6 +18,7 @@ import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
+import { buildExploreSeed, type ChatSeed } from "../lib/exploreSeed.ts";
 
 interface Region {
   key: string;
@@ -32,28 +33,48 @@ interface Region {
 // A rib's primary surface: region-bound boards laid out as header → banner →
 // rows(columns) → footer. Each region owns an independent snapshot subscription
 // (live + per-region refresh); the harness carries no rib-specific layout code.
-export function Surface({ descriptor }: { descriptor: RibSurfaceDescriptor }) {
+export function Surface({
+  descriptor,
+  onExplore,
+}: {
+  descriptor: RibSurfaceDescriptor;
+  // Raised when a region's "explore in chat" control fires, carrying the seed
+  // built from that region's current snapshot. App hands it to the Chat view.
+  onExplore?: (seed: ChatSeed) => void;
+}) {
   const { header, banner, rows, footer } = descriptor.layout;
   return (
     <div className="page surface-page">
       {/* Role-prefixed keys so a region remounts (re-reads its initial collapsed
           flag) if the descriptor swaps it for a different one at this slot. */}
-      {header && <SurfaceRegion key={`header:${header.key}`} region={header} />}
-      {banner && <SurfaceRegion key={`banner:${banner.key}`} region={banner} />}
+      {header && (
+        <SurfaceRegion key={`header:${header.key}`} region={header} onExplore={onExplore} />
+      )}
+      {banner && (
+        <SurfaceRegion key={`banner:${banner.key}`} region={banner} onExplore={onExplore} />
+      )}
       {rows.map((row, rowIndex) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: surface rows are a static descriptor array (never reordered), so the index is a stable, collision-free key — region keys are unconstrained and could collide if joined.
         <div className="surface-row" key={`row:${rowIndex}`}>
           {row.columns.map((col) => (
-            <SurfaceRegion key={col.key} region={col} />
+            <SurfaceRegion key={col.key} region={col} onExplore={onExplore} />
           ))}
         </div>
       ))}
-      {footer && <SurfaceRegion key={`footer:${footer.key}`} region={footer} />}
+      {footer && (
+        <SurfaceRegion key={`footer:${footer.key}`} region={footer} onExplore={onExplore} />
+      )}
     </div>
   );
 }
 
-function SurfaceRegion({ region }: { region: Region }) {
+function SurfaceRegion({
+  region,
+  onExplore,
+}: {
+  region: Region;
+  onExplore?: (seed: ChatSeed) => void;
+}) {
   const collapsible = region.collapsible ?? false;
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
   const snap = useSnapshot(region.key);
@@ -143,6 +164,19 @@ function SurfaceRegion({ region }: { region: Region }) {
         >
           {freshness.label}
         </span>
+      )}
+      {snap.status === "live" && onExplore && (
+        <button
+          type="button"
+          className="surface-region-action surface-region-icon"
+          onClick={() =>
+            onExplore(buildExploreSeed(board?.title ?? region.title ?? region.key, snap.data))
+          }
+          aria-label="Explore in chat"
+          title="Explore this in chat"
+        >
+          <span aria-hidden="true">✦</span>
+        </button>
       )}
       <button
         type="button"

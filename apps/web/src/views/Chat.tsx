@@ -26,23 +26,6 @@ import {
   startWorkflowRun,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
-import { Sidebar } from "../components/Chat/Sidebar.tsx";
-import { AddToNotebookModal } from "../components/Memory/AddToNotebookModal.tsx";
-import { useConversation } from "../hooks/useConversation.ts";
-import { useConversations } from "../hooks/useConversations.ts";
-import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
-import {
-  createReconnectingChatWs,
-  type ReconnectingChatWsHandle,
-  type ReconnectingWsState,
-} from "../ws.ts";
-
-// Sentinel used to hide a seeded-conversation kickoff turn that the SPA
-// auto-sends. No seed flows ship yet — this stays as an exact-match sentinel
-// for the legacy `seeded` check; a real value would override it once seed
-// flows ship.
-const OPENING_PROMPT = "__keelson_seeded_opening_prompt__";
-
 import { CommandCallBlock } from "../components/Chat/CommandCallBlock.tsx";
 import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";
 import { ModelChip } from "../components/Chat/ModelChip.tsx";
@@ -51,6 +34,7 @@ import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { ReasoningEffortChip } from "../components/Chat/ReasoningEffortChip.tsx";
 import { ReasoningEffortPopover } from "../components/Chat/ReasoningEffortPopover.tsx";
+import { Sidebar } from "../components/Chat/Sidebar.tsx";
 import { SlashCommandPopover } from "../components/Chat/SlashCommandPopover.tsx";
 import { ThinkingBlock } from "../components/Chat/ThinkingBlock.tsx";
 import { ThinkingChip } from "../components/Chat/ThinkingChip.tsx";
@@ -61,10 +45,15 @@ import {
 } from "../components/Chat/ToolCallsBlock.tsx";
 import { ToolsChip } from "../components/Chat/ToolsChip.tsx";
 import { ToolsPopover } from "../components/Chat/ToolsPopover.tsx";
+import { AddToNotebookModal } from "../components/Memory/AddToNotebookModal.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
+import { useConversation } from "../hooks/useConversation.ts";
+import { useConversations } from "../hooks/useConversations.ts";
+import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
+import { OPENING_PROMPT } from "../lib/exploreSeed.ts";
 import {
   filterSlashCommands,
   filterWorkflowNames,
@@ -75,6 +64,11 @@ import {
   type SlashCommandFamily,
   workflowRunNamePartial,
 } from "../lib/slashCommands.ts";
+import {
+  createReconnectingChatWs,
+  type ReconnectingChatWsHandle,
+  type ReconnectingWsState,
+} from "../ws.ts";
 
 type Role = "user" | "assistant" | "system" | "command";
 

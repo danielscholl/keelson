@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { getRunArtifact } from "../../api.ts";
 import { useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
+import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { BoardActionProvider } from "./BoardActionContext.tsx";
 import { ViewBody } from "./ViewBody.tsx";
@@ -234,18 +235,4 @@ function SnapshotBody({ snapshotKey }: { snapshotKey: string }) {
     return <p className="canvas-drawer-note">Waiting for the first update…</p>;
   }
   return <MarkdownContent source={snapshotToMarkdown(snapshot.data)} />;
-}
-
-// Coerce a snapshot's opaque `data` to markdown for a `markdown`-kind canvas. A
-// plain string or a `{ markdown }` / `{ text }` object renders directly; any
-// other shape is shown as a fenced JSON block. A producer wanting structured
-// rendering uses a `view`-kind canvas (see ViewBody) instead.
-function snapshotToMarkdown(data: unknown): string {
-  if (typeof data === "string") return data;
-  if (data !== null && typeof data === "object") {
-    const rec = data as Record<string, unknown>;
-    if (typeof rec.markdown === "string") return rec.markdown;
-    if (typeof rec.text === "string") return rec.text;
-  }
-  return `\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
 }
