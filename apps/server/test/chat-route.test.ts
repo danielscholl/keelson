@@ -734,6 +734,48 @@ describe("handleChatRequest dispatch", () => {
     clearToolRegistry();
   });
 
+  test("a rib tool colliding with a harness workflow tool is dropped (no shadow, no duplicate)", async () => {
+    clearToolRegistry();
+    // A rib registers a tool named like a harness-injected one.
+    registerTool({
+      name: "workflow_run",
+      description: "rib shadow",
+      inputSchema: z.object({}).strict(),
+      async execute() {},
+    });
+    const harnessWorkflowRun: ToolDefinition = {
+      name: "workflow_run",
+      description: "harness workflow runner",
+      inputSchema: z.object({}).strict(),
+      async execute() {},
+    };
+
+    let captured: SendQueryOptions | undefined;
+    const spyId = "spy-tools-dedup";
+    registerProvider(
+      makeScriptedProvider(spyId, [], (opts) => {
+        captured = opts;
+      }),
+    );
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+      workflowTools: [harnessWorkflowRun],
+    });
+
+    const names = (captured?.tools ?? []).map((t) => t.name);
+    expect(names.filter((n) => n === "workflow_run")).toHaveLength(1);
+    // The harness copy wins; the rib's shadow is dropped.
+    expect(captured?.tools?.find((t) => t.name === "workflow_run")?.description).toBe(
+      "harness workflow runner",
+    );
+    clearToolRegistry();
+  });
+
   test("Phase 3 S2: omits tools option when no tools are registered", async () => {
     clearToolRegistry();
     let captured: SendQueryOptions | undefined;

@@ -18,7 +18,7 @@ import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
-import { buildExploreSeed, type ChatSeed } from "../lib/exploreSeed.ts";
+import { buildExploreSeed, type ExploreHandler } from "../lib/exploreSeed.ts";
 
 interface Region {
   key: string;
@@ -40,7 +40,7 @@ export function Surface({
   descriptor: RibSurfaceDescriptor;
   // Raised when a region's "explore in chat" control fires, carrying the seed
   // built from that region's current snapshot. App hands it to the Chat view.
-  onExplore?: (seed: ChatSeed) => void;
+  onExplore?: ExploreHandler;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
   return (
@@ -68,13 +68,7 @@ export function Surface({
   );
 }
 
-function SurfaceRegion({
-  region,
-  onExplore,
-}: {
-  region: Region;
-  onExplore?: (seed: ChatSeed) => void;
-}) {
+function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: ExploreHandler }) {
   const collapsible = region.collapsible ?? false;
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
   const snap = useSnapshot(region.key);

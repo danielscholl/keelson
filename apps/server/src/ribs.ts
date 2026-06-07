@@ -344,12 +344,21 @@ function collectRibTools(
 function isToolDefinition(value: unknown): value is ToolDefinition {
   if (typeof value !== "object" || value === null) return false;
   const t = value as Record<string, unknown>;
+  // inputSchema must be a zod schema — the provider adapters call
+  // `z.toJSONSchema()` / read its `.shape`, which throws on a plain object and
+  // would take down the whole agent turn rather than skipping one bad rib here.
+  const schema = t.inputSchema as { safeParse?: unknown } | null | undefined;
+  // Advisory flags reach /api/tools verbatim (registeredToolInfoSchema parses
+  // them as booleans); a non-boolean would 500 the tools panel for every tool.
   return (
     typeof t.name === "string" &&
     t.name.length > 0 &&
     typeof t.description === "string" &&
     typeof t.execute === "function" &&
-    t.inputSchema != null
+    schema != null &&
+    typeof schema.safeParse === "function" &&
+    (t.state_changing === undefined || typeof t.state_changing === "boolean") &&
+    (t.requires_confirmation === undefined || typeof t.requires_confirmation === "boolean")
   );
 }
 

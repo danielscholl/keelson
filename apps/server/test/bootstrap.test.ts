@@ -127,6 +127,42 @@ describe("bootstrapRibs", () => {
     expect(tools.map((t) => t.name)).toEqual(["ok_tool"]);
   });
 
+  test("drops a tool whose inputSchema is not a zod schema (would crash the provider adapter)", async () => {
+    delete process.env.KEELSON_RIBS;
+    const ribBadSchema = {
+      id: "alpha",
+      displayName: "alpha",
+      // inputSchema is a plain object, not a zod schema — the provider adapter
+      // would throw on z.toJSONSchema(); it must be skipped at the boundary.
+      registerTools: () => [
+        { name: "alpha_bad", description: "d", inputSchema: {}, execute: async () => {} },
+        fakeTool("alpha_ok"),
+      ],
+    } as unknown as Rib;
+    const { manifests, tools } = await bootstrapRibs({ available: { alpha: ribBadSchema } });
+    expect(manifests[0]?.registered).toEqual(["alpha_ok"]);
+    expect(tools.map((t) => t.name)).toEqual(["alpha_ok"]);
+  });
+
+  test("drops a tool with a non-boolean advisory flag (would 500 /api/tools)", async () => {
+    delete process.env.KEELSON_RIBS;
+    const ribBadFlag = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: () => [
+        {
+          name: "alpha_flag",
+          description: "d",
+          inputSchema: z.object({}),
+          execute: async () => {},
+          state_changing: "true",
+        },
+      ],
+    } as unknown as Rib;
+    const { tools } = await bootstrapRibs({ available: { alpha: ribBadFlag } });
+    expect(tools).toEqual([]);
+  });
+
   test("a non-array registerTools result doesn't crash bootstrap", async () => {
     delete process.env.KEELSON_RIBS;
     const ribNonArray = {

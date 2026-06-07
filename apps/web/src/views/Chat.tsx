@@ -53,7 +53,7 @@ import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
 import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
-import { OPENING_PROMPT } from "../lib/exploreSeed.ts";
+import { type ChatSeed, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 import {
   filterSlashCommands,
   filterWorkflowNames,
@@ -289,11 +289,7 @@ export interface ChatProps {
   // hydrated) and forwards systemPrompt + name to createConversation on
   // first send. The openingPrompt is auto-fired and hidden from the
   // transcript so the kickoff doesn't clutter the chat.
-  pendingSeed?: {
-    systemPrompt: string;
-    openingPrompt: string;
-    name: string;
-  } | null;
+  pendingSeed?: ChatSeed | null;
   onSeedConsumed?: () => void;
   // Opens a started workflow run in the Workflows view (from a `/workflow run`
   // result block). App lifts this so it can switch tabs and deep-link the run.

@@ -89,22 +89,22 @@ function AppInner() {
   }, [themePreference]);
 
   // useConversation owns the active conversation id; expose setConversationId
-  // here so the topbar's New Chat button can reset it.
+  // here so the topbar's New Chat button and the panel explore handoff can reset
+  // it. Clearing it is what lets Chat's seed consumer mint a fresh conversation.
   const { setConversationId } = useConversation();
-  const handleNewChat = useCallback(() => {
+  const goToFreshChat = useCallback(() => {
     setConversationId(null);
     setActiveTab("chat");
   }, [setConversationId]);
 
-  // Panel → chat: clear the active conversation (Chat's seed consumer requires
-  // no hydrated convo) so the seed mints a fresh chat, then flip to the Chat tab.
+  // Panel → chat: stash the seed, then open a fresh chat (Chat's seed consumer
+  // requires no hydrated conversation, which goToFreshChat guarantees).
   const handleExplore = useCallback(
     (seed: ChatSeed) => {
       setPendingSeed(seed);
-      setConversationId(null);
-      setActiveTab("chat");
+      goToFreshChat();
     },
-    [setConversationId],
+    [goToFreshChat],
   );
 
   return (
@@ -117,7 +117,7 @@ function AppInner() {
         onThemeChange={setTheme}
         pausedRunCount={pausedRunCount}
         pendingMemoryCount={pendingMemoryCount}
-        onNewChat={handleNewChat}
+        onNewChat={goToFreshChat}
       />
       {activeSurface ? (
         // Key by tab so switching surfaces remounts the tree — region collapse
