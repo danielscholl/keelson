@@ -195,6 +195,16 @@ describe("makeRibAgentTurn tool rails", () => {
     expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read");
   });
 
+  it("intersects tools with the allow-list so the catalog can't widen past it", async () => {
+    const args = await argsFor({
+      prompt: "hi",
+      tools: [{ name: "Read" }, { name: "Edit" }],
+      allowedTools: ["Read"],
+    });
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read"); // Edit excluded by the allow-list
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read");
+  });
+
   it("maps allow/deny rails (catalog uses base names; rail keeps the scope)", async () => {
     const allowed = await argsFor({ prompt: "hi", allowedTools: ["Bash(git:*)", "Read"] });
     expect(allowed[allowed.indexOf("--tools") + 1]).toBe("Bash,Read"); // catalog = base names

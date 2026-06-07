@@ -123,10 +123,22 @@ function toolArgs(req: RibAgentTurnRequest): string[] {
 
   // `--tools` is the catalog gate (which built-ins may load at all); only it
   // actually bounds the turn. `--allowedTools` is just the permission rail — on
-  // its own it leaves every default tool loadable. So an explicit allow-list
-  // must also narrow the catalog. Catalog names come from `tools` plus the base
-  // name of each allow entry ("Bash(git:*)" -> "Bash").
-  const catalog = unique([...fromTools, ...allowed.map(baseToolName)]);
+  // its own it leaves every default tool loadable. So an allow-list, when
+  // present, IS the narrowing: the catalog is what's both available and allowed
+  // (or just the allow-list when no explicit `tools` set was given) — never the
+  // union, which would let a `tools` entry outside the allow-list stay loadable.
+  // Allow entries are reduced to base names ("Bash(git:*)" -> "Bash") for the
+  // catalog; the scoped form is kept on the `--allowedTools` rail.
+  const allowedBase = allowed.map(baseToolName);
+  let catalog: string[];
+  if (req.allowedTools !== undefined) {
+    catalog =
+      req.tools !== undefined
+        ? unique(fromTools.filter((n) => allowedBase.includes(n)))
+        : unique(allowedBase);
+  } else {
+    catalog = unique(fromTools);
+  }
   // `tools`/`allowedTools` present (even empty) means "these and no others";
   // `disallowedTools` alone is a deny rail that leaves the rest available.
   const explicitAllowList = req.tools !== undefined || req.allowedTools !== undefined;
