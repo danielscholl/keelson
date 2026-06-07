@@ -97,18 +97,39 @@ async function runCli(
 // and could invoke Bash/Edit, violating the C1 contract. `--tools ""` disables
 // all tools; `--allowedTools` / `--disallowedTools` are the permission rails.
 function toolArgs(req: RibAgentTurnRequest): string[] {
-  const available = req.tools?.map((t) => t.name) ?? [];
+  const fromTools = req.tools?.map((t) => t.name) ?? [];
   const allowed = req.allowedTools ?? [];
   const disallowed = req.disallowedTools ?? [];
-  // No tool field grants anything (the room default) => force a text-only turn.
-  if (available.length === 0 && allowed.length === 0 && disallowed.length === 0) {
-    return ["--tools", ""];
-  }
+
+  // `--tools` is the catalog gate (which built-ins may load at all); only it
+  // actually bounds the turn. `--allowedTools` is just the permission rail — on
+  // its own it leaves every default tool loadable. So an explicit allow-list
+  // must also narrow the catalog. Catalog names come from `tools` plus the base
+  // name of each allow entry ("Bash(git:*)" -> "Bash").
+  const catalog = unique([...fromTools, ...allowed.map(baseToolName)]);
+  // `tools`/`allowedTools` present (even empty) means "these and no others";
+  // `disallowedTools` alone is a deny rail that leaves the rest available.
+  const explicitAllowList = req.tools !== undefined || req.allowedTools !== undefined;
+
   const args: string[] = [];
-  if (available.length > 0) args.push("--tools", available.join(","));
+  if (catalog.length > 0) {
+    args.push("--tools", catalog.join(","));
+  } else if (explicitAllowList || disallowed.length === 0) {
+    args.push("--tools", ""); // text-only: the room default, or an empty allow-list
+  }
   if (allowed.length > 0) args.push("--allowedTools", allowed.join(","));
   if (disallowed.length > 0) args.push("--disallowedTools", disallowed.join(","));
   return args;
+}
+
+// The bare built-in tool name, dropping any permission scope ("Bash(git:*)").
+function baseToolName(spec: string): string {
+  const paren = spec.indexOf("(");
+  return (paren === -1 ? spec : spec.slice(0, paren)).trim();
+}
+
+function unique(names: string[]): string[] {
+  return [...new Set(names.filter((n) => n.length > 0))];
 }
 
 // The MVP has no live token stream, so synthesize one from the settled result:

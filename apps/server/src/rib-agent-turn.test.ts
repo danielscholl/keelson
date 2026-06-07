@@ -171,10 +171,18 @@ describe("makeRibAgentTurn tool rails", () => {
     expect(args[args.indexOf("--tools") + 1]).toBe("Read,Edit");
   });
 
-  it("maps allow/deny rails and does not force no-tools when rails are present", async () => {
+  it("bounds the --tools catalog from an allow-list, not just the permission rail", async () => {
+    const args = await argsFor({ prompt: "hi", allowedTools: ["Read"] });
+    // allow-list must narrow the catalog gate too, else default tools stay loadable
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read");
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read");
+  });
+
+  it("maps allow/deny rails (catalog uses base names; rail keeps the scope)", async () => {
     const allowed = await argsFor({ prompt: "hi", allowedTools: ["Bash(git:*)", "Read"] });
+    expect(allowed[allowed.indexOf("--tools") + 1]).toBe("Bash,Read"); // catalog = base names
     expect(allowed[allowed.indexOf("--allowedTools") + 1]).toBe("Bash(git:*),Read");
-    expect(allowed).not.toContain(""); // no text-only sentinel
+    expect(allowed).not.toContain(""); // not the text-only sentinel
 
     const denied = await argsFor({ prompt: "hi", disallowedTools: ["Bash", "Edit"] });
     expect(denied[denied.indexOf("--disallowedTools") + 1]).toBe("Bash,Edit");
