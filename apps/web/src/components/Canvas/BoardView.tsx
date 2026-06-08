@@ -1,5 +1,5 @@
 import type { CanvasBoardView, CanvasTone, RibAction } from "@keelson/shared";
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { useBoardActions } from "./BoardActionContext.tsx";
 import { TableView } from "./TableView.tsx";
@@ -50,42 +50,138 @@ export function Segments({ items }: { items: Segment[] }) {
   );
 }
 
+type ActionItem = Extract<BoardSection, { kind: "actions" }>["items"][number];
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// Collected field values merge over a static object payload (so the rib reads a
+// typed-in `topic` the same way it reads any other payload key); a non-object
+// static payload is dropped when fields are present rather than nested.
+function mergePayload(staticPayload: unknown, collected?: Record<string, string>): unknown {
+  if (!collected) return staticPayload;
+  return { ...(isPlainObject(staticPayload) ? staticPayload : {}), ...collected };
+}
+
+// One action button. With no `fields` it dispatches on click (confirming first
+// when destructive). With `fields` it toggles an inline form and dispatches the
+// collected values on submit, so a payload-carrying action can gather its input.
+function ActionItemButton({ item }: { item: ActionItem }) {
+  const ctx = useBoardActions();
+  const fields = item.fields ?? [];
+  const hasFields = fields.length > 0;
+  const [pending, setPending] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  const dispatch = async (collected?: Record<string, string>) => {
+    if (!ctx || pending) return;
+    setPending(true);
+    try {
+      const payload = mergePayload(item.payload, collected);
+      await ctx.run(payload !== undefined ? { type: item.type, payload } : { type: item.type });
+      setOpen(false);
+      setValues({});
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const onButtonClick = () => {
+    if (!ctx || pending) return;
+    if (hasFields) {
+      setError(null);
+      setOpen((o) => !o);
+      return;
+    }
+    if (item.destructive && !window.confirm(`${item.label}?`)) return;
+    void dispatch();
+  };
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const missing = fields.find((f) => f.required && !values[f.name]?.trim());
+    if (missing) {
+      setError(`${missing.label} is required`);
+      return;
+    }
+    if (item.destructive && !window.confirm(`${item.label}?`)) return;
+    void dispatch(values);
+  };
+
+  return (
+    <div className="cvb-action">
+      <button
+        type="button"
+        className={`cvb-action-button${item.destructive ? " is-destructive" : ""}`}
+        data-tone={item.tone}
+        disabled={!ctx || pending}
+        aria-expanded={hasFields ? open : undefined}
+        onClick={onButtonClick}
+      >
+        {item.glyph && (
+          <span className="cvb-action-glyph" aria-hidden="true">
+            {item.glyph}
+          </span>
+        )}
+        {item.label}
+      </button>
+      {hasFields && open && (
+        <form className="cvb-action-form" onSubmit={onSubmit}>
+          {fields.map((f) => {
+            const id = `cvb-af-${item.type}-${f.name}`;
+            return (
+              <div key={f.name} className="cvb-action-field">
+                <label className="cvb-action-field-label" htmlFor={id}>
+                  {f.label}
+                </label>
+                {f.multiline ? (
+                  <textarea
+                    id={id}
+                    className="cvb-action-field-input"
+                    placeholder={f.placeholder}
+                    value={values[f.name] ?? ""}
+                    onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                  />
+                ) : (
+                  <input
+                    id={id}
+                    type="text"
+                    className="cvb-action-field-input"
+                    placeholder={f.placeholder}
+                    value={values[f.name] ?? ""}
+                    onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                  />
+                )}
+              </div>
+            );
+          })}
+          {error && <p className="cvb-action-form-error">{error}</p>}
+          <div className="cvb-action-form-controls">
+            <button type="submit" className="cvb-action-button" disabled={pending}>
+              {item.label}
+            </button>
+            <button type="button" className="cvb-action-button" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 // Action buttons dispatch to the owning rib via the board-action context (a
 // surface region / the canvas drawer provides it, keyed off the snapshot
 // namespace). With no provider in scope the buttons render disabled.
 function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "actions" }> }) {
-  const ctx = useBoardActions();
-  const [pending, setPending] = useState<string | null>(null);
   const key = makeKeyer();
   return (
     <div className="cvb-actions">
       {section.items.map((a) => (
-        <button
-          type="button"
-          key={key(a.type)}
-          className={`cvb-action-button${a.destructive ? " is-destructive" : ""}`}
-          data-tone={a.tone}
-          disabled={!ctx || pending === a.type}
-          onClick={async () => {
-            if (!ctx || pending === a.type) return;
-            if (a.destructive && !window.confirm(`${a.label}?`)) return;
-            setPending(a.type);
-            try {
-              await ctx.run(
-                a.payload !== undefined ? { type: a.type, payload: a.payload } : { type: a.type },
-              );
-            } finally {
-              setPending(null);
-            }
-          }}
-        >
-          {a.glyph && (
-            <span className="cvb-action-glyph" aria-hidden="true">
-              {a.glyph}
-            </span>
-          )}
-          {a.label}
-        </button>
+        <ActionItemButton key={key(a.type)} item={a} />
       ))}
     </div>
   );

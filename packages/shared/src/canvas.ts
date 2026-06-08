@@ -161,6 +161,21 @@ const canvasFieldSchema = z
     message: "a field sets at most one of copyable / copyAction",
   });
 
+// One free-text input an action collects before it dispatches. The base renders
+// a labelled field; the typed value is merged into the dispatched payload under
+// `name`, so the rib reads it the same way it reads any other payload key.
+const canvasActionFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    label: z.string().min(1),
+    placeholder: z.string().optional(),
+    required: z.boolean().optional(),
+    // Render a multi-line textarea rather than a single-line input.
+    multiline: z.boolean().optional(),
+  })
+  .strict();
+export type CanvasActionField = z.infer<typeof canvasActionFieldSchema>;
+
 // An action button a board offers; clicking dispatches `type` to the owning
 // rib's onAction, resolved from the board's snapshot-key namespace. `type` is a
 // rib-defined verb the base never enumerates (mirrors ribActionSchema).
@@ -175,6 +190,18 @@ const canvasActionItemSchema = z
     // ribActionSchema's `payload`), e.g. the cluster the board was built against
     // so the rib can reject a stale action. The base never inspects it.
     payload: z.unknown().optional(),
+    // Input the action collects from the operator before dispatching. When set,
+    // clicking the button opens a small form; the collected `{ name: value }`
+    // map is merged into the dispatched payload (over any static object payload).
+    // Names must be unique — the UI keys form state and JSX by `name`, so a
+    // duplicate would silently overwrite a sibling's value.
+    fields: z
+      .array(canvasActionFieldSchema)
+      .min(1)
+      .refine((f) => new Set(f.map((x) => x.name)).size === f.length, {
+        message: "action field names must be unique",
+      })
+      .optional(),
   })
   .strict();
 
