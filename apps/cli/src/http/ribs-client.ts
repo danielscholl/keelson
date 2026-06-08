@@ -11,8 +11,7 @@ function normalizeBase(baseUrl: string): string {
 
 function originHeader(baseUrl: string): string {
   try {
-    const u = new URL(baseUrl);
-    return `http://${u.hostname}:${u.port || (u.protocol === "https:" ? "443" : "80")}`;
+    return new URL(baseUrl).origin;
   } catch {
     return "http://127.0.0.1:7878";
   }
