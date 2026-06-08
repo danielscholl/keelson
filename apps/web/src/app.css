@@ -3394,6 +3394,55 @@ button.tab:focus-visible {
   justify-content: center;
   flex: none;
 }
+.cvb-action {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cvb-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.cvb-action-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cvb-action-field-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.cvb-action-field-input {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.cvb-action-field-input:focus {
+  outline: none;
+  border-color: var(--magenta);
+}
+textarea.cvb-action-field-input {
+  min-height: 56px;
+  resize: vertical;
+}
+.cvb-action-form-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--danger);
+}
+.cvb-action-form-controls {
+  display: flex;
+  gap: 6px;
+}
 
 /* stats — KPI tiles */
 .cvb-stats {

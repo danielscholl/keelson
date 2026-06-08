@@ -125,6 +125,97 @@ describe("board actions", () => {
   });
 });
 
+describe("board actions with input fields", () => {
+  function fieldsBoard(): CanvasBoardView {
+    return {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "room-start",
+              label: "Start room",
+              fields: [{ name: "topic", label: "Topic", placeholder: "What to discuss?" }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+  }
+
+  test("clicking the action opens an inline form instead of dispatching", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={fieldsBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start room" }));
+    // The form's labelled input appears; nothing dispatched yet.
+    expect(screen.getByText("Topic")).toBeDefined();
+    await Promise.resolve();
+    expect(calls).toHaveLength(0);
+  });
+
+  test("submitting the form merges collected values into the dispatched payload", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={fieldsBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start room" }));
+    const input = container.querySelector(".cvb-action-field-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "ship the rib" } });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(calls).toEqual([{ type: "room-start", payload: { topic: "ship the rib" } }]),
+    );
+  });
+
+  test("a required field blocks dispatch until filled", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "room-start",
+              label: "Start room",
+              fields: [{ name: "topic", label: "Topic", required: true }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start room" }));
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await Promise.resolve();
+    expect(calls).toHaveLength(0);
+    expect(screen.getByText("Topic is required")).toBeDefined();
+  });
+});
+
 describe("copy-on-reveal field", () => {
   const realClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   afterEach(() => {
