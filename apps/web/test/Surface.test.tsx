@@ -214,6 +214,48 @@ describe("Surface", () => {
     expect(screen.queryByText("Waiting for the first update…")).toBeNull();
   });
 
+  test("a workflow-bound region with no cadence offers a one-shot Load, not an endless skeleton", () => {
+    // chamber's Briefing footer shape: a producing workflow but no cadence, so
+    // it never auto-runs and would otherwise shimmer forever.
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    expect(container.querySelector(".cv-skeleton")).toBeNull();
+    expect(screen.getByRole("button", { name: "Load" })).toBeDefined();
+  });
+
+  test("the idle Load control runs the bound workflow once on click", () => {
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    expect(triggerCalls).toEqual(["chamber-brief"]);
+  });
+
+  test("a busy workflow-bound region shows the running skeleton, not the idle Load", () => {
+    triggerRunning = true;
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    expect(screen.queryByRole("button", { name: "Load" })).toBeNull();
+    expect(container.querySelector(".cv-skeleton")).not.toBeNull();
+  });
+
   test("Expand opens the region full-size in the canvas drawer", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     const { container } = renderSurface({
