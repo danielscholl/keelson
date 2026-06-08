@@ -69,7 +69,7 @@ function toShowItem(rib: RibSummary) {
     views: rib.views.map((v) => v.key),
     surfaces: rib.surfaces.map((s) => ({ id: s.id, title: s.title })),
     handlesActions: rib.hasOnAction,
-    auth: rib.auth ?? "n/a",
+    auth: authLabel(rib),
   };
 }
 

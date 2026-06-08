@@ -30,7 +30,6 @@ function manifest(surfaces: RibSurfaceDescriptor[]): RibManifest {
     displayName: "OSDU",
     registered: [],
     views: [],
-    actions: [],
     surfaces,
     hasOnAction: false,
   };
