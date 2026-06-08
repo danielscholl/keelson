@@ -452,6 +452,18 @@ export type CanvasGraphView = z.infer<typeof canvasGraphViewSchema>;
 export type CanvasBoardView = z.infer<typeof canvasBoardViewSchema>;
 export type CanvasActionItem = z.infer<typeof canvasActionItemSchema>;
 
+// Producer-side guard for ribs publishing a snapshot frame: parse `data` through
+// the full canvas view union (not a bare member schema) so the node-id /
+// column-key uniqueness checks the SPA render gate runs are enforced before a
+// frame is broadcast, then assert it is the expected discriminant.
+export function expectView(key: string, kind: CanvasView["view"]) {
+  return (data: unknown): CanvasView => {
+    const view = canvasViewSchema.parse(data);
+    if (view.view !== kind) throw new Error(`${key} expects a ${kind} view, got "${view.view}"`);
+    return view;
+  };
+}
+
 // Wire shape for the sandboxed run-artifact endpoint. `path` echoes the
 // requested relative path; `content` is the file's UTF-8 text.
 export const getRunArtifactResponseSchema = z
