@@ -23,7 +23,7 @@ const HOOK_FIELDS = [
   "authStatus",
 ] as const;
 
-const ARRAY_FIELDS = ["views", "actions", "surfaces"] as const;
+const ARRAY_FIELDS = ["views", "surfaces"] as const;
 
 export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Record<string, Rib>> {
   const root = opts.root ?? join(process.cwd(), "node_modules", "@keelson");

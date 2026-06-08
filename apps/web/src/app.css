@@ -8136,39 +8136,5 @@ a.cvb-card-title::after {
   background: var(--red); color: var(--bg);
 }
 
-/* === Ribs tab (M8) ======================================================== */
-
-.ribs-page .page-header {
-  margin-bottom: 14px;
-}
-.ribs-list {
-  list-style: none; padding: 0; margin: 0;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.rib-card {
-  background: var(--card); border: 1px solid var(--border);
-  border-radius: 10px; padding: 14px;
-  display: flex; flex-direction: column; gap: 10px;
-}
-.rib-card-head {
-  display: flex; align-items: center; gap: 10px;
-}
-.rib-name { font-weight: 600; color: var(--fg-strong); }
-.rib-auth-badge {
-  font-size: 11px; font-weight: 600;
-  padding: 2px 8px; border-radius: 999px;
-  border: 1px solid var(--border);
-}
-.rib-auth-badge.is-ok { color: var(--green); border-color: var(--green); }
-.rib-auth-badge.is-warn { color: var(--amber, #b8860b); border-color: var(--amber, #b8860b); }
-.rib-tools { font-size: 12px; }
-.rib-views, .rib-actions {
-  display: flex; flex-wrap: wrap; gap: 8px;
-}
-.rib-view-button, .rib-action-button {
-  background: var(--bg-soft); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 6px;
-  padding: 5px 12px; font-size: 12px; font-family: inherit; cursor: pointer;
-}
-.rib-view-button:hover, .rib-action-button:hover:not(:disabled) { background: var(--card-2); }
-.rib-action-button:disabled { opacity: 0.6; cursor: default; }
+/* Rib surfaces render through the canvas/board styles; the standalone Ribs page
+   was removed — `keelson rib list` covers discovery. */

@@ -59,7 +59,6 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
           displayName: m.displayName,
           registered: [...m.registered],
           views: [...m.views],
-          actions: [...m.actions],
           surfaces: [...m.surfaces],
           hasOnAction: m.hasOnAction,
           ...(auth ? { auth } : {}),

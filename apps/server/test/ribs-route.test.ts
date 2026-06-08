@@ -61,7 +61,7 @@ function post(path: string, body: unknown): Request {
 }
 
 describe("GET /api/ribs", () => {
-  test("lists an active rib with its view + action descriptors", async () => {
+  test("lists an active rib with its view descriptors, tools, and auth", async () => {
     const { app } = await makeRig({ token: "secret" });
     const res = await app.fetch(get("/api/ribs"));
     expect(res.status).toBe(200);
@@ -72,7 +72,6 @@ describe("GET /api/ribs", () => {
     expect(rib.displayName).toBe("V2 Rib");
     expect(rib.registered).toEqual(["v2.tool"]);
     expect(rib.views).toEqual([{ key: "rib:v2:summary", canvasKind: "view", title: "V2 Summary" }]);
-    expect(rib.actions).toEqual([{ type: "ping", label: "Ping" }]);
     expect(rib.hasOnAction).toBe(true);
     expect(rib.auth).toEqual({ authenticated: true });
   });

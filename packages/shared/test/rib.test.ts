@@ -77,7 +77,6 @@ describe("rib v2 wire schemas", () => {
           displayName: "OSDU Bridge",
           registered: ["osdu.search"],
           views: [{ key: "rib:osdu:graph", canvasKind: "view" }],
-          actions: [{ type: "refresh", label: "Refresh" }],
           surfaces: [],
           hasOnAction: true,
           auth: { authenticated: true },
