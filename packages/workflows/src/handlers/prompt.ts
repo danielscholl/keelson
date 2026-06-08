@@ -186,6 +186,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const nodeDenied = readStringArray(node, "denied_tools");
       const nodeHooks = readHooksField(node);
       const nodeOutputFormat = readOutputFormat(node);
+      const failOnToolError =
+        (node as { fail_on_tool_error?: unknown }).fail_on_tool_error === true;
 
       // Provider resolution: node.provider overrides workflow.provider, which
       // overrides the resolver's own default. Passed verbatim to getProvider;
@@ -286,6 +288,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       let assistantText = "";
       let providerError: string | null = null;
+      // Set when any tool the turn invoked returned an error result; consulted
+      // after the stream when the node opts into `fail_on_tool_error`.
+      let toolErrored = false;
 
       let iterator: AsyncIterator<unknown> | undefined;
       let iteratorReturned = false;
@@ -378,6 +383,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
               assistantText += (chunk as { content: string }).content;
             } else if (t === "error") {
               providerError = (chunk as { message: string }).message;
+            } else if (t === "tool_result" && (chunk as { isError?: boolean }).isError === true) {
+              toolErrored = true;
             }
             // Defensive: a timeout or cancel can fire after the chunk
             // resolves but before this branch runs. Skip the emit so
@@ -448,6 +455,15 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           status: "failed",
           output: { kind: "text", text: assistantText },
           error: providerError,
+        };
+      } else if (failOnToolError && toolErrored) {
+        // The node's real work happens inside a tool that failed closed; the
+        // turn may still have completed with a normal text reply, but the node
+        // must report failure rather than a successful no-op.
+        result = {
+          status: "failed",
+          output: { kind: "text", text: assistantText },
+          error: "a tool invoked by this node returned an error",
         };
       } else if (nodeOutputFormat !== undefined) {
         // output_format → structured output only when the reply parses to a JSON

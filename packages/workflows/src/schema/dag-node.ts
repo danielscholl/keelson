@@ -146,6 +146,12 @@ export const dagNodeBaseSchema = z.object({
   output_schema: outputSchemaSchema.optional(),
   allowed_tools: z.array(z.string()).optional(),
   denied_tools: z.array(z.string()).optional(),
+  // When true, the node fails if any tool the turn invoked returned an error
+  // result — so a workflow whose real work happens inside a tool (e.g. a write
+  // seam that fails closed) reports a failed run instead of a successful one
+  // when the tool errored. Off by default: most nodes tolerate a tool error and
+  // let the model recover within the turn.
+  fail_on_tool_error: z.boolean().optional(),
   idle_timeout: z.number().optional(),
   retry: stepRetryConfigSchema.optional(),
   hooks: workflowNodeHooksSchema.optional(),
@@ -336,6 +342,7 @@ export const BASH_NODE_AI_FIELDS: readonly string[] = [
   "output_format",
   "allowed_tools",
   "denied_tools",
+  "fail_on_tool_error",
   "hooks",
   "mcp",
   "skills",
@@ -563,6 +570,9 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),
       ...(data.allowed_tools !== undefined ? { allowed_tools: data.allowed_tools } : {}),
       ...(data.denied_tools !== undefined ? { denied_tools: data.denied_tools } : {}),
+      ...(data.fail_on_tool_error !== undefined
+        ? { fail_on_tool_error: data.fail_on_tool_error }
+        : {}),
       ...(data.hooks !== undefined ? { hooks: data.hooks } : {}),
       ...(data.mcp !== undefined ? { mcp: data.mcp.trim() } : {}),
       ...(data.skills !== undefined ? { skills: data.skills.map((s) => s.trim()) } : {}),
