@@ -35,10 +35,11 @@ mock.module("../src/hooks/useSnapshot.ts", () => ({
 // the api.ts module mock that other suites set process-globally.
 const triggerCalls: string[] = [];
 let triggerRunning = false;
+let triggerError: string | null = null;
 mock.module("../src/hooks/useWorkflowTrigger.ts", () => ({
   useWorkflowTrigger: (name?: string) => ({
     running: name ? triggerRunning : false,
-    error: null,
+    error: name ? triggerError : null,
     trigger: () => {
       if (name) triggerCalls.push(name);
     },
@@ -75,6 +76,7 @@ beforeEach(() => {
   useSnapshotKeys.length = 0;
   triggerCalls.length = 0;
   triggerRunning = false;
+  triggerError = null;
 });
 
 describe("Surface", () => {
@@ -212,6 +214,62 @@ describe("Surface", () => {
     });
     expect(container.querySelector(".cv-skeleton")).not.toBeNull();
     expect(screen.queryByText("Waiting for the first update…")).toBeNull();
+  });
+
+  test("a workflow-bound region with no cadence offers a one-shot Load, not an endless skeleton", () => {
+    // chamber's Briefing footer shape: a producing workflow but no cadence, so
+    // it never auto-runs and would otherwise shimmer forever.
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    expect(container.querySelector(".cv-skeleton")).toBeNull();
+    expect(screen.getByRole("button", { name: "Load" })).toBeDefined();
+  });
+
+  test("the idle Load control runs the bound workflow once on click", () => {
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    expect(triggerCalls).toEqual(["chamber-brief"]);
+  });
+
+  test("a failed on-demand Load surfaces the error and offers Retry", () => {
+    triggerError = "boom: collector exited 1";
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    expect(screen.getByText(/Load failed: boom/)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+  });
+
+  test("a busy workflow-bound region shows the running skeleton, not the idle Load", () => {
+    triggerRunning = true;
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    expect(screen.queryByRole("button", { name: "Load" })).toBeNull();
+    expect(container.querySelector(".cv-skeleton")).not.toBeNull();
   });
 
   test("Expand opens the region full-size in the canvas drawer", () => {
