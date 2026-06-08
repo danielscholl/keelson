@@ -820,6 +820,98 @@ nodes:
     expect(parts.map((p) => p.type)).toEqual(["text", "tool_use", "tool_result", "text"]);
   });
 
+  test("fail_on_tool_error fails the node when a tool errors, even on a normal text reply", async () => {
+    writeWorkflow(
+      "failtool.yaml",
+      `name: failtool
+description: prompt that fails closed on a tool error
+nodes:
+  - id: write
+    prompt: persist via the write seam
+    fail_on_tool_error: true
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    // The write tool fails closed (isError) but the model still narrates success
+    // — the node must report failure, not a successful no-op.
+    const spyProvider = {
+      async *sendQuery() {
+        yield { type: "tool_use", id: "tu-1", toolName: "write_seam" };
+        yield { type: "tool_result", toolUseId: "tu-1", content: "already exists", isError: true };
+        yield { type: "text", content: "Done — created it." };
+        yield { type: "done" };
+      },
+    };
+    const promptHandler = makePromptHandler({
+      getProvider: () => spyProvider,
+      getRegisteredTools: () => [],
+    });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore: createConversationStore(db),
+      defaultCwd: tmpDir,
+      promptHandler,
+    });
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/failtool/runs", { inputs: {}, workingDir: tmpDir }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string; error?: string | null }>;
+    };
+    expect(run.status).toBe("failed");
+    const write = run.nodes.find((n) => n.nodeId === "write");
+    expect(write?.status).toBe("failed");
+    expect(write?.error ?? "").toContain("tool");
+  });
+
+  test("fail_on_tool_error still succeeds when no tool errors", async () => {
+    writeWorkflow(
+      "oktool.yaml",
+      `name: oktool
+description: fail_on_tool_error with a clean tool result
+nodes:
+  - id: write
+    prompt: persist via the write seam
+    fail_on_tool_error: true
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const spyProvider = {
+      async *sendQuery() {
+        yield { type: "tool_use", id: "tu-1", toolName: "write_seam" };
+        yield { type: "tool_result", toolUseId: "tu-1", content: '{"ok":true}' };
+        yield { type: "text", content: "created" };
+        yield { type: "done" };
+      },
+    };
+    const promptHandler = makePromptHandler({
+      getProvider: () => spyProvider,
+      getRegisteredTools: () => [],
+    });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore: createConversationStore(db),
+      defaultCwd: tmpDir,
+      promptHandler,
+    });
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/oktool/runs", { inputs: {}, workingDir: tmpDir }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as { status: string };
+    expect(run.status).toBe("succeeded");
+  });
+
   test("DELETE /api/workflows/runs/:runId cancels an in-flight prompt run", async () => {
     writeWorkflow(
       "longprompt.yaml",
