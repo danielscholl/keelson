@@ -254,9 +254,12 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(opts?.allowedTools).toEqual([]);
   });
 
-  it("derives the allow-list from a requested tool set", async () => {
+  it("derives the allow-list from a requested tool set without forwarding it as projectable tools", async () => {
     const opts = await optionsFor({ prompt: "hi", tools: [{ name: "Read" }, { name: "Edit" }] });
     expect(opts?.allowedTools).toEqual(["Read", "Edit"]);
+    // The loose `{ name }[]` is NOT forwarded as options.tools — a provider would
+    // try to project it as MCP defs and crash on the missing inputSchema.
+    expect(opts?.tools).toBeUndefined();
   });
 
   it("passes an explicit allow-list through verbatim", async () => {

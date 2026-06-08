@@ -19,7 +19,6 @@ import type {
   RibAgentTurn,
   RibAgentTurnRequest,
   RibAgentTurnResult,
-  ToolDefinition,
 } from "@keelson/shared";
 
 // Registry-routed C1 `runAgentTurn` seam (packages/shared/src/rib.ts): resolve a
@@ -191,6 +190,11 @@ async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<Ri
 // turn with no tool fields at all is text-only (the room default — no Bash/Edit
 // between turns), expressed as an empty allow-list. A `disallowedTools`-only
 // request is a deny rail that leaves the rest of the catalog available.
+//
+// `req.tools` is a loose `{ name }[]` (not projectable ToolDefinitions), so it
+// only contributes to the allow-list by name — it is NOT forwarded as
+// `options.tools`, which the providers would try to project as MCP defs and
+// crash on the missing inputSchema.
 function toolOptions(req: RibAgentTurnRequest): Partial<SendQueryOptions> {
   const out: Partial<SendQueryOptions> = {};
 
@@ -205,9 +209,6 @@ function toolOptions(req: RibAgentTurnRequest): Partial<SendQueryOptions> {
   }
   if (allowedTools !== undefined) out.allowedTools = allowedTools;
   if (req.disallowedTools !== undefined) out.disallowedTools = [...req.disallowedTools];
-  // The loose rib `tools` shape carries names for the allow-list above; only a
-  // full ToolDefinition is projectable, so forward it as such when present.
-  if (req.tools !== undefined) out.tools = req.tools as unknown as ToolDefinition[];
   return out;
 }
 
@@ -224,6 +225,8 @@ function errMessage(err: unknown): string {
 async function* toStream(result: Promise<RibAgentTurnResult>): AsyncGenerator<MessageChunk> {
   const r = await result;
   if (r.text) yield { type: "text", content: r.text };
-  if (r.status !== "ok" && r.error) yield { type: "error", message: r.error };
+  // Emit an error chunk whenever the result carries one, so a failed turn never
+  // looks clean on the stream (an empty-message provider error included).
+  if (r.error !== undefined) yield { type: "error", message: r.error };
   yield { type: "done" };
 }
