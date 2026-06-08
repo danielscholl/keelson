@@ -193,7 +193,15 @@ const canvasActionItemSchema = z
     // Input the action collects from the operator before dispatching. When set,
     // clicking the button opens a small form; the collected `{ name: value }`
     // map is merged into the dispatched payload (over any static object payload).
-    fields: z.array(canvasActionFieldSchema).min(1).optional(),
+    // Names must be unique — the UI keys form state and JSX by `name`, so a
+    // duplicate would silently overwrite a sibling's value.
+    fields: z
+      .array(canvasActionFieldSchema)
+      .min(1)
+      .refine((f) => new Set(f.map((x) => x.name)).size === f.length, {
+        message: "action field names must be unique",
+      })
+      .optional(),
   })
   .strict();
 

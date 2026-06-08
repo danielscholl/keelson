@@ -351,6 +351,46 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses an action item with input fields, and rejects duplicate field names", () => {
+    const ok = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "room-start",
+              label: "Start room",
+              fields: [{ name: "topic", label: "Topic", multiline: true }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(ok.view).toBe("board");
+    // Duplicate field names collide in the UI's keyed form state — reject them.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "room-start",
+                label: "Start room",
+                fields: [
+                  { name: "topic", label: "Topic" },
+                  { name: "topic", label: "Again" },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("parses an action item with a glyph and an opaque payload", () => {
     const v = canvasViewSchema.parse({
       view: "board",
