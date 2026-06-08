@@ -80,17 +80,16 @@ export interface RibExec {
 // Agent invocation (C1) — a rib runs one agent turn through the harness.
 //
 // Types only, no `@keelson/providers` back-dep: `MessageChunk` is the shared
-// chat streaming unit. The seam ships in two impls behind this one signature —
-// a CLI-backed MVP, then a registry-routed provider impl that inherits provider
-// pinning / redaction / credentials — so a rib's call site never changes when
-// the impl swaps.
+// chat streaming unit. The host routes the turn through the provider registry,
+// so a rib inherits provider pinning / redaction / credentials behind this one
+// signature.
 // ---------------------------------------------------------------------------
 
 export interface RibAgentTurnRequest {
   prompt: string;
   system?: string;
-  // A HINT, not a pin: undefined resolves to KEELSON_WORKFLOW_PROVIDER (or the
-  // first non-stub provider) once the registry-routed impl lands.
+  // A HINT, not a pin: undefined resolves to KEELSON_WORKFLOW_PROVIDER, then the
+  // first non-stub registered provider.
   provider?: string;
   model?: string;
   // Omit for a text-only turn (the room default — no Bash/Edit between turns).
@@ -109,14 +108,15 @@ export interface RibAgentTurnResult {
   status: "ok" | "aborted" | "timeout" | "error";
   text: string;
   error?: string;
-  // "cli:<bin>" for the MVP impl; the real provider id once registry-routed.
+  // The provider id the turn resolved to.
   providerId?: string;
   sessionId?: string;
 }
 
 // A settled dual-handle, NOT a bare AsyncGenerator: `stream` is live progress,
-// `result` settles exactly once after the stream completes. The MVP impl yields
-// a single synthetic text chunk then a terminal `done`.
+// `result` settles exactly once after the stream completes. `result` is the
+// source of truth; the stream is derived from it (full text, then a terminal
+// `done`).
 export interface RibAgentTurn {
   stream: AsyncIterable<MessageChunk>;
   result: Promise<RibAgentTurnResult>;
