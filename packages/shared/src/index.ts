@@ -18,6 +18,7 @@ export * from "./projects.ts";
 export * from "./rib.ts";
 export * from "./snapshots.ts";
 export * from "./tools.ts";
+export * from "./util.ts";
 export * from "./workflows.ts";
 
 // `exec.ts` is intentionally NOT re-exported from the root: it depends on
