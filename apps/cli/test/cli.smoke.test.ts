@@ -55,7 +55,16 @@ describe("keelson CLI smoke", () => {
   test("help lists every v0 subcommand", async () => {
     const { stdout, exitCode } = await runCli(["--help"]);
     expect(exitCode).toBe(0);
-    for (const cmd of ["version", "serve", "workflow", "chat", "doctor", "project", "worktree"]) {
+    for (const cmd of [
+      "version",
+      "serve",
+      "workflow",
+      "chat",
+      "doctor",
+      "project",
+      "rib",
+      "worktree",
+    ]) {
       expect(stdout).toContain(cmd);
     }
   });

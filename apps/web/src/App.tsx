@@ -11,7 +11,6 @@ import { useSettings } from "./hooks/useSettings.ts";
 import type { ChatSeed } from "./lib/exploreSeed.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
-import { Ribs } from "./views/Ribs.tsx";
 import { Surface } from "./views/Surface.tsx";
 import { Workflows } from "./views/Workflows.tsx";
 
@@ -130,8 +129,6 @@ function AppInner() {
         />
       ) : activeTab === "memory" ? (
         <Memory />
-      ) : activeTab === "ribs" ? (
-        <Ribs />
       ) : (
         <Chat
           onOpenWorkflowRun={handleOpenWorkflowRun}

@@ -356,24 +356,12 @@ describe("bootstrapRibs", () => {
     );
   });
 
-  test("a rib declaring a malformed action descriptor throws at activation", async () => {
-    delete process.env.KEELSON_RIBS;
-    const ribBadAction = {
-      id: "alpha",
-      displayName: "alpha",
-      // Missing `label` — would otherwise corrupt the GET /api/ribs response.
-      actions: [{ type: "go" }],
-    } as unknown as Rib;
-    await expect(bootstrapRibs({ available: { alpha: ribBadAction } })).rejects.toThrow();
-  });
-
-  test("manifest carries views, actions, and hasOnAction; probes/handlers are returned", async () => {
+  test("manifest carries views and hasOnAction; probes/handlers are returned", async () => {
     delete process.env.KEELSON_RIBS;
     const rib: Rib = {
       id: "alpha",
       displayName: "alpha",
       views: [{ key: "rib:alpha:v", canvasKind: "view", title: "V" }],
-      actions: [{ type: "go", label: "Go" }],
       onAction: () => ({ ok: true }),
       authStatus: () => ({ authenticated: true }),
     };
@@ -381,7 +369,6 @@ describe("bootstrapRibs", () => {
       available: { alpha: rib },
     });
     expect(manifests[0]?.views).toEqual([{ key: "rib:alpha:v", canvasKind: "view", title: "V" }]);
-    expect(manifests[0]?.actions).toEqual([{ type: "go", label: "Go" }]);
     expect(manifests[0]?.hasOnAction).toBe(true);
     expect(await probes.get("alpha")?.()).toEqual({ authenticated: true });
     expect(await actionHandlers.get("alpha")?.({ type: "go" })).toEqual({ ok: true });

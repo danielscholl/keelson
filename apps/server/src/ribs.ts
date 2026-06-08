@@ -22,7 +22,6 @@
 import {
   type Rib,
   type RibAction,
-  type RibActionDescriptor,
   type RibActionResult,
   type RibAgentTurn,
   type RibAgentTurnRequest,
@@ -30,7 +29,6 @@ import {
   type RibContext,
   type RibSurfaceDescriptor,
   type RibViewDescriptor,
-  ribActionDescriptorSchema,
   ribDisplayNameSchema,
   ribIdSchema,
   ribSurfaceDescriptorSchema,
@@ -46,7 +44,6 @@ export interface RibManifest {
   readonly displayName: string;
   readonly registered: readonly string[];
   readonly views: readonly RibViewDescriptor[];
-  readonly actions: readonly RibActionDescriptor[];
   readonly surfaces: readonly RibSurfaceDescriptor[];
   readonly hasOnAction: boolean;
 }
@@ -195,17 +192,13 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       tools,
     );
 
-    // Validate view + action descriptors at the activation boundary (the same
-    // spot the self-id is checked) so a malformed descriptor fails the rib
-    // here, not later inside GET /api/ribs where it would blank the panel.
+    // Validate view + surface descriptors at the activation boundary (the same
+    // spot the self-id is checked) so a malformed descriptor fails the rib here,
+    // not later inside GET /api/ribs where it would blank a panel.
     const views = rib.views ?? [];
     for (const view of views) {
       ribViewDescriptorSchema.parse(view);
       assertInNamespace(rib.id, namespace, view.key, "view key");
-    }
-    const actions = rib.actions ?? [];
-    for (const action of actions) {
-      ribActionDescriptorSchema.parse(action);
     }
     const surfaces = rib.surfaces ?? [];
     const surfaceIds = new Set<string>();
@@ -225,7 +218,6 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       // Names of the tools that survived validation + de-dup, for GET /api/ribs.
       registered: ribToolNames,
       views,
-      actions,
       surfaces,
       hasOnAction: typeof rib.onAction === "function",
     });

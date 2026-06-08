@@ -207,15 +207,6 @@ export const ribSurfaceDescriptorSchema = z
   .strict();
 export type RibSurfaceDescriptor = z.infer<typeof ribSurfaceDescriptorSchema>;
 
-// A button the Ribs panel renders; clicking it dispatches `type` to onAction.
-export const ribActionDescriptorSchema = z
-  .object({
-    type: z.string().min(1),
-    label: z.string().min(1),
-  })
-  .strict();
-export type RibActionDescriptor = z.infer<typeof ribActionDescriptorSchema>;
-
 // Inbound action a rib receives over POST /api/ribs/:id/action. The base never
 // enumerates `type` (a rib-defined verb); `payload` stays opaque and the rib
 // narrows at its edge. The capability-token envelope + outbound dispatcher are
@@ -281,13 +272,10 @@ export interface Rib {
   // same data layer its `composeBundle` snapshot draws from.
   registerTools?(ctx: RibContext): readonly ToolDefinition[];
   composeBundle?(ctx: RibContext): Promise<unknown>;
-  // Static view descriptors honored by the canvas-kind registry / Ribs panel.
-  // Each `key` must live under the rib's namespace (`rib:<id>` or
-  // `rib:<id>:*`); the harness rejects out-of-namespace keys at activation.
+  // Static view descriptors honored by the canvas-kind registry. Each `key` must
+  // live under the rib's namespace (`rib:<id>` or `rib:<id>:*`); the harness
+  // rejects out-of-namespace keys at activation.
   views?: readonly RibViewDescriptor[];
-  // Static action descriptors the Ribs panel renders as buttons. Each `type`
-  // is dispatched to `onAction`.
-  actions?: readonly RibActionDescriptor[];
   // Static surface descriptors — primary nav tabs that lay out region-bound
   // boards. Each region `key` must live under the rib's namespace, like view
   // keys; the harness rejects out-of-namespace keys at activation.
@@ -306,16 +294,14 @@ export interface Rib {
 }
 
 // Wire shape for GET /api/ribs — what the SPA consumes to discover active ribs
-// without an App.tsx edit. `views`/`actions`/`surfaces` are always present
-// (possibly empty); `auth` is present only when the rib declares an
-// `authStatus` probe.
+// without an App.tsx edit. `views`/`surfaces` are always present (possibly
+// empty); `auth` is present only when the rib declares an `authStatus` probe.
 export const ribSummarySchema = z
   .object({
     id: ribIdSchema,
     displayName: ribDisplayNameSchema,
     registered: z.array(z.string()),
     views: z.array(ribViewDescriptorSchema),
-    actions: z.array(ribActionDescriptorSchema),
     surfaces: z.array(ribSurfaceDescriptorSchema),
     hasOnAction: z.boolean(),
     auth: ribAuthStatusSchema.optional(),

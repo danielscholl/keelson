@@ -1,7 +1,7 @@
 import type { ThemePreference } from "../hooks/useSettings.ts";
 import { ThemePicker } from "./ThemePicker.tsx";
 
-export type BuiltinTab = "chat" | "workflows" | "memory" | "ribs";
+export type BuiltinTab = "chat" | "workflows" | "memory";
 // Dynamic rib surfaces ride alongside the built-in tabs as opaque ids
 // (`surface:<ribId>:<surfaceId>`); the template-literal union keeps every
 // `activeTab === "workflows"` comparison compiling unchanged.
@@ -101,14 +101,6 @@ export function TopBar(props: TopBarProps) {
                 {memoryCount}
               </span>
             )}
-          </button>
-          <button
-            type="button"
-            className={`nav-tab${activeTab === "ribs" ? " is-active" : ""}`}
-            aria-pressed={activeTab === "ribs"}
-            onClick={() => onTabChange("ribs")}
-          >
-            Ribs
           </button>
           {surfaceTabs?.map((tab) => (
             <button
