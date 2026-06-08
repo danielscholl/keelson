@@ -192,7 +192,7 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
   const body = board ? (
     <BoardBody view={board} />
   ) : idle ? (
-    <RegionIdle onLoad={runRefresh.trigger} />
+    <RegionIdle onLoad={runRefresh.trigger} error={runRefresh.error} />
   ) : (
     <SnapshotStateView snapshot={snap} busy={busy} />
   );
@@ -216,13 +216,16 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
 
 // The on-demand resting state for a workflow-bound, cadence-free region: a quiet
 // note and a one-shot run control, rather than a skeleton that implies a load is
-// already underway.
-function RegionIdle({ onLoad }: { onLoad: () => void }) {
+// already underway. A failed prior run surfaces here (a no-cadence region has no
+// freshness label to carry it) so the operator knows the Load didn't take.
+function RegionIdle({ onLoad, error }: { onLoad: () => void; error?: string | null }) {
   return (
     <div className="surface-region-idle">
-      <p className="surface-region-idle-note">Not loaded yet — this panel runs on demand.</p>
+      <p className="surface-region-idle-note">
+        {error ? `Load failed: ${error}` : "Not loaded yet — this panel runs on demand."}
+      </p>
       <button type="button" className="surface-region-action" onClick={onLoad}>
-        Load
+        {error ? "Retry" : "Load"}
       </button>
     </div>
   );

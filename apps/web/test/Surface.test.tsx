@@ -35,10 +35,11 @@ mock.module("../src/hooks/useSnapshot.ts", () => ({
 // the api.ts module mock that other suites set process-globally.
 const triggerCalls: string[] = [];
 let triggerRunning = false;
+let triggerError: string | null = null;
 mock.module("../src/hooks/useWorkflowTrigger.ts", () => ({
   useWorkflowTrigger: (name?: string) => ({
     running: name ? triggerRunning : false,
-    error: null,
+    error: name ? triggerError : null,
     trigger: () => {
       if (name) triggerCalls.push(name);
     },
@@ -75,6 +76,7 @@ beforeEach(() => {
   useSnapshotKeys.length = 0;
   triggerCalls.length = 0;
   triggerRunning = false;
+  triggerError = null;
 });
 
 describe("Surface", () => {
@@ -240,6 +242,20 @@ describe("Surface", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Load" }));
     expect(triggerCalls).toEqual(["chamber-brief"]);
+  });
+
+  test("a failed on-demand Load surfaces the error and offers Retry", () => {
+    triggerError = "boom: collector exited 1";
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        footer: { key: "rib:chamber:brief", workflow: "chamber-brief", title: "Briefing" },
+        rows: [],
+      },
+    });
+    expect(screen.getByText(/Load failed: boom/)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
   });
 
   test("a busy workflow-bound region shows the running skeleton, not the idle Load", () => {
