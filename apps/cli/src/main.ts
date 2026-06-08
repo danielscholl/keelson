@@ -13,6 +13,7 @@ import pkg from "../package.json" with { type: "json" };
 import { runChat } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
+import { runRibList, runRibShow } from "./commands/rib.ts";
 import { runServe } from "./commands/serve.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRespond } from "./commands/workflow-respond.ts";
@@ -242,6 +243,34 @@ export function buildProgram(): Command {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
       await runProjectRemove(nameOrId, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  const rib = program
+    .command("rib")
+    .description("rib operations (list, show) — inspect the extensions discovered at boot");
+
+  rib
+    .command("list")
+    .description("list discovered ribs with their tools, surfaces, and auth (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function ribListAction(this: Command, listOpts: { baseUrl?: string }) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", listOpts.baseUrl);
+      await runRibList({ json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  rib
+    .command("show <id>")
+    .description("show one rib's tools, views, surfaces, and auth (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function ribShowAction(
+      this: Command,
+      id: string,
+      showOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", showOpts.baseUrl);
+      await runRibShow(id, { json, ...(baseUrl ? { baseUrl } : {}) });
     });
 
   const worktree = program
