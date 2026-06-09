@@ -9,6 +9,23 @@ under [Pre-release milestones](#pre-release-milestones) used an internal
 milestone numbering (0.2–0.4); they predate the install path and were never
 published as artifacts, and are kept here for history.
 
+## [0.2.0] — 2026-06-09 — `keelson update`
+
+In-place upgrades. `keelson update` moves an installed home to the latest
+release and advances the ribs you installed, showing the release notes for the
+versions it crosses.
+
+### Added
+
+- `keelson update` — resolves the latest GitHub release, re-pins the home's
+  `@keelson/cli` + `@keelson/shared` to that version's asset URLs, runs
+  `bun install`, then `bun update`s github-sourced ribs to their latest tracked
+  commit. `--check` reports the available version without applying, `--force`
+  re-applies at the current version, and `--no-ribs` / `--no-notes` opt out of
+  the rib advance and the notes fetch. Release notes for the
+  `(installed, latest]` window come from the Releases API and print before the
+  upgrade applies.
+
 ## [0.1.0] — 2026-06-09 — Installable harness
 
 Keelson becomes a real, installable `keelson` CLI: a GitHub-release `install.sh`

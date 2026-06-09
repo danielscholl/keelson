@@ -15,6 +15,7 @@ import { runDoctor } from "./commands/doctor.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
 import { runServe } from "./commands/serve.ts";
+import { runUpdate } from "./commands/update.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRespond } from "./commands/workflow-respond.ts";
 import { runWorkflowRun } from "./commands/workflow-run.ts";
@@ -401,6 +402,26 @@ export function buildProgram(): Command {
         ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
         ...(baseUrl ? { baseUrl } : {}),
       });
+    });
+
+  program
+    .command("update")
+    .description(
+      "update keelson (and github-sourced ribs) in the managed home to the latest release",
+    )
+    .option("--check", "report the available version without applying", false)
+    .option("--force", "re-apply even when already on the latest version", false)
+    .option("--no-ribs", "skip advancing github-sourced ribs")
+    .option("--no-notes", "skip fetching and showing release notes")
+    .action(async function updateAction(this: Command) {
+      const { json } = globalOpts(this);
+      const { check, force, ribs, notes } = this.opts<{
+        check: boolean;
+        force: boolean;
+        ribs: boolean;
+        notes: boolean;
+      }>();
+      await runUpdate({ json, check, force, ribs, notes });
     });
 
   program

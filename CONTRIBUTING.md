@@ -70,9 +70,11 @@ differs between versions, re-running a newer `install.sh` (fetched from
 `/latest/download/install.sh`) rewrites the home's `@keelson/cli` +
 `@keelson/shared` to the new URLs and `bun install` re-resolves them — installed
 ribs are preserved (the manifest merge sets keys, never clobbering rib deps).
-For now, upgrade by re-running `install.sh`; a `keelson update` command that
-wraps this (and advances `github:`-sourced ribs via `bun update` against their
-CI-green `main`) is the planned next step.
+`keelson update` wraps this: it resolves the latest release, re-pins the home's
+`@keelson/cli` + `@keelson/shared` to that version's asset URLs, `bun install`s,
+and `bun update`s `github:`-sourced ribs to their latest CI-green `main`.
+Re-running `install.sh` does the same cli/shared upgrade (but leaves ribs at
+their locked commits).
 
 ## Required checks before opening a PR
 
