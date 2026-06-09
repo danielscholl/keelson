@@ -2,261 +2,168 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 ![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)
+[![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh/)
 
-### A local agent harness — pluggable ribs, deterministic workflows
+**The backbone for your coding agent. Multi-provider chat, deterministic YAML workflows, and ribs you bolt on.**
 
 Keelson is a single-user, local-only **harness** that wraps a coding agent
 (GitHub Copilot SDK or Claude Agent SDK) with persistent state, a typed
-extension contract, deterministic YAML workflows, and a browser UI. The
-harness runs on your laptop, never round-trips through a hosted service,
-and stays out of the way of whatever capabilities your **ribs** bring.
+extension contract, deterministic YAML workflows, and a browser UI. It runs
+on your laptop and never round-trips through a hosted service. The harness
+is the deliverable; your capabilities live in **ribs** you install.
 
-The browser UI lives at `http://127.0.0.1:5173`; the `keelson` CLI drives
-the same surfaces from the shell, from cron, or from another script.
+Alpha: the APIs and workflow schema still move. [Read the docs](https://danielscholl.github.io/keelson/).
 
-**Who this is for:**
+---
 
-- Builders who want a multi-provider coding agent (Copilot SDK *and* Claude
-  Agent SDK) with a real tool surface, governed by deterministic workflows
-- Anyone shipping a domain-specific agent integration who'd rather own the
-  capabilities (the ribs) than rebuild the harness around them
+## Quick Start
 
+You need [Bun](https://bun.sh/). There's no standalone binary yet, so run from the workspace.
 
-## Why Keelson
+```bash
+git clone https://github.com/danielscholl/keelson.git
+cd keelson
+bun install
+```
 
-- **Local-only**: runs on your machine, calls your CLIs directly, no SaaS
-- **Multi-provider**: never bound to a single coding-agent vendor — Copilot
-  SDK and Claude Agent SDK both ship today
-- **Rib architecture**: capabilities live in *ribs* (extensions), each in
-  its own repo. The harness is the substrate; ribs register tools through
-  a typed `Rib` contract
-- **Deterministic when it matters**: repeatable operations live in YAML
-  workflows that humans can read, not in chat transcripts; the engine runs
-  prompt / bash / command / loop / script / approval nodes through a DAG
+**1. Launch both surfaces** (server on `:7878`, SPA on `:5173`):
 
+```bash
+bun dev
+```
+
+Open `http://127.0.0.1:5173` for the Chat and Workflows surfaces.
+
+**2. No API keys?** Use the `stub` provider for an offline path. It echoes
+input rather than reasoning, so it's for trying the harness without credentials:
+
+```bash
+KEELSON_PROVIDERS=stub bun dev:server
+```
+
+**3. Check the environment:**
+
+```bash
+bun apps/cli/bin/keelson.ts doctor
+```
+
+Real agents need a Copilot subscription or an Anthropic API key, set through
+the SPA's credentials drawer.
+
+---
 
 ## What's a rib?
 
-A keelson is the longitudinal beam fastened on top of a ship's keel — the
-reinforcing spine that lets the rest of the structure attach to something
-rigid. **Ribs** are the structural members bolted onto it that give the
-hull its shape. In Keelson, the harness is the beam; ribs are the units
-that register tools, supply context, and own external-system integrations.
+A keelson is the beam fastened over a ship's keel, the spine the rest of the
+hull bolts onto. Lay the keel, raise the ribs: the harness is the beam, and
+**ribs** are the units that register tools, supply context, and own
+external-system integrations.
 
-Ribs ship as their own packages and repos:
-
-| Surface | Convention |
-|---|---|
-| GitHub repo | `keelson-rib-<name>` (e.g., `keelson-rib-osdu`) |
-| npm package | `@keelson/rib-<name>` |
-| TypeScript contract | `Rib` interface from `@keelson/shared` |
-| Activation | discovered from `node_modules/@keelson/`, filtered by `KEELSON_RIBS` |
-
-No ribs ship in-tree — the harness is the deliverable. Install any
-`@keelson/rib-*` package as a dependency and the server discovers it from
-`node_modules/@keelson/` at boot:
+No ribs ship in-tree. Install any `@keelson/rib-*` package and the server
+discovers it from `node_modules/@keelson/` at boot:
 
 ```bash
 bun add @keelson/rib-osdu
 ```
 
-`KEELSON_RIBS=<id1>,<id2>` then filters which discovered ribs actually
-activate. When unset, every discovered rib activates. Embedders who want
-to bypass discovery can hand `bootstrapRibs` an explicit `available` map
-instead. See [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts)
-for the contract.
+| Surface | Convention |
+|---|---|
+| GitHub repo | `keelson-rib-<name>` |
+| npm package | `@keelson/rib-<name>` |
+| Contract | `Rib` interface from `@keelson/shared` |
+| Activation | discovered from `node_modules/@keelson/`, filtered by `KEELSON_RIBS` |
 
+`KEELSON_RIBS=<id1>,<id2>` filters which discovered ribs activate; unset activates all.
 
-## Concepts from Archon
+---
 
-The workflow engine — YAML schema, DAG node taxonomy (`prompt` / `bash` /
-`command` / `loop` / `script` / `approval` / `cancel` / `subprocess`), and
-the `$nodeId.output` substitution model — borrows concepts from
-[Archon](https://github.com/coleam00/Archon) by Cole Medin, used under the
-MIT license. Keelson implements a compatible subset of Archon's spec: most
-workflows authored against Archon load directly, and the loader emits
-warnings (rather than hard errors) when it encounters fields or loop
-forms it doesn't yet support — see
-[`packages/workflows/src/loader.ts`](packages/workflows/src/loader.ts)
-for the current edge cases.
+## Write a rib
 
-Keelson re-types the schema in TypeScript and adapts the executor to
-Bun + SQLite — the conceptual credit belongs upstream. Full attribution
-lives in [NOTICE](NOTICE).
+A rib default-exports an object implementing the `Rib` contract. The smallest
+useful one registers a tool:
 
+```ts
+import type { Rib, ToolDefinition } from "@keelson/shared";
+import { z } from "zod";
 
-## Install
+const weatherTool: ToolDefinition = {
+  name: "weather_now",
+  description: "Report the current weather for a city.",
+  inputSchema: z.object({ city: z.string() }),
+  async execute(input, ctx) {
+    const { city } = input as { city: string };
+    // Results travel back as a tool_result chunk; the provider rewrites toolUseId.
+    ctx.emit({ type: "tool_result", toolUseId: "", content: `Clear skies over ${city}.` });
+  },
+};
 
-Keelson is currently developed and run from the workspace — there's no
-standalone binary yet. The only tool you need for the golden path is
-[Bun](https://bun.sh/).
+const rib: Rib = {
+  id: "weather", // matches @keelson/rib-weather
+  displayName: "Weather",
+  registerTools: () => [weatherTool],
+};
 
-```bash
-git clone https://github.com/danielscholl/keelson.git
-cd keelson
-bun install
+export default rib;
 ```
 
-**Optional**: install [uv](https://docs.astral.sh/uv/) if a rib you load uses
-the Python `runtime: uv` script-node path. The bundled
-[`smoke-test`](.keelson/workflows/smoke-test.yaml) is Bun-only and doesn't
-require it.
+Registered tools reach the chat agent and workflow `prompt` nodes with no
+extra wiring. See [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts)
+for the full contract (snapshots, views, surfaces, workflow contributions)
+and the [docs](https://danielscholl.github.io/keelson/) for a walkthrough.
 
-Alias the workspace bin while developing:
+---
+
+## CLI
+
+The `keelson` CLI drives the same surfaces from the shell. Alias it while developing:
 
 ```bash
 alias keelson="bun $(pwd)/apps/cli/bin/keelson.ts"
-keelson version
-keelson help
 ```
-
-
-## Quick Start
 
 ```bash
-# Launch both surfaces (server on :7878, SPA on :5173)
-bun dev
-
-# Open http://127.0.0.1:5173 in your browser
-
-# Offline / no-auth — use the stub provider, no API keys required
-KEELSON_PROVIDERS=stub bun dev:server
+keelson doctor                            # health sweep: toolchain, server, DB, auth, workflows
+keelson workflow list                     # workflows in .keelson/workflows
+keelson workflow validate smoke-test      # schema + reference check
+keelson workflow run smoke-test --watch   # run and stream output
+keelson chat "hello" --provider stub      # one-shot turn
 ```
 
-### Headless / CLI
+When the server is up, commands route over HTTP/WS; `workflow run` and `chat`
+fall back to in-process execution when it's down. Every command takes `--json`,
+with stable exit codes: `0` success, `1` failure, `2` bad args, `3` server
+required but down, `4` not found.
 
-```bash
-# Health sweep across toolchain, server, DB, auth, workflows
-keelson doctor
-keelson doctor --strict --json | jq '.data.summary'
+---
 
-# Workflow operations (server up → HTTP; server down → in-process fallback)
-keelson workflow list
-keelson workflow validate smoke-test
-keelson workflow run smoke-test --watch
-keelson workflow status                  # paused runs (server required)
+## How it fits together
 
-# One-shot chat
-keelson chat "hello" --provider stub
-```
-
-Every command supports `--json` for piping and uses stable exit codes:
-`0` success, `1` failure, `2` bad args, `3` server required but down,
-`4` not found.
-
-
-## Development Setup
-
-```bash
-git clone https://github.com/danielscholl/keelson.git
-cd keelson
-bun install
-bun --filter '*' typecheck
-bun --filter '*' test
-bun dev
-```
-
-The workspace is a single Bun monorepo; `bun dev` runs the server (port
-7878) and the Vite SPA (port 5173) in parallel and proxies `/api` from
-the SPA to the server. Run `bun dev:server` or `bun dev:web` to start
-one side alone.
-
-
-## Operating Model
-
-Keelson is a **harness** with a typed `Rib` contract, not a monolith.
-
-The harness owns: provider registry, tool registry, DAG workflow executor,
-chat surface, SQLite session persistence, keytar credentials, redaction
-pipeline.
-
-Ribs plug in by implementing `registerTools?` and `dispose?`. None ship
-in-tree — bring your own and activate them with `KEELSON_RIBS`.
-
-<details>
-<summary>Harness layers</summary>
-
-| Layer | What it does |
+| Piece | What it is |
 |---|---|
-| **Surface** | React 19 + Vite SPA (Chat / Workflows) and the `keelson` CLI |
-| **Provider** | Pluggable coding-agent SDKs behind one `IAgentProvider` (Copilot, Claude, stub) |
-| **Tools** | Native TS skills registered by ribs through the manifest |
-| **Workflows** | DAG engine — concepts from [Archon](https://github.com/coleam00/Archon) (MIT); `prompt`, `bash`, `command`, `loop`, `script`, `approval` nodes with `depends_on`, `when:`, `trigger_rule:` |
-| **State** | SQLite (sessions, runs, node outputs) + keytar (credentials) |
+| **Surfaces** | React 19 + Vite SPA (Chat, Workflows) and the `keelson` CLI |
+| **Providers** | One `IAgentProvider` over Copilot SDK, Claude Agent SDK, and a `stub` (offline/test, no keys) |
+| **Ribs** | Capabilities that register tools through the typed `Rib` contract, each in its own repo |
+| **Workflows** | Deterministic YAML DAG: `prompt` / `bash` / `command` / `loop` / `script` / `approval` / `cancel` nodes with `depends_on`, `when:`, `trigger_rule:` |
+| **State** | SQLite (conversations, runs, node outputs, memory) plus your OS keychain for credentials |
 
-</details>
+The workflow engine borrows its schema and DAG concepts from
+[Archon](https://github.com/coleam00/Archon) (MIT, by Cole Medin): most Archon
+workflows load directly, and the loader warns rather than hard-errors on fields
+it doesn't yet support. Full attribution lives in [NOTICE](NOTICE).
 
-<details>
-<summary>Environment overrides</summary>
-
-| Variable | Effect |
-|---|---|
-| `KEELSON_RIBS=osdu,…` | Filter which ribs from the embedder-supplied manifest activate (comma-separated ids; unset = all) |
-| `KEELSON_PROVIDERS=stub,copilot,claude` | Restrict which agent providers register |
-| `KEELSON_WORKFLOW_PROVIDER=claude` | Pin the provider workflows use for `prompt` nodes |
-| `KEELSON_WORKFLOW_TOOL_DENYLIST=tool_a,tool_b` | Operator floor: per-node tool denylist |
-| `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S=600` | Per-prompt-node timeout in seconds |
-| `KEELSON_DISABLE_SCHEDULER=1` | Disable the server-side surface-refresh heartbeat (`1` = off; unset = on). Client-side auto-refresh is unaffected |
-| `KEELSON_DB=/tmp/scratch.db` | Override the SQLite path (default: `.keelson/keelson.db`) |
-| `KEELSON_WORKSPACE=~/code` | Override the workspace root (default: `~/keelson`). The bundled `default` project's rootPath *is* the workspace root; `/api/projects/clone` clones into `<workspace>/<name>/`, and per-run worktrees land at `<project>/.worktrees/<branch>/`. |
-| `PORT=7878` | Override the HTTP/WS listen port |
-
-</details>
-
-
-## Prerequisites
-
-Run `keelson doctor` to verify the environment:
-
-```bash
-keelson doctor
-keelson doctor --strict --json | jq '.data.summary'
-```
-
-The doctor sweeps five categories — toolchain (`bun`), server, DB
-(`schema_version` match), auth (`keytar` round-trip), and workflow
-validation. Ribs can register their own probes by extending the doctor
-surface (see [`apps/cli/src/checks/`](apps/cli/src/checks/)).
-
-**Required**: Bun. **Recommended for live providers**: a Copilot
-subscription or Anthropic API key, configured via the SPA's credentials
-drawer.
-
-
-## CLI Reference
-
-```
-keelson <command> [options]
-
-Commands:
-  serve                    Foreground server supervisor (port 7878 default)
-  workflow list            List workflows discovered in .keelson/workflows
-  workflow validate NAME   Schema + reference check on one workflow
-  workflow run NAME        Run a workflow (server-routed when up, in-process when down)
-  workflow status [ID]     Paused-run list, or one run's detail (server required)
-  chat MESSAGE             One-shot turn — WebSocket when server is up, in-process otherwise
-  doctor                   Non-mutating health sweep across five categories
-  version                  Print version (supports --json)
-  help                     Show help text
-```
-
-Every command supports `--json` for piping. Stable exit codes: `0` success,
-`1` failure, `2` bad args, `3` server required but down, `4` not found.
-
+---
 
 ## Documentation
 
-- [`docs/`](docs/) — the documentation site (Astro Starlight + a bespoke landing); `cd docs && bun install && bun run dev`. Authoring guide: [`docs/STYLE.md`](docs/STYLE.md)
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, required checks, PR hygiene
-- [SECURITY.md](SECURITY.md) — supported versions, threat model, how to report
-- [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) — the `Rib` contract
-- [`packages/workflows/src/schema/`](packages/workflows/src/schema/) — YAML schema (Archon-compatible)
-- [`.keelson/workflows/`](.keelson/workflows/) — bundled starter workflows
+- **[danielscholl.github.io/keelson](https://danielscholl.github.io/keelson/)** : the documentation site (concepts, guides, the rib contract)
+- [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) : the `Rib` contract
+- [`.keelson/workflows/`](.keelson/workflows/) : bundled starter workflows
+- [CONTRIBUTING.md](CONTRIBUTING.md) : setup, required checks, PR hygiene
+- [SECURITY.md](SECURITY.md) : threat model and how to report
 
+---
 
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for
-third-party attribution — the workflow YAML schema borrows concepts from
-[Archon](https://github.com/coleam00/Archon) (MIT) and remains compatible
-with the upstream specification.
+third-party attribution.
