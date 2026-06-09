@@ -58,7 +58,7 @@ model assumes:
 - Command injection or path traversal in any handler that splices
   untrusted data (provider output, upstream node output, workflow YAML
   fields) into a shell, child process, or filesystem path
-- Authentication or credential leakage paths (the keytar store, the
+- Authentication or credential leakage paths (the OS keychain store, the
   redacted-console pipeline, the credentials drawer)
 - The browser ↔ server channel: origin / WebSocket-upgrade checks
   (`isAllowedOrigin` in `apps/server/src/chat-handler.ts`) and any

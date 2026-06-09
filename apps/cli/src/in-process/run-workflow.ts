@@ -114,7 +114,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   }
 
   // Stub provider is the deterministic fallback when nothing else is
-  // registered. Real providers (claude / copilot) would need keytar
+  // registered. Real providers (claude / copilot) would need keychain
   // bootstrap and are out of scope for C3's headless path — operators who
   // want them up should `keelson serve` first so the run routes via HTTP.
   registerStubProvider();
@@ -144,7 +144,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const promptHandler = makePromptHandler({
     getProvider: (id) => {
       // Headless runs register exactly one provider (stub by default; the
-      // claude/copilot bootstrap path requires keytar + credentials and only
+      // claude/copilot bootstrap path requires keychain + credentials and only
       // wires under `keelson serve`). If the workflow's `provider:` (or a
       // node's override) names a different id, fail loudly rather than
       // silently substituting — `keelson serve` is the only path that can

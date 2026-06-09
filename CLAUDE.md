@@ -32,16 +32,16 @@ bun apps/cli/bin/keelson.ts workflow run smoke-test --watch
 Keelson is a **local-only agent harness**, not a hosted service. The harness is the deliverable; capabilities live in **ribs** (extensions) bolted on via a typed contract.
 
 - `apps/cli/` — `keelson` CLI. Commands (`workflow run`, `chat`, `doctor`) route to the server over HTTP/WS when it's up, and fall back to in-process execution (`apps/cli/src/in-process/`) when it's down. Stable exit codes: `0` success, `1` failure, `2` bad args, `3` server required but down, `4` not found.
-- `apps/server/` — Bun HTTP/WS server (`:7878`). Owns the SQLite store, keytar credentials, redaction pipeline, chat/memory/workflow/snapshot handlers, and the `bootstrapRibs()` composition root in `src/index.ts`.
+- `apps/server/` — Bun HTTP/WS server (`:7878`). Owns the SQLite store, keychain credentials (`@napi-rs/keyring`), redaction pipeline, chat/memory/workflow/snapshot handlers, and the `bootstrapRibs()` composition root in `src/index.ts`.
 - `apps/web/` — React 19 + Vite SPA (`:5173`) — Chat and Workflows surfaces. `/api` is proxied to the server.
 - `packages/shared/` — public types. The `Rib` interface (`src/rib.ts`) is the extension contract; `SnapshotManager`/`SnapshotFrame` (`src/snapshots.ts`) is the generic streaming substrate ribs plug into.
-- `packages/workflows/` — DAG executor + YAML schema. Concepts borrowed from [Archon](https://github.com/coleam00/Archon) (MIT); the loader (`src/loader.ts`) is intentionally lenient — unknown fields warn rather than hard-error. Node taxonomy: `prompt` / `bash` / `command` / `loop` / `script` / `approval` / `cancel` / `subprocess`.
+- `packages/workflows/` — DAG executor + YAML schema. Concepts borrowed from [Archon](https://github.com/coleam00/Archon) (MIT); the loader (`src/loader.ts`) is intentionally lenient — unknown fields warn rather than hard-error. Node taxonomy: `prompt` / `bash` / `command` / `loop` / `script` / `approval` / `cancel`.
 - `packages/providers/` — pluggable coding-agent SDKs behind `IAgentProvider` (Copilot, Claude, stub).
 - `.keelson/` — runtime data home: `keelson.db` (SQLite), `workflows/`, `commands/`.
 
 **Rib activation is discovery-based.** No in-tree ribs ship. `bootstrapRibs()` discovers installed `@keelson/rib-*` packages from `node_modules/@keelson/` at boot (`apps/server/src/rib-discovery.ts`); `bun add @keelson/rib-osdu` is enough to wire one in. `KEELSON_RIBS=<id1>,<id2>` filters which discovered ribs activate (unset = all). Embedders can bypass discovery by handing `bootstrapRibs({ available: { id: rib } })` an explicit map — the path tests use.
 
-**State.** SQLite (sessions, runs, node outputs, memory rows) + keytar (credentials). Schema migrations live in `apps/server/src/db/migrations.ts`; `keelson doctor` checks `schema_version` matches.
+**State.** SQLite (sessions, runs, node outputs, memory rows) + keychain credentials (`@napi-rs/keyring`). Schema migrations live in `apps/server/src/db/migrations.ts`; `keelson doctor` checks `schema_version` matches.
 
 **Provider/tool determinism.** `KEELSON_WORKFLOW_PROVIDER` pins the provider workflows use for `prompt` nodes; `KEELSON_WORKFLOW_TOOL_DENYLIST` is an operator floor for per-node tool filtering. `KEELSON_USE_STUBS=1` is a test-only env var (CI + bun test setup) — no production code reads it.
 
