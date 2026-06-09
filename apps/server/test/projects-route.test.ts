@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { openDatabase } from "../src/db/init.ts";
 import { projectsRoutes } from "../src/projects-handler.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 
@@ -21,7 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function makeRig() {

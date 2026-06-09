@@ -1,0 +1,23 @@
+# Normalize line endings to LF on checkout across every platform so the
+# toolchain (Biome formatting, bun test, shell/bash workflow nodes) behaves
+# identically on Windows, macOS, and Linux. Without this, a Windows checkout
+# with core.autocrlf=true rewrites files to CRLF and `bun run check` fails.
+* text=auto eol=lf
+
+# Shell scripts and bash workflow nodes must stay LF even if a tool would
+# otherwise guess.
+*.sh text eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.avif binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary

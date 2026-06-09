@@ -9,7 +9,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkflowDefinition } from "@keelson/workflows";
@@ -25,6 +25,7 @@ import {
   createWorkflowSubscribers,
   runDedupeKey,
 } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 function liveEntry(dedupeKey: string, conversationId: string): ActiveRunEntry {
   return {
@@ -87,7 +88,7 @@ nodes:
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmTemp(tmpDir);
   });
 
   // `bindCollect` registers `collect` as a bound producer — the de-dup only

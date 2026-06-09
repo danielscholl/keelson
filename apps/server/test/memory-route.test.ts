@@ -10,7 +10,7 @@ import "./test-setup.ts";
 
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -26,6 +26,7 @@ import { Hono } from "hono";
 import { openDatabase } from "../src/db/init.ts";
 import { memoryRoutes } from "../src/memory-handler.ts";
 import { createMemoryStore, type MemoryStore } from "../src/memory-store.ts";
+import { rmTemp } from "./temp.ts";
 
 const ORIGIN = "http://127.0.0.1:5173";
 
@@ -44,7 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function postJson(path: string, body: unknown, headers: Record<string, string> = {}) {

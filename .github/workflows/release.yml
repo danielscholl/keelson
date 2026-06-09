@@ -48,7 +48,7 @@ jobs:
 
       # Bundles @keelson/cli (server inlined; shared/zod/keyring external) and
       # packs @keelson/shared, then renames to stable asset names + emits
-      # install.sh. The bundle is platform-independent — the native
+      # install.sh and install.ps1. The bundle is platform-independent — the native
       # @napi-rs/keyring is fetched per-platform when the home runs `bun install`.
       - name: Build release artifacts
         run: bun scripts/build-release.ts
@@ -76,4 +76,5 @@ jobs:
             dist/release/keelson-cli.tgz
             dist/release/keelson-shared.tgz
             dist/release/install.sh
+            dist/release/install.ps1
           fail_on_unmatched_files: true

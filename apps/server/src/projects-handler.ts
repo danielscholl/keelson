@@ -18,6 +18,7 @@ import {
   projectNameSchema,
   updateProjectBodySchema,
 } from "@keelson/shared";
+import { ensureSpawnPath } from "@keelson/shared/exec";
 import type { Hono } from "hono";
 
 import { DuplicateProjectNameError, type ProjectsStore } from "./projects-store.ts";
@@ -93,21 +94,24 @@ async function gitClone(
   dest: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   // Force non-interactive: any credential / known-hosts prompt would hang
-  // the Hono handler. SSH_ASKPASS=/usr/bin/true neutralizes any passphrase
-  // prompt for SSH URLs; GIT_TERMINAL_PROMPT=0 covers HTTPS basic auth.
+  // the Hono handler. GIT_TERMINAL_PROMPT=0 covers HTTPS basic auth and
+  // BatchMode=yes makes ssh fail rather than prompt; the askpass overrides
+  // (POSIX-only — /usr/bin/true doesn't exist on Windows) additionally
+  // neutralize SSH passphrase prompts.
   // The 60s timeout protects against a server that accepts the connection
   // but never finishes; aborted clones are reported as a clean failure.
   const proc = Bun.spawn({
     cmd: ["git", "clone", "--", url, dest],
     stdout: "pipe",
     stderr: "pipe",
-    env: {
+    env: ensureSpawnPath({
       ...process.env,
       GIT_TERMINAL_PROMPT: "0",
-      GIT_ASKPASS: "/usr/bin/true",
-      SSH_ASKPASS: "/usr/bin/true",
       GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
-    },
+      ...(process.platform === "win32"
+        ? {}
+        : { GIT_ASKPASS: "/usr/bin/true", SSH_ASKPASS: "/usr/bin/true" }),
+    } as Record<string, string>),
   });
   const timeout = setTimeout(() => {
     try {

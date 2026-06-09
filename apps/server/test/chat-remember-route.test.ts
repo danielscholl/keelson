@@ -6,7 +6,7 @@ import "./test-setup.ts";
 
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RememberChatMessageResponse } from "@keelson/shared";
@@ -15,6 +15,7 @@ import { chatRememberRoutes } from "../src/chat-remember-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createMemoryStore, type MemoryStore } from "../src/memory-store.ts";
+import { rmTemp } from "./temp.ts";
 
 const ORIGIN = "http://127.0.0.1:5173";
 
@@ -35,7 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function postJson(path: string, body: unknown) {

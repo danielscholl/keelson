@@ -18,6 +18,7 @@
  */
 
 import type { NodeHandler, NodeResult } from "../executor.ts";
+import { prependPath, resolveBash } from "./shell.ts";
 import {
   buildSubprocessEnv,
   runSubprocess,
@@ -43,13 +44,17 @@ export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler 
 
       let outcome: SubprocessOutcome;
       try {
+        const bash = resolveBash();
         outcome = await runSubprocess({
-          cmd: "bash",
+          cmd: bash.cmd,
           args: ["-c", ctx.rawBody],
           cwd: ctx.cwd,
-          env: buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
-            ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
-          }),
+          env: prependPath(
+            buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
+              ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+            }),
+            bash.pathDirs,
+          ),
           timeoutMs,
           abortSignal: ctx.abortSignal,
           emit: ctx.emit,

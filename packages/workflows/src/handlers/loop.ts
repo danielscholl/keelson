@@ -30,6 +30,7 @@ import {
   stripCompletionTags,
   synthesizePromptNode,
 } from "./helpers.ts";
+import { prependPath, resolveBash } from "./shell.ts";
 import { buildSubprocessEnv, runSubprocess, SubprocessSpawnError } from "./subprocess.ts";
 
 /** Per-iteration timeout for the `loop.until_bash` completion probe. Matches Archon. */
@@ -92,8 +93,10 @@ export const defaultRunUntilBashProbe: RunUntilBashProbe = async (script, opts) 
     for (const [k, v] of Object.entries(opts.env)) env[k] = v;
   }
   try {
+    const bash = resolveBash();
+    prependPath(env, bash.pathDirs);
     const outcome = await runSubprocess({
-      cmd: "bash",
+      cmd: bash.cmd,
       args: ["-c", script],
       cwd: opts.cwd,
       env,

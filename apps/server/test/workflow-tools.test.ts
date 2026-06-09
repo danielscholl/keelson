@@ -9,7 +9,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MessageChunk, ToolContext, ToolDefinition } from "@keelson/shared";
@@ -26,6 +26,7 @@ import {
   createWorkflowSubscribers,
   type WorkflowController,
 } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -42,7 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   activeDispose?.();
   activeDispose = undefined;
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 interface Rig {

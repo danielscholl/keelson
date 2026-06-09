@@ -10,7 +10,7 @@ import "./test-setup.ts";
 
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -26,6 +26,7 @@ import {
 } from "@keelson/shared";
 import { openDatabase } from "../src/db/init.ts";
 import { createMemoryStore, InvalidCursorError, type MemoryStore } from "../src/memory-store.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -41,7 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function makeDraft(overrides: Partial<WritebackMemoryDraft> = {}): WritebackMemoryDraft {

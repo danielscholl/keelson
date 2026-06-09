@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import {
+  canonicalPath,
   createWorktree,
   ensureWorktreeDeps,
   gitToplevel,
@@ -53,13 +54,23 @@ async function initRepo(path: string): Promise<void> {
   await git(["init", "--initial-branch=main"], path);
   await git(["config", "user.email", "test@example.com"], path);
   await git(["config", "user.name", "Test"], path);
+  // Hermetic line endings: a host-level core.autocrlf=true (the Git for
+  // Windows default, and what GitHub's windows runners ship) would smudge the
+  // committed bun.lock to CRLF on worktree checkout, and `bun install
+  // --frozen-lockfile` rejects the reserialized lockfile as changed.
+  await git(["config", "core.autocrlf", "false"], path);
   writeFileSync(join(path, "README.md"), "test repo\n");
   await git(["add", "README.md"], path);
   await git(["commit", "-m", "initial"], path);
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), "keelson-worktree-test-"));
+  // Canonicalize (8.3 short form → long): GitHub's windows runners expose TEMP
+  // as C:\Users\RUNNER~1\..., and a short-form repo cwd makes bun record
+  // repo-escaping workspace keys in bun.lock (breaking the frozen install in
+  // the worktree) and makes lexical comparisons against git's long-form
+  // output miss.
+  tmp = canonicalPath(mkdtempSync(join(tmpdir(), "keelson-worktree-test-")));
 });
 
 afterEach(() => {
@@ -96,7 +107,7 @@ describe("worktreePathForRepoLocal", () => {
         projectRootPath: "/repos/work",
         branch: "keelson/architect/abc",
       }),
-    ).toBe("/repos/work/.worktrees/abc");
+    ).toBe(join("/repos/work", ".worktrees", "abc"));
   });
 });
 
@@ -285,6 +296,16 @@ describe("repoPathFromWorktree", () => {
 
   test("returns null when the directory has no .git pointer", () => {
     expect(repoPathFromWorktree(tmp)).toBeNull();
+  });
+
+  test("parses a backslash-separated gitdir pointer", () => {
+    const wt = join(tmp, "winwt");
+    require("node:fs").mkdirSync(wt);
+    require("node:fs").writeFileSync(
+      join(wt, ".git"),
+      "gitdir: C:\\Users\\dev\\repo\\.git\\worktrees\\feature\n",
+    );
+    expect(repoPathFromWorktree(wt)).toBe("C:\\Users\\dev\\repo");
   });
 
   test("returns null when .git is malformed", () => {

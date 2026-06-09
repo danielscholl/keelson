@@ -23,6 +23,25 @@ const GIT_TIMEOUT_MS = 30_000;
 // Resolving a fresh worktree's workspace graph is far slower than a git op.
 const BUN_INSTALL_TIMEOUT_MS = 300_000;
 
+// realpathSync.native resolves through the OS (GetFinalPathNameByHandle on
+// Windows), which also expands 8.3 short names (C:\Users\RUNNER~1\...) that the
+// portable implementation leaves intact. Git records long-form paths, so a
+// same-directory check against a short-form input (e.g. a Windows temp dir)
+// only converges if both sides canonicalize the same way.
+export function canonicalPath(p: string): string {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return realpathSync(p);
+  }
+}
+
+// Windows filesystems are case-insensitive; canonical forms can still differ
+// in casing (drive letter, preserved-case components from different origins).
+function samePath(a: string, b: string): boolean {
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 export interface BranchTemplateContext {
   workflow: string;
   runId: string;
@@ -177,11 +196,12 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Creat
   }
   if (existsSync(opts.dest)) {
     const known = await listWorktrees(opts.repoPath);
-    const destReal = realpathSync(opts.dest);
+    const destReal = canonicalPath(opts.dest);
     const isRegistered = known.some((wt) => {
       try {
         return (
-          realpathSync(wt.path) === destReal && (wt.branch === null || wt.branch === opts.branch)
+          samePath(canonicalPath(wt.path), destReal) &&
+          (wt.branch === null || wt.branch === opts.branch)
         );
       } catch {
         return false;
@@ -256,7 +276,15 @@ export async function ensureWorktreeDeps(opts: {
   }
   let out: GitOutcome;
   try {
-    out = await runBun(["install", "--frozen-lockfile"], opts.worktreePath, opts.abortSignal);
+    // Canonicalize the cwd (8.3 short form → long): bun install run from a
+    // short-form cwd writes workspace keys relative to the short cwd while
+    // resolving package dirs long-form, so the keys escape the repo and the
+    // frozen-lockfile compare always fails.
+    out = await runBun(
+      ["install", "--frozen-lockfile"],
+      canonicalPath(opts.worktreePath),
+      opts.abortSignal,
+    );
   } catch (err) {
     return {
       installed: false,
@@ -344,7 +372,13 @@ export function repoPathFromWorktree(worktreeDir: string): string | null {
   if (!match) return null;
   const gitdir = match[1]!.trim();
   // Strip `/worktrees/<name>` to get `<repo>/.git`, then dirname to get repo.
-  const worktreesIdx = gitdir.lastIndexOf("/.git/worktrees/");
+  // Git for Windows writes gitdir pointers with forward slashes, but tolerate
+  // backslashes too — a misparse here downgrades a tracked worktree to an
+  // orphan, and prune would rmSync it without unregistering the git record.
+  const worktreesIdx = Math.max(
+    gitdir.lastIndexOf("/.git/worktrees/"),
+    gitdir.lastIndexOf("\\.git\\worktrees\\"),
+  );
   if (worktreesIdx < 0) return null;
   return gitdir.slice(0, worktreesIdx);
 }
