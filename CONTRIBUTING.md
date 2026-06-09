@@ -17,7 +17,10 @@ bun dev
 ```
 
 `bun dev` launches the server on `:7878` and the SPA on `:5173` in parallel.
-Use `bun dev:server` or `bun dev:web` to run one side alone.
+Use `bun dev:server` or `bun dev:web` to run one side alone. In dev the SPA runs
+under Vite (HMR) on `:5173` and proxies `/api` to `:7878`; an **installed**
+`keelson serve` instead serves the built SPA from the cli tarball at `:7878`
+(same origin), which `scripts/build-release.ts` bundles in under `web/`.
 
 Run the CLI from source (no install) — handy while developing:
 

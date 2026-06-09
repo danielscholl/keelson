@@ -46,21 +46,21 @@ keelson rib list --installed
 > `cimpl`, `kubectl`, `osdu-activity`, `osdu-quality`, `glab` — plus a reachable
 > cluster and GitLab auth. Without them it still loads; its lanes just render empty.
 
-**3. Run** the API server, then drive it from the CLI:
+**3. Run** the server, then open the UI or drive it from the CLI:
 
 ```bash
-keelson serve                     # API + WS on :7878 (Ctrl-C to stop)
+keelson serve                     # server + web UI + WS on :7878 (Ctrl-C to stop)
+open http://127.0.0.1:7878        # Chat, Workflows, and your ribs' surfaces
 keelson doctor                    # health sweep: toolchain, server, DB, auth, ribs
 keelson chat "hello"              # one-shot turn
 keelson workflow list             # workflows the installed ribs contribute
 ```
 
-Workflows come from the ribs you install (or drop your own YAML in
-`~/.keelson/workflows`). Real agents need a Copilot subscription or an Anthropic
-API key. No keys? Add
-`KEELSON_PROVIDERS=stub` for an offline echo provider to try the harness without
-credentials. (The React Chat/Workflows UI currently runs in dev — see
-[CONTRIBUTING.md](CONTRIBUTING.md) — and isn't served by the installed binary yet.)
+`keelson serve` serves the React UI (Chat, Workflows, and each rib's surfaces) at
+`http://127.0.0.1:7878` — same origin as the API. Workflows come from the ribs you
+install (or drop your own YAML in `~/.keelson/workflows`). Real agents need a
+Copilot subscription or an Anthropic API key. No keys? Add `KEELSON_PROVIDERS=stub`
+for an offline echo provider to try the harness without credentials.
 
 **Uninstall:**
 

@@ -9,6 +9,24 @@ under [Pre-release milestones](#pre-release-milestones) used an internal
 milestone numbering (0.2–0.4); they predate the install path and were never
 published as artifacts, and are kept here for history.
 
+## [0.4.0] — 2026-06-09 — Browser UI from `keelson serve`
+
+The installed harness now has a browser UI. `keelson serve` serves the built
+React SPA — Chat, Workflows, and every rib's surfaces — at `http://127.0.0.1:7878`,
+the same origin as the API. No separate dev server.
+
+### Added
+
+- `keelson serve` serves the built SPA at the root: static assets with an
+  immutable cache, an `index.html` SPA fallback for client-side routes, and the
+  `/api/*` + WebSocket routes unchanged. The SPA talks to its own origin
+  (relative `/api`, `window.location.host` WebSockets), so same-origin "just
+  works".
+- `scripts/build-release.ts` builds `@keelson/web` and ships it inside the
+  `@keelson/cli` tarball under `web/`; the server resolves it from the bundle
+  location (overridable via `KEELSON_WEB_DIR`). A source checkout has no build,
+  so dev stays API-only and the Vite server on `:5173` owns the UI.
+
 ## [0.3.0] — 2026-06-09 — Registry-free rib install
 
 Keelson no longer keeps a list of which ribs exist. `keelson rib add` takes any
