@@ -82,7 +82,7 @@ stableName(OUT, "keelson-cli", "keelson-cli.tgz");
 stableName(OUT, "keelson-shared", "keelson-shared.tgz");
 
 // 6. install.sh — see the heredoc-built launcher below.
-writeFileSync(join(OUT, "install.sh"), installScript(REPO));
+writeFileSync(join(OUT, "install.sh"), installScript(REPO, VERSION));
 await $`chmod +x ${join(OUT, "install.sh")}`;
 
 console.log(`[release] artifacts in ${OUT}`);
@@ -96,16 +96,23 @@ function stableName(dir: string, prefix: string, target: string): void {
   renameSync(join(dir, match), join(dir, target));
 }
 
-function installScript(repo: string): string {
+function installScript(repo: string, version: string): string {
   return `#!/usr/bin/env sh
 # Keelson installer. Provisions $KEELSON_HOME as a managed Bun project (the
 # single node_modules that holds the CLI, @keelson/shared, and your ribs) and
-# drops a launcher on PATH. Safe to re-run to repair the install.
+# drops a launcher on PATH. Re-run to upgrade: this installer is itself
+# versioned, so a re-run from a newer release rewrites the home to that
+# version's tarballs and \`bun install\` picks them up.
 set -eu
 
+KEELSON_VERSION="${version}"
 KEELSON_HOME="\${KEELSON_HOME:-$HOME/.keelson}"
 BIN_DIR="\${KEELSON_BIN_DIR:-$HOME/.local/bin}"
-BASE="https://github.com/${repo}/releases/latest/download"
+# Pin the home to this release's versioned download URLs (not /latest/), so the
+# dependency string changes between versions — that is what lets \`bun install\`
+# re-resolve on a re-run instead of serving the URL-keyed cache. Override either
+# tarball via env for local dry-runs against locally-built artifacts.
+BASE="https://github.com/${repo}/releases/download/v\${KEELSON_VERSION}"
 CLI_TARBALL="\${KEELSON_CLI_TARBALL:-$BASE/keelson-cli.tgz}"
 SHARED_TARBALL="\${KEELSON_SHARED_TARBALL:-$BASE/keelson-shared.tgz}"
 
@@ -133,7 +140,7 @@ exec bun "$KEELSON_HOME/node_modules/@keelson/cli/dist/keelson.js" "\\$@"
 LAUNCH
 chmod +x "$BIN_DIR/keelson"
 
-echo "keelson installed to $KEELSON_HOME"
+echo "keelson v$KEELSON_VERSION installed to $KEELSON_HOME"
 echo "launcher: $BIN_DIR/keelson  (ensure $BIN_DIR is on PATH)"
 echo "next: keelson rib add chamber && keelson serve"
 `;

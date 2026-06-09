@@ -34,6 +34,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The release version is derived from packages/shared/package.json, so a
+      # tag that disagrees would publish mislabeled artifacts. Fail loudly first.
+      - name: Verify tag matches package version
+        run: |
+          pkg_version="$(bun -e 'console.log(require("./packages/shared/package.json").version)')"
+          if [ "${GITHUB_REF_NAME}" != "v${pkg_version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package version v${pkg_version}" >&2
+            echo "bump packages/shared/package.json (and root) to match the tag, or retag." >&2
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} matches package version v${pkg_version}"
+
       # Bundles @keelson/cli (server inlined; shared/zod/keyring external) and
       # packs @keelson/shared, then renames to stable asset names + emits
       # install.sh. The bundle is platform-independent — the native
