@@ -30,6 +30,15 @@ export { isValidCommandName } from "../schema/command-validation.ts";
 const MAX_DISCOVERY_DEPTH = 1;
 const HOME = homedir();
 
+// The managed keelson home, so command/script assets resolve from the same home
+// as the workflows that reference them. Honors KEELSON_HOME (env) and defaults
+// to ~/.keelson — kept env-only here to avoid a @keelson/shared dependency in
+// this leaf package; the project-local scope (cwd/.keelson) covers the dev case.
+function keelsonHome(): string {
+  const env = process.env.KEELSON_HOME?.trim();
+  return env ? env : join(HOME, ".keelson");
+}
+
 export type ScriptRuntime = "bun" | "uv";
 
 const SCRIPT_EXT_RUNTIME: Record<string, ScriptRuntime> = {
@@ -50,7 +59,7 @@ export interface ResolvedScript {
 }
 
 function searchDirs(cwd: string, kind: "commands" | "scripts"): string[] {
-  return [join(cwd, ".keelson", kind), join(HOME, ".keelson", kind)];
+  return [join(cwd, ".keelson", kind), join(keelsonHome(), kind)];
 }
 
 interface WalkedFile {
