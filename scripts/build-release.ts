@@ -34,6 +34,13 @@ const SHARED_PKG = JSON.parse(
 ) as { version: string; dependencies: Record<string, string> };
 const VERSION = SHARED_PKG.version;
 const ZOD_RANGE = SHARED_PKG.dependencies.zod;
+// Provider SDK ranges come from @keelson/providers so the release always ships
+// the same SDK versions the repo tests against.
+const PROVIDERS_PKG = JSON.parse(
+  readFileSync(join(ROOT, "packages", "providers", "package.json"), "utf8"),
+) as { dependencies: Record<string, string> };
+const CLAUDE_SDK_RANGE = PROVIDERS_PKG.dependencies["@anthropic-ai/claude-agent-sdk"];
+const COPILOT_SDK_RANGE = PROVIDERS_PKG.dependencies["@github/copilot-sdk"];
 const REPO = "danielscholl/keelson";
 
 rmSync(OUT, { recursive: true, force: true });
@@ -42,22 +49,33 @@ mkdirSync(join(CLI_PKG_DIR, "dist"), { recursive: true });
 // 1. Bundle the CLI. server/providers/skills/workflows/commander are inlined;
 //    @keelson/shared, zod, and @napi-rs/keyring stay external so they resolve
 //    to the home's single copy at runtime (one zod → schema identity holds
-//    across the harness↔rib boundary).
+//    across the harness↔rib boundary). The provider SDKs must also stay
+//    external: each one locates a sibling package at runtime relative to its
+//    own module path (claude-agent-sdk resolves its per-platform native CLI
+//    binary, copilot-sdk resolves the @github/copilot CLI it spawns), so
+//    inlining them breaks that resolution and chat fails on both providers.
 console.log("[release] bundling @keelson/cli");
 await $`bun build ${join(ROOT, "apps/cli/bin/keelson.ts")} --target=bun --outfile ${join(
   CLI_PKG_DIR,
   "dist",
   "keelson.js",
-)} --external @keelson/shared --external zod --external @napi-rs/keyring`;
+)} --external @keelson/shared --external zod --external @napi-rs/keyring --external @anthropic-ai/claude-agent-sdk --external @github/copilot-sdk`;
 
 // 2. CLI release manifest. shared is an optional peer (the home provides it);
-//    keyring is a real native dep bun fetches per-platform.
+//    keyring is a real native dep bun fetches per-platform; the provider SDKs
+//    bring their own runtime siblings (claude's per-platform binary via its
+//    optionalDependencies, copilot's CLI via its @github/copilot dep).
 const cliPkg = {
   name: "@keelson/cli",
   version: VERSION,
   type: "module",
   bin: { keelson: "./dist/keelson.js" },
-  dependencies: { "@napi-rs/keyring": "1.3.0", zod: ZOD_RANGE },
+  dependencies: {
+    "@anthropic-ai/claude-agent-sdk": CLAUDE_SDK_RANGE,
+    "@github/copilot-sdk": COPILOT_SDK_RANGE,
+    "@napi-rs/keyring": "1.3.0",
+    zod: ZOD_RANGE,
+  },
   peerDependencies: { "@keelson/shared": `^${VERSION}` },
   peerDependenciesMeta: { "@keelson/shared": { optional: true } },
   files: ["dist", "web", "LICENSE", "NOTICE"],
