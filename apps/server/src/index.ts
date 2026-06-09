@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, join, resolve } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import type { Server } from "bun";
@@ -73,10 +73,15 @@ export interface StartServerConfig {
 // extensionless path that doesn't map to a file (a client-side route) returns
 // index.html. Returns null for a missing asset (let the API 404 it) and guards
 // against path traversal escaping webDir.
-async function serveSpaAsset(webDir: string, pathname: string): Promise<Response | null> {
+export async function serveSpaAsset(webDir: string, pathname: string): Promise<Response | null> {
   const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
   const filePath = join(webDir, rel);
-  if (!resolve(filePath).startsWith(resolve(webDir))) return null;
+  // Stay within webDir: the resolved path must be the root itself or strictly
+  // under it. A bare `startsWith(root)` would also match a sibling whose name
+  // shares the prefix (e.g. `/var/www` vs `/var/www-evil`), so anchor on `sep`.
+  const root = resolve(webDir);
+  const full = resolve(filePath);
+  if (full !== root && !full.startsWith(root + sep)) return null;
   const file = Bun.file(filePath);
   if (await file.exists()) {
     const res = new Response(file);

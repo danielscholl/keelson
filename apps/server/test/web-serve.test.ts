@@ -6,8 +6,8 @@ import "./test-setup.ts";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type ServerHandle, startServer } from "../src/index.ts";
+import { basename, join } from "node:path";
+import { type ServerHandle, serveSpaAsset, startServer } from "../src/index.ts";
 
 let handle: ServerHandle;
 let home: string;
@@ -72,5 +72,15 @@ describe("static SPA serving", () => {
   test("a missing asset with an extension is not faked into index.html", async () => {
     const res = await fetch(new URL("/assets/missing-xyz.js", handle.url));
     expect(res.status).toBe(404);
+  });
+
+  // new URL() normalizes `..` out of a request path, so the traversal guard is
+  // tested directly: a path escaping to a sibling that shares webDir's prefix
+  // (e.g. `<dist>` vs `<dist>-evil`) must not resolve.
+  test("the traversal guard rejects a sibling-prefix escape", async () => {
+    // `<dist>-evil` shares webDir's full path prefix — the exact case a bare
+    // startsWith(root) would wave through.
+    expect(await serveSpaAsset(webDir, `/../${basename(webDir)}-evil/secret`)).toBeNull();
+    expect(await serveSpaAsset(webDir, "/../secret")).toBeNull();
   });
 });
