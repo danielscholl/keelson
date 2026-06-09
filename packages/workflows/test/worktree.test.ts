@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import {
+  canonicalPath,
   createWorktree,
   ensureWorktreeDeps,
   gitToplevel,
@@ -64,7 +65,12 @@ async function initRepo(path: string): Promise<void> {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), "keelson-worktree-test-"));
+  // Canonicalize (8.3 short form → long): GitHub's windows runners expose TEMP
+  // as C:\Users\RUNNER~1\..., and a short-form repo cwd makes bun record
+  // repo-escaping workspace keys in bun.lock (breaking the frozen install in
+  // the worktree) and makes lexical comparisons against git's long-form
+  // output miss.
+  tmp = canonicalPath(mkdtempSync(join(tmpdir(), "keelson-worktree-test-")));
 });
 
 afterEach(() => {

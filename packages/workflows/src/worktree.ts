@@ -28,7 +28,7 @@ const BUN_INSTALL_TIMEOUT_MS = 300_000;
 // portable implementation leaves intact. Git records long-form paths, so a
 // same-directory check against a short-form input (e.g. a Windows temp dir)
 // only converges if both sides canonicalize the same way.
-function canonicalPath(p: string): string {
+export function canonicalPath(p: string): string {
   try {
     return realpathSync.native(p);
   } catch {
@@ -276,7 +276,15 @@ export async function ensureWorktreeDeps(opts: {
   }
   let out: GitOutcome;
   try {
-    out = await runBun(["install", "--frozen-lockfile"], opts.worktreePath, opts.abortSignal);
+    // Canonicalize the cwd (8.3 short form → long): bun install run from a
+    // short-form cwd writes workspace keys relative to the short cwd while
+    // resolving package dirs long-form, so the keys escape the repo and the
+    // frozen-lockfile compare always fails.
+    out = await runBun(
+      ["install", "--frozen-lockfile"],
+      canonicalPath(opts.worktreePath),
+      opts.abortSignal,
+    );
   } catch (err) {
     return {
       installed: false,

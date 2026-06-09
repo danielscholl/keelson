@@ -69,10 +69,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # TEMPORARY: diagnose the worktree frozen-lockfile failure (remove).
-      - name: Worktree lockfile repro
-        run: bun scripts/tmp-windows-repro.ts
-
       - name: Typecheck
         run: bun --filter '*' typecheck
 
