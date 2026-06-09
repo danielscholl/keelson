@@ -3,11 +3,20 @@ title: Reference
 description: The contract tier for rib developers and workflow authors.
 ---
 
-The reference tier is the contract: precise, terse, and stable. Planned pages:
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-- The Rib contract: the `Rib` interface, its lifecycle hooks, the validation
-  rules the harness enforces, and the discovery and activation sequence. The
-  centerpiece, and the first reference page to land.
+The reference tier is the contract: precise, terse, and stable.
+
+<CardGrid>
+  <LinkCard
+    title="The Rib contract"
+    href="rib-contract/"
+    description="The Rib interface, the context the harness injects, the validation rules it enforces, and the activation lifecycle."
+  />
+</CardGrid>
+
+More pages land here as the contract is documented:
+
 - Snapshots and surfaces: the streaming substrate ribs publish to.
 - Workflow nodes: the seven-node taxonomy, the DAG features, and the substitution
   model.
