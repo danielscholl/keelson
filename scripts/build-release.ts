@@ -14,6 +14,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -24,7 +25,11 @@ import { $ } from "bun";
 const ROOT = resolve(import.meta.dir, "..");
 const OUT = join(ROOT, "dist", "release");
 const CLI_PKG_DIR = join(OUT, "cli");
-const VERSION = "0.1.0";
+// Track @keelson/shared's version so the CLI tarball version and its
+// `@keelson/shared` peer range always match the shared tarball packed from that
+// same manifest, rather than drifting from a hard-coded constant on a v0.2+ cut.
+const VERSION = JSON.parse(readFileSync(join(ROOT, "packages", "shared", "package.json"), "utf8"))
+  .version as string;
 const REPO = "danielscholl/keelson";
 
 rmSync(OUT, { recursive: true, force: true });

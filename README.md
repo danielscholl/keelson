@@ -28,7 +28,7 @@ Keelson installs as a single `keelson` command backed by a managed home at
 curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/install.sh | sh
 ```
 
-Make sure `~/.local/bin` is on your `PATH`. Re-run any time to update.
+Make sure `~/.local/bin` is on your `PATH`. Safe to re-run to repair the install.
 
 **2. Add the capabilities (ribs) you want:**
 
