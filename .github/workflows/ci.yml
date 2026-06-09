@@ -22,6 +22,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # CI only reads the repo; don't persist the token into .git/config.
+          persist-credentials: false
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -60,6 +63,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # CI only reads the repo; don't persist the token into .git/config.
+          persist-credentials: false
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
