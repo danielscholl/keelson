@@ -60,12 +60,24 @@ const cliPkg = {
   dependencies: { "@napi-rs/keyring": "1.3.0", zod: ZOD_RANGE },
   peerDependencies: { "@keelson/shared": `^${VERSION}` },
   peerDependenciesMeta: { "@keelson/shared": { optional: true } },
-  files: ["dist", "LICENSE", "NOTICE"],
+  files: ["dist", "web", "LICENSE", "NOTICE"],
 };
 writeFileSync(join(CLI_PKG_DIR, "package.json"), `${JSON.stringify(cliPkg, null, 2)}\n`);
 for (const f of ["LICENSE", "NOTICE"]) {
   if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(CLI_PKG_DIR, f));
 }
+
+// 2b. Build the SPA and ship it inside the cli tarball at `web/`. The server
+//     (inlined in the bundle at dist/keelson.js) resolves `../web` and serves it
+//     at the root, so `keelson serve` gives an installed user the browser UI —
+//     no separate Vite dev server. The build is version-locked to the cli.
+console.log("[release] building @keelson/web");
+await $`cd ${ROOT} && bun --filter @keelson/web build`.quiet();
+const webDist = join(ROOT, "apps", "web", "dist");
+if (!existsSync(join(webDist, "index.html"))) {
+  throw new Error(`expected a built SPA at ${webDist} (apps/web build produced no index.html)`);
+}
+cpSync(webDist, join(CLI_PKG_DIR, "web"), { recursive: true });
 
 // 3. Pack the CLI package.
 console.log("[release] packing @keelson/cli");

@@ -2,9 +2,9 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import type { Server } from "bun";
@@ -62,6 +62,44 @@ export interface StartServerConfig {
   dbPath?: string;
   // Overrides PORT (defaults to env PORT or 7878).
   port?: number;
+  // Directory of the built web SPA to serve at the root. Defaults to the
+  // installed cli tarball's sibling `web/` (resolved from the bundle location);
+  // unset/missing in a source checkout → API only, and the Vite dev server
+  // on :5173 owns the UI.
+  webDir?: string;
+}
+
+// Serve a file from the built SPA, with a single-page-app fallback: an
+// extensionless path that doesn't map to a file (a client-side route) returns
+// index.html. Returns null for a missing asset (let the API 404 it) and guards
+// against path traversal escaping webDir.
+export async function serveSpaAsset(webDir: string, pathname: string): Promise<Response | null> {
+  const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const filePath = join(webDir, rel);
+  // Stay within webDir: the resolved path must be the root itself or strictly
+  // under it. A bare `startsWith(root)` would also match a sibling whose name
+  // shares the prefix (e.g. `/var/www` vs `/var/www-evil`), so anchor on `sep`.
+  const root = resolve(webDir);
+  const full = resolve(filePath);
+  if (full !== root && !full.startsWith(root + sep)) return null;
+  const file = Bun.file(filePath);
+  if (await file.exists()) {
+    const res = new Response(file);
+    // Vite emits content-hashed asset names, so they're safe to cache forever;
+    // index.html must revalidate so a new build is picked up.
+    res.headers.set(
+      "Cache-Control",
+      rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
+    );
+    return res;
+  }
+  if (!extname(rel)) {
+    const index = Bun.file(join(webDir, "index.html"));
+    if (await index.exists()) {
+      return new Response(index, { headers: { "Cache-Control": "no-cache" } });
+    }
+  }
+  return null;
 }
 
 export interface ServerHandle {
@@ -244,6 +282,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     db.close();
   };
 
+  // The built SPA to serve at the root. config.webDir → KEELSON_WEB_DIR → the
+  // cli tarball's sibling `web/` (the bundle lives at <cli>/dist, the build at
+  // <cli>/web). Null when the resolved dir has no index.html (a source checkout),
+  // so dev stays API-only and the Vite server on :5173 owns the UI.
+  const webDirCandidate =
+    config.webDir ?? (process.env.KEELSON_WEB_DIR?.trim() || join(import.meta.dir, "..", "web"));
+  const WEB_DIR = existsSync(join(webDirCandidate, "index.html")) ? webDirCandidate : null;
+
   const app = new Hono();
 
   // Reflect any loopback origin so Vite port shifts (5174/5175/…) don't break
@@ -290,6 +336,8 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     claudeAuthProbe: bootstrap.claudeAuthProbe,
   });
 
+  // Only reached when no built SPA is present (a source checkout) — the static
+  // handler below serves index.html for `/` when WEB_DIR is set.
   app.get("/", (c) =>
     c.text(
       "keelson server is running. The web UI lives at http://127.0.0.1:5173 in dev (run `bun --filter @keelson/web dev`).",
@@ -340,7 +388,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     port: PORT,
     hostname: HOSTNAME,
     idleTimeout: IDLE_TIMEOUT_S,
-    fetch(req: Request, srv: Server<WsData>) {
+    async fetch(req: Request, srv: Server<WsData>) {
       const url = new URL(req.url);
       if (url.pathname === "/api/chat/ws") {
         return handleChatUpgrade(req, srv);
@@ -359,12 +407,20 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         }
         return handleSnapshotUpgrade(req, srv, snapshotKey);
       }
+      // Serve the built SPA (and its client-side routes) for non-API GETs. The
+      // API still owns /api/*; everything else falls through to Hono (the dev `/`
+      // hint, 404s) when no asset matches.
+      if (WEB_DIR && req.method === "GET" && !url.pathname.startsWith("/api/")) {
+        const asset = await serveSpaAsset(WEB_DIR, url.pathname);
+        if (asset) return asset;
+      }
       return app.fetch(req);
     },
     websocket: wsHandlers,
   });
 
   console.log(`keelson server listening on ${server.url.href}`);
+  if (WEB_DIR) console.log(`serving web UI from ${WEB_DIR}`);
   return {
     server,
     url: server.url.href,
