@@ -30,6 +30,8 @@ curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/inst
 
 Make sure `~/.local/bin` is on your `PATH`. Re-run any time to upgrade to the
 latest release (or repair a broken install) — your installed ribs are preserved.
+Once installed, `keelson update` does the same upgrade in place (and advances
+your ribs); `keelson update --check` reports what's available.
 
 **2. Add the capabilities (ribs) you want:**
 
