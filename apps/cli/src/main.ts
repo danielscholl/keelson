@@ -13,7 +13,7 @@ import pkg from "../package.json" with { type: "json" };
 import { runChat } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
-import { runRibList, runRibShow } from "./commands/rib.ts";
+import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
 import { runServe } from "./commands/serve.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRespond } from "./commands/workflow-respond.ts";
@@ -247,16 +247,54 @@ export function buildProgram(): Command {
 
   const rib = program
     .command("rib")
-    .description("rib operations (list, show) — inspect the extensions discovered at boot");
+    .description("rib operations (add, remove, list, show) — manage and inspect extensions");
 
   rib
     .command("list")
     .description("list discovered ribs with their tools, surfaces, and auth (server-required)")
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
-    .action(async function ribListAction(this: Command, listOpts: { baseUrl?: string }) {
+    .option("--installed", "list ribs installed in the keelson home (no server needed)")
+    .action(async function ribListAction(
+      this: Command,
+      listOpts: { baseUrl?: string; installed?: boolean },
+    ) {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", listOpts.baseUrl);
-      await runRibList({ json, ...(baseUrl ? { baseUrl } : {}) });
+      await runRibList({
+        json,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(listOpts.installed ? { installed: true } : {}),
+      });
+    });
+
+  rib
+    .command("add <source>")
+    .description(
+      "install a rib into the keelson home (a known id like `chamber`/`osdu`, a path, or a github:owner/repo / git URL)",
+    )
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function ribAddAction(
+      this: Command,
+      source: string,
+      addOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", addOpts.baseUrl);
+      await runRibAdd(source, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  rib
+    .command("remove <id>")
+    .description("uninstall a rib from the keelson home")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function ribRemoveAction(
+      this: Command,
+      id: string,
+      removeOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
+      await runRibRemove(id, { json, ...(baseUrl ? { baseUrl } : {}) });
     });
 
   rib

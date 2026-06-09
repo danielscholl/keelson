@@ -18,6 +18,7 @@
       },
       "dependencies": {
         "@keelson/providers": "workspace:*",
+        "@keelson/server": "workspace:*",
         "@keelson/shared": "workspace:*",
         "@keelson/skills": "workspace:*",
         "@keelson/workflows": "workspace:*",

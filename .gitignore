@@ -28,6 +28,10 @@ package.json.bak
 .keelson/keelson.db-wal
 .keelson/keelson.db-shm
 
+# A `keelson rib add` run against the repo-local home seeds these.
+.keelson/package.json
+.keelson/bun.lock
+
 # Playwright MCP scratch — screenshots, console logs, snapshots from
 # headless verification runs. Local-only; never committed.
 .playwright-mcp/

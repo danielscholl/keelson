@@ -3,12 +3,21 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 
-async function runCli(args: readonly string[]): Promise<{ stdout: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", BIN, ...args], { stdout: "pipe", stderr: "pipe" });
+async function runCli(
+  args: readonly string[],
+  env?: Record<string, string>,
+): Promise<{ stdout: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", BIN, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+  });
   const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   return { stdout, exitCode };
 }
@@ -106,5 +115,68 @@ describe("keelson rib (HTTP)", () => {
     const env = JSON.parse(stdout.trim());
     expect(env.ok).toBe(false);
     expect(env.code).toBe("NO_SERVER");
+  });
+});
+
+describe("keelson rib (home lifecycle)", () => {
+  let home: string;
+  let ribSrc: string;
+
+  beforeAll(() => {
+    home = join(mkdtempSync(join(tmpdir(), "keelson-rib-home-")), "keelson");
+    // A minimal local rib package `bun add <path>` can install. Zero deps so
+    // the install is self-contained and offline.
+    ribSrc = mkdtempSync(join(tmpdir(), "keelson-rib-fake-"));
+    writeFileSync(
+      join(ribSrc, "package.json"),
+      JSON.stringify({ name: "@keelson/rib-faketest", version: "0.0.0", main: "./index.ts" }),
+    );
+    writeFileSync(join(ribSrc, "index.ts"), "export default { id: 'faketest' };\n");
+  });
+
+  afterAll(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(ribSrc, { recursive: true, force: true });
+  });
+
+  test("add a local path installs the rib into the home", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "rib", "add", ribSrc], {
+      KEELSON_HOME: home,
+    });
+    expect(exitCode).toBe(0);
+    const env = JSON.parse(stdout.trim());
+    expect(env.ok).toBe(true);
+    expect(env.data.added).toContain("faketest");
+    expect(env.data.installed).toContain("faketest");
+  });
+
+  test("list --installed reports it without a server", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "rib", "list", "--installed"], {
+      KEELSON_HOME: home,
+    });
+    expect(exitCode).toBe(0);
+    const env = JSON.parse(stdout.trim());
+    expect(env.data.source).toBe("installed");
+    expect(env.data.ribs.map((r: { id: string }) => r.id)).toContain("faketest");
+  });
+
+  test("remove uninstalls it", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "rib", "remove", "faketest"], {
+      KEELSON_HOME: home,
+    });
+    expect(exitCode).toBe(0);
+    const env = JSON.parse(stdout.trim());
+    expect(env.data.removed).toBe("faketest");
+    expect(env.data.installed).not.toContain("faketest");
+  });
+
+  test("remove an uninstalled rib exits 4 with NOT_FOUND", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "rib", "remove", "ghost"], {
+      KEELSON_HOME: home,
+    });
+    expect(exitCode).toBe(4);
+    const env = JSON.parse(stdout.trim());
+    expect(env.ok).toBe(false);
+    expect(env.code).toBe("NOT_FOUND");
   });
 });

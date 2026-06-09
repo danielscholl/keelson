@@ -130,6 +130,9 @@ function isBuiltIn(id: string): id is BuiltInId {
 export interface BootstrapRibsOptions {
   // Omitted runs discovery; explicit (even `{}`) bypasses it.
   available?: Readonly<Record<string, Rib>>;
+  // node_modules/@keelson directory discovery scans. Defaults to the keelson
+  // home's rib tree (resolveRibsRoot). Ignored when `available` is supplied.
+  ribsRoot?: string;
   // Shared SnapshotManager passed into RibContext and used to auto-register
   // each rib's `composeBundle`. Optional so unit tests for parseRibList /
   // applyRibs don't need to spin up a manager.
@@ -163,7 +166,8 @@ export interface RibBootstrap {
 
 export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
-  const available = options.available ?? (await discoverRibs());
+  const available =
+    options.available ?? (await discoverRibs(options.ribsRoot ? { root: options.ribsRoot } : {}));
   const active = requested.length > 0 ? requested : Object.keys(available);
   const snapshotManager = options.snapshotManager;
   // The template ctx carries only exec/sidecar; applyRibs layers a scoped

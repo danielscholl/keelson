@@ -19,6 +19,30 @@ bun dev
 `bun dev` launches the server on `:7878` and the SPA on `:5173` in parallel.
 Use `bun dev:server` or `bun dev:web` to run one side alone.
 
+Run the CLI from source (no install) — handy while developing:
+
+```bash
+bun apps/cli/bin/keelson.ts doctor
+alias keelson="bun $(pwd)/apps/cli/bin/keelson.ts"   # optional shell alias
+```
+
+In a checkout, the keelson home resolves to the repo's `.keelson/` (it walks up
+from cwd looking for an existing `.keelson/`), so dev runs read the bundled
+workflows and a local DB rather than `~/.keelson`. Set `KEELSON_HOME=<dir>` to
+point at a throwaway home.
+
+### Release artifacts
+
+`bun run build:release` (the same script CI runs on a `v*` tag, see
+`.github/workflows/release.yml`) bundles `@keelson/cli` and packs
+`@keelson/shared` into `dist/release/` along with `install.sh`. To exercise the
+full install path locally against those tarballs — install into a throwaway
+home, then run `doctor`, `rib add`, and a single-Zod identity check:
+
+```bash
+scripts/dry-run-install.sh ../keelson-rib-chamber
+```
+
 ## Required checks before opening a PR
 
 Every PR must keep these green. CI runs the same commands.

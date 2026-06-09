@@ -23,12 +23,23 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, extname, join } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 
 export { isValidCommandName } from "../schema/command-validation.ts";
 
 const MAX_DISCOVERY_DEPTH = 1;
 const HOME = homedir();
+
+// The managed keelson home, so command/script assets resolve from the same home
+// as the workflows that reference them. Honors KEELSON_HOME (env) and defaults
+// to ~/.keelson — kept env-only here to avoid a @keelson/shared dependency in
+// this leaf package; the project-local scope (cwd/.keelson) covers the dev case.
+function keelsonHome(): string {
+  const env = process.env.KEELSON_HOME?.trim();
+  // resolve() so a relative KEELSON_HOME normalizes to absolute, matching
+  // resolveKeelsonHome in @keelson/shared/paths.
+  return env ? resolve(env) : join(HOME, ".keelson");
+}
 
 export type ScriptRuntime = "bun" | "uv";
 
@@ -50,7 +61,7 @@ export interface ResolvedScript {
 }
 
 function searchDirs(cwd: string, kind: "commands" | "scripts"): string[] {
-  return [join(cwd, ".keelson", kind), join(HOME, ".keelson", kind)];
+  return [join(cwd, ".keelson", kind), join(keelsonHome(), kind)];
 }
 
 interface WalkedFile {

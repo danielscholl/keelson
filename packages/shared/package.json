@@ -39,6 +39,11 @@
       "types": "./dist/exec.d.ts",
       "default": "./dist/exec.js"
     },
+    "./paths": {
+      "bun": "./src/paths.ts",
+      "types": "./dist/paths.d.ts",
+      "default": "./dist/paths.js"
+    },
     "./tools": {
       "bun": "./src/tools.ts",
       "types": "./dist/tools.d.ts",
