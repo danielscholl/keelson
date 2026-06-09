@@ -43,6 +43,37 @@ home, then run `doctor`, `rib add`, and a single-Zod identity check:
 scripts/dry-run-install.sh ../keelson-rib-chamber
 ```
 
+### Cutting a release
+
+Releases are versioned and tagged. The version lives in
+`packages/shared/package.json` (and the root `package.json`); `build-release.ts`
+derives the artifact version from it, and `release.yml` refuses to publish if
+the pushed tag doesn't match. To cut `vX.Y.Z`:
+
+1. Bump `version` in `package.json` and `packages/shared/package.json` to `X.Y.Z`.
+2. Add a `## [X.Y.Z]` entry to `CHANGELOG.md`.
+3. Land that on `main`, then tag and push:
+
+   ```bash
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+`release.yml` builds the CLI + shared tarballs and `install.sh`, and attaches
+them to the GitHub Release. GitHub also aliases the newest release under
+`/releases/latest/download/`, which is where `curl … install.sh | sh` reads.
+
+### Update model
+
+`install.sh` pins the home to **versioned** download URLs
+(`/releases/download/vX.Y.Z/`), not `/latest/`. Because the dependency string
+differs between versions, re-running a newer `install.sh` (fetched from
+`/latest/download/install.sh`) rewrites the home's `@keelson/cli` +
+`@keelson/shared` to the new URLs and `bun install` re-resolves them — installed
+ribs are preserved (the manifest merge sets keys, never clobbering rib deps).
+For now, upgrade by re-running `install.sh`; a `keelson update` command that
+wraps this (and advances `github:`-sourced ribs via `bun update` against their
+CI-green `main`) is the planned next step.
+
 ## Required checks before opening a PR
 
 Every PR must keep these green. CI runs the same commands.

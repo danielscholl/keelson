@@ -3,7 +3,45 @@
 All notable changes to Keelson are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versions track the milestones in the README Status table.
+`0.1.0` is the first **tagged, installable** release — the version line that
+GitHub Releases publish and `keelson update` moves between. The dated entries
+under [Pre-release milestones](#pre-release-milestones) used an internal
+milestone numbering (0.2–0.4); they predate the install path and were never
+published as artifacts, and are kept here for history.
+
+## [0.1.0] — 2026-06-09 — Installable harness
+
+Keelson becomes a real, installable `keelson` CLI: a GitHub-release `install.sh`
+provisions a managed home (`~/.keelson`) as a single Bun project, `keelson serve`
+runs the server in-process, and `keelson rib add <id>` installs ribs into that
+home. The topology resolves one `@keelson/shared` (hence one Zod) so rib tool
+schemas survive `z.toJSONSchema()` across the harness↔rib boundary.
+
+### Added
+
+- `install.sh` (built by `scripts/build-release.ts`, published by
+  `.github/workflows/release.yml` on a `v*` tag) provisions `$KEELSON_HOME`,
+  pins the CLI + `@keelson/shared` tarballs, and drops a launcher on PATH.
+- `keelson serve` runs the server in-process via `startServer()` /
+  `serveUntilSignal()`; `keelson rib add/remove/list` manage ribs in the home
+  (known ids `chamber`/`osdu` resolve to `github:danielscholl/keelson-rib-*`).
+- `@keelson/shared/paths`: `resolveKeelsonHome` / `keelsonPaths` /
+  `resolveRibsRoot` — the single home resolver shared by CLI and server.
+
+### Changed
+
+- Release artifacts pin **versioned** download URLs
+  (`/releases/download/v<x.y.z>/`), not `/latest/`, so re-running a newer
+  `install.sh` upgrades in place: the dependency string changes between
+  versions, which is what lets `bun install` re-resolve instead of serving the
+  URL-keyed cache.
+- `release.yml` fails fast unless the pushed tag matches the package version.
+
+<a id="pre-release-milestones"></a>
+## Pre-release milestones
+
+Development milestones before the install path existed (internal numbering,
+never tagged or published).
 
 ## [0.4.0] — 2026-05-27 — Dynamic rib discovery
 
