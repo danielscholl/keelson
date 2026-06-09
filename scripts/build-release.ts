@@ -232,6 +232,7 @@ try {
 $HomeForCmd = if ($env:KEELSON_HOME) { $KeelsonHome } else { "%USERPROFILE%\\.keelson" }
 $Launcher = @(
   "@echo off",
+  "setlocal",
   "if not defined KEELSON_HOME set ""KEELSON_HOME=$HomeForCmd""",
   "bun ""%KEELSON_HOME%\\node_modules\\@keelson\\cli\\dist\\keelson.js"" %*"
 )
