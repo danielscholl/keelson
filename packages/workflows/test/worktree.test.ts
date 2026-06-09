@@ -53,6 +53,11 @@ async function initRepo(path: string): Promise<void> {
   await git(["init", "--initial-branch=main"], path);
   await git(["config", "user.email", "test@example.com"], path);
   await git(["config", "user.name", "Test"], path);
+  // Hermetic line endings: a host-level core.autocrlf=true (the Git for
+  // Windows default, and what GitHub's windows runners ship) would smudge the
+  // committed bun.lock to CRLF on worktree checkout, and `bun install
+  // --frozen-lockfile` rejects the reserialized lockfile as changed.
+  await git(["config", "core.autocrlf", "false"], path);
   writeFileSync(join(path, "README.md"), "test repo\n");
   await git(["add", "README.md"], path);
   await git(["commit", "-m", "initial"], path);
