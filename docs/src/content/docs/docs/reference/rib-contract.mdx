@@ -1,0 +1,326 @@
+---
+title: The Rib contract
+description: The Rib interface, the context the harness injects, the validation rules it enforces, and the activation lifecycle.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+A rib is the harness's one extension point. It is a single TypeScript
+interface, `Rib`, exported from `@keelson/shared`, and a rib package
+default-exports one object that implements it. Every hook is optional: a rib
+implements the subset it needs and the harness fills in the rest.
+
+This page is the precise contract. For why capabilities are packages and how a
+contribution reaches every surface without wiring, read
+[The rib model](../../concepts/the-rib-model/) first; this page assumes that
+model and states the exact shapes, rules, and order the harness enforces.
+
+```ts
+import type { Rib } from "@keelson/shared";
+
+const rib: Rib = {
+  id: "demo",
+  displayName: "Demo",
+  // ...any subset of the optional hooks below
+};
+
+export default rib;
+```
+
+## Terminology
+
+| Term | Meaning |
+| --- | --- |
+| **rib id** | The stable identifier, lowercase kebab-case, matching the package basename (`@keelson/rib-demo` has id `demo`). Gated by `KEELSON_RIBS`. |
+| **namespace** | Everything a rib publishes lives under `rib:<id>` or `rib:<id>:*`. The harness rejects out-of-namespace keys at activation. |
+| **snapshot key** | A namespaced key under which a rib publishes data. The browser renders the cached payload as a live board. |
+| **composer** | A function registered under a key that produces the payload on demand. A rib's `composeBundle` is the composer for `rib.id`. |
+| **view** | A static declaration that binds a snapshot key to a canvas renderer, so the harness draws it with no per-rib UI code. |
+| **surface** | A primary nav tab that lays out region-bound boards. Each region binds a namespaced key. |
+| **action** | An inbound verb a rib handles over the loopback API, so a board's buttons can reach the rib. |
+
+## The interface
+
+```ts
+interface Rib {
+  id: string;                                              // required
+  displayName: string;                                     // required
+  registerTools?(ctx: RibContext): readonly ToolDefinition[];
+  composeBundle?(ctx: RibContext): Promise<unknown>;
+  views?: readonly RibViewDescriptor[];
+  surfaces?: readonly RibSurfaceDescriptor[];
+  contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
+  onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
+  authStatus?(ctx: RibContext): Promise<RibAuthStatus> | RibAuthStatus;
+  dispose?(): void | Promise<void>;
+}
+```
+
+Only `id` and `displayName` are required. The rest are the seven optional hooks
+the [rib model](../../concepts/the-rib-model/) enumerates.
+
+### The context the harness injects
+
+Hook factories receive a `RibContext`: the rib's scoped data layer. Every
+accessor except `getExec` is optional, so a minimal test context still
+satisfies the interface, and a rib that needs an absent accessor fails closed.
+
+| Accessor | Returns | Notes |
+| --- | --- | --- |
+| `getExec()` | `RibExec` | Process-exec with `runJSON` / `runText`. The one accessor always present. |
+| `getSnapshotManager?()` | `SnapshotManager` | Register, recompose, and read snapshot keys. Scoped to the rib's namespace. |
+| `getCredential?(serviceId)` | `Promise<string \| undefined>` | Read-only, resolves a keychain entry under `rib_<id>_<serviceId>`. A rib cannot read another rib's secrets. |
+| `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, redaction, and credentials. |
+| `getSidecar?()` | `Promise<unknown> \| unknown` | Opaque resolver; each rib narrows and casts at its own edge. |
+
+## Hooks
+
+<Steps>
+
+1. **`registerTools(ctx)`** returns the rib's tools for the shared registry.
+   They reach the chat agent and workflow `prompt` nodes through the provider
+   tool adapters with no further wiring. Tool names are global: a name already
+   claimed by another rib is skipped with a warning, which is why rib tools
+   carry a family prefix (the substring before the first underscore, so
+   `demo_ping` has family `demo`). A `ToolDefinition` is `name`, `description`,
+   a zod `inputSchema`, optional advisory `state_changing` /
+   `requires_confirmation`, and an `execute(input, ctx)` that returns nothing
+   and emits results as `tool_result` chunks. Emit a `tool_result` with
+   `isError: true` rather than letting a throw bubble through the SDK, and check
+   `ctx.abortSignal.aborted` at every meaningful await.
+
+2. **`composeBundle(ctx)`** is registered as the snapshot composer under
+   `rib.id` after `registerTools` returns. It is invoked lazily, only when
+   something calls `SnapshotManager.recompose(rib.id)`, never eagerly at boot.
+   For a warm initial snapshot, call `ctx.getSnapshotManager?.().recompose(rib.id)`
+   from inside `registerTools`. A rib can also register additional keys
+   imperatively with `ctx.getSnapshotManager?.().register(key, compose, opts)`.
+
+3. **`views`** are static `RibViewDescriptor`s: `{ key, canvasKind, title? }`.
+   `key` must be namespaced. `canvasKind` is the closed enum `markdown` |
+   `view` | `html` (`html` is reserved and not yet rendered). The payload
+   published under `key` must satisfy the renderer for that kind; the client
+   gate fail-closes on a mismatch. Views are static metadata, so the manifest
+   is built without invoking rib code.
+
+4. **`surfaces`** are static `RibSurfaceDescriptor`s: a top-level nav tab with a
+   `layout` of an optional collapsible `header`, an optional `banner`, one or
+   more `rows` of `columns`, and an optional collapsible `footer`. Only the
+   header and footer collapse. Each region is `{ key, workflow?, cadenceMs?,
+   title?, glyph? }`: `key` is namespaced, `workflow` is the catalog workflow a
+   region's refresh re-runs, `cadenceMs` is the auto-refresh interval (floored
+   to 30s, run on open and on a heartbeat), and `glyph` is a `{ char, tone? }`
+   chip for the region head.
+
+5. **`contributeWorkflows(ctx)`** returns `RibWorkflowContribution`s merged into
+   the catalog at activation: `{ definition, bindSnapshotKey?, validate? }`.
+   `definition` stays `unknown` at the contract floor and the server validates
+   it against the workflow schema when it merges. When `bindSnapshotKey` is set,
+   the run's structured output republishes to that key, and `validate` is the
+   producer-side fail-closed gate (a zod `.parse`) run before the frame is
+   cached or broadcast.
+
+6. **`onAction(action, ctx)`** handles inbound actions over
+   `POST /api/ribs/:id/action`. `action` is `{ type, payload? }`: `type` is a
+   rib-defined verb the base never enumerates, and `payload` stays opaque for
+   the rib to narrow. It returns `{ ok: true, data? }` or `{ ok: false, error }`.
+   This path is loopback-trusted today; the capability-token envelope is a later
+   milestone.
+
+7. **`authStatus(ctx)`** is a credential probe surfaced in `GET /api/ribs` (and
+   optionally `doctor`). It returns `{ authenticated, statusMessage? }`. The
+   probe is not expected to throw; a throwing probe is caught at the seam and
+   reported as `{ authenticated: false, statusMessage: <error> }`.
+
+8. **`dispose()`** is teardown, sync or async. The harness awaits it during
+   shutdown, before the database closes, so a rib holding sockets, watchers, or
+   child processes can tear down cleanly.
+
+</Steps>
+
+## Validation rules
+
+The harness validates each candidate against the contract at activation and
+fails closed. A rib that fails any check is skipped with one warning in the boot
+log; a broken rib costs you that rib, never the harness.
+
+| Rule | Enforced where |
+| --- | --- |
+| `id` is lowercase kebab-case, 1 to 64 chars, matching `^[a-z][a-z0-9-]*$`, and matches the package suffix. | `ribIdSchema`, discovery |
+| `displayName` is 1 to 80 chars. | `ribDisplayNameSchema` |
+| Every `views`, `surfaces`, and region `key` lives under `rib:<id>` or `rib:<id>:*`. | activation, `assertInNamespace` |
+| Snapshot keys a rib registers are namespaced; registering outside the namespace throws, and reading another rib's keys returns nothing. | `SnapshotManager`, scoped per rib |
+| Credentials resolve only under `rib_<id>_*`, read-only. | `getCredential` |
+| Tool names are global; a collision loses (skipped with a warning). | shared tool registry |
+| `canvasKind` is the closed `markdown` / `view` / `html` enum; a payload that mismatches its renderer is rejected client-side. | `canvasKindSchema`, client gate |
+| A bound workflow's output is run through `validate` before caching or broadcast; an invalid payload is dropped and the prior value kept. | `SnapshotValidator`, fail-closed |
+| `cadenceMs` is an integer of at least 30000. | `surfaceRegionSchema` |
+
+<Aside type="caution" title="The boundary is not a sandbox">
+These rules protect against collisions and accidents and keep one rib's secrets
+out of another's reach through harness APIs. They are not isolation. A rib runs
+in-process with the server, with the same access to your machine as any
+dependency you install. Choose rib sources the way you choose any package.
+</Aside>
+
+## Lifecycle
+
+<Steps>
+
+1. **Discovery.** `bootstrapRibs()` discovers installed `@keelson/rib-*`
+   packages from `node_modules/@keelson/` at boot. Embedders can bypass
+   discovery by passing an explicit `bootstrapRibs({ available })` map (the path
+   tests use).
+
+2. **Filter.** `KEELSON_RIBS` (comma-separated rib ids) selects which discovered
+   ribs activate. Unset means activate all. Installed and active are distinct
+   states: a package can be present in the home but filtered out per process.
+
+3. **Validate.** Each candidate is checked against the rules above. A failure is
+   one warning, not a crash.
+
+4. **Register.** `registerTools` runs and its tools join the shared registry.
+   `composeBundle`, if declared, is registered as the composer under `rib.id`
+   (lazy). `contributeWorkflows` are merged into the catalog. `views`,
+   `surfaces`, and `authStatus` become discoverable through `GET /api/ribs`.
+
+5. **Run.** Tools serve chat and workflow `prompt` nodes. The browser renders
+   views and surfaces from cached snapshots and re-runs region workflows on
+   their cadence. `onAction` handles board actions over the loopback API.
+
+6. **Dispose.** At shutdown the harness awaits each rib's `dispose` before
+   closing the database.
+
+</Steps>
+
+## Wire shapes
+
+A rib never edits the SPA. The browser discovers active ribs through two
+endpoints, both typed in `@keelson/shared`:
+
+- `GET /api/ribs` returns `ListRibsResponse` (`{ ribs: RibSummary[] }`). Each
+  `RibSummary` is `{ id, displayName, registered, views, surfaces, hasOnAction,
+  auth? }`. `views` and `surfaces` are always present (possibly empty); `auth`
+  appears only when the rib declares `authStatus`.
+- `POST /api/ribs/:id/action` returns `RibActionResponse`, the discriminated
+  `RibActionResult` the rib's `onAction` produced.
+
+## Minimal example
+
+The smallest useful rib registers one tool. Tools reach chat and workflow
+`prompt` nodes with no further wiring.
+
+```ts
+import type { Rib, ToolDefinition } from "@keelson/shared";
+import { z } from "zod";
+
+const ping: ToolDefinition = {
+  name: "demo_ping", // family "demo" (the substring before the first underscore)
+  description: "Echo a message back to the agent.",
+  inputSchema: z.object({ message: z.string() }),
+  async execute(input, ctx) {
+    const { message } = input as { message: string };
+    ctx.emit({ type: "tool_result", toolUseId: "", content: `pong: ${message}` });
+  },
+};
+
+const rib: Rib = {
+  id: "demo",
+  displayName: "Demo",
+  registerTools: () => [ping],
+};
+
+export default rib;
+```
+
+## Full surface-producing example
+
+A rib that publishes a snapshot, declares a view and a surface for it,
+contributes a bound workflow that refreshes it, handles a board action, and
+reports auth status. The payload builder and its schema live in the rib's own
+module; the canvas payload shape itself is covered in
+[Snapshots and surfaces](../../concepts/snapshots-and-surfaces/).
+
+```ts
+import type {
+  Rib,
+  RibAction,
+  RibActionResult,
+  RibContext,
+} from "@keelson/shared";
+import { buildBoard, boardSchema } from "./board.ts"; // your pure builder + zod schema
+
+const KEY = "rib:demo";
+
+const rib: Rib = {
+  id: "demo",
+  displayName: "Demo",
+
+  registerTools(ctx: RibContext) {
+    ctx.getSnapshotManager?.().recompose(rib.id); // warm the initial board
+    return [];
+  },
+
+  // Composer for `rib.id`, invoked lazily on recompose.
+  async composeBundle(ctx: RibContext) {
+    const res = await ctx.getExec().runJSON<unknown>("demo-cli", ["status", "--json"]);
+    return buildBoard(res.ok ? res.data : null); // degrades to a valid empty board
+  },
+
+  views: [{ key: KEY, canvasKind: "view", title: "Demo" }],
+
+  surfaces: [
+    {
+      id: "demo",
+      title: "Demo",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: KEY, workflow: "demo-refresh", cadenceMs: 60000, title: "Status" },
+            ],
+          },
+        ],
+      },
+    },
+  ],
+
+  contributeWorkflows() {
+    return [
+      {
+        definition: demoRefreshWorkflow, // a workflow whose node prints the board JSON
+        bindSnapshotKey: KEY,
+        validate: (data) => boardSchema.parse(data), // producer-side, fail-closed
+      },
+    ];
+  },
+
+  async onAction(action: RibAction, ctx: RibContext): Promise<RibActionResult> {
+    if (action.type === "refresh") {
+      await ctx.getSnapshotManager?.().recompose(rib.id);
+      return { ok: true };
+    }
+    return { ok: false, error: `unknown action: ${action.type}` };
+  },
+
+  async authStatus(ctx: RibContext) {
+    const res = await ctx.getExec().runText("demo-cli", ["whoami"]);
+    return res.ok
+      ? { authenticated: true }
+      : { authenticated: false, statusMessage: "demo-cli is not authenticated" };
+  },
+};
+
+export default rib;
+```
+
+## Related
+
+- [The rib model](../../concepts/the-rib-model/): why capabilities are packages
+  and how a contribution reaches every surface.
+- [Snapshots and surfaces](../../concepts/snapshots-and-surfaces/): the
+  publishing substrate behind `composeBundle`, views, and surfaces.
+- [Build your first rib](../../tutorials/build-your-first-rib/): the two-file
+  minimum, through install and verification.
