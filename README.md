@@ -48,10 +48,12 @@ keelson rib list --installed
 keelson serve                     # API + WS on :7878 (Ctrl-C to stop)
 keelson doctor                    # health sweep: toolchain, server, DB, auth, ribs
 keelson chat "hello"              # one-shot turn
-keelson workflow run smoke-test --watch
+keelson workflow list             # workflows the installed ribs contribute
 ```
 
-Real agents need a Copilot subscription or an Anthropic API key. No keys? Add
+Workflows come from the ribs you install (or drop your own YAML in
+`~/.keelson/workflows`). Real agents need a Copilot subscription or an Anthropic
+API key. No keys? Add
 `KEELSON_PROVIDERS=stub` for an offline echo provider to try the harness without
 credentials. (The React Chat/Workflows UI currently runs in dev — see
 [CONTRIBUTING.md](CONTRIBUTING.md) — and isn't served by the installed binary yet.)
@@ -138,8 +140,8 @@ keelson rib add chamber                   # install a rib into the home
 keelson rib list --installed              # ribs in the home (no server needed)
 keelson serve                             # run the API + WS server on :7878
 keelson doctor                            # health sweep: toolchain, server, DB, auth, ribs
-keelson workflow validate smoke-test      # schema + reference check
-keelson workflow run smoke-test --watch   # run and stream output
+keelson workflow validate <name>          # schema + reference check
+keelson workflow run <name> --watch       # run and stream output
 keelson chat "hello" --provider stub      # one-shot turn
 ```
 

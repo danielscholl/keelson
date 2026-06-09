@@ -25,11 +25,15 @@ import { $ } from "bun";
 const ROOT = resolve(import.meta.dir, "..");
 const OUT = join(ROOT, "dist", "release");
 const CLI_PKG_DIR = join(OUT, "cli");
-// Track @keelson/shared's version so the CLI tarball version and its
-// `@keelson/shared` peer range always match the shared tarball packed from that
-// same manifest, rather than drifting from a hard-coded constant on a v0.2+ cut.
-const VERSION = JSON.parse(readFileSync(join(ROOT, "packages", "shared", "package.json"), "utf8"))
-  .version as string;
+// Track @keelson/shared's manifest so the CLI tarball version + `@keelson/shared`
+// peer range match the shared tarball, and the CLI's direct zod dep matches the
+// zod shared brings in (one resolved zod → schema identity holds, even under a
+// non-hoisting/isolated install where a transitive sibling wouldn't resolve).
+const SHARED_PKG = JSON.parse(
+  readFileSync(join(ROOT, "packages", "shared", "package.json"), "utf8"),
+) as { version: string; dependencies: Record<string, string> };
+const VERSION = SHARED_PKG.version;
+const ZOD_RANGE = SHARED_PKG.dependencies.zod;
 const REPO = "danielscholl/keelson";
 
 rmSync(OUT, { recursive: true, force: true });
@@ -53,19 +57,15 @@ const cliPkg = {
   version: VERSION,
   type: "module",
   bin: { keelson: "./dist/keelson.js" },
-  dependencies: { "@napi-rs/keyring": "1.3.0" },
+  dependencies: { "@napi-rs/keyring": "1.3.0", zod: ZOD_RANGE },
   peerDependencies: { "@keelson/shared": `^${VERSION}` },
   peerDependenciesMeta: { "@keelson/shared": { optional: true } },
-  files: ["dist", "workflows", "LICENSE", "NOTICE"],
+  files: ["dist", "LICENSE", "NOTICE"],
 };
 writeFileSync(join(CLI_PKG_DIR, "package.json"), `${JSON.stringify(cliPkg, null, 2)}\n`);
 for (const f of ["LICENSE", "NOTICE"]) {
   if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(CLI_PKG_DIR, f));
 }
-// Ship the bundled starter workflows so install.sh can seed them into the home
-// (a fresh install otherwise has an empty workflows dir — `keelson workflow run
-// smoke-test` would find nothing).
-cpSync(join(ROOT, ".keelson", "workflows"), join(CLI_PKG_DIR, "workflows"), { recursive: true });
 
 // 3. Pack the CLI package.
 console.log("[release] packing @keelson/cli");
@@ -121,12 +121,6 @@ mkdir -p "$KEELSON_HOME" "$BIN_DIR"
 KEELSON_HOME="$KEELSON_HOME" CLI_TARBALL="$CLI_TARBALL" SHARED_TARBALL="$SHARED_TARBALL" bun -e 'const fs=require("fs");const p=process.env.KEELSON_HOME+"/package.json";const pkg=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,"utf8")):{name:"keelson-home",private:true};pkg.dependencies=Object.assign({},pkg.dependencies,{"@keelson/cli":process.env.CLI_TARBALL,"@keelson/shared":process.env.SHARED_TARBALL});fs.writeFileSync(p,JSON.stringify(pkg,null,2)+"\\n");'
 
 ( cd "$KEELSON_HOME" && bun install )
-
-# Seed the bundled starter workflows on first install so \`keelson workflow run
-# smoke-test\` works out of the box; never overwrite an existing workflows dir.
-if [ ! -d "$KEELSON_HOME/workflows" ]; then
-  cp -R "$KEELSON_HOME/node_modules/@keelson/cli/workflows" "$KEELSON_HOME/workflows" 2>/dev/null || true
-fi
 
 cat > "$BIN_DIR/keelson" <<LAUNCH
 #!/usr/bin/env sh
