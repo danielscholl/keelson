@@ -1,0 +1,217 @@
+---
+title: Run your first workflow
+description: Author a four-node YAML workflow, let validation catch a broken reference, and watch the DAG execute.
+sidebar:
+  order: 2
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Chat is improvisation: good for exploration, wrong for work you need to run
+the same way every time. For repeatable work keelson has workflows, plain
+YAML files that describe a DAG of nodes the engine executes deterministically.
+In this tutorial you author one from scratch, break it on purpose to see what
+validation catches, and watch it run.
+
+## Hit the wall first
+
+[Your first run](../first-run/) ended with `doctor` reporting zero workflows.
+Try to run one anyway:
+
+```sh
+keelson workflow run hello-harness
+```
+
+```text
+error: no workflow named 'hello-harness' under /Users/you/.keelson/workflows
+```
+
+The exit code is `4`, the CLI's stable code for "not found". The error names
+the directory it searched, and that directory is the whole catalog mechanism:
+a workflow is a YAML file in `~/.keelson/workflows`. Ribs can contribute
+workflows there too, but nothing stops you from writing your own, so let's
+fix this error the direct way.
+
+## Author the workflow
+
+Create `~/.keelson/workflows/hello-harness.yaml`:
+
+```yaml title="~/.keelson/workflows/hello-harness.yaml"
+name: hello-harness
+description: Three node kinds, one dependency, one gate. A first workflow.
+
+nodes:
+  - id: ask
+    prompt: "Reply with exactly the words 'engine answers' and nothing else."
+    idle_timeout: 30000
+
+  - id: check
+    bash: 'echo ''{"status":"ok"}'''
+
+  - id: report
+    bash: 'echo "the agent said: $KEELSON_NODE_ask_OUTPUT"'
+    depends_on: [ask]
+
+  - id: done
+    bash: "echo 'all checks passed'"
+    depends_on: [check, report]
+    when: "$check.output.status == 'ok'"
+```
+
+Four nodes, three ideas:
+
+- **`prompt` runs an agent turn.** The `ask` node sends its prompt to whatever
+  provider the server registered, with an idle timeout so a stalled turn
+  cannot hang the run.
+- **`bash` runs a shell script.** The `check` node emits JSON, and that
+  matters downstream: JSON output unlocks dot-access like
+  `$check.output.status`.
+- **Edges are data, not order.** `report` declares `depends_on: [ask]` and
+  reads the upstream output through the `KEELSON_NODE_ask_OUTPUT` environment
+  variable. `done` waits on two parents and adds a `when:` condition, so it
+  runs only if the gate evaluates true.
+
+<Aside type="note" title="Why an env var and not string substitution?">
+Bash nodes read upstream output through `KEELSON_NODE_<id>_OUTPUT` (the id's
+hyphens become underscores) instead of having `$ask.output` spliced into the
+script text. The engine runs the script body exactly as you wrote it, so
+upstream output can never be injected into your shell as code. The
+`$nodeId.output` dot form is for the workflow layer itself, in `when:`
+conditions and prompt text.
+</Aside>
+
+The shape on the page is a diagram waiting to happen. Here is the same file
+as the engine sees it:
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/hello-harness-dag.svg`}
+    alt="The hello-harness DAG. The ask and check nodes start together from the start rail; report depends on ask; done depends on report and check, with a dashed when-gate on the edge from check."
+  />
+  <figcaption>
+    Figure 1. The hello-harness DAG. Nodes with no dependencies start
+    together; <code>done</code> fires only after both parents succeed and the
+    gate on <code>check</code>'s output holds.
+  </figcaption>
+</figure>
+
+## Let validation catch a mistake
+
+Before running anything, validate. To see what that buys you, first sabotage
+the file: change `depends_on: [ask]` to `depends_on: [aks]` and run:
+
+```sh
+keelson workflow validate hello-harness
+```
+
+```text
+results:
+  -     filename: /Users/you/.keelson/workflows/hello-harness.yaml
+    ok: false
+    warnings:
+    error: Node 'report' depends_on unknown node 'aks'
+failed: 1
+total: 1
+```
+
+The validator reads the whole graph, so a reference to a node that does not
+exist is caught before any node executes, with the exact node and the exact
+bad reference named. Fix the typo back to `ask` and validate again:
+
+```text
+results:
+  -     filename: /Users/you/.keelson/workflows/hello-harness.yaml
+    ok: true
+    warnings:
+    error:
+failed: 0
+total: 1
+```
+
+<Aside type="tip" title="Lenient by design">
+The loader hard-errors on broken structure, like the unknown node above, but
+only warns on fields it does not recognize. The schema and DAG concepts are
+borrowed from [Archon](https://github.com/coleam00/Archon), and the lenient
+loader is what lets most Archon workflows run unmodified.
+</Aside>
+
+## Watch it run
+
+```sh
+keelson workflow run hello-harness --watch
+```
+
+```text
+▶ run 7b17995e (hello-harness)
+  · ask …
+  · check …
+  ✓ ask
+    {"status":"ok"}
+  ✓ check
+  · report …
+    the agent said: Reply with exactly the words 'engine answers' and nothing else.
+  ✓ report
+  · done …
+    all checks passed
+  ✓ done
+■ succeeded (13ms)
+```
+
+Read the trace against Figure 1. `ask` and `check` started together because
+neither has dependencies. `report` waited for `ask`, then read its output
+through the env channel. `done` waited for both parents, evaluated its gate
+against `check`'s JSON, and ran.
+
+One line deserves a second look: the agent "said" your prompt back. This run
+used the stub provider from the previous tutorial, and the stub echoes
+prompts instead of answering them. That is a feature here: the run is fully
+deterministic with zero credentials. Register a real provider and the same
+file, unchanged, sends `ask` to a real coding agent.
+
+<Aside type="note" title="Pinning the provider">
+`KEELSON_WORKFLOW_PROVIDER` pins which provider every `prompt` node uses,
+independent of what chat uses. Unset, workflows prefer the first non-stub
+provider the server registered.
+</Aside>
+
+## The full node taxonomy
+
+You have used two node kinds. There are seven:
+
+| Node | What it runs |
+| --- | --- |
+| `prompt` | One agent turn against a provider. |
+| `bash` | A shell script, with upstream output in `KEELSON_NODE_*` env vars. |
+| `command` | A named, reusable prompt file from `~/.keelson/commands`. |
+| `loop` | An agent turn repeated until an answer matches `until:`, bounded by `max_iterations`. |
+| `script` | A script file under a declared runtime, such as `runtime: bun`. |
+| `approval` | A pause that waits for a human yes or no before downstream nodes run. |
+| `cancel` | A controlled early exit for a branch. |
+
+Combined with `depends_on`, `when:`, and `trigger_rule:` for merge semantics,
+this is the entire vocabulary. Confirm your catalog is no longer empty:
+
+```sh
+keelson workflow list
+```
+
+```text
+workflows:
+  -     name: hello-harness
+    description: Three node kinds, one dependency, one gate. A first workflow.
+    nodeCount: 4
+    path: /Users/you/.keelson/workflows/hello-harness.yaml
+    source: project
+```
+
+## What you proved
+
+A workflow is a YAML file you can read in one screen: nodes, edges, gates.
+Validation catches broken graphs before execution, the watch stream shows you
+the DAG executing in dependency order, and the provider is swappable without
+touching the file.
+
+So far the agent side of the harness can only echo. The capabilities that
+make an agent worth harnessing arrive as ribs, and that is next.
+
+**Continue to** [Install a rib](../install-a-rib/).

@@ -1,0 +1,135 @@
+---
+title: Snapshots and surfaces
+description: How a rib's data becomes a live board in the browser without the rib shipping any UI.
+sidebar:
+  order: 4
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Extension systems die on the UI question. Either extensions embed their own
+web views, and the host becomes a browser for mutually distrustful apps, or
+extensions get no UI at all and live as command-line afterthoughts. Keelson
+takes a third path: **ribs publish data, never UI.** A rib hands the harness
+typed payloads under namespaced keys; the browser renders every rib with the
+same small set of components. The whole web app contains exactly one view for
+rib content, and it works for all of them.
+
+This page explains the substrate that makes that possible: frames, the
+snapshot manager, the canvas vocabulary, and the surface layout model.
+
+## Frames on keys
+
+The unit of the substrate is the **frame**: a payload published under a
+string key, stamped with a version and a composition time.
+
+```ts title="the wire shape"
+{ type: "snapshot_update", key: "rib:example:board", version: 7,
+  composedAt: "2026-06-09T18:20:04Z", data: ... }
+```
+
+A producer registers a **composer** under a key, a function that returns the
+payload. Composition is lazy: the composer runs when something asks for a
+recompose, not on a timer the producer manages. Each successful compose
+increments the version, replaces the cached frame, and broadcasts to every
+subscriber. Concurrent recompose calls coalesce into one composer run, and
+versions let a late-joining client discard an out-of-order frame.
+
+The figure traces the whole path from producer to pixels:
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/snapshot-pipeline.svg`}
+    alt="The snapshot pipeline. A brass producer box, composeBundle or workflow run output, flows through a dashed fail-closed validate gate into the snapshot manager's cache, then over WebSocket to the browser canvas. A dashed edge below shows late joiners fetching the latest frame and then subscribing."
+  />
+  <figcaption>
+    Figure 1. One pipeline for every producer. The validate gate runs before
+    the cache, the WebSocket carries versioned frames, and a late joiner
+    reads the cached frame before subscribing.
+  </figcaption>
+</figure>
+
+## Fail closed, three times
+
+The pipeline's defining property is where it puts its checks. A frame can be
+rejected at three points, and every rejection protects the last good state:
+
+1. **At the producer.** A key can register a validator, canonically a zod
+   `parse`. An invalid payload is dropped before it is cached or broadcast,
+   and the prior frame survives.
+2. **At the composer.** If the compose function throws, the failure is
+   logged once and the cached frame is untouched. A flaky external system
+   degrades a board to "stale", never to "broken".
+3. **At the renderer.** The browser parses every frame against the canvas
+   schema before rendering. A mismatch renders a one-line error note instead
+   of a component, so a malformed payload cannot take the page down.
+
+The combined effect is the substrate's contract with the reader of a board:
+what you see is the last payload that passed validation, with its
+composition time shown, and nothing else ever reaches the screen.
+
+## The canvas vocabulary
+
+Renderers are a closed set, on purpose. A payload declares what it is, and
+the browser either has a renderer for that shape or refuses politely.
+
+| Kind | Renders as |
+| --- | --- |
+| `markdown` | Formatted text. |
+| `view` | A typed visualization: a `table`, a `graph` of nodes and edges, or a `board`. |
+| `html` | Reserved. Declared in the schema, unrendered until a sandboxing pass lands. |
+
+The `board` is the workhorse: a dashboard composed from a fixed section
+vocabulary, stats, segments, bars, tables, cards, rows, actions, and a grid,
+with one level of columns for layout. Sections carry **tones**, a small
+semantic palette (`ok`, `warn`, `error`, `neutral`, and a few decorative
+accents), so status reads consistently across every rib's boards. An
+`actions` section is how a board gets buttons: each action posts back to the
+rib that owns the board's key, and the rib's handler decides what it means.
+
+<Aside type="note" title="Closed is the feature">
+A rib cannot invent a renderer, and that is the point. The closed vocabulary
+is what lets the harness promise that every rib's surface is consistent,
+navigable, and safe to render, the same promise a terminal makes to every
+program that prints to it.
+</Aside>
+
+## Views and surfaces
+
+Payloads need placement, and a rib declares it statically, as data, in the
+contract:
+
+- A **view** binds one snapshot key to one canvas kind: "render
+  `rib:example:status` as a board." Views are the small unit, a single live
+  panel.
+- A **surface** is a full tab in the browser: a layout of regions, each
+  region bound to a snapshot key, arranged as an optional header, a banner,
+  rows of columns, and a footer. The rib declares titles and glyphs; the
+  harness owns every pixel of chrome.
+
+A region can also name a **workflow**: the catalog workflow whose run
+repopulates the region's key. That single field is what makes boards
+operable. The refresh button on a region runs the workflow; a `cadenceMs` on
+the region (floored at thirty seconds) lets the harness re-run it on a
+heartbeat while the surface is open. Data freshness becomes visible and
+demand-driven: a board composes when someone is looking at it, not on a
+daemon's schedule.
+
+## One substrate, no exceptions
+
+The substrate is not a rib-only side channel. Workflow runs publish their
+progress under run-scoped keys the browser watches the same way, and the
+built-in surfaces ride the same pump as rib surfaces. The strongest evidence
+is the shape of the web app itself: its views directory holds Chat,
+Workflows, Memory, and a single generic `Surface` component that renders
+every rib ever installed. When a new rib lights up a new tab, no UI code
+shipped anywhere; data did.
+
+## Where to go next
+
+- [The rib model](../the-rib-model/) places snapshots among the other
+  contributions a rib can make.
+- [Workflows](../workflows/) covers the runs that repopulate region keys.
+- [Build your first rib](../../tutorials/build-your-first-rib/) ends where
+  this page begins: with a tool-only rib, one `composeBundle` away from a
+  live board.

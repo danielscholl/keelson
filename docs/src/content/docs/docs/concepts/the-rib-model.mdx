@@ -1,0 +1,131 @@
+---
+title: The rib model
+description: Why capabilities are packages, what a rib can contribute, and the boundary the harness enforces.
+sidebar:
+  order: 2
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Every agent harness eventually faces the same question: where does new
+capability go? Most answers couple your code to someone else's release train.
+You fork the harness and maintain the fork, or you upstream a plugin into a
+monolith and wait for reviews, or you wire a sidecar and invent a protocol.
+Keelson's answer is the rib: a capability is a package, in its own repository,
+on its own version, and the harness it bolts onto never changes.
+
+This page explains the model behind that answer: what a rib is allowed to
+contribute, how contributions reach every surface without wiring, and the
+boundary the harness enforces rather than requests.
+
+## Packages, not forks
+
+A rib is a Bun package named `@keelson/rib-<id>`, usually in a repository
+named `keelson-rib-<id>`. Installation is dependency management, not
+integration work: `keelson rib add <source>` hands the source to `bun add`,
+and at the next boot the server discovers whatever `rib-*` packages sit in
+the home's `@keelson` scope. There is no central registry of ribs, no
+manifest to edit, and no plugin API key. Anyone can publish a rib; installing
+one is a one-line decision you can reverse with `keelson rib remove`.
+
+Discovery also separates two states that plugin systems usually conflate.
+**Installed** means the package is present in the home. **Active** means the
+server validated and registered it at boot. `KEELSON_RIBS` filters between
+them, so an operator can keep five ribs installed and activate one, per
+process, without uninstalling anything.
+
+<Aside type="note" title="Validation never takes the server down">
+Discovery checks each candidate against the contract: a kebab-case id that
+matches the package suffix, a default export shaped like a rib, hooks that
+are functions. A package that fails any check is skipped with one warning in
+the boot log. A broken rib costs you that rib, never the harness.
+</Aside>
+
+## What a rib can contribute
+
+The contract is one interface, and every hook on it is optional. A rib
+implements the subset it needs, and each hook lands its contribution in a
+specific place in the harness. The figure shows the full set of destinations:
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/rib-contributions.svg`}
+    alt="One rib package on the left, four labeled arrows crossing a dashed harness boundary to four destinations: the tool registry, snapshot keys under the rib's namespace, the workflow catalog, and the actions and auth status probes."
+  />
+  <figcaption>
+    Figure 1. One rib, four destinations. Each optional hook lands its
+    contribution in a specific harness registry, and everything the rib
+    touches stays under its own namespace.
+  </figcaption>
+</figure>
+
+| Hook | What it contributes |
+| --- | --- |
+| `registerTools` | Tools for the shared registry. They reach the chat agent and workflow `prompt` nodes with no further wiring. |
+| `composeBundle` | A snapshot composer under the rib's key namespace. The browser renders the published data as live boards. |
+| `views`, `surfaces` | Static declarations of how those snapshots appear, up to a full top-level tab in the browser. |
+| `contributeWorkflows` | Workflow definitions merged into the catalog at activation, optionally bound so a run's output republishes a snapshot key. |
+| `onAction` | A handler for inbound actions over the loopback API, so a board's buttons can reach the rib. |
+| `authStatus` | A credential probe surfaced in the rib inventory, so the harness can report whether the rib's external system is reachable. |
+| `dispose` | Teardown. The harness awaits it at shutdown, before the database closes. |
+
+The pattern across all seven: a rib contributes **data and declarations**,
+and the harness owns the machinery. A rib never renders UI, never opens its
+own port, and never touches the database.
+
+## The boundary is enforced, not requested
+
+The architecture page states the rule from the harness side: the core never
+imports a rib. The rib model adds the other half: a rib cannot reach outside
+its own namespace, and the harness checks rather than trusts.
+
+- **Snapshot keys are namespaced.** Everything a rib publishes lives under
+  `rib:<id>` or `rib:<id>:*`. The snapshot manager a rib receives is scoped:
+  registering a key outside the namespace throws at activation, and reading
+  another rib's keys returns nothing.
+- **Credentials are namespaced.** A rib's `getCredential("token")` resolves
+  to a keychain entry under `rib_<id>_token`. The accessor is read-only and
+  the account format is validated, so one rib cannot enumerate or read
+  another rib's secrets through the harness.
+- **Tool names are global, collisions lose.** A tool name already claimed is
+  skipped with a warning, which is why rib tools carry a family prefix, like
+  `weather_now`.
+
+<Aside type="caution" title="What the boundary is for">
+The namespace rules protect against collisions and accidents, and they keep
+one rib's secrets out of another's reach through harness APIs. They are not a
+sandbox. A rib runs in-process with the server, with the same access to your
+machine as any dependency you install. Choose sources the way you choose any
+package.
+</Aside>
+
+## The payoff: zero wiring
+
+The model earns its keep when a contribution travels. Follow one tool call
+end to end:
+
+1. A chat turn starts. The server assembles the turn's tools from the shared
+   registry, the same list `GET /api/tools` reports, with rib tools folded in
+   beside the harness's own.
+2. The provider adapter projects each tool into its SDK's format. The agent
+   sees a typed tool; it does not see ribs at all.
+3. The agent calls the tool. The provider validates the input against the
+   tool's schema, then runs the rib's `execute` with the rib's own context:
+   its process-exec helper, its scoped credentials, its snapshot manager.
+4. The result streams back as a `tool_result` chunk, through the same
+   pipeline every other chunk uses, into the conversation record.
+
+Nothing in that path is rib-specific. The same registry serves workflow
+`prompt` nodes, so a tool written once is callable from chat, from a
+deterministic workflow, and from any surface that can start either. That is
+the rib model's bet: if the contract is narrow and the destinations are
+shared, capability scales by adding packages, not by modifying the harness.
+
+## Where to go next
+
+- [Build your first rib](../../tutorials/build-your-first-rib/) walks the
+  two-file minimum through install and verification.
+- [Snapshots and surfaces](../snapshots-and-surfaces/) covers the publishing
+  substrate behind `composeBundle`, views, and surfaces.
+- The [reference tier](../../reference/) holds the precise contract as its
+  pages land.

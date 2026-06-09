@@ -1,0 +1,74 @@
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="The hello-harness DAG. The ask and check nodes start together; report depends on ask; done depends on both report and check, gated by a when condition on check's JSON output.">
+  <defs>
+    <style>
+      .lbl  { font-family: "Cascadia Code","SF Mono",ui-monospace,Menlo,monospace; }
+      .navy { fill:#1e3a5f; }
+      .blue { fill:#2f6fb0; }
+      .slate{ fill:#64748b; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9" fill="none" stroke="#1e3a5f" stroke-width="1.6"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- start rail -->
+  <line x1="56" y1="40" x2="56" y2="210" stroke="#64748b" stroke-width="1"
+        stroke-dasharray="5 5" stroke-opacity="0.55"/>
+  <text class="lbl slate" x="56" y="28" font-size="10" text-anchor="middle">start</text>
+
+  <!-- ask node -->
+  <g>
+    <rect x="96" y="48" width="150" height="46" rx="4"
+          fill="#2f6fb0" fill-opacity="0.06" stroke="#2f6fb0" stroke-width="1.8"/>
+    <text class="lbl navy" x="171" y="68" font-size="13" text-anchor="middle">ask</text>
+    <text class="lbl slate" x="171" y="84" font-size="10" text-anchor="middle">prompt</text>
+  </g>
+
+  <!-- check node -->
+  <g>
+    <rect x="96" y="160" width="150" height="46" rx="4"
+          fill="#2f6fb0" fill-opacity="0.06" stroke="#2f6fb0" stroke-width="1.8"/>
+    <text class="lbl navy" x="171" y="180" font-size="13" text-anchor="middle">check</text>
+    <text class="lbl slate" x="171" y="196" font-size="10" text-anchor="middle">bash</text>
+  </g>
+
+  <!-- report node -->
+  <g>
+    <rect x="330" y="48" width="150" height="46" rx="4"
+          fill="#2f6fb0" fill-opacity="0.06" stroke="#2f6fb0" stroke-width="1.8"/>
+    <text class="lbl navy" x="405" y="68" font-size="13" text-anchor="middle">report</text>
+    <text class="lbl slate" x="405" y="84" font-size="10" text-anchor="middle">bash</text>
+  </g>
+
+  <!-- done node -->
+  <g>
+    <rect x="564" y="104" width="150" height="46" rx="4"
+          fill="#2f6fb0" fill-opacity="0.06" stroke="#2f6fb0" stroke-width="1.8"/>
+    <text class="lbl navy" x="639" y="124" font-size="13" text-anchor="middle">done</text>
+    <text class="lbl slate" x="639" y="140" font-size="10" text-anchor="middle">bash</text>
+  </g>
+
+  <!-- start edges -->
+  <line x1="56" y1="71" x2="92" y2="71" stroke="#1e3a5f" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="56" y1="183" x2="92" y2="183" stroke="#1e3a5f" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- ask -> report -->
+  <line x1="246" y1="71" x2="326" y2="71" stroke="#1e3a5f" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text class="lbl slate" x="286" y="62" font-size="10" text-anchor="middle">depends_on</text>
+
+  <!-- report -> done -->
+  <path d="M 480 71 C 522 71, 528 110, 560 121" fill="none"
+        stroke="#1e3a5f" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- check -> done, gated -->
+  <path d="M 246 183 C 420 183, 480 140, 560 132" fill="none"
+        stroke="#1e3a5f" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <g>
+    <rect x="356" y="156" width="226" height="22" rx="3"
+          fill="#ffffff" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4"/>
+    <text class="lbl slate" x="469" y="171" font-size="10.5" text-anchor="middle">when: $check.output.status == 'ok'</text>
+  </g>
+</svg>

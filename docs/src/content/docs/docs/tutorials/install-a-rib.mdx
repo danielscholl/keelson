@@ -1,0 +1,167 @@
+---
+title: Install a rib
+description: Add a capability package from any bun-installable source and watch the server discover it at boot.
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+Ask your chat agent about something only your systems know, the state of a
+cluster you operate or the queue in your issue tracker, and it has nothing to
+offer: the harness ships with no tools at all. That emptiness is a design
+decision, not a gap. Capabilities live in **ribs**, separately versioned
+packages that register tools and surfaces through a typed contract, and this
+tutorial is about getting one into your harness.
+
+Keelson keeps no registry of which ribs exist. Anyone can publish one, and
+`keelson rib add` accepts anything `bun` can install.
+
+## Start from empty
+
+```sh
+keelson rib list --installed
+```
+
+```text
+ribs:
+source: installed
+home: /Users/you/.keelson
+```
+
+Nothing installed, as expected. Note that `--installed` reads the home
+directly, so it works whether or not the server is running. Most other rib
+commands talk to the running server:
+
+```sh
+keelson rib show anything
+```
+
+```text
+error: rib commands require `keelson serve` to be running
+```
+
+Exit code `3`: server required but down. The CLI's exit codes are stable, so
+scripts can branch on them: `0` success, `1` failure, `2` bad arguments, `3`
+server required, `4` not found.
+
+## Add a rib from a source
+
+A rib names itself `keelson-rib-<name>` as a repository and
+`@keelson/rib-<name>` as a package, and any of these source forms works:
+
+| Source form | Example |
+| --- | --- |
+| GitHub URL | `https://github.com/danielscholl/keelson-rib-chamber` |
+| GitHub shorthand | `github:you/keelson-rib-yours` |
+| Git URL | `git@github.com:you/keelson-rib-yours.git` |
+| npm package | `@keelson/rib-yours` |
+| Local path | `./keelson-rib-yours` |
+
+Install one. The chamber rib, multi-agent rooms on the harness, is a public
+example you can use to follow along, but any rib behaves the same way:
+
+```sh
+keelson rib add https://github.com/danielscholl/keelson-rib-chamber
+```
+
+```text
+bun add v1.3.13 (bf2e2cec)
+Resolving dependencies
+Resolved, downloaded and extracted [1]
+Saved lockfile
+
+installed @keelson/rib-chamber@github:danielscholl/keelson-rib-chamber#9eaf6fd
+
+added:   - chamber
+installed:   - chamber
+home: /Users/you/.keelson
+restartRequired: true
+added chamber
+```
+
+The command hands your source to `bun add` inside the managed home, then
+reports what changed in rib terms: the rib id `chamber` was added, and
+`restartRequired: true` tells you a server is currently running and will not
+see the new package until it restarts. List again to confirm:
+
+```sh
+keelson rib list --installed
+```
+
+```text
+ribs:
+  -     id: chamber
+    displayName: chamber
+source: installed
+home: /Users/you/.keelson
+```
+
+## Restart and let discovery work
+
+Discovery happens once, at boot. Restart `keelson serve` and the server walks
+the home's `node_modules/@keelson/` scope:
+
+<Steps>
+
+1. **Discover.** Every `rib-*` package in the scope is a candidate. The
+   directory name fixes the expected id: `rib-chamber` must export a rib with
+   id `chamber`.
+
+2. **Validate.** The default export is checked against the contract: a valid
+   id and display name, hooks that are functions, declared surfaces that stay
+   inside the rib's namespace. A package that fails any check is skipped with
+   a warning in the boot log, never a crash.
+
+3. **Activate and register.** Each surviving rib hands over its tools, and
+   they land in the same registry the chat agent and workflow `prompt` nodes
+   already read. A rib that declares surfaces gets its own tab in the browser
+   UI, rendered by the harness with no per-rib UI code.
+
+</Steps>
+
+Once the server is back up, the server-backed commands work, and
+`keelson rib show <id>` is the inspection tool: it reports the tools the rib
+registered, the views and surfaces it declared, whether it handles actions,
+and its auth status if it declares a probe. The same inventory backs the
+browser UI, which is where an installed rib is most visible: its surface
+appears as a top-level tab, and its tools are on tap in Chat.
+
+<Aside type="caution" title="A rib is code you are choosing to run">
+Installing a rib executes someone else's package inside your harness with
+access to your machine. Install ribs the way you would install any
+dependency: from sources you trust.
+</Aside>
+
+## Control which ribs activate
+
+Installed and activated are different states. `KEELSON_RIBS` is the
+operator's filter between them:
+
+```sh
+KEELSON_RIBS=chamber keelson serve    # activate only chamber
+keelson serve                         # unset: activate everything discovered
+```
+
+This makes experiments cheap: install several ribs, activate one. And
+removal is symmetric with adding:
+
+```sh
+keelson rib remove chamber
+```
+
+`keelson update` advances the harness and your GitHub-sourced ribs together,
+so an installed rib stays a managed dependency, not a fork you maintain.
+
+## What you proved
+
+Capabilities arrive as packages: one `rib add` from any bun-installable
+source, one server restart, and the rib's tools are reachable from chat,
+workflows, and the browser, with `KEELSON_RIBS` as the activation gate and
+the boot log as the audit trail.
+
+Which leaves one wall standing. The rib your systems actually need probably
+does not exist yet, and the whole point of the contract is that you do not
+wait for someone else to write it.
+
+**Continue to** [Build your first rib](../build-your-first-rib/).

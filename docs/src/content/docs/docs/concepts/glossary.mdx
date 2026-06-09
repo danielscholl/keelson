@@ -1,0 +1,118 @@
+---
+title: Glossary
+description: The vocabulary used across the documentation, with the two overloaded terms disambiguated.
+sidebar:
+  order: 6
+---
+
+The terms below appear throughout the documentation and the codebase. Two of
+them, *surface* and *command*, carry two meanings each; their entries say
+which is which.
+
+## The harness
+
+- **harness**: the part that ships in the keelson repository: the server, the
+  CLI, the browser app, the store, and the contracts. It is the same on every
+  install, finished and deliberately capability-empty.
+- **keelson (the name)**: the beam fastened over a ship's keel, the spine the
+  frames bolt onto. The harness is the beam and ribs are the frames. The
+  metaphor lives in the name and the figures; the APIs use the plain terms in
+  this glossary.
+- **the home**: the managed directory, `~/.keelson` by default, holding the
+  database, your `workflows/`, and installed rib packages. `KEELSON_HOME`
+  overrides it.
+- **server**: the Bun process on `127.0.0.1:7878` that owns state, providers,
+  ribs, and every stream. The CLI and the browser are both clients of it.
+- **surface**: two senses. Broadly, a way into the harness: the CLI and the
+  browser app are keelson's two surfaces. Specifically, a *rib surface* is a
+  browser tab a rib declares as a layout of regions. Pages say "rib surface"
+  when the narrow sense matters.
+- **provider**: a coding-agent SDK behind the one `IAgentProvider` interface:
+  Copilot, Claude, or the stub. Swappable per chat turn and per workflow node.
+- **stub provider**: the offline echo provider. No credentials, no tool
+  calls, deterministic output; exists so every loop can be verified without
+  keys.
+- **doctor**: the CLI health sweep. Each failing check carries a hint naming
+  the next command.
+- **project**: a name plus a root path. Conversations and workflow runs
+  attach to one, and recall is scoped by it.
+- **notebook**: a project's standing markdown context, injected into every
+  chat turn for that project.
+
+## Extensions
+
+- **rib**: a capability package, `@keelson/rib-<id>`, whose default export
+  implements the [rib contract](../the-rib-model/). The only place an
+  external system is touched.
+- **rib id**: the lowercase kebab-case identity inferred from the package
+  name. The declared id must match the package suffix or discovery skips the
+  rib.
+- **discovery**: the boot-time scan of the home's `@keelson` scope. Failed
+  validation skips one rib with a warning, never the boot.
+- **activation**: a discovered rib that validated and registered.
+  `KEELSON_RIBS` filters which discovered ribs activate; unset activates all.
+- **tool**: a typed function the agent can call, declared with a zod input
+  schema. Tool names are global across ribs; first claim wins.
+- **tool family**: the prefix before the first underscore in a tool name,
+  like `weather` in `weather_now`. Groups tools in the UI and avoids name
+  collisions.
+- **action**: an inbound message to a rib over the loopback API; how a
+  board's buttons reach the rib that owns the board.
+- **auth probe**: a rib's optional `authStatus` hook, reporting whether its
+  external system is reachable and signed in.
+
+## Workflows
+
+- **workflow**: a YAML file describing a DAG of nodes the engine executes
+  deterministically. See [Workflows](../workflows/).
+- **catalog**: the merged set of workflows: the home's files, a project's
+  files, and rib contributions.
+- **node**: one unit of execution. Seven kinds in three families: agent
+  (`prompt`, `command`, `loop`), deterministic (`bash`, `script`), and
+  control (`approval`, `cancel`).
+- **command**: two senses. A *CLI command* is `keelson <verb>`. A *named
+  command* is a reusable prompt file in the home's `commands/` directory,
+  which a workflow `command` node runs. Workflow pages mean the second.
+- **run**: one execution of a workflow, durable as a record: a run row plus
+  a row per node with output, timing, and error.
+- **edge**: a `depends_on` declaration. Edges carry both ordering and data:
+  downstream nodes can read upstream output.
+- **gate**: a `when:` condition over upstream output. False skips the node.
+- **trigger rule**: a node's dependency-merge rule: `all_success` (default),
+  `one_success`, `none_failed_min_one_success`, or `all_done`.
+- **pause**: the run state an `approval` node enters while waiting for a
+  human. Process-lifetime only; a restart fails the run rather than faking a
+  resume.
+
+## Data, memory, and state
+
+- **snapshot**: data published under a key for the browser to render. The
+  substrate behind every live board. See
+  [Snapshots and surfaces](../snapshots-and-surfaces/).
+- **frame**: the versioned envelope a snapshot travels in: key, version,
+  composition time, data.
+- **key**: a snapshot's name. Everything a rib publishes lives under
+  `rib:<id>` or `rib:<id>:*`, and the harness enforces it.
+- **composer**: the registered function that produces a key's payload.
+  **Recompose** runs it, validates, caches, and broadcasts; composition is
+  lazy and concurrent calls coalesce.
+- **canvas kind**: what a payload claims to be: `markdown` or a typed `view`
+  (`html` is reserved and unrendered). The renderer set is closed.
+- **board**: the workhorse view payload: a dashboard built from a fixed
+  section vocabulary with semantic tones.
+- **region**: one slot in a rib surface's layout, bound to a snapshot key,
+  optionally naming the workflow that refreshes it.
+- **cadence**: a region's auto-refresh interval while its surface is open,
+  floored at thirty seconds.
+- **memory**: a typed, reviewed row of accumulated knowledge: a decision,
+  lesson, constraint, or failure. See
+  [Memory and state](../memory-and-state/).
+- **writeback**: a workflow node's declaration that its result becomes a
+  draft memory, screened by guardrails, landing as pending.
+- **recall**: the read path: full-text search weighted by recency, scoped by
+  project, filtered by review policy.
+- **review**: the human action that routes a pending memory: instruction
+  grade, evidence only, restricted, or rejected. The only path to influence.
+- **keychain**: the operating system's secret store. Every provider key and
+  rib credential lives there under the `keelson` service, never in the
+  database.

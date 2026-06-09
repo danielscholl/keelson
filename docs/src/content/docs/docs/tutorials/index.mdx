@@ -1,14 +1,38 @@
 ---
 title: Tutorials
-description: A problem-first learning rail, ending in building your first rib.
+description: A problem-first learning rail, from nothing installed to building your own rib.
+sidebar:
+  order: 0
 ---
 
-The tutorials are a problem-first learning rail. Each one opens with a scenario,
-walks you into the wall it solves, then hands off to the next. Planned rail:
+import { LinkCard } from "@astrojs/starlight/components";
 
-1. First run: from clone to a running harness and a first chat.
-2. Run a workflow: the bundled smoke test, watched end to end.
-3. Install a rib: add a package, see it light up a surface.
-4. Build your first rib: scaffold a `@keelson/rib-*` package against the contract.
+The tutorials are one rail, not a menu. Each page opens with the problem the
+last one left you holding, ends at a working checkpoint, and hands off to the
+next. Every command and its output is real, and the whole rail runs without
+credentials: the offline stub provider stands in wherever a real coding agent
+would, so you can verify the harness before you bring keys.
 
-The capstone, building your first rib, is the one most readers come for.
+Ride it in order. The capstone, building your own rib, is what the first
+three pages are quietly preparing you for.
+
+<LinkCard
+  title="1. Your first run"
+  href="first-run/"
+  description="Install the harness, read its health sweep, start the server, and push one chat turn through the whole loop."
+/>
+<LinkCard
+  title="2. Run your first workflow"
+  href="run-a-workflow/"
+  description="Author a four-node YAML DAG, let validation catch a broken reference, and watch the engine execute it."
+/>
+<LinkCard
+  title="3. Install a rib"
+  href="install-a-rib/"
+  description="Add a capability package from any bun-installable source and watch discovery wire it in at boot."
+/>
+<LinkCard
+  title="4. Build your first rib"
+  href="build-your-first-rib/"
+  description="The capstone: implement the contract in two files, install from a local path, and find your tool in the registry."
+/>

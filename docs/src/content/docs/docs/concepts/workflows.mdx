@@ -1,0 +1,166 @@
+---
+title: Workflows
+description: Why deterministic YAML sits next to an agent, how the DAG executes, and where the agency is bounded.
+sidebar:
+  order: 3
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+An agent in chat decides what happens next, every turn. That is the point of
+chat, and it is exactly wrong for the other half of real work: the release
+chore, the review pass, the data refresh you want to run the same way every
+time, reviewable before it runs and explainable after. A keelson workflow
+takes the control flow away from the agent and gives it to a YAML file. The
+file fixes what runs, in what order, under what conditions. Inside that fixed
+frame, individual nodes can still do agent work, with the leash declared in
+the same file.
+
+This page covers the execution model behind that trade: how the graph runs,
+how data moves between nodes, what a run leaves behind, and where the agency
+is bounded.
+
+## The graph is the contract
+
+A workflow is a set of nodes and `depends_on` edges, a directed acyclic
+graph. The executor sorts it into layers: nodes with no unmet dependencies
+run first, concurrently; each later layer starts when the layer before it
+settles. You saw that shape in
+[the first-workflow tutorial](../../tutorials/run-a-workflow/), where two
+independent nodes started together.
+
+Whether a node runs at all is decided by two declarations on the node, both
+evaluated against upstream results:
+
+- **`when:`** is a data gate: a condition over upstream output, like
+  `$check.output.status == 'ok'`, with `==`, `!=`, and numeric comparisons,
+  joined by `and` / `or`. A false gate skips the node.
+- **`trigger_rule:`** is a dependency-merge rule: what pattern of upstream
+  outcomes lets the node fire.
+
+| `trigger_rule` | The node runs when |
+| --- | --- |
+| `all_success` (default) | Every dependency succeeded. |
+| `one_success` | At least one dependency succeeded, so a branch can rescue a failing sibling. |
+| `none_failed_min_one_success` | Nothing failed and at least one succeeded. |
+| `all_done` | Every dependency reached a terminal state, for collector nodes that summarize whatever happened. |
+
+The details fail closed. A `depends_on` reference the validator somehow never
+saw counts as failed, a malformed `when:` expression warns and skips its node,
+and a node that declares an `output_schema` fails rather than passing a
+mismatched payload downstream.
+
+## Three families of nodes
+
+Seven node kinds, three jobs:
+
+| Family | Kinds | Character |
+| --- | --- | --- |
+| Agent | `prompt`, `command`, `loop` | Run agent turns. Take `model`, `provider`, and tool gates. `command` runs a named, reusable prompt file from the home; `loop` repeats a prompt until a completion token appears, hard-bounded by `max_iterations`. |
+| Deterministic | `bash`, `script` | Run code with no model in the path: `bash` for shell, `script` for a declared runtime such as Bun. Timeouts and exit codes decide success. |
+| Control | `approval`, `cancel` | Shape the run itself. `approval` pauses for a human decision; `cancel` ends a branch deliberately, recording why. |
+
+The taxonomy is the determinism dial. A workflow of `bash` and `script` nodes
+is a build system. A workflow of `prompt` nodes with gates between them is a
+supervised agent. Most useful workflows sit in the middle: deterministic
+nodes establish facts, agent nodes do judgment work, and gates check the
+judgment before anything irreversible happens.
+
+## How data moves
+
+Upstream output reaches a downstream node through one of two channels, and
+the split is deliberate.
+
+**The workflow layer substitutes text.** In prompts, `when:` conditions, and
+cancel reasons, `$nodeId.output` expands to the upstream node's output, and
+`$nodeId.output.field` reaches into JSON output. Workflow inputs arrive the
+same way, as `$inputs.<name>` and `$ARGUMENTS`. Substitution is a single
+atomic pass: if an upstream output happens to contain `$something.output`,
+the marker stays literal text instead of expanding again.
+
+**Shell nodes read the environment instead.** A `bash` or `script` node runs
+its body exactly as written in the file, with upstream output delivered as
+`KEELSON_NODE_<id>_OUTPUT` environment variables. Nothing produced by a model
+is ever spliced into shell source, so upstream text containing `$(...)` or
+backticks is data, never code.
+
+<Aside type="note" title="One file, two trust levels">
+The two channels encode a judgment: prompt text is interpreted by a model
+that treats it as language, but shell source is executed by a machine that
+treats it as instructions. The first can absorb hostile text; the second must
+never see it. Keeping the channels separate is what makes it safe to feed an
+agent's output into a script node at all.
+</Aside>
+
+## A run is a record
+
+Starting a workflow creates a run, and the run is durable: a row for the run,
+a row per node with its output, timing, and error, all in the harness's
+SQLite store. The watch stream you see in the CLI and the browser is the same
+event feed, emitted as each node starts, streams, and settles. The figure
+shows every state a run can occupy:
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/run-lifecycle.svg`}
+    alt="Workflow run states. From start, a run is running; an approval node moves it to paused and a resume moves it back. Running ends at succeeded, failed, or cancelled. A dashed edge from paused to failed is labeled: server restart, boot reconcile marks it failed."
+  />
+  <figcaption>
+    Figure 1. The run lifecycle. Approval nodes are the only path into
+    <code>paused</code>, and the dashed edge is the honest one: a pause does
+    not survive a server restart.
+  </figcaption>
+</figure>
+
+The dashed edge deserves its sentence. An approval pause is held by the
+running server process, not by the database. If the server restarts while a
+run is paused or mid-flight, boot reconciliation finds the stale run and
+marks it failed rather than pretending it can continue. Runs are durable as
+records; they are not yet resumable as processes.
+
+## Where the agency is bounded
+
+Every agent node runs inside limits that are declared, not improvised, and
+they layer from the file up to the operator:
+
+- **The file** picks the provider and model per node, gates tools with
+  `allowed_tools` and `denied_tools`, bounds loops with `max_iterations`,
+  bounds stalls with `idle_timeout`, and pins output shape with
+  `output_schema`.
+- **The operator floor** sits above the file. `KEELSON_WORKFLOW_PROVIDER`
+  pins which provider every prompt node uses, and
+  `KEELSON_WORKFLOW_TOOL_DENYLIST` subtracts tools no workflow may use,
+  applied on top of whatever a node allows.
+- **The human gate** is a node. An `approval` node holds the run before the
+  irreversible step, and the reply becomes that node's output, so downstream
+  nodes can branch on what the human said.
+
+Provider support for the finer controls varies, and the loader is honest
+about it at load time: fields only one provider honors, like per-node
+`hooks`, are flagged as warnings rather than silently accepted or rejected.
+
+<Aside type="tip" title="Lenient on vocabulary, strict on structure">
+The loader hard-errors on anything that breaks the graph: duplicate ids,
+unknown dependencies, cycles, reserved names. Fields it recognizes but does
+not honor only warn. The schema and DAG concepts are borrowed from
+[Archon](https://github.com/coleam00/Archon), and the leniency is what lets
+most Archon workflows load unmodified.
+</Aside>
+
+## Where workflows come from
+
+The catalog merges YAML files in the home's `workflows/` directory, files in
+a project's `.keelson/workflows/`, and definitions contributed by installed
+ribs at activation. A rib-contributed workflow can additionally bind its
+run output to one of the rib's snapshot keys, which is how a browser board's
+refresh button becomes a workflow run; that pipeline is the subject of
+[Snapshots and surfaces](../snapshots-and-surfaces/).
+
+## Where to go next
+
+- [Run your first workflow](../../tutorials/run-a-workflow/) builds a
+  four-node DAG and watches it execute.
+- [Memory and state](../memory-and-state/) covers what runs leave behind,
+  and the memory hooks nodes can declare.
+- The [reference tier](../../reference/) will hold the full node-by-node
+  schema as it lands.
