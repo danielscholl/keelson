@@ -26,6 +26,14 @@ KEELSON_HOME="$HOME_DIR" KEELSON_BIN_DIR="$BIN_DIR" \
 
 KEELSON="$BIN_DIR/keelson"
 
+echo "==> starter workflows seeded into the home?"
+if [ -f "$HOME_DIR/workflows/smoke-test.yaml" ]; then
+  echo "    OK: smoke-test.yaml seeded"
+else
+  echo "    FAIL: starter workflows were not seeded" >&2
+  exit 1
+fi
+
 echo "==> keelson doctor"
 "$KEELSON" doctor || true
 

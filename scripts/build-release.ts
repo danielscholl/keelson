@@ -51,12 +51,16 @@ const cliPkg = {
   dependencies: { "@napi-rs/keyring": "1.3.0" },
   peerDependencies: { "@keelson/shared": `^${VERSION}` },
   peerDependenciesMeta: { "@keelson/shared": { optional: true } },
-  files: ["dist", "LICENSE", "NOTICE"],
+  files: ["dist", "workflows", "LICENSE", "NOTICE"],
 };
 writeFileSync(join(CLI_PKG_DIR, "package.json"), `${JSON.stringify(cliPkg, null, 2)}\n`);
 for (const f of ["LICENSE", "NOTICE"]) {
   if (existsSync(join(ROOT, f))) cpSync(join(ROOT, f), join(CLI_PKG_DIR, f));
 }
+// Ship the bundled starter workflows so install.sh can seed them into the home
+// (a fresh install otherwise has an empty workflows dir — `keelson workflow run
+// smoke-test` would find nothing).
+cpSync(join(ROOT, ".keelson", "workflows"), join(CLI_PKG_DIR, "workflows"), { recursive: true });
 
 // 3. Pack the CLI package.
 console.log("[release] packing @keelson/cli");
@@ -106,23 +110,18 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 mkdir -p "$KEELSON_HOME" "$BIN_DIR"
-# Write the manifest only on first install; never clobber an existing one — it
-# carries the ribs added via \`keelson rib add\`. A re-run just reinstalls from
-# the existing manifest, leaving cli/shared and every rib dep intact.
-if [ ! -f "$KEELSON_HOME/package.json" ]; then
-  cat > "$KEELSON_HOME/package.json" <<JSON
-{
-  "name": "keelson-home",
-  "private": true,
-  "dependencies": {
-    "@keelson/cli": "$CLI_TARBALL",
-    "@keelson/shared": "$SHARED_TARBALL"
-  }
-}
-JSON
-fi
+# Merge cli + shared into the home manifest every run, preserving any ribs added
+# via \`keelson rib add\` (object-key set → no clobber, no duplicate keys). A
+# re-run with a new CLI_TARBALL updates those two deps and leaves ribs intact.
+KEELSON_HOME="$KEELSON_HOME" CLI_TARBALL="$CLI_TARBALL" SHARED_TARBALL="$SHARED_TARBALL" bun -e 'const fs=require("fs");const p=process.env.KEELSON_HOME+"/package.json";const pkg=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,"utf8")):{name:"keelson-home",private:true};pkg.dependencies=Object.assign({},pkg.dependencies,{"@keelson/cli":process.env.CLI_TARBALL,"@keelson/shared":process.env.SHARED_TARBALL});fs.writeFileSync(p,JSON.stringify(pkg,null,2)+"\\n");'
 
 ( cd "$KEELSON_HOME" && bun install )
+
+# Seed the bundled starter workflows on first install so \`keelson workflow run
+# smoke-test\` works out of the box; never overwrite an existing workflows dir.
+if [ ! -d "$KEELSON_HOME/workflows" ]; then
+  cp -R "$KEELSON_HOME/node_modules/@keelson/cli/workflows" "$KEELSON_HOME/workflows" 2>/dev/null || true
+fi
 
 cat > "$BIN_DIR/keelson" <<LAUNCH
 #!/usr/bin/env sh

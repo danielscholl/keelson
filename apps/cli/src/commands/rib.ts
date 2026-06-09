@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { resolve } from "node:path";
 import type { RibSummary } from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { ensureHome, installedRibIds, resolveKeelsonHome } from "../home.ts";
@@ -23,8 +24,15 @@ const KNOWN_RIBS: Record<string, string> = {
   osdu: "github:danielscholl/keelson-rib-osdu",
 };
 
+// A known id → its github source; a relative path (`./my-rib`) → absolute
+// against the invoking shell's cwd, because `bun add` runs with cwd=home and a
+// bare relative spec would otherwise resolve under the home; everything else
+// (absolute path, github:/git URL, npm name) passes through unchanged.
 function resolveRibSource(arg: string): string {
-  return KNOWN_RIBS[arg] ?? arg;
+  const known = KNOWN_RIBS[arg];
+  if (known) return known;
+  if (arg.startsWith(".")) return resolve(arg);
+  return arg;
 }
 
 // Run `bun <args>` in the home and return its exit code. In JSON mode bun's
