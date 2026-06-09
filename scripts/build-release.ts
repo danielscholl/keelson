@@ -41,6 +41,13 @@ const PROVIDERS_PKG = JSON.parse(
 ) as { dependencies: Record<string, string> };
 const CLAUDE_SDK_RANGE = PROVIDERS_PKG.dependencies["@anthropic-ai/claude-agent-sdk"];
 const COPILOT_SDK_RANGE = PROVIDERS_PKG.dependencies["@github/copilot-sdk"];
+// A missing range would be dropped by JSON.stringify below, silently shipping a
+// manifest without the SDK while the bundle still marks it external.
+if (!CLAUDE_SDK_RANGE || !COPILOT_SDK_RANGE) {
+  throw new Error(
+    "packages/providers/package.json must declare @anthropic-ai/claude-agent-sdk and @github/copilot-sdk dependencies",
+  );
+}
 const REPO = "danielscholl/keelson";
 
 rmSync(OUT, { recursive: true, force: true });
