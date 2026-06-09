@@ -9,8 +9,9 @@
 Keelson is a single-user, local-only **harness** that wraps a coding agent
 (GitHub Copilot SDK or Claude Agent SDK) with persistent state, a typed
 extension contract, deterministic YAML workflows, and a browser UI. It runs
-on your laptop and never round-trips through a hosted service. The harness
-is the deliverable; your capabilities live in **ribs** you install.
+on your laptop and never round-trips through a hosted service. The harness is
+the deliverable, useful on its own; the **ribs** you install extend it with new
+tools and surfaces.
 
 Alpha: the APIs and workflow schema still move. [Read the docs](https://danielscholl.github.io/keelson/).
 

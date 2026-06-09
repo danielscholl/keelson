@@ -36,6 +36,12 @@ onto Starlight.
   cross-restart resume (resume is process-lifetime only), and a full offline
   story (the CLI's server-down fallback runs the stub provider only). Ground
   every claim in the actual code.
+- **Keelson is useful on its own.** Never imply a rib is required for keelson to
+  be useful. The built-in Chat, Workflows, and Memory surfaces ship and work
+  standalone with just a provider; ribs extend the harness, they do not enable
+  it. Positioning copy names that standalone value before it reaches for ribs.
+  ("The agent ships with no tools until a rib registers them" is a narrower, true
+  claim about tools, fine where the context is genuinely about tools.)
 - Seat the nautical metaphor once, prominently, then switch to the codebase's
   own vocabulary. The keelson-is-the-backbone, ribs-are-the-frames idea earns one
   clear statement per audience entry point. Do not invent nautical names for
@@ -162,8 +168,10 @@ metaphor land together:
   sit on two balanced lines (not the dramatic four-line stack). Both keel and
   ribs are named.
 - **Copy** maps the metaphor to the product: "The harness is the keel, the part
-  that ships. The capabilities come from the ribs you bring." Do not repeat
-  "local" in the copy; the eyebrow carries it.
+  that ships, and it is useful on its own. Ribs are the capabilities you bolt on
+  for more." It names the standalone value before reaching for ribs (the
+  standalone-useful voice rule). Do not repeat "local" in the copy; the eyebrow
+  carries it.
 
 ## Feature tiles
 
@@ -186,7 +194,8 @@ eyebrow and the hull figure respectively.
 
 ## Figures
 
-Three media, picked by job. Plus one custom icon family.
+Three diagram media, picked by job, plus app screenshots and one custom icon
+family.
 
 - **Bespoke SVG** for the signature hero illustration, "The Frame"
   (`assets/figures/the-frame-ship.svg`): a naval side elevation where the keelson
@@ -212,6 +221,17 @@ Figure color legend, consistent across all media:
 
 Keep figures clean (no hand-drawn roughness), monospace labels, white canvas. The
 `diagram-figure` frame supplies the blueprint context on the page.
+
+### App screenshots
+
+Screenshots of the running UI use the dark `screenshot-figure` frame, not the
+light `diagram-figure` one. Two themes are in play at once: the docs render in
+light and dark, and the UI itself has light and dark modes. A shot must hold up
+in both. Either capture the UI in one canonical theme (state which) and frame it
+so it reads against both doc backgrounds, or ship light and dark variants that
+swap with the active theme. Never drop an unframed dark-UI shot onto a light page
+or the reverse. Add screenshots only once a surface is visually stable, and keep
+them current with the UI.
 
 ### Icon family
 
