@@ -18,6 +18,7 @@ import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { migrateLegacyProjectsLayout } from "../src/workspace-migration.ts";
+import { rmTemp } from "./temp.ts";
 
 let workspace: string;
 let dbPath: string;
@@ -28,7 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(workspace, { recursive: true, force: true });
+  rmTemp(workspace);
 });
 
 async function git(args: string[], cwd: string): Promise<string> {

@@ -26,6 +26,7 @@ import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
 import { createActiveRuns, workflowsRoutes } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -46,7 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
   clearRegistry();
 });
 

@@ -7,6 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { Database } from "bun:sqlite";
+import { isAbsolute, relative, sep } from "node:path";
 import type { Project } from "@keelson/shared";
 
 export interface CreateProjectInput {
@@ -63,16 +64,17 @@ function isUniqueConstraintError(err: unknown): err is SqliteWriteError {
 
 function trimSlash(p: string): string {
   if (p === "/") return p;
-  return p.replace(/\/+$/, "");
+  return p.replace(/[/\\]+$/, "");
 }
 
-// `${parent}/` boundary guards against `/a/bc` matching parent `/a/b`.
+// True when `child` is `parent` itself or nested within it. Uses path.relative
+// so it stays separator- and platform-correct (Windows `\` as well as POSIX `/`)
+// rather than a raw `${parent}/` prefix test, which never matches a Windows path.
+// A sibling whose name shares a prefix (`/a/bc` vs parent `/a/b`) is excluded —
+// relative() yields a `..`-leading path there.
 export function isPathInside(parent: string, child: string): boolean {
-  const p = trimSlash(parent);
-  const c = trimSlash(child);
-  if (c === p) return true;
-  const needle = p === "/" ? "/" : `${p}/`;
-  return c.startsWith(needle);
+  const rel = relative(parent, child);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 export function createProjectsStore(db: Database): ProjectsStore {

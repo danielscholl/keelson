@@ -86,6 +86,9 @@ interface MemoryRow {
 
 interface RecallRow extends MemoryRow {
   bm25_score: number;
+  // Combined bm25 × recency score, computed and ordered by in SQL so the
+  // returned row order and the normalized rankingScore can never disagree.
+  combined_score: number;
 }
 
 interface SourceRefRow {
@@ -108,19 +111,6 @@ function buildFtsQuery(raw: string): string {
   const tokens = raw.split(/[^\p{L}\p{N}_-]+/u).filter((t) => t.length > 0);
   if (tokens.length === 0) return "";
   return tokens.map((t) => `"${t}"`).join(" OR ");
-}
-
-function daysSince(iso: string): number {
-  const created = Date.parse(iso);
-  if (Number.isNaN(created)) return 0;
-  const ms = Date.now() - created;
-  return Math.max(0, ms / 86_400_000);
-}
-
-// Half-life ~30 days: a result from a month ago scores half what an identical
-// result from today would.
-function recencyDecay(days: number): number {
-  return 1 / (1 + days / 30);
 }
 
 function rowToMemory(
@@ -427,7 +417,13 @@ export function createMemoryStore(db: Database): MemoryStore {
       m.content_hash, m.idempotency_key, m.confidence, m.runtime,
       m.task_id, m.flow_id, m.model, m.provider,
       m.created_at, m.updated_at, m.stale_after,
-      bm25(memories_fts) AS bm25_score
+      bm25(memories_fts) AS bm25_score,
+      -- Recency half-life ~30 days: a month-old result scores half a same-day
+      -- one. Selected (not just ordered by) so the JS layer reuses the exact
+      -- value the row order reflects.
+      abs(bm25(memories_fts))
+        * (1.0 / (1.0 + (max(0.0, julianday('now') - julianday(m.created_at)) / 30.0)))
+        AS combined_score
     FROM memories_fts
     JOIN memories m ON m.rowid = memories_fts.rowid
     WHERE memories_fts MATCH ?
@@ -437,10 +433,7 @@ export function createMemoryStore(db: Database): MemoryStore {
       AND (m.stale_after IS NULL OR datetime(m.stale_after) > datetime('now'))
       AND (? IS NULL OR m.scope_project_id = ?)
       AND (? IS NULL OR datetime(m.created_at) >= datetime('now', ?))
-    ORDER BY
-      abs(bm25(memories_fts))
-        * (1.0 / (1.0 + (max(0.0, julianday('now') - julianday(m.created_at)) / 30.0)))
-      DESC
+    ORDER BY combined_score DESC
     LIMIT ?
   `;
   const recallStmt = db.prepare(recallSql);
@@ -474,12 +467,10 @@ export function createMemoryStore(db: Database): MemoryStore {
         }
       }
 
-      // SQL already returns rows in descending combined order; we only
-      // recompute the score here to normalize rankingScore into [0,1].
-      const scored = rawRows.map((r) => {
-        const combined = Math.abs(r.bm25_score) * recencyDecay(daysSince(r.created_at));
-        return { row: r, combined };
-      });
+      // SQL computes and orders by the combined bm25 × recency score; reuse it
+      // verbatim so rankingScore normalizes the same values the row order
+      // reflects — recomputing in JS drifts on near-ties and can invert them.
+      const scored = rawRows.map((r) => ({ row: r, combined: r.combined_score }));
       const maxCombined = scored.reduce((acc, s) => Math.max(acc, s.combined), 0);
       const memories = hydrate(scored.map((s) => s.row));
       const items: RecallItem[] = memories.map((m, idx) => {

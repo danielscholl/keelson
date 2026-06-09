@@ -296,67 +296,87 @@ describe("bashHandler", () => {
     }
   });
 
-  test("abort reaps grandchild processes via process-group kill", async () => {
-    // Stage two long-lived sleeps in the background and write their PIDs
-    // to a temp file so we can verify they're dead AFTER the handler
-    // returns. Without `detached: true` + `process.kill(-pid)`, the bash
-    // wrapper dies but the child sleeps survive past abort (the bug Codex
-    // flagged in round 1).
-    const tmpFile = `/tmp/keelson-bash-pgrp-${crypto.randomUUID()}.txt`;
-    const ac = new AbortController();
-    const body = `
+  // The grandchild-reaping guarantee is asserted here through POSIX-only
+  // mechanics: a shared `/tmp` view between bash and Node, plus `process.kill(
+  // pid, 0)` against the PIDs bash reports via `$!`. On Windows bash's `/tmp`
+  // and its MSYS PIDs don't map onto Node's filesystem / Win32 PIDs, so the
+  // scenario can't be asserted this way. Tree termination on abort is still
+  // covered on Windows by the taskkill-based "abort signal kills the
+  // subprocess" and "background child ... is reaped" tests above.
+  test.skipIf(process.platform === "win32")(
+    "abort reaps grandchild processes via process-group kill",
+    async () => {
+      // Stage two long-lived sleeps in the background and write their PIDs
+      // to a temp file so we can verify they're dead AFTER the handler
+      // returns. Without `detached: true` + `process.kill(-pid)`, the bash
+      // wrapper dies but the child sleeps survive past abort (the bug Codex
+      // flagged in round 1).
+      const tmpFile = `/tmp/keelson-bash-pgrp-${crypto.randomUUID()}.txt`;
+      const ac = new AbortController();
+      const body = `
 			sleep 30 &
 			echo $! >> ${tmpFile}
 			sleep 30 &
 			echo $! >> ${tmpFile}
 			wait
 		`;
-    const promise = bashHandler.handle(
-      stubNode,
-      buildCtx({ resolvedBody: body, abortSignal: ac.signal }),
-    );
-    // Give bash a beat to fork the children and write the pidfile.
-    await new Promise((r) => setTimeout(r, 150));
-    ac.abort();
-    const result = await promise;
-    expect(result.status).toBe("failed");
+      const promise = bashHandler.handle(
+        stubNode,
+        buildCtx({ resolvedBody: body, abortSignal: ac.signal }),
+      );
+      // Give bash a beat to fork the children and write the pidfile.
+      await new Promise((r) => setTimeout(r, 150));
+      ac.abort();
+      const result = await promise;
+      expect(result.status).toBe("failed");
 
-    const fs = await import("node:fs");
-    const pids = fs
-      .readFileSync(tmpFile, "utf-8")
-      .split("\n")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    fs.unlinkSync(tmpFile);
-    expect(pids.length).toBeGreaterThanOrEqual(2);
+      const fs = await import("node:fs");
+      const pids = fs
+        .readFileSync(tmpFile, "utf-8")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      fs.unlinkSync(tmpFile);
+      expect(pids.length).toBeGreaterThanOrEqual(2);
 
-    // Give SIGTERM a tick to propagate then verify both grandchildren
-    // are gone. `process.kill(pid, 0)` throws ESRCH if the pid is dead.
-    await new Promise((r) => setTimeout(r, 100));
-    for (const pidStr of pids) {
-      const pid = Number(pidStr);
-      let alive = true;
-      try {
-        process.kill(pid, 0);
-      } catch {
-        alive = false;
-      }
-      // Best-effort cleanup if the assertion would have failed —
-      // don't leak sleepers into the host even on regression.
-      if (alive) {
+      // Give SIGTERM a tick to propagate then verify both grandchildren
+      // are gone. `process.kill(pid, 0)` throws ESRCH if the pid is dead.
+      await new Promise((r) => setTimeout(r, 100));
+      for (const pidStr of pids) {
+        const pid = Number(pidStr);
+        let alive = true;
         try {
-          process.kill(pid, "SIGKILL");
+          process.kill(pid, 0);
         } catch {
-          /* race */
+          alive = false;
         }
+        // Best-effort cleanup if the assertion would have failed —
+        // don't leak sleepers into the host even on regression.
+        if (alive) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            /* race */
+          }
+        }
+        expect(alive).toBe(false);
       }
-      expect(alive).toBe(false);
-    }
-  });
+    },
+  );
 
   test("runs with workflow cwd", async () => {
-    const result = await bashHandler.handle(stubNode, buildCtx({ resolvedBody: "pwd" }));
+    // Git Bash reports POSIX paths (`/c/Users/...`); `pwd -W` prints the Windows
+    // form so the assertion can line up with process.cwd() on both platforms.
+    const body = process.platform === "win32" ? "pwd -W" : "pwd";
+    const result = await bashHandler.handle(stubNode, buildCtx({ resolvedBody: body }));
     expect(result.status).toBe("succeeded");
-    expect(result.output.kind === "text" && result.output.text.trim()).toBe(process.cwd());
+    const actual = result.output.kind === "text" ? result.output.text.trim() : "";
+    if (process.platform === "win32") {
+      expect(actual.replace(/\\/g, "/").toLowerCase()).toBe(
+        process.cwd().replace(/\\/g, "/").toLowerCase(),
+      );
+    } else {
+      expect(actual).toBe(process.cwd());
+    }
   });
 });

@@ -28,6 +28,7 @@ import {
   workflowRunWebSocketHandlers,
   workflowsRoutes,
 } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -44,7 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 interface Rig {

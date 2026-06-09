@@ -62,6 +62,12 @@ install (or drop your own YAML in `~/.keelson/workflows`). Real agents need a
 Copilot subscription or an Anthropic API key. No keys? Add `KEELSON_PROVIDERS=stub`
 for an offline echo provider to try the harness without credentials.
 
+> **Windows.** Keelson runs natively on [Bun for Windows](https://bun.sh/). The
+> `bash` workflow node (and `loop` `until_bash`) need a POSIX shell — install
+> [Git for Windows](https://git-scm.com/download/win) and Keelson auto-discovers
+> its `bash.exe` (set `KEELSON_BASH` to point at a different one). The `prompt`,
+> `command`, and `script` (`bun`/`uv`) node types have no such requirement.
+
 **Uninstall:**
 
 ```bash

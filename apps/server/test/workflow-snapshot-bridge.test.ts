@@ -24,6 +24,7 @@ import { createSnapshotSubscribers } from "../src/snapshot-subscribers.ts";
 import { snapshotsRoutes } from "../src/snapshots-handler.ts";
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
 import { workflowsRoutes } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 const ORIGIN = "http://127.0.0.1:5173";
 
@@ -49,7 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function makeRig() {

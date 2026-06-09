@@ -447,7 +447,9 @@ export async function serveUntilSignal(config: StartServerConfig = {}): Promise<
   };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-  process.on("SIGHUP", onSignal);
+  // SIGHUP (terminal hangup) is POSIX-only — Bun/Node don't deliver it on
+  // Windows and registering a listener there can throw.
+  if (process.platform !== "win32") process.on("SIGHUP", onSignal);
   // Park forever; onSignal owns process exit. Bun.serve already keeps the loop alive.
   return await new Promise<never>(() => {});
 }

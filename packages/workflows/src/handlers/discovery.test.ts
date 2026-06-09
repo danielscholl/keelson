@@ -40,7 +40,7 @@ describe("resolveCommand", () => {
     const res = await resolveCommand("hello", cwd);
     expect(res).not.toBeNull();
     expect(res?.content).toBe("Hello, $1!");
-    expect(res?.path.endsWith(".keelson/commands/hello.md")).toBe(true);
+    expect(res?.path.endsWith(join(".keelson", "commands", "hello.md"))).toBe(true);
   });
 
   test("walks 1 subdir deep", async () => {
@@ -73,7 +73,7 @@ describe("resolveScript", () => {
 
     const res = await resolveScript("echo-args", "bun", cwd);
     expect(res?.runtime).toBe("bun");
-    expect(res?.path.endsWith(".keelson/scripts/echo-args.ts")).toBe(true);
+    expect(res?.path.endsWith(join(".keelson", "scripts", "echo-args.ts"))).toBe(true);
   });
 
   test("matches a .py script for runtime=uv", async () => {

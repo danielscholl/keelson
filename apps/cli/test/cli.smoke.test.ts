@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
+import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -22,7 +23,7 @@ async function runCli(
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...envOverrides } as Record<string, string>,
+    env: spawnEnv(envOverrides),
   });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),

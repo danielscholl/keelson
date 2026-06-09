@@ -14,6 +14,7 @@ import {
   ribDependencies,
   selectReleaseNotes,
 } from "../src/commands/update.ts";
+import { spawnEnv } from "./spawn-env.ts";
 
 describe("update pure helpers", () => {
   test("parseTagVersion strips a leading v and rejects non-semver", () => {
@@ -97,7 +98,7 @@ async function runCli(
   const proc = Bun.spawn(["bun", BIN, ...args], {
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...env },
+    env: spawnEnv(env),
   });
   const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   return { stdout, exitCode };

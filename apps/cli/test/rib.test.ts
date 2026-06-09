@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 
@@ -16,7 +17,7 @@ async function runCli(
   const proc = Bun.spawn(["bun", BIN, ...args], {
     stdout: "pipe",
     stderr: "pipe",
-    ...(env ? { env: { ...process.env, ...env } } : {}),
+    ...(env ? { env: spawnEnv(env) } : {}),
   });
   const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   return { stdout, exitCode };

@@ -26,6 +26,7 @@ import { Hono } from "hono";
 import { openDatabase } from "../src/db/init.ts";
 import { memoryRoutes } from "../src/memory-handler.ts";
 import { createMemoryStore, type MemoryStore } from "../src/memory-store.ts";
+import { rmTemp } from "./temp.ts";
 
 const ORIGIN = "http://127.0.0.1:5173";
 
@@ -44,7 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function postJson(path: string, body: unknown, headers: Record<string, string> = {}) {

@@ -19,6 +19,21 @@ export interface ExecOptions {
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
+// Windows exposes the search path as `Path`; Bun.spawn resolves a bare command
+// against `PATH` (uppercase) when handed an explicit env, so an env derived from
+// `process.env` (which carries `Path`) fails ENOENT for `git`/`gh`/rib tools.
+// Mirror the value onto `PATH`. No-op on POSIX and when `PATH` is already set.
+function ensureSpawnPath(env: Record<string, string>): Record<string, string> {
+  if (process.platform !== "win32" || env.PATH !== undefined) return env;
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() === "PATH") {
+      env.PATH = env[key] as string;
+      break;
+    }
+  }
+  return env;
+}
+
 export async function runText(
   cmd: string,
   args: string[],
@@ -29,7 +44,7 @@ export async function runText(
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const proc = Bun.spawn([cmd, ...args], {
-      env: { ...process.env, ...(opts.env ?? {}) },
+      env: ensureSpawnPath({ ...process.env, ...(opts.env ?? {}) } as Record<string, string>),
       stdout: "pipe",
       stderr: "pipe",
       cwd: opts.cwd,

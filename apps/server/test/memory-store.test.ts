@@ -26,6 +26,7 @@ import {
 } from "@keelson/shared";
 import { openDatabase } from "../src/db/init.ts";
 import { createMemoryStore, InvalidCursorError, type MemoryStore } from "../src/memory-store.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -41,7 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function makeDraft(overrides: Partial<WritebackMemoryDraft> = {}): WritebackMemoryDraft {

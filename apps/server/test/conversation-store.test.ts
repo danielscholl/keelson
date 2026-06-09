@@ -13,6 +13,7 @@ import { join } from "node:path";
 import type { Message } from "@keelson/shared";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function makeMessage(overrides: Partial<Message> = {}): Message {

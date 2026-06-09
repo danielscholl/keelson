@@ -20,6 +20,7 @@ import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { type ActiveRuns, createActiveRuns, workflowsRoutes } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let artifactsDir: string;
@@ -32,7 +33,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 const RUN_ID = "run-1";

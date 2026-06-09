@@ -60,6 +60,23 @@ export class SubprocessSpawnError extends Error {
   }
 }
 
+const IS_WINDOWS = process.platform === "win32";
+
+// Windows exposes the search path as `Path`; Bun.spawn resolves a bare command
+// against `PATH` (uppercase) when handed an explicit env, so an env derived from
+// `process.env` (which only carries `Path`) fails ENOENT for `bun`/`uv`/etc.
+// Mirror the value onto `PATH`. No-op on POSIX and when `PATH` is already set.
+function ensureSpawnPath(env: Record<string, string>): Record<string, string> {
+  if (!IS_WINDOWS || env.PATH !== undefined) return env;
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() === "PATH") {
+      env.PATH = env[key] as string;
+      break;
+    }
+  }
+  return env;
+}
+
 /**
  * Spawn a subprocess with the shared timeout/abort/drain machinery. Caller
  * decides how to render the result into a `NodeResult` (label/runtime/exit
@@ -74,13 +91,18 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
   try {
     proc = Bun.spawn([opts.cmd, ...opts.args], {
       cwd: opts.cwd,
-      env: opts.env,
+      env: ensureSpawnPath({ ...opts.env }),
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",
+      // POSIX-only: a new process group lets the kill-group dance below reap a
+      // daemonizing grandchild that escapes the immediate child. Windows has no
+      // POSIX process groups, and Bun's `detached` there suppresses stdout/stderr
+      // capture (empty output) — so omit it on Windows and lean on `taskkill /T`
+      // for tree termination instead.
       // biome-ignore lint/suspicious/noTsIgnore: Bun supports `detached` at runtime; types lag.
       // @ts-ignore
-      detached: true,
+      detached: !IS_WINDOWS,
     });
   } catch (err) {
     throw new SubprocessSpawnError(err);
@@ -90,6 +112,24 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
   let escalateTimer: ReturnType<typeof setTimeout> | null = null;
 
   const signalGroup = (signal: "SIGTERM" | "SIGKILL"): void => {
+    if (IS_WINDOWS) {
+      // No POSIX process groups: terminate the whole child tree by pid. `/t`
+      // walks children (the grandchildren a bare proc.kill would miss); `/f`
+      // forces it on the SIGKILL escalation. SIGTERM stays best-effort/graceful.
+      try {
+        const args = ["/pid", String(proc.pid), "/t"];
+        if (signal === "SIGKILL") args.push("/f");
+        Bun.spawnSync(["taskkill", ...args], { stdout: "ignore", stderr: "ignore" });
+      } catch {
+        // taskkill unavailable or the pid is already gone
+      }
+      try {
+        proc.kill();
+      } catch {
+        // already exited
+      }
+      return;
+    }
     try {
       process.kill(-proc.pid, signal);
     } catch {
@@ -144,7 +184,10 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
   ]);
 
   const rawStdout = stdoutCapture.join("");
-  const stdoutText = opts.trimTrailingNewline ? rawStdout.replace(/\n$/, "") : rawStdout;
+  // Strip an optional CR before the trailing LF: a native Windows program
+  // (e.g. Python via `uv`) terminates output with `\r\n`, and trimming only the
+  // `\n` would leave a stray `\r` on the captured value.
+  const stdoutText = opts.trimTrailingNewline ? rawStdout.replace(/\r?\n$/, "") : rawStdout;
   const stderrTail = stderrBox.text.slice(-STDERR_TAIL_MAX_CHARS).trim();
 
   return { stdoutText, stderrTail, exitCode, killReason };

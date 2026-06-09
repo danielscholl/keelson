@@ -96,7 +96,7 @@ describe("worktreePathForRepoLocal", () => {
         projectRootPath: "/repos/work",
         branch: "keelson/architect/abc",
       }),
-    ).toBe("/repos/work/.worktrees/abc");
+    ).toBe(join("/repos/work", ".worktrees", "abc"));
   });
 });
 

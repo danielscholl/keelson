@@ -21,6 +21,7 @@ import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { workflowsRoutes } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let repoDir: string;
@@ -58,7 +59,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 function writeWorkflow(filename: string, body: string): void {
@@ -146,7 +147,7 @@ nodes:
     const echoed = run.nodes[0]!.outputText?.trim();
     expect(echoed).toBeTruthy();
     expect(echoed).not.toBe(repoDir);
-    expect(echoed!.includes(`${sep}.worktrees${sep}`)).toBe(true);
+    expect(echoed!.replace(/\\/g, "/").includes("/.worktrees/")).toBe(true);
 
     // Sentinel was written to the worktree, not the source repo.
     expect(existsSync(join(repoDir, "sentinel.txt"))).toBe(false);
@@ -204,7 +205,7 @@ nodes:
     // honoring the policy this pwd would be `repoDir`.
     const echoed = run.nodes[0]!.outputText?.trim();
     expect(echoed).not.toBe(repoDir);
-    expect(echoed!.includes(`${sep}.worktrees${sep}`)).toBe(true);
+    expect(echoed!.replace(/\\/g, "/").includes("/.worktrees/")).toBe(true);
   });
 
   test("isolation:none override defeats YAML default and runs in place", async () => {

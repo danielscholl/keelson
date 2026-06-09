@@ -25,6 +25,7 @@ import {
   createWorkflowSubscribers,
   runDedupeKey,
 } from "../src/workflows-handler.ts";
+import { rmTemp } from "./temp.ts";
 
 function liveEntry(dedupeKey: string, conversationId: string): ActiveRunEntry {
   return {
@@ -87,7 +88,7 @@ nodes:
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmTemp(tmpDir);
   });
 
   // `bindCollect` registers `collect` as a bound producer — the de-dup only

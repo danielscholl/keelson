@@ -14,6 +14,7 @@ import {
   DuplicateProjectNameError,
   isPathInside,
 } from "../src/projects-store.ts";
+import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 let dbPath: string;
@@ -24,7 +25,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  rmTemp(tmpDir);
 });
 
 describe("ProjectsStore", () => {
