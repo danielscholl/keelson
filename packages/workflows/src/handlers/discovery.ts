@@ -23,7 +23,7 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, extname, join } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 
 export { isValidCommandName } from "../schema/command-validation.ts";
 
@@ -36,7 +36,9 @@ const HOME = homedir();
 // this leaf package; the project-local scope (cwd/.keelson) covers the dev case.
 function keelsonHome(): string {
   const env = process.env.KEELSON_HOME?.trim();
-  return env ? env : join(HOME, ".keelson");
+  // resolve() so a relative KEELSON_HOME normalizes to absolute, matching
+  // resolveKeelsonHome in @keelson/shared/paths.
+  return env ? resolve(env) : join(HOME, ".keelson");
 }
 
 export type ScriptRuntime = "bun" | "uv";

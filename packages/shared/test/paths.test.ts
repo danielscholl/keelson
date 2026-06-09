@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { keelsonPaths, resolveKeelsonHome, resolveRibsRoot } from "../src/paths.ts";
 
@@ -44,7 +44,7 @@ describe("resolveKeelsonHome", () => {
     // An isolated cwd with no .keelson/ ancestor resolves to the user home.
     const isolated = join(tmp, "no-project");
     mkdirSync(isolated, { recursive: true });
-    expect(resolveKeelsonHome(isolated)).toBe(join(process.env.HOME ?? "", ".keelson"));
+    expect(resolveKeelsonHome(isolated)).toBe(join(homedir(), ".keelson"));
   });
 });
 

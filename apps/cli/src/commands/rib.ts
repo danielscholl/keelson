@@ -154,10 +154,17 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
   const server = await probeServer(opts.baseUrl ? { baseUrl: opts.baseUrl } : {});
   emit({ data: { added, installed, home, restartRequired: server !== null } }, { json: opts.json });
   if (!opts.json) {
-    const label = added.length > 0 ? added.join(", ") : source;
-    process.stdout.write(`added ${label}\n`);
-    if (server !== null) {
-      process.stdout.write("restart `keelson serve` to activate the new rib\n");
+    if (added.length > 0) {
+      process.stdout.write(`added ${added.join(", ")}\n`);
+      if (server !== null) {
+        process.stdout.write("restart `keelson serve` to activate the new rib\n");
+      }
+    } else {
+      // bun add succeeded but no new @keelson/rib-* appeared: either an
+      // already-installed rib, or a source that isn't a keelson rib package.
+      process.stdout.write(
+        `no new rib added from ${source} (already installed, or not an @keelson/rib-* package)\n`,
+      );
     }
   }
   process.exit(EXIT_OK);
