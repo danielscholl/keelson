@@ -9,6 +9,24 @@ under [Pre-release milestones](#pre-release-milestones) used an internal
 milestone numbering (0.2–0.4); they predate the install path and were never
 published as artifacts, and are kept here for history.
 
+## [0.3.0] — 2026-06-09 — Registry-free rib install
+
+Keelson no longer keeps a list of which ribs exist. `keelson rib add` takes any
+source `bun` understands, so anyone can publish a rib without being coded into
+the harness.
+
+### Changed
+
+- `keelson rib add <source>` accepts a github URL, `github:owner/repo`, a git
+  URL, an npm name, or a local path, and hands it to `bun add` unchanged (only
+  relative paths are absolutized). The built-in `chamber`/`osdu` id shortcuts are
+  removed — install by source, e.g.
+  `keelson rib add https://github.com/danielscholl/keelson-rib-osdu`.
+- `keelson update` advances **every** installed `@keelson/rib-*` dependency
+  regardless of how it was added (`bun update` moves a floating git ref to its
+  newest commit and no-ops a pinned tag/tarball/path), fixing ribs added via a
+  plain `https://` URL or `owner/repo` shorthand not being advanced.
+
 ## [0.2.0] — 2026-06-09 — `keelson update`
 
 In-place upgrades. `keelson update` moves an installed home to the latest

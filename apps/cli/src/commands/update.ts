@@ -71,16 +71,15 @@ export function applyManifestVersion(
   };
 }
 
-// Installed rib deps resolved from a git/github source — the ones `bun update`
-// can advance to their latest tracked commit. A rib pinned to a tarball/path is
-// left alone (no floating ref to move).
-export function githubSourcedRibs(manifest: HomeManifest): string[] {
+// Every installed rib dependency. `bun update` advances each to the latest of
+// whatever its source resolves to — a floating git ref (github URL, github:,
+// owner/repo, git+) moves to its newest commit; a pinned tag, tarball, or path
+// is a no-op. Source-agnostic by design: keelson keeps no registry, so it can't
+// (and shouldn't) reason about where a rib came from.
+export function ribDependencies(manifest: HomeManifest): string[] {
   const deps = manifest.dependencies ?? {};
-  return Object.entries(deps)
-    .filter(
-      ([name, spec]) => name.startsWith("@keelson/rib-") && /^(github:|git\+|git:)/.test(spec),
-    )
-    .map(([name]) => name)
+  return Object.keys(deps)
+    .filter((name) => name.startsWith("@keelson/rib-"))
     .sort();
 }
 
@@ -231,7 +230,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     );
   }
 
-  const ribs = opts.ribs ? githubSourcedRibs(manifest) : [];
+  const ribs = opts.ribs ? ribDependencies(manifest) : [];
   if (ribs.length > 0) {
     const ribCode = await runBun(["update", ...ribs], home, opts.json);
     if (ribCode !== 0) {
