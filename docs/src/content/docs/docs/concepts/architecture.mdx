@@ -1,0 +1,84 @@
+---
+title: Architecture
+description: What the harness owns, where ribs attach, and the rule that keeps them apart.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+Keelson is a harness with a typed extension contract, not a monolith. This page
+covers the shape of the system: what the harness owns, where ribs attach, and the
+one rule that keeps the two apart.
+
+## Backbone and ribs
+
+The split that defines keelson is the split between the harness and the ribs. The
+harness is the part that ships in this repository: the provider registry, the
+tool registry, the workflow executor, the chat surface, the SQLite store, and the
+credential vault. It is the same on every install.
+
+A **rib** is an extension that lives in its own package, named
+`keelson-rib-<name>` on GitHub and `@keelson/rib-<name>` on npm. A rib is the only
+place an external system is touched. Install one as a dependency and the server
+discovers it at boot. Nothing about the harness changes; the rib simply bolts on.
+
+## The frame
+
+Read the system as a ship's frame. The harness is the keelson beam running the
+length of the build. The two surfaces, the CLI and the browser, drive the same
+server. Ribs are the frames fastened to the beam, each owning one external system.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/the-frame-ship.svg`}
+    alt="A blueprint side elevation of a hull. The keelson beam is the harness; the ribs are frames bolted on, three labeled as keelson-rib packages. The CLI is the rudder, the browser SPA a surface, and a dashed bridge marks a structure still under construction."
+  />
+  <figcaption>
+    Figure 1. The harness is the keelson beam. Ribs fasten on as separately
+    versioned packages, the CLI steers from the shell, and the core never imports
+    any rib.
+  </figcaption>
+</figure>
+
+## What the harness owns
+
+The harness is a Bun monorepo. Each workspace owns one responsibility, and the
+server is the composition root that wires them together at startup.
+
+| Workspace | Responsibility |
+| --- | --- |
+| `apps/cli` | The `keelson` command. Routes to the server over HTTP and WebSocket when it is up, and falls back to in-process execution when it is down. |
+| `apps/server` | The HTTP and WebSocket server on port 7878. The composition root: it wires the snapshot manager, providers, credentials, and ribs, and owns the SQLite store and the redaction pipeline. |
+| `apps/web` | The React SPA on port 5173. Renders the built-in Chat, Workflows, and Memory surfaces, plus any surface a rib contributes, with no per-rib UI code. |
+| `packages/shared` | The public types and contracts, including the `Rib` interface and the snapshot streaming substrate. It carries no dependencies back on the host. |
+| `packages/workflows` | The DAG executor and YAML schema. The node taxonomy and substitution model borrow concepts from Archon. |
+| `packages/providers` | Pluggable coding-agent SDKs behind one interface: Copilot, Claude, and a no-auth stub for offline use. |
+| `.keelson/` | The runtime home: the SQLite database, the bundled starter workflows, and the named commands and scripts that workflow nodes run. |
+
+## How work reaches a rib
+
+Ribs are not registered by hand. The server discovers them at boot and folds
+their tools into the same registry the chat agent and workflow prompt nodes
+already read, so a rib's capability reaches every surface without per-rib wiring.
+
+<Steps>
+
+1. **Discover.** The server walks `node_modules/@keelson` and keeps the `rib-*`
+   packages it finds. A package that fails validation is skipped with a warning,
+   never fatally.
+
+2. **Activate.** `KEELSON_RIBS` filters which discovered ribs turn on. When it is
+   unset, every discovered rib activates.
+
+3. **Register.** Each rib returns its tools. They land in the shared tool registry
+   and become reachable from both the chat agent and workflow prompt nodes.
+
+4. **Stream.** A rib can publish a snapshot frame under its own namespace. The SPA
+   subscribes and renders it as a live surface, refreshing on its own cadence.
+
+</Steps>
+
+<Aside type="note" title="The boundary rule">
+The harness never imports a rib. External systems are touched only inside ribs.
+This is what lets the harness ship once and stay stable while any number of ribs
+come and go, exactly as a keelson does not depend on any single frame.
+</Aside>

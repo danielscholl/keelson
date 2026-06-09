@@ -246,6 +246,7 @@ Every command supports `--json` for piping. Stable exit codes: `0` success,
 
 ## Documentation
 
+- [`docs/`](docs/) — the documentation site (Astro Starlight + a bespoke landing); `cd docs && bun install && bun run dev`. Authoring guide: [`docs/STYLE.md`](docs/STYLE.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, required checks, PR hygiene
 - [SECURITY.md](SECURITY.md) — supported versions, threat model, how to report
 - [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) — the `Rib` contract

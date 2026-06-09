@@ -1,0 +1,42 @@
+---
+title: Keelson documentation
+description: A local agent harness. Pluggable ribs, deterministic workflows.
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+Keelson is a single-user agent harness. It wraps a coding agent with persistent
+state, deterministic YAML workflows, and a typed extension contract. The harness
+is the keel, the part that ships. The capabilities come from the ribs you bring.
+
+These docs are tiered by audience. Start with Concepts to learn the shape of the
+system, follow the Tutorials to build, and reach for the Reference when you need
+the contract.
+
+<CardGrid>
+  <LinkCard
+    title="Concepts"
+    href="/docs/concepts/"
+    description="The shape of the system: the harness, where ribs attach, and the rule that keeps them apart."
+  />
+  <LinkCard
+    title="Guides"
+    href="/docs/guides/"
+    description="Task-oriented how-tos: install, run, install a rib, author workflows, configure."
+  />
+  <LinkCard
+    title="Tutorials"
+    href="/docs/tutorials/"
+    description="A problem-first learning rail. The capstone is building your first rib."
+  />
+  <LinkCard
+    title="Reference"
+    href="/docs/reference/"
+    description="The contract tier: the Rib interface, snapshots, the workflow node taxonomy, the CLI."
+  />
+  <LinkCard
+    title="Design"
+    href="/docs/design/"
+    description="Decision records and a candid account of what we learned building it."
+  />
+</CardGrid>
