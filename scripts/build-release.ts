@@ -115,6 +115,10 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 mkdir -p "$KEELSON_HOME" "$BIN_DIR"
+# Canonicalize to absolute paths so the launcher (which bakes in KEELSON_HOME)
+# resolves from any directory, even if a relative KEELSON_HOME was supplied.
+KEELSON_HOME="$(cd "$KEELSON_HOME" && pwd)"
+BIN_DIR="$(cd "$BIN_DIR" && pwd)"
 # Merge cli + shared into the home manifest every run, preserving any ribs added
 # via \`keelson rib add\` (object-key set → no clobber, no duplicate keys). A
 # re-run with a new CLI_TARBALL updates those two deps and leaves ribs intact.
