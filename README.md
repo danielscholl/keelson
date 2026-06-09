@@ -28,10 +28,19 @@ Keelson installs as a single `keelson` command backed by a managed home at
 curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/install.sh | sh
 ```
 
-Make sure `~/.local/bin` is on your `PATH`. Re-run any time to upgrade to the
-latest release (or repair a broken install) — your installed ribs are preserved.
-Once installed, `keelson update` does the same upgrade in place (and advances
-your ribs); `keelson update --check` reports what's available.
+On Windows, use the PowerShell installer instead — it provisions
+`%USERPROFILE%\.keelson`, drops a `keelson.cmd` launcher in
+`%LOCALAPPDATA%\keelson\bin`, and adds it to your user `PATH`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/danielscholl/keelson/releases/latest/download/install.ps1 | iex"
+```
+
+Make sure `~/.local/bin` is on your `PATH` (the Windows installer handles PATH
+for you). Re-run any time to upgrade to the latest release (or repair a broken
+install) — your installed ribs are preserved. Once installed, `keelson update`
+does the same upgrade in place (and advances your ribs); `keelson update
+--check` reports what's available.
 
 **2. Add the capabilities (ribs) you want:**
 
@@ -73,6 +82,11 @@ for an offline echo provider to try the harness without credentials.
 ```bash
 rm -f ~/.local/bin/keelson
 rm -rf ~/.keelson
+```
+
+```powershell
+# Windows (also remove %LOCALAPPDATA%\keelson\bin from your user PATH)
+Remove-Item -Recurse -Force "$env:USERPROFILE\.keelson", "$env:LOCALAPPDATA\keelson\bin"
 ```
 
 ---
