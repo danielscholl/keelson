@@ -53,9 +53,25 @@ jobs:
       - name: Build release artifacts
         run: bun scripts/build-release.ts
 
+      # The GitHub Release body is what `keelson update` shows as the notes for
+      # this version — populate it from the CHANGELOG section for the tag.
+      - name: Extract release notes from CHANGELOG
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "no CHANGELOG section for $version — add a '## [$version]' entry" >&2
+            exit 1
+          fi
+
       - name: Publish to the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             dist/release/keelson-cli.tgz
             dist/release/keelson-shared.tgz
