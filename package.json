@@ -15,6 +15,7 @@
     "dev:server": "bun --filter @keelson/server dev",
     "dev:web": "bun --filter @keelson/web dev",
     "build": "bun --filter '*' build",
+    "build:release": "bun scripts/build-release.ts",
     "typecheck": "bun --filter '*' typecheck",
     "test": "bun --filter '*' test",
     "lint": "biome lint .",

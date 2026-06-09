@@ -18,37 +18,50 @@ Alpha: the APIs and workflow schema still move. [Read the docs](https://danielsc
 
 ## Quick Start
 
-You need [Bun](https://bun.sh/). There's no standalone binary yet, so run from the workspace.
+Keelson installs as a single `keelson` command backed by a managed home at
+`~/.keelson` (its SQLite store, workflows, and the ribs you install). You need
+[Bun](https://bun.sh/) on PATH — the harness and ribs both run on it.
+
+**1. Install** — provisions `~/.keelson` and drops a `keelson` launcher in `~/.local/bin`:
 
 ```bash
-git clone https://github.com/danielscholl/keelson.git
-cd keelson
-bun install
+curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/install.sh | sh
 ```
 
-**1. Launch both surfaces** (server on `:7878`, SPA on `:5173`):
+Make sure `~/.local/bin` is on your `PATH`. Re-run any time to update.
+
+**2. Add the capabilities (ribs) you want:**
 
 ```bash
-bun dev
+keelson rib add chamber           # multi-agent rooms + agent genesis
+keelson rib add osdu              # OSDU CIMPL cluster / platform lanes
+keelson rib list --installed
 ```
 
-Open `http://127.0.0.1:5173` for the Chat and Workflows surfaces.
+> The `osdu` rib needs the OSDU toolchain on PATH to show live data —
+> `cimpl`, `kubectl`, `osdu-activity`, `osdu-quality`, `glab` — plus a reachable
+> cluster and GitLab auth. Without them it still loads; its lanes just render empty.
 
-**2. No API keys?** Use the `stub` provider for an offline path. It echoes
-input rather than reasoning, so it's for trying the harness without credentials:
+**3. Run** the API server, then drive it from the CLI:
 
 ```bash
-KEELSON_PROVIDERS=stub bun dev:server
+keelson serve                     # API + WS on :7878 (Ctrl-C to stop)
+keelson doctor                    # health sweep: toolchain, server, DB, auth, ribs
+keelson chat "hello"              # one-shot turn
+keelson workflow run smoke-test --watch
 ```
 
-**3. Check the environment:**
+Real agents need a Copilot subscription or an Anthropic API key. No keys? Add
+`KEELSON_PROVIDERS=stub` for an offline echo provider to try the harness without
+credentials. (The React Chat/Workflows UI currently runs in dev — see
+[CONTRIBUTING.md](CONTRIBUTING.md) — and isn't served by the installed binary yet.)
+
+**Uninstall:**
 
 ```bash
-bun apps/cli/bin/keelson.ts doctor
+rm -f ~/.local/bin/keelson
+rm -rf ~/.keelson
 ```
-
-Real agents need a Copilot subscription or an Anthropic API key, set through
-the SPA's credentials drawer.
 
 ---
 
@@ -59,11 +72,14 @@ hull bolts onto. Lay the keel, raise the ribs: the harness is the beam, and
 **ribs** are the units that register tools, supply context, and own
 external-system integrations.
 
-No ribs ship in-tree. Install any `@keelson/rib-*` package and the server
-discovers it from `node_modules/@keelson/` at boot:
+No ribs ship in-tree. `keelson rib add <id>` installs an `@keelson/rib-*`
+package into the home, and the server discovers it from
+`~/.keelson/node_modules/@keelson/` at boot:
 
 ```bash
-bun add @keelson/rib-osdu
+keelson rib add osdu              # known id → github:danielscholl/keelson-rib-osdu
+keelson rib add ./my-rib          # or a local path / git URL / github:owner/repo
+keelson rib remove osdu
 ```
 
 | Surface | Convention |
@@ -115,19 +131,19 @@ and the [docs](https://danielscholl.github.io/keelson/) for a walkthrough.
 
 ## CLI
 
-The `keelson` CLI drives the same surfaces from the shell. Alias it while developing:
+Once installed, `keelson` is on your PATH (working from `~/.keelson`):
 
 ```bash
-alias keelson="bun $(pwd)/apps/cli/bin/keelson.ts"
-```
-
-```bash
-keelson doctor                            # health sweep: toolchain, server, DB, auth, workflows
-keelson workflow list                     # workflows in .keelson/workflows
+keelson rib add chamber                   # install a rib into the home
+keelson rib list --installed              # ribs in the home (no server needed)
+keelson serve                             # run the API + WS server on :7878
+keelson doctor                            # health sweep: toolchain, server, DB, auth, ribs
 keelson workflow validate smoke-test      # schema + reference check
 keelson workflow run smoke-test --watch   # run and stream output
 keelson chat "hello" --provider stub      # one-shot turn
 ```
+
+(Developing on Keelson itself runs the CLI from source — see [CONTRIBUTING.md](CONTRIBUTING.md).)
 
 When the server is up, commands route over HTTP/WS; `workflow run` and `chat`
 fall back to in-process execution when it's down. Every command takes `--json`,
