@@ -1,12 +1,44 @@
 ---
 title: Concepts
-description: The mental model behind keelson.
+description: The mental model behind keelson, one organizing idea per page.
+sidebar:
+  order: 0
 ---
 
-The concept pages build the mental model: what keelson is, the shape of the
-system, and the vocabulary you will meet everywhere else.
+import { LinkCard } from "@astrojs/starlight/components";
 
-- [Architecture](/docs/concepts/architecture/): what the harness owns, where ribs
-  attach, and the one rule that keeps the two apart.
+The concept pages build the mental model: what keelson is, why it is shaped
+this way, and the vocabulary you will meet everywhere else. Each page carries
+one organizing idea, and they read best in order: the map first, then the
+extension model, then the two engines, then the state story.
 
-More concept pages (the glossary, the rib model in depth) land here next.
+<LinkCard
+  title="Architecture"
+  href="architecture/"
+  description="The map: what the harness owns, where ribs attach, and the one rule that keeps them apart."
+/>
+<LinkCard
+  title="The rib model"
+  href="the-rib-model/"
+  description="Why capabilities are packages, what a rib can contribute, and the boundary the harness enforces rather than requests."
+/>
+<LinkCard
+  title="Workflows"
+  href="workflows/"
+  description="Determinism next to an agent: the DAG execution model, the two data channels, and where the agency is bounded."
+/>
+<LinkCard
+  title="Snapshots and surfaces"
+  href="snapshots-and-surfaces/"
+  description="Ribs publish data, never UI: frames, the triple fail-closed pipeline, and the closed canvas vocabulary."
+/>
+<LinkCard
+  title="Memory and state"
+  href="memory-and-state/"
+  description="One home, one database, one keychain, and how a memory earns the right to instruct the agent."
+/>
+<LinkCard
+  title="Glossary"
+  href="glossary/"
+  description="The vocabulary in one place, with the two overloaded terms disambiguated."
+/>

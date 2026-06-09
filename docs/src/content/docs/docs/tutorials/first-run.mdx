@@ -1,0 +1,214 @@
+---
+title: Your first run
+description: Install keelson, read its health sweep, start the server, and complete a first chat turn without any credentials.
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+You want an agent harness that keeps its state on your machine: no hosted
+service, no account, nothing leaving your laptop that you did not send. This
+tutorial takes you from nothing installed to a running server and a completed
+chat turn, and every checkpoint works without credentials.
+
+By the end you will have keelson installed in its managed home, know how to
+read its health sweep, and have pushed one message through the whole loop:
+CLI to server to provider and back.
+
+<Aside type="note" title="Prerequisites">
+[Bun](https://bun.sh/) on your PATH, and `~/.local/bin` on your PATH. That is
+the whole list. A real coding agent needs a GitHub Copilot subscription or an
+Anthropic API key, but this tutorial deliberately uses the offline stub
+provider so you can verify the harness first and add credentials after.
+</Aside>
+
+## Install the harness
+
+The installer provisions `~/.keelson`, the managed home that holds the CLI,
+its SQLite store, your workflows, and the ribs you install later. It also
+drops a `keelson` launcher in `~/.local/bin`.
+
+```sh
+curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/install.sh | sh
+```
+
+The last lines of the install tell you where everything landed:
+
+```text
+keelson v0.4.0 installed to /Users/you/.keelson
+launcher: /Users/you/.local/bin/keelson  (ensure /Users/you/.local/bin is on PATH)
+```
+
+Confirm the launcher resolves and the versions line up:
+
+```sh
+keelson version
+```
+
+```text
+name: @keelson/cli
+version: 0.4.0
+bunVersion: 1.3.13
+schemaVersion: 0.1
+```
+
+Re-running the installer later upgrades in place and preserves your installed
+ribs, and `keelson update` does the same from the CLI once you are set up.
+
+## Read the health sweep
+
+Before starting anything, ask the harness how it feels. `keelson doctor` probes
+the toolchain, the server, the database, credential storage, and your
+workflows in one pass:
+
+```sh
+keelson doctor
+```
+
+```text
+categories:
+  -     category: toolchain
+    checks:
+      -         name: bun --version
+        status: ok
+        detail: 1.3.13
+  -     category: server
+    checks:
+      -         name: GET /api/health
+        status: warn
+        detail: not reachable
+        hint: run `keelson serve` to start the API server on http://127.0.0.1:7878
+  -     category: db
+    checks:
+      -         name: schema_version
+        status: ok
+        detail: v2 (current)
+  -     category: auth
+    checks:
+      -         name: keyring round-trip
+        status: ok
+        detail: service=keelson
+  -     category: workflows
+    checks:
+      -         name: discovery
+        status: ok
+        detail: 0 workflow(s) under /Users/you/.keelson/workflows
+      -         name: parse
+        status: ok
+        detail: all workflows parse cleanly
+summary:
+  ok: 5
+  warn: 1
+  fail: 0
+  skip: 0
+  total: 6
+strict: false
+```
+
+Two things are worth reading closely. The `server` category warns, and that is
+expected: nothing is running yet, and the `hint` line tells you the exact next
+move. And `workflows` found zero files, which is also correct: a fresh install
+ships no workflows. The harness arrives finished but empty, and the next two
+tutorials fill it.
+
+<Aside type="tip" title="Doctor is your reflex">
+Whenever keelson behaves unexpectedly, run `keelson doctor` first. Every check
+that fails or warns carries a `hint` with the next command to run.
+</Aside>
+
+## Start the server
+
+The server owns the store, the providers, and the browser UI, all on one port.
+Start it in a terminal you can leave open:
+
+```sh
+KEELSON_PROVIDERS=stub keelson serve
+```
+
+```text
+[workflows] discovered 0 workflows
+[workflows] no non-stub provider registered; prompt nodes will use 'stub' (echo-only). Set KEELSON_PROVIDERS to include copilot or claude, or pin KEELSON_WORKFLOW_PROVIDER explicitly.
+[workflows] default workflow provider is 'stub'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.
+keelson server listening on http://127.0.0.1:7878/
+```
+
+`KEELSON_PROVIDERS=stub` registers the stub provider: an offline echo that
+needs no keys. The boot log says so plainly, which is the behavior you want
+from a harness: it tells you what it is running with, not what you hoped it
+was running with.
+
+Open [http://127.0.0.1:7878](http://127.0.0.1:7878) in a browser. The server
+serves the full web UI from the same port as the API: a Chat surface, a
+Workflows surface, and a tab for each rib you install later.
+
+Now run the sweep again from a second terminal:
+
+```sh
+keelson doctor
+```
+
+```text
+  -     category: server
+    checks:
+      -         name: GET /api/health
+        status: ok
+        detail: keelson, schema 0.1 @ http://127.0.0.1:7878
+summary:
+  ok: 6
+  warn: 0
+  fail: 0
+  skip: 0
+  total: 6
+```
+
+All six checks pass. The warn you saw earlier resolved itself the way the hint
+said it would.
+
+## Complete a first turn
+
+Push one message through the loop:
+
+```sh
+keelson chat "hello, keelson" --provider stub
+```
+
+```text
+hello, keelson
+```
+
+The stub provider echoes your message back, and that echo is the point. Your
+message traveled from the CLI over HTTP to the server, through the provider
+registry, and streamed back as a real turn. The turn also landed in the
+server's SQLite store, so if you open the Chat surface in the browser you will
+find the same session there. Swap the stub for a real provider and the exact
+same path carries a real coding agent.
+
+<Aside type="note" title="When the server is down">
+`keelson chat` and `keelson workflow run` do not require the server. When it
+is down they fall back to in-process execution and print to stdout, which is
+why the CLI works for quick checks even before `keelson serve`. Server-backed
+features like the browser UI and the rib commands need the server up.
+</Aside>
+
+## What you proved
+
+<Steps>
+
+1. The harness installs into one managed home, `~/.keelson`, with a launcher
+   on your PATH.
+
+2. `keelson doctor` is the diagnostic reflex, and its hints name the next
+   command when something is off.
+
+3. One server on port 7878 carries the API, the WebSocket stream, and the
+   browser UI.
+
+4. A chat turn flows CLI to server to provider and back, with no credentials
+   required to verify the loop.
+
+</Steps>
+
+Your harness runs, but `doctor` said it: zero workflows. Time to write one.
+
+**Continue to** [Run your first workflow](../run-a-workflow/).

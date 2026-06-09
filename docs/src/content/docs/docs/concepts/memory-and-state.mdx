@@ -1,0 +1,116 @@
+---
+title: Memory and state
+description: What the harness remembers, where every byte lives, and how a memory earns the right to instruct the agent.
+sidebar:
+  order: 5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A bare agent SDK forgets everything between invocations. Most of what a
+harness is for is refusing to forget: the conversation you had yesterday, the
+run that failed last week, the constraint you taught it once, the credential
+it needs every time. Keelson's answer is deliberate about both halves of the
+problem: **what** is remembered, and **where** it physically lives. The where
+is simple and strict: one directory, one database, your operating system's
+keychain, all on your machine. The server binds to `127.0.0.1` and
+state-changing endpoints are gated to loopback origins; "local-only" is a
+property of the wiring, not a promise in the README.
+
+## One home, one database, one keychain
+
+Everything the harness owns lives in three places:
+
+| Where | What |
+| --- | --- |
+| `~/.keelson/` | The managed home: the `workflows/` you author, the rib packages under `node_modules/@keelson/`, and the database. `KEELSON_HOME` overrides it, and a project checkout with its own `.keelson/` gets project-local state. |
+| `keelson.db` | One SQLite file for conversations and messages, workflow runs and per-node outputs, projects and notebooks, and the memory tables. Schema migrations run at open, and `keelson doctor` checks the version. |
+| The OS keychain | Every secret. Provider keys and rib credentials are keychain entries under the `keelson` service, never database rows, and the API reports whether a credential exists without ever returning its value. |
+
+The split is the trust model in miniature: data you may want to inspect,
+copy, or delete sits in a single file you can open with any SQLite client;
+secrets sit behind the operating system's own lock.
+
+## Projects and notebooks
+
+State is organized under **projects**: a project is a name and a root path,
+and conversations and workflow runs attach to one. Each project also carries
+a **notebook**, a plain markdown document injected into every chat turn for
+that project. The notebook is the always-on context: the conventions,
+decisions, and standing facts you want the agent to hold without being asked.
+The agent can append to it through a `note_project` tool, and you can edit it
+directly, which makes it the simplest of the harness's memory tiers: one
+document, no ranking, always present.
+
+## Memory: remembered is not believed
+
+The memory subsystem handles the harder tier: facts that accumulate over
+time, from runs you were not watching, that may or may not deserve influence
+over future work. Its design principle is that **writing a memory and
+trusting a memory are separate events, and only a human connects them.**
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/memory-lifecycle.svg`}
+    alt="The memory lifecycle. A workflow writeback node passes a dashed fail-closed guardrails gate into pending review. Review routes it to instruction grade, evidence only, or restricted. A green recall edge runs from the instruction state to the agent context box."
+  />
+  <figcaption>
+    Figure 1. A memory is written as evidence, gated by guardrails, and
+    promoted to instruction-grade only by your review. Recall searches what
+    survived.
+  </figcaption>
+</figure>
+
+**Writing.** Workflow nodes declare a `memory.writeback`: when the node
+settles, a typed memory row is drafted, a decision, a lesson, a constraint,
+a failure, with its provenance hard-coded to `generated`. Guardrails screen
+every draft before it lands: known secret patterns are rejected, size is
+capped, and reference-type memories must point at sources rather than inline
+them. An idempotency key keeps re-runs from writing duplicates.
+
+**Reviewing.** New memories arrive as `pending`, and the Memory surface in
+the browser is the queue. Your review action routes each one: confirm it as
+instruction-grade, keep it as evidence only, restrict it from automatic
+injection, or reject it. The critical asymmetry is enforced in the policy
+bits: an agent-generated memory cannot mark itself safe to instruct future
+agents. Influence is granted by review, and every action lands in an audit
+journal.
+
+**Recalling.** Chat and workflows query memory through full-text search
+ranked by relevance and weighted by recency, with a thirty-day half-life, so
+stale facts fade rather than linger. What recall returns is scoped to the
+project and filtered by policy: a chat turn injects at most a handful of
+short, instruction-approved items into the system prompt, and workflows
+receive recall results as data under `$memory.recall`. Recall is also
+traced: the harness records what was offered to each turn, which is how
+"why did the agent think that" stays an answerable question.
+
+<Aside type="note" title="Grounding the tile">
+The landing claims memory is "persistent, searchable, and governed", and
+each word is a mechanism: persistent is SQLite rows with idempotent writes,
+searchable is the full-text index with recency decay, governed is the
+guardrail gate, the review queue, and the audit journal.
+</Aside>
+
+## What the agent actually sees
+
+All of this converges in one place: the system prompt assembled for each
+chat turn. The order is fixed, and knowing it makes the harness predictable:
+
+1. The project notebook, in full.
+2. The memory recall section: a few approved, recent, relevant items.
+3. The conversation's seed prompt, when a surface primed one.
+4. Workflow guidance, when workflow tools are active for the turn.
+
+Nothing else is silently added. If the agent knows something across
+sessions, it came through one of those four doors, and three of them are
+files or rows you can read.
+
+## Where to go next
+
+- [Workflows](../workflows/) covers the nodes that write memories and the
+  runs the database records.
+- [Architecture](../architecture/) places the store inside the server's
+  composition root.
+- The [glossary](../glossary/) pins down the vocabulary: project, notebook,
+  memory, recall, writeback.

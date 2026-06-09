@@ -1,6 +1,8 @@
 ---
 title: Architecture
 description: What the harness owns, where ribs attach, and the rule that keeps them apart.
+sidebar:
+  order: 1
 ---
 
 import { Aside, Steps } from "@astrojs/starlight/components";
@@ -82,3 +84,16 @@ The harness never imports a rib. External systems are touched only inside ribs.
 This is what lets the harness ship once and stay stable while any number of ribs
 come and go, exactly as a keelson does not depend on any single frame.
 </Aside>
+
+## Where to go next
+
+This page is the map; the rest of the concepts tier goes one level deeper on
+each part of it.
+
+- [The rib model](../the-rib-model/): the extension philosophy and the
+  enforced boundary.
+- [Workflows](../workflows/): the deterministic engine behind the catalog.
+- [Snapshots and surfaces](../snapshots-and-surfaces/): how rib data becomes
+  live UI.
+- [Memory and state](../memory-and-state/): where every byte lives and what
+  the agent sees each turn.

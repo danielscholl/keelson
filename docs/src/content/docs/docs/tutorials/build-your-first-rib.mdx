@@ -1,0 +1,228 @@
+---
+title: Build your first rib
+description: Write a two-file rib against the contract, install it from a local path, and verify its tool reaches the registry.
+sidebar:
+  order: 4
+---
+
+import { Aside, FileTree, Steps } from "@astrojs/starlight/components";
+
+The previous tutorial ended at the real wall: the rib your systems need does
+not exist. This one takes it down. The `Rib` contract is a single TypeScript
+interface, every hook on it is optional, and the smallest useful rib is two
+files. You will write one that registers a tool, install it from a local
+path, and verify the tool reaches the harness's registry, all without
+publishing anything.
+
+The rib is deliberately modest, a `weather_now` tool that returns a canned
+answer. Wiring first: once you have watched your own tool arrive in the
+registry, swapping the canned line for a real integration is ordinary
+TypeScript.
+
+## The shape of a rib
+
+A rib is a Bun package named `@keelson/rib-<id>` whose default export
+implements the contract. No build step is required: the package can point
+straight at TypeScript source, because the harness runs on Bun and Bun runs
+TypeScript.
+
+<FileTree>
+
+- keelson-rib-weather/
+  - package.json the manifest, names the rib
+  - src/
+    - index.ts the contract implementation
+
+</FileTree>
+
+<Steps>
+
+1. Create the manifest:
+
+   ```json title="keelson-rib-weather/package.json"
+   {
+     "name": "@keelson/rib-weather",
+     "version": "0.1.0",
+     "description": "A first rib: one tool the chat agent can call.",
+     "type": "module",
+     "main": "./src/index.ts",
+     "files": ["src"],
+     "dependencies": {
+       "zod": "^4.1.8"
+     },
+     "peerDependencies": {
+       "@keelson/shared": "*"
+     },
+     "peerDependenciesMeta": {
+       "@keelson/shared": { "optional": true }
+     }
+   }
+   ```
+
+   Two fields carry rules. The `name` must be `@keelson/rib-<id>`, because
+   discovery infers the rib id from the package directory name, `rib-weather`
+   means id `weather`, and rejects a mismatch. And `@keelson/shared` is an
+   optional peer dependency, not a real one: the managed home already provides
+   it, so your rib types against the copy the harness itself uses.
+
+2. Implement the contract:
+
+   ```ts title="keelson-rib-weather/src/index.ts"
+   import type { Rib, ToolDefinition } from "@keelson/shared";
+   import { z } from "zod";
+
+   const weatherTool: ToolDefinition = {
+     name: "weather_now",
+     description: "Report the current weather for a city.",
+     inputSchema: z.object({ city: z.string() }),
+     async execute(input, ctx) {
+       const { city } = input as { city: string };
+       ctx.emit({
+         type: "tool_result",
+         toolUseId: "",
+         content: `Clear skies over ${city}.`,
+       });
+     },
+   };
+
+   const rib: Rib = {
+     id: "weather",
+     displayName: "Weather",
+     registerTools: () => [weatherTool],
+   };
+
+   export default rib;
+   ```
+
+</Steps>
+
+Three parts of the file are the contract in miniature:
+
+- **The tool is a `ToolDefinition`.** Its `inputSchema` is a zod schema, and
+  the provider adapter parses every call against it before your `execute`
+  runs, so malformed input never reaches your code.
+- **Results are emitted, not returned.** `execute` sends a `tool_result`
+  chunk through `ctx.emit`; the provider fills in the real `toolUseId`. One
+  emission path serves both chat and workflow `prompt` nodes.
+- **The default export is the rib.** An `id` matching the package suffix, a
+  display name, and whichever hooks you implement. `registerTools` is the
+  only one this rib needs.
+
+## Install it from the path
+
+`keelson rib add` takes a local path the same way it takes a GitHub URL:
+
+```sh
+keelson rib add ./keelson-rib-weather
+```
+
+```text
+bun add v1.3.13 (bf2e2cec)
+Resolving dependencies
+Resolved, downloaded and extracted [1]
+Saved lockfile
+
+installed @keelson/rib-weather@../keelson-rib-weather
+
+2 packages installed [105.00ms]
+added:   - weather
+installed:   - weather
+home: /Users/you/.keelson
+restartRequired: true
+added weather
+```
+
+Two packages, because zod came along as your rib's own dependency. Restart
+`keelson serve` so discovery runs, then inspect what the server actually
+registered:
+
+```sh
+keelson rib show weather
+```
+
+```text
+rib:
+  id: weather
+  displayName: Weather
+  tools:     - weather_now
+  views:
+  surfaces:
+  handlesActions: false
+  auth: n/a
+```
+
+Your tool is in the registry. The API view confirms the same thing in wire
+form, including the metadata the UI uses to group tools by family:
+
+```sh
+curl -s http://127.0.0.1:7878/api/tools
+```
+
+```json
+{
+  "tools": [
+    {
+      "name": "weather_now",
+      "description": "Report the current weather for a city.",
+      "family": "weather",
+      "state_changing": false,
+      "requires_confirmation": false
+    }
+  ]
+}
+```
+
+<Aside type="note" title="Seeing the tool fire">
+The registry checkpoints above prove the wiring without any credentials. To
+watch the tool actually get called, you need a real provider: register
+Copilot or Claude, open Chat, and ask "what's the weather in Reykjavik?". The
+agent picks `weather_now` from the same registry you just inspected. The stub
+provider never calls tools; it only echoes.
+</Aside>
+
+## What discovery checks
+
+Discovery is strict about the contract and forgiving about failure: every
+check that fails skips that one rib with a boot-log warning, and the server
+boots anyway.
+
+| Rule | Rejected example |
+| --- | --- |
+| The id is lowercase kebab-case. | `id: "Weather"` |
+| The declared id matches the package suffix. | `id: "meteo"` inside `rib-weather` |
+| The default export is an object. | `export default makeRib` |
+| Declared hooks are functions, `views` and `surfaces` are arrays. | `registerTools: [...]` |
+| Each rib id appears once. | two packages both claiming `weather` |
+
+Tool names are global across ribs too: a name already claimed by another rib
+is skipped with a warning, so prefix your tools with a family, the
+`weather_` in `weather_now`.
+
+## Beyond one tool
+
+`registerTools` is one hook of several, and the rest are how a rib grows from
+a tool into a capability:
+
+- **`composeBundle`** publishes a snapshot the browser renders as a live
+  board.
+- **`views` and `surfaces`** declare how those snapshots appear, up to a full
+  top-level tab laid out in regions, with no UI code in the rib.
+- **`contributeWorkflows`** ships YAML workflows with the rib, which is how
+  workflow catalogs stay empty in the harness and full in practice.
+- **`authStatus`** reports the rib's credential state, and `dispose` tears
+  down sockets and child processes at shutdown.
+
+The contract itself lives in
+[`packages/shared/src/rib.ts`](https://github.com/danielscholl/keelson/blob/main/packages/shared/src/rib.ts),
+and the [reference tier](../../reference/) documents it as pages land.
+
+## End of the rail
+
+Four tutorials ago you had nothing installed. You now run a harness you can
+health-check, write deterministic workflows against it, install capabilities
+as packages, and, when the capability you need does not exist, build it from
+a two-file contract. That is the whole keelson loop.
+
+From here, [Architecture](../../concepts/architecture/) gives you the system
+shape behind what you just did, and the [guides](../../guides/) cover the
+operational corners as they land.
