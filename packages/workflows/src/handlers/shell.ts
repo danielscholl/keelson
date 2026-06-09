@@ -25,7 +25,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 export interface ResolvedBash {
   cmd: string;
@@ -40,7 +40,7 @@ export function resolveBash(): ResolvedBash {
   const override = process.env.KEELSON_BASH?.trim();
   if (override) return { cmd: override, pathDirs: gitBashPathDirs(override) };
   if (process.platform === "win32") {
-    for (const candidate of windowsGitBashCandidates()) {
+    for (const candidate of [...windowsGitBashCandidates(), ...gitDerivedBashCandidates()]) {
       if (existsSync(candidate)) return { cmd: candidate, pathDirs: gitBashPathDirs(candidate) };
     }
   }
@@ -104,4 +104,15 @@ function windowsGitBashCandidates(): string[] {
     out.push(join(root, "Git", "usr", "bin", "bash.exe"));
   }
   return out;
+}
+
+// A portable or custom Git won't sit under the standard roots; derive its
+// install root from `git` itself (<root>\cmd\git.exe or <root>\bin\git.exe)
+// and probe the sibling bash. A shim layout (e.g. scoop\shims\git.exe) misses
+// both probes and falls through to the bare-PATH bash.
+function gitDerivedBashCandidates(): string[] {
+  const git = Bun.which("git");
+  if (!git) return [];
+  const root = dirname(dirname(git));
+  return [join(root, "bin", "bash.exe"), join(root, "usr", "bin", "bash.exe")];
 }

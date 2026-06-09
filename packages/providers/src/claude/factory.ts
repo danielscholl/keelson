@@ -296,10 +296,12 @@ export type ClaudeCliRunner = () => Promise<{
 }>;
 
 const defaultClaudeCliRunner: ClaudeCliRunner = async () => {
+  // Inherit env implicitly: handing Bun.spawn an explicit env (even
+  // process.env itself) bypasses its case-insensitive PATH lookup on Windows,
+  // where the search path is exposed as `Path`, and `claude` fails ENOENT.
   const proc = Bun.spawn(["claude", "auth", "status", "--json"], {
     stdout: "pipe",
     stderr: "pipe",
-    env: process.env,
   });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),

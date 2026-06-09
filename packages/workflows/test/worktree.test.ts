@@ -287,6 +287,16 @@ describe("repoPathFromWorktree", () => {
     expect(repoPathFromWorktree(tmp)).toBeNull();
   });
 
+  test("parses a backslash-separated gitdir pointer", () => {
+    const wt = join(tmp, "winwt");
+    require("node:fs").mkdirSync(wt);
+    require("node:fs").writeFileSync(
+      join(wt, ".git"),
+      "gitdir: C:\\Users\\dev\\repo\\.git\\worktrees\\feature\n",
+    );
+    expect(repoPathFromWorktree(wt)).toBe("C:\\Users\\dev\\repo");
+  });
+
   test("returns null when .git is malformed", () => {
     const wt = join(tmp, "broken");
     require("node:fs").mkdirSync(wt);

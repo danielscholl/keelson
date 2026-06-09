@@ -344,7 +344,13 @@ export function repoPathFromWorktree(worktreeDir: string): string | null {
   if (!match) return null;
   const gitdir = match[1]!.trim();
   // Strip `/worktrees/<name>` to get `<repo>/.git`, then dirname to get repo.
-  const worktreesIdx = gitdir.lastIndexOf("/.git/worktrees/");
+  // Git for Windows writes gitdir pointers with forward slashes, but tolerate
+  // backslashes too — a misparse here downgrades a tracked worktree to an
+  // orphan, and prune would rmSync it without unregistering the git record.
+  const worktreesIdx = Math.max(
+    gitdir.lastIndexOf("/.git/worktrees/"),
+    gitdir.lastIndexOf("\\.git\\worktrees\\"),
+  );
   if (worktreesIdx < 0) return null;
   return gitdir.slice(0, worktreesIdx);
 }

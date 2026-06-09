@@ -23,7 +23,8 @@ const DEFAULT_TIMEOUT_MS = 90_000;
 // against `PATH` (uppercase) when handed an explicit env, so an env derived from
 // `process.env` (which carries `Path`) fails ENOENT for `git`/`gh`/rib tools.
 // Mirror the value onto `PATH`. No-op on POSIX and when `PATH` is already set.
-function ensureSpawnPath(env: Record<string, string>): Record<string, string> {
+// Exported for spawn sites that need a custom env and can't go through runText.
+export function ensureSpawnPath(env: Record<string, string>): Record<string, string> {
   if (process.platform !== "win32" || env.PATH !== undefined) return env;
   for (const key of Object.keys(env)) {
     if (key.toUpperCase() === "PATH") {

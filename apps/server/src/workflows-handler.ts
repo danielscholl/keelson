@@ -1291,10 +1291,12 @@ export function workflowsRoutes(
     // Read through a single no-follow fd so the type/size check and the read
     // act on the same inode we validated — not a path re-resolved per call,
     // which a concurrent symlink swap could race. O_NOFOLLOW also rejects a
-    // final-component symlink planted after the realpath check.
+    // final-component symlink planted after the realpath check. It is
+    // POSIX-only (undefined on Windows, where symlink creation requires
+    // elevation and the realpath containment check above still holds).
     let fd: number;
     try {
-      fd = openSync(realPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      fd = openSync(realPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     } catch {
       return c.json({ error: `artifact not found: ${rel}` }, 404);
     }
