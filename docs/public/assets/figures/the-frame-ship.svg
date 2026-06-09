@@ -1,0 +1,121 @@
+<svg viewBox="0 0 1040 600" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="A blueprint side elevation of a hull. The keelson beam is the harness; the frames are ribs bolted on, three of them labeled as keelson-rib packages.">
+  <defs>
+    <style>
+      .lbl  { font-family: "Cascadia Code","SF Mono",ui-monospace,Menlo,monospace; }
+      .navy { fill:#1e3a5f; }
+      .slate{ fill:#64748b; }
+      .brass{ fill:#8a5a1f; }
+    </style>
+  </defs>
+
+  <!-- waterline -->
+  <line x1="150" y1="356" x2="950" y2="356" stroke="#1e3a5f" stroke-width="1"
+        stroke-dasharray="7 6" stroke-opacity="0.38"/>
+  <text class="lbl slate" x="948" y="349" font-size="10" fill-opacity="0.7" text-anchor="end">design waterline</text>
+
+  <!-- light frames (ribs of the hull), keel to sheer -->
+  <g stroke="#2f6fb0" stroke-width="1" stroke-opacity="0.5">
+    <line x1="232" y1="446" x2="232" y2="318"/>
+    <line x1="390" y1="450" x2="390" y2="322"/>
+    <line x1="450" y1="451" x2="450" y2="322"/>
+    <line x1="570" y1="449" x2="570" y2="320"/>
+    <line x1="630" y1="447" x2="630" y2="318"/>
+    <line x1="748" y1="440" x2="748" y2="308"/>
+    <line x1="806" y1="434" x2="806" y2="299"/>
+  </g>
+
+  <!-- hull -->
+  <path d="M 150 300
+           C 250 316, 410 324, 520 323
+           C 642 322, 760 314, 820 296
+           C 866 282, 894 268, 906 250
+           C 919 304, 906 384, 876 432
+           C 720 456, 360 458, 200 442
+           L 174 438
+           C 158 408, 150 352, 150 300 Z"
+        fill="#1e3a5f" fill-opacity="0.05" stroke="#1e3a5f" stroke-width="2.2"
+        stroke-linejoin="round"/>
+  <!-- deck line just inside the sheer -->
+  <path d="M 162 306 C 256 320, 412 328, 520 327 C 640 326, 758 318, 816 301"
+        fill="none" stroke="#1e3a5f" stroke-width="1" stroke-opacity="0.45"/>
+
+  <!-- bridge: a deckhouse drawn dashed, a structure still on the ways -->
+  <g stroke="#1e3a5f" stroke-width="1.4" stroke-dasharray="4 3" fill="#1e3a5f" fill-opacity="0.04" stroke-linejoin="round">
+    <rect x="372" y="298" width="86" height="28" rx="2"/>
+    <rect x="392" y="278" width="48" height="22" rx="2"/>
+    <line x1="416" y1="278" x2="416" y2="262" stroke-dasharray="3 2"/>
+    <line x1="408" y1="266" x2="424" y2="266" stroke-dasharray="3 2"/>
+  </g>
+
+  <!-- keelson beam: the harness, along the keel -->
+  <line x1="190" y1="420" x2="862" y2="420" stroke="#1e3a5f" stroke-width="6"
+        stroke-linecap="round"/>
+
+  <!-- three ribs that bolt on: continuous brass members from the keel up to their label -->
+  <g stroke="#b5803a" stroke-width="2">
+    <line x1="330" y1="420" x2="330" y2="150"/>
+    <line x1="510" y1="420" x2="510" y2="150"/>
+    <line x1="690" y1="420" x2="690" y2="150"/>
+  </g>
+  <!-- bolts where each rib fastens to the beam -->
+  <g fill="#b5803a" stroke="#8a5a1f">
+    <circle cx="330" cy="420" r="5"/>
+    <circle cx="510" cy="420" r="5"/>
+    <circle cx="690" cy="420" r="5"/>
+  </g>
+
+  <!-- rib callout boxes -->
+  <g>
+    <rect x="250" y="104" width="160" height="46" rx="6" fill="#fff7ec" stroke="#b5803a" stroke-width="1.6"/>
+    <text class="lbl navy"  x="330" y="124" font-size="13" text-anchor="middle">@keelson/rib-data</text>
+    <text class="lbl brass" x="330" y="141" font-size="12" text-anchor="middle">&#8594; a data platform</text>
+
+    <rect x="430" y="104" width="160" height="46" rx="6" fill="#fff7ec" stroke="#b5803a" stroke-width="1.6"/>
+    <text class="lbl navy"  x="510" y="124" font-size="13" text-anchor="middle">@keelson/rib-issues</text>
+    <text class="lbl brass" x="510" y="141" font-size="12" text-anchor="middle">&#8594; an issue tracker</text>
+
+    <rect x="610" y="104" width="160" height="46" rx="6" fill="#fff7ec" stroke="#b5803a" stroke-width="1.6"/>
+    <text class="lbl navy"  x="690" y="124" font-size="13" text-anchor="middle">@keelson/rib-deploy</text>
+    <text class="lbl brass" x="690" y="141" font-size="12" text-anchor="middle">&#8594; a cluster CLI</text>
+  </g>
+
+  <!-- browser SPA: the visible surface -->
+  <g>
+    <rect x="22" y="262" width="104" height="30" rx="5" fill="#eaf1f8" stroke="#1e3a5f" stroke-width="1.4"/>
+    <text class="lbl navy" x="74" y="282" font-size="13" text-anchor="middle">browser SPA</text>
+    <line x1="126" y1="284" x2="198" y2="318" stroke="#1e3a5f" stroke-width="1.4" marker-end="url(#ah)"/>
+    <text class="lbl slate" x="150" y="305" font-size="10">HTTP / WS</text>
+  </g>
+
+  <!-- keelson CLI: the rudder that steers the harness -->
+  <g>
+    <line x1="158" y1="406" x2="150" y2="436" stroke="#1e3a5f" stroke-width="1"/>
+    <path d="M 150 430 L 162 430 L 150 486 L 134 482 Z" fill="#1e3a5f" fill-opacity="0.1"
+          stroke="#1e3a5f" stroke-width="1.6" stroke-linejoin="round"/>
+    <line x1="96" y1="452" x2="134" y2="468" stroke="#1e3a5f" stroke-width="1" stroke-opacity="0.6"/>
+    <text class="lbl navy"  x="90" y="450" font-size="13" text-anchor="end">keelson CLI</text>
+    <text class="lbl slate" x="90" y="466" font-size="11" text-anchor="end">steers from the shell</text>
+  </g>
+  <defs>
+    <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#1e3a5f"/>
+    </marker>
+  </defs>
+
+  <!-- title -->
+  <text class="lbl brass" x="30" y="46" font-size="26" letter-spacing="3">THE FRAME</text>
+  <text class="lbl slate" x="32" y="70" font-size="13">one backbone, many ribs.</text>
+  <text class="lbl slate" x="32" y="88" font-size="13">The harness ships; capabilities bolt on.</text>
+
+  <!-- harness label with a bracket under the keel -->
+  <path d="M 300 432 L 300 446 L 720 446 L 720 432" fill="none" stroke="#1e3a5f"
+        stroke-width="1" stroke-opacity="0.5"/>
+  <text class="lbl navy"  x="510" y="468" font-size="15" text-anchor="middle">THE HARNESS</text>
+  <text class="lbl slate" x="510" y="486" font-size="12" text-anchor="middle">the part that ships, the same on every install</text>
+
+  <!-- boundary rule -->
+  <line x1="700" y1="516" x2="1000" y2="516" stroke="#b5803a" stroke-width="1.6"/>
+  <text class="lbl navy"  x="700" y="536" font-size="14">The harness never imports a rib.</text>
+  <text class="lbl slate" x="700" y="553" font-size="12">External systems are touched only inside ribs.</text>
+</svg>

@@ -1,0 +1,607 @@
+/*
+  Keelson documentation design system.
+  Adapted from the chamber user-guide component vocabulary, reskinned to the
+  keelson "blueprint" identity: deep-navy structure, a single brass accent, a
+  faint blueprint grid. One stylesheet for every page (landing links it too,
+  then adds only its hero-specific rules inline).
+*/
+
+:root {
+  color-scheme: light;
+  --ink: #0f1b2d;          /* deep navy ink for body text */
+  --muted: #51607a;        /* slate-blue secondary text */
+  --line: rgba(15, 27, 45, 0.14);
+  --panel: rgba(255, 255, 255, 0.70);
+  --panel-strong: rgba(255, 255, 255, 0.86);
+  --keel: #1e3a5f;         /* the harness / backbone navy */
+  --keel-deep: #14283f;
+  --rib: #2f6fb0;          /* ribs / extensions ocean blue */
+  --brass: #b5803a;        /* brass accent: emphasis and interaction */
+  --brass-ink: #8a5a1f;    /* deeper brass for small text contrast */
+  --brass-soft: rgba(181, 128, 58, 0.13);
+  --green: #2f8f5b;        /* success / check */
+  --grid: rgba(30, 58, 95, 0.055);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 74% 0%, rgba(255, 255, 255, 0.95), transparent 19rem),
+    radial-gradient(circle at 76% 42%, rgba(181, 128, 58, 0.12), transparent 13rem),
+    linear-gradient(180deg, #f3f5f8 0%, #e6eaf0 100%);
+  color: var(--ink);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  overflow-x: hidden;
+}
+
+/* faint blueprint grid, fading toward the bottom */
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, black, transparent 84%);
+}
+
+/* a soft waterline shadow anchoring the page */
+body::after {
+  position: fixed;
+  inset: auto -8vw 0 -8vw;
+  z-index: -1;
+  height: 22vh;
+  content: "";
+  background:
+    radial-gradient(ellipse at center, rgba(15, 27, 45, 0.26), transparent 36%),
+    linear-gradient(180deg, transparent, rgba(15, 27, 45, 0.1));
+  filter: blur(2px);
+}
+
+a {
+  color: inherit;
+}
+
+/* ---- shell + header --------------------------------------------------- */
+
+.guide-shell {
+  width: min(1320px, calc(100vw - 48px));
+  margin: 0 auto;
+  padding: 42px 0 64px;
+}
+
+.site-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 34px;
+  align-items: center;
+  margin-bottom: clamp(54px, 9vh, 110px);
+}
+
+.brand {
+  display: inline-flex;
+  gap: 15px;
+  align-items: center;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 0 0 7px rgba(181, 128, 58, 0.06);
+}
+
+.brand-word {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.46em;
+}
+
+.nav {
+  display: flex;
+  gap: clamp(18px, 3vw, 44px);
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+.nav a,
+.github-link {
+  color: rgba(15, 27, 45, 0.74);
+  text-decoration: none;
+}
+
+.nav a:hover {
+  color: var(--brass-ink);
+}
+
+.github-link {
+  justify-self: end;
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  min-width: 150px;
+  padding: 14px 20px;
+  border: 1px solid rgba(15, 27, 45, 0.32);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+/* ---- hero ------------------------------------------------------------- */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(280px, 0.88fr);
+  gap: clamp(30px, 7vw, 92px);
+  align-items: end;
+  margin-bottom: 56px;
+}
+
+.eyebrow {
+  margin: 0 0 24px;
+  color: var(--brass-ink);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 760px;
+  margin: 0;
+  font-size: clamp(40px, 5.6vw, 78px);
+  font-weight: 300;
+  line-height: 1.13;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.divider {
+  width: 128px;
+  height: 1px;
+  margin: 28px 0 26px;
+  background: linear-gradient(90deg, var(--line), var(--brass), var(--line));
+}
+
+.hero-copy,
+.lead {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+.hero-copy {
+  max-width: 620px;
+  margin: 0;
+}
+
+/* ---- shared card surfaces -------------------------------------------- */
+
+.hero-card,
+.callout,
+.content-card,
+.step,
+.link-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+}
+
+.hero-card {
+  padding: 28px;
+}
+
+.hero-card h2,
+.content-card h2,
+.section-heading {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+.hero-card p,
+.content-card p,
+.step p,
+.callout p,
+.link-card p {
+  margin: 0;
+  color: rgba(15, 27, 45, 0.6);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* ---- guide layout: sticky on-this-page + content column -------------- */
+
+.guide-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 36px;
+  align-items: start;
+}
+
+.side-nav {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.side-nav strong {
+  margin-bottom: 8px;
+  color: var(--brass-ink);
+  font-size: 11px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+.side-nav a {
+  padding: 9px 10px;
+  border-radius: 7px;
+  color: rgba(15, 27, 45, 0.72);
+  font-size: 13px;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.side-nav a[aria-current="page"],
+.side-nav a:hover {
+  background: var(--brass-soft);
+  color: var(--ink);
+}
+
+.guide-content {
+  display: grid;
+  gap: 28px;
+}
+
+/* ---- hub: card grid of topic links ----------------------------------- */
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.link-card {
+  display: grid;
+  min-height: 180px;
+  padding: 24px;
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.link-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 40px rgba(15, 27, 45, 0.12);
+}
+
+.link-card span {
+  color: var(--brass-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+.link-card h2,
+.link-card h3 {
+  margin: 22px 0 12px;
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+/* ---- content cards (the body of a topic page) ------------------------ */
+
+.content-card {
+  padding: clamp(24px, 4vw, 38px);
+}
+
+.content-card h3 {
+  margin: 28px 0 10px;
+  font-size: 18px;
+}
+
+.content-card ul,
+.content-card ol {
+  margin: 16px 0 0;
+  padding-left: 22px;
+  color: rgba(15, 27, 45, 0.7);
+  line-height: 1.75;
+}
+
+.content-card li + li {
+  margin-top: 6px;
+}
+
+/* the column is wide, but prose keeps a comfortable ~72-character measure;
+   tables, figures, and code are free to use the full width */
+.content-card > p,
+.content-card > ul,
+.content-card > ol {
+  max-width: 72ch;
+  font-size: 15px;
+}
+
+.content-card code {
+  padding: 2px 5px;
+  border: 1px solid rgba(15, 27, 45, 0.1);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--keel-deep);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+/* ---- figures: diagrams (light) and screenshots (dark) ---------------- */
+
+.diagram-figure {
+  margin: 24px 0 0;
+}
+
+.diagram-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 14px;
+  border: 1px solid rgba(15, 27, 45, 0.12);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.9), transparent 60%),
+    rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 44px rgba(15, 27, 45, 0.1);
+}
+
+.screenshot-figure {
+  margin: 22px 0 0;
+}
+
+.screenshot-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid rgba(15, 27, 45, 0.16);
+  border-radius: 12px;
+  background: rgba(15, 27, 45, 0.9);
+  box-shadow: 0 24px 60px rgba(15, 27, 45, 0.18);
+}
+
+.diagram-figure figcaption,
+.screenshot-figure figcaption {
+  margin-top: 10px;
+  color: rgba(15, 27, 45, 0.54);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---- code samples ---------------------------------------------------- */
+
+.code-sample {
+  margin: 18px 0 0;
+  padding: 18px;
+  overflow-x: auto;
+  border: 1px solid rgba(15, 27, 45, 0.14);
+  border-radius: 10px;
+  background: var(--keel-deep);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.code-sample .c { color: #8aa0bf; }   /* comment */
+.code-sample .k { color: #d8a657; }   /* keyword / command */
+.code-sample .s { color: #8fce96; }   /* string / value */
+
+/* ---- reference tables ------------------------------------------------ */
+
+.info-table {
+  width: 100%;
+  margin-top: 18px;
+  border-collapse: collapse;
+  color: rgba(15, 27, 45, 0.7);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.info-table th,
+.info-table td {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(15, 27, 45, 0.1);
+  text-align: left;
+  vertical-align: top;
+}
+
+.info-table thead th {
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.info-table tbody th {
+  width: 30%;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.info-table code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+  color: var(--keel-deep);
+}
+
+/* ---- numbered steps -------------------------------------------------- */
+
+.steps {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 18px;
+  padding: 20px;
+}
+
+.step-number {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(181, 128, 58, 0.34);
+  border-radius: 999px;
+  color: var(--brass-ink);
+  font-weight: 700;
+}
+
+.step h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+/* ---- callouts (semantic admonitions) --------------------------------- */
+
+.callout {
+  padding: 22px 24px;
+  border-color: rgba(181, 128, 58, 0.3);
+  background: var(--brass-soft);
+}
+
+.callout strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--brass-ink);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.callout-keel {
+  border-color: rgba(47, 111, 176, 0.32);
+  background: rgba(47, 111, 176, 0.09);
+}
+
+.callout-keel strong {
+  color: var(--keel);
+}
+
+/* ---- related links + buttons ----------------------------------------- */
+
+.related {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.related a,
+.button {
+  display: inline-flex;
+  min-height: 42px;
+  padding: 0 18px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(15, 27, 45, 0.22);
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.button-primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #c79452, #9a6420);
+  color: #fff;
+  box-shadow: 0 18px 40px rgba(154, 100, 32, 0.26);
+}
+
+/* ---- footer ---------------------------------------------------------- */
+
+.page-footer {
+  margin-top: 54px;
+  padding-top: 26px;
+  border-top: 1px solid var(--line);
+  color: rgba(15, 27, 45, 0.46);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ---- responsive ------------------------------------------------------ */
+
+@media (max-width: 980px) {
+  .site-header,
+  .hero,
+  .guide-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .github-link,
+  .nav {
+    justify-self: start;
+  }
+
+  .side-nav {
+    position: static;
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .guide-shell {
+    width: min(100% - 28px, 1180px);
+    padding-top: 28px;
+  }
+
+  .nav {
+    display: none;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .step {
+    grid-template-columns: 1fr;
+  }
+}

@@ -16,6 +16,7 @@
       "!**/dist",
       "!**/build",
       "!.keelson/runs",
+      "!docs",
       "!**/*.lock",
       "!bun.lock"
     ]

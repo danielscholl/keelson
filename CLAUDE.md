@@ -61,3 +61,7 @@ Comments live in source long after the PR that motivated them merges. Default to
 - **Commit messages**: conventional (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `test:`). One sentence subject under 70 chars.
 - **PR bodies**: three sections — *What*, *Why now*, *Test plan*. Skim recent merged PRs (`gh pr list --state merged --limit 3`) for voice. No "Generated with" footers.
 - **Workflow descriptions**: bundled workflows in `.keelson/workflows/` use the `Use when / Triggers / Does / NOT for` structured convention so the SPA workflow cards render scannably. Match that shape when adding new ones.
+
+## Documentation
+
+The docs site lives in `docs/` — a self-contained **Astro Starlight** project (not a Bun workspace; it has its own `bun install` and lockfile). Two parts share one "blueprint" identity: a bespoke hand-authored landing in `docs/public/` and the Starlight docs tier (Markdown/MDX) under `docs/src/content/docs/`. **`docs/STYLE.md` is the authoritative style guide — read it before adding or editing any docs page.** It locks the voice, palette, components, figure conventions, widths, and the route map (landing at `/`, docs under `/docs/`). Build and preview locally with `cd docs && bun install && bun run build && bun run preview`. `.github/workflows/docs.yml` builds and deploys it to GitHub Pages. Do not introduce a second site generator or fork the palette per page.
