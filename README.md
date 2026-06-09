@@ -36,8 +36,9 @@ your ribs); `keelson update --check` reports what's available.
 **2. Add the capabilities (ribs) you want:**
 
 ```bash
-keelson rib add chamber           # multi-agent rooms + agent genesis
-keelson rib add osdu              # OSDU CIMPL cluster / platform lanes
+# add a rib from any bun-installable source — a github URL is the simplest:
+keelson rib add https://github.com/danielscholl/keelson-rib-chamber   # multi-agent rooms + agent genesis
+keelson rib add https://github.com/danielscholl/keelson-rib-osdu      # OSDU CIMPL cluster / platform lanes
 keelson rib list --installed
 ```
 
@@ -77,14 +78,17 @@ hull bolts onto. Lay the keel, raise the ribs: the harness is the beam, and
 **ribs** are the units that register tools, supply context, and own
 external-system integrations.
 
-No ribs ship in-tree. `keelson rib add <id>` installs an `@keelson/rib-*`
-package into the home, and the server discovers it from
+No ribs ship in-tree, and keelson keeps no registry of which ribs exist —
+anyone can publish one. `keelson rib add <source>` hands the source to `bun`
+(a github URL, `github:owner/repo`, a git URL, an npm name, or a local path);
+whatever it installs as an `@keelson/rib-*` package the server discovers from
 `~/.keelson/node_modules/@keelson/` at boot:
 
 ```bash
-keelson rib add osdu              # known id → github:danielscholl/keelson-rib-osdu
-keelson rib add ./my-rib          # or a local path / git URL / github:owner/repo
-keelson rib remove osdu
+keelson rib add https://github.com/danielscholl/keelson-rib-osdu   # github URL
+keelson rib add github:you/keelson-rib-yours                       # or shorthand
+keelson rib add ./my-rib                                           # or a local path
+keelson rib remove osdu                                            # remove by its rib id
 ```
 
 | Surface | Convention |
@@ -139,7 +143,7 @@ and the [docs](https://danielscholl.github.io/keelson/) for a walkthrough.
 Once installed, `keelson` is on your PATH (working from `~/.keelson`):
 
 ```bash
-keelson rib add chamber                   # install a rib into the home
+keelson rib add <github-url|git|npm|path> # install a rib into the home
 keelson rib list --installed              # ribs in the home (no server needed)
 keelson serve                             # run the API + WS server on :7878
 keelson doctor                            # health sweep: toolchain, server, DB, auth, ribs

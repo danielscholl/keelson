@@ -271,7 +271,7 @@ export function buildProgram(): Command {
   rib
     .command("add <source>")
     .description(
-      "install a rib into the keelson home (a known id like `chamber`/`osdu`, a path, or a github:owner/repo / git URL)",
+      "install a rib into the keelson home from any bun-installable source (a github URL, github:owner/repo, a git URL, an npm name, or a local path)",
     )
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .action(async function ribAddAction(

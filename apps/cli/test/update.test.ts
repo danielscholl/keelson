@@ -9,9 +9,9 @@ import { join, resolve } from "node:path";
 import cliPkg from "../package.json" with { type: "json" };
 import {
   applyManifestVersion,
-  githubSourcedRibs,
   parseTagVersion,
   releaseAssetUrls,
+  ribDependencies,
   selectReleaseNotes,
 } from "../src/commands/update.ts";
 
@@ -49,16 +49,24 @@ describe("update pure helpers", () => {
     expect(manifest.dependencies["@keelson/cli"]).toContain("/v0.1.0/keelson-cli.tgz");
   });
 
-  test("githubSourcedRibs selects only git-sourced rib deps", () => {
+  test("ribDependencies returns every rib dep regardless of source form, never the harness deps", () => {
     const manifest = {
       dependencies: {
         "@keelson/cli": "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
-        "@keelson/rib-osdu": "github:danielscholl/keelson-rib-osdu",
-        "@keelson/rib-chamber": "git+https://example.com/chamber.git",
+        "@keelson/shared":
+          "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-shared.tgz",
+        "@keelson/rib-osdu": "https://github.com/danielscholl/keelson-rib-osdu",
+        "@keelson/rib-chamber": "github:danielscholl/keelson-rib-chamber",
+        "@keelson/rib-acme": "acme/keelson-rib-acme",
         "@keelson/rib-local": "/tmp/some/path.tgz",
       },
     };
-    expect(githubSourcedRibs(manifest)).toEqual(["@keelson/rib-chamber", "@keelson/rib-osdu"]);
+    expect(ribDependencies(manifest)).toEqual([
+      "@keelson/rib-acme",
+      "@keelson/rib-chamber",
+      "@keelson/rib-local",
+      "@keelson/rib-osdu",
+    ]);
   });
 
   test("selectReleaseNotes returns the window (current, latest] oldest-first", () => {

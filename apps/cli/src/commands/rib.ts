@@ -16,21 +16,12 @@ interface BaseOptions {
   baseUrl?: string;
 }
 
-// First-party ribs the CLI knows how to fetch by bare id. Anything else passed
-// to `rib add` is treated as a bun-installable spec (path, github:owner/repo,
-// git URL, or npm name).
-const KNOWN_RIBS: Record<string, string> = {
-  chamber: "github:danielscholl/keelson-rib-chamber",
-  osdu: "github:danielscholl/keelson-rib-osdu",
-};
-
-// A known id → its github source; a relative path (`./my-rib`) → absolute
-// against the invoking shell's cwd, because `bun add` runs with cwd=home and a
-// bare relative spec would otherwise resolve under the home; everything else
-// (absolute path, github:/git URL, npm name) passes through unchanged.
+// Keelson keeps no registry of ribs — `rib add <source>` hands the source
+// straight to `bun add`, which accepts a github URL, github:owner/repo, a git
+// URL, an npm name, or a path. The only rewrite: a relative path is absolutized,
+// because `bun add` runs with cwd=home and a bare `./rib` would otherwise
+// resolve under the home rather than the operator's shell cwd.
 function resolveRibSource(arg: string): string {
-  const known = KNOWN_RIBS[arg];
-  if (known) return known;
   if (arg.startsWith(".")) return resolve(arg);
   return arg;
 }

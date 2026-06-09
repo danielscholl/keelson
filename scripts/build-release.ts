@@ -142,6 +142,6 @@ chmod +x "$BIN_DIR/keelson"
 
 echo "keelson v$KEELSON_VERSION installed to $KEELSON_HOME"
 echo "launcher: $BIN_DIR/keelson  (ensure $BIN_DIR is on PATH)"
-echo "next: keelson rib add chamber && keelson serve"
+echo "next: keelson rib add https://github.com/danielscholl/keelson-rib-chamber && keelson serve"
 `;
 }
