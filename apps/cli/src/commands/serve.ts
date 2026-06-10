@@ -12,6 +12,7 @@ import {
   isPidAlive,
   readServerState,
   type ServerState,
+  serverStatePath,
 } from "@keelson/shared/server-state";
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
@@ -113,7 +114,7 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
   if (state && isPidAlive(state.pid)) {
     emit(
       {
-        error: `a server process (pid ${state.pid}) exists but is not responding at ${state.url}; check \`keelson serve status\` or ${logPath(home)}`,
+        error: `a process with pid ${state.pid} is alive but not responding at ${state.url} — it may still be booting (check \`keelson serve status\` or ${logPath(home)}); if it is not a keelson server (stale record after a crash), delete ${serverStatePath(home)} and retry`,
         code: "UNRESPONSIVE",
       },
       opts,
@@ -235,18 +236,49 @@ export async function runServeStop(opts: { json: boolean }): Promise<void> {
     process.exit(EXIT_OK);
   }
 
-  if (!running && !isPidAlive(state.pid)) {
+  // Identity gate: the recorded pid is only trustworthy while the server it
+  // names answers at the recorded URL. A pid alone is never proof — the OS
+  // recycles pids (quickly on Windows), so signaling on pid liveness alone
+  // could kill an unrelated process that inherited the number after a crash.
+  const respondingAtRecorded = running !== null && running.baseUrl === state.url;
+
+  if (!respondingAtRecorded && !isPidAlive(state.pid)) {
     clearServerState(home);
     emit({ data: { status: "not running", note: "cleaned up stale server.json" } }, opts);
     process.exit(EXIT_OK);
   }
 
+  if (!respondingAtRecorded) {
+    emit(
+      {
+        error: `a process with pid ${state.pid} is alive but nothing responds at ${state.url}; refusing to signal a possibly recycled pid — if it is a hung keelson server, kill it manually and delete ${serverStatePath(home)}`,
+        code: "STALE_STATE",
+      },
+      opts,
+    );
+    process.exit(EXIT_FAIL);
+  }
+
   // Graceful first: the token-gated shutdown route drains runs and closes the
-  // DB on every platform. Signals are the fallback (on Windows process.kill
-  // is a hard TerminateProcess — the DB is WAL, so still crash-safe).
+  // DB on every platform. An accepted token also confirms identity — the
+  // responding server read this home's server.json, so the recorded pid is its
+  // own and the signal fallback below is safe.
   const graceful = await requestGracefulShutdown(state);
-  let exited = graceful ? await waitForExit(state.pid, STOP_TIMEOUT_MS) : false;
+  if (!graceful) {
+    emit(
+      {
+        error: `a server responds at ${state.url} but did not accept the recorded shutdown token — it was started from a different home (or an older keelson); stop it where it was started`,
+        code: "UNMANAGED",
+      },
+      opts,
+    );
+    process.exit(EXIT_FAIL);
+  }
+
+  let exited = await waitForExit(state.pid, STOP_TIMEOUT_MS);
   if (!exited && isPidAlive(state.pid)) {
+    // Signals are the fallback for a drain that hangs (on Windows process.kill
+    // is a hard TerminateProcess — the DB is WAL, so still crash-safe).
     try {
       process.kill(state.pid, "SIGTERM");
     } catch {
@@ -261,8 +293,6 @@ export async function runServeStop(opts: { json: boolean }): Promise<void> {
       }
       exited = await waitForExit(state.pid, 2_000);
     }
-  } else if (!exited) {
-    exited = await waitForExit(state.pid, 2_000);
   }
 
   if (!exited) {
@@ -270,20 +300,6 @@ export async function runServeStop(opts: { json: boolean }): Promise<void> {
       {
         error: `server process (pid ${state.pid}) did not exit; kill it manually`,
         code: "STOP_FAILED",
-      },
-      opts,
-    );
-    process.exit(EXIT_FAIL);
-  }
-
-  // If something still answers, the recorded pid wasn't the responding server
-  // (e.g. a foreground server from another home on the same port).
-  const still = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
-  if (still) {
-    emit(
-      {
-        error: `stopped pid ${state.pid}, but a server is still responding at ${still.baseUrl} — it was started elsewhere; stop it where it was started`,
-        code: "UNMANAGED",
       },
       opts,
     );

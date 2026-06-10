@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { readServerState } from "@keelson/shared/server-state";
+import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
 import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
@@ -136,5 +136,68 @@ describe("keelson serve start/status/stop lifecycle", () => {
     expect(exitCode).toBe(0);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.data.status).toBe("not running");
+  }, 30_000);
+
+  test("stop refuses to signal a live pid whose recorded URL is silent", async () => {
+    // A crash + pid recycling leaves server.json naming a live pid that is NOT
+    // a keelson server. This test process plays the innocent pid; stop must
+    // refuse rather than SIGTERM it.
+    writeServerState(
+      {
+        pid: process.pid,
+        url: `http://127.0.0.1:${port}`,
+        startedAt: new Date().toISOString(),
+        version: "0.0.0",
+        schemaVersion: "test",
+        shutdownToken: "recycled-pid-token",
+      },
+      home,
+    );
+    try {
+      const { stdout, exitCode } = await runCli(["--json", "serve", "stop"]);
+      expect(exitCode).toBe(1);
+      const envelope = JSON.parse(stdout.trim());
+      expect(envelope.ok).toBe(false);
+      expect(envelope.code).toBe("STALE_STATE");
+    } finally {
+      clearServerState(home);
+    }
+  }, 30_000);
+
+  test("stop refuses the signal fallback when the responding server rejects the token", async () => {
+    // A server that answers health at the recorded URL but rejects the token
+    // is someone else's (different home). Stop must not fall through to
+    // signaling the recorded pid.
+    const foreign = Bun.serve({
+      port,
+      fetch(req) {
+        const { pathname } = new URL(req.url);
+        if (pathname === "/api/health") {
+          return Response.json({ ok: true, name: "keelson", schema_version: "test" });
+        }
+        return new Response("nope", { status: 401 });
+      },
+    });
+    writeServerState(
+      {
+        pid: process.pid,
+        url: `http://127.0.0.1:${port}`,
+        startedAt: new Date().toISOString(),
+        version: "0.0.0",
+        schemaVersion: "test",
+        shutdownToken: "not-their-token",
+      },
+      home,
+    );
+    try {
+      const { stdout, exitCode } = await runCli(["--json", "serve", "stop"]);
+      expect(exitCode).toBe(1);
+      const envelope = JSON.parse(stdout.trim());
+      expect(envelope.ok).toBe(false);
+      expect(envelope.code).toBe("UNMANAGED");
+    } finally {
+      foreign.stop(true);
+      clearServerState(home);
+    }
   }, 30_000);
 });
