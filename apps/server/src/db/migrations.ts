@@ -245,7 +245,8 @@ const migrations: Migration[] = [
     description: "workflow run provenance: origin (manual|scheduled) + owning rib_id",
     up: (db) => {
       db.exec(`
-        ALTER TABLE workflow_runs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';
+        ALTER TABLE workflow_runs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'
+          CHECK (origin IN ('manual', 'scheduled'));
         ALTER TABLE workflow_runs ADD COLUMN rib_id TEXT;
         CREATE INDEX ix_workflow_runs_origin_started
           ON workflow_runs(origin, started_at DESC);

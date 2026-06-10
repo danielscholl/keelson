@@ -157,6 +157,11 @@ export function RecentRuns({
   // runs drop out of the feed too, so hiding declutters the list AND the runs.
   const visibleRows = visibleRuns(rows, isWorkflowSourceHidden);
   const hiddenByRib = rows.length - visibleRows.length;
+  // Selection acts only on currently-visible rows: a row whose rib is hidden
+  // after it was checked must not be silently bulk-deleted, and the count must
+  // reflect what the operator can actually see.
+  const visibleIds = new Set(visibleRows.map((r) => r.runId));
+  const selectedVisible = [...selected].filter((id) => visibleIds.has(id));
 
   const scheduledToggle = (
     <label className="bg-toggle">
@@ -218,7 +223,7 @@ export function RecentRuns({
   };
 
   const handleConfirmBulk = async () => {
-    const ids = [...selected];
+    const ids = selectedVisible;
     if (ids.length === 0) return;
     setDeleting(true);
     try {
@@ -240,9 +245,9 @@ export function RecentRuns({
   return (
     <>
       <div className="runs-toolbar">
-        {selected.size > 0 ? (
+        {selectedVisible.length > 0 ? (
           <div className="bulk-bar">
-            <span>{selected.size} selected</span>
+            <span>{selectedVisible.length} selected</span>
             <button type="button" className="btn-danger-sm" onClick={() => setPendingBulk(true)}>
               Delete selected
             </button>
@@ -374,13 +379,13 @@ export function RecentRuns({
         title="Delete selected runs"
         body={
           <>
-            Delete <strong>{selected.size}</strong> run{selected.size === 1 ? "" : "s"}? This
-            removes them from history and deletes their linked chat conversations. Still-running
-            runs are cancelled first.
+            Delete <strong>{selectedVisible.length}</strong> run
+            {selectedVisible.length === 1 ? "" : "s"}? This removes them from history and deletes
+            their linked chat conversations. Still-running runs are cancelled first.
           </>
         }
         mode={{ kind: "simple" }}
-        confirmLabel={deleting ? "Deleting…" : `Delete ${selected.size}`}
+        confirmLabel={deleting ? "Deleting…" : `Delete ${selectedVisible.length}`}
         danger
         onConfirm={handleConfirmBulk}
         onCancel={() => {

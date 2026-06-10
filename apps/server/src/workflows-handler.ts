@@ -199,9 +199,12 @@ function pruneScheduledRuns(
     workflowName,
     SCHEDULED_RUN_RETENTION,
   )) {
+    // Conversation first (FK SET NULLs the run pointer), then the run row — so a
+    // conversation-delete failure leaves both intact (no orphan) and the next
+    // prune retries. Per-run swallow keeps retention best-effort.
     try {
-      store.deleteRun(runId);
       if (conversationId !== null) conversationStore.delete(conversationId);
+      store.deleteRun(runId);
     } catch (err) {
       console.warn(
         `[workflows] failed to prune scheduled run ${runId}: ${
@@ -1047,25 +1050,19 @@ export function workflowsRoutes(
     projectNotebookStore,
   } = buildExecutionDeps(opts);
 
-  // Purge a run (cancel-if-active, await terminal write, hard-delete the row)
-  // and cascade its linked chat conversation. Shared by single-delete, bulk
-  // delete, and never leaves an orphan conversation behind. Returns whether a
-  // row actually existed so callers can count / 404.
+  // Purge a run and cascade its linked chat conversation. Delete the
+  // conversation FIRST (the workflow_runs FK is ON DELETE SET NULL, so this only
+  // clears the run's pointer): if it throws, we abort before purging the run —
+  // the caller sees the error and can retry — rather than deleting the run row
+  // and orphaning the conversation. Returns whether a row actually existed so
+  // callers can count / 404.
   const purgeAndCascade = async (runId: string): Promise<boolean> => {
-    const { existed, conversationId } = await purgeWorkflowRun({ runId, store, activeRuns });
-    if (!existed) return false;
+    const conversationId = store.getRun(runId)?.conversationId ?? null;
     if (conversationId !== null) {
-      try {
-        conversationStore.delete(conversationId);
-      } catch (err) {
-        console.warn(
-          `[workflows] failed to delete linked conversation ${conversationId}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
+      conversationStore.delete(conversationId);
     }
-    return true;
+    const { existed } = await purgeWorkflowRun({ runId, store, activeRuns });
+    return existed;
   };
 
   app.get("/api/workflows", (c) => {

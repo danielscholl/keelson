@@ -8253,4 +8253,9 @@ a.cvb-card-title::after {
   padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 600;
   color: var(--muted); background: var(--bg-soft); border: 1px solid var(--border-soft);
 }
-.runs-row.is-selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* :not(.head):hover outranks the plain is-selected rule, so spell out the
+   hover variant (higher specificity) to keep the selection tint while hovering. */
+.runs-row.is-selected,
+.runs-row.is-selected:not(.head):hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}

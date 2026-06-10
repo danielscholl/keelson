@@ -322,7 +322,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     },
     queryRuns(filter) {
       const clauses: string[] = [];
-      const params: string[] = [];
+      const params: Array<string | number> = [];
       if (filter.workflowName !== undefined) {
         clauses.push("workflow_name = ?");
         params.push(filter.workflowName);
@@ -340,11 +340,13 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         params.push(...filter.statuses);
       }
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-      // limit is a server-controlled integer (route-clamped), never raw input,
-      // so inlining it instead of binding is safe and keeps the cache key stable.
-      const limit =
-        filter.limit !== undefined && filter.limit > 0 ? ` LIMIT ${Math.floor(filter.limit)}` : "";
-      const sql = `SELECT * FROM workflow_runs ${where} ORDER BY started_at DESC, rowid DESC${limit}`;
+      let sql = `SELECT * FROM workflow_runs ${where} ORDER BY started_at DESC, rowid DESC`;
+      // Bind the limit (don't interpolate) — keeps this fully parameterized and
+      // collapses the prepared-statement cache to one entry regardless of value.
+      if (filter.limit !== undefined && filter.limit >= 0) {
+        sql += " LIMIT ?";
+        params.push(Math.floor(filter.limit));
+      }
       const rows = db.query(sql).all(...params) as RunRow[];
       return rows.map(rowToRunSummary);
     },

@@ -414,7 +414,21 @@ describe("SQLite WorkflowStore", () => {
     expect(store.queryRuns({ statuses: ["succeeded"] }).map((r) => r.runId)).toEqual(["s2"]);
     expect(store.queryRuns({ statuses: ["running"] }).map((r) => r.runId)).toEqual(["s1", "m1"]);
     expect(store.queryRuns({ limit: 1 }).map((r) => r.runId)).toEqual(["s2"]);
+    // The bound LIMIT honors 0 (returns nothing) rather than treating it as "no limit".
+    expect(store.queryRuns({ limit: 0 })).toEqual([]);
     expect(store.queryRuns({}).map((r) => r.runId)).toEqual(["s2", "s1", "m1"]);
+  });
+
+  test("origin CHECK constraint rejects values outside manual|scheduled", () => {
+    const db = openDatabase({ path: dbPath });
+    createWorkflowStore(db);
+    expect(() =>
+      db
+        .query(
+          "INSERT INTO workflow_runs (id, workflow_name, status, started_at, origin) VALUES ('x', 'w', 'running', 't', 'bogus')",
+        )
+        .run(),
+    ).toThrow();
   });
 
   test("scheduledRunsToPrune keeps newest N + skips non-terminal and manual runs", () => {
