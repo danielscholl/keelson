@@ -7,13 +7,15 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { Database } from "bun:sqlite";
-import type {
-  ContentBlock,
-  NodeOutputRow,
-  WorkflowNodeStatus,
-  WorkflowRunDetail,
-  WorkflowRunStatus,
-  WorkflowRunSummary,
+import {
+  type ContentBlock,
+  type NodeOutputRow,
+  TERMINAL_RUN_STATUSES,
+  type WorkflowNodeStatus,
+  type WorkflowRunDetail,
+  type WorkflowRunOrigin,
+  type WorkflowRunStatus,
+  type WorkflowRunSummary,
 } from "@keelson/shared";
 
 export interface CreateRunInput {
@@ -33,6 +35,23 @@ export interface CreateRunInput {
   workingDir: string;
   // Populated by the executor only when isolation is on (slice 3); null until then.
   worktreePath?: string | null;
+  // How the run was triggered. Omitted → 'manual' (the operator paths). The
+  // heartbeat / panel-refresh pass 'scheduled' so producer runs stay out of the
+  // default feed and get retention-pruned.
+  origin?: WorkflowRunOrigin;
+  // The rib that owns this run's workflow, resolved from the catalog at start.
+  ribId?: string | null;
+}
+
+// Filter for the general runs feed (GET /api/workflows/runs) and bulk delete.
+// All fields optional; an omitted field doesn't constrain. `statuses` empty or
+// omitted matches every status.
+export interface RunQueryFilter {
+  workflowName?: string;
+  origin?: WorkflowRunOrigin;
+  ribId?: string;
+  statuses?: readonly WorkflowRunStatus[];
+  limit?: number;
 }
 
 export interface UpsertNodeOutputInput {
@@ -68,6 +87,18 @@ export interface WorkflowStore {
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];
+  // General filtered feed backing GET /api/workflows/runs and bulk delete.
+  // Single SQL pass (vs. one listRuns per catalog entry), filterable by
+  // workflow / origin / rib / status, newest first.
+  queryRuns(filter: RunQueryFilter): WorkflowRunSummary[];
+  // Retention support: terminal `scheduled` runs for a workflow beyond the
+  // newest `keep`, paired with their linked conversation so the caller can
+  // cascade-delete both. Never returns a non-terminal run (a live producer is
+  // left alone). The newest `keep` rows of any status are protected.
+  scheduledRunsToPrune(
+    workflowName: string,
+    keep: number,
+  ): Array<{ runId: string; conversationId: string | null }>;
   // Drives the Workflows-nav badge: caller polls for `paused` rows so other
   // tabs can show a pending-input count without subscribing to every run's WS.
   listRunsByStatus(status: WorkflowRunStatus): WorkflowRunSummary[];
@@ -97,6 +128,8 @@ interface RunRow {
   project_id: string | null;
   working_dir: string | null;
   worktree_path: string | null;
+  origin: string;
+  rib_id: string | null;
 }
 
 interface NodeRow {
@@ -121,6 +154,8 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     projectId: row.project_id,
     workingDir: row.working_dir,
     worktreePath: row.worktree_path,
+    origin: row.origin === "scheduled" ? "scheduled" : "manual",
+    ribId: row.rib_id,
   };
 }
 
@@ -180,7 +215,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, origin, rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
@@ -233,6 +268,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.projectId ?? null,
         input.workingDir,
         input.worktreePath ?? null,
+        input.origin ?? "manual",
+        input.ribId ?? null,
       );
     },
     updateRunStatus(input) {
@@ -282,6 +319,51 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     listRunsByStatus(status) {
       const rows = listRunsByStatusStmt.all(status) as RunRow[];
       return rows.map(rowToRunSummary);
+    },
+    queryRuns(filter) {
+      const clauses: string[] = [];
+      const params: string[] = [];
+      if (filter.workflowName !== undefined) {
+        clauses.push("workflow_name = ?");
+        params.push(filter.workflowName);
+      }
+      if (filter.origin !== undefined) {
+        clauses.push("origin = ?");
+        params.push(filter.origin);
+      }
+      if (filter.ribId !== undefined) {
+        clauses.push("rib_id = ?");
+        params.push(filter.ribId);
+      }
+      if (filter.statuses !== undefined && filter.statuses.length > 0) {
+        clauses.push(`status IN (${filter.statuses.map(() => "?").join(", ")})`);
+        params.push(...filter.statuses);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      // limit is a server-controlled integer (route-clamped), never raw input,
+      // so inlining it instead of binding is safe and keeps the cache key stable.
+      const limit =
+        filter.limit !== undefined && filter.limit > 0 ? ` LIMIT ${Math.floor(filter.limit)}` : "";
+      const sql = `SELECT * FROM workflow_runs ${where} ORDER BY started_at DESC, rowid DESC${limit}`;
+      const rows = db.query(sql).all(...params) as RunRow[];
+      return rows.map(rowToRunSummary);
+    },
+    scheduledRunsToPrune(workflowName, keep) {
+      const rows = db
+        .query(
+          `SELECT id, conversation_id, status FROM workflow_runs
+             WHERE workflow_name = ? AND origin = 'scheduled'
+             ORDER BY started_at DESC, rowid DESC`,
+        )
+        .all(workflowName) as { id: string; conversation_id: string | null; status: string }[];
+      const out: Array<{ runId: string; conversationId: string | null }> = [];
+      const protectedCount = Math.max(0, Math.floor(keep));
+      for (const r of rows.slice(protectedCount)) {
+        if (TERMINAL_RUN_STATUSES.includes(r.status as WorkflowRunStatus)) {
+          out.push({ runId: r.id, conversationId: r.conversation_id });
+        }
+      }
+      return out;
     },
     listWorktreePaths() {
       const rows = db

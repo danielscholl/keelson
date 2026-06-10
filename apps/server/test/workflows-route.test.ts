@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
 
-import { makePromptHandler } from "@keelson/workflows";
+import { makePromptHandler, type WorkflowDefinition } from "@keelson/workflows";
 import { Hono } from "hono";
 
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
@@ -1982,12 +1982,181 @@ nodes:
     await pollUntilTerminal(app, runId);
   });
 
-  test("GET /api/workflows/runs rejects missing or invalid status query (400)", async () => {
+  test("GET /api/workflows/runs serves the general feed and validates query params", async () => {
     const { app } = makeRig();
-    const missing = await app.fetch(new Request("http://test/api/workflows/runs"));
-    expect(missing.status).toBe(400);
-    const invalid = await app.fetch(new Request("http://test/api/workflows/runs?status=running"));
-    expect(invalid.status).toBe(400);
+    // No status → general feed (not a 400 anymore); empty store → empty list.
+    const all = await app.fetch(new Request("http://test/api/workflows/runs"));
+    expect(all.status).toBe(200);
+    expect((await all.json()).runs).toEqual([]);
+    // A real status is now accepted (the feed is no longer paused-only).
+    const running = await app.fetch(new Request("http://test/api/workflows/runs?status=running"));
+    expect(running.status).toBe(200);
+    // The long-standing nav-badge/CLI query still works.
+    const paused = await app.fetch(new Request("http://test/api/workflows/runs?status=paused"));
+    expect(paused.status).toBe(200);
+    // Garbage status / origin / limit are rejected.
+    for (const q of ["status=bogus", "origin=nope", "limit=-1", "limit=abc"]) {
+      const res = await app.fetch(new Request(`http://test/api/workflows/runs?${q}`));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  test("GET /api/workflows tags source + background from rib provenance", async () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    writeWorkflow(
+      "local-wf.yaml",
+      `name: local-wf
+description: a local one
+nodes:
+  - id: n
+    bash: echo hi
+`,
+    );
+    const ribDef = {
+      name: "osdu-lane",
+      description: "rib producer",
+      nodes: [{ id: "n", bash: "echo hi" }],
+    } as unknown as WorkflowDefinition;
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      extra: [ribDef],
+      ribProvenance: new Map([["osdu-lane", { ribId: "osdu", background: true }]]),
+      ribNames: new Map([["osdu", "OSDU"]]),
+    });
+    const app = new Hono();
+    workflowsRoutes(app, { catalog, store, conversationStore });
+
+    const res = await app.fetch(new Request("http://test/api/workflows"));
+    const body = (await res.json()) as { workflows: Array<Record<string, unknown>> };
+    const byName = Object.fromEntries(body.workflows.map((w) => [w.name as string, w]));
+    expect(byName["local-wf"]!.source).toEqual({ kind: "local" });
+    expect(byName["local-wf"]!.background).toBe(false);
+    expect(byName["osdu-lane"]!.source).toEqual({ kind: "rib", ribId: "osdu", ribName: "OSDU" });
+    expect(byName["osdu-lane"]!.background).toBe(true);
+  });
+
+  test("POST /api/workflows/runs/bulk-delete by ids purges runs + cascades conversations", async () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const app = new Hono();
+    workflowsRoutes(app, { catalog, store, conversationStore });
+
+    const convIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const conv = conversationStore.create({ providerId: "workflow", name: `r${i}` });
+      convIds.push(conv.id);
+      store.createRun({
+        runId: `r${i}`,
+        workflowName: "wf",
+        inputs: {},
+        startedAt: `2025-01-01T00:00:0${i}.000Z`,
+        conversationId: conv.id,
+      });
+      store.updateRunStatus({ runId: `r${i}`, status: "succeeded", completedAt: "x", error: null });
+    }
+    const exists = (id: string): boolean => Boolean(conversationStore.get(id));
+
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/runs/bulk-delete", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ runIds: ["r0", "r1"] }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).deleted).toBe(2);
+    expect(store.getRun("r0")).toBeUndefined();
+    expect(store.getRun("r1")).toBeUndefined();
+    expect(store.getRun("r2")).toBeDefined();
+    expect(exists(convIds[0]!)).toBe(false);
+    expect(exists(convIds[1]!)).toBe(false);
+    expect(exists(convIds[2]!)).toBe(true);
+  });
+
+  test("POST /api/workflows/runs/bulk-delete by filter targets a group; guards empty filter + origin", async () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const app = new Hono();
+    workflowsRoutes(app, { catalog, store, conversationStore });
+
+    const seed = (runId: string, origin: "manual" | "scheduled"): void => {
+      const conv = conversationStore.create({ providerId: "workflow", name: runId });
+      store.createRun({
+        runId,
+        workflowName: "wf",
+        inputs: {},
+        startedAt: `2025-01-01T00:00:00.00${runId.slice(-1)}Z`,
+        conversationId: conv.id,
+        origin,
+      });
+      store.updateRunStatus({ runId, status: "succeeded", completedAt: "x", error: null });
+    };
+    seed("m0", "manual");
+    seed("s0", "scheduled");
+    seed("s1", "scheduled");
+
+    const bulk = (body: unknown): Request =>
+      new Request("http://test/api/workflows/runs/bulk-delete", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    // Empty filter is rejected (can't accidentally nuke all history).
+    expect((await app.fetch(bulk({ filter: {} }))).status).toBe(400);
+    // Missing Origin header is forbidden (CSRF guard).
+    const noOrigin = await app.fetch(
+      new Request("http://test/api/workflows/runs/bulk-delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ filter: { origin: "scheduled" } }),
+      }),
+    );
+    expect(noOrigin.status).toBe(403);
+
+    const res = await app.fetch(bulk({ filter: { origin: "scheduled" } }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).deleted).toBe(2);
+    expect(store.getRun("m0")).toBeDefined();
+    expect(store.getRun("s0")).toBeUndefined();
+    expect(store.getRun("s1")).toBeUndefined();
+  });
+
+  test("GET /api/workflows/runs?origin=… filters the feed by trigger provenance", async () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const app = new Hono();
+    workflowsRoutes(app, { catalog, store, conversationStore });
+    const seed = (runId: string, origin: "manual" | "scheduled", at: string): void => {
+      const conv = conversationStore.create({ providerId: "workflow", name: runId });
+      store.createRun({
+        runId,
+        workflowName: "wf",
+        inputs: {},
+        startedAt: at,
+        conversationId: conv.id,
+        origin,
+      });
+    };
+    seed("m0", "manual", "2025-01-01T00:00:00.000Z");
+    seed("s0", "scheduled", "2025-01-01T00:00:01.000Z");
+
+    const ids = async (q: string): Promise<string[]> => {
+      const res = await app.fetch(new Request(`http://test/api/workflows/runs${q}`));
+      const body = (await res.json()) as { runs: Array<{ runId: string }> };
+      return body.runs.map((r) => r.runId);
+    };
+    expect(await ids("?origin=manual")).toEqual(["m0"]);
+    expect(await ids("?origin=scheduled")).toEqual(["s0"]);
+    expect(await ids("")).toEqual(["s0", "m0"]);
   });
 
   // -------------------------------------------------------------------------

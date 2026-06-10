@@ -1,4 +1,6 @@
 import {
+  type BulkDeleteRunsBody,
+  bulkDeleteRunsResponseSchema,
   type ClaudeCliStatus,
   type CloneProjectBody,
   type Conversation,
@@ -312,6 +314,48 @@ export async function listPausedRuns(): Promise<WorkflowRunSummary[]> {
   return listRunsResponseSchema.parse(
     await apiRequest<unknown>("/api/workflows/runs?status=paused"),
   ).runs;
+}
+
+export interface ListWorkflowRunsFilter {
+  // "manual" | "scheduled" — omit for both. The runs feed defaults to manual.
+  origin?: "manual" | "scheduled";
+  ribId?: string;
+  workflow?: string;
+  status?: WorkflowRunSummary["status"];
+  limit?: number;
+}
+
+// General runs feed (one request for the whole table, vs. one per workflow).
+// Filterable by origin / rib / workflow / status server-side.
+export async function listWorkflowRuns(
+  filter: ListWorkflowRunsFilter = {},
+): Promise<WorkflowRunSummary[]> {
+  const qs = new URLSearchParams();
+  if (filter.origin) qs.set("origin", filter.origin);
+  if (filter.ribId) qs.set("ribId", filter.ribId);
+  if (filter.workflow) qs.set("workflow", filter.workflow);
+  if (filter.status) qs.set("status", filter.status);
+  if (filter.limit !== undefined) qs.set("limit", String(filter.limit));
+  const suffix = qs.toString();
+  return listRunsResponseSchema.parse(
+    await apiRequest<unknown>(`/api/workflows/runs${suffix ? `?${suffix}` : ""}`, {
+      label: "/api/workflows/runs",
+    }),
+  ).runs;
+}
+
+// Delete a group of runs in one call — explicit ids or a filter (e.g. every
+// scheduled run, or all runs owned by a rib). Cancels in-flight runs and
+// cascades linked conversations, same as single delete. Returns the count.
+export async function bulkDeleteWorkflowRuns(body: BulkDeleteRunsBody): Promise<number> {
+  const res = await apiRequest<unknown>("/api/workflows/runs/bulk-delete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    errorBody: "json-error",
+    label: "/api/workflows/runs/bulk-delete",
+  });
+  return bulkDeleteRunsResponseSchema.parse(res).deleted;
 }
 
 export interface StartWorkflowRunOptions {

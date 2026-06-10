@@ -49,3 +49,40 @@ describe("useSettings — workflowsViewMode", () => {
     expect(result.current.settings.workflowsViewMode ?? "both").toBe("both");
   });
 });
+
+describe("useSettings — workflow provenance view prefs", () => {
+  beforeEach(() => {
+    seedAndSync();
+  });
+
+  test("toggleHiddenWorkflowSource adds/removes a rib id and persists", () => {
+    const { result } = renderHook(() => useSettings());
+    expect(result.current.isWorkflowSourceHidden("osdu")).toBe(false);
+    act(() => result.current.toggleHiddenWorkflowSource("osdu"));
+    expect(result.current.isWorkflowSourceHidden("osdu")).toBe(true);
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) as string).hiddenWorkflowSources).toEqual([
+      "osdu",
+    ]);
+    act(() => result.current.toggleHiddenWorkflowSource("osdu"));
+    expect(result.current.isWorkflowSourceHidden("osdu")).toBe(false);
+  });
+
+  test("setShowBackgroundWorkflows / setShowScheduledRuns default false and persist", () => {
+    const { result } = renderHook(() => useSettings());
+    expect(result.current.settings.showBackgroundWorkflows ?? false).toBe(false);
+    expect(result.current.settings.showScheduledRuns ?? false).toBe(false);
+    act(() => result.current.setShowBackgroundWorkflows(true));
+    act(() => result.current.setShowScheduledRuns(true));
+    expect(result.current.settings.showBackgroundWorkflows).toBe(true);
+    expect(result.current.settings.showScheduledRuns).toBe(true);
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) as string);
+    expect(raw.showBackgroundWorkflows).toBe(true);
+    expect(raw.showScheduledRuns).toBe(true);
+  });
+
+  test("rejects a malformed hiddenWorkflowSources payload (whole-settings guard)", () => {
+    seedAndSync({ favorites: [], lastUsed: null, hiddenWorkflowSources: "osdu" });
+    const { result } = renderHook(() => useSettings());
+    expect(result.current.settings.hiddenWorkflowSources).toBeUndefined();
+  });
+});

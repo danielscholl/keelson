@@ -28,6 +28,15 @@ export interface Settings {
   theme?: ThemePreference;
   // Missing = "both".
   workflowsViewMode?: WorkflowsViewMode;
+  // Rib ids whose workflows are hidden from the catalog + runs feed. View-only:
+  // the rib's producers keep refreshing its surfaces. Missing = none hidden.
+  hiddenWorkflowSources?: string[];
+  // Show rib-bound background producer workflows in the catalog. Missing = false
+  // (they're auto-refresh machinery the operator never runs by hand).
+  showBackgroundWorkflows?: boolean;
+  // Show scheduled (producer) runs in the runs feed. Missing = false — the feed
+  // defaults to manual runs so high-cadence lanes don't bury them.
+  showScheduledRuns?: boolean;
 }
 
 const DEFAULTS: Settings = { favorites: [], lastUsed: null };
@@ -59,6 +68,19 @@ function isSettings(v: unknown): v is Settings {
   }
   if (o.theme !== undefined && !isThemePreference(o.theme)) return false;
   if (o.workflowsViewMode !== undefined && !isWorkflowsViewMode(o.workflowsViewMode)) return false;
+  if (
+    o.hiddenWorkflowSources !== undefined &&
+    (!Array.isArray(o.hiddenWorkflowSources) ||
+      !o.hiddenWorkflowSources.every((s) => typeof s === "string"))
+  ) {
+    return false;
+  }
+  if (o.showBackgroundWorkflows !== undefined && typeof o.showBackgroundWorkflows !== "boolean") {
+    return false;
+  }
+  if (o.showScheduledRuns !== undefined && typeof o.showScheduledRuns !== "boolean") {
+    return false;
+  }
   return true;
 }
 
@@ -132,6 +154,11 @@ export interface UseSettingsResult {
   setSidebarCollapsed: (value: boolean) => void;
   setTheme: (value: ThemePreference) => void;
   setWorkflowsViewMode: (value: WorkflowsViewMode) => void;
+  // Toggle a rib's workflows in/out of the catalog + runs view (view-only).
+  toggleHiddenWorkflowSource: (ribId: string) => void;
+  isWorkflowSourceHidden: (ribId: string) => boolean;
+  setShowBackgroundWorkflows: (value: boolean) => void;
+  setShowScheduledRuns: (value: boolean) => void;
 }
 
 export function useSettings(): UseSettingsResult {
@@ -179,6 +206,35 @@ export function useSettings(): UseSettingsResult {
     });
   }, []);
 
+  const toggleHiddenWorkflowSource = useCallback((ribId: string) => {
+    update((prev) => {
+      const current = prev.hiddenWorkflowSources ?? [];
+      const next = current.includes(ribId)
+        ? current.filter((id) => id !== ribId)
+        : [...current, ribId];
+      return { ...prev, hiddenWorkflowSources: next };
+    });
+  }, []);
+
+  const isWorkflowSourceHidden = useCallback(
+    (ribId: string): boolean => (settings.hiddenWorkflowSources ?? []).includes(ribId),
+    [settings.hiddenWorkflowSources],
+  );
+
+  const setShowBackgroundWorkflows = useCallback((value: boolean) => {
+    update((prev) => {
+      if ((prev.showBackgroundWorkflows ?? false) === value) return prev;
+      return { ...prev, showBackgroundWorkflows: value };
+    });
+  }, []);
+
+  const setShowScheduledRuns = useCallback((value: boolean) => {
+    update((prev) => {
+      if ((prev.showScheduledRuns ?? false) === value) return prev;
+      return { ...prev, showScheduledRuns: value };
+    });
+  }, []);
+
   return {
     settings,
     toggleFavorite,
@@ -187,5 +243,9 @@ export function useSettings(): UseSettingsResult {
     setSidebarCollapsed,
     setTheme,
     setWorkflowsViewMode,
+    toggleHiddenWorkflowSource,
+    isWorkflowSourceHidden,
+    setShowBackgroundWorkflows,
+    setShowScheduledRuns,
   };
 }

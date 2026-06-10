@@ -5,6 +5,8 @@ import {
 } from "@keelson/shared";
 import { useMemo } from "react";
 
+import { RibBadge } from "./RibBadge.tsx";
+
 export interface WorkflowCardProps {
   workflow: WorkflowSummary;
   // Optional detail (with nodes[]) so the card can show node-type chips
@@ -56,6 +58,16 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
         <div>
           <div className="wc-title">{humanTitle(workflow.name)}</div>
           <div className="wc-slug">{workflow.name}</div>
+        </div>
+        <div className="wc-tags">
+          {workflow.source.kind === "rib" && workflow.source.ribId && (
+            <RibBadge ribId={workflow.source.ribId} label={workflow.source.ribName} />
+          )}
+          {workflow.background && (
+            <span className="wc-bg-pill" title="Auto-refreshed by a rib; you don't run it by hand">
+              background
+            </span>
+          )}
         </div>
       </div>
       <div className="wc-grid">

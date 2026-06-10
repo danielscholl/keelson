@@ -30,6 +30,7 @@ import type {
   SnapshotManager,
   ToolDefinition,
   WorkflowDiscoveryNotice,
+  WorkflowSource,
 } from "@keelson/shared";
 import { runJSON, runText } from "@keelson/shared/exec";
 import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
@@ -229,6 +230,13 @@ export function registerRibTools(tools: readonly ToolDefinition[]): void {
 // so a project workflow that shadows the name (or a same-name collision between
 // ribs) resolves to a different object and simply finds no binding. This stays
 // correct across catalog hot-reloads without any re-pruning.
+export interface RibWorkflowProvenance {
+  ribId: string;
+  // A bound producer (the run path republishes its output to a rib key) — the
+  // heartbeat auto-refreshes it and the operator never starts it by hand.
+  background: boolean;
+}
+
 export function prepareRibWorkflows(contributions: readonly RibWorkflowContribution[]): {
   definitions: WorkflowDefinition[];
   bindings: Map<WorkflowDefinition, RibWorkflowBinding>;
@@ -236,10 +244,14 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
   // validation only. Name-keyed (not object-identity like `bindings`) because
   // its one consumer matches a region's declared `workflow` string.
   boundKeys: Map<string, string>;
+  // Workflow name → owning rib id + background flag, so the catalog can stamp
+  // each entry's source/origin. Name-keyed to match the catalog merge.
+  provenance: Map<string, RibWorkflowProvenance>;
 } {
   const definitions: WorkflowDefinition[] = [];
   const bindings = new Map<WorkflowDefinition, RibWorkflowBinding>();
   const boundKeys = new Map<string, string>();
+  const provenance = new Map<string, RibWorkflowProvenance>();
   for (const contribution of contributions) {
     const parsed = workflowDefinitionSchema.safeParse(contribution.definition);
     if (!parsed.success) {
@@ -261,6 +273,8 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       continue;
     }
     definitions.push(definition);
+    const background = Boolean(contribution.publish);
+    provenance.set(definition.name, { ribId: contribution.ribId, background });
     if (contribution.publish) {
       bindings.set(definition, { publish: contribution.publish });
       if (contribution.bindSnapshotKey !== undefined) {
@@ -268,7 +282,7 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       }
     }
   }
-  return { definitions, bindings, boundKeys };
+  return { definitions, bindings, boundKeys, provenance };
 }
 
 export interface BootstrapWorkflowsOptions {
@@ -279,11 +293,29 @@ export interface BootstrapWorkflowsOptions {
   // of the same name wins (so an operator can override a rib's), and the
   // collision surfaces as a discovery notice.
   extra?: readonly WorkflowDefinition[];
+  // Name → owning rib id + background flag for the `extra` definitions, used to
+  // stamp each catalog entry's source. From prepareRibWorkflows().provenance.
+  ribProvenance?: ReadonlyMap<string, RibWorkflowProvenance>;
+  // Rib id → display name, from the activated manifests, so a rib-sourced entry
+  // carries a human label for the UI badge.
+  ribNames?: ReadonlyMap<string, string>;
 }
+
+// Where a catalog entry came from + whether it's a background producer. Always
+// resolvable for a known name (defaults to a local, foreground workflow).
+export interface WorkflowProvenance {
+  source: WorkflowSource;
+  background: boolean;
+}
+
+const LOCAL_PROVENANCE: WorkflowProvenance = { source: { kind: "local" }, background: false };
 
 export interface WorkflowCatalog {
   list(): WorkflowDefinition[];
   get(name: string): WorkflowDefinition | undefined;
+  // Source (local vs which rib) + background flag for a catalog entry. Returns
+  // a local default for an unknown name so callers need no null guard.
+  provenance(name: string): WorkflowProvenance;
   // Load-errors (file dropped) + non-fatal warnings, normalized for the
   // wire schema. The SPA toasts these once on first Workflows-tab load.
   discoveryNotices(): WorkflowDiscoveryNotice[];
@@ -292,6 +324,7 @@ export interface WorkflowCatalog {
 interface CatalogSnapshot {
   signature: string;
   byName: Map<string, WorkflowDefinition>;
+  provenance: Map<string, WorkflowProvenance>;
   notices: WorkflowDiscoveryNotice[];
 }
 
@@ -334,6 +367,8 @@ function catalogSignature(dir: string): string {
 export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCatalog {
   const dir = opts.workflowDir;
   const extra = opts.extra ?? [];
+  const ribProvenance = opts.ribProvenance;
+  const ribNames = opts.ribNames;
   let cached: CatalogSnapshot | undefined;
 
   const scan = (): CatalogSnapshot => {
@@ -355,8 +390,10 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
       notices.push(toDiscoveryNotice(warning));
     }
     const byName = new Map<string, WorkflowDefinition>();
+    const provenance = new Map<string, WorkflowProvenance>();
     for (const entry of result.workflows) {
       byName.set(entry.workflow.name, entry.workflow);
+      provenance.set(entry.workflow.name, LOCAL_PROVENANCE);
     }
     // Rib-contributed workflows fill in around the filesystem set; a name
     // collision keeps the filesystem definition so an operator can override.
@@ -373,9 +410,20 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
         continue;
       }
       byName.set(definition.name, definition);
+      const prov = ribProvenance?.get(definition.name);
+      const ribId = prov?.ribId;
+      const ribName = ribId !== undefined ? ribNames?.get(ribId) : undefined;
+      provenance.set(definition.name, {
+        source: {
+          kind: "rib",
+          ...(ribId !== undefined ? { ribId } : {}),
+          ...(ribName !== undefined ? { ribName } : {}),
+        },
+        background: prov?.background ?? false,
+      });
     }
     console.log(`[workflows] discovered ${byName.size} workflows`);
-    cached = { signature, byName, notices };
+    cached = { signature, byName, provenance, notices };
     return cached;
   };
 
@@ -386,6 +434,7 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
   return {
     list: () => Array.from(scan().byName.values()),
     get: (name) => scan().byName.get(name),
+    provenance: (name) => scan().provenance.get(name) ?? LOCAL_PROVENANCE,
     discoveryNotices: () => scan().notices,
   };
 }

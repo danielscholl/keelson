@@ -242,6 +242,30 @@ describe("createScheduler", () => {
     expect(h.starts).toEqual(["osdu-cluster"]);
   });
 
+  test("tags producer runs as origin 'scheduled' and prunes that workflow after firing", () => {
+    const origins: Array<string | undefined> = [];
+    const pruned: string[] = [];
+    const controller: Pick<WorkflowController, "startRun" | "findActiveRun"> = {
+      startRun: ({ name, origin }) => {
+        origins.push(origin);
+        return { ok: true, runId: `r-${name}`, conversationId: "c" };
+      },
+      findActiveRun: () => undefined,
+    };
+    createScheduler({
+      schedules: [cold[1]!],
+      controller,
+      snapshotManager: makeSnapshots(new Map()),
+      repoRoot: "/repo",
+      now: () => 1_700_000_000_000,
+      pruneScheduled: (name) => pruned.push(name),
+      setIntervalFn: () => HANDLE,
+      clearIntervalFn: () => {},
+    }).start();
+    expect(origins).toEqual(["scheduled"]);
+    expect(pruned).toEqual(["osdu-cluster"]);
+  });
+
   test("a frame that turns fresh after a fire suppresses the next tick", () => {
     const frames = new Map<string, string>();
     // Controller that never reports active, so only composedAt can suppress.
