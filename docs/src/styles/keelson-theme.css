@@ -61,7 +61,7 @@ body {
   line-height: 1.6;
 }
 
-/* structural callouts (Aside type="note"): keelson navy bar, brass title */
+/* structural callouts (Aside type="note"): keelson ocean-blue bar, brass title */
 .sl-markdown-content .starlight-aside--note {
   --sl-color-asides-text-accent: var(--sl-color-accent);
   --sl-color-asides-border: #2f6fb0;
