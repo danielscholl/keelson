@@ -1,33 +1,59 @@
 ---
 title: Architecture
-description: What the harness owns, where ribs attach, and the rule that keeps them apart.
+description: What the harness owns, how it wires together at boot, where ribs attach, and the rule that keeps them apart.
 sidebar:
   order: 1
 ---
 
-import { Aside, Steps } from "@astrojs/starlight/components";
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
 
 Keelson is a harness with a typed extension contract, not a monolith. This page
-covers the shape of the system: what the harness owns, where ribs attach, and the
-one rule that keeps the two apart.
+is the map of the system: what the harness owns, how the pieces wire together at
+boot, where ribs attach, and the one rule that keeps the harness and the ribs
+apart.
+
+## At a glance
+
+Two surfaces drive one server, and the server fans out into the subsystems that
+do the work. The CLI and the browser both speak to the Keelson server over HTTP
+and WebSocket. The server owns the provider registry, the tool registry, the
+workflow executor, and the snapshot manager, and each of those grounds into local
+state: your OS keychain, the rib packages you install, the SQLite store, and the
+WebSocket frames the browser renders as live surfaces.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/runtime-architecture.png`}
+    alt="A layered runtime diagram. The CLI and Browser SPA sit at the top and connect through an HTTP / WebSocket bus to the Keelson server. The server fans out to four subsystems: providers, the tool registry, workflows, and snapshots. Each subsystem grounds into a stack below it: providers into credentials and the OS keychain, the tool registry into rib tools and ribs, workflows into YAML DAG runs and the SQLite store, snapshots into live surfaces and WebSocket frames. The tool-registry column is brass, marking the path where ribs attach."
+  />
+  <figcaption>
+    Figure 1. The runtime shape. The two surfaces drive one server, which fans
+    out into four subsystems, each grounding into local state. Navy is the
+    harness, ocean blue is something attached to it, brass is a rib, and dashed
+    slate is external state. The brass column is the seam where ribs attach.
+  </figcaption>
+</figure>
 
 ## Backbone and ribs
 
 The split that defines keelson is the split between the harness and the ribs. The
-harness is the part that ships in this repository: the provider registry, the
+**harness** is the part that ships in this repository: the provider registry, the
 tool registry, the workflow executor, the chat surface, the SQLite store, and the
 credential vault. It is the same on every install.
 
 A **rib** is an extension that lives in its own package, named
 `keelson-rib-<name>` on GitHub and `@keelson/rib-<name>` on npm. A rib is the only
-place an external system is touched. Install one as a dependency and the server
-discovers it at boot. Nothing about the harness changes; the rib simply bolts on.
+place an external system is touched. A rib can contribute tools to the agent path,
+workflows to the catalog, and surfaces to the browser, all without changing the
+harness or the SPA. Install one as a dependency and the server discovers it at
+boot; nothing about the harness changes.
 
 ## The frame
 
-Read the system as a ship's frame. The harness is the keelson beam running the
-length of the build. The two surfaces, the CLI and the browser, drive the same
-server. Ribs are the frames fastened to the beam, each owning one external system.
+The same system reads as a ship's frame, the picture the project is named for.
+The harness is the keelson beam running the length of the build. The two surfaces,
+the CLI and the browser, drive the same server. Ribs are the frames fastened to
+the beam, each owning one external system.
 
 <figure>
   <img
@@ -35,9 +61,10 @@ server. Ribs are the frames fastened to the beam, each owning one external syste
     alt="A blueprint side elevation of a hull. The keelson beam is the harness; the ribs are frames bolted on, three labeled as keelson-rib packages. The CLI is the rudder, the browser SPA a surface, and a dashed bridge marks a structure still under construction."
   />
   <figcaption>
-    Figure 1. The harness is the keelson beam. Ribs fasten on as separately
-    versioned packages, the CLI steers from the shell, and the core never imports
-    any rib.
+    Figure 2. The harness is the keelson beam. Ribs fasten on as separately
+    versioned packages, the CLI steers from the shell, and the harness has no
+    compile-time dependency on any rib: installed ribs are discovered and loaded
+    through the rib contract at boot.
   </figcaption>
 </figure>
 
@@ -46,54 +73,162 @@ server. Ribs are the frames fastened to the beam, each owning one external syste
 The harness is a Bun monorepo. Each workspace owns one responsibility, and the
 server is the composition root that wires them together at startup.
 
-| Workspace | Responsibility |
-| --- | --- |
-| `apps/cli` | The `keelson` command. Routes to the server over HTTP and WebSocket when it is up, and falls back to in-process execution when it is down. |
-| `apps/server` | The HTTP and WebSocket server on port 7878. The composition root: it wires the snapshot manager, providers, credentials, and ribs, and owns the SQLite store and the redaction pipeline. |
-| `apps/web` | The React SPA on port 5173. Renders the built-in Chat, Workflows, and Memory surfaces, plus any surface a rib contributes, with no per-rib UI code. |
-| `packages/shared` | The public types and contracts, including the `Rib` interface and the snapshot streaming substrate. It carries no dependencies back on the host. |
-| `packages/workflows` | The DAG executor and YAML schema. The node taxonomy and substitution model borrow concepts from Archon. |
-| `packages/providers` | Pluggable coding-agent SDKs behind one interface: Copilot, Claude, and a no-auth stub for offline use. |
-| `.keelson/` | The runtime home: the SQLite database, the bundled starter workflows, and the named commands and scripts that workflow nodes run. |
+<CardGrid>
+  <Card title="apps/cli">
+    The `keelson` command. Routes to the server over HTTP and WebSocket when it
+    is up, and falls back to in-process execution when it is down.
+  </Card>
+  <Card title="apps/server">
+    The HTTP and WebSocket server on port 7878, and the composition root. It
+    wires the snapshot manager, providers, credentials, and ribs, and owns the
+    SQLite store and the redaction pipeline.
+  </Card>
+  <Card title="apps/web">
+    The React SPA. Renders the built-in Chat, Workflows, and Memory surfaces,
+    plus any surface a rib contributes, with no per-rib UI code.
+  </Card>
+  <Card title="packages/shared">
+    The public types and contracts: the `Rib` interface and the snapshot
+    streaming substrate. It carries no dependency back on the harness.
+  </Card>
+  <Card title="packages/workflows">
+    The DAG executor and YAML schema. The node taxonomy and substitution model
+    borrow concepts from Archon.
+  </Card>
+  <Card title="packages/providers">
+    The coding-agent SDKs behind one interface: Copilot, Claude, and a no-auth
+    stub for offline use.
+  </Card>
+  <Card title="The keelson home">
+    The runtime home at `~/.keelson`: the SQLite database, the bundled starter
+    workflows, the ribs you install, and the named commands and scripts that
+    workflow nodes run.
+  </Card>
+</CardGrid>
 
-## How work reaches a rib
+## How the server wires the system
 
-Ribs are not registered by hand. The server discovers them at boot and folds
-their tools into the same registry the chat agent and workflow prompt nodes
-already read, so a rib's capability reaches every surface without per-rib wiring.
+`startServer()` builds the system in a fixed order, because later stages close
+over earlier ones. The registries have to be populated before the chat and
+workflow handlers capture them, and the snapshot manager has to exist before a
+rib can bind to it.
 
 <Steps>
 
-1. **Discover.** The server walks `node_modules/@keelson` and keeps the `rib-*`
-   packages it finds. A package that fails validation is skipped with a warning,
+1. **Bootstrap providers.** Build the provider registry over the Copilot SDK, the
+   Claude Agent SDK, and the offline stub, each reading credentials through the
+   keychain.
+
+2. **Create the snapshot manager.** Stand up the generic streaming substrate that
+   ribs publish boards through, before any rib can bind to it.
+
+3. **Create the credential store.** Open the keyring-backed vault, so each rib can
+   be handed a namespaced, read-only reader scoped to its own keys.
+
+4. **Discover and activate ribs.** `bootstrapRibs()` scans the keelson home for
+   `@keelson/rib-*` packages, validates each, imports it, and filters the set by
+   `KEELSON_RIBS`.
+
+5. **Register rib tools.** Each active rib's tools join the shared registry that
+   the chat agent and workflow `prompt` nodes read.
+
+6. **Prepare rib workflows.** Narrow each contributed workflow definition against
+   the schema and collect the bindings that republish a run's output to a
+   snapshot key.
+
+7. **Open the SQLite stores.** Conversations, workflow runs, memory, and projects,
+   all in the one database at the keelson home.
+
+8. **Merge the workflow catalog.** The bundled workflows from the home and the
+   rib-contributed definitions become one catalog.
+
+9. **Build the prompt handler and controller.** Wired after the registries are
+   populated; rib tools are passed in default-off, so a workflow `prompt` node
+   sees one only when it allows it by name.
+
+10. **Schedule surfaces and serve.** A heartbeat scheduler keeps snapshot-backed
+    regions fresh on their cadence, then Bun serves the HTTP and WebSocket routes
+    on `127.0.0.1:7878`.
+
+</Steps>
+
+## How a rib attaches
+
+Ribs are not registered by hand. The server discovers them at boot and folds each
+kind of contribution into the surface that already reads it, so a rib reaches
+chat, workflows, and the browser without per-rib wiring.
+
+<Steps>
+
+1. **Discover.** The server walks the keelson home and keeps the `rib-*` packages
+   it finds. A package that fails to import or validate is skipped with a warning,
    never fatally.
 
 2. **Activate.** `KEELSON_RIBS` filters which discovered ribs turn on. When it is
    unset, every discovered rib activates.
 
-3. **Register.** Each rib returns its tools. They land in the shared tool registry
-   and become reachable from both the chat agent and workflow prompt nodes.
+3. **Validate.** Each candidate is checked against the contract: a well-formed id,
+   a display name, and namespaced keys. A failure costs you that rib, not the
+   harness.
 
-4. **Stream.** A rib can publish a snapshot frame under its own namespace. The SPA
-   subscribes and renders it as a live surface, refreshing on its own cadence.
+4. **Register tools.** Each rib's tools land in the shared registry and become
+   reachable from both the chat agent and workflow `prompt` nodes.
+
+5. **Publish snapshots and surfaces.** A rib's `composeBundle`, views, and
+   surfaces become live boards the SPA renders, each under the rib's own
+   namespace and refreshing on its own cadence.
+
+6. **Merge workflows.** Contributed workflow definitions fold into the catalog,
+   and a bound run's output republishes to the rib's snapshot key.
+
+7. **Expose actions and auth.** `onAction` handles a board's buttons over the
+   loopback API; `authStatus` surfaces a credential probe through `GET /api/ribs`.
+
+8. **Dispose.** At shutdown the harness awaits each rib's `dispose` before the
+   database closes, so a rib holding sockets or child processes tears down
+   cleanly.
 
 </Steps>
 
+The exact shapes, rules, and order live in [the rib contract](../../reference/rib-contract/).
+
+## The boundary rule
+
+One rule keeps the harness and the ribs apart, and it is four concrete
+boundaries, not a slogan.
+
+- **Static dependency.** The harness has no compile-time dependency on any rib.
+  Installed ribs are discovered and imported at boot through the `Rib` contract,
+  which is what lets the harness ship once and stay stable while any number of
+  ribs come and go.
+- **Namespace.** Everything a rib publishes lives under `rib:<id>` or
+  `rib:<id>:*`. Registering a snapshot key outside that namespace throws, and
+  reading another rib's keys returns nothing.
+- **Credentials.** Each rib receives a namespaced, read-only credential reader
+  scoped to `rib_<id>_*`. A rib cannot read another rib's secrets, or the
+  harness's.
+- **Failure isolation.** A malformed rib, a bad tool, or a duplicate tool name is
+  skipped with one warning. One broken rib costs you that rib, never the server.
+
 <Aside type="note" title="The boundary rule">
-The harness never imports a rib. External systems are touched only inside ribs.
-This is what lets the harness ship once and stay stable while any number of ribs
-come and go, exactly as a keelson does not depend on any single frame.
+The harness imports the `Rib` contract, never a rib. External systems are touched
+only inside ribs. This is what lets the harness ship once and stay stable while
+any number of ribs come and go, exactly as a keelson does not depend on any single
+frame. The boundary guards against collisions and accidents; it is not a sandbox.
+A rib runs in-process with the server.
 </Aside>
 
 ## Where to go next
 
-This page is the map; the rest of the concepts tier goes one level deeper on
-each part of it.
+This page is the map; the rest of the tier goes one level deeper on each part of
+it.
 
-- [The rib model](../the-rib-model/): the extension philosophy and the
-  enforced boundary.
+- [The rib contract](../../reference/rib-contract/): the exact `Rib` interface,
+  the context the harness injects, and the rules it enforces.
+- [The rib model](../the-rib-model/): the extension philosophy and the enforced
+  boundary.
 - [Workflows](../workflows/): the deterministic engine behind the catalog.
-- [Snapshots and surfaces](../snapshots-and-surfaces/): how rib data becomes
-  live UI.
-- [Memory and state](../memory-and-state/): where every byte lives and what
-  the agent sees each turn.
+- [Snapshots and surfaces](../snapshots-and-surfaces/): how rib data becomes live
+  UI.
+- [Memory and state](../memory-and-state/): where every byte lives and what the
+  agent sees each turn.
