@@ -28,6 +28,10 @@ package.json.bak
 .keelson/keelson.db-wal
 .keelson/keelson.db-shm
 
+# Running-server record + background-serve logs (`keelson serve start`).
+.keelson/server.json
+.keelson/logs/
+
 # A `keelson rib add` run against the repo-local home seeds these.
 .keelson/package.json
 .keelson/bun.lock

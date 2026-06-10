@@ -2,14 +2,17 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
+import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
 import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import pkg from "../package.json" with { type: "json" };
 import {
   bootstrapPromptHandler,
   bootstrapProviders,
@@ -67,6 +70,24 @@ export interface StartServerConfig {
   // unset/missing in a source checkout → API only, and the Vite dev server
   // on :5173 owns the UI.
   webDir?: string;
+  // When set, registers POST /api/server/shutdown gated by the bearer token.
+  // The token never travels over the network unprompted — it lives in the
+  // home's server.json, so only a caller that can read the operator's disk
+  // (keelson serve stop) can present it. onShutdown is invoked after the
+  // response is sent; the caller owns process exit.
+  shutdown?: { token: string; onShutdown: () => void };
+  // Operator-facing version recorded in server.json (`keelson serve status`
+  // reports it). The CLI passes its release version; the private @keelson/server
+  // package's own version is meaningless to an operator.
+  version?: string;
+}
+
+// Hash both sides so timingSafeEqual gets equal-length buffers regardless of
+// what the caller presented.
+function shutdownTokenMatches(presented: string, expected: string): boolean {
+  const a = createHash("sha256").update(presented).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 // Serve a file from the built SPA, with a single-page-app fallback: an
@@ -304,6 +325,20 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     }),
   );
 
+  if (config.shutdown) {
+    const { token, onShutdown } = config.shutdown;
+    app.post("/api/server/shutdown", (c) => {
+      const header = c.req.header("authorization") ?? "";
+      const presented = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+      if (presented.length === 0 || !shutdownTokenMatches(presented, token)) {
+        return c.json({ ok: false, error: "invalid shutdown token" }, 401);
+      }
+      // Let the response flush before the listener is torn down.
+      setTimeout(onShutdown, 50);
+      return c.json({ ok: true });
+    });
+  }
+
   app.get("/api/config", (c) =>
     c.json({
       schemaVersion: SCHEMA_VERSION,
@@ -433,24 +468,61 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   };
 }
 
-// Run the server and block until a termination signal, then shut down once and
-// exit. This is the process-owning entry both `bun src/index.ts` (dev) and
-// `keelson serve` (in-process) use; startServer itself installs no signal
-// handlers. SIGHUP (SSH/terminal close) is treated as a graceful stop.
+// Run the server and block until a termination signal (or an authorized
+// POST /api/server/shutdown), then shut down once and exit. This is the
+// process-owning entry both `bun src/index.ts` (dev) and `keelson serve`
+// (in-process) use; startServer itself installs no signal handlers. It also
+// owns the home's server.json record so `keelson serve status`/`stop` can
+// find the pid, URL, and shutdown token. SIGHUP (SSH/terminal close) is a
+// graceful stop in the foreground; a `keelson serve start` child sets
+// KEELSON_SERVE_BACKGROUND=1 and ignores it so the server outlives the
+// terminal that launched it.
 export async function serveUntilSignal(config: StartServerConfig = {}): Promise<never> {
-  const handle = await startServer(config);
+  const home = resolveKeelsonHome();
+  const shutdownToken = randomBytes(32).toString("hex");
+  let handle: ServerHandle | null = null;
   let shuttingDown = false;
-  const onSignal = () => {
-    if (shuttingDown) return;
+  const stopOnce = () => {
+    if (shuttingDown || !handle) return;
     shuttingDown = true;
+    // Only remove the record we own — a newer server in the same home may
+    // have overwritten it.
+    if (readServerState(home)?.pid === process.pid) clearServerState(home);
     void handle.shutdown().finally(() => process.exit(0));
   };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
+  handle = await startServer({
+    ...config,
+    shutdown: { token: shutdownToken, onShutdown: stopOnce },
+  });
+  try {
+    writeServerState(
+      {
+        pid: process.pid,
+        url: handle.url.replace(/\/+$/, ""),
+        startedAt: new Date().toISOString(),
+        version: config.version ?? pkg.version,
+        schemaVersion: SCHEMA_VERSION,
+        shutdownToken,
+      },
+      home,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[keelson] could not write ${home}/server.json: ${msg}`);
+  }
+  process.on("SIGINT", stopOnce);
+  process.on("SIGTERM", stopOnce);
   // SIGHUP (terminal hangup) is POSIX-only — Bun/Node don't deliver it on
   // Windows and registering a listener there can throw.
-  if (process.platform !== "win32") process.on("SIGHUP", onSignal);
-  // Park forever; onSignal owns process exit. Bun.serve already keeps the loop alive.
+  if (process.platform !== "win32") {
+    if (process.env.KEELSON_SERVE_BACKGROUND === "1") {
+      // A no-op listener overrides the default terminate-on-SIGHUP.
+      process.on("SIGHUP", () => {});
+    } else {
+      process.on("SIGHUP", stopOnce);
+    }
+  }
+  // Park forever; stopOnce owns process exit. Bun.serve already keeps the loop alive.
   return await new Promise<never>(() => {});
 }
 

@@ -32,7 +32,7 @@ export async function runServerCheck(deps: ServerDeps = {}): Promise<CategoryRes
         name: "GET /api/health",
         status: "warn",
         detail: "not reachable",
-        hint: "run `keelson serve` to start the API server on http://127.0.0.1:7878",
+        hint: "run `keelson serve start` to start the API server on http://127.0.0.1:7878",
       };
 
   return { category: "server", checks: [check] };
