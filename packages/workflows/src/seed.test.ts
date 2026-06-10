@@ -11,7 +11,7 @@ import * as os from "node:os";
 // @ts-ignore
 import * as path from "node:path";
 
-import { seedStarterWorkflows } from "./seed.ts";
+import { isWorkflowYaml, seedStarterWorkflows } from "./seed.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "keelson-seed-"));
@@ -77,5 +77,27 @@ describe("seedStarterWorkflows", () => {
 
     expect(seedStarterWorkflows(target, source)).toEqual(["a.yaml"]);
     expect(fs.readdirSync(target)).toEqual(["a.yaml"]);
+  });
+
+  test("a failed copy leaves the target retryable — no YAML, no staging litter", () => {
+    const source = makeSource(["a.yaml"]);
+    // A directory whose name matches isWorkflowYaml: copyFileSync(dir) throws
+    // EISDIR mid-loop, standing in for a real failure (ENOSPC/EACCES/kill).
+    fs.mkdirSync(path.join(source, "z.yaml"));
+    const target = path.join(tmpDir(), "workflows");
+
+    expect(() => seedStarterWorkflows(target, source)).toThrow();
+    // No real workflow landed, so the next run is free to reseed the full set —
+    // the "target holds YAML" guard never trips on a partial seed.
+    const left = fs.readdirSync(target);
+    expect(left.filter(isWorkflowYaml)).toEqual([]);
+    expect(left.some((n) => n.endsWith(".seedtmp"))).toBe(false);
+  });
+
+  test("isWorkflowYaml matches .yaml/.yml only", () => {
+    expect(isWorkflowYaml("a.yaml")).toBe(true);
+    expect(isWorkflowYaml("a.yml")).toBe(true);
+    expect(isWorkflowYaml("a.txt")).toBe(false);
+    expect(isWorkflowYaml(".a.yaml.1234.seedtmp")).toBe(false);
   });
 });

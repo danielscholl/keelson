@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { $ } from "bun";
+import { isWorkflowYaml } from "../packages/workflows/src/seed.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const OUT = join(ROOT, "dist", "release");
@@ -115,7 +116,7 @@ cpSync(webDist, join(CLI_PKG_DIR, "web"), { recursive: true });
 //     runtime seeds them into a fresh home on first run (seedStarterWorkflows
 //     in @keelson/workflows resolves the dir relative to the bundle).
 const starterDir = join(ROOT, ".keelson", "workflows");
-const starters = readdirSync(starterDir).filter((n) => n.endsWith(".yaml") || n.endsWith(".yml"));
+const starters = readdirSync(starterDir).filter(isWorkflowYaml);
 if (starters.length === 0) {
   throw new Error(`expected starter workflow YAMLs in ${starterDir}`);
 }
