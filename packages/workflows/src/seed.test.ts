@@ -11,7 +11,7 @@ import * as os from "node:os";
 // @ts-ignore
 import * as path from "node:path";
 
-import { isWorkflowYaml, seedStarterWorkflows } from "./seed.ts";
+import { isWorkflowYaml, seedStarterAssets, seedStarterWorkflows } from "./seed.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "keelson-seed-"));
@@ -23,6 +23,21 @@ function makeSource(names: string[]): string {
     fs.writeFileSync(path.join(dir, name), `name: ${name}\n`);
   }
   return dir;
+}
+
+// A bundle root with the three starter-asset dirs populated, mirroring how
+// build-release.ts stages them next to the cli bundle.
+function makeBundle(): string {
+  const root = tmpDir();
+  for (const [kind, name] of [
+    ["workflows", "smoke-test.yaml"],
+    ["commands", "e2e-echo-command.md"],
+    ["scripts", "echo-args.js"],
+  ]) {
+    fs.mkdirSync(path.join(root, kind));
+    fs.writeFileSync(path.join(root, kind, name), `// ${name}\n`);
+  }
+  return root;
 }
 
 describe("seedStarterWorkflows", () => {
@@ -99,5 +114,78 @@ describe("seedStarterWorkflows", () => {
     expect(isWorkflowYaml("a.yml")).toBe(true);
     expect(isWorkflowYaml("a.txt")).toBe(false);
     expect(isWorkflowYaml(".a.yaml.1234.seedtmp")).toBe(false);
+  });
+});
+
+describe("seedStarterAssets", () => {
+  test("seeds workflows, commands, and scripts into a fresh home", () => {
+    const bundle = makeBundle();
+    const home = path.join(tmpDir(), "home");
+
+    const seeded = seedStarterAssets(home, path.join(home, "workflows"), bundle);
+
+    expect(seeded).toEqual({
+      workflows: ["smoke-test.yaml"],
+      commands: ["e2e-echo-command.md"],
+      scripts: ["echo-args.js"],
+    });
+    expect(fs.readdirSync(path.join(home, "workflows"))).toEqual(["smoke-test.yaml"]);
+    expect(fs.readdirSync(path.join(home, "commands"))).toEqual(["e2e-echo-command.md"]);
+    expect(fs.readdirSync(path.join(home, "scripts"))).toEqual(["echo-args.js"]);
+  });
+
+  test("honors a workflowsDir override while commands/scripts stay under home", () => {
+    const bundle = makeBundle();
+    const home = path.join(tmpDir(), "home");
+    const customWorkflows = path.join(tmpDir(), "elsewhere");
+
+    seedStarterAssets(home, customWorkflows, bundle);
+
+    expect(fs.existsSync(path.join(customWorkflows, "smoke-test.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(home, "workflows"))).toBe(false);
+    expect(fs.existsSync(path.join(home, "commands", "e2e-echo-command.md"))).toBe(true);
+    expect(fs.existsSync(path.join(home, "scripts", "echo-args.js"))).toBe(true);
+  });
+
+  test("skips a populated kind without affecting the others", () => {
+    const bundle = makeBundle();
+    const home = path.join(tmpDir(), "home");
+    fs.mkdirSync(path.join(home, "commands"), { recursive: true });
+    fs.writeFileSync(path.join(home, "commands", "mine.md"), "# mine\n");
+
+    const seeded = seedStarterAssets(home, path.join(home, "workflows"), bundle);
+
+    expect(seeded.commands).toEqual([]);
+    expect(fs.readdirSync(path.join(home, "commands"))).toEqual(["mine.md"]);
+    expect(seeded.workflows).toEqual(["smoke-test.yaml"]);
+    expect(seeded.scripts).toEqual(["echo-args.js"]);
+  });
+
+  test("seeds only files whose extension the kind recognizes", () => {
+    const bundle = makeBundle();
+    // Stray non-asset files alongside the real starters must not be seeded.
+    fs.writeFileSync(path.join(bundle, "scripts", "notes.txt"), "ignore me");
+    fs.writeFileSync(path.join(bundle, "commands", "data.json"), "{}");
+    const home = path.join(tmpDir(), "home");
+
+    const seeded = seedStarterAssets(home, path.join(home, "workflows"), bundle);
+
+    expect(seeded.scripts).toEqual(["echo-args.js"]);
+    expect(seeded.commands).toEqual(["e2e-echo-command.md"]);
+    expect(fs.readdirSync(path.join(home, "scripts"))).toEqual(["echo-args.js"]);
+    expect(fs.readdirSync(path.join(home, "commands"))).toEqual(["e2e-echo-command.md"]);
+  });
+
+  test("no-ops cleanly when the bundle root has no asset dirs", () => {
+    const home = path.join(tmpDir(), "home");
+
+    const seeded = seedStarterAssets(
+      home,
+      path.join(home, "workflows"),
+      path.join(tmpDir(), "empty"),
+    );
+
+    expect(seeded).toEqual({ workflows: [], commands: [], scripts: [] });
+    expect(fs.existsSync(path.join(home, "workflows"))).toBe(false);
   });
 });

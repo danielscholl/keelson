@@ -9,7 +9,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
-import { seedStarterWorkflows } from "@keelson/workflows";
+import { seedStarterAssets } from "@keelson/workflows";
 import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -145,9 +145,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // A seed failure must not block boot — the server is fully usable with an
   // empty workflows dir.
   try {
-    seedStarterWorkflows(paths.workflowsDir);
+    seedStarterAssets(paths.home, paths.workflowsDir);
   } catch (err) {
-    console.warn(`failed to seed starter workflows: ${err}`);
+    console.warn(`failed to seed starter assets: ${err}`);
   }
 
   // Hoist before bootstrapProviders — those code paths emit console.warn on

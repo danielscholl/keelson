@@ -85,7 +85,12 @@ export {
   type WorkflowLoadWarning,
 } from "./loader.ts";
 export * from "./schema/index.ts";
-export { isWorkflowYaml, seedStarterWorkflows } from "./seed.ts";
+export {
+  isWorkflowYaml,
+  type SeededAssets,
+  seedStarterAssets,
+  seedStarterWorkflows,
+} from "./seed.ts";
 export {
   shellQuote,
   substituteNodeOutputRefs,
