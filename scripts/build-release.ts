@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { $ } from "bun";
+import { isWorkflowYaml } from "../packages/workflows/src/seed.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const OUT = join(ROOT, "dist", "release");
@@ -92,7 +93,7 @@ const cliPkg = {
   },
   peerDependencies: { "@keelson/shared": `^${VERSION}` },
   peerDependenciesMeta: { "@keelson/shared": { optional: true } },
-  files: ["dist", "web", "LICENSE", "NOTICE"],
+  files: ["dist", "web", "workflows", "LICENSE", "NOTICE"],
 };
 writeFileSync(join(CLI_PKG_DIR, "package.json"), `${JSON.stringify(cliPkg, null, 2)}\n`);
 for (const f of ["LICENSE", "NOTICE"]) {
@@ -110,6 +111,19 @@ if (!existsSync(join(webDist, "index.html"))) {
   throw new Error(`expected a built SPA at ${webDist} (apps/web build produced no index.html)`);
 }
 cpSync(webDist, join(CLI_PKG_DIR, "web"), { recursive: true });
+
+// 2c. Ship the repo's starter workflows at `workflows/` next to dist/ — the
+//     runtime seeds them into a fresh home on first run (seedStarterWorkflows
+//     in @keelson/workflows resolves the dir relative to the bundle).
+const starterDir = join(ROOT, ".keelson", "workflows");
+const starters = readdirSync(starterDir).filter(isWorkflowYaml);
+if (starters.length === 0) {
+  throw new Error(`expected starter workflow YAMLs in ${starterDir}`);
+}
+mkdirSync(join(CLI_PKG_DIR, "workflows"), { recursive: true });
+for (const n of starters) {
+  cpSync(join(starterDir, n), join(CLI_PKG_DIR, "workflows", n));
+}
 
 // 3. Pack the CLI package.
 console.log("[release] packing @keelson/cli");

@@ -72,8 +72,9 @@ keelson serve stop                # graceful shutdown
 Ctrl-C to stop.)
 
 `keelson serve` serves the React UI (Chat, Workflows, and each rib's surfaces) at
-`http://127.0.0.1:7878` — same origin as the API. Workflows come from the ribs you
-install (or drop your own YAML in `~/.keelson/workflows`). Real agents need a
+`http://127.0.0.1:7878` — same origin as the API. A fresh install seeds a set of
+starter workflows into `~/.keelson/workflows`; ribs contribute more, and you can
+drop your own YAML alongside them. Real agents need a
 Copilot subscription or an Anthropic API key. No keys? Add `KEELSON_PROVIDERS=stub`
 for an offline echo provider to try the harness without credentials.
 
