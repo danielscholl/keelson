@@ -110,10 +110,6 @@ export interface SchedulerDeps {
   snapshotManager: Pick<SnapshotManager, "latest">;
   repoRoot: string;
   disabled?: boolean;
-  // Retention hook: after a producer run is fired, trim that workflow's older
-  // terminal scheduled runs (the snapshot is the durable output). Optional so
-  // the scheduler's unit tests stay storeless.
-  pruneScheduled?: (workflowName: string) => void;
   // Injection points so tests drive ticks deterministically without real timers.
   now?: () => number;
   setIntervalFn?: IntervalSetter;
@@ -137,7 +133,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     repoRoot,
     disabled = false,
     now = Date.now,
-    pruneScheduled,
   } = deps;
   const setIntervalFn: IntervalSetter = deps.setIntervalFn ?? setInterval;
   const clearIntervalFn: IntervalClearer = deps.clearIntervalFn ?? clearInterval;
@@ -167,7 +162,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       });
       if (result.ok) {
         started += 1;
-        pruneScheduled?.(schedule.workflow);
       } else {
         console.warn(
           `[keelson] scheduler could not start '${schedule.workflow}': ${result.message}`,

@@ -242,9 +242,11 @@ describe("createScheduler", () => {
     expect(h.starts).toEqual(["osdu-cluster"]);
   });
 
-  test("tags producer runs as origin 'scheduled' and prunes that workflow after firing", () => {
+  test("tags producer runs as origin 'scheduled'", () => {
+    // Retention itself is a creation-time invariant in startRunCore (covered by
+    // the route/store tests); the scheduler's only retention-relevant job is to
+    // stamp the right origin so those runs become prunable.
     const origins: Array<string | undefined> = [];
-    const pruned: string[] = [];
     const controller: Pick<WorkflowController, "startRun" | "findActiveRun"> = {
       startRun: ({ name, origin }) => {
         origins.push(origin);
@@ -258,12 +260,10 @@ describe("createScheduler", () => {
       snapshotManager: makeSnapshots(new Map()),
       repoRoot: "/repo",
       now: () => 1_700_000_000_000,
-      pruneScheduled: (name) => pruned.push(name),
       setIntervalFn: () => HANDLE,
       clearIntervalFn: () => {},
     }).start();
     expect(origins).toEqual(["scheduled"]);
-    expect(pruned).toEqual(["osdu-cluster"]);
   });
 
   test("a frame that turns fresh after a fire suppresses the next tick", () => {

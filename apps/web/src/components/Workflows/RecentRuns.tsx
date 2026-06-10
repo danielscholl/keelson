@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { bulkDeleteWorkflowRuns, deleteWorkflowRun, listWorkflowRuns } from "../../api.ts";
 import { useSettings } from "../../hooks/useSettings.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { visibleRuns } from "../../lib/rib.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { SkeletonStack } from "../Skeleton.tsx";
 import { useToast } from "../Toast.tsx";
@@ -77,7 +78,7 @@ export function RecentRuns({
   onRunDeleted,
   projectsById,
 }: RecentRunsProps) {
-  const { settings, setShowScheduledRuns } = useSettings();
+  const { settings, setShowScheduledRuns, isWorkflowSourceHidden } = useSettings();
   const showScheduled = settings.showScheduledRuns ?? false;
   const [rows, setRows] = useState<RunRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -152,6 +153,11 @@ export function RecentRuns({
     return <div className="empty-state">Failed to load run history: {error}</div>;
   }
 
+  // Honor the same per-rib hide the catalog uses (view-only): a hidden rib's
+  // runs drop out of the feed too, so hiding declutters the list AND the runs.
+  const visibleRows = visibleRuns(rows, isWorkflowSourceHidden);
+  const hiddenByRib = rows.length - visibleRows.length;
+
   const scheduledToggle = (
     <label className="bg-toggle">
       <input
@@ -163,25 +169,27 @@ export function RecentRuns({
     </label>
   );
 
-  if (rows.length === 0) {
+  if (visibleRows.length === 0) {
     return (
       <>
         <div className="runs-toolbar">{scheduledToggle}</div>
         <div className="empty-state">
           <div className="empty-state-title">No runs yet</div>
           <div className="empty-state-body">
-            {showScheduled
-              ? "Kick a workflow above to populate history."
-              : "No manual runs yet. Kick a workflow above, or enable “Show scheduled” to see background refreshes."}
+            {hiddenByRib > 0
+              ? `${hiddenByRib} run${hiddenByRib === 1 ? "" : "s"} hidden by a rib filter. Show the rib in the catalog to see them.`
+              : showScheduled
+                ? "Kick a workflow above to populate history."
+                : "No manual runs yet. Kick a workflow above, or enable “Show scheduled” to see background refreshes."}
           </div>
         </div>
       </>
     );
   }
 
-  const allSelected = rows.every((r) => selected.has(r.runId));
+  const allSelected = visibleRows.every((r) => selected.has(r.runId));
   const toggleAll = () => {
-    setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.runId)));
+    setSelected(allSelected ? new Set() : new Set(visibleRows.map((r) => r.runId)));
   };
   const toggleOne = (runId: string) => {
     setSelected((prev) => {
@@ -264,7 +272,7 @@ export function RecentRuns({
           <span>Started</span>
           <span style={{ textAlign: "right" }}>Actions</span>
         </div>
-        {rows.map((r) => {
+        {visibleRows.map((r) => {
           const openRun = () => onOpenRun(r.runId, r.workflowName);
           const project = r.projectId ? projectsById?.get(r.projectId) : undefined;
           const projectLabel =

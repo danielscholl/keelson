@@ -275,35 +275,15 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   for (const warning of scheduleWarnings) {
     console.warn(`[keelson] ${warning}`);
   }
-  // Producer runs are refresh machinery, not history: keep only the newest few
-  // terminal scheduled runs per workflow (the snapshot is the durable output)
-  // so OSDU-style high-cadence lanes don't grow workflow_runs without bound. The
-  // linked conversation is cascaded so it doesn't leak either.
-  const SCHEDULED_RUN_RETENTION = 5;
-  const pruneScheduled = (workflowName: string): void => {
-    for (const { runId, conversationId } of workflowStore.scheduledRunsToPrune(
-      workflowName,
-      SCHEDULED_RUN_RETENTION,
-    )) {
-      try {
-        workflowStore.deleteRun(runId);
-        if (conversationId !== null) store.delete(conversationId);
-      } catch (err) {
-        console.warn(
-          `[keelson] failed to prune scheduled run ${runId}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-    }
-  };
+  // Scheduled-run retention (keep newest few terminal producer runs per
+  // workflow) is a creation-time invariant in startRunCore, so it covers the
+  // heartbeat and panel /refresh uniformly — nothing to wire here.
   const scheduler = createScheduler({
     schedules: surfaceSchedules,
     controller: workflowController,
     snapshotManager,
     repoRoot: KEELSON_HOME,
     disabled: process.env.KEELSON_DISABLE_SCHEDULER === "1",
-    pruneScheduled,
   });
   scheduler.start();
 

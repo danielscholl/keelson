@@ -185,6 +185,33 @@ function ribIdFor(catalog: WorkflowCatalog, name: string): string | null {
   return source.kind === "rib" ? (source.ribId ?? null) : null;
 }
 
+// Producer runs are refresh machinery, not history: keep only the newest few
+// terminal `scheduled` runs per workflow (the snapshot is the durable output),
+// cascading their linked conversations. Best-effort — a prune failure must never
+// break the run that triggered it.
+const SCHEDULED_RUN_RETENTION = 5;
+function pruneScheduledRuns(
+  store: WorkflowStore,
+  conversationStore: ConversationStore,
+  workflowName: string,
+): void {
+  for (const { runId, conversationId } of store.scheduledRunsToPrune(
+    workflowName,
+    SCHEDULED_RUN_RETENTION,
+  )) {
+    try {
+      store.deleteRun(runId);
+      if (conversationId !== null) conversationStore.delete(conversationId);
+    } catch (err) {
+      console.warn(
+        `[workflows] failed to prune scheduled run ${runId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+}
+
 function workflowToDetail(workflow: WorkflowDefinition) {
   return {
     name: workflow.name,
@@ -708,6 +735,12 @@ function startRunCore(
     dedupeKey,
     conversationId: conversation.id,
   });
+  // Retention is a creation-time invariant of scheduled runs, so it covers the
+  // heartbeat AND panel /refresh uniformly (rather than only firing on a
+  // scheduler tick). Manual runs are never auto-pruned.
+  if (origin === "scheduled") {
+    pruneScheduledRuns(store, conversationStore, name);
+  }
   return { runId, conversationId: conversation.id };
 }
 

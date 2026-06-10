@@ -24,6 +24,7 @@ import { createProjectsStore, type ProjectsStore } from "../src/projects-store.t
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
 import {
   createActiveRuns,
+  createWorkflowController,
   createWorkflowSubscribers,
   workflowRunWebSocketHandlers,
   workflowsRoutes,
@@ -2157,6 +2158,72 @@ nodes:
     expect(await ids("?origin=manual")).toEqual(["m0"]);
     expect(await ids("?origin=scheduled")).toEqual(["s0"]);
     expect(await ids("")).toEqual(["s0", "m0"]);
+  });
+
+  test("starting a scheduled run prunes that workflow's older scheduled runs (creation-time retention)", async () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    writeWorkflow(
+      "producer.yaml",
+      `name: producer
+description: a producer
+nodes:
+  - id: n
+    bash: echo hi
+`,
+    );
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const activeRuns = createActiveRuns();
+    const subscribers = createWorkflowSubscribers();
+    const controller = createWorkflowController(
+      { catalog, store, conversationStore },
+      activeRuns,
+      subscribers,
+    );
+
+    // Seed 6 OLD terminal scheduled runs for the producer (retention keeps 5).
+    const seededConvs: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const conv = conversationStore.create({ providerId: "workflow", name: `seed-${i}` });
+      seededConvs.push(conv.id);
+      store.createRun({
+        runId: `seed-${i}`,
+        workflowName: "producer",
+        inputs: {},
+        startedAt: `2025-01-01T00:00:0${i}.000Z`,
+        conversationId: conv.id,
+        origin: "scheduled",
+      });
+      store.updateRunStatus({
+        runId: `seed-${i}`,
+        status: "succeeded",
+        completedAt: "x",
+        error: null,
+      });
+    }
+
+    // A scheduled start (the heartbeat / panel-refresh path) prunes synchronously.
+    const result = controller.startRun({
+      name: "producer",
+      inputs: {},
+      workingDir: tmpDir,
+      origin: "scheduled",
+    });
+    expect(result.ok).toBe(true);
+
+    // Newest 5 (the new running run + seed-5..seed-2) are kept; seed-0/1 pruned,
+    // their linked conversations cascaded.
+    expect(store.getRun("seed-0")).toBeUndefined();
+    expect(store.getRun("seed-1")).toBeUndefined();
+    expect(store.getRun("seed-2")).toBeDefined();
+    expect(store.getRun("seed-5")).toBeDefined();
+    expect(Boolean(conversationStore.get(seededConvs[0]!))).toBe(false);
+    expect(Boolean(conversationStore.get(seededConvs[1]!))).toBe(false);
+    expect(Boolean(conversationStore.get(seededConvs[2]!))).toBe(true);
+
+    // Let the background bash run finish so teardown doesn't race a late write.
+    if (result.ok) await activeRuns.get(result.runId)?.done;
   });
 
   // -------------------------------------------------------------------------

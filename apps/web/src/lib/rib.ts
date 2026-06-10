@@ -31,3 +31,13 @@ export function ribAccent(ribId: string): RibAccent {
     border: `hsl(${h} 60% 45% / 0.35)`,
   };
 }
+
+// Drop rows whose owning rib is hidden (view-only per-rib hide). Shared by the
+// runs feed so hiding a rib declutters the runs list the same way it declutters
+// the catalog. Rows with no ribId (local workflows) are always kept.
+export function visibleRuns<T extends { ribId: string | null }>(
+  rows: readonly T[],
+  isHidden: (ribId: string) => boolean,
+): T[] {
+  return rows.filter((r) => !(r.ribId !== null && isHidden(r.ribId)));
+}
