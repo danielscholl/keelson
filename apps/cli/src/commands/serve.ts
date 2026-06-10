@@ -159,7 +159,13 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
       );
       process.exit(EXIT_FAIL);
     }
-    const info = await probeServer({ baseUrl: defaultBaseUrl() });
+    // A refused connection fails instantly, so boot polling stays on the 250ms
+    // cadence; the longer timeout only matters once the port is bound and the
+    // health route is slow to answer (loaded machine mid-bootstrap).
+    const info = await probeServer({
+      baseUrl: defaultBaseUrl(),
+      timeoutMs: STATUS_PROBE_TIMEOUT_MS,
+    });
     if (info) {
       emit(
         {
