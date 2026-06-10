@@ -85,6 +85,7 @@ export {
   type WorkflowLoadWarning,
 } from "./loader.ts";
 export * from "./schema/index.ts";
+export { seedStarterWorkflows } from "./seed.ts";
 export {
   shellQuote,
   substituteNodeOutputRefs,

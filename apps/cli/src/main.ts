@@ -7,6 +7,8 @@ import {
   reasoningEffortLevelSchema,
   SCHEMA_VERSION,
 } from "@keelson/shared";
+import { keelsonPaths } from "@keelson/shared/paths";
+import { seedStarterWorkflows } from "@keelson/workflows";
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 
@@ -573,6 +575,16 @@ function cleanCommanderMessage(message: string): string {
 
 export async function run(argv: readonly string[]): Promise<void> {
   const wantsJson = argv.includes("--json");
+
+  // First-run provisioning: a fresh home gets the starter workflows shipped in
+  // the cli package, so `workflow list` and the SPA have something to show
+  // before any rib is installed. No-op once the dir holds YAML, and a failure
+  // must not block the command.
+  try {
+    seedStarterWorkflows(keelsonPaths().workflowsDir);
+  } catch {
+    // non-fatal: discovery just sees an empty dir
+  }
 
   const program = buildProgram();
   applyExitOverride(program);
