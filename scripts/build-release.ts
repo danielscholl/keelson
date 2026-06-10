@@ -22,7 +22,6 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { $ } from "bun";
-import { isWorkflowYaml } from "../packages/workflows/src/seed.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const OUT = join(ROOT, "dist", "release");
@@ -93,7 +92,7 @@ const cliPkg = {
   },
   peerDependencies: { "@keelson/shared": `^${VERSION}` },
   peerDependenciesMeta: { "@keelson/shared": { optional: true } },
-  files: ["dist", "web", "workflows", "LICENSE", "NOTICE"],
+  files: ["dist", "web", "workflows", "commands", "scripts", "LICENSE", "NOTICE"],
 };
 writeFileSync(join(CLI_PKG_DIR, "package.json"), `${JSON.stringify(cliPkg, null, 2)}\n`);
 for (const f of ["LICENSE", "NOTICE"]) {
@@ -112,17 +111,21 @@ if (!existsSync(join(webDist, "index.html"))) {
 }
 cpSync(webDist, join(CLI_PKG_DIR, "web"), { recursive: true });
 
-// 2c. Ship the repo's starter workflows at `workflows/` next to dist/ — the
-//     runtime seeds them into a fresh home on first run (seedStarterWorkflows
-//     in @keelson/workflows resolves the dir relative to the bundle).
-const starterDir = join(ROOT, ".keelson", "workflows");
-const starters = readdirSync(starterDir).filter(isWorkflowYaml);
-if (starters.length === 0) {
-  throw new Error(`expected starter workflow YAMLs in ${starterDir}`);
-}
-mkdirSync(join(CLI_PKG_DIR, "workflows"), { recursive: true });
-for (const n of starters) {
-  cpSync(join(starterDir, n), join(CLI_PKG_DIR, "workflows", n));
+// 2c. Ship the repo's starter kit next to dist/ — the starter workflows plus
+//     the command/script files they reference — so the runtime seeds them into
+//     a fresh home on first run (seedStarterAssets in @keelson/workflows
+//     resolves these dirs relative to the bundle). Staging ships every non-dot
+//     file; the seed's per-kind predicate is authoritative on what's relevant.
+for (const kind of ["workflows", "commands", "scripts"] as const) {
+  const srcDir = join(ROOT, ".keelson", kind);
+  const files = readdirSync(srcDir).filter((n) => !n.startsWith("."));
+  if (files.length === 0) {
+    throw new Error(`expected starter ${kind} in ${srcDir}`);
+  }
+  mkdirSync(join(CLI_PKG_DIR, kind), { recursive: true });
+  for (const n of files) {
+    cpSync(join(srcDir, n), join(CLI_PKG_DIR, kind, n));
+  }
 }
 
 // 3. Pack the CLI package.
