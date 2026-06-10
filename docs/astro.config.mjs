@@ -1,6 +1,7 @@
 // @ts-check
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
+import remarkGfm from "remark-gfm";
 import starlightLlmsTxt from "starlight-llms-txt";
 
 // Deploy defaults target this repo's GitHub Pages project URL
@@ -11,6 +12,12 @@ export default defineConfig({
   site: "https://danielscholl.github.io",
   base: "/keelson",
   trailingSlash: "always",
+  // Astro 6 dropped GFM from the MDX pipeline that Starlight uses, which silently
+  // breaks Markdown tables in .mdx; re-add it on the channel the MDX integration
+  // reads. (Piggybacks on the remarkPlugins deprecation Starlight already emits.)
+  markdown: {
+    remarkPlugins: [remarkGfm],
+  },
   integrations: [
     starlight({
       title: "Keelson",

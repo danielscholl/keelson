@@ -60,3 +60,15 @@ body {
   font-size: var(--sl-text-sm);
   line-height: 1.6;
 }
+
+/* structural callouts (Aside type="note"): keelson navy bar, brass title */
+.sl-markdown-content .starlight-aside--note {
+  --sl-color-asides-text-accent: var(--sl-color-accent);
+  --sl-color-asides-border: #2f6fb0;
+}
+:root[data-theme="light"] .sl-markdown-content .starlight-aside--note {
+  background-color: rgba(47, 111, 176, 0.07);
+}
+:root[data-theme="dark"] .sl-markdown-content .starlight-aside--note {
+  background-color: rgba(47, 111, 176, 0.13);
+}
