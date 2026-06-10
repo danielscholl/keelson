@@ -3,6 +3,36 @@
 All notable changes to Keelson are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] — 2026-06-10 — Workflow run provenance & bulk management
+
+Workflow runs now carry provenance — which rib they came from, and whether they
+were triggered manually or by the background scheduler — and the Workflows
+surface uses it to filter, badge, and bulk-manage.
+
+### Added
+
+- **Run provenance.** Each workflow records its source (a local YAML file or a
+  specific rib) and each run records its trigger (`manual` vs `scheduled`) and
+  owning rib. Catalog cards and run rows badge by rib, and both are filterable by
+  source. (Migration 3 adds `workflow_runs.origin` + `rib_id`.)
+- **Bulk run management.** `POST /api/workflows/runs/bulk-delete` removes a group
+  of runs by id or by filter (every scheduled run, all runs from a rib); the runs
+  feed gains multi-select with select-all and bulk delete.
+- **Per-rib hide.** A view-only toggle hides a rib's workflows from the catalog
+  and its runs from the feed; the rib's background producers keep refreshing its
+  surfaces.
+
+### Changed
+
+- **Scheduled-run retention.** Background producer runs (heartbeat and panel
+  refresh) are kept to the newest few per workflow and auto-pruned — cascading
+  their linked conversations — so high-cadence rib lanes no longer grow run
+  history without bound. The runs feed defaults to manual runs, with a toggle to
+  reveal scheduled ones.
+- The general `GET /api/workflows/runs` feed (filterable by origin / status /
+  rib / workflow) replaces the prior paused-only endpoint; `?status=paused` still
+  backs the nav badge.
+
 ## [0.1.0] — 2026-06-10 — Installable harness
 
 The first installable Keelson release. A single `keelson` CLI backed by a managed
