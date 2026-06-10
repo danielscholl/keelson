@@ -3,6 +3,23 @@
 All notable changes to Keelson are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] — 2026-06-10 — Starter command/script seeding
+
+The `smoke-test` starter — the one meant to verify a fresh install end-to-end —
+references a command and a script that v0.1.2 never shipped, so running it on a
+new install failed with "command/script not found". This completes the starter
+seeding so the workflow runs out of the box.
+
+### Fixed
+
+- **Seed the assets starter workflows reference.** First-run seeding now covers
+  the whole starter kit — workflows plus the command (`.keelson/commands/`) and
+  script (`.keelson/scripts/`) files they use — so `keelson workflow run
+  smoke-test` works on a fresh install. Each kind seeds independently into the
+  home where discovery looks for it, atomically (temp-then-rename) and only when
+  its dir holds no matching file yet. Updating from v0.1.2 backfills the missing
+  command/script dirs without touching an already-populated workflows dir.
+
 ## [0.1.2] — 2026-06-10 — Starter workflows on first run
 
 A fresh install now ships with workflows. Previously an installed
