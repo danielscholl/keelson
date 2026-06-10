@@ -3,6 +3,28 @@
 All notable changes to Keelson are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] — 2026-06-10 — Starter workflows on first run
+
+A fresh install now ships with workflows. Previously an installed
+`keelson serve` came up with "0 workflows discovered" until you installed a rib
+or hand-copied YAML — the starter workflows only existed in a source checkout.
+
+### Added
+
+- **Starter workflows seeded on first run.** The release bundle now carries the
+  starter workflows (`fix-issue`, `plan-act-evaluate`, `pr-review`,
+  `smoke-test`), and the CLI and server seed them into `~/.keelson/workflows` the
+  first time they run, so Chat/Workflows and `keelson workflow list` have
+  something to show before any rib is installed. Ribs still contribute more, and
+  your own YAML in the workflows dir is left untouched.
+
+### Fixed
+
+- **Atomic seeding.** Starters are copied to a temp name and renamed into place,
+  so an interrupted or failed first-run seed leaves no partial set behind (the
+  next run reseeds the full set) and discovery never reads a half-written file. A
+  populated workflows dir is treated as user-owned and never overwritten.
+
 ## [0.1.1] — 2026-06-10 — Workflow run provenance & bulk management
 
 Workflow runs now carry provenance — which rib they came from, and whether they
