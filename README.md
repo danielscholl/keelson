@@ -59,12 +59,17 @@ keelson rib list --installed
 **3. Run** the server, then open the UI or drive it from the CLI:
 
 ```bash
-keelson serve                     # server + web UI + WS on :7878 (Ctrl-C to stop)
+keelson serve start               # server + web UI + WS on :7878, in the background
 open http://127.0.0.1:7878        # Chat, Workflows, and your ribs' surfaces
+keelson serve status              # running? prints the URL, pid, and uptime
 keelson doctor                    # health sweep: toolchain, server, DB, auth, ribs
 keelson chat "hello"              # one-shot turn
 keelson workflow list             # workflows the installed ribs contribute
+keelson serve stop                # graceful shutdown
 ```
+
+(`keelson serve` without a subcommand still runs the server in the foreground —
+Ctrl-C to stop.)
 
 `keelson serve` serves the React UI (Chat, Workflows, and each rib's surfaces) at
 `http://127.0.0.1:7878` — same origin as the API. Workflows come from the ribs you
@@ -166,7 +171,10 @@ Once installed, `keelson` is on your PATH (working from `~/.keelson`):
 ```bash
 keelson rib add <github-url|git|npm|path> # install a rib into the home
 keelson rib list --installed              # ribs in the home (no server needed)
-keelson serve                             # run the API + WS server on :7878
+keelson serve                             # run the server in the foreground (Ctrl-C to stop)
+keelson serve start                       # run it in the background and report the URL
+keelson serve status                      # URL, pid, uptime — exit 3 when it's down
+keelson serve stop                        # graceful shutdown (kill fallback)
 keelson doctor                            # health sweep: toolchain, server, DB, auth, ribs
 keelson workflow validate <name>          # schema + reference check
 keelson workflow run <name> --watch       # run and stream output

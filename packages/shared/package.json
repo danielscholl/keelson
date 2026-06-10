@@ -44,6 +44,11 @@
       "types": "./dist/paths.d.ts",
       "default": "./dist/paths.js"
     },
+    "./server-state": {
+      "bun": "./src/server-state.ts",
+      "types": "./dist/server-state.d.ts",
+      "default": "./dist/server-state.js"
+    },
     "./tools": {
       "bun": "./src/tools.ts",
       "types": "./dist/tools.d.ts",

@@ -2,8 +2,22 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { spawn } from "node:child_process";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { serveUntilSignal } from "@keelson/server";
-import { EXIT_FAIL } from "../exit.ts";
+import { ensureSpawnPath } from "@keelson/shared/exec";
+import {
+  clearServerState,
+  isPidAlive,
+  readServerState,
+  type ServerState,
+} from "@keelson/shared/server-state";
+import pkg from "../../package.json" with { type: "json" };
+import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
+import { resolveKeelsonHome } from "../home.ts";
+import { emit } from "../output.ts";
+import { probeServer, type ServerInfo } from "../server-probe.ts";
 
 export interface ServeOptions {
   db?: string;
@@ -15,10 +29,312 @@ export interface ServeOptions {
 // graceful-shutdown handlers, and never returns (it process.exits on signal).
 export async function runServe(opts: ServeOptions): Promise<never> {
   try {
-    return await serveUntilSignal(opts.db ? { dbPath: opts.db } : {});
+    return await serveUntilSignal({
+      ...(opts.db ? { dbPath: opts.db } : {}),
+      version: pkg.version,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`failed to start server: ${msg}\n`);
     process.exit(EXIT_FAIL);
   }
+}
+
+const START_TIMEOUT_MS = 30_000;
+const STOP_TIMEOUT_MS = 12_000;
+const POLL_INTERVAL_MS = 250;
+const STATUS_PROBE_TIMEOUT_MS = 1_000;
+
+function defaultBaseUrl(): string {
+  return `http://127.0.0.1:${Number(process.env.PORT ?? 7878)}`;
+}
+
+function logPath(home: string): string {
+  return join(home, "logs", "server.log");
+}
+
+function logTail(path: string, lines = 15): string | null {
+  try {
+    const content = readFileSync(path, "utf8").trimEnd();
+    if (!content) return null;
+    return content.split("\n").slice(-lines).join("\n");
+  } catch {
+    return null;
+  }
+}
+
+function uptimeSince(startedAt: string): string | null {
+  const started = Date.parse(startedAt);
+  if (Number.isNaN(started)) return null;
+  let seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  const days = Math.floor(seconds / 86_400);
+  seconds -= days * 86_400;
+  const hours = Math.floor(seconds / 3_600);
+  seconds -= hours * 3_600;
+  const minutes = Math.floor(seconds / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+// Probe the recorded URL first (covers a server started with a custom PORT),
+// then the conventional one.
+async function probeKnown(
+  state: ServerState | null,
+  timeoutMs: number,
+): Promise<ServerInfo | null> {
+  if (state) {
+    const found = await probeServer({ baseUrl: state.url, timeoutMs });
+    if (found) return found;
+  }
+  if (!state || state.url !== defaultBaseUrl()) {
+    return probeServer({ baseUrl: defaultBaseUrl(), timeoutMs });
+  }
+  return null;
+}
+
+export async function runServeStart(opts: ServeOptions): Promise<void> {
+  const home = resolveKeelsonHome();
+  const state = readServerState(home);
+  const running = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
+  if (running) {
+    emit(
+      {
+        data: {
+          status: "already running",
+          url: running.baseUrl,
+          ...(state && isPidAlive(state.pid) ? { pid: state.pid } : {}),
+        },
+      },
+      opts,
+    );
+    process.exit(EXIT_OK);
+  }
+  if (state && isPidAlive(state.pid)) {
+    emit(
+      {
+        error: `a server process (pid ${state.pid}) exists but is not responding at ${state.url}; check \`keelson serve status\` or ${logPath(home)}`,
+        code: "UNRESPONSIVE",
+      },
+      opts,
+    );
+    process.exit(EXIT_FAIL);
+  }
+
+  const log = logPath(home);
+  mkdirSync(join(home, "logs"), { recursive: true });
+  // Keep one previous generation for post-mortems; the live file starts fresh.
+  if (existsSync(log)) renameSync(log, `${log}.old`);
+  const fd = openSync(log, "a");
+
+  // Re-exec this same CLI entry (dev: bin/keelson.ts, installed: dist/keelson.js)
+  // as a detached session so the server outlives this process and its terminal.
+  const child = spawn(
+    process.execPath,
+    [resolve(process.argv[1] ?? ""), "serve", ...(opts.db ? ["--db", opts.db] : [])],
+    {
+      detached: true,
+      stdio: ["ignore", fd, fd],
+      windowsHide: true,
+      env: ensureSpawnPath({
+        ...process.env,
+        KEELSON_HOME: home,
+        KEELSON_SERVE_BACKGROUND: "1",
+      } as Record<string, string>),
+    },
+  );
+  closeSync(fd);
+  child.unref();
+
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      const tail = logTail(log);
+      emit(
+        {
+          error: `server exited during startup (code ${child.exitCode ?? child.signalCode})${tail ? `\n${tail}` : ""}`,
+          code: "START_FAILED",
+        },
+        opts,
+      );
+      process.exit(EXIT_FAIL);
+    }
+    const info = await probeServer({ baseUrl: defaultBaseUrl() });
+    if (info) {
+      emit(
+        {
+          data: {
+            status: "running",
+            url: info.baseUrl,
+            pid: child.pid,
+            log,
+          },
+        },
+        opts,
+      );
+      process.exit(EXIT_OK);
+    }
+    await Bun.sleep(POLL_INTERVAL_MS);
+  }
+  const tail = logTail(log);
+  emit(
+    {
+      error: `server did not respond within ${START_TIMEOUT_MS / 1000}s${tail ? `\n${tail}` : ""}`,
+      code: "START_TIMEOUT",
+    },
+    opts,
+  );
+  process.exit(EXIT_FAIL);
+}
+
+async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return true;
+    await Bun.sleep(POLL_INTERVAL_MS);
+  }
+  return !isPidAlive(pid);
+}
+
+async function requestGracefulShutdown(state: ServerState): Promise<boolean> {
+  try {
+    const res = await fetch(`${state.url}/api/server/shutdown`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${state.shutdownToken}` },
+      signal: AbortSignal.timeout(2_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function runServeStop(opts: { json: boolean }): Promise<void> {
+  const home = resolveKeelsonHome();
+  const state = readServerState(home);
+  const running = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
+
+  if (!state) {
+    if (running) {
+      emit(
+        {
+          error: `a server is responding at ${running.baseUrl} but ${home}/server.json does not exist — it was started from a different home (or an older keelson); stop it where it was started`,
+          code: "UNMANAGED",
+        },
+        opts,
+      );
+      process.exit(EXIT_FAIL);
+    }
+    emit({ data: { status: "not running" } }, opts);
+    process.exit(EXIT_OK);
+  }
+
+  if (!running && !isPidAlive(state.pid)) {
+    clearServerState(home);
+    emit({ data: { status: "not running", note: "cleaned up stale server.json" } }, opts);
+    process.exit(EXIT_OK);
+  }
+
+  // Graceful first: the token-gated shutdown route drains runs and closes the
+  // DB on every platform. Signals are the fallback (on Windows process.kill
+  // is a hard TerminateProcess — the DB is WAL, so still crash-safe).
+  const graceful = await requestGracefulShutdown(state);
+  let exited = graceful ? await waitForExit(state.pid, STOP_TIMEOUT_MS) : false;
+  if (!exited && isPidAlive(state.pid)) {
+    try {
+      process.kill(state.pid, "SIGTERM");
+    } catch {
+      // Already gone between the liveness check and the kill.
+    }
+    exited = await waitForExit(state.pid, STOP_TIMEOUT_MS);
+    if (!exited) {
+      try {
+        process.kill(state.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      exited = await waitForExit(state.pid, 2_000);
+    }
+  } else if (!exited) {
+    exited = await waitForExit(state.pid, 2_000);
+  }
+
+  if (!exited) {
+    emit(
+      {
+        error: `server process (pid ${state.pid}) did not exit; kill it manually`,
+        code: "STOP_FAILED",
+      },
+      opts,
+    );
+    process.exit(EXIT_FAIL);
+  }
+
+  // If something still answers, the recorded pid wasn't the responding server
+  // (e.g. a foreground server from another home on the same port).
+  const still = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
+  if (still) {
+    emit(
+      {
+        error: `stopped pid ${state.pid}, but a server is still responding at ${still.baseUrl} — it was started elsewhere; stop it where it was started`,
+        code: "UNMANAGED",
+      },
+      opts,
+    );
+    process.exit(EXIT_FAIL);
+  }
+
+  clearServerState(home);
+  emit({ data: { status: "stopped", pid: state.pid } }, opts);
+  process.exit(EXIT_OK);
+}
+
+export async function runServeStatus(opts: { json: boolean }): Promise<void> {
+  const home = resolveKeelsonHome();
+  const state = readServerState(home);
+  const info = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
+  const log = existsSync(logPath(home)) ? logPath(home) : undefined;
+
+  if (info) {
+    const owned = state !== null && isPidAlive(state.pid);
+    const uptime = owned && state.startedAt ? uptimeSince(state.startedAt) : null;
+    emit(
+      {
+        data: {
+          status: "running",
+          url: info.baseUrl,
+          ...(owned ? { pid: state.pid } : {}),
+          ...(uptime ? { uptime } : {}),
+          ...(owned && state.version ? { version: state.version } : {}),
+          schemaVersion: info.schemaVersion,
+          ...(log ? { log } : {}),
+        },
+      },
+      opts,
+    );
+    process.exit(EXIT_OK);
+  }
+
+  if (state && isPidAlive(state.pid)) {
+    emit(
+      {
+        error: `server process (pid ${state.pid}) is running but not responding at ${state.url}${log ? `; check ${log}` : ""}`,
+        code: "UNRESPONSIVE",
+      },
+      opts,
+    );
+    process.exit(EXIT_FAIL);
+  }
+
+  emit(
+    {
+      data: {
+        status: "stopped",
+        ...(state ? { note: `stale server.json (pid ${state.pid} is not running)` } : {}),
+        hint: "run `keelson serve start`",
+      },
+    },
+    opts,
+  );
+  process.exit(EXIT_NO_SERVER);
 }

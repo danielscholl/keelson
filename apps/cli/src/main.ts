@@ -14,7 +14,7 @@ import { runChat } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
-import { runServe } from "./commands/serve.ts";
+import { runServe, runServeStart, runServeStatus, runServeStop } from "./commands/serve.ts";
 import { runUpdate } from "./commands/update.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRespond } from "./commands/workflow-respond.ts";
@@ -82,14 +82,40 @@ export function buildProgram(): Command {
       );
     });
 
-  program
+  const serve = program
     .command("serve")
-    .description("run the Keelson server in the foreground")
+    .description("run the Keelson server in the foreground (use `serve start` for background)")
     .option("--db <path>", "override KEELSON_DB for this run")
     .action(async function serveAction(this: Command) {
       const { json } = globalOpts(this);
       const { db } = this.opts<{ db?: string }>();
       await runServe({ db, json });
+    });
+
+  serve
+    .command("start")
+    .description("start the server in the background and report its URL")
+    .option("--db <path>", "override KEELSON_DB for the background server")
+    .action(async function serveStartAction(this: Command) {
+      const { json } = globalOpts(this);
+      const { db } = this.opts<{ db?: string }>();
+      await runServeStart({ db, json });
+    });
+
+  serve
+    .command("stop")
+    .description("stop the background server (graceful shutdown, kill fallback)")
+    .action(async function serveStopAction(this: Command) {
+      const { json } = globalOpts(this);
+      await runServeStop({ json });
+    });
+
+  serve
+    .command("status")
+    .description("report whether the server is running and its URL (exit 0 up, 3 down)")
+    .action(async function serveStatusAction(this: Command) {
+      const { json } = globalOpts(this);
+      await runServeStatus({ json });
     });
 
   const workflow = program
