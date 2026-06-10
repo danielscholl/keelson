@@ -3,7 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
+import { COMMAND_EXTENSION, SCRIPT_EXT_RUNTIME } from "./handlers/discovery.ts";
 
 // Root the bundled starter assets are staged under, as sibling dirs
 // `workflows/`, `commands/`, and `scripts/`. In the release bundle import.meta
@@ -18,11 +19,13 @@ const BUNDLED_ROOT = join(import.meta.dir, "..");
 export function isWorkflowYaml(name: string): boolean {
   return name.endsWith(".yaml") || name.endsWith(".yml");
 }
+// Command/script relevance comes straight from discovery's extension tables, so
+// a starter discovery can resolve is one the seeder will copy, and vice versa.
 function isCommandFile(name: string): boolean {
-  return name.endsWith(".md");
+  return extname(name) === COMMAND_EXTENSION;
 }
 function isScriptFile(name: string): boolean {
-  return name.endsWith(".ts") || name.endsWith(".js") || name.endsWith(".py");
+  return extname(name) in SCRIPT_EXT_RUNTIME;
 }
 
 // Atomic, skip-if-populated copy of one flat asset dir. Seeds only when the
@@ -50,8 +53,9 @@ function seedDir(
   // Stage every file under a temp name (dot-prefixed, `.seedtmp` suffix so it
   // never matches a relevance predicate). The pid keeps two concurrent seeders
   // off each other's temp files; the final rename overwrites atomically with
-  // byte-identical content. If any copy throws, drop the temps and rethrow so
-  // the target stays empty and the next run reseeds the whole set.
+  // byte-identical content. If any copy OR rename throws, drop the remaining
+  // temps and rethrow — a rename can fail too (Windows when the dest is held
+  // open, or the dir vanishing), so cleanup has to cover both phases.
   const staged: Array<{ tmp: string; final: string }> = [];
   try {
     for (const name of items) {
@@ -59,11 +63,11 @@ function seedDir(
       copyFileSync(join(source, name), tmp);
       staged.push({ tmp, final: join(target, name) });
     }
+    for (const { tmp, final } of staged) renameSync(tmp, final);
   } catch (err) {
     for (const { tmp } of staged) rmSync(tmp, { force: true });
     throw err;
   }
-  for (const { tmp, final } of staged) renameSync(tmp, final);
   return items;
 }
 

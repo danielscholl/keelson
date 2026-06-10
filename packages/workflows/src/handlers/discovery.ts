@@ -43,11 +43,16 @@ function keelsonHome(): string {
 
 export type ScriptRuntime = "bun" | "uv";
 
-const SCRIPT_EXT_RUNTIME: Record<string, ScriptRuntime> = {
+// The authoritative extension sets for runnable assets, exported so the seeder
+// (packages/workflows/src/seed.ts) decides what to seed from the same source of
+// truth discovery resolves against — a new runtime can't ship a starter that
+// seeding then silently skips.
+export const SCRIPT_EXT_RUNTIME: Record<string, ScriptRuntime> = {
   ".ts": "bun",
   ".js": "bun",
   ".py": "uv",
 };
+export const COMMAND_EXTENSION = ".md";
 
 export interface ResolvedCommand {
   path: string;
@@ -96,7 +101,7 @@ async function walkFiles(root: string, depth = 0): Promise<WalkedFile[]> {
 export async function resolveCommand(name: string, cwd: string): Promise<ResolvedCommand | null> {
   for (const dir of searchDirs(cwd, "commands")) {
     const files = await walkFiles(dir);
-    const match = files.find((f) => f.ext === ".md" && f.base === name);
+    const match = files.find((f) => f.ext === COMMAND_EXTENSION && f.base === name);
     if (!match) continue;
     try {
       const content = await readFile(match.path, "utf-8");

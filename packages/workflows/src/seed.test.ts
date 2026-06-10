@@ -161,6 +161,21 @@ describe("seedStarterAssets", () => {
     expect(seeded.scripts).toEqual(["echo-args.js"]);
   });
 
+  test("seeds only files whose extension the kind recognizes", () => {
+    const bundle = makeBundle();
+    // Stray non-asset files alongside the real starters must not be seeded.
+    fs.writeFileSync(path.join(bundle, "scripts", "notes.txt"), "ignore me");
+    fs.writeFileSync(path.join(bundle, "commands", "data.json"), "{}");
+    const home = path.join(tmpDir(), "home");
+
+    const seeded = seedStarterAssets(home, path.join(home, "workflows"), bundle);
+
+    expect(seeded.scripts).toEqual(["echo-args.js"]);
+    expect(seeded.commands).toEqual(["e2e-echo-command.md"]);
+    expect(fs.readdirSync(path.join(home, "scripts"))).toEqual(["echo-args.js"]);
+    expect(fs.readdirSync(path.join(home, "commands"))).toEqual(["e2e-echo-command.md"]);
+  });
+
   test("no-ops cleanly when the bundle root has no asset dirs", () => {
     const home = path.join(tmpDir(), "home");
 

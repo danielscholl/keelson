@@ -50,6 +50,10 @@ if (!CLAUDE_SDK_RANGE || !COPILOT_SDK_RANGE) {
   );
 }
 const REPO = "danielscholl/keelson";
+// The starter-asset dirs shipped in the cli tarball and seeded into a fresh home
+// on first run. One list, used for both staging and the package `files` array,
+// so the tarball can't ship a dir the manifest omits (or vice versa).
+const STARTER_KINDS = ["workflows", "commands", "scripts"] as const;
 // Merges the cli + shared tarball pins into the home manifest, preserving any
 // ribs added via `keelson rib add` (object-key set → no clobber, no duplicate
 // keys). Env-var driven and shared verbatim by both installers so the two
@@ -92,7 +96,7 @@ const cliPkg = {
   },
   peerDependencies: { "@keelson/shared": `^${VERSION}` },
   peerDependenciesMeta: { "@keelson/shared": { optional: true } },
-  files: ["dist", "web", "workflows", "commands", "scripts", "LICENSE", "NOTICE"],
+  files: ["dist", "web", ...STARTER_KINDS, "LICENSE", "NOTICE"],
 };
 writeFileSync(join(CLI_PKG_DIR, "package.json"), `${JSON.stringify(cliPkg, null, 2)}\n`);
 for (const f of ["LICENSE", "NOTICE"]) {
@@ -116,7 +120,7 @@ cpSync(webDist, join(CLI_PKG_DIR, "web"), { recursive: true });
 //     a fresh home on first run (seedStarterAssets in @keelson/workflows
 //     resolves these dirs relative to the bundle). Staging ships every non-dot
 //     file; the seed's per-kind predicate is authoritative on what's relevant.
-for (const kind of ["workflows", "commands", "scripts"] as const) {
+for (const kind of STARTER_KINDS) {
   const srcDir = join(ROOT, ".keelson", kind);
   const files = readdirSync(srcDir).filter((n) => !n.startsWith("."));
   if (files.length === 0) {
@@ -124,7 +128,7 @@ for (const kind of ["workflows", "commands", "scripts"] as const) {
   }
   mkdirSync(join(CLI_PKG_DIR, kind), { recursive: true });
   for (const n of files) {
-    cpSync(join(srcDir, n), join(CLI_PKG_DIR, kind, n));
+    cpSync(join(srcDir, n), join(CLI_PKG_DIR, kind, n), { recursive: true });
   }
 }
 
