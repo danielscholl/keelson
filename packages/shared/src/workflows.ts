@@ -32,6 +32,14 @@ export const TERMINAL_RUN_STATUSES: readonly WorkflowRunStatus[] = [
   "cancelled",
 ] as const;
 
+// How a run was triggered. `manual` = an operator started it (POST /runs, the
+// CLI, a chat tool); `scheduled` = a background producer run the heartbeat or a
+// surface-panel refresh fired. The runs feed defaults to `manual`, and
+// `scheduled` runs are retained to a small cap per producer (the snapshot is the
+// durable output). Defaulted at parse time so pre-migration rows read `manual`.
+export const workflowRunOriginSchema = z.enum(["manual", "scheduled"]);
+export type WorkflowRunOrigin = z.infer<typeof workflowRunOriginSchema>;
+
 // Node-level status as persisted to workflow_node_outputs.status. Rows are
 // written on completion AND on approval pause (`awaiting`) so a page-reload
 // mid-pause can rehydrate the approval callout from the snapshot. The
@@ -55,12 +63,31 @@ export const workflowNodeSummarySchema = z
   .strict();
 export type WorkflowNodeSummary = z.infer<typeof workflowNodeSummarySchema>;
 
+// Where a workflow definition came from. `local` = a YAML file in the
+// workflows dir; `rib` = contributed by an installed rib, carrying the rib's
+// id + display name so the UI can badge, filter, and hide by rib. Defaulted to
+// `local` at parse time so older payloads (and the many fixtures that build a
+// summary by hand) keep validating.
+export const workflowSourceSchema = z
+  .object({
+    kind: z.enum(["local", "rib"]),
+    ribId: z.string().optional(),
+    ribName: z.string().optional(),
+  })
+  .strict();
+export type WorkflowSource = z.infer<typeof workflowSourceSchema>;
+
 // Catalog list shape (GET /api/workflows).
 export const workflowSummarySchema = z
   .object({
     name: z.string(),
     description: z.string(),
     nodeCount: z.number().int().nonnegative(),
+    source: workflowSourceSchema.default({ kind: "local" }),
+    // True for a rib-bound producer workflow the heartbeat auto-refreshes — the
+    // user never starts it by hand. The SPA collapses these out of the catalog
+    // by default and hides their runs from the default runs feed.
+    background: z.boolean().default(false),
   })
   .strict();
 export type WorkflowSummary = z.infer<typeof workflowSummarySchema>;
@@ -122,6 +149,13 @@ export const workflowRunSummarySchema = z
     projectId: z.string().nullable(),
     workingDir: z.string().nullable(),
     worktreePath: z.string().nullable(),
+    // Trigger provenance (migration 3). Defaulted so pre-migration rows and the
+    // fixtures that predate the column keep parsing.
+    origin: workflowRunOriginSchema.default("manual"),
+    // The rib that owns this run's workflow, stamped at run-start from the
+    // catalog so historical runs stay badgeable even after the rib is removed.
+    // Null for local workflows.
+    ribId: z.string().nullable().default(null),
   })
   .strict();
 export type WorkflowRunSummary = z.infer<typeof workflowRunSummarySchema>;
@@ -306,3 +340,31 @@ export type ResumeWorkflowRunBody = z.infer<typeof resumeWorkflowRunBodySchema>;
 
 export const resumeWorkflowRunResponseSchema = z.object({ resumed: z.literal(true) }).strict();
 export type ResumeWorkflowRunResponse = z.infer<typeof resumeWorkflowRunResponseSchema>;
+
+// POST /api/workflows/runs/bulk-delete body. Two mutually-exclusive forms: an
+// explicit list of run ids, or a filter that selects a group (e.g. all
+// `scheduled` runs, or every run owned by a rib). The filter must constrain at
+// least one field so a typo'd empty body can't purge the entire run history.
+export const bulkDeleteRunsFilterSchema = z
+  .object({
+    workflowName: z.string().min(1).optional(),
+    origin: workflowRunOriginSchema.optional(),
+    ribId: z.string().min(1).optional(),
+    statuses: z.array(workflowRunStatusSchema).min(1).optional(),
+  })
+  .strict()
+  .refine((f) => Object.values(f).some((v) => v !== undefined), {
+    message: "filter must constrain at least one of workflowName / origin / ribId / statuses",
+  });
+export type BulkDeleteRunsFilter = z.infer<typeof bulkDeleteRunsFilterSchema>;
+
+export const bulkDeleteRunsBodySchema = z.union([
+  z.object({ runIds: z.array(z.string().min(1)).min(1).max(1000) }).strict(),
+  z.object({ filter: bulkDeleteRunsFilterSchema }).strict(),
+]);
+export type BulkDeleteRunsBody = z.infer<typeof bulkDeleteRunsBodySchema>;
+
+export const bulkDeleteRunsResponseSchema = z
+  .object({ deleted: z.number().int().nonnegative() })
+  .strict();
+export type BulkDeleteRunsResponse = z.infer<typeof bulkDeleteRunsResponseSchema>;

@@ -4,24 +4,23 @@ import type {
   WorkflowRunSummary,
   WorkflowSummary,
 } from "@keelson/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { deleteWorkflowRun, listRuns } from "../../api.ts";
+import { bulkDeleteWorkflowRuns, deleteWorkflowRun, listWorkflowRuns } from "../../api.ts";
+import { useSettings } from "../../hooks/useSettings.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { visibleRuns } from "../../lib/rib.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { SkeletonStack } from "../Skeleton.tsx";
 import { useToast } from "../Toast.tsx";
+import { RibBadge } from "./RibBadge.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
 
-// Poll so runs started outside the UI (e.g. via the keelson CLI) appear and
-// advance status without a manual refresh.
+// Poll so runs started outside the UI (e.g. via the keelson CLI, or the
+// heartbeat) appear and advance status without a manual refresh.
 const RUNS_POLL_INTERVAL_MS = 4000;
+const RUNS_FEED_LIMIT = 50;
 
-// Map the wire-schema run status onto the badge's NodeViewStatus surface.
-// `paused` maps to `awaiting` (same magenta accent the per-node awaiting
-// badge uses; cf. statusBadgeStatus in RunView.tsx). Without this explicit
-// mapping, paused runs would render as `cancelled` and look terminated in
-// history even though they're still resumable.
 function badgeStatusFor(s: WorkflowRunStatus): NodeViewStatus | "running" {
   switch (s) {
     case "running":
@@ -61,25 +60,16 @@ function formatStarted(startedAt: string): string {
 }
 
 export interface RecentRunsProps {
-  // Catalog drives this — fanning out one listRuns() per workflow is
-  // wasteful but matches the current server surface (no aggregate endpoint
-  // yet) and avoids needing a backend change for the first cut.
+  // The catalog — used to map a run's ribId to the rib's display name for the
+  // row badge. No longer drives fetching (the feed is a single endpoint).
   workflows: ReadonlyArray<WorkflowSummary>;
   onOpenRun: (runId: string, workflowName: string) => void;
-  // Optional refresh ticker so a freshly-started run shows up in the list.
-  // Caller bumps this when it kicks a new run.
   refreshKey?: number;
-  // Bumped after a successful delete so parent state (active runs, badges)
-  // stays in sync with the now-shorter history.
   onRunDeleted?: () => void;
-  // Projects keyed by id, so each row can show its project label. The
-  // parent owns the list — passing a map keeps RecentRuns from fetching
-  // /api/projects on its own and dropping cache freshness on every
-  // refresh.
   projectsById?: ReadonlyMap<string, Project>;
 }
 
-interface RunRow extends WorkflowRunSummary {}
+type RunRow = WorkflowRunSummary;
 
 export function RecentRuns({
   workflows,
@@ -88,57 +78,51 @@ export function RecentRuns({
   onRunDeleted,
   projectsById,
 }: RecentRunsProps) {
+  const { settings, setShowScheduledRuns, isWorkflowSourceHidden } = useSettings();
+  const showScheduled = settings.showScheduledRuns ?? false;
   const [rows, setRows] = useState<RunRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<RunRow | null>(null);
+  const [pendingBulk, setPendingBulk] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const toast = useToast();
-  // Per-workflow fanout failures. We don't bail the whole panel for one
-  // bad workflow (other workflows' history is still useful) but the
-  // operator needs to know which entries are partial vs. authoritative.
-  const [failedWorkflows, setFailedWorkflows] = useState<Array<{ name: string; error: string }>>(
-    [],
-  );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a deliberate refetch trigger from the parent (bumped after run kick / delete); see comment at the dep array below
+  // ribId → display name, from the catalog, so a run row can label its origin
+  // rib. Falls back to the raw id for a run whose rib was since removed.
+  const ribNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const w of workflows) {
+      if (w.source.kind === "rib" && w.source.ribId) {
+        m.set(w.source.ribId, w.source.ribName ?? w.source.ribId);
+      }
+    }
+    return m;
+  }, [workflows]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a deliberate refetch trigger from the parent (bumped after run kick / delete)
   useEffect(() => {
     let cancelled = false;
     let running = false;
 
     const fetchRuns = () => {
-      // Skip when a previous fetch is still in flight so slow responses can't
-      // stack up behind the poll interval.
       if (running) return;
       running = true;
-      Promise.all(
-        workflows.map((w) =>
-          listRuns(w.name).then(
-            (runs) => ({ kind: "ok" as const, name: w.name, runs }),
-            (err) => ({
-              kind: "err" as const,
-              name: w.name,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          ),
-        ),
-      )
-        .then((perWorkflow) => {
+      // Default feed is manual-only; revealing scheduled runs drops the filter
+      // so both surface together.
+      listWorkflowRuns({
+        ...(showScheduled ? {} : { origin: "manual" }),
+        limit: RUNS_FEED_LIMIT,
+      })
+        .then((runs) => {
           if (cancelled) return;
-          const merged: RunRow[] = [];
-          const failed: Array<{ name: string; error: string }> = [];
-          for (const r of perWorkflow) {
-            if (r.kind === "ok") merged.push(...r.runs);
-            else failed.push({ name: r.name, error: r.error });
-          }
-          merged.sort((a, b) => {
-            // Newest first by startedAt; the column is ISO so string sort works.
-            return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0;
+          setRows(runs);
+          // Drop selections for runs that no longer exist.
+          setSelected((prev) => {
+            const live = new Set(runs.map((r) => r.runId));
+            const next = new Set([...prev].filter((id) => live.has(id)));
+            return next.size === prev.size ? prev : next;
           });
-          // Keep the table small — top 20 entries by recency. Update banners
-          // atomically with the rows so a background poll doesn't flash an
-          // empty error/warning state mid-fetch.
-          setRows(merged.slice(0, 20));
-          setFailedWorkflows(failed);
           setError(null);
         })
         .catch((err) => {
@@ -156,12 +140,7 @@ export function RecentRuns({
       cancelled = true;
       clearInterval(timer);
     };
-    // `refreshKey` is in the dep list intentionally — the parent bumps it
-    // to force a refetch after a run kick or delete, even when the
-    // workflows array identity hasn't changed. Biome flags it as "more
-    // dependencies than necessary" because the value isn't read inside
-    // the effect; we want it watched, not consumed (suppressed above).
-  }, [workflows, refreshKey]);
+  }, [refreshKey, showScheduled]);
 
   if (rows === null) {
     return (
@@ -174,33 +153,57 @@ export function RecentRuns({
     return <div className="empty-state">Failed to load run history: {error}</div>;
   }
 
-  const failureBanner =
-    failedWorkflows.length > 0 ? (
-      <div className="run-warnings" role="status">
-        {failedWorkflows.map((f) => (
-          <div key={f.name} className="run-warning-row">
-            <span className="run-warning-glyph" aria-hidden="true">
-              ⚠
-            </span>
-            <span>
-              <strong>{f.name}</strong> history failed to load: {f.error}
-            </span>
-          </div>
-        ))}
-      </div>
-    ) : null;
+  // Honor the same per-rib hide the catalog uses (view-only): a hidden rib's
+  // runs drop out of the feed too, so hiding declutters the list AND the runs.
+  const visibleRows = visibleRuns(rows, isWorkflowSourceHidden);
+  const hiddenByRib = rows.length - visibleRows.length;
+  // Selection acts only on currently-visible rows: a row whose rib is hidden
+  // after it was checked must not be silently bulk-deleted, and the count must
+  // reflect what the operator can actually see.
+  const visibleIds = new Set(visibleRows.map((r) => r.runId));
+  const selectedVisible = [...selected].filter((id) => visibleIds.has(id));
 
-  if (rows.length === 0) {
+  const scheduledToggle = (
+    <label className="bg-toggle">
+      <input
+        type="checkbox"
+        checked={showScheduled}
+        onChange={(e) => setShowScheduledRuns(e.target.checked)}
+      />
+      Show scheduled
+    </label>
+  );
+
+  if (visibleRows.length === 0) {
     return (
       <>
-        {failureBanner}
+        <div className="runs-toolbar">{scheduledToggle}</div>
         <div className="empty-state">
           <div className="empty-state-title">No runs yet</div>
-          <div className="empty-state-body">Kick a workflow above to populate history.</div>
+          <div className="empty-state-body">
+            {hiddenByRib > 0
+              ? `${hiddenByRib} run${hiddenByRib === 1 ? "" : "s"} hidden by a rib filter. Show the rib in the catalog to see them.`
+              : showScheduled
+                ? "Kick a workflow above to populate history."
+                : "No manual runs yet. Kick a workflow above, or enable “Show scheduled” to see background refreshes."}
+          </div>
         </div>
       </>
     );
   }
+
+  const allSelected = visibleRows.every((r) => selected.has(r.runId));
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(visibleRows.map((r) => r.runId)));
+  };
+  const toggleOne = (runId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(runId)) next.delete(runId);
+      else next.add(runId);
+      return next;
+    });
+  };
 
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
@@ -208,17 +211,32 @@ export function RecentRuns({
     setDeleting(true);
     try {
       await deleteWorkflowRun(target.runId);
-      // Optimistic local drop — the panel feels instant; the parent's
-      // onRunDeleted bump re-fetches downstream views (e.g. chat sidebar).
       setRows((prev) => prev?.filter((r) => r.runId !== target.runId) ?? prev);
       onRunDeleted?.();
       setPendingDelete(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      toast.push({
-        kind: "error",
-        message: `Couldn't delete ${target.workflowName} run: ${msg}`,
-      });
+      toast.push({ kind: "error", message: `Couldn't delete ${target.workflowName} run: ${msg}` });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleConfirmBulk = async () => {
+    const ids = selectedVisible;
+    if (ids.length === 0) return;
+    setDeleting(true);
+    try {
+      const deleted = await bulkDeleteWorkflowRuns({ runIds: ids });
+      const removed = new Set(ids);
+      setRows((prev) => prev?.filter((r) => !removed.has(r.runId)) ?? prev);
+      setSelected(new Set());
+      onRunDeleted?.();
+      setPendingBulk(false);
+      toast.push({ kind: "info", message: `Deleted ${deleted} run${deleted === 1 ? "" : "s"}.` });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.push({ kind: "error", message: `Bulk delete failed: ${msg}` });
     } finally {
       setDeleting(false);
     }
@@ -226,10 +244,32 @@ export function RecentRuns({
 
   return (
     <>
-      {failureBanner}
+      <div className="runs-toolbar">
+        {selectedVisible.length > 0 ? (
+          <div className="bulk-bar">
+            <span>{selectedVisible.length} selected</span>
+            <button type="button" className="btn-danger-sm" onClick={() => setPendingBulk(true)}>
+              Delete selected
+            </button>
+            <button type="button" className="btn-ghost-sm" onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+          </div>
+        ) : (
+          <span className="runs-hint">Select rows to delete in bulk</span>
+        )}
+        {scheduledToggle}
+      </div>
       <div className="runs-table runs-table--with-project">
         <div className="runs-row head">
-          <span />
+          <span>
+            <input
+              type="checkbox"
+              aria-label="Select all runs"
+              checked={allSelected}
+              onChange={toggleAll}
+            />
+          </span>
           <span>Workflow</span>
           <span>Project</span>
           <span>Status</span>
@@ -237,27 +277,21 @@ export function RecentRuns({
           <span>Started</span>
           <span style={{ textAlign: "right" }}>Actions</span>
         </div>
-        {rows.map((r) => {
+        {visibleRows.map((r) => {
           const openRun = () => onOpenRun(r.runId, r.workflowName);
           const project = r.projectId ? projectsById?.get(r.projectId) : undefined;
           const projectLabel =
             project?.name ?? (r.projectId ? "(deleted project)" : r.workingDir ? "(adhoc)" : "—");
+          const checked = selected.has(r.runId);
           return (
-            // The row is a <div role="button"> rather than a <button> so the
-            // delete action inside can be a real nested <button> — nesting
-            // interactive elements inside a <button> is invalid HTML.
-            // biome-ignore lint/a11y/useSemanticElements: row contains a nested button (delete), so it can't itself be a <button>
+            // biome-ignore lint/a11y/useSemanticElements: row contains nested buttons/checkbox, so it can't itself be a <button>
             <div
               key={r.runId}
-              className="runs-row"
+              className={`runs-row${checked ? " is-selected" : ""}`}
               role="button"
               tabIndex={0}
               onClick={openRun}
               onKeyDown={(e) => {
-                // Bail if a nested interactive (the delete <button>, or any
-                // future inline action) bubbled this keydown up to us — the
-                // native button activation has its own Enter/Space handling
-                // and calling preventDefault() here would suppress it.
                 if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
@@ -265,9 +299,25 @@ export function RecentRuns({
                 }
               }}
             >
-              <span />
+              <span>
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${r.workflowName} run ${r.runId.slice(0, 8)}`}
+                  checked={checked}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => toggleOne(r.runId)}
+                />
+              </span>
               <span className="run-name">
-                {r.workflowName}
+                <span className="run-name-row">
+                  {r.workflowName}
+                  {r.ribId && <RibBadge ribId={r.ribId} label={ribNames.get(r.ribId)} />}
+                  {r.origin === "scheduled" && (
+                    <span className="run-origin-pill" title="Background producer run">
+                      scheduled
+                    </span>
+                  )}
+                </span>
                 <small>{r.runId.slice(0, 8)}</small>
               </span>
               <span className="run-project" title={r.workingDir ?? project?.rootPath ?? ""}>
@@ -322,6 +372,24 @@ export function RecentRuns({
         onConfirm={handleConfirmDelete}
         onCancel={() => {
           if (!deleting) setPendingDelete(null);
+        }}
+      />
+      <ConfirmModal
+        open={pendingBulk}
+        title="Delete selected runs"
+        body={
+          <>
+            Delete <strong>{selectedVisible.length}</strong> run
+            {selectedVisible.length === 1 ? "" : "s"}? This removes them from history and deletes
+            their linked chat conversations. Still-running runs are cancelled first.
+          </>
+        }
+        mode={{ kind: "simple" }}
+        confirmLabel={deleting ? "Deleting…" : `Delete ${selectedVisible.length}`}
+        danger
+        onConfirm={handleConfirmBulk}
+        onCancel={() => {
+          if (!deleting) setPendingBulk(false);
         }}
       />
     </>

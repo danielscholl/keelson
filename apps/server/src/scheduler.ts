@@ -158,6 +158,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         name: schedule.workflow,
         inputs: {},
         workingDir: repoRoot,
+        origin: "scheduled",
       });
       if (result.ok) {
         started += 1;

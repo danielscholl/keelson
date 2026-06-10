@@ -19,6 +19,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import {
+  bulkDeleteRunsBodySchema,
+  bulkDeleteRunsResponseSchema,
   type ContentBlock,
   getRunArtifactResponseSchema,
   type IsolationOverride,
@@ -33,11 +35,14 @@ import {
   type WorkflowFrame,
   type WorkflowNodeStatus,
   type WorkflowRunDetail,
+  type WorkflowRunOrigin,
   type WorkflowRunStatus,
   type WorkflowRunSummary,
   type WorkflowSummary,
   workflowDetailSchema,
   workflowRunDetailSchema,
+  workflowRunOriginSchema,
+  workflowRunStatusSchema,
   workflowRunSummarySchema,
   writebackRequestSchema,
 } from "@keelson/shared";
@@ -159,12 +164,55 @@ function nodeTypeOf(node: DagNode): string {
   return "unknown";
 }
 
-function workflowToSummary(workflow: WorkflowDefinition): WorkflowSummary {
+function workflowToSummary(
+  workflow: WorkflowDefinition,
+  catalog: WorkflowCatalog,
+): WorkflowSummary {
+  const prov = catalog.provenance(workflow.name);
   return {
     name: workflow.name,
     description: workflow.description,
     nodeCount: workflow.nodes.length,
+    source: prov.source,
+    background: prov.background,
   };
+}
+
+// The owning rib id for a catalog entry, or null for a local workflow. Stamped
+// onto each run so the feed can badge/filter/bulk-delete by rib.
+function ribIdFor(catalog: WorkflowCatalog, name: string): string | null {
+  const source = catalog.provenance(name).source;
+  return source.kind === "rib" ? (source.ribId ?? null) : null;
+}
+
+// Producer runs are refresh machinery, not history: keep only the newest few
+// terminal `scheduled` runs per workflow (the snapshot is the durable output),
+// cascading their linked conversations. Best-effort — a prune failure must never
+// break the run that triggered it.
+const SCHEDULED_RUN_RETENTION = 5;
+function pruneScheduledRuns(
+  store: WorkflowStore,
+  conversationStore: ConversationStore,
+  workflowName: string,
+): void {
+  for (const { runId, conversationId } of store.scheduledRunsToPrune(
+    workflowName,
+    SCHEDULED_RUN_RETENTION,
+  )) {
+    // Conversation first (FK SET NULLs the run pointer), then the run row — so a
+    // conversation-delete failure leaves both intact (no orphan) and the next
+    // prune retries. Per-run swallow keeps retention best-effort.
+    try {
+      if (conversationId !== null) conversationStore.delete(conversationId);
+      store.deleteRun(runId);
+    } catch (err) {
+      console.warn(
+        `[workflows] failed to prune scheduled run ${runId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 }
 
 function workflowToDetail(workflow: WorkflowDefinition) {
@@ -554,6 +602,11 @@ interface StartRunCoreParams {
   resolvedProject: Project | null;
   isolationOn: boolean;
   branchTemplate: string | undefined;
+  // Trigger provenance for the run row. Omitted → 'manual'. The owning rib id
+  // (null for local workflows) is stamped so the runs feed can badge/filter and
+  // bulk-delete by rib even after the rib is removed.
+  origin?: WorkflowRunOrigin;
+  ribId?: string | null;
 }
 
 // Run-launch core: create the linked conversation + run row, spawn the
@@ -570,6 +623,8 @@ function startRunCore(
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore } = deps;
   const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
     params;
+  const origin: WorkflowRunOrigin = params.origin ?? "manual";
+  const ribId = params.ribId ?? null;
   // Bind the notebook (read + contribute) only when the working dir actually
   // resolves inside the resolved project. A run started with a display-only
   // `projectId` + an overriding `workingDir` outside that project must NOT read
@@ -625,6 +680,8 @@ function startRunCore(
       conversationId: conversation.id,
       projectId,
       workingDir,
+      origin,
+      ribId,
     });
   } catch (err) {
     // Orphan rollback: the conversation row exists only to anchor a run, so
@@ -681,6 +738,12 @@ function startRunCore(
     dedupeKey,
     conversationId: conversation.id,
   });
+  // Retention is a creation-time invariant of scheduled runs, so it covers the
+  // heartbeat AND panel /refresh uniformly (rather than only firing on a
+  // scheduler tick). Manual runs are never auto-pruned.
+  if (origin === "scheduled") {
+    pruneScheduledRuns(store, conversationStore, name);
+  }
   return { runId, conversationId: conversation.id };
 }
 
@@ -781,6 +844,9 @@ export interface WorkflowController {
     inputs: Record<string, string>;
     workingDir: string;
     isolation?: IsolationOverride;
+    // Defaults to 'manual'. The heartbeat passes 'scheduled' so producer runs
+    // stay out of the default feed and get retention-pruned.
+    origin?: WorkflowRunOrigin;
   }): StartRunResult;
   // The live run for an identical (name, workingDir, inputs), or undefined — the
   // heartbeat scheduler's pre-check so it won't re-fire a collector still running.
@@ -818,7 +884,7 @@ export function createWorkflowController(
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
   return {
-    startRun({ name, inputs, workingDir, isolation }) {
+    startRun({ name, inputs, workingDir, isolation, origin }) {
       const workflow = catalog.get(name);
       if (!workflow) return { ok: false, message: `unknown workflow '${name}'` };
       try {
@@ -854,6 +920,8 @@ export function createWorkflowController(
             resolvedProject,
             isolationOn,
             branchTemplate: workflow.worktree?.branch,
+            origin: origin ?? "manual",
+            ribId: ribIdFor(catalog, workflow.name),
           },
         );
         return { ok: true, runId, conversationId };
@@ -982,8 +1050,23 @@ export function workflowsRoutes(
     projectNotebookStore,
   } = buildExecutionDeps(opts);
 
+  // Purge a run and cascade its linked chat conversation. Delete the
+  // conversation FIRST (the workflow_runs FK is ON DELETE SET NULL, so this only
+  // clears the run's pointer): if it throws, we abort before purging the run —
+  // the caller sees the error and can retry — rather than deleting the run row
+  // and orphaning the conversation. Returns whether a row actually existed so
+  // callers can count / 404.
+  const purgeAndCascade = async (runId: string): Promise<boolean> => {
+    const conversationId = store.getRun(runId)?.conversationId ?? null;
+    if (conversationId !== null) {
+      conversationStore.delete(conversationId);
+    }
+    const { existed } = await purgeWorkflowRun({ runId, store, activeRuns });
+    return existed;
+  };
+
   app.get("/api/workflows", (c) => {
-    const workflows = catalog.list().map(workflowToSummary);
+    const workflows = catalog.list().map((w) => workflowToSummary(w, catalog));
     return c.json(
       listWorkflowsResponseSchema.parse({
         workflows,
@@ -993,15 +1076,89 @@ export function workflowsRoutes(
   });
 
   // Register the literal `/api/workflows/runs` path BEFORE the `/:name`
-  // route so Hono doesn't bind `name="runs"` and return a 404. Strict
-  // allow-list on `status` keeps this from drifting into a generic aggregate
-  // endpoint; widen the allow-list only when a concrete caller needs it.
+  // route so Hono doesn't bind `name="runs"` and return a 404. General runs
+  // feed: filterable by status / origin / owning rib / workflow, newest first,
+  // bounded. `?status=paused` (the long-standing nav-badge + CLI query) still
+  // returns exactly the paused rows. No filter → all runs up to `limit`.
+  const RUNS_FEED_DEFAULT_LIMIT = 200;
+  const RUNS_FEED_MAX_LIMIT = 1000;
   app.get("/api/workflows/runs", (c) => {
-    const status = c.req.query("status");
-    if (status !== "paused") {
-      return c.json({ error: "status query is required and must be 'paused'" }, 400);
+    const filter: {
+      workflowName?: string;
+      origin?: WorkflowRunOrigin;
+      ribId?: string;
+      statuses?: WorkflowRunStatus[];
+      limit: number;
+    } = { limit: RUNS_FEED_DEFAULT_LIMIT };
+
+    const statusParam = c.req.query("status");
+    if (statusParam !== undefined && statusParam !== "all") {
+      const parsed = workflowRunStatusSchema.safeParse(statusParam);
+      if (!parsed.success) {
+        return c.json({ error: `invalid status '${statusParam}'` }, 400);
+      }
+      filter.statuses = [parsed.data];
     }
-    return c.json({ runs: store.listRunsByStatus("paused") });
+
+    const originParam = c.req.query("origin");
+    if (originParam !== undefined && originParam !== "all") {
+      const parsed = workflowRunOriginSchema.safeParse(originParam);
+      if (!parsed.success) {
+        return c.json({ error: `invalid origin '${originParam}'` }, 400);
+      }
+      filter.origin = parsed.data;
+    }
+
+    const workflowName = c.req.query("workflow");
+    if (workflowName) filter.workflowName = workflowName;
+    const ribId = c.req.query("ribId");
+    if (ribId) filter.ribId = ribId;
+
+    const limitParam = c.req.query("limit");
+    if (limitParam !== undefined) {
+      const n = Number(limitParam);
+      if (!Number.isFinite(n) || n <= 0) {
+        return c.json({ error: `invalid limit '${limitParam}'` }, 400);
+      }
+      filter.limit = Math.min(RUNS_FEED_MAX_LIMIT, Math.floor(n));
+    }
+
+    return c.json({ runs: z.array(workflowRunSummarySchema).parse(store.queryRuns(filter)) });
+  });
+
+  // Delete a group of runs in one call — either an explicit id list or a filter
+  // (e.g. every `scheduled` run, or all runs owned by a rib). Same per-run
+  // semantics as DELETE /runs/:runId?purge=1 (cancel active, await terminal
+  // write, hard-delete, cascade the linked conversation). Origin-gated like the
+  // other state-changing routes.
+  app.post("/api/workflows/runs/bulk-delete", async (c) => {
+    if (originForbidden(c)) {
+      return c.json({ error: "forbidden origin" }, 403);
+    }
+    const raw = await c.req.json().catch(() => null);
+    const parsed = bulkDeleteRunsBodySchema.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.message }, 400);
+    }
+    let runIds: string[];
+    if ("runIds" in parsed.data) {
+      runIds = parsed.data.runIds;
+    } else {
+      const f = parsed.data.filter;
+      runIds = store
+        .queryRuns({
+          ...(f.workflowName !== undefined ? { workflowName: f.workflowName } : {}),
+          ...(f.origin !== undefined ? { origin: f.origin } : {}),
+          ...(f.ribId !== undefined ? { ribId: f.ribId } : {}),
+          ...(f.statuses !== undefined ? { statuses: f.statuses } : {}),
+        })
+        .map((r) => r.runId);
+    }
+    let deleted = 0;
+    for (const runId of runIds) {
+      if (await purgeAndCascade(runId)) deleted += 1;
+    }
+    return c.json(bulkDeleteRunsResponseSchema.parse({ deleted }));
   });
 
   // Read-only feed for `keelson worktree prune`. Returns persisted
@@ -1177,6 +1334,8 @@ export function workflowsRoutes(
           resolvedProject,
           isolationOn,
           branchTemplate,
+          origin: "manual",
+          ribId: ribIdFor(catalog, workflow.name),
         },
       );
       // Echo the canonical name so a fuzzy start (smoketst → smoke-test) hands
@@ -1232,6 +1391,10 @@ export function workflowsRoutes(
           // collector that opts into isolation must not write the live checkout.
           isolationOn: workflow.worktree?.enabled === true,
           branchTemplate: workflow.worktree?.branch,
+          // A panel refresh is a producer run, same class as the heartbeat's —
+          // keep it out of the default (manual) runs feed and subject to prune.
+          origin: "scheduled",
+          ribId: ribIdFor(catalog, workflow.name),
         },
       );
       return c.json({ runId, workflowName: workflow.name });
@@ -1331,24 +1494,9 @@ export function workflowsRoutes(
     const purge = c.req.query("purge") === "1";
 
     if (purge) {
-      const { existed, conversationId } = await purgeWorkflowRun({
-        runId,
-        store,
-        activeRuns,
-      });
+      const existed = await purgeAndCascade(runId);
       if (!existed) {
         return c.json({ error: `unknown run '${runId}'` }, 404);
-      }
-      if (conversationId !== null) {
-        try {
-          conversationStore.delete(conversationId);
-        } catch (err) {
-          console.warn(
-            `[workflows] failed to delete linked conversation ${conversationId}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
       }
       return c.json({ deleted: true });
     }

@@ -343,4 +343,144 @@ describe("SQLite WorkflowStore", () => {
     expect(store.deleteRun("r1")).toBe(true);
     expect(store.deleteRun("r1")).toBe(false);
   });
+
+  test("createRun persists origin + ribId; defaults to manual/null", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "manual",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    store.createRun({
+      runId: "sched",
+      workflowName: "osdu-lane",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:01.000Z",
+      conversationId: mintConv(db),
+      origin: "scheduled",
+      ribId: "osdu",
+    });
+
+    const manual = store.getRun("manual");
+    expect(manual!.origin).toBe("manual");
+    expect(manual!.ribId).toBeNull();
+    const sched = store.getRun("sched");
+    expect(sched!.origin).toBe("scheduled");
+    expect(sched!.ribId).toBe("osdu");
+  });
+
+  test("queryRuns filters by origin / ribId / workflow / status and clamps via limit", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const mk = (
+      runId: string,
+      startedAt: string,
+      extra: Partial<Parameters<typeof store.createRun>[0]>,
+    ): void => {
+      store.createRun({
+        runId,
+        workflowName: extra.workflowName ?? "wf",
+        inputs: {},
+        startedAt,
+        conversationId: mintConv(db),
+        ...extra,
+      });
+    };
+    mk("m1", "2025-01-01T00:00:00.000Z", { origin: "manual" });
+    mk("s1", "2025-01-01T00:00:01.000Z", {
+      origin: "scheduled",
+      ribId: "osdu",
+      workflowName: "osdu-lane",
+    });
+    mk("s2", "2025-01-01T00:00:02.000Z", {
+      origin: "scheduled",
+      ribId: "chamber",
+      workflowName: "chamber-feed",
+    });
+    store.updateRunStatus({
+      runId: "s2",
+      status: "succeeded",
+      completedAt: "2025-01-01T00:00:03.000Z",
+      error: null,
+    });
+
+    expect(store.queryRuns({ origin: "manual" }).map((r) => r.runId)).toEqual(["m1"]);
+    expect(store.queryRuns({ origin: "scheduled" }).map((r) => r.runId)).toEqual(["s2", "s1"]);
+    expect(store.queryRuns({ ribId: "osdu" }).map((r) => r.runId)).toEqual(["s1"]);
+    expect(store.queryRuns({ workflowName: "chamber-feed" }).map((r) => r.runId)).toEqual(["s2"]);
+    expect(store.queryRuns({ statuses: ["succeeded"] }).map((r) => r.runId)).toEqual(["s2"]);
+    expect(store.queryRuns({ statuses: ["running"] }).map((r) => r.runId)).toEqual(["s1", "m1"]);
+    expect(store.queryRuns({ limit: 1 }).map((r) => r.runId)).toEqual(["s2"]);
+    // The bound LIMIT honors 0 (returns nothing) rather than treating it as "no limit".
+    expect(store.queryRuns({ limit: 0 })).toEqual([]);
+    expect(store.queryRuns({}).map((r) => r.runId)).toEqual(["s2", "s1", "m1"]);
+  });
+
+  test("origin CHECK constraint rejects values outside manual|scheduled", () => {
+    const db = openDatabase({ path: dbPath });
+    createWorkflowStore(db);
+    expect(() =>
+      db
+        .query(
+          "INSERT INTO workflow_runs (id, workflow_name, status, started_at, origin) VALUES ('x', 'w', 'running', 't', 'bogus')",
+        )
+        .run(),
+    ).toThrow();
+  });
+
+  test("scheduledRunsToPrune keeps newest N + skips non-terminal and manual runs", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    // 4 scheduled runs for one producer: 3 succeeded + 1 still running (newest).
+    const stamps = [
+      "2025-01-01T00:00:00.000Z", // oldest
+      "2025-01-01T00:00:01.000Z",
+      "2025-01-01T00:00:02.000Z",
+      "2025-01-01T00:00:03.000Z", // newest, left running
+    ];
+    stamps.forEach((startedAt, i) => {
+      const runId = `p${i}`;
+      store.createRun({
+        runId,
+        workflowName: "producer",
+        inputs: {},
+        startedAt,
+        conversationId: mintConv(db),
+        origin: "scheduled",
+      });
+      if (i < 3) {
+        store.updateRunStatus({ runId, status: "succeeded", completedAt: startedAt, error: null });
+      }
+    });
+    // A manual run of the same workflow must never be pruned.
+    store.createRun({
+      runId: "manual",
+      workflowName: "producer",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.500Z",
+      conversationId: mintConv(db),
+      origin: "manual",
+    });
+    store.updateRunStatus({
+      runId: "manual",
+      status: "succeeded",
+      completedAt: "x",
+      error: null,
+    });
+
+    // keep=2 protects the 2 newest scheduled rows (p3 running, p2 succeeded);
+    // among the rest only terminal ones are eligible → p1, p0.
+    const toPrune = store
+      .scheduledRunsToPrune("producer", 2)
+      .map((r) => r.runId)
+      .sort();
+    expect(toPrune).toEqual(["p0", "p1"]);
+    // The conversation id is returned so the caller can cascade.
+    expect(store.scheduledRunsToPrune("producer", 2).every((r) => r.conversationId !== null)).toBe(
+      true,
+    );
+  });
 });

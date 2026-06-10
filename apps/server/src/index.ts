@@ -214,6 +214,8 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const workflowCatalog = bootstrapWorkflows({
     workflowDir: paths.workflowsDir,
     extra: ribWorkflows.definitions,
+    ribProvenance: ribWorkflows.provenance,
+    ribNames: new Map(ribs.manifests.map((m) => [m.id, m.displayName])),
   });
   // Composition-root ownership of in-flight runs — the shutdown handler
   // drains via this same handle so a SIGINT can abort active executions and
@@ -273,6 +275,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   for (const warning of scheduleWarnings) {
     console.warn(`[keelson] ${warning}`);
   }
+  // Scheduled-run retention (keep newest few terminal producer runs per
+  // workflow) is a creation-time invariant in startRunCore, so it covers the
+  // heartbeat and panel /refresh uniformly — nothing to wire here.
   const scheduler = createScheduler({
     schedules: surfaceSchedules,
     controller: workflowController,
