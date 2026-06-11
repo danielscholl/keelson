@@ -63,16 +63,20 @@ export const workflowNodeSummarySchema = z
   .strict();
 export type WorkflowNodeSummary = z.infer<typeof workflowNodeSummarySchema>;
 
-// Where a workflow definition came from. `local` = a YAML file in the
+// Where a workflow definition came from. `local` = a YAML file in the global
 // workflows dir; `rib` = contributed by an installed rib, carrying the rib's
-// id + display name so the UI can badge, filter, and hide by rib. Defaulted to
+// id + display name so the UI can badge, filter, and hide by rib; `project` =
+// a YAML file under a registered project's .keelson/workflows, carrying the
+// project's id + name for the same badge/filter treatment. Defaulted to
 // `local` at parse time so older payloads (and the many fixtures that build a
 // summary by hand) keep validating.
 export const workflowSourceSchema = z
   .object({
-    kind: z.enum(["local", "rib"]),
+    kind: z.enum(["local", "rib", "project"]),
     ribId: z.string().optional(),
     ribName: z.string().optional(),
+    projectId: z.string().optional(),
+    projectName: z.string().optional(),
   })
   .strict();
 export type WorkflowSource = z.infer<typeof workflowSourceSchema>;

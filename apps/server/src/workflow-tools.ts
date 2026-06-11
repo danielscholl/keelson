@@ -22,13 +22,19 @@ import {
   type WorkflowRunDetail,
 } from "@keelson/shared";
 import { z } from "zod";
-import type { WorkflowCatalog } from "./bootstrap.ts";
+import type { WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
+import type { ProjectsStore } from "./projects-store.ts";
 import { resolveWorkflowName } from "./workflow-resolve.ts";
 import type { WatchResult, WorkflowController } from "./workflows-handler.ts";
 
 export interface CreateWorkflowChatToolsDeps {
   controller: WorkflowController;
   catalog: WorkflowCatalog;
+  // Lets workflow_list / workflow_run recover the conversation's project from
+  // ctx.cwd (chat sets it to the project root) so catalog reads see that
+  // project's workflows shadowing global. The controller re-derives the same
+  // scope from workingDir, keeping list- and run-resolution in agreement.
+  projectsStore?: Pick<ProjectsStore, "findByPathPrefix">;
   // Soft cap on how long workflow_run / workflow_respond block waiting for the
   // run to pause or finish before returning a "still running" result. Tunable
   // for tests; the chat default gives a plan/approval node time to reach its
@@ -170,6 +176,10 @@ const statusInputSchema = z.object({
 export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): ToolDefinition[] {
   const { controller, catalog } = deps;
   const watchDeadlineMs = deps.watchDeadlineMs ?? DEFAULT_CHAT_WATCH_DEADLINE_MS;
+  const scopeFor = (ctx: ToolContext): WorkflowScopeContext | undefined => {
+    const projectId = deps.projectsStore?.findByPathPrefix(ctx.cwd)?.id;
+    return projectId !== undefined ? { projectId } : undefined;
+  };
 
   const workflowList: ToolDefinition = {
     name: "workflow_list",
@@ -183,7 +193,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const q = parsed.data.query?.trim().toLowerCase();
-      const all = catalog.list();
+      const all = catalog.list(scopeFor(ctx));
       const matches = q
         ? all.filter(
             (w) => w.name.toLowerCase().includes(q) || w.description.toLowerCase().includes(q),
@@ -231,7 +241,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const requested = parsed.data.name;
-      const names = catalog.list().map((w) => w.name);
+      const names = catalog.list(scopeFor(ctx)).map((w) => w.name);
       const resolution = resolveWorkflowName(requested, names);
       if (resolution.kind === "none") {
         const avail =

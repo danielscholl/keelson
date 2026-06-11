@@ -235,7 +235,7 @@ export interface ChatWebSocketDeps {
   workflowTools?: ToolDefinition[];
   // Live workflow catalog, used to render the always-on workflow index into the
   // system prompt so the model can match intent without a workflow_list call.
-  workflowCatalog?: { list(): readonly WorkflowSummaryLike[] };
+  workflowCatalog?: { list(scope?: { projectId?: string }): readonly WorkflowSummaryLike[] };
 }
 
 export function chatWebSocketHandlers(
@@ -292,7 +292,7 @@ export interface ChatDeps {
   // Workflow chat tools appended to the registry tools for this turn.
   workflowTools?: ToolDefinition[];
   // Live workflow catalog for the system-prompt index (see chat-prompt.ts).
-  workflowCatalog?: { list(): readonly WorkflowSummaryLike[] };
+  workflowCatalog?: { list(scope?: { projectId?: string }): readonly WorkflowSummaryLike[] };
 }
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
@@ -440,7 +440,14 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     ...(typeof conv.seedSystemPrompt === "string"
       ? { seedSystemPrompt: conv.seedSystemPrompt }
       : {}),
-    ...(workflowToolsActive ? { workflows: deps.workflowCatalog?.list() ?? [] } : {}),
+    ...(workflowToolsActive
+      ? {
+          workflows:
+            deps.workflowCatalog?.list(
+              recallProjectId !== undefined ? { projectId: recallProjectId } : undefined,
+            ) ?? [],
+        }
+      : {}),
   });
 
   // Falls back to the default project's rootPath when conv.projectId was

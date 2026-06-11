@@ -221,6 +221,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   );
   const workflowCatalog = bootstrapWorkflows({
     workflowDir: paths.workflowsDir,
+    listProjects: () => projectsStore.list(),
     extra: ribWorkflows.definitions,
     ribProvenance: ribWorkflows.provenance,
     ribNames: new Map(ribs.manifests.map((m) => [m.id, m.displayName])),
@@ -270,6 +271,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const workflowTools = createWorkflowChatTools({
     controller: workflowController,
     catalog: workflowCatalog,
+    projectsStore,
   });
 
   // Server-side heartbeat: keep snapshot-backed surface regions fresh on their

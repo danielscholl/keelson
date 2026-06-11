@@ -89,9 +89,11 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
     [setActiveProject],
   );
 
+  // Re-fetch when the active project changes — the catalog is scoped to it
+  // (project workflows overlay global, shadowing same-named ones).
   useEffect(() => {
     let cancelled = false;
-    listWorkflows()
+    listWorkflows(activeProjectId ?? undefined)
       .then(async ({ workflows: list, discoveryNotices }) => {
         if (cancelled) return;
         setWorkflows(list);
@@ -113,7 +115,7 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
         // for the starter set is cheap.
         const detailEntries = await Promise.all(
           list.map((w) =>
-            getWorkflowDetail(w.name).then(
+            getWorkflowDetail(w.name, activeProjectId ?? undefined).then(
               (d) => [w.name, d] as const,
               (err) => {
                 console.warn(`[workflows] detail(${w.name}) failed:`, err);
@@ -136,14 +138,14 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
     return () => {
       cancelled = true;
     };
-  }, [toast.push]);
+  }, [toast.push, activeProjectId]);
 
   const handleRunRequest = useCallback(
     async (workflow: WorkflowSummary) => {
       let detail = details.get(workflow.name);
       if (!detail) {
         try {
-          detail = await getWorkflowDetail(workflow.name);
+          detail = await getWorkflowDetail(workflow.name, activeProjectId ?? undefined);
           setDetails((prev) => {
             const next = new Map(prev);
             next.set(workflow.name, detail!);
@@ -157,7 +159,7 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
       }
       setScreen({ kind: "run", workflow: detail, runId: null });
     },
-    [details, toast],
+    [details, toast, activeProjectId],
   );
 
   const handleStart = useCallback(
@@ -190,7 +192,7 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
       let detail = details.get(workflowName);
       if (!detail) {
         try {
-          detail = await getWorkflowDetail(workflowName);
+          detail = await getWorkflowDetail(workflowName, activeProjectId ?? undefined);
           setDetails((prev) => {
             const next = new Map(prev);
             next.set(workflowName, detail!);
@@ -204,7 +206,7 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
       }
       setScreen({ kind: "run", workflow: detail, runId });
     },
-    [details, toast],
+    [details, toast, activeProjectId],
   );
 
   const handleBack = useCallback(() => {

@@ -289,13 +289,17 @@ export async function getClaudeCliStatus(): Promise<ClaudeCliStatus> {
 
 // --- Workflow surface ---
 
-export async function listWorkflows(): Promise<ListWorkflowsResponse> {
-  return listWorkflowsResponseSchema.parse(await apiRequest<unknown>("/api/workflows"));
+// projectId narrows the catalog to that project's view (its workflows
+// overlaid on global); omitted = global only.
+export async function listWorkflows(projectId?: string): Promise<ListWorkflowsResponse> {
+  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+  return listWorkflowsResponseSchema.parse(await apiRequest<unknown>(`/api/workflows${query}`));
 }
 
-export async function getWorkflowDetail(name: string): Promise<WorkflowDetail> {
+export async function getWorkflowDetail(name: string, projectId?: string): Promise<WorkflowDetail> {
+  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
   return getWorkflowDetailResponseSchema.parse(
-    await apiRequest<unknown>(`/api/workflows/${encodeURIComponent(name)}`, {
+    await apiRequest<unknown>(`/api/workflows/${encodeURIComponent(name)}${query}`, {
       label: `/api/workflows/${name}`,
     }),
   ).workflow;

@@ -28,6 +28,7 @@ import { handleChatRequest } from "../src/chat-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import type { MemoryStore } from "../src/memory-store.ts";
+import { createProjectsStore } from "../src/projects-store.ts";
 
 function makeMemStore(): ConversationStore {
   return createConversationStore(openDatabase({ path: ":memory:" }));
@@ -313,6 +314,44 @@ describe("chat memory recall", () => {
     expect(sp).toContain("## Workflows");
     expect(sp).toContain("- smoke-test");
     expect(sp).toContain("Do NOT run the name as a shell command");
+  });
+
+  test("scopes the workflow index to the conversation's project", async () => {
+    const spyId = "spy-wf-index-scoped";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const db = openDatabase({ path: ":memory:" });
+    const store = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "scoped", rootPath: "/tmp" });
+    const conv = store.create({ providerId: spyId, projectId: project.id });
+
+    const noopTool: ToolDefinition = {
+      name: "workflow_run",
+      description: "stub",
+      inputSchema: z.object({}),
+      execute: async () => {},
+    };
+
+    let capturedScope: { projectId?: string } | undefined;
+    await handleChatRequest(makeFrame(conv.id, spyId, "what can you run?"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+      workflowTools: [noopTool],
+      workflowCatalog: {
+        list: (scope?: { projectId?: string }) => {
+          capturedScope = scope;
+          return [{ name: "proj-flow", description: "Use when: project-scoped testing" }];
+        },
+      },
+    });
+
+    expect(capturedScope).toEqual({ projectId: project.id });
+    expect(captured!.systemPrompt!).toContain("- proj-flow");
   });
 
   test("does not invoke recall for workflow-linked conversations", async () => {

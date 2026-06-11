@@ -63,6 +63,14 @@ export function WorkflowCard({ workflow, detail, onRun }: WorkflowCardProps) {
           {workflow.source.kind === "rib" && workflow.source.ribId && (
             <RibBadge ribId={workflow.source.ribId} label={workflow.source.ribName} />
           )}
+          {workflow.source.kind === "project" && (
+            <span
+              className="wc-project-pill"
+              title={`From this project's .keelson/workflows${workflow.source.projectName ? ` (${workflow.source.projectName})` : ""}`}
+            >
+              {workflow.source.projectName ?? "project"}
+            </span>
+          )}
           {workflow.background && (
             <span className="wc-bg-pill" title="Auto-refreshed by a rib; you don't run it by hand">
               background
