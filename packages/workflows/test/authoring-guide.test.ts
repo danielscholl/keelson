@@ -9,7 +9,25 @@ import {
   authoringGuideSection,
   WORKFLOW_AUTHORING_GUIDE,
 } from "../src/authoring-guide.ts";
-import { dagNodeBaseSchema, triggerRuleSchema } from "../src/schema/dag-node.ts";
+import {
+  approvalOnRejectSchema,
+  dagNodeBaseSchema,
+  triggerRuleSchema,
+} from "../src/schema/dag-node.ts";
+import type { LoopNodeConfig } from "../src/schema/loop.ts";
+import { stepRetryConfigSchema } from "../src/schema/retry.ts";
+
+// Record<keyof T, true> so the compiler flags a renamed/removed loop field
+// here, and the runtime check below flags one the guide stops documenting.
+const LOOP_CONFIG_KEYS: Record<keyof LoopNodeConfig, true> = {
+  prompt: true,
+  until: true,
+  max_iterations: true,
+  fresh_context: true,
+  until_bash: true,
+  interactive: true,
+  gate_message: true,
+};
 
 const NODE_TYPE_KEYWORDS = [
   "prompt",
@@ -68,6 +86,19 @@ describe("workflow authoring guide", () => {
   test("documents every trigger rule", () => {
     for (const rule of triggerRuleSchema.options) {
       expect(WORKFLOW_AUTHORING_GUIDE).toContain(rule);
+    }
+  });
+
+  // Nested block fields drift too — a wrong field name in the guide makes
+  // every draft authored from it fail validation.
+  test("documents the nested retry, loop, and approval on_reject fields", () => {
+    const nestedKeys = [
+      ...Object.keys(stepRetryConfigSchema.shape),
+      ...Object.keys(LOOP_CONFIG_KEYS),
+      ...Object.keys(approvalOnRejectSchema.shape),
+    ];
+    for (const field of nestedKeys) {
+      expect(WORKFLOW_AUTHORING_GUIDE).toContain(field);
     }
   });
 });

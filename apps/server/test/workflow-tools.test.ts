@@ -427,3 +427,51 @@ nodes:
     expect(result.content).not.toContain("project-sentinel-456");
   });
 });
+
+describe("scheduled-run scope (review fix)", () => {
+  test("origin 'scheduled' resolves the global definition even from a project cwd", async () => {
+    const rig = makeRig();
+    activeDispose = rig.dispose;
+    const projectRoot = join(tmpDir, "sched-root");
+    mkdirSync(join(projectRoot, ".keelson", "workflows"), { recursive: true });
+    writeWorkflow(
+      "producer.yaml",
+      `name: producer\ndescription: global producer\nnodes:\n  - id: global-step\n    bash: echo from-global\n`,
+    );
+    writeFileSync(
+      join(projectRoot, ".keelson", "workflows", "producer.yaml"),
+      `name: producer\ndescription: project shadow\nnodes:\n  - id: shadow-step\n    bash: echo from-shadow\n`,
+    );
+    rig.projectsStore.create({ name: "sched", rootPath: projectRoot });
+
+    const manual = rig.controller.startRun({
+      name: "producer",
+      inputs: {},
+      workingDir: projectRoot,
+    });
+    expect(manual.ok).toBe(true);
+
+    const scheduled = rig.controller.startRun({
+      name: "producer",
+      inputs: {},
+      workingDir: projectRoot,
+      origin: "scheduled",
+    });
+    expect(scheduled.ok).toBe(true);
+    if (!scheduled.ok || !manual.ok) throw new Error("runs did not start");
+
+    const detail = await waitForRun(rig.controller, scheduled.runId);
+    expect(detail.nodes[0]!.nodeId).toBe("global-step");
+    const manualDetail = await waitForRun(rig.controller, manual.runId);
+    expect(manualDetail.nodes[0]!.nodeId).toBe("shadow-step");
+  });
+});
+
+async function waitForRun(controller: WorkflowController, runId: string) {
+  for (let i = 0; i < 100; i++) {
+    const detail = controller.getRun(runId);
+    if (detail && (detail.status === "succeeded" || detail.status === "failed")) return detail;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`run ${runId} did not finish`);
+}

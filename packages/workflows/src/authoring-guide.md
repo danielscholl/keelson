@@ -116,8 +116,9 @@ exposes the reply as the node's output; `on_reject` re-prompts on rejection:
 ```
 
 `loop` — repeats an AI prompt until `until` text appears in the output (or
-`until_bash` exits 0), bounded by `max_iterations`. `loop.interactive: true`
-requires workflow-level `interactive: true` and a `gate_message`:
+`until_bash` exits 0), bounded by `max_iterations`; `fresh_context: true`
+starts a new session each iteration. `loop.interactive: true` requires
+workflow-level `interactive: true` and a `gate_message`:
 
 ```yaml
 - id: fix-until-green
@@ -155,8 +156,9 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
   Rib-registered tools are default-off; opt in with `allowed_tools`.
 - `output_schema` — JSON-Schema subset the node output must satisfy.
 - `output_format` — provider structured-output request (claude).
-- `retry: { maxAttempts, delayMs, backoffFactor }` — not allowed on loop
-  nodes.
+- `retry: { max_attempts, delay_ms, on_error }` — `max_attempts` 1–5
+  (required), `delay_ms` 1000–60000 (doubled each attempt), `on_error`
+  `transient` (default) | `all`. Not allowed on loop nodes.
 - `fail_on_tool_error: true` — fail the node if any invoked tool errored.
 - `idle_timeout` — ms of AI-stream silence before the node fails.
 - `systemPrompt`, `effort`, `thinking` — claude-only per-node controls.

@@ -23,7 +23,7 @@ export interface WorkflowListEntry {
 
 export async function runWorkflowList(opts: WorkflowListOptions): Promise<never> {
   const dir = opts.dir ?? defaultWorkflowsDir();
-  const result = discoverWorkflows([{ dir, source: "project" }]);
+  const result = discoverWorkflows([{ dir, source: "global" }]);
 
   if (result.errors.length > 0 && result.workflows.length === 0) {
     emit(

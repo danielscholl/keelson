@@ -901,9 +901,12 @@ export function createWorkflowController(
       }
       // Project resolution precedes the lookup so a workingDir inside a
       // registered project sees that project's workflows (shadowing global).
+      // Scheduled producer runs are the exception: they must always resolve
+      // the rib's own definition (snapshot bindings are object-identity-keyed,
+      // so a project shadow would run uselessly and never publish).
       const resolvedProject = projectsStore?.findByPathPrefix(workingDir) ?? null;
       const projectId = resolvedProject?.id ?? null;
-      const scope = projectId !== null ? { projectId } : undefined;
+      const scope = origin === "scheduled" || projectId === null ? undefined : { projectId };
       const workflow = catalog.get(name, scope);
       if (!workflow) return { ok: false, message: `unknown workflow '${name}'` };
       const yamlEnabled = workflow.worktree?.enabled === true;
@@ -1286,25 +1289,18 @@ export function workflowsRoutes(
       return c.json({ error: "projectId or workingDir is required" }, 400);
     }
 
-    // Fail closed when the resolved target isn't a usable directory. Without
-    // this, a `--working-dir package.json` (file) or stale project root would
-    // pass schema validation, get a run row written, then crash the executor's
-    // pre-start worktree probe before the try/finally that closes the row out.
-    try {
-      const st = statSync(workingDir);
-      if (!st.isDirectory()) {
-        return c.json({ error: `workingDir is not a directory: ${workingDir}` }, 400);
-      }
-    } catch {
-      return c.json({ error: `workingDir does not exist: ${workingDir}` }, 400);
-    }
-
-    // Forgiving lookup, scoped to the resolved project (a workingDir inside a
-    // registered project sees that project's workflows shadowing global):
-    // exact name wins; otherwise a confident typo resolves to the run while a
-    // weak guess returns suggestions rather than auto-starting a
-    // possibly-destructive workflow.
-    const scope: WorkflowScopeContext | undefined = projectId !== null ? { projectId } : undefined;
+    // Forgiving lookup, scoped to the project that contains the EXECUTION
+    // directory (matching controller.startRun, so the same name+dir resolves
+    // the same definition on every entry path; an explicit body projectId
+    // still tags the run but never picks a different definition than where it
+    // runs): exact name wins; otherwise a confident typo resolves to the run
+    // while a weak guess returns suggestions rather than auto-starting a
+    // possibly-destructive workflow. Runs before the workingDir stat check so
+    // an unknown name is always a 404 (the CLI maps 404 → exit 4 with
+    // suggestions) regardless of target validity.
+    const scopeProjectId = projectsStore?.findByPathPrefix(workingDir)?.id ?? null;
+    const scope: WorkflowScopeContext | undefined =
+      scopeProjectId !== null ? { projectId: scopeProjectId } : undefined;
     let workflow = catalog.get(requested, scope);
     if (!workflow) {
       const resolution = resolveWorkflowName(
@@ -1335,6 +1331,19 @@ export function workflowsRoutes(
         },
         404,
       );
+    }
+
+    // Fail closed when the resolved target isn't a usable directory. Without
+    // this, a `--working-dir package.json` (file) or stale project root would
+    // pass schema validation, get a run row written, then crash the executor's
+    // pre-start worktree probe before the try/finally that closes the row out.
+    try {
+      const st = statSync(workingDir);
+      if (!st.isDirectory()) {
+        return c.json({ error: `workingDir is not a directory: ${workingDir}` }, 400);
+      }
+    } catch {
+      return c.json({ error: `workingDir does not exist: ${workingDir}` }, 400);
     }
 
     // Resolve isolation policy: YAML default ⊕ per-run override. The override

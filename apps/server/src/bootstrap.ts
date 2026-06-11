@@ -404,12 +404,22 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
   // In the monorepo dev layout the global dir already lives under a project
   // root, so registering that project would double-index every global
   // workflow as project-scoped; skip any project whose dir resolves there.
-  const resolvedGlobalDir = path.resolve(dir);
-  const scopedProjects = () =>
-    (opts.listProjects?.() ?? [])
-      .filter((p) => path.resolve(projectWorkflowsDir(p.rootPath)) !== resolvedGlobalDir)
+  // realpath, not resolve: a symlinked root (macOS /tmp → /private/tmp,
+  // symlinked checkouts) must not make one physical dir look like two scopes.
+  const canonicalPath = (p: string): string => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const scopedProjects = () => {
+    const resolvedGlobalDir = canonicalPath(dir);
+    return (opts.listProjects?.() ?? [])
+      .filter((p) => canonicalPath(projectWorkflowsDir(p.rootPath)) !== resolvedGlobalDir)
       .slice()
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  };
 
   const scan = (): CatalogSnapshot => {
     const projects = scopedProjects();
@@ -418,7 +428,8 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     const signature = [
       `global:${catalogSignature(dir)}`,
       ...projects.map(
-        (p) => `${p.id}:${p.name}:${catalogSignature(projectWorkflowsDir(p.rootPath))}`,
+        (p) =>
+          `${p.id}:${p.name}:${p.rootPath}:${catalogSignature(projectWorkflowsDir(p.rootPath))}`,
       ),
     ].join("\n");
     if (cached && cached.signature === signature) return cached;
@@ -450,12 +461,12 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     for (const definition of extra) {
       if (byName.has(definition.name)) {
         console.warn(
-          `[workflows] rib workflow '${definition.name}' shadowed by a project workflow of the same name`,
+          `[workflows] rib workflow '${definition.name}' shadowed by a global workflow file of the same name`,
         );
         notices.push({
           level: "warning",
           filename: `<rib:${definition.name}>`,
-          message: `rib workflow '${definition.name}' shadowed by a project workflow of the same name`,
+          message: `rib workflow '${definition.name}' shadowed by a global workflow file of the same name`,
         });
         continue;
       }
@@ -535,8 +546,14 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     list: (scope) => {
       const { snapshot, project } = projectView(scope);
       if (!project) return Array.from(snapshot.byName.values());
-      const merged = new Map(snapshot.byName);
+      // Project entries first: downstream consumers truncate from the front
+      // (the system-prompt index caps at 40 names), and the scope's own
+      // workflows must never be the ones cut.
+      const merged = new Map<string, WorkflowDefinition>();
       for (const [name, entry] of project.byName) merged.set(name, entry.workflow);
+      for (const [name, definition] of snapshot.byName) {
+        if (!merged.has(name)) merged.set(name, definition);
+      }
       return Array.from(merged.values());
     },
     get: (name, scope) => {

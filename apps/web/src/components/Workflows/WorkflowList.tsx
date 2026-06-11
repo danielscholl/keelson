@@ -1,5 +1,5 @@
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useSettings } from "../../hooks/useSettings.ts";
 import { ribAccent } from "../../lib/rib.ts";
@@ -62,6 +62,20 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
   }, [workflows]);
+
+  // The filter state outlives refetches (project switches swap the workflows
+  // prop in place). If the selected chip no longer exists in the new list, the
+  // toolbar may unmount entirely while the predicate still excludes everything
+  // — reset to "all" so the catalog can't get stuck empty with no visible chip
+  // to clear.
+  useEffect(() => {
+    if (source === "all") return;
+    const valid =
+      (source === "local" && ribs.hasLocal) ||
+      (source === "project" && ribs.hasProject) ||
+      ribs.list.some((r) => r.id === source);
+    if (!valid) setSource("all");
+  }, [source, ribs]);
 
   const hiddenCount = useMemo(
     () =>

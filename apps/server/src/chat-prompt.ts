@@ -53,6 +53,10 @@ export function buildWorkflowGuidance(workflows: readonly WorkflowSummaryLike[])
     .map((n) => `- ${n}`);
   const overflow = workflows.length - shown.length;
   if (overflow > 0) lines.push(`- …and ${overflow} more (call workflow_list to see them).`);
+  // An empty catalog still gets the section: the authoring rules below
+  // (validate-first, show-the-user-before-save) matter MOST when the user is
+  // about to author the first workflow.
+  if (lines.length === 0) lines.push("- (none yet — you can author the first one)");
 
   return [
     "## Workflows",
@@ -72,7 +76,7 @@ export function buildWorkflowGuidance(workflows: readonly WorkflowSummaryLike[])
     "Authoring new workflows:",
     "- When the user wants to create or change a workflow, call workflow_schema for the YAML reference and workflow_get on a similar existing workflow to copy its shape, then draft and check the YAML with workflow_validate until it is clean.",
     '- Before calling workflow_save, ALWAYS show the user the complete final YAML and get their explicit approval — including the scope ("project" = this conversation\'s project, "global" = all projects) and whether an existing file may be overwritten.',
-    "- Only inline prompt/bash/script nodes can be authored from chat; a `command:` node references a markdown file that must already exist on disk.",
+    "- Every node type except `command:` is authorable inline (prompt, bash, script, approval, loop, cancel); a `command:` node references a markdown file that must already exist on disk — use a `prompt` node instead.",
   ].join("\n");
 }
 
@@ -87,7 +91,7 @@ export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string
   if (typeof input.seedSystemPrompt === "string" && input.seedSystemPrompt.length > 0) {
     parts.push(input.seedSystemPrompt);
   }
-  if (input.workflows !== undefined && input.workflows.length > 0) {
+  if (input.workflows !== undefined) {
     parts.push(buildWorkflowGuidance(input.workflows));
   }
   return parts.length > 0 ? parts.join("\n\n") : undefined;

@@ -445,3 +445,118 @@ describe("workflow_save", () => {
     );
   });
 });
+
+describe("review-fix regressions", () => {
+  test("overwrite refuses to replace a file that declares a different workflow name", async () => {
+    writeFileSync(join(wfDir, "keep.yaml"), VALID_WF("other-flow", "precious"));
+    const tools = makeTools();
+    const { ctx, chunks } = makeCtx();
+    await toolByName(tools, "workflow_save").execute(
+      { name: "keep", yaml: VALID_WF("keep"), scope: "global", overwrite: true },
+      ctx,
+    );
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('"other-flow"');
+    expect(readFileSync(join(wfDir, "keep.yaml"), "utf-8")).toContain("precious");
+  });
+
+  test("project scope aliasing the global dir runs the global-scope guards", async () => {
+    // Project whose .keelson/workflows IS the global dir (dev layout): the
+    // catalog skips it as a scope, but saves must not skip the name guard.
+    const aliasRoot = join(tmpDir, "alias-root");
+    mkdirSync(join(aliasRoot, ".keelson"), { recursive: true });
+    const aliasWfDir = join(aliasRoot, ".keelson", "workflows");
+    mkdirSync(aliasWfDir, { recursive: true });
+    writeFileSync(join(aliasWfDir, "other-file.yaml"), VALID_WF("claimed"));
+    const catalog = bootstrapWorkflows({ workflowDir: aliasWfDir, listProjects: () => [] });
+    const tools = createWorkflowAuthoringTools({
+      catalog,
+      globalWorkflowsDir: aliasWfDir,
+      project: { id: "p-alias", rootPath: aliasRoot },
+    });
+
+    const refused = makeCtx();
+    await toolByName(tools, "workflow_save").execute(
+      { name: "claimed", yaml: VALID_WF("claimed"), scope: "project" },
+      refused.ctx,
+    );
+    const refusal = lastToolResult(refused.chunks);
+    expect(refusal.isError).toBe(true);
+    expect(refusal.content).toContain("other-file.yaml");
+
+    const clean = makeCtx();
+    await toolByName(tools, "workflow_save").execute(
+      { name: "fresh-flow", yaml: VALID_WF("fresh-flow"), scope: "project" },
+      clean.ctx,
+    );
+    const saved = lastToolResult(clean.chunks);
+    expect(saved.isError).toBe(false);
+    expect(saved.content).toContain("effectively global");
+  });
+
+  test("workflow_schema rejects invalid input instead of returning the guide", async () => {
+    const tools = makeTools();
+    const { ctx, chunks } = makeCtx();
+    await toolByName(tools, "workflow_schema").execute({ section: "node-types" }, ctx);
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("invalid input");
+    expect(result.content).not.toContain("# Keelson Workflow Authoring Guide");
+  });
+
+  test("validate keeps a message containing '; ' as one bullet", async () => {
+    const tools = makeTools();
+    const { ctx, chunks } = makeCtx();
+    await toolByName(tools, "workflow_validate").execute(
+      {
+        yaml: `name: x
+description: y
+nodes:
+  - id: memory
+    bash: echo hi
+`,
+      },
+      ctx,
+    );
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    // The reserved-id message contains "; rename the node." — it must stay in
+    // the same bullet, not split into a dangling fragment.
+    expect(result.content).toContain("rename the node");
+    expect(result.content).not.toContain("\n- rename the node");
+  });
+
+  test("strict kebab names: trailing/double hyphens rejected, validate flags unsaveable names", async () => {
+    const tools = makeTools();
+    for (const name of ["pr-review-", "a--b"]) {
+      const { ctx, chunks } = makeCtx();
+      await toolByName(tools, "workflow_save").execute(
+        { name, yaml: VALID_WF(name), scope: "global" },
+        ctx,
+      );
+      expect(lastToolResult(chunks).isError).toBe(true);
+    }
+
+    const { ctx, chunks } = makeCtx();
+    await toolByName(tools, "workflow_validate").execute(
+      { yaml: `name: Deploy Prod\ndescription: y\nnodes:\n  - id: a\n    bash: echo hi\n` },
+      ctx,
+    );
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("NOT saveable");
+  });
+
+  test("global save over a rib-contributed name reports the rib shadow", async () => {
+    const tools = makeTools();
+    const { ctx, chunks } = makeCtx();
+    await toolByName(tools, "workflow_save").execute(
+      { name: "rib-flow", yaml: VALID_WF("rib-flow"), scope: "global" },
+      ctx,
+    );
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("rib-contributed");
+  });
+});

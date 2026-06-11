@@ -2634,3 +2634,51 @@ nodes:
     expect(((await res.json()) as { error: string }).error).toContain("invalid json");
   });
 });
+
+describe("review-fix regressions (routes)", () => {
+  const SIMPLE_WF = (name: string) => `name: ${name}
+description: regression fixture
+nodes:
+  - id: step
+    bash: echo ${name}
+`;
+
+  function makeScopedRig() {
+    const rig = makeRig();
+    const projectRoot = join(tmpDir, "proj-root");
+    const projectWfDir = join(projectRoot, ".keelson", "workflows");
+    mkdirSync(projectWfDir, { recursive: true });
+    const project = rig.projectsStore.create({ name: "scoped", rootPath: projectRoot });
+    return { ...rig, project, projectRoot, projectWfDir };
+  }
+
+  test("an unknown name with an invalid workingDir is still a 404 with suggestions", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("smoke-test.yaml", SIMPLE_WF("smoke-test"));
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/smoke-tst/runs", {
+        workingDir: join(tmpDir, "does-not-exist"),
+      }),
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { suggestions?: string[] };
+    expect(body.suggestions ?? []).toContain("smoke-test");
+  });
+
+  test("definition scope follows workingDir even when an explicit projectId is supplied", async () => {
+    const rig = makeScopedRig();
+    writeFileSync(join(rig.projectWfDir, "proj-only.yaml"), SIMPLE_WF("proj-only"));
+    // Explicit projectId points at the DEFAULT project, workingDir at the
+    // scoped project — the execution dir's overlay must win the lookup.
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/proj-only/runs", {
+        projectId: rig.defaultProjectId,
+        workingDir: rig.projectRoot,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = await pollUntilTerminal(rig.app, runId);
+    expect(run.status).toBe("succeeded");
+  });
+});

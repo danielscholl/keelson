@@ -9,7 +9,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -283,5 +283,44 @@ describe("bootstrapWorkflows project scoping", () => {
     expect(catalog.discoveryNotices()).toHaveLength(0);
     const scoped = catalog.discoveryNotices({ projectId: "p1" });
     expect(scoped.some((n) => n.filename.endsWith("broken.yaml"))).toBe(true);
+  });
+});
+
+describe("review-fix regressions (catalog)", () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(join(tmpdir(), "keelson-fix-root-"));
+  });
+
+  afterEach(() => {
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  test("scoped list puts the project's own workflows first (prompt index truncates from the front)", () => {
+    writeWorkflow("aaa-global.yaml", workflow("aaa-global", "global", "g"));
+    const file = join(projectRoot, ".keelson", "workflows", "zzz-proj.yaml");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, workflow("zzz-proj", "project", "p"));
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => [{ id: "p1", name: "demo", rootPath: projectRoot }],
+    });
+    const names = catalog.list({ projectId: "p1" }).map((w) => w.name);
+    expect(names[0]).toBe("zzz-proj");
+  });
+
+  test("a symlinked project root aliasing the global dir is still skipped", () => {
+    writeWorkflow("alpha.yaml", workflow("alpha", "global", "global"));
+    // Real root whose .keelson/workflows IS the global dir, reached via symlink.
+    const devRoot = dirname(dirname(wfDir));
+    const linkRoot = join(projectRoot, "linked-root");
+    symlinkSync(devRoot, linkRoot);
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => [{ id: "p1", name: "dev", rootPath: linkRoot }],
+    });
+    expect(catalog.provenance("alpha", { projectId: "p1" }).source.kind).toBe("local");
+    expect(catalog.list({ projectId: "p1" }).filter((w) => w.name === "alpha")).toHaveLength(1);
   });
 });

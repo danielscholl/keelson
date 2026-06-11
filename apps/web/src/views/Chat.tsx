@@ -1269,6 +1269,11 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     })();
     return () => {
       cancelled = true;
+      // Clear the guard synchronously: React runs this cleanup before the
+      // effect re-runs, so a project switch mid-fetch can start the new
+      // scope's fetch instead of early-returning on a stale in-flight ref
+      // (whose result the `cancelled` flag already discards).
+      workflowNamesFetchingRef.current = false;
     };
   }, [workflowRunPartial, workflowNames, activeProjectId]);
 

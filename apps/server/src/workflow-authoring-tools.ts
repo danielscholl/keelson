@@ -14,8 +14,16 @@
 // physically cannot be saved, and the loader's structured errors come back as
 // the tool result so the model self-corrects in the same turn.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, join, resolve } from "node:path";
 import type { ToolDefinition } from "@keelson/shared";
 import { projectWorkflowsDir } from "@keelson/shared/paths";
 import {
@@ -44,9 +52,10 @@ export interface CreateWorkflowAuthoringToolsDeps {
 const MAX_YAML_BYTES = 131_072;
 const GET_OUTPUT_CAP = 49_152;
 
-// Kebab-case with no separators or dots — the filename is `name + ".yaml"`,
-// so this regex is also the path-traversal guard.
-const WORKFLOW_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// Strict kebab-case with no separators or dots — the filename is
+// `name + ".yaml"`, so this regex is also the path-traversal guard.
+const WORKFLOW_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const MAX_NAME_CHARS = 64;
 
 const getInputSchema = z.object({ name: z.string().min(1).max(120) }).strict();
 const validateInputSchema = z.object({ yaml: z.string().min(1).max(MAX_YAML_BYTES) }).strict();
@@ -54,9 +63,10 @@ const saveInputSchema = z
   .object({
     name: z
       .string()
+      .max(MAX_NAME_CHARS)
       .regex(
         WORKFLOW_NAME_RE,
-        "must be kebab-case: lowercase letters, digits, hyphens, starting alphanumeric",
+        "must be kebab-case: lowercase letters and digits separated by single hyphens",
       ),
     yaml: z.string().min(1).max(MAX_YAML_BYTES),
     scope: z.enum(["global", "project"]),
@@ -74,14 +84,29 @@ function renderWarnings(warnings: readonly WorkflowLoadWarning[]): string {
   return `Warnings (${warnings.length}, non-blocking):\n${lines.join("\n")}`;
 }
 
-// The loader aggregates node errors into one "; "-joined string — split it
-// back into bullets so the model can fix issues one at a time.
+// The loader aggregates node errors into one "; "-joined string. Split only
+// at node boundaries — individual messages legitimately contain "; " (e.g.
+// "…substitution namespace); rename the node."), so a bare split would
+// fragment one error into misleading bullets.
 function renderError(error: { error: string; errorType: string }): string {
   const bullets = error.error
-    .split("; ")
+    .split(/;\s+(?=Node ')/)
     .map((line) => `- ${line}`)
     .join("\n");
   return `INVALID (${error.errorType}):\n${bullets}`;
+}
+
+// realpath-based comparison so symlinked layouts (macOS /tmp → /private/tmp,
+// symlinked checkouts) can't make one physical directory look like two scopes.
+function sameDir(a: string, b: string): boolean {
+  const canonical = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  return canonical(a) === canonical(b);
 }
 
 export function createWorkflowAuthoringTools(
@@ -96,7 +121,11 @@ export function createWorkflowAuthoringTools(
     inputSchema: schemaInputSchema,
     async execute(input, ctx) {
       const parsed = schemaInputSchema.safeParse(input);
-      const topic = parsed.success ? parsed.data.topic : undefined;
+      if (!parsed.success) {
+        emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
+        return;
+      }
+      const topic = parsed.data.topic;
       if (topic !== undefined) {
         const section = authoringGuideSection(topic);
         if (section !== undefined) {
@@ -208,11 +237,19 @@ export function createWorkflowAuthoringTools(
         return;
       }
       const nodeIds = result.workflow.nodes.map((n) => n.id).join(", ");
+      // The loader accepts any non-empty name, but workflow_save only writes
+      // kebab-case ≤64 chars — surface the mismatch here so VALID never
+      // promises a save that the next step will refuse.
+      const saveableNote =
+        WORKFLOW_NAME_RE.test(result.workflow.name) && result.workflow.name.length <= MAX_NAME_CHARS
+          ? ""
+          : `Heads up: the name "${result.workflow.name}" is valid to run but NOT saveable via workflow_save (names must be kebab-case, ≤${MAX_NAME_CHARS} chars). Rename it before saving.`;
       emitResult(
         ctx,
         [
           `VALID — workflow "${result.workflow.name}" parsed cleanly. ${result.workflow.nodes.length} node(s): ${nodeIds}.`,
           warningBlock,
+          saveableNote,
           "Next: show the user the complete YAML and get approval, then call workflow_save.",
         ]
           .filter((p) => p !== "")
@@ -286,6 +323,12 @@ export function createWorkflowAuthoringTools(
         saveScope === "project" && project
           ? projectWorkflowsDir(project.rootPath)
           : globalWorkflowsDir;
+      // In the monorepo dev layout a project's .keelson/workflows IS the
+      // global dir (the catalog skips indexing it as a project scope). The
+      // guards below must then run with GLOBAL semantics, or a scoped lookup
+      // would fall through to the global entry and skip every check.
+      const aliasesGlobal = saveScope === "project" && sameDir(targetDir, globalWorkflowsDir);
+      const effectiveScope = aliasesGlobal ? "global" : saveScope;
 
       // Overwrite guard at the file level. With overwrite, the rewrite target
       // is the EXISTING file's name so a .yml never gains a .yaml twin.
@@ -300,6 +343,22 @@ export function createWorkflowAuthoringTools(
           );
           return;
         }
+        // Filename matching is not identity: the existing file may declare a
+        // DIFFERENT workflow name, and replacing it would silently destroy
+        // that other workflow.
+        try {
+          const current = parseWorkflow(readFileSync(join(targetDir, existing), "utf-8"), existing);
+          if (current.error === null && current.workflow.name !== name) {
+            emitResult(
+              ctx,
+              `${join(targetDir, existing)} defines the workflow "${current.workflow.name}", not "${name}" — overwriting it would silently destroy that workflow. Pick a different name, or edit that workflow under its own name.`,
+              true,
+            );
+            return;
+          }
+        } catch {
+          // Unreadable existing file — the overwrite replaces it; nothing to protect.
+        }
         filename = existing;
       }
 
@@ -307,7 +366,7 @@ export function createWorkflowAuthoringTools(
       // saved under another filename) would leave two definitions racing for
       // one catalog key — refuse rather than ever touching a third file.
       const sameScopePre =
-        saveScope === "project"
+        effectiveScope === "project"
           ? (() => {
               const entry = catalog.getWithSource(name, scope);
               return entry?.source === "project" ? entry : undefined;
@@ -316,24 +375,43 @@ export function createWorkflowAuthoringTools(
       if (sameScopePre !== undefined && basename(sameScopePre.path) !== filename) {
         emitResult(
           ctx,
-          `"${name}" is already defined by ${sameScopePre.path} in the ${saveScope} scope. Saving ${filename} would create two files claiming one workflow name — rename this workflow or edit that file instead.`,
+          `"${name}" is already defined by ${sameScopePre.path} in the ${effectiveScope} scope. Saving ${filename} would create two files claiming one workflow name — rename this workflow or edit that file instead.`,
           true,
         );
         return;
       }
 
       // Shadow analysis, before the write so the pre-save catalog answers.
+      // Provenance labels the shadowed side correctly (global file vs
+      // rib-contributed) instead of calling everything "the global".
       const notes: string[] = [];
-      if (saveScope === "project") {
+      if (aliasesGlobal) {
+        notes.push(
+          "Note: this project's .keelson/workflows is the global workflows dir, so the save is effectively global.",
+        );
+      }
+      if (effectiveScope === "project") {
         if (catalog.get(name) !== undefined) {
-          notes.push(`Note: this shadows the global "${name}" for conversations in this project.`);
-        }
-      } else if (project) {
-        const projectEntry = catalog.getWithSource(name, scope);
-        if (projectEntry?.source === "project") {
+          const shadowedKind = catalog.provenance(name).source.kind;
           notes.push(
-            `Note: the project workflow at ${projectEntry.path} will continue to shadow this global copy inside that project.`,
+            shadowedKind === "rib"
+              ? `Note: this shadows the rib-contributed "${name}" for conversations in this project.`
+              : `Note: this shadows the global "${name}" for conversations in this project.`,
           );
+        }
+      } else {
+        if (catalog.getWithSource(name) === undefined && catalog.get(name) !== undefined) {
+          notes.push(
+            `Note: this file shadows the rib-contributed workflow "${name}" — the filesystem copy wins everywhere.`,
+          );
+        }
+        if (project && !aliasesGlobal) {
+          const projectEntry = catalog.getWithSource(name, scope);
+          if (projectEntry?.source === "project") {
+            notes.push(
+              `Note: the project workflow at ${projectEntry.path} will continue to shadow this global copy inside that project.`,
+            );
+          }
         }
       }
 

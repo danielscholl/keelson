@@ -21,7 +21,7 @@ export interface WorkflowsDeps {
 export async function runWorkflowsCheck(deps: WorkflowsDeps = {}): Promise<CategoryResult> {
   const dir = deps.workflowsDir ?? defaultWorkflowsDir();
   const discover = deps.discoverWorkflows ?? defaultDiscoverWorkflows;
-  const result = discover([{ dir, source: "project" }]);
+  const result = discover([{ dir, source: "global" }]);
 
   const checks: CheckResult[] = [];
 

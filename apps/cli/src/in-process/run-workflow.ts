@@ -61,7 +61,9 @@ export class WorkflowNotFoundError extends Error {
     public readonly name: string,
     public readonly searched: string,
   ) {
-    super(`no workflow named '${name}' under ${searched}`);
+    super(
+      `no workflow named '${name}' under ${searched} (project-scoped workflows need the server — run \`keelson service start\`)`,
+    );
     this.name = "WorkflowNotFoundError";
   }
 }
@@ -85,11 +87,11 @@ export class MemoryRequiresServerError extends Error {
   }
 }
 
-// Find a workflow definition by name. Discovery walks the project's
-// workflow directory only — global / home-scoped roots are out of scope
-// for the CLI's in-process path (mirrors the server's discovery surface).
+// Find a workflow definition by name. Discovery walks the resolved home's
+// global workflow directory only — registered-project overlays live behind
+// the server, so the in-process fallback cannot see project-scoped workflows.
 function loadWorkflowByName(dir: string, name: string): WorkflowDefinition | null {
-  const result = discoverWorkflows([{ dir, source: "project" }]);
+  const result = discoverWorkflows([{ dir, source: "global" }]);
   for (const wf of result.workflows) {
     if (wf.workflow.name === name) return wf.workflow;
   }

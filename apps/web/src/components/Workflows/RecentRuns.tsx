@@ -63,7 +63,9 @@ export interface RecentRunsProps {
   // The catalog — used to map a run's ribId to the rib's display name for the
   // row badge. No longer drives fetching (the feed is a single endpoint).
   workflows: ReadonlyArray<WorkflowSummary>;
-  onOpenRun: (runId: string, workflowName: string) => void;
+  // runProjectId is the run's own project — the detail fetch must use the
+  // run's scope, not the viewer's active project (the feed is cross-project).
+  onOpenRun: (runId: string, workflowName: string, runProjectId?: string | null) => void;
   refreshKey?: number;
   onRunDeleted?: () => void;
   projectsById?: ReadonlyMap<string, Project>;
@@ -278,7 +280,7 @@ export function RecentRuns({
           <span style={{ textAlign: "right" }}>Actions</span>
         </div>
         {visibleRows.map((r) => {
-          const openRun = () => onOpenRun(r.runId, r.workflowName);
+          const openRun = () => onOpenRun(r.runId, r.workflowName, r.projectId);
           const project = r.projectId ? projectsById?.get(r.projectId) : undefined;
           const projectLabel =
             project?.name ?? (r.projectId ? "(deleted project)" : r.workingDir ? "(adhoc)" : "—");
