@@ -81,7 +81,10 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
   }, [reposition]);
 
   const pct = contextPercent(latest.contextTokens, latest.contextWindow);
-  const lastTurnRows = hasSpend(latest) || latest.cacheReadInputTokens !== undefined;
+  const hasTurnSpend = hasSpend(latest);
+  const hasCacheRead = (latest.cacheReadInputTokens ?? 0) > 0;
+  const hasCacheWrite = (latest.cacheCreationInputTokens ?? 0) > 0;
+  const lastTurnRows = hasTurnSpend || hasCacheRead || hasCacheWrite;
 
   return (
     <div
@@ -104,18 +107,22 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
           />
         </section>
       )}
-      {/* Zero-total context-only turns skip the spend rows — "↑ Input 0"
-          under a live context gauge would read as a real measurement. */}
+      {/* Zero-total turns skip the spend rows — "↑ Input 0" would be a
+          fabricated measurement. Cache rows gate on their own presence. */}
       {lastTurnRows && (
         <section className="usage-popover-section">
           <div className="usage-popover-section-title">Last turn</div>
-          <Row label="↑ Input" value={formatTokens(latest.inputTokens)} />
-          <Row label="↓ Output" value={formatTokens(latest.outputTokens)} />
-          {latest.cacheReadInputTokens !== undefined && (
-            <Row label="Cache read" value={formatTokens(latest.cacheReadInputTokens)} />
+          {hasTurnSpend && (
+            <>
+              <Row label="↑ Input" value={formatTokens(latest.inputTokens)} />
+              <Row label="↓ Output" value={formatTokens(latest.outputTokens)} />
+            </>
           )}
-          {latest.cacheCreationInputTokens !== undefined && (
-            <Row label="Cache write" value={formatTokens(latest.cacheCreationInputTokens)} />
+          {hasCacheRead && (
+            <Row label="Cache read" value={formatTokens(latest.cacheReadInputTokens ?? 0)} />
+          )}
+          {hasCacheWrite && (
+            <Row label="Cache write" value={formatTokens(latest.cacheCreationInputTokens ?? 0)} />
           )}
         </section>
       )}

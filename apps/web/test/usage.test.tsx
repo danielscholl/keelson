@@ -110,6 +110,20 @@ describe("UsagePopover", () => {
     expect(screen.queryByText("Cache write")).toBeNull();
     expect(screen.queryByText("Context")).toBeNull();
   });
+
+  test("cache-write-only turn shows Cache write row but not ↑/↓ rows", () => {
+    render(
+      <UsagePopover
+        popoverId="usage-pop-7"
+        latest={{ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 1200 }}
+        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+      />,
+    );
+    expect(screen.getByText("Cache write")).toBeDefined();
+    expect(screen.queryByText("↑ Input")).toBeNull();
+    expect(screen.queryByText("↓ Output")).toBeNull();
+    expect(screen.queryByText("Cache read")).toBeNull();
+  });
 });
 
 describe("UsageChip — fabricated-zero guard", () => {

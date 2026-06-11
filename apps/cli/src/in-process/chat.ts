@@ -4,6 +4,7 @@
 
 import { getAgentProvider, getProviderInfoList, UnknownProviderError } from "@keelson/providers";
 import type { MessageChunk, ReasoningEffortLevel, TokenUsage } from "@keelson/shared";
+import { coerceTokenUsage } from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
 
 import {
@@ -81,9 +82,12 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
     ...(tools.length > 0 ? { tools } : {}),
     ...(systemPrompt !== undefined ? { systemPrompt } : {}),
   })) {
+    if (chunk.type === "usage") {
+      const coerced = coerceTokenUsage(chunk.usage);
+      if (coerced !== undefined) usage = coerced;
+    }
     if (opts.abortSignal?.aborted) break;
     if (chunk.type === "text") text += chunk.content;
-    if (chunk.type === "usage") usage = chunk.usage;
     opts.onChunk?.(chunk);
     if (chunk.type === "done") break;
   }

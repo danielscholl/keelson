@@ -1757,6 +1757,33 @@ describe("ClaudeProvider — token usage edge cases", () => {
       usage: { inputTokens: 100, outputTokens: 20 },
     });
   });
+
+  it("emits no usage chunk when the assistant message has an empty usage object and result has no usage", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "hi" }], usage: {} },
+          uuid: "a1",
+          session_id: "sess-id",
+        } as ClaudeSdkMessage);
+        await push({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          uuid: "result-uuid",
+          session_id: "sess-id",
+        });
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    expect(chunks.filter((c) => c.type === "usage")).toHaveLength(0);
+  });
 });
 
 describe("ClaudeProvider — usage built from partial result data", () => {

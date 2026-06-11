@@ -364,15 +364,22 @@ function buildClaudeTokenUsage(
   const output = toTokenCount(msg.usage?.output_tokens);
   const cacheRead = toTokenCount(msg.usage?.cache_read_input_tokens);
   const cacheCreation = toTokenCount(msg.usage?.cache_creation_input_tokens);
+  const lastInput = toTokenCount(lastApiUsage?.input_tokens);
+  const lastCacheRead = toTokenCount(lastApiUsage?.cache_read_input_tokens);
+  const lastCacheCreation = toTokenCount(lastApiUsage?.cache_creation_input_tokens);
   // Build whenever the SDK reported anything usable — a result whose usage
   // carries only cache counts, or no usage at all while assistant messages
-  // supplied per-call context, still has data worth surfacing.
+  // supplied per-call context, still has data worth surfacing. Gate on the
+  // sanitized last-call counts so an empty usage object ({}) doesn't pass
+  // the predicate and emit zero totals with no context fields.
   if (
     input === undefined &&
     output === undefined &&
     cacheRead === undefined &&
     cacheCreation === undefined &&
-    lastApiUsage === undefined
+    lastInput === undefined &&
+    lastCacheRead === undefined &&
+    lastCacheCreation === undefined
   ) {
     return undefined;
   }
@@ -381,13 +388,8 @@ function buildClaudeTokenUsage(
   if (cacheCreation !== undefined && cacheCreation > 0) {
     usage.cacheCreationInputTokens = cacheCreation;
   }
-  if (lastApiUsage !== undefined) {
-    const lastInput = toTokenCount(lastApiUsage.input_tokens);
-    const lastCacheRead = toTokenCount(lastApiUsage.cache_read_input_tokens);
-    const lastCacheCreation = toTokenCount(lastApiUsage.cache_creation_input_tokens);
-    if (lastInput !== undefined || lastCacheRead !== undefined || lastCacheCreation !== undefined) {
-      usage.contextTokens = (lastInput ?? 0) + (lastCacheRead ?? 0) + (lastCacheCreation ?? 0);
-    }
+  if (lastInput !== undefined || lastCacheRead !== undefined || lastCacheCreation !== undefined) {
+    usage.contextTokens = (lastInput ?? 0) + (lastCacheRead ?? 0) + (lastCacheCreation ?? 0);
   }
   if (msg.modelUsage !== undefined) {
     let window: number | undefined;
