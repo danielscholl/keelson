@@ -52,6 +52,15 @@ describe("buildWorkflowGuidance", () => {
     expect(out).toContain("Do NOT run the name as a shell command");
   });
 
+  test("teaches the authoring flow with a hard approval gate before save", () => {
+    const out = buildWorkflowGuidance([SMOKE]);
+    expect(out).toContain("Authoring new workflows:");
+    expect(out).toContain("workflow_schema");
+    expect(out).toContain("workflow_validate");
+    expect(out).toContain("ALWAYS show the user the complete final YAML");
+    expect(out).toContain("workflow_save");
+  });
+
   test("caps the index and reports the overflow", () => {
     const many: WorkflowSummaryLike[] = Array.from({ length: 45 }, (_, i) => ({
       name: `wf-${i}`,

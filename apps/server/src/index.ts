@@ -45,6 +45,7 @@ import {
   snapshotsRoutes,
   snapshotWebSocketHandlers,
 } from "./snapshots-handler.ts";
+import { createWorkflowAuthoringTools } from "./workflow-authoring-tools.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
 import { createWorkflowChatTools } from "./workflow-tools.ts";
 import {
@@ -273,6 +274,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     catalog: workflowCatalog,
     projectsStore,
   });
+  // Built here (not in chat-handler) so the save target stays pinned to the
+  // same resolved workflowsDir the catalog scans.
+  const workflowAuthoringTools = (project: { id: string; rootPath: string } | null) =>
+    createWorkflowAuthoringTools({
+      catalog: workflowCatalog,
+      globalWorkflowsDir: paths.workflowsDir,
+      project,
+    });
 
   // Server-side heartbeat: keep snapshot-backed surface regions fresh on their
   // declared cadence even when no client tab is mounted (and warm them after a
@@ -400,6 +409,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     projectNotebookStore,
     workflowTools,
     workflowCatalog,
+    workflowAuthoringTools,
   });
   const workflowRunHandlers = workflowRunWebSocketHandlers({
     subscribers: workflowSubscribers,

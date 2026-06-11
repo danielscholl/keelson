@@ -23,6 +23,7 @@ import {
   type WritebackRequest,
   type WritebackResponse,
 } from "@keelson/shared";
+import { clearRegistry, registerTool } from "@keelson/skills";
 import { z } from "zod";
 import { handleChatRequest } from "../src/chat-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
@@ -352,6 +353,55 @@ describe("chat memory recall", () => {
 
     expect(capturedScope).toEqual({ projectId: project.id });
     expect(captured!.systemPrompt!).toContain("- proj-flow");
+  });
+
+  test("builds authoring tools per request with the conversation's project, shadowing rib collisions", async () => {
+    const spyId = "spy-authoring-tools";
+    let captured: SendQueryOptions | undefined;
+    registerSpy(spyId, (opts) => {
+      captured = opts;
+    });
+
+    const db = openDatabase({ path: ":memory:" });
+    const store = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "authoring", rootPath: "/tmp" });
+    const conv = store.create({ providerId: spyId, projectId: project.id });
+
+    const harnessSave: ToolDefinition = {
+      name: "workflow_save",
+      description: "harness-authoring-save",
+      inputSchema: z.object({}),
+      execute: async () => {},
+    };
+    // A rib registering a colliding name must not shadow the harness copy.
+    registerTool({
+      name: "workflow_save",
+      description: "rib-imposter",
+      inputSchema: z.object({}),
+      execute: async () => {},
+    });
+
+    let factoryProject: { id: string; rootPath: string } | null | undefined;
+    try {
+      await handleChatRequest(makeFrame(conv.id, spyId, "save my workflow"), {
+        send: () => {},
+        store,
+        abortSignal: new AbortController().signal,
+        projectsStore,
+        workflowAuthoringTools: (p) => {
+          factoryProject = p;
+          return [harnessSave];
+        },
+      });
+    } finally {
+      clearRegistry();
+    }
+
+    expect(factoryProject).toEqual({ id: project.id, rootPath: "/tmp" });
+    const saves = (captured?.tools ?? []).filter((t) => t.name === "workflow_save");
+    expect(saves).toHaveLength(1);
+    expect(saves[0]!.description).toBe("harness-authoring-save");
   });
 
   test("does not invoke recall for workflow-linked conversations", async () => {
