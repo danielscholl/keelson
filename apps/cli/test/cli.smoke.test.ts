@@ -200,6 +200,24 @@ describe("keelson CLI smoke", () => {
     expect(stdout.trim()).toBe("hello world");
   });
 
+  test("chat options before -p still reach chat", async () => {
+    const { stdout, exitCode } = await runCli(["--provider", "stub", "-p", "hello world"], {
+      KEELSON_PROVIDERS: "stub",
+      KEELSON_USE_STUBS: "1",
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe("hello world");
+  });
+
+  test("attached short form -p<message> works", async () => {
+    const { stdout, exitCode } = await runCli(["-phello world", "--provider", "stub"], {
+      KEELSON_PROVIDERS: "stub",
+      KEELSON_USE_STUBS: "1",
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe("hello world");
+  });
+
   test("--prompt long form composes with --json", async () => {
     const { stdout, exitCode } = await runCli(
       ["--json", "--prompt", "hello world", "--provider", "stub"],
