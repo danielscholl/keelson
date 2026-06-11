@@ -14,6 +14,7 @@
 // physically cannot be saved, and the loader's structured errors come back as
 // the tool result so the model self-corrects in the same turn.
 
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -418,7 +419,7 @@ export function createWorkflowAuthoringTools(
       const targetPath = join(targetDir, filename);
       // Dot-prefixed non-yaml temp name keeps discovery + the catalog
       // fingerprint blind to the write until the atomic rename (seed.ts idiom).
-      const tmpPath = join(targetDir, `.${filename}.${process.pid}.savetmp`);
+      const tmpPath = join(targetDir, `.${filename}.${process.pid}.${randomUUID()}.savetmp`);
       try {
         mkdirSync(targetDir, { recursive: true });
         writeFileSync(tmpPath, yaml);
