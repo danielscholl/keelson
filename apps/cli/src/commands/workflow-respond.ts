@@ -35,7 +35,7 @@ export async function runWorkflowRespond(
   if (!baseUrl) {
     emit(
       {
-        error: "workflow respond requires a running server; start it with `keelson serve` first",
+        error: "workflow respond requires a running server; start it with `keelson service` first",
         code: "NO_SERVER",
       },
       { json: opts.json },

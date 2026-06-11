@@ -95,7 +95,7 @@ export function bootstrapCliProviders(): BootstrapResult {
 // Pick a default provider when --provider is omitted. Mirrors the SPA's
 // pickInitialRef and the HTTP fallback path: copilot → stub → first
 // registered non-workflow. Same invocation routes to the same provider
-// whether or not `keelson serve` is running.
+// whether or not `keelson service` is running.
 export function pickDefaultProvider(): string {
   const providers = getProviderInfoList();
   const ids = new Set(providers.map((p) => p.id));

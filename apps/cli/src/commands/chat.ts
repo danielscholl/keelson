@@ -66,7 +66,7 @@ function pickDefaultHttpProvider(providers: readonly ProviderInfoRow[]): string 
   const first = providers.find((p) => p.id !== "workflow");
   if (first) return first.id;
   throw new Error(
-    "no chat-capable provider registered on the server; run `keelson serve` with KEELSON_PROVIDERS unset or include stub/copilot/claude",
+    "no chat-capable provider registered on the server; run `keelson service` with KEELSON_PROVIDERS unset or include stub/copilot/claude",
   );
 }
 
@@ -290,7 +290,7 @@ export async function runChat(message: string, opts: ChatOptions): Promise<never
     emit(
       {
         error:
-          "--conversation requires a running server (start with `keelson serve`); the in-process path has no conversation store",
+          "--conversation requires a running server (start with `keelson service`); the in-process path has no conversation store",
         code: "NO_SERVER",
       },
       { json: opts.json },

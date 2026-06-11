@@ -63,8 +63,29 @@ export function buildProgram(): Command {
     .description("Operator CLI for the Keelson agent harness")
     .version(pkg.version, "-v, --version", "print version and exit")
     .option("--json", "emit machine-readable JSON envelope to stdout", false)
+    .option(
+      "-p, --prompt <message>",
+      "one-shot chat turn; alias for `chat <message>` (same options apply)",
+    )
     .showHelpAfterError()
     .configureHelp({ sortSubcommands: true });
+
+  // `-p` before a subcommand is rewritten to `chat` pre-parse (see
+  // rewritePromptAlias); one that survives to an action was placed after a
+  // subcommand, where silently dropping the operator's message is a mis-target.
+  program.hook("preAction", function promptGuard(thisCommand: Command) {
+    const { prompt, json } = thisCommand.opts<{ prompt?: string; json: boolean }>();
+    if (prompt !== undefined) {
+      emit(
+        {
+          error: "-p/--prompt is an alias for `keelson chat` and must come before any subcommand",
+          code: "BAD_INPUTS",
+        },
+        { json },
+      );
+      process.exit(EXIT_BAD_ARGS);
+    }
+  });
 
   program
     .command("version")
@@ -85,8 +106,9 @@ export function buildProgram(): Command {
     });
 
   const serve = program
-    .command("serve")
-    .description("run the Keelson server in the foreground (use `serve start` for background)")
+    .command("service")
+    .alias("serve")
+    .description("run the Keelson server in the foreground (use `service start` for background)")
     .option("--db <path>", "override KEELSON_DB for this run")
     .action(async function serveAction(this: Command) {
       const { json } = globalOpts(this);
@@ -533,11 +555,30 @@ function findHelpTarget(program: Command, argv: readonly string[]): Command {
   const positionals = upToFlag.filter((a) => !a.startsWith("-") && a !== "help");
   let current = program;
   for (const name of positionals) {
-    const sub = current.commands.find((c) => c.name() === name);
+    const sub = current.commands.find((c) => c.name() === name || c.aliases().includes(name));
     if (!sub) break;
     current = sub;
   }
   return current;
+}
+
+// `keelson -p "msg"` is sugar for `keelson chat "msg"` (parity with
+// `copilot -p` / `claude -p`). Rewriting argv before parse gives the alias
+// full option parity with `chat` without duplicating its options at the root.
+// Only a `-p` ahead of the first positional is rewritten; after a subcommand
+// name it stays put so the preAction guard can reject it.
+export function rewritePromptAlias(argv: readonly string[]): readonly string[] {
+  for (let i = 2; i < argv.length; i++) {
+    const token = argv[i] ?? "";
+    if (token === "-p" || token === "--prompt") {
+      return [...argv.slice(0, i), "chat", ...argv.slice(i + 1)];
+    }
+    if (token.startsWith("--prompt=")) {
+      return [...argv.slice(0, i), "chat", token.slice("--prompt=".length), ...argv.slice(i + 1)];
+    }
+    if (token === "--" || !token.startsWith("-")) break;
+  }
+  return argv;
 }
 
 function versionEnvelope(): { data: unknown } {
@@ -573,7 +614,8 @@ function cleanCommanderMessage(message: string): string {
   return message.replace(/^error:\s*/i, "");
 }
 
-export async function run(argv: readonly string[]): Promise<void> {
+export async function run(rawArgv: readonly string[]): Promise<void> {
+  const argv = rewritePromptAlias(rawArgv);
   const wantsJson = argv.includes("--json");
 
   // First-run provisioning: a fresh home gets the starter workflows and the

@@ -105,7 +105,7 @@ for (const f of ["LICENSE", "NOTICE"]) {
 
 // 2b. Build the SPA and ship it inside the cli tarball at `web/`. The server
 //     (inlined in the bundle at dist/keelson.js) resolves `../web` and serves it
-//     at the root, so `keelson serve` gives an installed user the browser UI —
+//     at the root, so `keelson service` gives an installed user the browser UI —
 //     no separate Vite dev server. The build is version-locked to the cli.
 console.log("[release] building @keelson/web");
 await $`cd ${ROOT} && bun --filter @keelson/web build`.quiet();
@@ -208,7 +208,7 @@ chmod +x "$BIN_DIR/keelson"
 
 echo "keelson v$KEELSON_VERSION installed to $KEELSON_HOME"
 echo "launcher: $BIN_DIR/keelson  (ensure $BIN_DIR is on PATH)"
-echo "next: keelson rib add https://github.com/danielscholl/keelson-rib-chamber && keelson serve"
+echo "next: keelson rib add https://github.com/danielscholl/keelson-rib-chamber && keelson service"
 `;
 }
 
@@ -298,6 +298,6 @@ if (-not (($env:Path -split ";") -contains $BinDir)) {
 
 Write-Host "keelson v$KeelsonVersion installed to $KeelsonHome"
 Write-Host "launcher: $BinDir\\keelson.cmd"
-Write-Host "next: keelson rib add https://github.com/danielscholl/keelson-rib-chamber; keelson serve"
+Write-Host "next: keelson rib add https://github.com/danielscholl/keelson-rib-chamber; keelson service"
 `;
 }

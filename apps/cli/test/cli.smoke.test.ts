@@ -58,7 +58,7 @@ describe("keelson CLI smoke", () => {
     expect(exitCode).toBe(0);
     for (const cmd of [
       "version",
-      "serve",
+      "service",
       "workflow",
       "chat",
       "doctor",
@@ -68,6 +68,7 @@ describe("keelson CLI smoke", () => {
     ]) {
       expect(stdout).toContain(cmd);
     }
+    expect(stdout).toContain("-p, --prompt <message>");
   });
 
   test("doctor --json emits a structured report envelope", async () => {
@@ -119,7 +120,7 @@ describe("keelson CLI smoke", () => {
     expect(envelope.ok).toBe(true);
     expect(envelope.data.name).toBe("@keelson/cli");
     const names = (envelope.data.commands as Array<{ name: string }>).map((c) => c.name);
-    for (const expected of ["serve", "workflow", "chat", "doctor", "version"]) {
+    for (const expected of ["service", "workflow", "chat", "doctor", "version"]) {
       expect(names).toContain(expected);
     }
   });
@@ -188,6 +189,52 @@ describe("keelson CLI smoke", () => {
     expect(exitCode).toBe(0);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.data.command).toBe("workflow");
+  });
+
+  test("-p is an alias for chat with full option parity", async () => {
+    const { stdout, exitCode } = await runCli(["-p", "hello world", "--provider", "stub"], {
+      KEELSON_PROVIDERS: "stub",
+      KEELSON_USE_STUBS: "1",
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout.trim()).toBe("hello world");
+  });
+
+  test("--prompt long form composes with --json", async () => {
+    const { stdout, exitCode } = await runCli(
+      ["--json", "--prompt", "hello world", "--provider", "stub"],
+      { KEELSON_PROVIDERS: "stub", KEELSON_USE_STUBS: "1" },
+    );
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.text).toContain("hello world");
+  });
+
+  test("-p with no message exits 2 like chat does", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "-p"]);
+    expect(exitCode).toBe(2);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.code).toBe("commander.missingArgument");
+  });
+
+  test("-p after a subcommand exits 2 instead of being silently swallowed", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "chat", "hi", "-p", "second message"]);
+    expect(exitCode).toBe(2);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.code).toBe("BAD_INPUTS");
+    expect(envelope.error).toContain("before any subcommand");
+  });
+
+  test("service is the primary subcommand and serve remains an alias", async () => {
+    const primary = await runCli(["--json", "service", "--help"]);
+    expect(primary.exitCode).toBe(0);
+    expect(JSON.parse(primary.stdout.trim()).data.command).toBe("service");
+    const aliased = await runCli(["--json", "serve", "--help"]);
+    expect(aliased.exitCode).toBe(0);
+    expect(JSON.parse(aliased.stdout.trim()).data.command).toBe("service");
   });
 
   test("chat with stub provider on a pipe emits only the assistant text", async () => {

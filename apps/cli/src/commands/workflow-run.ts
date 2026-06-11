@@ -322,7 +322,7 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
       // Resolve --working-dir to an absolute path relative to the *CLI's*
       // shell cwd, not the long-running server's cwd. Without this, a user
       // invoking `keelson workflow run foo --working-dir .` over HTTP would
-      // pin the run to whatever directory `keelson serve` was launched in.
+      // pin the run to whatever directory `keelson service` was launched in.
       const rawCwd = opts.workingDir ?? (opts.project ? undefined : process.cwd());
       const cwd =
         rawCwd === undefined
@@ -374,7 +374,7 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
   if (opts.project !== undefined) {
     emit(
       {
-        error: `--project '${opts.project}' requires the server (start \`keelson serve\`)`,
+        error: `--project '${opts.project}' requires the server (start \`keelson service\`)`,
         code: "NO_SERVER",
       },
       { json: opts.json },
