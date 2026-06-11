@@ -38,7 +38,7 @@ point at a throwaway home.
 
 ### Release artifacts
 
-`bun run build:release` (the same script CI runs on a `v*` tag, see
+`bun run build:release` (the same script CI runs when a release is cut, see
 `.github/workflows/release.yml`) bundles `@keelson/cli` and packs
 `@keelson/shared` into `dist/release/` along with `install.sh`. To exercise the
 full install path locally against those tarballs — install into a throwaway
@@ -50,22 +50,23 @@ scripts/dry-run-install.sh ../keelson-rib-chamber
 
 ### Cutting a release
 
-Releases are versioned and tagged. The version lives in
-`packages/shared/package.json` (and the root `package.json`); `build-release.ts`
-derives the artifact version from it, and `release.yml` refuses to publish if
-the pushed tag doesn't match. To cut `vX.Y.Z`:
+Releases are automated with
+[release-please](https://github.com/googleapis/release-please)
+(`release-please-config.json`). Conventional commits landing on `main`
+accumulate into a rolling release PR that bumps `version` in the root and
+every workspace `package.json`, refreshes `bun.lock`, and writes the
+`CHANGELOG.md` entry from the commit subjects. Merging that PR tags `vX.Y.Z`
+and creates the GitHub Release — its body is what `keelson update` shows as
+the release notes — and `release.yml` then builds the CLI + shared tarballs
+and the installers and attaches them.
 
-1. Bump `version` in `package.json` and `packages/shared/package.json` to `X.Y.Z`.
-2. Add a `## [X.Y.Z]` entry to `CHANGELOG.md`.
-3. Land that on `main`, then tag and push:
+Commit types drive the version while pre-1.0: `fix:` bumps patch, `feat:`
+bumps minor, and a breaking change (`!` or `BREAKING CHANGE:`) also bumps
+minor, not major. Commit subjects become changelog lines — write them for the
+release reader.
 
-   ```bash
-   git tag vX.Y.Z && git push origin vX.Y.Z
-   ```
-
-`release.yml` builds the CLI + shared tarballs and `install.sh`, and attaches
-them to the GitHub Release. GitHub also aliases the newest release under
-`/releases/latest/download/`, which is where `curl … install.sh | sh` reads.
+GitHub aliases the newest release under `/releases/latest/download/`, which is
+where `curl … install.sh | sh` reads.
 
 ### Update model
 
