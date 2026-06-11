@@ -598,7 +598,9 @@ export function bootstrapPromptHandler(
   // registered) → first non-stub. Keeps the workflow default aligned with the
   // chat default a config sets.
   const envProvider = process.env.KEELSON_WORKFLOW_PROVIDER?.trim();
-  const configDefault = loadKeelsonConfig().defaultProvider?.trim();
+  // Lowercase to match resolveDefaultProvider + the canonical lowercase ids, so
+  // a config value like "Claude" resolves the same here as it does for chat.
+  const configDefault = loadKeelsonConfig().defaultProvider?.trim().toLowerCase();
   const requestedId =
     envProvider && envProvider.length > 0
       ? envProvider

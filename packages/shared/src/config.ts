@@ -104,7 +104,7 @@ export function resolveEnabledProviders(opts: ResolveEnabledProvidersOptions): s
     for (const [rawId, enabled] of Object.entries(opts.config.providers)) {
       const id = rawId.trim().toLowerCase();
       if (!knownSet.has(id)) {
-        warn(`[keelson] config.json providers names unknown provider '${rawId}'; ignoring.`);
+        warn(`[keelson] config.json providers map names an unknown provider '${rawId}'; ignoring.`);
         continue;
       }
       merged[id] = enabled === true;
@@ -123,10 +123,12 @@ export function resolveDefaultProvider(
 ): string | undefined {
   const ids = new Set(registeredIds);
   const preferred = config.defaultProvider?.trim().toLowerCase();
-  if (preferred && ids.has(preferred)) return preferred;
+  if (preferred && preferred !== "workflow" && ids.has(preferred)) return preferred;
   if (ids.has("copilot")) return "copilot";
   const realFirst = registeredIds.find((id) => id !== "stub" && id !== "workflow");
   if (realFirst) return realFirst;
   if (ids.has("stub")) return "stub";
-  return registeredIds[0];
+  // Never default to the synthetic non-chat 'workflow' provider — undefined when
+  // nothing chat-capable is registered.
+  return registeredIds.find((id) => id !== "workflow");
 }

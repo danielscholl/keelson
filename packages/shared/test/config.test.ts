@@ -164,4 +164,9 @@ describe("resolveDefaultProvider", () => {
   test("returns undefined when nothing is registered", () => {
     expect(resolveDefaultProvider({}, [])).toBeUndefined();
   });
+
+  test("never returns the synthetic 'workflow' provider as the default", () => {
+    expect(resolveDefaultProvider({}, ["workflow"])).toBeUndefined();
+    expect(resolveDefaultProvider({ defaultProvider: "workflow" }, ["workflow"])).toBeUndefined();
+  });
 });

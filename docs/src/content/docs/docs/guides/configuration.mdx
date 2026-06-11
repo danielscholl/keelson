@@ -14,10 +14,11 @@ agent providers load and which one new chats default to.
 ## The config file
 
 Settings live in `config.json` under the keelson home, which is `~/.keelson` by
-default. It is plain JSON, optional, and read at server boot. A missing or
-malformed file is ignored with a warning, so a typo never blocks startup.
+default. It is plain JSON, optional, and read at server boot. A missing file
+falls back to the defaults silently; a malformed one is ignored with a warning,
+so a typo never blocks startup.
 
-```json
+```jsonc
 // ~/.keelson/config.json
 {
   "providers": {
@@ -37,7 +38,7 @@ The built-in provider ids are `copilot`, `claude`, and `stub` (the offline echo
 provider). Out of the box, **copilot and stub load and claude is off**, so a
 fresh install defaults to Copilot. Flip the ones you want:
 
-```json
+```jsonc
 // Claude only
 {
   "providers": { "copilot": false, "claude": true }
