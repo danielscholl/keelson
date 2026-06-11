@@ -3,6 +3,55 @@
 All notable changes to Keelson are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] — 2026-06-11 — Project-scoped workflows and chat authoring
+
+Workflows now come in two scopes, and the chat agent can write them. Each
+registered project's `<root>/.keelson/workflows/` layers over the global
+workflows dir — a project workflow shadows a same-named global one inside
+that project and is invisible outside it — and four new chat tools let the
+agent author a workflow conversationally and save it into either scope.
+
+### Added
+
+- **Project-scoped workflow discovery.** The catalog indexes every registered
+  project's `.keelson/workflows/` beside the global dir, with project
+  shadowing global by name. `GET /api/workflows?projectId=` scopes the list,
+  run starts resolve names against the project containing the execution
+  directory, chat's workflow tools and system-prompt index follow the
+  conversation's project, and the Workflows tab badges project workflows and
+  re-scopes when you switch projects. Precedence: project > global files >
+  rib-contributed; scheduled producer runs always resolve the rib's own
+  definition.
+- **Chat workflow authoring.** Four harness tools beside the `workflow_*`
+  run family: `workflow_schema` serves an embedded authoring reference
+  (full guide or per-topic), `workflow_get` reads an existing workflow's
+  YAML as a template, `workflow_validate` dry-runs a draft through the real
+  loader, and `workflow_save` validates-then-atomically-writes to the global
+  or project scope. Validation lives inside the write path — an invalid
+  workflow cannot be saved, and loader errors return as the tool result so
+  the agent self-corrects. Saves refuse to silently replace a file that
+  defines a different workflow, require `overwrite: true` for any
+  replacement, and report when a save shadows (or stays shadowed by) a
+  same-named workflow in another scope.
+
+### Changed
+
+- **Run-start name resolution is scope-aware.** The same workflow name + run
+  directory resolves the same definition on every entry path (HTTP route,
+  chat tool, CLI), and an unknown name is always a 404 with suggestions —
+  exit code 4 from the CLI — regardless of target validity.
+- **CLI offline discovery labels the shared dir `global`** (matching the
+  server); project-scoped workflows require the server, and the offline
+  fallback's not-found error now says so.
+
+### Known limitations
+
+- The in-process CLI fallback (`keelson workflow run` with the server down)
+  sees only the global scope.
+- `workflow_save`'s confirmation gate is conversational (the agent is
+  instructed to show the final YAML and get approval); pipeline-enforced
+  confirmation for state-changing tools is a planned follow-up.
+
 ## [0.1.3] — 2026-06-10 — Starter command/script seeding
 
 The `smoke-test` starter — the one meant to verify a fresh install end-to-end —
