@@ -3,6 +3,38 @@
 All notable changes to Keelson are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-06-11 — Provider configuration and the Pi provider
+
+You can now choose which agent providers load and which one chat defaults to,
+and there is a new opt-in multi-vendor provider, Pi.
+
+### Added
+
+- **`~/.keelson/config.json` for provider selection.** An optional config file
+  picks which providers load (a `providers` enable-map) and which one new chats
+  and the workflow fallback preselect (`defaultProvider`). Precedence is
+  `KEELSON_PROVIDERS` env > `config.json` > built-in defaults, so the env var
+  still wins for one-off offline runs while the file is the durable setting.
+  `keelson doctor` reports the enabled set and where the decision came from, and
+  a new configuration guide documents every key and the `KEELSON_*` variables.
+- **Pi provider (opt-in).** `pi` wraps the
+  [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent),
+  a multi-vendor agent reaching Anthropic, Google, OpenAI, and more behind one
+  interface. Enable it with `"providers": { "pi": true }` and select a
+  `vendor/model` in the picker. Pi manages its own credentials (its
+  `~/.pi/agent/auth.json` plus per-vendor API-key env vars), so there is no
+  keelson sign-in for it; `keelson doctor` reports whether a pi credential is
+  present. Alpha scope: pi drives chat and reasoning only for now — its built-in
+  file and shell tools stay off, keelson's own tools are not yet projected into
+  pi, and there is no session resume.
+
+### Changed
+
+- **The default provider set is now Copilot plus the offline `stub`; Claude is
+  opt-in.** Previously every built-in provider loaded by default. Enable Claude
+  with `"providers": { "claude": true }` (or name it in `KEELSON_PROVIDERS`).
+  A fresh install still defaults to Copilot.
+
 ## [0.2.1] — 2026-06-11 — Multi-turn chat session continuity
 
 Follow-up turns in chat lost all prior context — drafting a workflow and then
