@@ -61,6 +61,26 @@ export {
   registerCopilotProvider,
 } from "./copilot/registration.ts";
 export { UnknownProviderError } from "./errors.ts";
+export type { PiRawEvent } from "./pi/event-bridge.ts";
+export { mapPiEvent } from "./pi/event-bridge.ts";
+export type {
+  PiAuthStatus,
+  PiCreateSessionParams,
+  PiSession,
+  PiSessionFactory,
+} from "./pi/factory.ts";
+export { checkPiAuth, PiAgentSessionFactory } from "./pi/factory.ts";
+export {
+  PI_CAPABILITIES,
+  PI_DEFAULT_MODEL,
+  PiProvider,
+  type PiProviderOptions,
+} from "./pi/provider.ts";
+export {
+  type PiAuthProbe,
+  type RegisterPiProviderResult,
+  registerPiProvider,
+} from "./pi/registration.ts";
 export {
   clearRegistry,
   getAgentProvider,

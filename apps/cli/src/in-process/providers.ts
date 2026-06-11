@@ -15,6 +15,7 @@ import {
   isRegisteredProvider,
   registerClaudeProvider,
   registerCopilotProvider,
+  registerPiProvider,
   registerStubProvider,
 } from "@keelson/providers";
 import {
@@ -78,6 +79,12 @@ export function bootstrapCliProviders(): BootstrapResult {
     if (id === "claude") {
       registerClaudeProvider({ getCredential });
       registered.push("claude");
+      continue;
+    }
+    if (id === "pi") {
+      // Self-managed auth — no keyring credential to pass.
+      registerPiProvider();
+      registered.push("pi");
     }
   }
   return { registered };

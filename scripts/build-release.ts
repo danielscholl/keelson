@@ -42,11 +42,13 @@ const PROVIDERS_PKG = JSON.parse(
 ) as { dependencies: Record<string, string> };
 const CLAUDE_SDK_RANGE = PROVIDERS_PKG.dependencies["@anthropic-ai/claude-agent-sdk"];
 const COPILOT_SDK_RANGE = PROVIDERS_PKG.dependencies["@github/copilot-sdk"];
+const PI_SDK_RANGE = PROVIDERS_PKG.dependencies["@earendil-works/pi-coding-agent"];
+const PI_AI_RANGE = PROVIDERS_PKG.dependencies["@earendil-works/pi-ai"];
 // A missing range would be dropped by JSON.stringify below, silently shipping a
 // manifest without the SDK while the bundle still marks it external.
-if (!CLAUDE_SDK_RANGE || !COPILOT_SDK_RANGE) {
+if (!CLAUDE_SDK_RANGE || !COPILOT_SDK_RANGE || !PI_SDK_RANGE || !PI_AI_RANGE) {
   throw new Error(
-    "packages/providers/package.json must declare @anthropic-ai/claude-agent-sdk and @github/copilot-sdk dependencies",
+    "packages/providers/package.json must declare @anthropic-ai/claude-agent-sdk, @github/copilot-sdk, @earendil-works/pi-coding-agent, and @earendil-works/pi-ai dependencies",
   );
 }
 const REPO = "danielscholl/keelson";
@@ -70,14 +72,15 @@ mkdirSync(join(CLI_PKG_DIR, "dist"), { recursive: true });
 //    across the harness↔rib boundary). The provider SDKs must also stay
 //    external: each one locates a sibling package at runtime relative to its
 //    own module path (claude-agent-sdk resolves its per-platform native CLI
-//    binary, copilot-sdk resolves the @github/copilot CLI it spawns), so
-//    inlining them breaks that resolution and chat fails on both providers.
+//    binary, copilot-sdk resolves the @github/copilot CLI it spawns, and
+//    pi-coding-agent reads its own package.json at init), so inlining them
+//    breaks that resolution and chat fails on those providers.
 console.log("[release] bundling @keelson/cli");
 await $`bun build ${join(ROOT, "apps/cli/bin/keelson.ts")} --target=bun --outfile ${join(
   CLI_PKG_DIR,
   "dist",
   "keelson.js",
-)} --external @keelson/shared --external zod --external @napi-rs/keyring --external @anthropic-ai/claude-agent-sdk --external @github/copilot-sdk`;
+)} --external @keelson/shared --external zod --external @napi-rs/keyring --external @anthropic-ai/claude-agent-sdk --external @github/copilot-sdk --external @earendil-works/pi-coding-agent --external @earendil-works/pi-ai`;
 
 // 2. CLI release manifest. shared is an optional peer (the home provides it);
 //    keyring is a real native dep bun fetches per-platform; the provider SDKs
@@ -90,6 +93,8 @@ const cliPkg = {
   bin: { keelson: "./dist/keelson.js" },
   dependencies: {
     "@anthropic-ai/claude-agent-sdk": CLAUDE_SDK_RANGE,
+    "@earendil-works/pi-ai": PI_AI_RANGE,
+    "@earendil-works/pi-coding-agent": PI_SDK_RANGE,
     "@github/copilot-sdk": COPILOT_SDK_RANGE,
     "@napi-rs/keyring": "1.3.0",
     zod: ZOD_RANGE,

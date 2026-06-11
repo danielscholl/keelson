@@ -16,6 +16,7 @@ import {
   isRegisteredProvider,
   registerClaudeProvider,
   registerCopilotProvider,
+  registerPiProvider,
   registerStubProvider,
   registerWorkflowProvider,
 } from "@keelson/providers";
@@ -108,6 +109,11 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
         result.claudeAuthProbe = reg.checkAuthStatus;
         break;
       }
+      case "pi":
+        // Self-managed auth (pi's own ~/.pi/agent/auth.json + vendor env keys),
+        // so nothing to thread through getCredential.
+        registerPiProvider();
+        break;
     }
   }
   // Always-on, non-chat provider that backs workflow-linked conversations.

@@ -60,20 +60,20 @@ Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
 credentials. `keelson service` (no subcommand) runs in the foreground instead;
 `keelson service stop` shuts the background server down.
 
-By default Keelson loads Copilot (plus the offline `stub`) and leaves Claude
-opt-in. Pick which providers load and which one chat defaults to in
-`~/.keelson/config.json`:
+By default Keelson loads Copilot (plus the offline `stub`) and leaves Claude and
+Pi (a multi-vendor community agent) opt-in. Pick which providers load and which
+one chat defaults to in `~/.keelson/config.json`:
 
 ```json
 {
-  "providers": { "copilot": true, "claude": true },
+  "providers": { "copilot": true, "claude": true, "pi": true },
   "defaultProvider": "claude"
 }
 ```
 
 `KEELSON_PROVIDERS` still overrides the file when set. See the
 [configuration guide](https://danielscholl.github.io/keelson/docs/guides/configuration/)
-for every setting and the `KEELSON_*` variables.
+for every setting, the `KEELSON_*` variables, and how Pi's self-managed auth works.
 
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and
@@ -143,7 +143,7 @@ contract — snapshots, views, surfaces, workflow contributions — and the
 | Piece | What it is |
 |---|---|
 | **Surfaces** | React 19 + Vite SPA (Chat, Workflows) and the `keelson` CLI |
-| **Providers** | One `IAgentProvider` over Copilot SDK, Claude Agent SDK, and a `stub` (offline/test, no keys) |
+| **Providers** | One `IAgentProvider` over Copilot SDK, Claude Agent SDK, the multi-vendor Pi agent, and a `stub` (offline/test, no keys) |
 | **Ribs** | Capabilities that register tools through the typed `Rib` contract, each in its own repo |
 | **Workflows** | Deterministic YAML DAG: `prompt` / `bash` / `command` / `loop` / `script` / `approval` / `cancel` nodes |
 | **State** | SQLite (conversations, runs, node outputs, memory) plus your OS keychain for credentials |
