@@ -20,6 +20,7 @@ import {
   registerWorkflowProvider,
 } from "@keelson/providers";
 import type {
+  Project,
   Rib,
   RibAction,
   RibActionResult,
@@ -33,6 +34,7 @@ import type {
   WorkflowSource,
 } from "@keelson/shared";
 import { runJSON, runText } from "@keelson/shared/exec";
+import { projectWorkflowsDir } from "@keelson/shared/paths";
 import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
 import {
   DEFAULT_TOOL_DENYLIST,
@@ -43,6 +45,7 @@ import {
   validateWorkflowInvariants,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
+  type WorkflowWithSource,
   workflowDefinitionSchema,
 } from "@keelson/workflows";
 import { makeRibAgentTurn } from "./rib-agent-turn.ts";
@@ -289,6 +292,11 @@ export interface BootstrapWorkflowsOptions {
   // Directory to scan for `*.yaml` workflow files. Production callers pass
   // `${REPO_ROOT}/.keelson/workflows`; tests pass a fixture dir.
   workflowDir: string;
+  // Registered projects whose `<root>/.keelson/workflows` layers over the
+  // global dir (project shadows global by name, visible only with that
+  // project's scope). A callback rather than the store so each scan observes
+  // project add/remove/rename without a rebootstrap, and tests can inject.
+  listProjects?: () => readonly Pick<Project, "id" | "name" | "rootPath">[];
   // Rib-contributed definitions merged into the catalog. A filesystem workflow
   // of the same name wins (so an operator can override a rib's), and the
   // collision surfaces as a discovery notice.
@@ -310,21 +318,43 @@ export interface WorkflowProvenance {
 
 const LOCAL_PROVENANCE: WorkflowProvenance = { source: { kind: "local" }, background: false };
 
+// Narrows catalog reads to one project's view: that project's workflows
+// overlaid on the global set, project winning name collisions. No/unknown
+// projectId means the global view, exactly the pre-scope behavior.
+export interface WorkflowScopeContext {
+  projectId?: string;
+}
+
 export interface WorkflowCatalog {
-  list(): WorkflowDefinition[];
-  get(name: string): WorkflowDefinition | undefined;
-  // Source (local vs which rib) + background flag for a catalog entry. Returns
-  // a local default for an unknown name so callers need no null guard.
-  provenance(name: string): WorkflowProvenance;
+  list(scope?: WorkflowScopeContext): WorkflowDefinition[];
+  get(name: string, scope?: WorkflowScopeContext): WorkflowDefinition | undefined;
+  // Definition plus the file it was loaded from. Rib-contributed entries have
+  // no backing file and return undefined; callers needing only the definition
+  // use get().
+  getWithSource(name: string, scope?: WorkflowScopeContext): WorkflowWithSource | undefined;
+  // Source (local / project / which rib) + background flag for a catalog
+  // entry. Returns a local default for an unknown name so callers need no
+  // null guard.
+  provenance(name: string, scope?: WorkflowScopeContext): WorkflowProvenance;
   // Load-errors (file dropped) + non-fatal warnings, normalized for the
   // wire schema. The SPA toasts these once on first Workflows-tab load.
-  discoveryNotices(): WorkflowDiscoveryNotice[];
+  // Project-dir notices surface only under that project's scope.
+  discoveryNotices(scope?: WorkflowScopeContext): WorkflowDiscoveryNotice[];
+}
+
+interface ProjectScopeSnapshot {
+  byName: Map<string, WorkflowWithSource>;
+  provenance: Map<string, WorkflowProvenance>;
+  notices: WorkflowDiscoveryNotice[];
 }
 
 interface CatalogSnapshot {
   signature: string;
   byName: Map<string, WorkflowDefinition>;
+  // Global file-backed entries only (rib extras have no path).
+  withSource: Map<string, WorkflowWithSource>;
   provenance: Map<string, WorkflowProvenance>;
+  byProject: Map<string, ProjectScopeSnapshot>;
   notices: WorkflowDiscoveryNotice[];
 }
 
@@ -371,10 +401,39 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
   const ribNames = opts.ribNames;
   let cached: CatalogSnapshot | undefined;
 
+  // In the monorepo dev layout the global dir already lives under a project
+  // root, so registering that project would double-index every global
+  // workflow as project-scoped; skip any project whose dir resolves there.
+  // realpath, not resolve: a symlinked root (macOS /tmp → /private/tmp,
+  // symlinked checkouts) must not make one physical dir look like two scopes.
+  const canonicalPath = (p: string): string => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const scopedProjects = () => {
+    const resolvedGlobalDir = canonicalPath(dir);
+    return (opts.listProjects?.() ?? [])
+      .filter((p) => canonicalPath(projectWorkflowsDir(p.rootPath)) !== resolvedGlobalDir)
+      .slice()
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  };
+
   const scan = (): CatalogSnapshot => {
-    const signature = catalogSignature(dir);
+    const projects = scopedProjects();
+    // The id:name prefix keys each fingerprint segment to the project, so
+    // adding, removing, or renaming a project re-scans just like a file edit.
+    const signature = [
+      `global:${catalogSignature(dir)}`,
+      ...projects.map(
+        (p) =>
+          `${p.id}:${p.name}:${p.rootPath}:${catalogSignature(projectWorkflowsDir(p.rootPath))}`,
+      ),
+    ].join("\n");
     if (cached && cached.signature === signature) return cached;
-    const result = discoverWorkflows([{ dir, source: "project" }]);
+    const result = discoverWorkflows([{ dir, source: "global" }]);
     const notices: WorkflowDiscoveryNotice[] = [];
     for (const error of result.errors) {
       console.warn(`[workflows] failed to load ${error.filename}: ${error.error}`);
@@ -390,9 +449,11 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
       notices.push(toDiscoveryNotice(warning));
     }
     const byName = new Map<string, WorkflowDefinition>();
+    const withSource = new Map<string, WorkflowWithSource>();
     const provenance = new Map<string, WorkflowProvenance>();
     for (const entry of result.workflows) {
       byName.set(entry.workflow.name, entry.workflow);
+      withSource.set(entry.workflow.name, entry);
       provenance.set(entry.workflow.name, LOCAL_PROVENANCE);
     }
     // Rib-contributed workflows fill in around the filesystem set; a name
@@ -400,12 +461,12 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     for (const definition of extra) {
       if (byName.has(definition.name)) {
         console.warn(
-          `[workflows] rib workflow '${definition.name}' shadowed by a project workflow of the same name`,
+          `[workflows] rib workflow '${definition.name}' shadowed by a global workflow file of the same name`,
         );
         notices.push({
           level: "warning",
           filename: `<rib:${definition.name}>`,
-          message: `rib workflow '${definition.name}' shadowed by a project workflow of the same name`,
+          message: `rib workflow '${definition.name}' shadowed by a global workflow file of the same name`,
         });
         continue;
       }
@@ -422,8 +483,51 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
         background: prov?.background ?? false,
       });
     }
-    console.log(`[workflows] discovered ${byName.size} workflows`);
-    cached = { signature, byName, provenance, notices };
+    const byProject = new Map<string, ProjectScopeSnapshot>();
+    for (const p of projects) {
+      const projectDir = projectWorkflowsDir(p.rootPath);
+      const projectResult = discoverWorkflows([{ dir: projectDir, source: "project" }]);
+      const projectNotices: WorkflowDiscoveryNotice[] = [];
+      for (const error of projectResult.errors) {
+        console.warn(
+          `[workflows] failed to load ${error.filename} (project ${p.name}): ${error.error}`,
+        );
+        projectNotices.push({
+          level: "error",
+          filename: error.filename,
+          message: `failed to load: ${error.error}`,
+        });
+      }
+      for (const warning of projectResult.warnings) {
+        const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
+        console.warn(
+          `[workflows] ${warning.filename}${nodeRef} (project ${p.name}): ${warning.message}`,
+        );
+        projectNotices.push(toDiscoveryNotice(warning));
+      }
+      const projectByName = new Map<string, WorkflowWithSource>();
+      const projectProvenance = new Map<string, WorkflowProvenance>();
+      for (const entry of projectResult.workflows) {
+        projectByName.set(entry.workflow.name, entry);
+        projectProvenance.set(entry.workflow.name, {
+          source: { kind: "project", projectId: p.id, projectName: p.name },
+          background: false,
+        });
+      }
+      if (projectByName.size > 0 || projectNotices.length > 0) {
+        byProject.set(p.id, {
+          byName: projectByName,
+          provenance: projectProvenance,
+          notices: projectNotices,
+        });
+      }
+    }
+    const projectCount = Array.from(byProject.values()).reduce((n, s) => n + s.byName.size, 0);
+    console.log(
+      `[workflows] discovered ${byName.size} workflows` +
+        (projectCount > 0 ? ` (+${projectCount} project-scoped)` : ""),
+    );
+    cached = { signature, byName, withSource, provenance, byProject, notices };
     return cached;
   };
 
@@ -431,11 +535,43 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
   // immediately, matching the previous build-at-boot behavior.
   scan();
 
+  const projectView = (scope?: WorkflowScopeContext) => {
+    const snapshot = scan();
+    const project =
+      scope?.projectId !== undefined ? snapshot.byProject.get(scope.projectId) : undefined;
+    return { snapshot, project };
+  };
+
   return {
-    list: () => Array.from(scan().byName.values()),
-    get: (name) => scan().byName.get(name),
-    provenance: (name) => scan().provenance.get(name) ?? LOCAL_PROVENANCE,
-    discoveryNotices: () => scan().notices,
+    list: (scope) => {
+      const { snapshot, project } = projectView(scope);
+      if (!project) return Array.from(snapshot.byName.values());
+      // Project entries first: downstream consumers truncate from the front
+      // (the system-prompt index caps at 40 names), and the scope's own
+      // workflows must never be the ones cut.
+      const merged = new Map<string, WorkflowDefinition>();
+      for (const [name, entry] of project.byName) merged.set(name, entry.workflow);
+      for (const [name, definition] of snapshot.byName) {
+        if (!merged.has(name)) merged.set(name, definition);
+      }
+      return Array.from(merged.values());
+    },
+    get: (name, scope) => {
+      const { snapshot, project } = projectView(scope);
+      return project?.byName.get(name)?.workflow ?? snapshot.byName.get(name);
+    },
+    getWithSource: (name, scope) => {
+      const { snapshot, project } = projectView(scope);
+      return project?.byName.get(name) ?? snapshot.withSource.get(name);
+    },
+    provenance: (name, scope) => {
+      const { snapshot, project } = projectView(scope);
+      return project?.provenance.get(name) ?? snapshot.provenance.get(name) ?? LOCAL_PROVENANCE;
+    },
+    discoveryNotices: (scope) => {
+      const { snapshot, project } = projectView(scope);
+      return project ? [...snapshot.notices, ...project.notices] : snapshot.notices;
+    },
   };
 }
 

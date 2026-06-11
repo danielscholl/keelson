@@ -32,6 +32,13 @@ function findProjectHome(start: string): string | null {
   }
 }
 
+// Workflows a registered project contributes to the catalog. Scope layering
+// (project shadows global) keys off ProjectsStore root paths — not the cwd
+// walk-up above, which substitutes the whole home rather than adding a layer.
+export function projectWorkflowsDir(rootPath: string): string {
+  return join(rootPath, HOME_DIR_NAME, "workflows");
+}
+
 export interface KeelsonPaths {
   readonly home: string;
   readonly dbPath: string;

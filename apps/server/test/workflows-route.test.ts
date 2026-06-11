@@ -72,7 +72,12 @@ function makeRig(): Rig {
   const projectsStore = createProjectsStore(db);
   const defaultProject = projectsStore.create({ name: "test-project", rootPath: tmpDir });
   CURRENT_DEFAULT_PROJECT_ID = defaultProject.id;
-  const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+  // Mirrors production wiring: registered projects contribute their
+  // .keelson/workflows dirs as project scopes.
+  const catalog = bootstrapWorkflows({
+    workflowDir: wfDir,
+    listProjects: () => projectsStore.list(),
+  });
   const app = new Hono();
   workflowsRoutes(app, { catalog, store, conversationStore, projectsStore });
   return { app, store, projectsStore, defaultProjectId: defaultProject.id };
@@ -2449,5 +2454,231 @@ nodes:
       query: "valid content",
     });
     expect(recall.items).toHaveLength(0);
+  });
+});
+
+describe("project-scoped workflows (routes)", () => {
+  const GLOBAL_WF = `name: shared-flow
+description: global copy
+nodes:
+  - id: global-step
+    bash: echo from-global
+`;
+  const PROJECT_WF = `name: shared-flow
+description: project copy
+nodes:
+  - id: project-step
+    bash: echo from-project
+`;
+  const PROJECT_ONLY_WF = `name: proj-only
+description: lives in the project
+nodes:
+  - id: step
+    bash: echo proj-only
+`;
+
+  function makeScopedRig() {
+    const rig = makeRig();
+    const projectRoot = join(tmpDir, "proj-root");
+    const projectWfDir = join(projectRoot, ".keelson", "workflows");
+    mkdirSync(projectWfDir, { recursive: true });
+    const project = rig.projectsStore.create({ name: "scoped", rootPath: projectRoot });
+    return { ...rig, project, projectRoot, projectWfDir };
+  }
+
+  test("GET /api/workflows?projectId returns the union with project shadowing global", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("shared-flow.yaml", GLOBAL_WF);
+    writeFileSync(join(rig.projectWfDir, "shared-flow.yaml"), PROJECT_WF);
+    writeFileSync(join(rig.projectWfDir, "proj-only.yaml"), PROJECT_ONLY_WF);
+
+    const unscoped = await rig.app.fetch(new Request("http://test/api/workflows"));
+    const unscopedBody = (await unscoped.json()) as {
+      workflows: Array<{ name: string; description: string; source: { kind: string } }>;
+    };
+    expect(unscopedBody.workflows.map((w) => w.name)).toEqual(["shared-flow"]);
+    expect(unscopedBody.workflows[0]!.description).toBe("global copy");
+    expect(unscopedBody.workflows[0]!.source.kind).toBe("local");
+
+    const scoped = await rig.app.fetch(
+      new Request(`http://test/api/workflows?projectId=${rig.project.id}`),
+    );
+    const scopedBody = (await scoped.json()) as {
+      workflows: Array<{
+        name: string;
+        description: string;
+        source: { kind: string; projectId?: string; projectName?: string };
+      }>;
+    };
+    const byName = new Map(scopedBody.workflows.map((w) => [w.name, w]));
+    expect([...byName.keys()].sort()).toEqual(["proj-only", "shared-flow"]);
+    expect(byName.get("shared-flow")!.description).toBe("project copy");
+    expect(byName.get("shared-flow")!.source).toEqual({
+      kind: "project",
+      projectId: rig.project.id,
+      projectName: "scoped",
+    });
+  });
+
+  test("GET /api/workflows with an unknown projectId is a 400", async () => {
+    const rig = makeScopedRig();
+    const res = await rig.app.fetch(new Request("http://test/api/workflows?projectId=nope"));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("unknown project");
+  });
+
+  test("project-dir discovery notices surface only with that projectId", async () => {
+    const rig = makeScopedRig();
+    writeFileSync(join(rig.projectWfDir, "broken.yaml"), "name: broken\nnodes: nope\n");
+
+    const unscoped = (await (
+      await rig.app.fetch(new Request("http://test/api/workflows"))
+    ).json()) as { discoveryNotices: Array<{ filename: string }> };
+    expect(unscoped.discoveryNotices).toHaveLength(0);
+
+    const scoped = (await (
+      await rig.app.fetch(new Request(`http://test/api/workflows?projectId=${rig.project.id}`))
+    ).json()) as { discoveryNotices: Array<{ filename: string }> };
+    expect(scoped.discoveryNotices.some((n) => n.filename.endsWith("broken.yaml"))).toBe(true);
+  });
+
+  test("GET /api/workflows/:name?projectId returns the shadowing project definition", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("shared-flow.yaml", GLOBAL_WF);
+    writeFileSync(join(rig.projectWfDir, "shared-flow.yaml"), PROJECT_WF);
+
+    const unscoped = (await (
+      await rig.app.fetch(new Request("http://test/api/workflows/shared-flow"))
+    ).json()) as { workflow: { nodes: Array<{ id: string }> } };
+    expect(unscoped.workflow.nodes[0]!.id).toBe("global-step");
+
+    const scoped = (await (
+      await rig.app.fetch(
+        new Request(`http://test/api/workflows/shared-flow?projectId=${rig.project.id}`),
+      )
+    ).json()) as { workflow: { nodes: Array<{ id: string }> } };
+    expect(scoped.workflow.nodes[0]!.id).toBe("project-step");
+  });
+
+  test("POST /:name/runs with projectId runs the project copy of a shadowed name", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("shared-flow.yaml", GLOBAL_WF);
+    writeFileSync(join(rig.projectWfDir, "shared-flow.yaml"), PROJECT_WF);
+
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/shared-flow/runs", { projectId: rig.project.id }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = (await pollUntilTerminal(rig.app, runId)) as {
+      nodes: Array<{ nodeId: string; outputText: string | null }>;
+      status: string;
+    };
+    expect(run.status).toBe("succeeded");
+    expect(run.nodes[0]!.nodeId).toBe("project-step");
+    expect(run.nodes[0]!.outputText).toContain("from-project");
+  });
+
+  test("a project-only workflow is not startable outside its project", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("other.yaml", GLOBAL_WF.replace("shared-flow", "other"));
+    writeFileSync(join(rig.projectWfDir, "proj-only.yaml"), PROJECT_ONLY_WF);
+
+    // Default-project target (auto-injected) — proj-only is out of scope.
+    const res = await rig.app.fetch(postRun("http://test/api/workflows/proj-only/runs", {}));
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string; available?: string[] };
+    expect(body.available ?? []).not.toContain("proj-only");
+
+    // Explicit project target — in scope, starts fine.
+    const scoped = await rig.app.fetch(
+      postRun("http://test/api/workflows/proj-only/runs", { projectId: rig.project.id }),
+    );
+    expect(scoped.status).toBe(200);
+    const { runId } = (await scoped.json()) as { runId: string };
+    const run = await pollUntilTerminal(rig.app, runId);
+    expect(run.status).toBe("succeeded");
+  });
+
+  test("a workingDir inside a registered project resolves that project's scope", async () => {
+    const rig = makeScopedRig();
+    writeFileSync(join(rig.projectWfDir, "proj-only.yaml"), PROJECT_ONLY_WF);
+
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/proj-only/runs", { workingDir: rig.projectRoot }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = await pollUntilTerminal(rig.app, runId);
+    expect(run.status).toBe("succeeded");
+  });
+
+  test("fuzzy suggestions are scoped to the resolved project", async () => {
+    const rig = makeScopedRig();
+    writeFileSync(join(rig.projectWfDir, "proj-only.yaml"), PROJECT_ONLY_WF);
+
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/proj-onyl/runs", { projectId: rig.project.id }),
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { suggestions?: string[]; error: string };
+    expect(body.suggestions ?? [body.error]).toContain("proj-only");
+  });
+
+  test("malformed JSON beats an unknown name (body parses before lookup)", async () => {
+    const rig = makeScopedRig();
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/definitely-not-a-workflow/runs", "{not json"),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("invalid json");
+  });
+});
+
+describe("review-fix regressions (routes)", () => {
+  const SIMPLE_WF = (name: string) => `name: ${name}
+description: regression fixture
+nodes:
+  - id: step
+    bash: echo ${name}
+`;
+
+  function makeScopedRig() {
+    const rig = makeRig();
+    const projectRoot = join(tmpDir, "proj-root");
+    const projectWfDir = join(projectRoot, ".keelson", "workflows");
+    mkdirSync(projectWfDir, { recursive: true });
+    const project = rig.projectsStore.create({ name: "scoped", rootPath: projectRoot });
+    return { ...rig, project, projectRoot, projectWfDir };
+  }
+
+  test("an unknown name with an invalid workingDir is still a 404 with suggestions", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("smoke-test.yaml", SIMPLE_WF("smoke-test"));
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/smoke-tst/runs", {
+        workingDir: join(tmpDir, "does-not-exist"),
+      }),
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { suggestions?: string[] };
+    expect(body.suggestions ?? []).toContain("smoke-test");
+  });
+
+  test("definition scope follows workingDir even when an explicit projectId is supplied", async () => {
+    const rig = makeScopedRig();
+    writeFileSync(join(rig.projectWfDir, "proj-only.yaml"), SIMPLE_WF("proj-only"));
+    // Explicit projectId points at the DEFAULT project, workingDir at the
+    // scoped project — the execution dir's overlay must win the lookup.
+    const res = await rig.app.fetch(
+      postRun("http://test/api/workflows/proj-only/runs", {
+        projectId: rig.defaultProjectId,
+        workingDir: rig.projectRoot,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = await pollUntilTerminal(rig.app, runId);
+    expect(run.status).toBe("succeeded");
   });
 });

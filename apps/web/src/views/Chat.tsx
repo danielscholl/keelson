@@ -1162,7 +1162,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
       const parsed = parseWorkflowCommand(rest);
 
       if (parsed.kind === "list") {
-        const { workflows } = await listWorkflows();
+        const { workflows } = await listWorkflows(activeProjectId ?? undefined);
         if (workflows.length === 0) return ok("No workflows discovered.");
         const rows = workflows.map((w) => {
           const desc = parseWorkflowDescription(w.description);
@@ -1234,6 +1234,13 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   // The navigable row count for the active mode (commands vs workflow names).
   const slashActiveLength = slashMode === "args" ? slashArgItems.length : slashFilteredItems.length;
 
+  // The name cache is project-scoped; switching projects must drop it so the
+  // picker re-fetches against the new scope instead of suggesting stale names.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeProjectId is a deliberate reset trigger
+  useEffect(() => {
+    setWorkflowNames(null);
+  }, [activeProjectId]);
+
   // Lazy-load workflow names the first time the user reaches `/workflow run`.
   // A failed fetch leaves the list null — the picker just shows no suggestions.
   useEffect(() => {
@@ -1243,7 +1250,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     let cancelled = false;
     void (async () => {
       try {
-        const { workflows } = await listWorkflows();
+        const { workflows } = await listWorkflows(activeProjectId ?? undefined);
         if (cancelled) return;
         setWorkflowNames(
           workflows.map((w) => {
@@ -1262,8 +1269,13 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     })();
     return () => {
       cancelled = true;
+      // Clear the guard synchronously: React runs this cleanup before the
+      // effect re-runs, so a project switch mid-fetch can start the new
+      // scope's fetch instead of early-returning on a stale in-flight ref
+      // (whose result the `cancelled` flag already discards).
+      workflowNamesFetchingRef.current = false;
     };
-  }, [workflowRunPartial, workflowNames]);
+  }, [workflowRunPartial, workflowNames, activeProjectId]);
 
   // Open the picker when the user starts a slash command; close it as soon as
   // the input stops starting with `/`. Keeping selectedIndex in range as the

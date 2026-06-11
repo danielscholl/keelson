@@ -6,6 +6,11 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+export {
+  AUTHORING_GUIDE_TOPICS,
+  authoringGuideSection,
+  WORKFLOW_AUTHORING_GUIDE,
+} from "./authoring-guide.ts";
 export { evaluateCondition } from "./conditions.ts";
 export {
   ExecutorValidationError,
@@ -23,7 +28,6 @@ export {
   resolveBody,
   runWorkflow,
 } from "./executor.ts";
-
 export {
   buildTopologicalLayers,
   type DagShapeError,

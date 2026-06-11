@@ -1,7 +1,7 @@
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { getWorkflowDetail, listWorkflows, startWorkflowRun } from "../api.ts";
+import { getWorkflowDetail, getWorkflowRun, listWorkflows, startWorkflowRun } from "../api.ts";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
@@ -89,12 +89,19 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
     [setActiveProject],
   );
 
+  // Re-fetch when the active project changes — the catalog is scoped to it
+  // (project workflows overlay global, shadowing same-named ones). The detail
+  // cache is keyed by name only, so it must not straddle scopes: drop it
+  // before fetching or a shadowed name would briefly serve the old scope's
+  // definition.
   useEffect(() => {
     let cancelled = false;
-    listWorkflows()
+    setDetails(new Map());
+    listWorkflows(activeProjectId ?? undefined)
       .then(async ({ workflows: list, discoveryNotices }) => {
         if (cancelled) return;
         setWorkflows(list);
+        setLoadError(null);
         for (const notice of discoveryNotices) {
           const where = notice.nodeId
             ? `${notice.filename} (node ${notice.nodeId})`
@@ -113,7 +120,7 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
         // for the starter set is cheap.
         const detailEntries = await Promise.all(
           list.map((w) =>
-            getWorkflowDetail(w.name).then(
+            getWorkflowDetail(w.name, activeProjectId ?? undefined).then(
               (d) => [w.name, d] as const,
               (err) => {
                 console.warn(`[workflows] detail(${w.name}) failed:`, err);
@@ -136,14 +143,14 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
     return () => {
       cancelled = true;
     };
-  }, [toast.push]);
+  }, [toast.push, activeProjectId]);
 
   const handleRunRequest = useCallback(
     async (workflow: WorkflowSummary) => {
       let detail = details.get(workflow.name);
       if (!detail) {
         try {
-          detail = await getWorkflowDetail(workflow.name);
+          detail = await getWorkflowDetail(workflow.name, activeProjectId ?? undefined);
           setDetails((prev) => {
             const next = new Map(prev);
             next.set(workflow.name, detail!);
@@ -157,7 +164,7 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
       }
       setScreen({ kind: "run", workflow: detail, runId: null });
     },
-    [details, toast],
+    [details, toast, activeProjectId],
   );
 
   const handleStart = useCallback(
@@ -186,25 +193,34 @@ export function Workflows({ pendingRun, onPendingRunConsumed }: WorkflowsProps =
   );
 
   const handleOpenRun = useCallback(
-    async (runId: string, workflowName: string) => {
-      let detail = details.get(workflowName);
-      if (!detail) {
-        try {
-          detail = await getWorkflowDetail(workflowName);
-          setDetails((prev) => {
-            const next = new Map(prev);
-            next.set(workflowName, detail!);
-            return next;
-          });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          toast.push({ kind: "error", message: `Couldn't open run: ${msg}` });
-          return;
+    async (runId: string, workflowName: string, runProjectId?: string | null) => {
+      try {
+        // Resolve detail in the RUN's scope, not the active project's — the
+        // runs feed is cross-project, and a shadowed name in the wrong scope
+        // would 404 or render a different DAG than the run executed.
+        const scopeId =
+          runProjectId !== undefined
+            ? (runProjectId ?? undefined)
+            : ((await getWorkflowRun(runId)).projectId ?? undefined);
+        const sameScope = scopeId === (activeProjectId ?? undefined);
+        let detail = sameScope ? details.get(workflowName) : undefined;
+        if (!detail) {
+          detail = await getWorkflowDetail(workflowName, scopeId);
+          if (sameScope) {
+            setDetails((prev) => {
+              const next = new Map(prev);
+              next.set(workflowName, detail!);
+              return next;
+            });
+          }
         }
+        setScreen({ kind: "run", workflow: detail, runId });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.push({ kind: "error", message: `Couldn't open run: ${msg}` });
       }
-      setScreen({ kind: "run", workflow: detail, runId });
     },
-    [details, toast],
+    [details, toast, activeProjectId],
   );
 
   const handleBack = useCallback(() => {

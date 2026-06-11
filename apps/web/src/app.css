@@ -8212,6 +8212,11 @@ a.cvb-card-title::after {
   padding: 1px 7px; border-radius: 999px; font-size: 11px;
   color: var(--muted); background: var(--bg-soft); border: 1px solid var(--border-soft);
 }
+.wc-project-pill {
+  padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  color: var(--accent); background: var(--bg-soft); border: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
 .source-toolbar { margin-top: -4px; }
 .chip-row-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;

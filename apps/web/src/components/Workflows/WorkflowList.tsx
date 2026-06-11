@@ -1,12 +1,12 @@
 import type { WorkflowDetail, WorkflowSummary } from "@keelson/shared";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useSettings } from "../../hooks/useSettings.ts";
 import { ribAccent } from "../../lib/rib.ts";
 import { WorkflowCard } from "./WorkflowCard.tsx";
 
 type FilterKind = "all" | "bash" | "prompt" | "mixed";
-// "all" | "local" | a rib id.
+// "all" | "local" (global files) | "project" | a rib id.
 type SourceFilter = string;
 
 function nodeTypesSet(detail: WorkflowDetail | undefined): Set<string> {
@@ -44,20 +44,38 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
   const ribs = useMemo(() => {
     const byId = new Map<string, string>();
     let hasLocal = false;
+    let hasProject = false;
     for (const w of workflows) {
       if (w.source.kind === "rib" && w.source.ribId) {
         byId.set(w.source.ribId, w.source.ribName ?? w.source.ribId);
+      } else if (w.source.kind === "project") {
+        hasProject = true;
       } else {
         hasLocal = true;
       }
     }
     return {
       hasLocal,
+      hasProject,
       list: [...byId.entries()]
         .map(([id, name]) => ({ id, name }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
   }, [workflows]);
+
+  // The filter state outlives refetches (project switches swap the workflows
+  // prop in place). If the selected chip no longer exists in the new list, the
+  // toolbar may unmount entirely while the predicate still excludes everything
+  // — reset to "all" so the catalog can't get stuck empty with no visible chip
+  // to clear.
+  useEffect(() => {
+    if (source === "all") return;
+    const valid =
+      (source === "local" && ribs.hasLocal) ||
+      (source === "project" && ribs.hasProject) ||
+      ribs.list.some((r) => r.id === source);
+    if (!valid) setSource("all");
+  }, [source, ribs]);
 
   const hiddenCount = useMemo(
     () =>
@@ -77,7 +95,9 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
       if (w.background && !showBackground) return false;
       // Source filter.
       if (source === "local" && w.source.kind !== "local") return false;
-      if (source !== "all" && source !== "local" && ribId !== source) return false;
+      if (source === "project" && w.source.kind !== "project") return false;
+      if (source !== "all" && source !== "local" && source !== "project" && ribId !== source)
+        return false;
       if (q) {
         const hay = `${w.name} ${w.description}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -141,12 +161,13 @@ export function WorkflowList({ workflows, details, onRun }: WorkflowListProps) {
           ))}
         </div>
       </div>
-      {ribs.list.length > 0 && (
+      {(ribs.list.length > 0 || ribs.hasProject) && (
         <div className="toolbar source-toolbar">
           <div className="chip-row">
             <span className="chip-row-label">Source</span>
             {sourceChip("all", "all")}
-            {ribs.hasLocal && sourceChip("local", "local")}
+            {ribs.hasLocal && sourceChip("local", "global")}
+            {ribs.hasProject && sourceChip("project", "project")}
             {ribs.list.map((r) => {
               const accent = ribAccent(r.id);
               const hidden = isWorkflowSourceHidden(r.id);

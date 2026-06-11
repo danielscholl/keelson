@@ -52,6 +52,15 @@ describe("buildWorkflowGuidance", () => {
     expect(out).toContain("Do NOT run the name as a shell command");
   });
 
+  test("teaches the authoring flow with a hard approval gate before save", () => {
+    const out = buildWorkflowGuidance([SMOKE]);
+    expect(out).toContain("Authoring new workflows:");
+    expect(out).toContain("workflow_schema");
+    expect(out).toContain("workflow_validate");
+    expect(out).toContain("ALWAYS show the user the complete final YAML");
+    expect(out).toContain("workflow_save");
+  });
+
   test("caps the index and reports the overflow", () => {
     const many: WorkflowSummaryLike[] = Array.from({ length: 45 }, (_, i) => ({
       name: `wf-${i}`,
@@ -73,11 +82,17 @@ describe("buildChatSystemPrompt", () => {
     expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).toBe("seed");
   });
 
-  test("omits workflow guidance when no workflows are supplied", () => {
-    // Mirrors the gate in chat-handler: tools inactive => no `workflows` =>
-    // the seed-only assertion in chat-memory.test.ts stays valid.
+  test("omits workflow guidance only when workflows is absent (tools inactive)", () => {
+    // Tools inactive => no `workflows` key => no guidance; the seed-only
+    // assertion in chat-memory.test.ts stays valid.
+    expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).toBe("seed");
+    // Tools active with an EMPTY catalog still get the section — the
+    // authoring rules matter most when the first workflow is about to be
+    // written.
     const out = buildChatSystemPrompt({ seedSystemPrompt: "seed", workflows: [] });
-    expect(out).toBe("seed");
+    expect(out).toContain("## Workflows");
+    expect(out).toContain("none yet");
+    expect(out).toContain("workflow_save");
   });
 
   test("composes recall, seed, and workflow guidance in order", () => {

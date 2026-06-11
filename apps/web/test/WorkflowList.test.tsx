@@ -17,6 +17,7 @@ const WORKFLOWS: WorkflowSummary[] = [
   wf("local-one", { kind: "local" }),
   wf("osdu-cluster", { kind: "rib", ribId: "osdu", ribName: "OSDU" }),
   wf("osdu-lane", { kind: "rib", ribId: "osdu", ribName: "OSDU" }, true),
+  wf("proj-flow", { kind: "project", projectId: "p1", projectName: "demo" }),
 ];
 const DETAILS = new Map<string, WorkflowDetail>();
 
@@ -42,9 +43,21 @@ describe("WorkflowList — provenance filtering", () => {
 
   test("the source filter narrows the grid to one source", () => {
     render(<WorkflowList workflows={WORKFLOWS} details={DETAILS} onRun={() => {}} />);
-    // Click the "local" source chip → only the local workflow remains.
-    fireEvent.click(screen.getByText("local"));
+    // Click the "global" source chip (kind: local) → only the global workflow remains.
+    fireEvent.click(screen.getByText("global"));
     expect(screen.getByText("local-one")).toBeTruthy();
+    expect(screen.queryByText("osdu-cluster")).toBeNull();
+    expect(screen.queryByText("proj-flow")).toBeNull();
+  });
+
+  test("project workflows get a badge and their own source filter", () => {
+    render(<WorkflowList workflows={WORKFLOWS} details={DETAILS} onRun={() => {}} />);
+    // The card badge carries the project name.
+    expect(screen.getAllByText("demo").length).toBeGreaterThan(0);
+    // The "project" chip narrows to project-scoped workflows only.
+    fireEvent.click(screen.getByText("project"));
+    expect(screen.getByText("proj-flow")).toBeTruthy();
+    expect(screen.queryByText("local-one")).toBeNull();
     expect(screen.queryByText("osdu-cluster")).toBeNull();
   });
 

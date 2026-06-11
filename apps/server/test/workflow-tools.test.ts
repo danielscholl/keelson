@@ -53,13 +53,20 @@ interface Rig {
   dispose: () => void;
 }
 
-function makeRig(): Rig {
+interface RigExtras {
+  projectsStore: ReturnType<typeof createProjectsStore>;
+}
+
+function makeRig(): Rig & RigExtras {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
   const projectsStore = createProjectsStore(db);
   projectsStore.create({ name: "test-project", rootPath: tmpDir });
-  const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+  const catalog = bootstrapWorkflows({
+    workflowDir: wfDir,
+    listProjects: () => projectsStore.list(),
+  });
   const activeRuns = createActiveRuns();
   const subscribers = createWorkflowSubscribers();
   const controller = createWorkflowController(
@@ -69,8 +76,13 @@ function makeRig(): Rig {
   );
   // Short watch deadline keeps the "still running" fallback from hanging a test,
   // while bash + approval fixtures reach their boundary well inside it.
-  const tools = createWorkflowChatTools({ controller, catalog, watchDeadlineMs: 4000 });
-  return { controller, tools, cwd: tmpDir, dispose: () => db.close() };
+  const tools = createWorkflowChatTools({
+    controller,
+    catalog,
+    projectsStore,
+    watchDeadlineMs: 4000,
+  });
+  return { controller, tools, cwd: tmpDir, projectsStore, dispose: () => db.close() };
 }
 
 function writeWorkflow(filename: string, body: string): void {
@@ -358,3 +370,108 @@ nodes:
     expect(result.content).toContain("invalid input");
   });
 });
+
+describe("project-scoped workflow chat tools", () => {
+  const PROJECT_WF = `name: proj-flow
+description: |
+  Use when: only this project needs it
+nodes:
+  - id: step
+    bash: echo project-sentinel-456
+`;
+
+  function makeScopedRig() {
+    const rig = makeRig();
+    activeDispose = rig.dispose;
+    const projectRoot = join(tmpDir, "proj-root");
+    mkdirSync(join(projectRoot, ".keelson", "workflows"), { recursive: true });
+    writeFileSync(join(projectRoot, ".keelson", "workflows", "proj-flow.yaml"), PROJECT_WF);
+    rig.projectsStore.create({ name: "scoped", rootPath: projectRoot });
+    return { ...rig, projectRoot };
+  }
+
+  test("workflow_list sees project workflows only from inside that project", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("global.yaml", NO_APPROVAL_WF);
+
+    const inProject = makeCtx(rig.projectRoot);
+    await toolByName(rig.tools, "workflow_list").execute({}, inProject.ctx);
+    const scoped = lastToolResult(inProject.chunks);
+    expect(scoped.content).toContain("proj-flow");
+    expect(scoped.content).toContain("done");
+
+    const outside = makeCtx(rig.cwd);
+    await toolByName(rig.tools, "workflow_list").execute({}, outside.ctx);
+    expect(lastToolResult(outside.chunks).content).not.toContain("proj-flow");
+  });
+
+  test("workflow_run resolves and runs a project workflow from its project cwd", async () => {
+    const rig = makeScopedRig();
+
+    const inProject = makeCtx(rig.projectRoot);
+    await toolByName(rig.tools, "workflow_run").execute({ name: "proj-flow" }, inProject.ctx);
+    const result = lastToolResult(inProject.chunks);
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("completed successfully");
+    expect(result.content).toContain("project-sentinel-456");
+  });
+
+  test("workflow_run cannot start a project workflow from outside its project", async () => {
+    const rig = makeScopedRig();
+    writeWorkflow("global.yaml", NO_APPROVAL_WF);
+
+    const outside = makeCtx(rig.cwd);
+    await toolByName(rig.tools, "workflow_run").execute({ name: "proj-flow" }, outside.ctx);
+    const result = lastToolResult(outside.chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).not.toContain("project-sentinel-456");
+  });
+});
+
+describe("scheduled-run scope (review fix)", () => {
+  test("origin 'scheduled' resolves the global definition even from a project cwd", async () => {
+    const rig = makeRig();
+    activeDispose = rig.dispose;
+    const projectRoot = join(tmpDir, "sched-root");
+    mkdirSync(join(projectRoot, ".keelson", "workflows"), { recursive: true });
+    writeWorkflow(
+      "producer.yaml",
+      `name: producer\ndescription: global producer\nnodes:\n  - id: global-step\n    bash: echo from-global\n`,
+    );
+    writeFileSync(
+      join(projectRoot, ".keelson", "workflows", "producer.yaml"),
+      `name: producer\ndescription: project shadow\nnodes:\n  - id: shadow-step\n    bash: echo from-shadow\n`,
+    );
+    rig.projectsStore.create({ name: "sched", rootPath: projectRoot });
+
+    const manual = rig.controller.startRun({
+      name: "producer",
+      inputs: {},
+      workingDir: projectRoot,
+    });
+    expect(manual.ok).toBe(true);
+
+    const scheduled = rig.controller.startRun({
+      name: "producer",
+      inputs: {},
+      workingDir: projectRoot,
+      origin: "scheduled",
+    });
+    expect(scheduled.ok).toBe(true);
+    if (!scheduled.ok || !manual.ok) throw new Error("runs did not start");
+
+    const detail = await waitForRun(rig.controller, scheduled.runId);
+    expect(detail.nodes[0]!.nodeId).toBe("global-step");
+    const manualDetail = await waitForRun(rig.controller, manual.runId);
+    expect(manualDetail.nodes[0]!.nodeId).toBe("shadow-step");
+  });
+});
+
+async function waitForRun(controller: WorkflowController, runId: string) {
+  for (let i = 0; i < 100; i++) {
+    const detail = controller.getRun(runId);
+    if (detail && (detail.status === "succeeded" || detail.status === "failed")) return detail;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`run ${runId} did not finish`);
+}

@@ -235,7 +235,11 @@ export interface ChatWebSocketDeps {
   workflowTools?: ToolDefinition[];
   // Live workflow catalog, used to render the always-on workflow index into the
   // system prompt so the model can match intent without a workflow_list call.
-  workflowCatalog?: { list(): readonly WorkflowSummaryLike[] };
+  workflowCatalog?: { list(scope?: { projectId?: string }): readonly WorkflowSummaryLike[] };
+  // Per-request factory for the workflow authoring tools (schema/get/validate/
+  // save) — built per turn closing over the conversation's resolved project so
+  // workflow_save can only write that project's .keelson/workflows.
+  workflowAuthoringTools?: (project: { id: string; rootPath: string } | null) => ToolDefinition[];
 }
 
 export function chatWebSocketHandlers(
@@ -269,6 +273,9 @@ export function chatWebSocketHandlers(
           : {}),
         ...(deps.workflowTools !== undefined ? { workflowTools: deps.workflowTools } : {}),
         ...(deps.workflowCatalog !== undefined ? { workflowCatalog: deps.workflowCatalog } : {}),
+        ...(deps.workflowAuthoringTools !== undefined
+          ? { workflowAuthoringTools: deps.workflowAuthoringTools }
+          : {}),
       });
     },
     close(ws) {
@@ -292,7 +299,9 @@ export interface ChatDeps {
   // Workflow chat tools appended to the registry tools for this turn.
   workflowTools?: ToolDefinition[];
   // Live workflow catalog for the system-prompt index (see chat-prompt.ts).
-  workflowCatalog?: { list(): readonly WorkflowSummaryLike[] };
+  workflowCatalog?: { list(scope?: { projectId?: string }): readonly WorkflowSummaryLike[] };
+  // Per-request authoring tools factory; see ChatWebSocketDeps.
+  workflowAuthoringTools?: (project: { id: string; rootPath: string } | null) => ToolDefinition[];
 }
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
@@ -388,22 +397,45 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // client so the live UI updates without a refetch).
   let turnUsage: TokenUsage | undefined;
 
-  // Harness-owned tools (workflow_* and, below, note_project) are authoritative:
-  // a rib that registers a colliding name must not shadow them, and the SDK
-  // adapters don't dedupe by name. So drop any registered (rib) tool whose name
-  // a harness tool already claims; the harness copy is appended in allTools.
-  const workflowTools = deps.workflowTools ?? [];
+  // A projectId is always required for project-scoped recall; without it,
+  // MemoryStore.recall would skip the filter and inject memories from every
+  // project. Fall back to the default project when conv.projectId is unset
+  // (e.g. a row whose project was deleted, FK SET NULL).
+  const defaultProject = deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME);
+  const recallProjectId = conv.projectId ?? defaultProject?.id;
+
+  // Falls back to the default project's rootPath when conv.projectId was
+  // NULLed (deleted project) or when the row's id no longer resolves; using
+  // process.cwd() would send tools to the server's launch directory.
+  const resolvedRootPath =
+    conv.projectId && deps.projectsStore
+      ? deps.projectsStore.get(conv.projectId)?.rootPath
+      : undefined;
+  const cwd = resolvedRootPath ?? defaultProject?.rootPath ?? process.cwd();
+
+  // The same conv-project → default-project fallback as recallProjectId,
+  // paired with its rootPath for the authoring tools' save closure.
+  const resolvedProject =
+    conv.projectId && resolvedRootPath !== undefined
+      ? { id: conv.projectId, rootPath: resolvedRootPath }
+      : defaultProject
+        ? { id: defaultProject.id, rootPath: defaultProject.rootPath }
+        : null;
+
+  // Harness-owned tools (workflow_*, the per-request authoring set, and, below,
+  // note_project) are authoritative: a rib that registers a colliding name must
+  // not shadow them, and the SDK adapters don't dedupe by name. So drop any
+  // registered (rib) tool whose name a harness tool already claims; the harness
+  // copy is appended in allTools.
+  const workflowTools = [
+    ...(deps.workflowTools ?? []),
+    ...(deps.workflowAuthoringTools?.(resolvedProject) ?? []),
+  ];
   const harnessNames = new Set(workflowTools.map((t) => t.name));
   const tools = [
     ...getRegisteredTools().filter((t) => !harnessNames.has(t.name)),
     ...workflowTools,
   ];
-
-  // A projectId is always required for project-scoped recall; without it,
-  // MemoryStore.recall would skip the filter and inject memories from every
-  // project. Fall back to the default project when conv.projectId is unset
-  // (e.g. a row whose project was deleted, FK SET NULL).
-  const recallProjectId = conv.projectId ?? deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME)?.id;
 
   // note_project is built per-request closing over the resolved project so it can
   // only write to this conversation's notebook; omitted when there's no project.
@@ -440,18 +472,15 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     ...(typeof conv.seedSystemPrompt === "string"
       ? { seedSystemPrompt: conv.seedSystemPrompt }
       : {}),
-    ...(workflowToolsActive ? { workflows: deps.workflowCatalog?.list() ?? [] } : {}),
+    ...(workflowToolsActive
+      ? {
+          workflows:
+            deps.workflowCatalog?.list(
+              recallProjectId !== undefined ? { projectId: recallProjectId } : undefined,
+            ) ?? [],
+        }
+      : {}),
   });
-
-  // Falls back to the default project's rootPath when conv.projectId was
-  // NULLed (deleted project) or when the row's id no longer resolves; using
-  // process.cwd() would send tools to the server's launch directory.
-  const defaultRootPath = deps.projectsStore?.getByName(DEFAULT_PROJECT_NAME)?.rootPath;
-  const resolvedRootPath =
-    conv.projectId && deps.projectsStore
-      ? deps.projectsStore.get(conv.projectId)?.rootPath
-      : undefined;
-  const cwd = resolvedRootPath ?? defaultRootPath ?? process.cwd();
 
   try {
     for await (const chunk of provider.sendQuery(message.prompt, cwd, conv.providerSessionId, {

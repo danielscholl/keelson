@@ -77,7 +77,7 @@ import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
 
-import type { RibWorkflowBinding, WorkflowCatalog } from "./bootstrap.ts";
+import type { RibWorkflowBinding, WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { resolveWorkflowName } from "./workflow-resolve.ts";
@@ -168,8 +168,9 @@ function nodeTypeOf(node: DagNode): string {
 function workflowToSummary(
   workflow: WorkflowDefinition,
   catalog: WorkflowCatalog,
+  scope?: WorkflowScopeContext,
 ): WorkflowSummary {
-  const prov = catalog.provenance(workflow.name);
+  const prov = catalog.provenance(workflow.name, scope);
   return {
     name: workflow.name,
     description: workflow.description,
@@ -180,9 +181,14 @@ function workflowToSummary(
 }
 
 // The owning rib id for a catalog entry, or null for a local workflow. Stamped
-// onto each run so the feed can badge/filter/bulk-delete by rib.
-function ribIdFor(catalog: WorkflowCatalog, name: string): string | null {
-  const source = catalog.provenance(name).source;
+// onto each run so the feed can badge/filter/bulk-delete by rib. Scope matters:
+// a project workflow shadowing a rib's name must not stamp the rib's id.
+function ribIdFor(
+  catalog: WorkflowCatalog,
+  name: string,
+  scope?: WorkflowScopeContext,
+): string | null {
+  const source = catalog.provenance(name, scope).source;
   return source.kind === "rib" ? (source.ribId ?? null) : null;
 }
 
@@ -886,8 +892,6 @@ export function createWorkflowController(
 
   return {
     startRun({ name, inputs, workingDir, isolation, origin }) {
-      const workflow = catalog.get(name);
-      if (!workflow) return { ok: false, message: `unknown workflow '${name}'` };
       try {
         if (!statSync(workingDir).isDirectory()) {
           return { ok: false, message: `workingDir is not a directory: ${workingDir}` };
@@ -895,8 +899,16 @@ export function createWorkflowController(
       } catch {
         return { ok: false, message: `workingDir does not exist: ${workingDir}` };
       }
+      // Project resolution precedes the lookup so a workingDir inside a
+      // registered project sees that project's workflows (shadowing global).
+      // Scheduled producer runs are the exception: they must always resolve
+      // the rib's own definition (snapshot bindings are object-identity-keyed,
+      // so a project shadow would run uselessly and never publish).
       const resolvedProject = projectsStore?.findByPathPrefix(workingDir) ?? null;
       const projectId = resolvedProject?.id ?? null;
+      const scope = origin === "scheduled" || projectId === null ? undefined : { projectId };
+      const workflow = catalog.get(name, scope);
+      if (!workflow) return { ok: false, message: `unknown workflow '${name}'` };
       const yamlEnabled = workflow.worktree?.enabled === true;
       const isolationOn =
         isolation === "worktree" ? true : isolation === "none" ? false : yamlEnabled;
@@ -922,7 +934,7 @@ export function createWorkflowController(
             isolationOn,
             branchTemplate: workflow.worktree?.branch,
             origin: origin ?? "manual",
-            ribId: ribIdFor(catalog, workflow.name),
+            ribId: ribIdFor(catalog, workflow.name, scope),
           },
         );
         return { ok: true, runId, conversationId };
@@ -1066,12 +1078,28 @@ export function workflowsRoutes(
     return existed;
   };
 
+  // Optional ?projectId= narrows catalog reads to that project's view
+  // (project workflows overlaid on global, project winning name collisions).
+  const resolveScopeParam = (
+    projectIdParam: string | undefined,
+  ): { ok: true; scope?: WorkflowScopeContext } | { ok: false; error: string } => {
+    if (projectIdParam === undefined || projectIdParam.length === 0) return { ok: true };
+    if (!projectsStore?.get(projectIdParam)) {
+      return { ok: false, error: `unknown project '${projectIdParam}'` };
+    }
+    return { ok: true, scope: { projectId: projectIdParam } };
+  };
+
   app.get("/api/workflows", (c) => {
-    const workflows = catalog.list().map((w) => workflowToSummary(w, catalog));
+    const scoped = resolveScopeParam(c.req.query("projectId"));
+    if (!scoped.ok) return c.json({ error: scoped.error }, 400);
+    const workflows = catalog
+      .list(scoped.scope)
+      .map((w) => workflowToSummary(w, catalog, scoped.scope));
     return c.json(
       listWorkflowsResponseSchema.parse({
         workflows,
-        discoveryNotices: catalog.discoveryNotices(),
+        discoveryNotices: catalog.discoveryNotices(scoped.scope),
       }),
     );
   });
@@ -1171,14 +1199,18 @@ export function workflowsRoutes(
 
   app.get("/api/workflows/:name", (c) => {
     const name = c.req.param("name");
-    const wf = catalog.get(name);
+    const scoped = resolveScopeParam(c.req.query("projectId"));
+    if (!scoped.ok) return c.json({ error: scoped.error }, 400);
+    const wf = catalog.get(name, scoped.scope);
     if (!wf) return c.json({ error: `unknown workflow '${name}'` }, 404);
     return c.json({ workflow: workflowDetailSchema.parse(workflowToDetail(wf)) });
   });
 
   app.get("/api/workflows/:name/runs", (c) => {
     const name = c.req.param("name");
-    if (!catalog.get(name)) {
+    const scoped = resolveScopeParam(c.req.query("projectId"));
+    if (!scoped.ok) return c.json({ error: scoped.error }, 400);
+    if (!catalog.get(name, scoped.scope)) {
       return c.json({ error: `unknown workflow '${name}'` }, 404);
     }
     const runs = store.listRuns(name);
@@ -1194,40 +1226,6 @@ export function workflowsRoutes(
       return c.json({ error: "forbidden origin" }, 403);
     }
     const requested = c.req.param("name");
-    // Forgiving lookup: exact name wins; otherwise a confident typo resolves to
-    // the run while a weak guess returns suggestions rather than auto-starting a
-    // possibly-destructive workflow.
-    let workflow = catalog.get(requested);
-    if (!workflow) {
-      const resolution = resolveWorkflowName(
-        requested,
-        catalog.list().map((w) => w.name),
-      );
-      if (resolution.kind === "match") {
-        workflow = catalog.get(resolution.name);
-      } else if (resolution.kind === "suggest") {
-        return c.json(
-          {
-            error: `No workflow named '${requested}'. Did you mean: ${resolution.candidates.join(", ")}?`,
-            suggestions: resolution.candidates,
-          },
-          404,
-        );
-      }
-    }
-    if (!workflow) {
-      const available = catalog.list().map((w) => w.name);
-      return c.json(
-        {
-          error:
-            available.length > 0
-              ? `No workflow named '${requested}'. Available: ${available.join(", ")}.`
-              : `No workflow named '${requested}'.`,
-          ...(available.length > 0 ? { available } : {}),
-        },
-        404,
-      );
-    }
     // Distinguish empty body from malformed JSON. An absent body is fine
     // (inputs defaults to {}); a body that's present but unparseable is a
     // client bug and must surface as 400 — silently defaulting to {} could
@@ -1291,6 +1289,50 @@ export function workflowsRoutes(
       return c.json({ error: "projectId or workingDir is required" }, 400);
     }
 
+    // Forgiving lookup, scoped to the project that contains the EXECUTION
+    // directory (matching controller.startRun, so the same name+dir resolves
+    // the same definition on every entry path; an explicit body projectId
+    // still tags the run but never picks a different definition than where it
+    // runs): exact name wins; otherwise a confident typo resolves to the run
+    // while a weak guess returns suggestions rather than auto-starting a
+    // possibly-destructive workflow. Runs before the workingDir stat check so
+    // an unknown name is always a 404 (the CLI maps 404 → exit 4 with
+    // suggestions) regardless of target validity.
+    const scopeProjectId = projectsStore?.findByPathPrefix(workingDir)?.id ?? null;
+    const scope: WorkflowScopeContext | undefined =
+      scopeProjectId !== null ? { projectId: scopeProjectId } : undefined;
+    let workflow = catalog.get(requested, scope);
+    if (!workflow) {
+      const resolution = resolveWorkflowName(
+        requested,
+        catalog.list(scope).map((w) => w.name),
+      );
+      if (resolution.kind === "match") {
+        workflow = catalog.get(resolution.name, scope);
+      } else if (resolution.kind === "suggest") {
+        return c.json(
+          {
+            error: `No workflow named '${requested}'. Did you mean: ${resolution.candidates.join(", ")}?`,
+            suggestions: resolution.candidates,
+          },
+          404,
+        );
+      }
+    }
+    if (!workflow) {
+      const available = catalog.list(scope).map((w) => w.name);
+      return c.json(
+        {
+          error:
+            available.length > 0
+              ? `No workflow named '${requested}'. Available: ${available.join(", ")}.`
+              : `No workflow named '${requested}'.`,
+          ...(available.length > 0 ? { available } : {}),
+        },
+        404,
+      );
+    }
+
     // Fail closed when the resolved target isn't a usable directory. Without
     // this, a `--working-dir package.json` (file) or stale project root would
     // pass schema validation, get a run row written, then crash the executor's
@@ -1336,7 +1378,7 @@ export function workflowsRoutes(
           isolationOn,
           branchTemplate,
           origin: "manual",
-          ribId: ribIdFor(catalog, workflow.name),
+          ribId: ribIdFor(catalog, workflow.name, scope),
         },
       );
       // Echo the canonical name so a fuzzy start (smoketst → smoke-test) hands
