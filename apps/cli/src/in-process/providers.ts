@@ -17,27 +17,14 @@ import {
   registerCopilotProvider,
   registerStubProvider,
 } from "@keelson/providers";
+import {
+  BUILT_IN_PROVIDER_IDS,
+  loadKeelsonConfig,
+  resolveDefaultProvider,
+  resolveEnabledProviders,
+} from "@keelson/shared/config";
 
 const KEYRING_SERVICE = "keelson" as const;
-const BUILT_IN_IDS = ["stub", "copilot", "claude"] as const;
-type BuiltInId = (typeof BUILT_IN_IDS)[number];
-
-function isBuiltIn(id: string): id is BuiltInId {
-  return (BUILT_IN_IDS as readonly string[]).includes(id);
-}
-
-function parseProviderList(raw: string | undefined): BuiltInId[] {
-  if (!raw || raw.trim() === "") return [...BUILT_IN_IDS];
-  const out: BuiltInId[] = [];
-  const seen = new Set<string>();
-  for (const part of raw.split(",")) {
-    const id = part.trim().toLowerCase();
-    if (id.length === 0 || seen.has(id)) continue;
-    seen.add(id);
-    if (isBuiltIn(id)) out.push(id);
-  }
-  return out;
-}
 
 type KeyringModule = typeof import("@napi-rs/keyring");
 let keyringPromise: Promise<KeyringModule> | null = null;
@@ -71,7 +58,11 @@ export interface BootstrapResult {
 // built-ins when unset), each with the keyring-backed credential getter.
 // Idempotent — re-registration is a no-op inside the registry.
 export function bootstrapCliProviders(): BootstrapResult {
-  const requested = parseProviderList(process.env.KEELSON_PROVIDERS);
+  const requested = resolveEnabledProviders({
+    config: loadKeelsonConfig(),
+    envProviders: process.env.KEELSON_PROVIDERS,
+    known: BUILT_IN_PROVIDER_IDS,
+  });
   const registered: string[] = [];
   for (const id of requested) {
     if (id === "stub") {
@@ -92,20 +83,19 @@ export function bootstrapCliProviders(): BootstrapResult {
   return { registered };
 }
 
-// Pick a default provider when --provider is omitted. Mirrors the SPA's
-// pickInitialRef and the HTTP fallback path: copilot → stub → first
-// registered non-workflow. Same invocation routes to the same provider
-// whether or not `keelson service` is running.
+// Pick a default provider when --provider is omitted. Shares resolveDefaultProvider
+// with the server and the SPA picker: config.defaultProvider → copilot → first
+// real provider → stub. Same invocation routes to the same provider whether or
+// not `keelson service` is running.
 export function pickDefaultProvider(): string {
-  const providers = getProviderInfoList();
-  const ids = new Set(providers.map((p) => p.id));
-  if (ids.has("copilot")) return "copilot";
-  if (ids.has("stub")) return "stub";
-  const fallback = providers.find((p) => p.id !== "workflow");
-  if (fallback) return fallback.id;
-  throw new Error(
-    "no chat-capable provider registered; set KEELSON_PROVIDERS to include stub, copilot, or claude",
-  );
+  const ids = getProviderInfoList().map((p) => p.id);
+  const id = resolveDefaultProvider(loadKeelsonConfig(), ids);
+  if (!id) {
+    throw new Error(
+      "no chat-capable provider registered; set KEELSON_PROVIDERS to include stub, copilot, or claude",
+    );
+  }
+  return id;
 }
 
 export { isRegisteredProvider };

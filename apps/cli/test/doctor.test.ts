@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecResult } from "@keelson/shared/exec";
-import { runAuthCheck } from "../src/checks/auth.ts";
+import { type ProviderSummary, runAuthCheck } from "../src/checks/auth.ts";
 import { type DbReader, LATEST_MIGRATION_VERSION, runDbCheck } from "../src/checks/db.ts";
 import { runServerCheck } from "../src/checks/server.ts";
 import { runToolchainCheck } from "../src/checks/toolchain.ts";
@@ -152,12 +152,19 @@ describe("db check", () => {
 });
 
 describe("auth check", () => {
+  const summaryStub = (): ProviderSummary => ({
+    enabled: ["stub", "copilot"],
+    defaultProvider: "copilot",
+    source: "defaults",
+  });
+
   test("keyring round-trip ok → ok", async () => {
     const result = await runAuthCheck({
       keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: summaryStub,
     });
-    expect(result.checks).toHaveLength(1);
-    expect(result.checks[0]?.status).toBe("ok");
+    const keyring = result.checks.find((c) => c.name === "keyring round-trip");
+    expect(keyring?.status).toBe("ok");
   });
 
   test("keyring failure → fail", async () => {
@@ -165,10 +172,37 @@ describe("auth check", () => {
       keyring: {
         roundTrip: async () => ({ ok: false, error: "keychain locked" }),
       },
+      providerSummary: summaryStub,
     });
     const keyring = result.checks.find((c) => c.name === "keyring round-trip");
     expect(keyring?.status).toBe("fail");
     expect(keyring?.detail).toBe("keychain locked");
+  });
+
+  test("providers check reports the enabled set, default, and source", async () => {
+    const result = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: () => ({
+        enabled: ["stub", "claude"],
+        defaultProvider: "claude",
+        source: "config.json",
+      }),
+    });
+    const providers = result.checks.find((c) => c.name === "providers");
+    expect(providers?.status).toBe("ok");
+    expect(providers?.detail).toContain("enabled=stub, claude");
+    expect(providers?.detail).toContain("default=claude");
+    expect(providers?.detail).toContain("source: config.json");
+  });
+
+  test("providers check warns when nothing is enabled", async () => {
+    const result = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: () => ({ enabled: [], source: "config.json" }),
+    });
+    const providers = result.checks.find((c) => c.name === "providers");
+    expect(providers?.status).toBe("warn");
+    expect(providers?.detail).toContain("none enabled");
   });
 });
 

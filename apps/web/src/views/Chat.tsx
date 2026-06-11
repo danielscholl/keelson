@@ -248,13 +248,15 @@ function snapshotTurnForReconcile<T extends { id: string; role: string }>(
   };
 }
 
-// Order of preference: lastUsed → first registered favorite → Copilot → stub →
-// first provider's default. Returns null when no providers are registered.
+// Order of preference: lastUsed → first registered favorite → server default
+// (config.defaultProvider) → Copilot → stub → first provider's default. Returns
+// null when no providers are registered.
 function pickInitialRef(
   providers: ProviderInfo[],
   modelsByProvider: Record<string, ModelInfo[]>,
   lastUsed: ModelRef | null,
   favorites: ModelRef[],
+  defaultProvider: string | null,
 ): ModelRef | null {
   const providerIds = new Set(providers.map((p) => p.id));
   if (lastUsed && providerIds.has(lastUsed.providerId)) return lastUsed;
@@ -269,7 +271,12 @@ function pickInitialRef(
     const [first] = modelsByProvider[providerId] ?? [];
     return first ? { providerId, modelId: first.id } : null;
   };
-  return refFor("copilot") ?? refFor("stub") ?? refFor(providers[0]?.id ?? "");
+  return (
+    (defaultProvider ? refFor(defaultProvider) : null) ??
+    refFor("copilot") ??
+    refFor("stub") ??
+    refFor(providers[0]?.id ?? "")
+  );
 }
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -317,6 +324,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   const { settings, toggleFavorite, setLastUsed, setSidebarCollapsed } = useSettings();
 
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [defaultProvider, setDefaultProvider] = useState<string | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -452,9 +460,10 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   useEffect(() => {
     let cancelled = false;
     fetchProviders()
-      .then((list) => {
+      .then(({ providers: list, defaultProvider: def }) => {
         if (cancelled) return;
         setProviders(list);
+        setDefaultProvider(def);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -529,6 +538,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
         modelsByProvider,
         settings.lastUsed,
         settings.favorites,
+        defaultProvider,
       );
       if (!ref) return current;
       setSelectedModel(ref.modelId);
@@ -536,7 +546,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     });
     // settings reads intentionally only at provider-load time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers, settings.lastUsed, settings.favorites, modelsByProvider]);
+  }, [providers, settings.lastUsed, settings.favorites, modelsByProvider, defaultProvider]);
 
   // Replay a stored conversation's messages on mount. Stale-resolution guard:
   // a sidebar click during this load bumps conversationIdRef, so compare on
@@ -1596,7 +1606,13 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     pendingNameRef.current = null;
     // Re-seed from latest settings so a fresh chat picks up changes since
     // this view mounted (starring, sending on a different provider).
-    const ref = pickInitialRef(providers, modelsByProvider, settings.lastUsed, settings.favorites);
+    const ref = pickInitialRef(
+      providers,
+      modelsByProvider,
+      settings.lastUsed,
+      settings.favorites,
+      defaultProvider,
+    );
     if (ref) {
       setSelectedProviderId(ref.providerId);
       setSelectedModel(ref.modelId);
@@ -1608,6 +1624,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     }
   }, [
     abortActiveStream,
+    defaultProvider,
     modelsByProvider,
     providers,
     resetEffortForModel,

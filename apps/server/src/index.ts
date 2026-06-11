@@ -377,7 +377,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       workflowStore,
       activeRuns: activeWorkflowRuns,
     },
-    { projectsStore },
+    {
+      projectsStore,
+      ...(bootstrap.defaultProvider ? { defaultProvider: bootstrap.defaultProvider } : {}),
+    },
   );
   workflowsRoutes(app, workflowHandlerOptions, activeWorkflowRuns, workflowSubscribers);
   snapshotsRoutes(app, { manager: snapshotManager, subscribers: snapshotSubscribers });

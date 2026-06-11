@@ -39,3 +39,8 @@ package.json.bak
 # Playwright MCP scratch — screenshots, console logs, snapshots from
 # headless verification runs. Local-only; never committed.
 .playwright-mcp/
+
+# Local agent tooling — personal Codex config + its auto-generated guidance
+# file. Local-only; never committed (the tracked project guidance is CLAUDE.md).
+.codex/
+AGENTS.md
