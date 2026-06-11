@@ -58,6 +58,13 @@ export interface SendQueryOptions {
   // as a built-in and pass it through Options.tools where the SDK rejects
   // it. The prompt handler passes the FULL registry, not the filtered set.
   registeredMcpToolNames?: readonly string[];
+  // Invoked once per turn when the provider's backend session id becomes
+  // known (Copilot: on session create/resume; Claude: first SDK message
+  // carrying one). The chat handler persists it so the NEXT turn resumes the
+  // same session — the only way multi-turn context survives for providers
+  // that keep history server-side rather than replaying it in the prompt.
+  // Providers that have no resumable session simply never call it.
+  onSessionId?: (sessionId: string) => void;
   // Per-node hook matchers in the vendored workflowNodeHooksSchema shape:
   // `Record<eventName, Array<{matcher?, response, timeout?}>>`. Loose
   // structural typing so this contract layer stays free of a runtime
