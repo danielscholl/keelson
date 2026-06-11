@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { checkPiAuth, type PiAuthStatus } from "@keelson/providers";
 import {
   BUILT_IN_PROVIDER_IDS,
   loadKeelsonConfig,
@@ -100,6 +101,8 @@ export interface AuthDeps {
   runText?: RunText;
   keyring?: KeyringProbe;
   providerSummary?: () => ProviderSummary;
+  // Defaults to the real pi credential probe; injected in tests.
+  piAuth?: () => PiAuthStatus;
 }
 
 export async function runAuthCheck(deps: AuthDeps = {}): Promise<CategoryResult> {
@@ -133,6 +136,22 @@ export async function runAuthCheck(deps: AuthDeps = {}): Promise<CategoryResult>
           hint: 'enable a provider in ~/.keelson/config.json ("providers": { "copilot": true }) or set KEELSON_PROVIDERS',
         },
   );
+
+  // pi is self-managed (no keelson keychain), so report its own credential
+  // presence separately — only when pi is actually enabled.
+  if (summary.enabled.includes("pi")) {
+    const pi = (deps.piAuth ?? checkPiAuth)();
+    checks.push(
+      pi.authenticated
+        ? { name: "pi auth", status: "ok", detail: `credential found (${pi.source})` }
+        : {
+            name: "pi auth",
+            status: "warn",
+            detail: "no pi credential found",
+            hint: "run pi's own login or set a vendor key (e.g. ANTHROPIC_API_KEY); pi reads ~/.pi/agent/auth.json",
+          },
+    );
+  }
 
   return { category: "auth", checks };
 }

@@ -34,9 +34,9 @@ so a typo never blocks startup.
 | `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. |
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. |
 
-The built-in provider ids are `copilot`, `claude`, and `stub` (the offline echo
-provider). Out of the box, **copilot and stub load and claude is off**, so a
-fresh install defaults to Copilot. Flip the ones you want:
+The built-in provider ids are `copilot`, `claude`, `pi`, and `stub` (the offline
+echo provider). Out of the box, **copilot and stub load; claude and pi are off**,
+so a fresh install defaults to Copilot. Flip the ones you want:
 
 ```jsonc
 // Claude only
@@ -64,6 +64,34 @@ A provider is enabled by the first of these that has an opinion:
 So `KEELSON_PROVIDERS=stub` gives you an offline run with no keys regardless of
 what `config.json` says, and the config file is the durable setting for everyday
 use.
+
+## Pi (community provider)
+
+`pi` wraps the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent),
+a multi-vendor agent that can reach Anthropic, Google, OpenAI, and more behind one
+interface. It is opt-in:
+
+```json
+{
+  "providers": { "pi": true }
+}
+```
+
+Pi manages its own credentials, so there is no keelson sign-in for it. Pi reads
+`~/.pi/agent/auth.json` (set up with pi's own login) and per-vendor API-key
+environment variables such as `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`. Because pi
+is multi-vendor, models are named `vendor/model` (for example
+`anthropic/claude-opus-4.5` or `google/gemini-2.5-pro`); pick one your credentials
+cover in the model picker, or leave the default and let pi choose from its own
+settings.
+
+<Aside type="caution" title="Alpha scope">
+The pi provider drives chat and reasoning only for now. Pi's built-in file and
+shell tools stay off (they would run outside keelson's permission and redaction
+rails), keelson's own tools are not yet projected into pi, and there is no
+session resume yet, so each turn starts fresh. Run `keelson doctor` to confirm pi
+found a credential.
+</Aside>
 
 ## Environment variables
 

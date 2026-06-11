@@ -204,6 +204,39 @@ describe("auth check", () => {
     expect(providers?.status).toBe("warn");
     expect(providers?.detail).toContain("none enabled");
   });
+
+  test("pi auth check appears only when pi is enabled", async () => {
+    const withoutPi = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: summaryStub,
+      piAuth: () => ({ authenticated: true, source: "env" }),
+    });
+    expect(withoutPi.checks.find((c) => c.name === "pi auth")).toBeUndefined();
+
+    const withPi = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: () => ({
+        enabled: ["stub", "pi"],
+        defaultProvider: "pi",
+        source: "config.json",
+      }),
+      piAuth: () => ({ authenticated: true, source: "auth.json" }),
+    });
+    const pi = withPi.checks.find((c) => c.name === "pi auth");
+    expect(pi?.status).toBe("ok");
+    expect(pi?.detail).toContain("auth.json");
+  });
+
+  test("pi auth check warns when pi is enabled but has no credential", async () => {
+    const result = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: () => ({ enabled: ["pi"], defaultProvider: "pi", source: "config.json" }),
+      piAuth: () => ({ authenticated: false }),
+    });
+    const pi = result.checks.find((c) => c.name === "pi auth");
+    expect(pi?.status).toBe("warn");
+    expect(pi?.detail).toContain("no pi credential");
+  });
 });
 
 describe("workflows check", () => {

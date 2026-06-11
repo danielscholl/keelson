@@ -12,16 +12,18 @@ const CONFIG_FILE_NAME = "config.json";
 // Canonical built-in provider ids, in registration order. The workflow
 // fallback ("first non-stub") and the default-provider pick both key off this
 // order, so keep stub first and real providers after it.
-export const BUILT_IN_PROVIDER_IDS = ["stub", "copilot", "claude"] as const;
+export const BUILT_IN_PROVIDER_IDS = ["stub", "copilot", "claude", "pi"] as const;
 export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number];
 
 // Out-of-the-box enablement when neither KEELSON_PROVIDERS nor config.json says
 // otherwise: copilot is the default agent, stub stays as the offline/no-keys
-// safety net, claude is opt-in. A config `providers` map is merged over this.
+// safety net, claude and pi are opt-in. A config `providers` map is merged over
+// this.
 export const DEFAULT_PROVIDER_ENABLEMENT: Readonly<Record<string, boolean>> = {
   stub: true,
   copilot: true,
   claude: false,
+  pi: false,
 };
 
 // Per-provider settings block. Only `model` is read today; the shape stays open

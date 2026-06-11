@@ -123,10 +123,19 @@ describe("resolveEnabledProviders", () => {
   });
 
   test("unknown provider in config map is ignored", () => {
+    const config: KeelsonConfig = { providers: { ollama: true } };
+    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
+      "stub",
+      "copilot",
+    ]);
+  });
+
+  test("pi is a known provider, opt-in via config", () => {
     const config: KeelsonConfig = { providers: { pi: true } };
     expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
       "stub",
       "copilot",
+      "pi",
     ]);
   });
 

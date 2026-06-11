@@ -1,0 +1,283 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License").
+
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { MessageChunk } from "@keelson/shared";
+import type { PiRawEvent } from "../src/pi/event-bridge.ts";
+import { mapPiEvent } from "../src/pi/event-bridge.ts";
+import type { PiCreateSessionParams, PiSession, PiSessionFactory } from "../src/pi/factory.ts";
+import { checkPiAuth } from "../src/pi/factory.ts";
+import { PI_CAPABILITIES, PiProvider } from "../src/pi/provider.ts";
+
+const textDelta = (delta: string): PiRawEvent => ({
+  type: "message_update",
+  assistantMessageEvent: { type: "text_delta", delta },
+});
+
+describe("mapPiEvent", () => {
+  test("text_delta → text chunk", () => {
+    expect(mapPiEvent(textDelta("hi"))).toEqual([{ type: "text", content: "hi" }]);
+  });
+
+  test("empty text_delta is dropped", () => {
+    expect(mapPiEvent(textDelta(""))).toEqual([]);
+  });
+
+  test("thinking_delta → thinking chunk", () => {
+    expect(
+      mapPiEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_delta", delta: "hmm" },
+      }),
+    ).toEqual([{ type: "thinking", content: "hmm" }]);
+  });
+
+  test("done → usage chunk from message.usage", () => {
+    expect(
+      mapPiEvent({
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "done",
+          message: { usage: { input: 12, output: 7, cacheRead: 3, cacheWrite: 0 } },
+        },
+      }),
+    ).toEqual([
+      { type: "usage", usage: { inputTokens: 12, outputTokens: 7, cacheReadInputTokens: 3 } },
+    ]);
+  });
+
+  test("error → usage then error chunk", () => {
+    const out = mapPiEvent({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "error",
+        error: {
+          errorMessage: "boom",
+          usage: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    });
+    expect(out).toEqual([
+      { type: "usage", usage: { inputTokens: 1, outputTokens: 0 } },
+      { type: "error", message: "boom" },
+    ]);
+  });
+
+  test("error without message uses a fallback string", () => {
+    const out = mapPiEvent({
+      type: "message_update",
+      assistantMessageEvent: { type: "error", error: {} },
+    });
+    expect(out).toEqual([{ type: "error", message: "pi turn ended with an error" }]);
+  });
+
+  test("tool_execution_start → tool_use chunk", () => {
+    expect(
+      mapPiEvent({
+        type: "tool_execution_start",
+        toolCallId: "t1",
+        toolName: "read",
+        args: { path: "a.ts" },
+      }),
+    ).toEqual([{ type: "tool_use", id: "t1", toolName: "read", toolInput: { path: "a.ts" } }]);
+  });
+
+  test("tool_execution_end → tool_result chunk, result stringified", () => {
+    expect(
+      mapPiEvent({
+        type: "tool_execution_end",
+        toolCallId: "t1",
+        toolName: "read",
+        result: { ok: true },
+        isError: false,
+      }),
+    ).toEqual([{ type: "tool_result", toolUseId: "t1", content: '{"ok":true}' }]);
+  });
+
+  test("tool_execution_end marks errors", () => {
+    const out = mapPiEvent({
+      type: "tool_execution_end",
+      toolCallId: "t1",
+      toolName: "bash",
+      result: "nope",
+      isError: true,
+    });
+    expect(out).toEqual([{ type: "tool_result", toolUseId: "t1", content: "nope", isError: true }]);
+  });
+
+  test("unknown / ignored events map to nothing", () => {
+    expect(mapPiEvent({ type: "turn_start" })).toEqual([]);
+    expect(mapPiEvent({ type: "agent_end" })).toEqual([]);
+    expect(
+      mapPiEvent({ type: "message_update", assistantMessageEvent: { type: "text_start" } }),
+    ).toEqual([]);
+  });
+});
+
+// Fake factory: prompt() replays a scripted event sequence to the subscriber,
+// then resolves — exercising the provider's queue/lifecycle with no SDK.
+function fakeFactory(
+  events: PiRawEvent[],
+  opts: {
+    throwOnCreate?: Error;
+    throwOnPrompt?: Error;
+    capture?: (p: PiCreateSessionParams) => void;
+    capturePrompt?: (text: string) => void;
+  } = {},
+): PiSessionFactory {
+  return {
+    async createSession(params): Promise<PiSession> {
+      opts.capture?.(params);
+      if (opts.throwOnCreate) throw opts.throwOnCreate;
+      let listener: ((e: PiRawEvent) => void) | null = null;
+      return {
+        subscribe(l) {
+          listener = l;
+          return () => {
+            listener = null;
+          };
+        },
+        async prompt(text) {
+          opts.capturePrompt?.(text);
+          if (opts.throwOnPrompt) throw opts.throwOnPrompt;
+          for (const e of events) listener?.(e);
+        },
+      };
+    },
+  };
+}
+
+async function collect(gen: AsyncGenerator<MessageChunk>): Promise<MessageChunk[]> {
+  const out: MessageChunk[] = [];
+  for await (const c of gen) out.push(c);
+  return out;
+}
+
+describe("PiProvider", () => {
+  test("getType / capabilities", () => {
+    const p = new PiProvider({ factory: fakeFactory([]) });
+    expect(p.getType()).toBe("pi");
+    expect(p.getCapabilities()).toEqual(PI_CAPABILITIES);
+    expect(PI_CAPABILITIES.tools).toBe(false);
+    expect(PI_CAPABILITIES.sessionResume).toBe(false);
+  });
+
+  test("listModels returns the curated catalog and never throws", async () => {
+    const models = await new PiProvider({ factory: fakeFactory([]) }).listModels();
+    expect(models.length).toBeGreaterThan(0);
+    expect(models.map((m) => m.id)).toEqual(PI_CAPABILITIES.models);
+  });
+
+  test("streams text deltas then a usage chunk, ends on agent_end", async () => {
+    const provider = new PiProvider({
+      factory: fakeFactory([
+        textDelta("Hello"),
+        textDelta(" world"),
+        {
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "done",
+            message: { usage: { input: 4, output: 2, cacheRead: 0, cacheWrite: 0 } },
+          },
+        },
+        { type: "agent_end" },
+      ]),
+    });
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(chunks).toEqual([
+      { type: "text", content: "Hello" },
+      { type: "text", content: " world" },
+      { type: "usage", usage: { inputTokens: 4, outputTokens: 2 } },
+    ]);
+  });
+
+  test("passes the model and prepends systemPrompt to the user text", async () => {
+    let promptedModel: string | undefined;
+    let promptedText = "";
+    const factory = fakeFactory([{ type: "agent_end" }], {
+      capture: (p) => {
+        promptedModel = p.model;
+      },
+      capturePrompt: (t) => {
+        promptedText = t;
+      },
+    });
+    const provider = new PiProvider({ factory });
+    await collect(
+      provider.sendQuery("question", "/tmp", undefined, {
+        model: "google/gemini-2.5-pro",
+        systemPrompt: "you are helpful",
+      }),
+    );
+    expect(promptedModel).toBe("google/gemini-2.5-pro");
+    expect(promptedText).toBe("you are helpful\n\nquestion");
+  });
+
+  test("session-creation failure yields a single error chunk", async () => {
+    const provider = new PiProvider({
+      factory: fakeFactory([], { throwOnCreate: new Error("no auth") }),
+    });
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(chunks).toEqual([{ type: "error", message: "pi session failed to start: no auth" }]);
+  });
+
+  test("a prompt() failure surfaces as an error chunk", async () => {
+    const provider = new PiProvider({
+      factory: fakeFactory([], { throwOnPrompt: new Error("stream died") }),
+    });
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(chunks).toEqual([{ type: "error", message: "stream died" }]);
+  });
+
+  test("an already-aborted signal yields nothing and never creates a session", async () => {
+    let created = false;
+    const factory: PiSessionFactory = {
+      async createSession() {
+        created = true;
+        throw new Error("should not be called");
+      },
+    };
+    const controller = new AbortController();
+    controller.abort();
+    const chunks = await collect(
+      new PiProvider({ factory }).sendQuery("hi", "/tmp", undefined, {
+        abortSignal: controller.signal,
+      }),
+    );
+    expect(chunks).toEqual([]);
+    expect(created).toBe(false);
+  });
+});
+
+describe("checkPiAuth", () => {
+  test("reports a vendor env key", () => {
+    expect(
+      checkPiAuth({ env: { ANTHROPIC_API_KEY: "sk-x" }, authFile: "/nope/auth.json" }),
+    ).toEqual({
+      authenticated: true,
+      source: "env",
+    });
+  });
+
+  test("reports an auth.json file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-auth-"));
+    try {
+      const authFile = join(dir, "auth.json");
+      writeFileSync(authFile, "{}");
+      expect(checkPiAuth({ env: {}, authFile })).toEqual({
+        authenticated: true,
+        source: "auth.json",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reports unauthenticated when nothing is present", () => {
+    expect(checkPiAuth({ env: {}, authFile: "/nope/auth.json" })).toEqual({ authenticated: false });
+  });
+});
