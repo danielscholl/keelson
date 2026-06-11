@@ -57,8 +57,9 @@ const CLAUDE_MODEL_CATALOG: readonly ModelInfo[] = [
 ];
 
 export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
-  // chat-handler doesn't propagate sessionId yet.
-  sessionResume: false,
+  // The chat handler persists the session id (onSessionId) and resumes it on
+  // the next turn, so multi-turn context survives.
+  sessionResume: true,
   streaming: true,
   tools: true,
   // Same source of truth as listModels(); providerInfoSchema's bare-id
@@ -171,10 +172,21 @@ export class ClaudeProvider implements IAgentProvider {
     // BetaUsage; the final one is the context-fill measure (result.usage sums
     // cache reads across calls, so it can't serve as a context gauge).
     let lastApiUsage: ClaudeApiUsage | undefined;
+    // Emit the SDK session id once; the handler persists it so the next turn
+    // resumes the same conversation. Resume echoes the same id back.
+    let sessionIdSeen = false;
 
     const producer = (async () => {
       try {
         for await (const msg of handle) {
+          // Surface the session id before the abort check: a turn aborted right
+          // after the session opens should still be resumable next time, so the
+          // handler must learn the id even on this iteration.
+          if (!sessionIdSeen && typeof msg.session_id === "string" && msg.session_id.length > 0) {
+            sessionIdSeen = true;
+            options?.onSessionId?.(msg.session_id);
+          }
+
           if (options?.abortSignal?.aborted) {
             abortedDuringStream = true;
             return;

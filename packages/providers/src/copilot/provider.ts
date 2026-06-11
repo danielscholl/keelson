@@ -35,8 +35,9 @@ export const COPILOT_CREDENTIAL_SERVICE_ID = "copilot" as const;
 export const COPILOT_DEFAULT_MODEL = "auto" as const;
 
 export const COPILOT_CAPABILITIES: ProviderCapabilities = {
-  // chat-handler doesn't propagate sessionId yet.
-  sessionResume: false,
+  // The chat handler persists the session id (onSessionId) and resumes it on
+  // the next turn, so multi-turn context survives.
+  sessionResume: true,
   streaming: true,
   tools: true,
   // Curated fallback when the live SDK.listModels() probe fails (signed out
@@ -173,6 +174,11 @@ export class CopilotProvider implements IAgentProvider {
         yield { type: "system", content: msg };
         throw err instanceof Error ? err : new Error(msg);
       }
+
+      // Surface the session id so the handler can persist it for the next
+      // turn's resume. createSession mints a new id; resumeSession echoes the
+      // one we passed in.
+      options?.onSessionId?.(session.sessionId);
 
       // ResumeSessionConfig doesn't reliably retarget effort on the next
       // turn; setModel is the documented per-turn override. Create-session

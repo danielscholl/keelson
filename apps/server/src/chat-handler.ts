@@ -397,6 +397,17 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // client so the live UI updates without a refetch).
   let turnUsage: TokenUsage | undefined;
 
+  // Resume the stored session only when this turn runs against the SAME
+  // provider that created it — a provider swap (model picker → different
+  // backend) names a session the new provider never opened. Gating the read
+  // here and the write below keeps providerSessionId an invariant: it always
+  // belongs to conv.providerId.
+  const providerMatches = message.providerId === conv.providerId;
+  const resumeSessionId = providerMatches ? conv.providerSessionId : undefined;
+  // Captured from the provider's onSessionId callback during the turn and
+  // persisted in the finally, so it survives even an aborted or errored turn.
+  let capturedSessionId: string | undefined;
+
   // A projectId is always required for project-scoped recall; without it,
   // MemoryStore.recall would skip the filter and inject memories from every
   // project. Fall back to the default project when conv.projectId is unset
@@ -483,9 +494,12 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   });
 
   try {
-    for await (const chunk of provider.sendQuery(message.prompt, cwd, conv.providerSessionId, {
+    for await (const chunk of provider.sendQuery(message.prompt, cwd, resumeSessionId, {
       model: message.model ?? conv.model,
       abortSignal: deps.abortSignal,
+      onSessionId: (id) => {
+        capturedSessionId = id;
+      },
       // Omit unset fields so providers see their SDK defaults.
       ...(message.thinking !== undefined ? { thinking: message.thinking } : {}),
       ...(message.reasoningEffort !== undefined
@@ -545,6 +559,16 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
         createdAt: new Date().toISOString(),
       });
+    }
+    // Persist the provider session id so the next turn resumes this
+    // conversation. Gated on providerMatches so a swapped-in provider's id
+    // can never overwrite the original provider's stored session.
+    if (
+      providerMatches &&
+      capturedSessionId !== undefined &&
+      capturedSessionId !== conv.providerSessionId
+    ) {
+      deps.store.setProviderSessionId(conversationId, capturedSessionId);
     }
     // Done frame closes the client-side turn. Skipped on abort (WS close
     // already signals termination); sent on provider error so the receiver
