@@ -51,12 +51,12 @@ const PER_NODE_OUTPUT_CAP = 2_000;
 const PAUSED_OUTPUT_CAP = 8_000;
 const TERMINAL_OUTPUT_CAP = 12_000;
 
-function truncate(text: string, max: number): string {
+export function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
 }
 
-function emitResult(ctx: ToolContext, content: string, isError = false): void {
+export function emitResult(ctx: ToolContext, content: string, isError = false): void {
   // toolUseId is a placeholder — Claude ignores it (its SDK emits the canonical
   // block), Copilot rewrites it to the real call id. See the provider factories.
   ctx.emit({ type: "tool_result", toolUseId: "", content, ...(isError ? { isError: true } : {}) });
