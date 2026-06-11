@@ -2,7 +2,7 @@ import type { WorkflowNodeSummary } from "@keelson/shared";
 import { useEffect, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
-import { formatTokens } from "../../lib/formatTokens.ts";
+import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
@@ -237,7 +237,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
         )}
         {isAwaiting && <span className="dur awaiting">awaiting</span>}
         {dur && <span className="dur">{dur}</span>}
-        {view.usage && view.usage.inputTokens + view.usage.outputTokens > 0 && (
+        {view.usage && hasSpend(view.usage) && (
           <span
             className="dur trace-usage"
             title={`Tokens: ${view.usage.inputTokens} in, ${view.usage.outputTokens} out`}

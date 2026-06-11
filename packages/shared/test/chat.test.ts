@@ -4,11 +4,14 @@ import {
   chatFrameSchema,
   clientFrameSchema,
   clientMessageSchema,
+  coerceTokenUsage,
   contentBlockSchema,
   conversationSchema,
   messageChunkSchema,
   messageSchema,
   modelInfoSchema,
+  parsePersistedTokenUsage,
+  tokenUsageSchema,
   WIRE_PROTOCOL_VERSION,
 } from "../src/chat.ts";
 
@@ -610,5 +613,43 @@ describe("modelInfoSchema", () => {
 
   it("rejects unknown defaultReasoningEffort values (F10.6)", () => {
     expect(() => modelInfoSchema.parse({ id: "x", defaultReasoningEffort: "ultra" })).toThrow();
+  });
+});
+
+describe("coerceTokenUsage", () => {
+  it("floors floats and strips unknown fields so the result always passes the strict schema", () => {
+    const coerced = coerceTokenUsage({
+      inputTokens: 421.7,
+      outputTokens: 37,
+      totalTokens: 458,
+      contextWindow: 200000,
+    });
+    expect(coerced).toEqual({ inputTokens: 421, outputTokens: 37, contextWindow: 200000 });
+    expect(tokenUsageSchema.safeParse(coerced).success).toBe(true);
+  });
+
+  it("returns undefined for payloads missing required counts or non-objects", () => {
+    expect(coerceTokenUsage({ tokens: 5 })).toBeUndefined();
+    expect(coerceTokenUsage([1, 2])).toBeUndefined();
+    expect(coerceTokenUsage("lots")).toBeUndefined();
+    expect(coerceTokenUsage(null)).toBeUndefined();
+    expect(coerceTokenUsage({ inputTokens: -1, outputTokens: 2 })).toBeUndefined();
+  });
+
+  it("drops a non-positive contextWindow rather than failing the positive() schema bound", () => {
+    expect(coerceTokenUsage({ inputTokens: 1, outputTokens: 2, contextWindow: 0 })).toEqual({
+      inputTokens: 1,
+      outputTokens: 2,
+    });
+  });
+});
+
+describe("parsePersistedTokenUsage", () => {
+  it("round-trips valid rows and degrades malformed ones to undefined", () => {
+    const usage = { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 100 };
+    expect(parsePersistedTokenUsage(JSON.stringify(usage))).toEqual(usage);
+    expect(parsePersistedTokenUsage(null)).toBeUndefined();
+    expect(parsePersistedTokenUsage("not json")).toBeUndefined();
+    expect(parsePersistedTokenUsage('{"inputTokens":"ten"}')).toBeUndefined();
   });
 });

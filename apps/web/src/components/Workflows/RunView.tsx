@@ -2,7 +2,7 @@ import type { Project, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
-import { formatTokens } from "../../lib/formatTokens.ts";
+import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
 import { DagGraph } from "./DagGraph.tsx";
@@ -133,7 +133,7 @@ export function RunView({
       outputTokens += v.usage.outputTokens;
     }
     // Zero total → render nothing, not "↑ 0 ↓ 0" (context-only reporters).
-    return inputTokens + outputTokens > 0 ? { inputTokens, outputTokens } : null;
+    return hasSpend({ inputTokens, outputTokens }) ? { inputTokens, outputTokens } : null;
   }, [nodes]);
 
   const handleCancel = async () => {

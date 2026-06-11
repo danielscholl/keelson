@@ -111,3 +111,27 @@ describe("UsagePopover", () => {
     expect(screen.queryByText("Context")).toBeNull();
   });
 });
+
+describe("UsageChip — fabricated-zero guard", () => {
+  test("renders nothing when there is neither a context gauge nor session spend", () => {
+    const { container } = render(
+      <UsageChip
+        latest={{ inputTokens: 0, outputTokens: 0, contextTokens: 900 }}
+        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        popoverId="usage-pop-5"
+      />,
+    );
+    expect(container.innerHTML).toBe("");
+  });
+
+  test("still renders the gauge for a context-only turn with a window", () => {
+    render(
+      <UsageChip
+        latest={{ inputTokens: 0, outputTokens: 0, contextTokens: 32_000, contextWindow: 64_000 }}
+        totals={{ inputTokens: 0, outputTokens: 0, turns: 0 }}
+        popoverId="usage-pop-6"
+      />,
+    );
+    expect(screen.getByText("50%")).toBeDefined();
+  });
+});

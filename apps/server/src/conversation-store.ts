@@ -12,10 +12,9 @@ import type {
   Conversation,
   ConversationWorkflowProjection,
   Message,
-  TokenUsage,
   WorkflowRunStatus,
 } from "@keelson/shared";
-import { tokenUsageSchema } from "@keelson/shared";
+import { parsePersistedTokenUsage } from "@keelson/shared";
 
 export interface CreateConversationInput {
   id?: string;
@@ -94,21 +93,9 @@ function parseContentParts(raw: string | null): ContentBlock[] | undefined {
   }
 }
 
-// Same degrade-to-undefined posture as parseContentParts — a malformed row
-// drops its usage rather than breaking conversation loads.
-function parseUsage(raw: string | null): TokenUsage | undefined {
-  if (raw === null) return undefined;
-  try {
-    const result = tokenUsageSchema.safeParse(JSON.parse(raw));
-    return result.success ? result.data : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function rowToMessage(row: MessageRow): Message {
   const parts = parseContentParts(row.content_parts);
-  const usage = parseUsage(row.usage_json);
+  const usage = parsePersistedTokenUsage(row.usage_json);
   const msg: Message = {
     id: row.id,
     role: row.role,

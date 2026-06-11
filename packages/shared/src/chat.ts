@@ -46,6 +46,45 @@ export const tokenUsageSchema = z
   .strict();
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
+// Rebuilds a provider-supplied usage payload from known fields only, flooring
+// floats and dropping extras. Providers are pluggable, and raw payloads ride
+// strictly-validated wire frames — an unknown key or non-integer count from an
+// out-of-tree provider would otherwise fail the frame parse, not just the
+// field. Returns undefined (emit/persist nothing) when the required counts are
+// missing. packages/workflows keeps a dep-free structural mirror of this in
+// its prompt handler (sanitizeNodeUsage) — keep the two in lockstep.
+export function coerceTokenUsage(u: unknown): TokenUsage | undefined {
+  if (u === null || typeof u !== "object" || Array.isArray(u)) return undefined;
+  const rec = u as Record<string, unknown>;
+  const count = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+  const inputTokens = count(rec.inputTokens);
+  const outputTokens = count(rec.outputTokens);
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const out: TokenUsage = { inputTokens, outputTokens };
+  const cacheRead = count(rec.cacheReadInputTokens);
+  if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
+  const cacheCreation = count(rec.cacheCreationInputTokens);
+  if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
+  const contextTokens = count(rec.contextTokens);
+  if (contextTokens !== undefined) out.contextTokens = contextTokens;
+  const contextWindow = count(rec.contextWindow);
+  if (contextWindow !== undefined && contextWindow > 0) out.contextWindow = contextWindow;
+  return out;
+}
+
+// Hydrates a persisted usage_json column; degrades to undefined on malformed
+// rows so a bad write can't break conversation/run loads.
+export function parsePersistedTokenUsage(raw: string | null): TokenUsage | undefined {
+  if (raw === null) return undefined;
+  try {
+    const result = tokenUsageSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const messageChunkSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("system"), content: z.string() }).strict(),
   z.object({ type: z.literal("text"), content: z.string() }).strict(),

@@ -362,10 +362,21 @@ function buildClaudeTokenUsage(
 ): TokenUsage | undefined {
   const input = toTokenCount(msg.usage?.input_tokens);
   const output = toTokenCount(msg.usage?.output_tokens);
-  if (input === undefined && output === undefined) return undefined;
-  const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
   const cacheRead = toTokenCount(msg.usage?.cache_read_input_tokens);
   const cacheCreation = toTokenCount(msg.usage?.cache_creation_input_tokens);
+  // Build whenever the SDK reported anything usable — a result whose usage
+  // carries only cache counts, or no usage at all while assistant messages
+  // supplied per-call context, still has data worth surfacing.
+  if (
+    input === undefined &&
+    output === undefined &&
+    cacheRead === undefined &&
+    cacheCreation === undefined &&
+    lastApiUsage === undefined
+  ) {
+    return undefined;
+  }
+  const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
   if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
   if (cacheCreation !== undefined && cacheCreation > 0) {
     usage.cacheCreationInputTokens = cacheCreation;

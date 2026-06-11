@@ -10,9 +10,9 @@ import type { Database } from "bun:sqlite";
 import {
   type ContentBlock,
   type NodeOutputRow,
+  parsePersistedTokenUsage,
   TERMINAL_RUN_STATUSES,
   type TokenUsage,
-  tokenUsageSchema,
   type WorkflowNodeStatus,
   type WorkflowRunDetail,
   type WorkflowRunOrigin,
@@ -182,17 +182,6 @@ function parseContentParts(raw: string | null): ContentBlock[] | null {
   }
 }
 
-// Degrades to null on parse/shape failure — same posture as parseContentParts.
-function parseUsage(raw: string | null): TokenUsage | null {
-  if (raw === null) return null;
-  try {
-    const result = tokenUsageSchema.safeParse(JSON.parse(raw));
-    return result.success ? result.data : null;
-  } catch {
-    return null;
-  }
-}
-
 function rowToNodeOutput(row: NodeRow): NodeOutputRow {
   return {
     nodeId: row.node_id,
@@ -202,7 +191,7 @@ function rowToNodeOutput(row: NodeRow): NodeOutputRow {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     error: row.error,
-    usage: parseUsage(row.usage_json),
+    usage: parsePersistedTokenUsage(row.usage_json) ?? null,
   };
 }
 

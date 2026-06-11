@@ -516,6 +516,8 @@ function chunkType(chunk: unknown): string | undefined {
 // pluggable, and this value rides the strictly-validated node_done wire frame
 // — an extra key or non-integer count from an out-of-tree provider would make
 // the SPA's frame parse reject the WHOLE node_done and leave the node spinning.
+// Dep-free mirror of @keelson/shared's coerceTokenUsage (this package can't
+// import shared) — keep the two in lockstep.
 function sanitizeNodeUsage(u: unknown): NodeTokenUsage | undefined {
   if (u === null || typeof u !== "object" || Array.isArray(u)) return undefined;
   const rec = u as Record<string, unknown>;

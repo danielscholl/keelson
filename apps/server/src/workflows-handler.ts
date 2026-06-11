@@ -22,6 +22,7 @@ import {
   bulkDeleteRunsBodySchema,
   bulkDeleteRunsResponseSchema,
   type ContentBlock,
+  coerceTokenUsage,
   getRunArtifactResponseSchema,
   type IsolationOverride,
   listWorkflowsResponseSchema,
@@ -32,7 +33,6 @@ import {
   type SnapshotManager,
   startWorkflowRunBodySchema,
   TERMINAL_RUN_STATUSES,
-  type TokenUsage,
   type WorkflowFrame,
   type WorkflowNodeStatus,
   type WorkflowRunDetail,
@@ -2254,9 +2254,12 @@ function dispatchRunEvent(args: DispatchArgs): void {
           : JSON.stringify(event.result.output.value);
       const acc = nodeAccumulators.get(event.nodeId);
       const parts: ContentBlock[] | null = acc && acc.parts().length > 0 ? acc.parts() : null;
-      // NodeTokenUsage is the executor's structural mirror of TokenUsage;
-      // this is the cast-at-the-boundary the executor documents.
-      const usage = (event.result.usage as TokenUsage | undefined) ?? null;
+      // Re-coerce at the trust boundary rather than trusting the handler's
+      // structural NodeTokenUsage: the prompt handler sanitizes its own
+      // capture, but any embedder-supplied handler can set result.usage
+      // directly, and a nonconforming value here would fail the SPA's strict
+      // frame parse — silently dropping the whole node_done.
+      const usage = coerceTokenUsage(event.result.usage) ?? null;
       store.upsertNodeOutput({
         runId,
         nodeId: event.nodeId,

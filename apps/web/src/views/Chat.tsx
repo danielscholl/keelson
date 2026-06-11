@@ -57,7 +57,7 @@ import { useConversations } from "../hooks/useConversations.ts";
 import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../lib/exploreSeed.ts";
-import { formatTokens } from "../lib/formatTokens.ts";
+import { formatTokens, hasSpend } from "../lib/formatTokens.ts";
 import {
   filterSlashCommands,
   filterWorkflowNames,
@@ -1649,8 +1649,9 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   const lockedProviderId = conversationId !== null ? selectedProviderId : null;
 
   // Two distinct measures for the usage chip: the latest assistant turn's
-  // usage carries the context gauge (fill, not spend); the totals sum every
-  // reporting turn (spend, not fill).
+  // usage carries the context gauge (fill, not spend — context-only reports
+  // keep it fresh), while totals/turns count only turns with real spend so
+  // zero-total reports don't inflate the session group.
   const usageSummary = useMemo<{ latest?: TokenUsage; totals: SessionUsageTotals }>(() => {
     let inputTokens = 0;
     let outputTokens = 0;
@@ -1658,10 +1659,11 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     let latest: TokenUsage | undefined;
     for (const m of messages) {
       if (m.role !== "assistant" || !m.usage) continue;
+      latest = m.usage;
+      if (!hasSpend(m.usage)) continue;
       inputTokens += m.usage.inputTokens;
       outputTokens += m.usage.outputTokens;
       turns++;
-      latest = m.usage;
     }
     return { latest, totals: { inputTokens, outputTokens, turns } };
   }, [messages]);
@@ -1738,22 +1740,14 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
                         m.content
                       )}
                     </div>
-                    {/* Gated on a non-zero total: context-only reporters
-                        (Copilot session.usage_info without assistant.usage)
-                        carry zero in/out, and a "↑ 0 ↓ 0" footer reads as a
-                        fabricated measurement. */}
-                    {m.role === "assistant" &&
-                      m.usage &&
-                      !m.streaming &&
-                      m.usage.inputTokens + m.usage.outputTokens > 0 && (
-                        <div
-                          className="chat-usage-meta"
-                          title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
-                        >
-                          ↑ {formatTokens(m.usage.inputTokens)} ↓{" "}
-                          {formatTokens(m.usage.outputTokens)}
-                        </div>
-                      )}
+                    {m.role === "assistant" && m.usage && !m.streaming && hasSpend(m.usage) && (
+                      <div
+                        className="chat-usage-meta"
+                        title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
+                      >
+                        ↑ {formatTokens(m.usage.inputTokens)} ↓ {formatTokens(m.usage.outputTokens)}
+                      </div>
+                    )}
                     {/* Add-to-notebook on persisted, non-streaming, non-system
                         messages. Gated on isPersistedMessageId so the buttons
                         only appear once the done-frame reconcile has swapped the
@@ -1835,7 +1829,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
             {selectedProvider?.capabilities.tools === true && tools.length > 0 && (
               <ToolsChip count={tools.length} popoverId={TOOLS_POPOVER_ID} disabled={streaming} />
             )}
-            {usageSummary.totals.turns > 0 && (
+            {usageSummary.latest !== undefined && (
               <UsageChip
                 latest={usageSummary.latest}
                 totals={usageSummary.totals}
@@ -1913,7 +1907,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
           <ToolsPopover popoverId={TOOLS_POPOVER_ID} tools={tools} />
         )}
 
-        {usageSummary.totals.turns > 0 && (
+        {usageSummary.latest !== undefined && (
           <UsagePopover
             popoverId={USAGE_POPOVER_ID}
             latest={usageSummary.latest}

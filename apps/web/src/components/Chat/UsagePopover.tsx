@@ -4,12 +4,18 @@
 
 import type { TokenUsage } from "@keelson/shared";
 import { useCallback, useEffect, useRef } from "react";
-import { contextFillLevel, contextPercent, formatTokens } from "../../lib/formatTokens.ts";
+import {
+  contextFillLevel,
+  contextPercent,
+  formatTokens,
+  hasSpend,
+} from "../../lib/formatTokens.ts";
 import type { SessionUsageTotals } from "./UsageChip.tsx";
 
 interface UsagePopoverProps {
   popoverId: string;
-  latest?: TokenUsage;
+  // Required: mounted only once a turn has reported (same gate as UsageChip).
+  latest: TokenUsage;
   totals: SessionUsageTotals;
 }
 
@@ -74,7 +80,8 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
     return () => window.removeEventListener("resize", onResize);
   }, [reposition]);
 
-  const pct = contextPercent(latest?.contextTokens, latest?.contextWindow);
+  const pct = contextPercent(latest.contextTokens, latest.contextWindow);
+  const lastTurnRows = hasSpend(latest) || latest.cacheReadInputTokens !== undefined;
 
   return (
     <div
@@ -93,11 +100,13 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
           </div>
           <Row
             label="In window"
-            value={`${formatTokens(latest?.contextTokens ?? 0)} of ${formatTokens(latest?.contextWindow ?? 0)} (${pct}%)`}
+            value={`${formatTokens(latest.contextTokens ?? 0)} of ${formatTokens(latest.contextWindow ?? 0)} (${pct}%)`}
           />
         </section>
       )}
-      {latest !== undefined && (
+      {/* Zero-total context-only turns skip the spend rows — "↑ Input 0"
+          under a live context gauge would read as a real measurement. */}
+      {lastTurnRows && (
         <section className="usage-popover-section">
           <div className="usage-popover-section-title">Last turn</div>
           <Row label="↑ Input" value={formatTokens(latest.inputTokens)} />

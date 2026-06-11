@@ -34,3 +34,10 @@ export function contextFillLevel(pct: number): "ok" | "warn" | "hot" {
   if (pct >= 70) return "warn";
   return "ok";
 }
+
+// The ↑/↓ display gate. Context-only reporters (Copilot session.usage_info
+// without assistant.usage) carry real context fields with zero in/out totals;
+// rendering "↑ 0 ↓ 0" for those would present a fabricated measurement.
+export function hasSpend(usage: { inputTokens: number; outputTokens: number }): boolean {
+  return usage.inputTokens + usage.outputTokens > 0;
+}

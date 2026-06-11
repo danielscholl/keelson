@@ -1758,3 +1758,31 @@ describe("ClaudeProvider — token usage edge cases", () => {
     });
   });
 });
+
+describe("ClaudeProvider — usage built from partial result data", () => {
+  it("emits usage when the result carries only cache counts (no input/output)", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          usage: { cache_read_input_tokens: 50000 },
+          uuid: "result-uuid",
+          session_id: "sess-id",
+        } as ClaudeSdkMessage);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    const usageChunk = chunks.find((c) => c.type === "usage");
+    expect(usageChunk).toEqual({
+      type: "usage",
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 50000 },
+    });
+  });
+});
