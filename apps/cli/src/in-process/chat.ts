@@ -46,7 +46,7 @@ function buildOneShotSystemPrompt(): string | undefined {
 }
 
 // One-shot chat turn against the provider registry. Does not touch SQLite —
-// an in-process write would race a concurrent `keelson serve`, so one-shot
+// an in-process write would race a concurrent `keelson service`, so one-shot
 // stdout is the contract. The HTTP path (chat-client.ts) is the one that
 // persists.
 export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadlessResult> {

@@ -70,7 +70,7 @@ export class WorkflowNotFoundError extends Error {
  * Thrown by `runHeadless` when the loaded workflow declares one or more
  * `memory:` blocks. The headless path has no MemoryStore wired (single-DB
  * invariant; the server owns the connection), so memory-bearing workflows
- * route through `keelson serve`. The CLI command translates this to exit
+ * route through `keelson service`. The CLI command translates this to exit
  * code 3 (server required).
  */
 export class MemoryRequiresServerError extends Error {
@@ -79,7 +79,7 @@ export class MemoryRequiresServerError extends Error {
     public readonly memoryNodeIds: readonly string[],
   ) {
     super(
-      `workflow '${workflowName}' declares 'memory:' on ${memoryNodeIds.length} node(s) (${memoryNodeIds.join(", ")}). Memory requires the server. Run \`keelson serve\` first.`,
+      `workflow '${workflowName}' declares 'memory:' on ${memoryNodeIds.length} node(s) (${memoryNodeIds.join(", ")}). Memory requires the server. Run \`keelson service\` first.`,
     );
     this.name = "MemoryRequiresServerError";
   }
@@ -116,13 +116,13 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // Stub provider is the deterministic fallback when nothing else is
   // registered. Real providers (claude / copilot) would need keychain
   // bootstrap and are out of scope for C3's headless path — operators who
-  // want them up should `keelson serve` first so the run routes via HTTP.
+  // want them up should `keelson service` first so the run routes via HTTP.
   registerStubProvider();
   const providerId = opts.provider ?? "stub";
   if (!isRegisteredProvider(providerId)) {
     throw new Error(
       `provider '${providerId}' is not registered. Use --provider stub for headless runs, or ` +
-        `start the server with credentials configured (\`keelson serve\`) and route this run through it.`,
+        `start the server with credentials configured (\`keelson service\`) and route this run through it.`,
     );
   }
   // @keelson/workflows declares `PromptHandlerProvider` structurally to keep
@@ -140,19 +140,19 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // Approval / cancel handlers in headless mode: there's no UI to receive
   // a pause callout and no second client to resume the run, so an approval
   // node fails immediately with a clear message. Operators who need
-  // approval should route through `keelson serve` + the SPA.
+  // approval should route through `keelson service` + the SPA.
   const promptHandler = makePromptHandler({
     getProvider: (id) => {
       // Headless runs register exactly one provider (stub by default; the
       // claude/copilot bootstrap path requires keychain + credentials and only
-      // wires under `keelson serve`). If the workflow's `provider:` (or a
+      // wires under `keelson service`). If the workflow's `provider:` (or a
       // node's override) names a different id, fail loudly rather than
-      // silently substituting — `keelson serve` is the only path that can
+      // silently substituting — `keelson service` is the only path that can
       // dispatch to the full provider set.
       if (id !== undefined && id !== providerId) {
         throw new Error(
           `workflow declares 'provider: ${id}' but headless mode only has '${providerId}'. ` +
-            `Run \`keelson serve\` and route this workflow through the server to use ${id}.`,
+            `Run \`keelson service\` and route this workflow through the server to use ${id}.`,
         );
       }
       return provider;
@@ -166,7 +166,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const approvalHandler = makeApprovalHandler({
     awaitApproval: async (_runId, nodeId, message) => {
       throw new Error(
-        `approval node '${nodeId}' cannot resolve in headless mode (message: "${message}"). Run via \`keelson serve\` for interactive approval.`,
+        `approval node '${nodeId}' cannot resolve in headless mode (message: "${message}"). Run via \`keelson service\` for interactive approval.`,
       );
     },
   });

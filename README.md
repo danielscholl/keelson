@@ -50,15 +50,15 @@ available).
 ## Quick Start
 
 ```bash
-keelson serve start          # server + web UI + WS on :7878, in the background
+keelson service start          # server + web UI + WS on :7878, in the background
 open http://127.0.0.1:7878   # Chat, Workflows, and your ribs' surfaces
 keelson doctor               # health sweep: toolchain, server, DB, auth, ribs
 ```
 
 Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
 `KEELSON_PROVIDERS=stub` for an offline echo provider to try the harness without
-credentials. `keelson serve` (no subcommand) runs in the foreground instead;
-`keelson serve stop` shuts the background server down.
+credentials. `keelson service` (no subcommand) runs in the foreground instead;
+`keelson service stop` shuts the background server down.
 
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and

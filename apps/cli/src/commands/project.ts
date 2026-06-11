@@ -24,7 +24,7 @@ function effectiveBaseUrl(opts: BaseOptions): string {
 function noServer(opts: BaseOptions): never {
   emit(
     {
-      error: "project commands require `keelson serve` to be running",
+      error: "project commands require `keelson service` to be running",
       code: "NO_SERVER",
     },
     { json: opts.json },

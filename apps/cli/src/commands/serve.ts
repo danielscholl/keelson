@@ -114,7 +114,7 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
   if (state && isPidAlive(state.pid)) {
     emit(
       {
-        error: `a process with pid ${state.pid} is alive but not responding at ${state.url} — it may still be booting (check \`keelson serve status\` or ${logPath(home)}); if it is not a keelson server (stale record after a crash), delete ${serverStatePath(home)} and retry`,
+        error: `a process with pid ${state.pid} is alive but not responding at ${state.url} — it may still be booting (check \`keelson service status\` or ${logPath(home)}); if it is not a keelson server (stale record after a crash), delete ${serverStatePath(home)} and retry`,
         code: "UNRESPONSIVE",
       },
       opts,
@@ -132,7 +132,7 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
   // as a detached session so the server outlives this process and its terminal.
   const child = spawn(
     process.execPath,
-    [resolve(process.argv[1] ?? ""), "serve", ...(opts.db ? ["--db", opts.db] : [])],
+    [resolve(process.argv[1] ?? ""), "service", ...(opts.db ? ["--db", opts.db] : [])],
     {
       detached: true,
       stdio: ["ignore", fd, fd],
@@ -353,7 +353,7 @@ export async function runServeStatus(opts: { json: boolean }): Promise<void> {
       data: {
         status: "stopped",
         ...(state ? { note: `stale server.json (pid ${state.pid} is not running)` } : {}),
-        hint: "run `keelson serve start`",
+        hint: "run `keelson service start`",
       },
     },
     opts,

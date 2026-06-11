@@ -78,7 +78,7 @@ categories:
       -         name: GET /api/health
         status: warn
         detail: not reachable
-        hint: run `keelson serve` to start the API server on http://127.0.0.1:7878
+        hint: run `keelson service` to start the API server on http://127.0.0.1:7878
   -     category: db
     checks:
       -         name: schema_version
@@ -123,7 +123,7 @@ The server owns the store, the providers, and the browser UI, all on one port.
 Start it in a terminal you can leave open:
 
 ```sh
-KEELSON_PROVIDERS=stub keelson serve
+KEELSON_PROVIDERS=stub keelson service
 ```
 
 ```text
@@ -187,7 +187,7 @@ same path carries a real coding agent.
 <Aside type="note" title="When the server is down">
 `keelson chat` and `keelson workflow run` do not require the server. When it
 is down they fall back to in-process execution and print to stdout, which is
-why the CLI works for quick checks even before `keelson serve`. Server-backed
+why the CLI works for quick checks even before `keelson service`. Server-backed
 features like the browser UI and the rib commands need the server up.
 </Aside>
 
