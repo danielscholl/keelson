@@ -21,10 +21,32 @@ export const SCHEMA_VERSION = "0.1" as const;
 export const reasoningEffortLevelSchema = z.enum(["none", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffortLevel = z.infer<typeof reasoningEffortLevelSchema>;
 
+// Normalized per-turn token usage. Two distinct measures live here and must
+// never be conflated: inputTokens/outputTokens are TURN TOTALS (summed across
+// the turn's API calls — what the turn cost), while contextTokens/contextWindow
+// describe CONTEXT FILL (input-side tokens of the turn's final API call vs the
+// model's window — what the next turn starts from). Fields are optional where
+// a provider may not report them; emitters omit the whole object rather than
+// fabricating zeros.
+export const tokenUsageSchema = z
+  .object({
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cacheReadInputTokens: z.number().int().nonnegative().optional(),
+    cacheCreationInputTokens: z.number().int().nonnegative().optional(),
+    contextTokens: z.number().int().nonnegative().optional(),
+    contextWindow: z.number().int().positive().optional(),
+  })
+  .strict();
+export type TokenUsage = z.infer<typeof tokenUsageSchema>;
+
 export const messageChunkSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("system"), content: z.string() }).strict(),
   z.object({ type: z.literal("text"), content: z.string() }).strict(),
   z.object({ type: z.literal("thinking"), content: z.string() }).strict(),
+  // Emitted at most once per turn, at stream end, from the provider's final
+  // usage-bearing SDK event. Never accumulated across stream events.
+  z.object({ type: z.literal("usage"), usage: tokenUsageSchema }).strict(),
   z
     .object({
       type: z.literal("tool_use"),
@@ -85,6 +107,9 @@ export const messageSchema = z
     // UI marker for turns that ended without a clean `done` (abort or
     // provider error). Providers resume via providerSessionId, not these rows.
     truncated: z.boolean().optional(),
+    // Per-turn token usage on assistant rows; absent when the provider
+    // reported none.
+    usage: tokenUsageSchema.optional(),
     createdAt: z.string().datetime(),
   })
   .strict();

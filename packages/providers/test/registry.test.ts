@@ -202,6 +202,22 @@ describe("registerStubProvider", () => {
     const textChunks = chunks.filter((c) => c.type === "text");
     expect(textChunks).toHaveLength(2);
   });
+
+  it("stub emits deterministic synthetic usage before done", async () => {
+    registerStubProvider();
+    const provider = getAgentProvider("stub");
+    const chunks = [];
+    for await (const chunk of provider.sendQuery("hello world out there", "/tmp")) {
+      chunks.push(chunk);
+    }
+    const usageChunks = chunks.filter((c) => c.type === "usage");
+    expect(usageChunks).toHaveLength(1);
+    expect(usageChunks[0]).toEqual({
+      type: "usage",
+      usage: { inputTokens: 4, outputTokens: 4, contextTokens: 8, contextWindow: 8192 },
+    });
+    expect(chunks[chunks.length - 1]!.type).toBe("done");
+  });
 });
 
 describe("getRegistration", () => {

@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { getAgentProvider, getProviderInfoList, UnknownProviderError } from "@keelson/providers";
-import type { MessageChunk, ReasoningEffortLevel } from "@keelson/shared";
+import type { MessageChunk, ReasoningEffortLevel, TokenUsage } from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
 
 import {
@@ -29,6 +29,8 @@ export interface ChatHeadlessResult {
   // Aggregated text content streamed from the provider — useful for tests
   // and callers that want the response without re-subscribing to onChunk.
   text: string;
+  // Provider-reported turn usage; absent when the provider emitted none.
+  usage?: TokenUsage;
 }
 
 // Lightweight identity prompt for one-shot chats. Server's chat-handler.ts
@@ -70,6 +72,7 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
   const effectiveModel = opts.model ?? (providerDefault.length > 0 ? providerDefault : undefined);
 
   let text = "";
+  let usage: TokenUsage | undefined;
   for await (const chunk of provider.sendQuery(opts.message, opts.cwd, undefined, {
     ...(effectiveModel ? { model: effectiveModel } : {}),
     ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
@@ -80,9 +83,10 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
   })) {
     if (opts.abortSignal?.aborted) break;
     if (chunk.type === "text") text += chunk.content;
+    if (chunk.type === "usage") usage = chunk.usage;
     opts.onChunk?.(chunk);
     if (chunk.type === "done") break;
   }
 
-  return { providerId, text };
+  return { providerId, text, ...(usage !== undefined ? { usage } : {}) };
 }

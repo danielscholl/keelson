@@ -2,6 +2,7 @@ import type { Project, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { formatTokens } from "../../lib/formatTokens.ts";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
 import { DagGraph } from "./DagGraph.tsx";
@@ -121,6 +122,21 @@ export function RunView({
     return undefined;
   })();
 
+  // Run-level rollup: sum across reporting nodes. Volume, not fill — no
+  // percentage gauge here (a run total has no meaningful window to fill).
+  const runUsage = useMemo(() => {
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let any = false;
+    for (const v of Object.values(nodes)) {
+      if (!v.usage) continue;
+      inputTokens += v.usage.inputTokens;
+      outputTokens += v.usage.outputTokens;
+      any = true;
+    }
+    return any ? { inputTokens, outputTokens } : null;
+  }, [nodes]);
+
   const handleCancel = async () => {
     try {
       await cancel();
@@ -177,6 +193,14 @@ export function RunView({
             <>
               <StatusBadge status={statusBadgeStatus(run.status)} />
               {elapsed != null && <span className="duration">{formatDuration(elapsed)}</span>}
+              {runUsage && (
+                <span
+                  className="run-usage"
+                  title={`Total tokens across nodes: ${runUsage.inputTokens} in, ${runUsage.outputTokens} out`}
+                >
+                  ↑ {formatTokens(runUsage.inputTokens)} ↓ {formatTokens(runUsage.outputTokens)}
+                </span>
+              )}
               {isRunning && (
                 <button type="button" className="btn danger" onClick={handleCancel}>
                   ✕ Cancel

@@ -1401,3 +1401,67 @@ describe("WebSocket upgrade gate", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("handleChatRequest — token usage", () => {
+  function makeFrame(conversationId: string, providerId: string, prompt: string): ClientFrame {
+    return {
+      version: WIRE_PROTOCOL_VERSION,
+      conversationId,
+      message: { type: "request", providerId, prompt },
+    };
+  }
+
+  test("streams the provider's usage chunk to the client", async () => {
+    const store = makeMemStore();
+    const conv = store.create({ providerId: "stub" });
+    const sent: ChatFrame[] = [];
+
+    await handleChatRequest(makeFrame(conv.id, "stub", "one two three"), {
+      send: (f) => sent.push(f),
+      store,
+      abortSignal: new AbortController().signal,
+    });
+
+    for (const f of sent) chatFrameSchema.parse(f);
+    const usageFrames = sent.filter(
+      (f) => f.event.type === "chunk" && f.event.payload.type === "usage",
+    );
+    expect(usageFrames).toHaveLength(1);
+    const event = usageFrames[0].event;
+    if (event.type === "chunk" && event.payload.type === "usage") {
+      expect(event.payload.usage).toEqual({
+        inputTokens: 3,
+        outputTokens: 3,
+        contextTokens: 6,
+        contextWindow: 8192,
+      });
+    }
+  });
+
+  test("persists usage on the assistant message and round-trips through the store", async () => {
+    const store = makeMemStore();
+    const conv = store.create({ providerId: "stub" });
+
+    await handleChatRequest(makeFrame(conv.id, "stub", "alpha beta"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+    });
+
+    const stored = store.get(conv.id);
+    expect(stored).toBeDefined();
+    const assistant = stored!.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant!.usage).toEqual({
+      inputTokens: 2,
+      outputTokens: 2,
+      contextTokens: 4,
+      contextWindow: 8192,
+    });
+    // The user row never carries usage.
+    const user = stored!.messages.find((m) => m.role === "user");
+    expect(user!.usage).toBeUndefined();
+    // And the full conversation still validates against the wire schema.
+    conversationSchema.parse(stored);
+  });
+});

@@ -484,3 +484,86 @@ describe("SQLite WorkflowStore", () => {
     );
   });
 });
+
+describe("workflow store — node token usage", () => {
+  test("usage round-trips through upsertNodeOutput → getRun", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "run-usage",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2026-06-10T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    store.upsertNodeOutput({
+      runId: "run-usage",
+      nodeId: "n1",
+      status: "succeeded",
+      outputText: "done",
+      contentParts: null,
+      startedAt: "2026-06-10T00:00:00.000Z",
+      completedAt: "2026-06-10T00:00:05.000Z",
+      error: null,
+      usage: {
+        inputTokens: 1200,
+        outputTokens: 340,
+        cacheReadInputTokens: 900,
+        contextTokens: 2100,
+        contextWindow: 200000,
+      },
+    });
+    store.upsertNodeOutput({
+      runId: "run-usage",
+      nodeId: "n2-bash",
+      status: "succeeded",
+      outputText: "ok",
+      contentParts: null,
+      startedAt: "2026-06-10T00:00:05.000Z",
+      completedAt: "2026-06-10T00:00:06.000Z",
+      error: null,
+      usage: null,
+    });
+
+    const run = store.getRun("run-usage");
+    expect(run).toBeDefined();
+    const n1 = run!.nodes.find((n) => n.nodeId === "n1");
+    expect(n1!.usage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 340,
+      cacheReadInputTokens: 900,
+      contextTokens: 2100,
+      contextWindow: 200000,
+    });
+    const n2 = run!.nodes.find((n) => n.nodeId === "n2-bash");
+    expect(n2!.usage).toBeNull();
+  });
+
+  test("malformed usage_json degrades to null instead of breaking getRun", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "run-bad-usage",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2026-06-10T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    store.upsertNodeOutput({
+      runId: "run-bad-usage",
+      nodeId: "n1",
+      status: "succeeded",
+      outputText: "x",
+      contentParts: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      usage: null,
+    });
+    db.exec(
+      "UPDATE workflow_node_outputs SET usage_json = 'not json' WHERE run_id = 'run-bad-usage'",
+    );
+    const run = store.getRun("run-bad-usage");
+    expect(run!.nodes[0]!.usage).toBeNull();
+  });
+});

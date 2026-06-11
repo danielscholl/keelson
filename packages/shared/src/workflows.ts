@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
-import { contentBlockSchema, messageChunkSchema } from "./chat.ts";
+import { contentBlockSchema, messageChunkSchema, tokenUsageSchema } from "./chat.ts";
 
 // Run-level status. `running` is the value the store writes on POST; the
 // executor's RunStatus union ("succeeded" | "failed" | "cancelled") flows in
@@ -124,6 +124,9 @@ export const nodeOutputRowSchema = z
     startedAt: z.string().nullable(),
     completedAt: z.string().nullable(),
     error: z.string().nullable(),
+    // Provider-reported token usage for LLM-backed nodes (migration 4).
+    // Defaulted so pre-migration rows and hand-built fixtures keep parsing.
+    usage: tokenUsageSchema.nullable().default(null),
   })
   .strict();
 export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
@@ -277,6 +280,8 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       nodeId: z.string(),
       status: workflowNodeStatusSchema,
       error: z.string().nullable(),
+      // Omitted (not null) when the node spent no reported tokens.
+      usage: tokenUsageSchema.optional(),
     })
     .strict(),
   z

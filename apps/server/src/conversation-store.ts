@@ -12,8 +12,10 @@ import type {
   Conversation,
   ConversationWorkflowProjection,
   Message,
+  TokenUsage,
   WorkflowRunStatus,
 } from "@keelson/shared";
+import { tokenUsageSchema } from "@keelson/shared";
 
 export interface CreateConversationInput {
   id?: string;
@@ -68,6 +70,7 @@ interface MessageRow {
   content: string;
   content_parts: string | null;
   truncated: number | null;
+  usage_json: string | null;
   createdAt: string;
 }
 
@@ -91,8 +94,21 @@ function parseContentParts(raw: string | null): ContentBlock[] | undefined {
   }
 }
 
+// Same degrade-to-undefined posture as parseContentParts — a malformed row
+// drops its usage rather than breaking conversation loads.
+function parseUsage(raw: string | null): TokenUsage | undefined {
+  if (raw === null) return undefined;
+  try {
+    const result = tokenUsageSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function rowToMessage(row: MessageRow): Message {
   const parts = parseContentParts(row.content_parts);
+  const usage = parseUsage(row.usage_json);
   const msg: Message = {
     id: row.id,
     role: row.role,
@@ -101,6 +117,7 @@ function rowToMessage(row: MessageRow): Message {
   };
   if (parts !== undefined) msg.contentParts = parts;
   if (row.truncated !== null && row.truncated > 0) msg.truncated = true;
+  if (usage !== undefined) msg.usage = usage;
   return msg;
 }
 
@@ -175,7 +192,7 @@ export function createConversationStore(db: Database): ConversationStore {
   // Order by rowid (insertion order) so messages inserted within the same
   // millisecond preserve insertion order — UUID-id tiebreak would shuffle them.
   const selectMessages = db.prepare(
-    "SELECT id, role, content, content_parts, truncated, createdAt FROM messages WHERE conversationId = ? ORDER BY rowid ASC",
+    "SELECT id, role, content, content_parts, truncated, usage_json, createdAt FROM messages WHERE conversationId = ? ORDER BY rowid ASC",
   );
   // Batched IN(?,?,...) hydration for list(); arity varies so it can't be
   // pre-compiled. conversationId returned alongside the message columns so
@@ -191,7 +208,7 @@ export function createConversationStore(db: Database): ConversationStore {
       const placeholders = chunk.map(() => "?").join(",");
       const rows = db
         .prepare(
-          `SELECT id, role, content, content_parts, truncated, createdAt, conversationId
+          `SELECT id, role, content, content_parts, truncated, usage_json, createdAt, conversationId
              FROM messages
             WHERE conversationId IN (${placeholders})
             ORDER BY conversationId, rowid ASC`,
@@ -205,7 +222,7 @@ export function createConversationStore(db: Database): ConversationStore {
     return groups;
   }
   const insertMsg = db.prepare(
-    "INSERT INTO messages(id, conversationId, role, content, content_parts, truncated, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO messages(id, conversationId, role, content, content_parts, truncated, usage_json, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const touchConv = db.prepare("UPDATE conversations SET updatedAt = ? WHERE id = ?");
   const setSession = db.prepare("UPDATE conversations SET providerSessionId = ? WHERE id = ?");
@@ -260,6 +277,7 @@ export function createConversationStore(db: Database): ConversationStore {
         if (!conv) return;
         const partsJson =
           message.contentParts !== undefined ? JSON.stringify(message.contentParts) : null;
+        const usageJson = message.usage !== undefined ? JSON.stringify(message.usage) : null;
         insertMsg.run(
           message.id,
           id,
@@ -267,6 +285,7 @@ export function createConversationStore(db: Database): ConversationStore {
           message.content,
           partsJson,
           message.truncated ? 1 : 0,
+          usageJson,
           message.createdAt,
         );
         touchConv.run(new Date().toISOString(), id);

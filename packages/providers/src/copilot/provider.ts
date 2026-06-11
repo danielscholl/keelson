@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { ToolContext } from "@keelson/shared";
+import type { TokenUsage, ToolContext } from "@keelson/shared";
 import { ChunkQueue } from "../chunk-queue.ts";
 import type {
   IAgentProvider,
@@ -265,6 +265,46 @@ export class CopilotProvider implements IAgentProvider {
           );
         }),
       );
+      // Per-API-call usage metrics — summing across events gives turn totals
+      // (each event is one model call, so this is accumulation across
+      // requests, not double-counting stream snapshots).
+      let turnInput = 0;
+      let turnOutput = 0;
+      let turnCacheRead = 0;
+      let turnCacheWrite = 0;
+      let sawCallUsage = false;
+      // Context gauge straight from the SDK; latest event wins.
+      let contextTokens: number | undefined;
+      let contextWindow: number | undefined;
+      unsubs.push(
+        session.on("assistant.usage", (event: unknown) => {
+          const input = readCount(event, "inputTokens");
+          const output = readCount(event, "outputTokens");
+          const cacheRead = readCount(event, "cacheReadTokens");
+          const cacheWrite = readCount(event, "cacheWriteTokens");
+          if (
+            input === undefined &&
+            output === undefined &&
+            cacheRead === undefined &&
+            cacheWrite === undefined
+          ) {
+            return;
+          }
+          sawCallUsage = true;
+          turnInput += input ?? 0;
+          turnOutput += output ?? 0;
+          turnCacheRead += cacheRead ?? 0;
+          turnCacheWrite += cacheWrite ?? 0;
+        }),
+      );
+      unsubs.push(
+        session.on("session.usage_info", (event: unknown) => {
+          const current = readCount(event, "currentTokens");
+          const limit = readCount(event, "tokenLimit");
+          if (current !== undefined) contextTokens = current;
+          if (limit !== undefined && limit > 0) contextWindow = limit;
+        }),
+      );
       unsubs.push(
         session.on("session.error", (event: unknown) => {
           lastSessionError = readString(event, "message") ?? "session error";
@@ -295,6 +335,17 @@ export class CopilotProvider implements IAgentProvider {
       // .catch above absorbs rejection; await ensures the promise settles
       // before the finally cleanup tears the session down.
       await sendPromise;
+
+      // Emit before the error checks — an errored turn still spent tokens.
+      // Omitted entirely when the SDK reported nothing (no fabricated zeros).
+      if (sawCallUsage || contextTokens !== undefined) {
+        const usage: TokenUsage = { inputTokens: turnInput, outputTokens: turnOutput };
+        if (turnCacheRead > 0) usage.cacheReadInputTokens = turnCacheRead;
+        if (turnCacheWrite > 0) usage.cacheCreationInputTokens = turnCacheWrite;
+        if (contextTokens !== undefined) usage.contextTokens = contextTokens;
+        if (contextWindow !== undefined) usage.contextWindow = contextWindow;
+        yield { type: "usage", usage };
+      }
 
       // Session errors carry typed errorType (auth, rate_limit) — more
       // informative than a bare send rejection.
@@ -430,6 +481,14 @@ function readString(event: unknown, key: string): string | undefined {
   if (!data || typeof data !== "object") return undefined;
   const v = (data as Record<string, unknown>)[key];
   return typeof v === "string" ? v : undefined;
+}
+
+function readCount(event: unknown, key: string): number | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const data = (event as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return undefined;
+  const v = (data as Record<string, unknown>)[key];
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
 }
 
 function readObject(event: unknown, key: string): Record<string, unknown> | undefined {

@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { ToolContext } from "@keelson/shared";
+import type { TokenUsage, ToolContext } from "@keelson/shared";
 import { ChunkQueue } from "../chunk-queue.ts";
 import type {
   IAgentProvider,
@@ -17,6 +17,7 @@ import type {
 } from "../types.ts";
 import { buildFriendlyClaudeError } from "./errors.ts";
 import {
+  type ClaudeApiUsage,
   type ClaudeContentBlock,
   ClaudeQueryFactory,
   type ClaudeQueryHandle,
@@ -165,6 +166,11 @@ export class ClaudeProvider implements IAgentProvider {
     // Drains the SDK iterable into the shared queue and closes it on end
     // (success, error, abort). Tool handlers push concurrently via their
     // captured ctx.emit closure.
+    // Last API call's usage — each assistant message carries that call's
+    // BetaUsage; the final one is the context-fill measure (result.usage sums
+    // cache reads across calls, so it can't serve as a context gauge).
+    let lastApiUsage: ClaudeApiUsage | undefined;
+
     const producer = (async () => {
       try {
         for await (const msg of handle) {
@@ -179,10 +185,16 @@ export class ClaudeProvider implements IAgentProvider {
             terminalError = new Error(errMsg);
             return;
           }
+          if (msg.type === "assistant" && msg.message?.usage !== undefined) {
+            lastApiUsage = msg.message.usage;
+          }
 
           for (const chunk of mapSdkMessageToChunks(msg)) queue.push(chunk);
 
           if (msg.type === "result") {
+            // Emit before the error branch — an errored turn still spent tokens.
+            const usage = buildClaudeTokenUsage(msg, lastApiUsage);
+            if (usage !== undefined) queue.push({ type: "usage", usage });
             if (msg.is_error || (msg.subtype && msg.subtype !== "success")) {
               const errs = msg.errors && msg.errors.length > 0 ? msg.errors.join("; ") : undefined;
               const errMsg = buildFriendlyClaudeError(
@@ -328,6 +340,47 @@ function stringifyToolResultContent(content: ClaudeContentBlock["content"]): str
     }
   }
   return parts.join("");
+}
+
+// Defensive count read off structurally-typed SDK fields.
+function toCount(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+}
+
+// Pure. Turn totals come from result.usage; context fill from the last
+// assistant message's per-call usage (input side only — matches the
+// convention Claude Code's statusline documents); contextWindow from the
+// result's per-model breakdown. Returns undefined when the SDK reported no
+// counts at all so callers emit nothing rather than zeros.
+function buildClaudeTokenUsage(
+  msg: ClaudeSdkMessage,
+  lastApiUsage: ClaudeApiUsage | undefined,
+): TokenUsage | undefined {
+  const input = toCount(msg.usage?.input_tokens);
+  const output = toCount(msg.usage?.output_tokens);
+  if (input === undefined && output === undefined) return undefined;
+  const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
+  const cacheRead = toCount(msg.usage?.cache_read_input_tokens);
+  const cacheCreation = toCount(msg.usage?.cache_creation_input_tokens);
+  if (cacheRead !== undefined) usage.cacheReadInputTokens = cacheRead;
+  if (cacheCreation !== undefined) usage.cacheCreationInputTokens = cacheCreation;
+  if (lastApiUsage !== undefined) {
+    const lastInput = toCount(lastApiUsage.input_tokens);
+    const lastCacheRead = toCount(lastApiUsage.cache_read_input_tokens);
+    const lastCacheCreation = toCount(lastApiUsage.cache_creation_input_tokens);
+    if (lastInput !== undefined || lastCacheRead !== undefined || lastCacheCreation !== undefined) {
+      usage.contextTokens = (lastInput ?? 0) + (lastCacheRead ?? 0) + (lastCacheCreation ?? 0);
+    }
+  }
+  if (msg.modelUsage !== undefined) {
+    let window: number | undefined;
+    for (const entry of Object.values(msg.modelUsage)) {
+      const w = toCount(entry?.contextWindow);
+      if (w !== undefined && w > 0 && (window === undefined || w > window)) window = w;
+    }
+    if (window !== undefined) usage.contextWindow = window;
+  }
+  return usage;
 }
 
 function forwardAbort(signal: AbortSignal | undefined, controller: AbortController): () => void {

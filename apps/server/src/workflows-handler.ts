@@ -32,6 +32,7 @@ import {
   type SnapshotManager,
   startWorkflowRunBodySchema,
   TERMINAL_RUN_STATUSES,
+  type TokenUsage,
   type WorkflowFrame,
   type WorkflowNodeStatus,
   type WorkflowRunDetail,
@@ -1892,6 +1893,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
           completedAt: null,
           error: null,
+          usage: null,
         });
       } catch (err) {
         console.warn(
@@ -2009,6 +2011,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
           completedAt: null,
           error: null,
+          usage: null,
         });
       } catch (err) {
         console.warn(
@@ -2251,6 +2254,9 @@ function dispatchRunEvent(args: DispatchArgs): void {
           : JSON.stringify(event.result.output.value);
       const acc = nodeAccumulators.get(event.nodeId);
       const parts: ContentBlock[] | null = acc && acc.parts().length > 0 ? acc.parts() : null;
+      // NodeTokenUsage is the executor's structural mirror of TokenUsage;
+      // this is the cast-at-the-boundary the executor documents.
+      const usage = (event.result.usage as TokenUsage | undefined) ?? null;
       store.upsertNodeOutput({
         runId,
         nodeId: event.nodeId,
@@ -2260,12 +2266,14 @@ function dispatchRunEvent(args: DispatchArgs): void {
         startedAt,
         completedAt,
         error: event.result.error ?? null,
+        usage,
       });
       subscribers.broadcast(runId, {
         type: "node_done",
         nodeId: event.nodeId,
         status,
         error: event.result.error ?? null,
+        ...(usage !== null ? { usage } : {}),
       });
       // Tier-0 bridge (#73): a structured node output becomes the latest frame
       // on the run-scoped snapshot key.

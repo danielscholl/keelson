@@ -26,7 +26,7 @@
  * the workflowFrameSchema validator) cast back to `MessageChunk` at the edge.
  */
 
-import type { NodeHandler, NodeResult } from "../executor.ts";
+import type { NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
 import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 
 // Loosely-typed handles to avoid pulling @keelson/providers and
@@ -291,6 +291,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // Set when any tool the turn invoked returned an error result; consulted
       // after the stream when the node opts into `fail_on_tool_error`.
       let toolErrored = false;
+      // The provider's end-of-turn usage chunk; rides NodeResult → node_done
+      // rather than the node_chunk channel.
+      let nodeUsage: NodeTokenUsage | undefined;
 
       let iterator: AsyncIterator<unknown> | undefined;
       let iteratorReturned = false;
@@ -379,6 +382,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             const chunk = next.value;
             const t = chunkType(chunk);
             if (t === "done") continue;
+            if (t === "usage") {
+              const u = (chunk as { usage?: unknown }).usage;
+              if (u !== null && typeof u === "object") nodeUsage = u as NodeTokenUsage;
+              continue;
+            }
             if (t === "text") {
               assistantText += (chunk as { content: string }).content;
             } else if (t === "error") {
@@ -481,6 +489,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           output: { kind: "text", text: assistantText },
         };
       }
+      // Attach regardless of outcome — a failed or timed-out turn still
+      // spent whatever the provider reported before the cut.
+      if (nodeUsage !== undefined) result.usage = nodeUsage;
 
       try {
         await lifecycle.afterNode?.({ runId: ctx.runId, nodeId: ctx.nodeId }, result);

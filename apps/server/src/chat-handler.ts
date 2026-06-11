@@ -23,6 +23,7 @@ import {
   type RecallResponse,
   registeredToolInfoSchema,
   renameConversationBodySchema,
+  type TokenUsage,
   type ToolDefinition,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
@@ -381,6 +382,10 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // tool_use / tool_result become their own. Thinking chunks excluded.
   const acc = createContentPartsAccumulator();
   let streamFailed = false;
+  // Providers emit at most one usage chunk per turn, at stream end; captured
+  // here and persisted on the assistant row (the chunk also streams to the
+  // client so the live UI updates without a refetch).
+  let turnUsage: TokenUsage | undefined;
 
   // Harness-owned tools (workflow_* and, below, note_project) are authoritative:
   // a rib that registers a colliding name must not shadow them, and the SDK
@@ -461,6 +466,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     })) {
       if (deps.abortSignal.aborted) return;
       if (chunk.type === "done") continue;
+      if (chunk.type === "usage") turnUsage = chunk.usage;
       acc.ingest(chunk);
       deps.send(chunkFrame(conversationId, chunk));
     }
@@ -484,6 +490,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         content: assistantContent,
         ...(contentParts.length > 0 ? { contentParts } : {}),
         ...(truncated ? { truncated: true } : {}),
+        ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
         createdAt: new Date().toISOString(),
       });
     }

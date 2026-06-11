@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { UnknownProviderError } from "@keelson/providers";
-import type { MessageChunk, ReasoningEffortLevel } from "@keelson/shared";
+import type { MessageChunk, ReasoningEffortLevel, TokenUsage } from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import {
   chatViaServer,
@@ -45,6 +45,14 @@ function aggregateText(chunks: readonly MessageChunk[]): string {
     if (c.type === "text") out += c.content;
   }
   return out;
+}
+
+function lastUsage(chunks: readonly MessageChunk[]): TokenUsage | undefined {
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const c = chunks[i]!;
+    if (c.type === "usage") return c.usage;
+  }
+  return undefined;
 }
 
 // Mirror the SPA's pickInitialRef (apps/web/src/views/Chat.tsx:131):
@@ -159,6 +167,7 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
   if (!live) {
     const text = aggregateText(chunks);
     if (opts.json) {
+      const usage = lastUsage(chunks);
       emit(
         {
           data: {
@@ -166,6 +175,7 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
             conversationId,
             providerId,
             text,
+            ...(usage !== undefined ? { usage } : {}),
             chunks,
           },
         },
@@ -207,6 +217,7 @@ async function runChatInProcess(message: string, opts: ChatOptions): Promise<nev
               mode: "in-process",
               providerId: result.providerId,
               text: result.text,
+              ...(result.usage !== undefined ? { usage: result.usage } : {}),
               chunks,
             },
           },

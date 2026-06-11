@@ -110,11 +110,27 @@ export interface NodeContext {
   memoryRecall?: MemoryRecallContext;
 }
 
+/**
+ * Structural mirror of `@keelson/shared`'s TokenUsage — duplicated rather
+ * than imported to keep this package's dep graph free (same discipline as
+ * `MemoryTools` above). Consumers cast at the boundary.
+ */
+export interface NodeTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  contextTokens?: number;
+  contextWindow?: number;
+}
+
 export interface NodeResult {
   status: "succeeded" | "failed" | "skipped";
   output: NodeOutputBody;
   /** Set when status === "failed". */
   error?: string;
+  /** Provider-reported token usage for LLM-backed nodes; absent otherwise. */
+  usage?: NodeTokenUsage;
 }
 
 export interface NodeHandler {

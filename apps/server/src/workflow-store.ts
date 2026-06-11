@@ -11,6 +11,8 @@ import {
   type ContentBlock,
   type NodeOutputRow,
   TERMINAL_RUN_STATUSES,
+  type TokenUsage,
+  tokenUsageSchema,
   type WorkflowNodeStatus,
   type WorkflowRunDetail,
   type WorkflowRunOrigin,
@@ -63,6 +65,7 @@ export interface UpsertNodeOutputInput {
   startedAt: string | null;
   completedAt: string | null;
   error: string | null;
+  usage: TokenUsage | null;
 }
 
 export interface UpdateRunStatusInput {
@@ -140,6 +143,7 @@ interface NodeRow {
   started_at: string | null;
   completed_at: string | null;
   error: string | null;
+  usage_json: string | null;
 }
 
 function rowToRunSummary(row: RunRow): WorkflowRunSummary {
@@ -178,6 +182,17 @@ function parseContentParts(raw: string | null): ContentBlock[] | null {
   }
 }
 
+// Degrades to null on parse/shape failure — same posture as parseContentParts.
+function parseUsage(raw: string | null): TokenUsage | null {
+  if (raw === null) return null;
+  try {
+    const result = tokenUsageSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToNodeOutput(row: NodeRow): NodeOutputRow {
   return {
     nodeId: row.node_id,
@@ -187,6 +202,7 @@ function rowToNodeOutput(row: NodeRow): NodeOutputRow {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     error: row.error,
+    usage: parseUsage(row.usage_json),
   };
 }
 
@@ -232,21 +248,22 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "SELECT * FROM workflow_runs WHERE status = ? ORDER BY started_at DESC, rowid DESC",
   );
   const upsertNode = db.prepare(
-    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id, node_id) DO UPDATE SET
        status = excluded.status,
        output_text = excluded.output_text,
        content_parts_json = excluded.content_parts_json,
        started_at = excluded.started_at,
        completed_at = excluded.completed_at,
-       error = excluded.error`,
+       error = excluded.error,
+       usage_json = excluded.usage_json`,
   );
   // rowid tiebreak preserves DAG insertion order when two nodes share a
   // completed_at millisecond — the executor runs siblings in parallel and
   // commits via the per-layer write buffer, so timestamp ties are common.
   const selectNodes = db.prepare(
-    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
+    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );
   const deleteRunStmt = db.prepare("DELETE FROM workflow_runs WHERE id = ?");
   const deleteNodeStmt = db.prepare(
@@ -288,6 +305,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.startedAt,
         input.completedAt,
         input.error,
+        input.usage !== null ? JSON.stringify(input.usage) : null,
       );
     },
     getRun(runId) {

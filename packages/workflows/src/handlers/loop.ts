@@ -21,7 +21,12 @@
  * provider-side session-threading slice.
  */
 
-import { type NodeHandler, type NodeResult, resolveBody } from "../executor.ts";
+import {
+  type NodeHandler,
+  type NodeResult,
+  type NodeTokenUsage,
+  resolveBody,
+} from "../executor.ts";
 import { isLoopNode, type NodeOutput } from "../schema/index.ts";
 import type { AwaitInteraction } from "./approval.ts";
 import {
@@ -182,10 +187,15 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
       let prevOutput = "";
       let lastStripped = "";
       let userInput = "";
+      // Usage summed across iterations so the loop node reports what the
+      // whole loop spent, not just the final iteration.
+      let loopUsage: NodeTokenUsage | undefined;
+      const withUsage = (result: NodeResult): NodeResult =>
+        loopUsage !== undefined ? { ...result, usage: loopUsage } : result;
 
       for (let i = 1; i <= loop.max_iterations; i++) {
         if (ctx.abortSignal.aborted) {
-          return failed(`Loop node '${node.id}': aborted`, prevOutput);
+          return withUsage(failed(`Loop node '${node.id}': aborted`, prevOutput));
         }
 
         ctx.emit({
@@ -222,7 +232,8 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
         };
 
         const result = await promptHandler.handle(synthesized, iterCtx);
-        if (result.status !== "succeeded") return result;
+        loopUsage = addNodeUsage(loopUsage, result.usage);
+        if (result.status !== "succeeded") return withUsage(result);
 
         const text =
           result.output.kind === "text" ? result.output.text : JSON.stringify(result.output.value);
@@ -231,7 +242,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
         lastStripped = stripped;
 
         if (detectCompletionSignal(text, loop.until)) {
-          return { status: "succeeded", output: { kind: "text", text: stripped } };
+          return withUsage({ status: "succeeded", output: { kind: "text", text: stripped } });
         }
 
         // Schema already enforces min(1) on until_bash, but guard at the
@@ -268,7 +279,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
             // catch it, but short-circuiting here returns a failed result
             // with the right error message instead of looping once more.
             if (probe.aborted === true || ctx.abortSignal.aborted) {
-              return failed(`Loop node '${node.id}': aborted`, stripped);
+              return withUsage(failed(`Loop node '${node.id}': aborted`, stripped));
             }
             if (probe.timedOut === true) {
               ctx.emit({
@@ -276,7 +287,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
                 line: `until_bash probe timed out (iteration ${String(i)}) — continuing`,
               });
             } else if (probe.exitCode === 0) {
-              return { status: "succeeded", output: { kind: "text", text: stripped } };
+              return withUsage({ status: "succeeded", output: { kind: "text", text: stripped } });
             }
             // Non-zero (and timeouts) keep iterating — matches Archon's
             // behavior: the probe is a hint, not a fatal check.
@@ -323,11 +334,11 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
             );
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
-            return {
+            return withUsage({
               status: "failed",
               output: { kind: "text", text: stripped },
               error: ctx.abortSignal.aborted ? "aborted" : reason,
-            };
+            });
           }
         }
 
@@ -336,7 +347,30 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
 
       // Hit max_iterations without seeing `until` — SUCCESS with the last
       // iteration's stripped output (matches Archon's behavior).
-      return { status: "succeeded", output: { kind: "text", text: lastStripped } };
+      return withUsage({ status: "succeeded", output: { kind: "text", text: lastStripped } });
     },
   };
+}
+
+// Totals sum across iterations; the context pair tracks the latest iteration
+// (a gauge, not a volume).
+function addNodeUsage(
+  total: NodeTokenUsage | undefined,
+  u: NodeTokenUsage | undefined,
+): NodeTokenUsage | undefined {
+  if (u === undefined) return total;
+  if (total === undefined) return { ...u };
+  const out: NodeTokenUsage = {
+    inputTokens: total.inputTokens + u.inputTokens,
+    outputTokens: total.outputTokens + u.outputTokens,
+  };
+  const cacheRead = (total.cacheReadInputTokens ?? 0) + (u.cacheReadInputTokens ?? 0);
+  if (cacheRead > 0) out.cacheReadInputTokens = cacheRead;
+  const cacheCreation = (total.cacheCreationInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0);
+  if (cacheCreation > 0) out.cacheCreationInputTokens = cacheCreation;
+  const contextTokens = u.contextTokens ?? total.contextTokens;
+  if (contextTokens !== undefined) out.contextTokens = contextTokens;
+  const contextWindow = u.contextWindow ?? total.contextWindow;
+  if (contextWindow !== undefined) out.contextWindow = contextWindow;
+  return out;
 }
