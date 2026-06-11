@@ -8,6 +8,7 @@
 
 import type { TokenUsage, ToolContext } from "@keelson/shared";
 import { ChunkQueue } from "../chunk-queue.ts";
+import { toTokenCount } from "../token-count.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -487,8 +488,7 @@ function readCount(event: unknown, key: string): number | undefined {
   if (!event || typeof event !== "object") return undefined;
   const data = (event as { data?: unknown }).data;
   if (!data || typeof data !== "object") return undefined;
-  const v = (data as Record<string, unknown>)[key];
-  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+  return toTokenCount((data as Record<string, unknown>)[key]);
 }
 
 function readObject(event: unknown, key: string): Record<string, unknown> | undefined {

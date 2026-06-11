@@ -8,6 +8,7 @@
 
 import type { TokenUsage, ToolContext } from "@keelson/shared";
 import { ChunkQueue } from "../chunk-queue.ts";
+import { toTokenCount } from "../token-count.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -185,7 +186,13 @@ export class ClaudeProvider implements IAgentProvider {
             terminalError = new Error(errMsg);
             return;
           }
-          if (msg.type === "assistant" && msg.message?.usage !== undefined) {
+          if (
+            msg.type === "assistant" &&
+            msg.message?.usage !== undefined &&
+            (msg.parent_tool_use_id ?? null) === null
+          ) {
+            // Root-agent messages only — a Task subagent's tiny fresh context
+            // must not masquerade as the conversation's fill level.
             lastApiUsage = msg.message.usage;
           }
 
@@ -342,32 +349,31 @@ function stringifyToolResultContent(content: ClaudeContentBlock["content"]): str
   return parts.join("");
 }
 
-// Defensive count read off structurally-typed SDK fields.
-function toCount(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
-}
-
 // Pure. Turn totals come from result.usage; context fill from the last
 // assistant message's per-call usage (input side only — matches the
 // convention Claude Code's statusline documents); contextWindow from the
 // result's per-model breakdown. Returns undefined when the SDK reported no
-// counts at all so callers emit nothing rather than zeros.
+// counts at all so callers emit nothing rather than zeros. Cache fields are
+// included only when positive — a cache-miss turn's 0 would otherwise render
+// as a "Cache read 0" row (the Copilot path applies the same gate).
 function buildClaudeTokenUsage(
   msg: ClaudeSdkMessage,
   lastApiUsage: ClaudeApiUsage | undefined,
 ): TokenUsage | undefined {
-  const input = toCount(msg.usage?.input_tokens);
-  const output = toCount(msg.usage?.output_tokens);
+  const input = toTokenCount(msg.usage?.input_tokens);
+  const output = toTokenCount(msg.usage?.output_tokens);
   if (input === undefined && output === undefined) return undefined;
   const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
-  const cacheRead = toCount(msg.usage?.cache_read_input_tokens);
-  const cacheCreation = toCount(msg.usage?.cache_creation_input_tokens);
-  if (cacheRead !== undefined) usage.cacheReadInputTokens = cacheRead;
-  if (cacheCreation !== undefined) usage.cacheCreationInputTokens = cacheCreation;
+  const cacheRead = toTokenCount(msg.usage?.cache_read_input_tokens);
+  const cacheCreation = toTokenCount(msg.usage?.cache_creation_input_tokens);
+  if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
+  if (cacheCreation !== undefined && cacheCreation > 0) {
+    usage.cacheCreationInputTokens = cacheCreation;
+  }
   if (lastApiUsage !== undefined) {
-    const lastInput = toCount(lastApiUsage.input_tokens);
-    const lastCacheRead = toCount(lastApiUsage.cache_read_input_tokens);
-    const lastCacheCreation = toCount(lastApiUsage.cache_creation_input_tokens);
+    const lastInput = toTokenCount(lastApiUsage.input_tokens);
+    const lastCacheRead = toTokenCount(lastApiUsage.cache_read_input_tokens);
+    const lastCacheCreation = toTokenCount(lastApiUsage.cache_creation_input_tokens);
     if (lastInput !== undefined || lastCacheRead !== undefined || lastCacheCreation !== undefined) {
       usage.contextTokens = (lastInput ?? 0) + (lastCacheRead ?? 0) + (lastCacheCreation ?? 0);
     }
@@ -375,7 +381,7 @@ function buildClaudeTokenUsage(
   if (msg.modelUsage !== undefined) {
     let window: number | undefined;
     for (const entry of Object.values(msg.modelUsage)) {
-      const w = toCount(entry?.contextWindow);
+      const w = toTokenCount(entry?.contextWindow);
       if (w !== undefined && w > 0 && (window === undefined || w > window)) window = w;
     }
     if (window !== undefined) usage.contextWindow = window;

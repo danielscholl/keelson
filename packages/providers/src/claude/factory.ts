@@ -57,6 +57,9 @@ export interface ClaudeSdkMessage {
   // Detail strings from SDKResultError — passed to buildFriendlyClaudeError
   // so the user sees the cause, not just the subtype.
   errors?: string[];
+  // Set on assistant messages emitted by Task subagents; null/absent for the
+  // root agent's own messages.
+  parent_tool_use_id?: string | null;
   message?: { content?: ClaudeContentBlock[]; usage?: ClaudeApiUsage };
   // Turn-total usage on `result` messages (SDKResultSuccess / SDKResultError).
   usage?: ClaudeApiUsage;

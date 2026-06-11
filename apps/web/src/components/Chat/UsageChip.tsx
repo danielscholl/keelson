@@ -14,7 +14,7 @@ export interface SessionUsageTotals {
 interface UsageChipProps {
   // The most recent assistant turn's usage — its contextTokens/contextWindow
   // pair drives the fill gauge. Undefined when no turn has reported yet.
-  latest?: TokenUsage | undefined;
+  latest?: TokenUsage;
   // Session totals summed over every assistant turn that carried usage.
   totals: SessionUsageTotals;
   // Popover id this chip opens (UsagePopover). Same declarative

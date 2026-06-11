@@ -9,7 +9,7 @@ import type { SessionUsageTotals } from "./UsageChip.tsx";
 
 interface UsagePopoverProps {
   popoverId: string;
-  latest?: TokenUsage | undefined;
+  latest?: TokenUsage;
   totals: SessionUsageTotals;
 }
 
@@ -61,6 +61,17 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
     };
     popoverEl.addEventListener("toggle", onToggle);
     return () => popoverEl.removeEventListener("toggle", onToggle);
+  }, [reposition]);
+
+  useEffect(() => {
+    const popoverEl = popoverRef.current;
+    if (!popoverEl) return;
+    const onResize = () => {
+      if (!popoverEl.matches(":popover-open")) return;
+      reposition();
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, [reposition]);
 
   const pct = contextPercent(latest?.contextTokens, latest?.contextWindow);

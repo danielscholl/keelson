@@ -13,7 +13,10 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // Contract schema marker shared by /api/health, /api/config, and the CLI's
 // `version` command. Bump on any breaking change to the chat / workflow /
 // tools schemas in this package.
-export const SCHEMA_VERSION = "0.1" as const;
+// 0.2: token usage — new `usage` MessageChunk variant, Message.usage,
+// NodeOutputRow.usage, node_done frame usage. Pre-0.2 clients strict-reject
+// frames carrying these.
+export const SCHEMA_VERSION = "0.2" as const;
 
 // Copilot reasoning tier. Sibling of `thinking` (Anthropic's boolean
 // adaptive-thinking) rather than a polymorphic merge — both providers stream
@@ -27,7 +30,10 @@ export type ReasoningEffortLevel = z.infer<typeof reasoningEffortLevelSchema>;
 // describe CONTEXT FILL (input-side tokens of the turn's final API call vs the
 // model's window — what the next turn starts from). Fields are optional where
 // a provider may not report them; emitters omit the whole object rather than
-// fabricating zeros.
+// fabricating zeros — except context-only reporters (e.g. Copilot when only
+// session.usage_info fires), which carry real context fields alongside zero
+// totals; display surfaces gate ↑/↓ rendering on a non-zero total for that
+// case.
 export const tokenUsageSchema = z
   .object({
     inputTokens: z.number().int().nonnegative(),

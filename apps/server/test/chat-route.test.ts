@@ -1465,3 +1465,48 @@ describe("handleChatRequest — token usage", () => {
     conversationSchema.parse(stored);
   });
 });
+
+describe("handleChatRequest — usage-only turn persistence", () => {
+  test("a turn that reports usage but streams no content still persists an assistant row", async () => {
+    const spyId = `usage-only-${crypto.randomUUID().slice(0, 8)}`;
+    const capabilities: ProviderCapabilities = {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      models: ["m"],
+      defaultModel: "m",
+    };
+    registerProvider({
+      id: spyId,
+      displayName: "UsageOnly",
+      builtIn: false,
+      capabilities,
+      factory: () => ({
+        getType: () => "spy",
+        getCapabilities: () => capabilities,
+        listModels: async () => [{ id: "m" }],
+        async *sendQuery(): AsyncGenerator<MessageChunk> {
+          yield { type: "usage", usage: { inputTokens: 12, outputTokens: 0 } };
+          yield { type: "done" };
+        },
+      }),
+    });
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+
+    await handleChatRequest(
+      {
+        version: WIRE_PROTOCOL_VERSION,
+        conversationId: conv.id,
+        message: { type: "request", providerId: spyId, prompt: "spend tokens" },
+      },
+      { send: () => {}, store, abortSignal: new AbortController().signal },
+    );
+
+    const stored = store.get(conv.id);
+    const assistant = stored!.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant!.content).toBe("");
+    expect(assistant!.usage).toEqual({ inputTokens: 12, outputTokens: 0 });
+  });
+});

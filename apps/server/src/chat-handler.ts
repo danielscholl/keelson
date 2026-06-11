@@ -481,7 +481,11 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     // these rows.
     const assistantContent = acc.text();
     const contentParts = acc.parts();
-    const hasPersistable = assistantContent.length > 0 || contentParts.length > 0;
+    // Usage alone is persistable: an errored turn that streamed no content
+    // still spent tokens, and dropping the row would shrink session totals
+    // on reload.
+    const hasPersistable =
+      assistantContent.length > 0 || contentParts.length > 0 || turnUsage !== undefined;
     if (hasPersistable) {
       const truncated = deps.abortSignal.aborted || streamFailed;
       deps.store.appendMessage(conversationId, {

@@ -127,14 +127,13 @@ export function RunView({
   const runUsage = useMemo(() => {
     let inputTokens = 0;
     let outputTokens = 0;
-    let any = false;
     for (const v of Object.values(nodes)) {
       if (!v.usage) continue;
       inputTokens += v.usage.inputTokens;
       outputTokens += v.usage.outputTokens;
-      any = true;
     }
-    return any ? { inputTokens, outputTokens } : null;
+    // Zero total → render nothing, not "↑ 0 ↓ 0" (context-only reporters).
+    return inputTokens + outputTokens > 0 ? { inputTokens, outputTokens } : null;
   }, [nodes]);
 
   const handleCancel = async () => {

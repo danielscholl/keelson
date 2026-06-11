@@ -383,8 +383,8 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             const t = chunkType(chunk);
             if (t === "done") continue;
             if (t === "usage") {
-              const u = (chunk as { usage?: unknown }).usage;
-              if (u !== null && typeof u === "object") nodeUsage = u as NodeTokenUsage;
+              const sanitized = sanitizeNodeUsage((chunk as { usage?: unknown }).usage);
+              if (sanitized !== undefined) nodeUsage = sanitized;
               continue;
             }
             if (t === "text") {
@@ -510,6 +510,30 @@ function chunkType(chunk: unknown): string | undefined {
     return typeof t === "string" ? t : undefined;
   }
   return undefined;
+}
+
+// Rebuild the provider's usage payload from known fields only. Providers are
+// pluggable, and this value rides the strictly-validated node_done wire frame
+// — an extra key or non-integer count from an out-of-tree provider would make
+// the SPA's frame parse reject the WHOLE node_done and leave the node spinning.
+function sanitizeNodeUsage(u: unknown): NodeTokenUsage | undefined {
+  if (u === null || typeof u !== "object" || Array.isArray(u)) return undefined;
+  const rec = u as Record<string, unknown>;
+  const count = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+  const inputTokens = count(rec.inputTokens);
+  const outputTokens = count(rec.outputTokens);
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const out: NodeTokenUsage = { inputTokens, outputTokens };
+  const cacheRead = count(rec.cacheReadInputTokens);
+  if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
+  const cacheCreation = count(rec.cacheCreationInputTokens);
+  if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
+  const contextTokens = count(rec.contextTokens);
+  if (contextTokens !== undefined) out.contextTokens = contextTokens;
+  const contextWindow = count(rec.contextWindow);
+  if (contextWindow !== undefined && contextWindow > 0) out.contextWindow = contextWindow;
+  return out;
 }
 
 // Vendored-schema fields land on the DagNode union with a non-strict shape;

@@ -237,7 +237,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
         )}
         {isAwaiting && <span className="dur awaiting">awaiting</span>}
         {dur && <span className="dur">{dur}</span>}
-        {view.usage && (
+        {view.usage && view.usage.inputTokens + view.usage.outputTokens > 0 && (
           <span
             className="dur trace-usage"
             title={`Tokens: ${view.usage.inputTokens} in, ${view.usage.outputTokens} out`}

@@ -1677,3 +1677,84 @@ describe("ClaudeProvider — token usage (chat/workflow usage feedback)", () => 
     });
   });
 });
+
+describe("ClaudeProvider — token usage edge cases", () => {
+  it("ignores subagent assistant usage for the context measure (parent_tool_use_id set)", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        // Root agent's call — this is the conversation's real context.
+        await push({
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "orchestrating" }],
+            usage: { input_tokens: 150000, cache_read_input_tokens: 40000 },
+          },
+          uuid: "a-root",
+          session_id: "sess-id",
+        });
+        // Task subagent's call — tiny fresh context, must not win.
+        await push({
+          type: "assistant",
+          parent_tool_use_id: "toolu_task_1",
+          message: {
+            content: [{ type: "text", text: "subagent reply" }],
+            usage: { input_tokens: 3000, output_tokens: 50 },
+          },
+          uuid: "a-sub",
+          session_id: "sess-id",
+        });
+        await push({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          usage: { input_tokens: 153000, output_tokens: 500 },
+          uuid: "result-uuid",
+          session_id: "sess-id",
+        } as ClaudeSdkMessage);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    const usageChunk = chunks.find((c) => c.type === "usage");
+    expect(usageChunk).toBeDefined();
+    if (usageChunk && usageChunk.type === "usage") {
+      // 150000 + 40000 from the root call, NOT 3000 from the subagent.
+      expect(usageChunk.usage.contextTokens).toBe(190000);
+    }
+  });
+
+  it("omits zero-valued cache fields so a cache-miss turn renders no cache rows", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          uuid: "result-uuid",
+          session_id: "sess-id",
+        } as ClaudeSdkMessage);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    const usageChunk = chunks.find((c) => c.type === "usage");
+    expect(usageChunk).toEqual({
+      type: "usage",
+      usage: { inputTokens: 100, outputTokens: 20 },
+    });
+  });
+});

@@ -14,6 +14,8 @@ import type {
   SendQueryOptions,
 } from "../types.ts";
 
+const STUB_CONTEXT_WINDOW = 8192;
+
 export const STUB_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,
   streaming: true,
@@ -63,5 +65,3 @@ export class StubProvider implements IAgentProvider {
     yield { type: "done" };
   }
 }
-
-export const STUB_CONTEXT_WINDOW = 8192;

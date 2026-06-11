@@ -1663,10 +1663,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
       turns++;
       latest = m.usage;
     }
-    return {
-      ...(latest !== undefined ? { latest } : {}),
-      totals: { inputTokens, outputTokens, turns },
-    };
+    return { latest, totals: { inputTokens, outputTokens, turns } };
   }, [messages]);
 
   const sidebarCollapsed = settings.sidebarCollapsed ?? false;
@@ -1741,14 +1738,22 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
                         m.content
                       )}
                     </div>
-                    {m.role === "assistant" && m.usage && !m.streaming && (
-                      <div
-                        className="chat-usage-meta"
-                        title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
-                      >
-                        ↑ {formatTokens(m.usage.inputTokens)} ↓ {formatTokens(m.usage.outputTokens)}
-                      </div>
-                    )}
+                    {/* Gated on a non-zero total: context-only reporters
+                        (Copilot session.usage_info without assistant.usage)
+                        carry zero in/out, and a "↑ 0 ↓ 0" footer reads as a
+                        fabricated measurement. */}
+                    {m.role === "assistant" &&
+                      m.usage &&
+                      !m.streaming &&
+                      m.usage.inputTokens + m.usage.outputTokens > 0 && (
+                        <div
+                          className="chat-usage-meta"
+                          title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
+                        >
+                          ↑ {formatTokens(m.usage.inputTokens)} ↓{" "}
+                          {formatTokens(m.usage.outputTokens)}
+                        </div>
+                      )}
                     {/* Add-to-notebook on persisted, non-streaming, non-system
                         messages. Gated on isPersistedMessageId so the buttons
                         only appear once the done-frame reconcile has swapped the

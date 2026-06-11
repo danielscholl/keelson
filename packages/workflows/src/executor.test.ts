@@ -2717,3 +2717,70 @@ nodes:
     }
   });
 });
+
+describe("runWorkflow — node usage survives executor rewraps", () => {
+  test("output_schema text→structured promotion keeps result.usage on node_done", async () => {
+    const wf = parseInline(`
+name: t
+description: test
+nodes:
+  - id: produce
+    prompt: "emit json"
+    output_schema:
+      type: object
+      required: [k]
+`);
+    const usage = { inputTokens: 99, outputTokens: 11 };
+    const handler: NodeHandler = {
+      type: "prompt",
+      async handle() {
+        return { status: "succeeded", output: { kind: "text", text: '{"k":1}' }, usage };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["prompt", handler]]),
+      onEvent,
+    });
+    expect(summary.nodes.produce.state).toBe("completed");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "produce");
+    expect(done).toBeDefined();
+    if (done && done.type === "node_done") {
+      expect(done.result.output.kind).toBe("structured");
+      expect(done.result.usage).toEqual(usage);
+    }
+  });
+
+  test("output_schema validation failure keeps result.usage — the failed turn still spent tokens", async () => {
+    const wf = parseInline(`
+name: t
+description: test
+nodes:
+  - id: produce
+    prompt: "emit json"
+    output_schema:
+      type: object
+      required: [missing_key]
+`);
+    const usage = { inputTokens: 7, outputTokens: 3 };
+    const handler: NodeHandler = {
+      type: "prompt",
+      async handle() {
+        return { status: "succeeded", output: { kind: "text", text: '{"k":1}' }, usage };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["prompt", handler]]),
+      onEvent,
+    });
+    expect(summary.nodes.produce.state).toBe("failed");
+    const done = events.find((e) => e.type === "node_done" && e.nodeId === "produce");
+    if (done && done.type === "node_done") {
+      expect(done.result.status).toBe("failed");
+      expect(done.result.usage).toEqual(usage);
+    }
+  });
+});

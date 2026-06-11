@@ -1369,3 +1369,45 @@ describe("prompt handler — token usage", () => {
     expect(result.usage).toBeUndefined();
   });
 });
+
+describe("prompt handler — usage sanitation at the provider boundary", () => {
+  test("strips unknown fields and floors float counts from a nonconforming provider", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        {
+          type: "usage",
+          usage: {
+            inputTokens: 421.7,
+            outputTokens: 37,
+            totalTokens: 458, // unknown field — must not reach the wire frame
+            contextWindow: 200000,
+          },
+        },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.usage).toEqual({ inputTokens: 421, outputTokens: 37, contextWindow: 200000 });
+  });
+
+  test("drops usage payloads missing required counts entirely", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "usage", usage: { tokens: 5 } },
+        { type: "usage", usage: [1, 2] },
+        { type: "usage", usage: "lots" },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.usage).toBeUndefined();
+  });
+});
