@@ -1636,3 +1636,95 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
     expect(tu.id!.length).toBeGreaterThan(0);
   });
 });
+
+describe("CopilotProvider — token usage (chat/workflow usage feedback)", () => {
+  it("accumulates assistant.usage events into one turn-total usage chunk", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("assistant.usage", {
+          model: "gpt-5",
+          inputTokens: 100,
+          outputTokens: 40,
+          cacheReadTokens: 25,
+        });
+        session.emit("assistant.usage", {
+          model: "gpt-5",
+          inputTokens: 60,
+          outputTokens: 10,
+          cacheWriteTokens: 8,
+        });
+        session.emit("session.usage_info", {
+          currentTokens: 1234,
+          tokenLimit: 128000,
+          messagesLength: 4,
+        });
+        session.emit("session.idle");
+      },
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+
+    const usageChunks = chunks.filter((c) => c.type === "usage");
+    expect(usageChunks).toHaveLength(1);
+    expect(usageChunks[0]).toEqual({
+      type: "usage",
+      usage: {
+        inputTokens: 160,
+        outputTokens: 50,
+        cacheReadInputTokens: 25,
+        cacheCreationInputTokens: 8,
+        contextTokens: 1234,
+        contextWindow: 128000,
+      },
+    });
+  });
+
+  it("emits a context-only usage chunk when only session.usage_info fires", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("session.usage_info", {
+          currentTokens: 900,
+          tokenLimit: 64000,
+          messagesLength: 2,
+        });
+        session.emit("session.idle");
+      },
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+
+    const usageChunks = chunks.filter((c) => c.type === "usage");
+    expect(usageChunks).toHaveLength(1);
+    expect(usageChunks[0]).toEqual({
+      type: "usage",
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        contextTokens: 900,
+        contextWindow: 64000,
+      },
+    });
+  });
+
+  it("emits no usage chunk when the SDK reports nothing", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => session.emit("session.idle"),
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+
+    expect(chunks.filter((c) => c.type === "usage")).toHaveLength(0);
+  });
+});

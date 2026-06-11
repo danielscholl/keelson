@@ -35,6 +35,16 @@ function expandToolNamesForClaudeSdk(names: readonly string[]): string[] {
   return out;
 }
 
+// Structural projection of the Anthropic BetaUsage block, snake_case as the
+// SDK ships it. Carried on each assistant message (that API call's usage)
+// and on the result message (turn totals summed across calls).
+export interface ClaudeApiUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
 // `type` is the discriminator: system | stream_event | assistant |
 // user/user_replay | result, plus forward-looking events we ignore.
 export interface ClaudeSdkMessage {
@@ -47,7 +57,14 @@ export interface ClaudeSdkMessage {
   // Detail strings from SDKResultError — passed to buildFriendlyClaudeError
   // so the user sees the cause, not just the subtype.
   errors?: string[];
-  message?: { content?: ClaudeContentBlock[] };
+  // Set on assistant messages emitted by Task subagents; null/absent for the
+  // root agent's own messages.
+  parent_tool_use_id?: string | null;
+  message?: { content?: ClaudeContentBlock[]; usage?: ClaudeApiUsage };
+  // Turn-total usage on `result` messages (SDKResultSuccess / SDKResultError).
+  usage?: ClaudeApiUsage;
+  // Per-model breakdown on `result` messages; read for contextWindow only.
+  modelUsage?: Record<string, { contextWindow?: number } | undefined>;
   // BetaRawMessageStreamEvent; we read content_block_delta for text_delta
   // (text) and thinking_delta (thinking).
   event?: {

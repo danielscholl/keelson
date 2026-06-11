@@ -1,6 +1,7 @@
 import type {
   ContentBlock,
   MessageChunk,
+  TokenUsage,
   WorkflowFrame,
   WorkflowNodeStatus,
   WorkflowRunDetail,
@@ -44,6 +45,9 @@ export interface NodeView {
   // Absent on snapshot rehydrate (not persisted) — that path falls back to
   // the optional-pauseId leg of the resume route.
   awaitingPauseId?: string;
+  // Provider-reported token usage for LLM-backed nodes. Live source: the
+  // `node_done` frame; snapshot source: the persisted usage_json row.
+  usage?: TokenUsage;
 }
 
 export interface RunView {
@@ -164,6 +168,8 @@ function applyChunkToNode(node: NodeView, chunk: MessageChunk): NodeView {
           },
         ],
       };
+    // usage rides the node_done frame, not the chunk channel; no-op here.
+    case "usage":
     case "system":
     case "error":
     case "done":
@@ -211,6 +217,7 @@ function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
       thinkingText: "",
       logLines: hydratedLogLines,
       ...(isAwaiting && row.outputText ? { awaitingMessage: row.outputText } : {}),
+      ...(row.usage !== null ? { usage: row.usage } : {}),
     };
   }
   // awaitingNodeId is derived from the nodes map at the hook boundary;
@@ -591,6 +598,9 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     logLines: winningLogs,
     awaitingMessage: winningAwaitingMessage,
     awaitingPauseId: winningAwaitingPauseId,
+    // Both sides carry the same node_done value when present; either may
+    // have missed it (WS gap vs pre-write fetch), so take whichever exists.
+    usage: liveSide.usage ?? snapshotSide.usage,
   };
 }
 
@@ -684,6 +694,7 @@ function applyFrame(
             completedAt: completed,
             durationMs: base.startedAt ? Math.max(0, completed - base.startedAt) : undefined,
             error: frame.error,
+            ...(frame.usage !== undefined ? { usage: frame.usage } : {}),
             // Approval node resolved — clear its message so the callout
             // doesn't linger after resume.
             awaitingMessage: undefined,

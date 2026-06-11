@@ -26,7 +26,7 @@
  * the workflowFrameSchema validator) cast back to `MessageChunk` at the edge.
  */
 
-import type { NodeHandler, NodeResult } from "../executor.ts";
+import type { NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
 import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 
 // Loosely-typed handles to avoid pulling @keelson/providers and
@@ -291,6 +291,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // Set when any tool the turn invoked returned an error result; consulted
       // after the stream when the node opts into `fail_on_tool_error`.
       let toolErrored = false;
+      // The provider's end-of-turn usage chunk; rides NodeResult → node_done
+      // rather than the node_chunk channel.
+      let nodeUsage: NodeTokenUsage | undefined;
 
       let iterator: AsyncIterator<unknown> | undefined;
       let iteratorReturned = false;
@@ -379,6 +382,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             const chunk = next.value;
             const t = chunkType(chunk);
             if (t === "done") continue;
+            if (t === "usage") {
+              const sanitized = sanitizeNodeUsage((chunk as { usage?: unknown }).usage);
+              if (sanitized !== undefined) nodeUsage = sanitized;
+              continue;
+            }
             if (t === "text") {
               assistantText += (chunk as { content: string }).content;
             } else if (t === "error") {
@@ -481,6 +489,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           output: { kind: "text", text: assistantText },
         };
       }
+      // Attach regardless of outcome — a failed or timed-out turn still
+      // spent whatever the provider reported before the cut.
+      if (nodeUsage !== undefined) result.usage = nodeUsage;
 
       try {
         await lifecycle.afterNode?.({ runId: ctx.runId, nodeId: ctx.nodeId }, result);
@@ -499,6 +510,32 @@ function chunkType(chunk: unknown): string | undefined {
     return typeof t === "string" ? t : undefined;
   }
   return undefined;
+}
+
+// Rebuild the provider's usage payload from known fields only. Providers are
+// pluggable, and this value rides the strictly-validated node_done wire frame
+// — an extra key or non-integer count from an out-of-tree provider would make
+// the SPA's frame parse reject the WHOLE node_done and leave the node spinning.
+// Dep-free mirror of @keelson/shared's coerceTokenUsage (this package can't
+// import shared) — keep the two in lockstep.
+function sanitizeNodeUsage(u: unknown): NodeTokenUsage | undefined {
+  if (u === null || typeof u !== "object" || Array.isArray(u)) return undefined;
+  const rec = u as Record<string, unknown>;
+  const count = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+  const inputTokens = count(rec.inputTokens);
+  const outputTokens = count(rec.outputTokens);
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const out: NodeTokenUsage = { inputTokens, outputTokens };
+  const cacheRead = count(rec.cacheReadInputTokens);
+  if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
+  const cacheCreation = count(rec.cacheCreationInputTokens);
+  if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
+  const contextTokens = count(rec.contextTokens);
+  if (contextTokens !== undefined) out.contextTokens = contextTokens;
+  const contextWindow = count(rec.contextWindow);
+  if (contextWindow !== undefined && contextWindow > 0) out.contextWindow = contextWindow;
+  return out;
 }
 
 // Vendored-schema fields land on the DagNode union with a non-strict shape;

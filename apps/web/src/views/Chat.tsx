@@ -8,6 +8,7 @@ import {
   parseWorkflowDescription,
   type ReasoningEffortLevel,
   type RegisteredToolInfo,
+  type TokenUsage,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import type { KeyboardEvent } from "react";
@@ -45,6 +46,8 @@ import {
 } from "../components/Chat/ToolCallsBlock.tsx";
 import { ToolsChip } from "../components/Chat/ToolsChip.tsx";
 import { ToolsPopover } from "../components/Chat/ToolsPopover.tsx";
+import { type SessionUsageTotals, UsageChip } from "../components/Chat/UsageChip.tsx";
+import { UsagePopover } from "../components/Chat/UsagePopover.tsx";
 import { AddToNotebookModal } from "../components/Memory/AddToNotebookModal.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
@@ -54,6 +57,7 @@ import { useConversations } from "../hooks/useConversations.ts";
 import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../lib/exploreSeed.ts";
+import { formatTokens, hasSpend } from "../lib/formatTokens.ts";
 import {
   filterSlashCommands,
   filterWorkflowNames,
@@ -98,6 +102,9 @@ interface LocalMessage {
   commandCall?: CommandCall;
   // Live-only Claude extended-thinking deltas; not persisted.
   thinking?: string;
+  // Provider-reported turn usage; arrives as the stream's final chunk and
+  // rehydrates from the persisted assistant row.
+  usage?: TokenUsage;
   // Ended without a clean `done` (user abort or provider error).
   truncated?: boolean;
   // Auto-sent kickoff for lane-seeded chats. Persisted server-side
@@ -111,6 +118,8 @@ const PROJECT_PICKER_POPOVER_ID = "chat-project-picker-popover";
 const REASONING_EFFORT_POPOVER_ID = "chat-reasoning-effort-popover";
 const SLASH_PICKER_POPOVER_ID = "chat-slash-picker-popover";
 const TOOLS_POPOVER_ID = "chat-tools-popover";
+
+const USAGE_POPOVER_ID = "chat-usage-popover";
 
 const DEFAULT_REASONING_EFFORT: ReasoningEffortLevel = "medium";
 
@@ -583,6 +592,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
               content: m.content,
               ...(m.contentParts ? { toolCalls: toolCallsFromContentParts(m.contentParts) } : {}),
               ...(m.truncated ? { truncated: true } : {}),
+              ...(m.usage ? { usage: m.usage } : {}),
               ...(hide ? { hidden: true } : {}),
             };
           }),
@@ -722,6 +732,12 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
             prev.map((m) =>
               m.id === assistantId ? { ...m, thinking: (m.thinking ?? "") + payload.content } : m,
             ),
+          );
+        } else if (payload.type === "usage") {
+          const assistantId = activeAssistantIdRef.current;
+          if (!assistantId) return;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, usage: payload.usage } : m)),
           );
         }
         // `done` chunk payload ignored — top-level `done` ends stream
@@ -1529,6 +1545,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
                 content: m.content,
                 ...(m.contentParts ? { toolCalls: toolCallsFromContentParts(m.contentParts) } : {}),
                 ...(m.truncated ? { truncated: true } : {}),
+                ...(m.usage ? { usage: m.usage } : {}),
                 ...(hide ? { hidden: true } : {}),
               };
             }),
@@ -1631,6 +1648,26 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   // Foreign-provider popover rows disable once a conversation exists.
   const lockedProviderId = conversationId !== null ? selectedProviderId : null;
 
+  // Two distinct measures for the usage chip: the latest assistant turn's
+  // usage carries the context gauge (fill, not spend — context-only reports
+  // keep it fresh), while totals/turns count only turns with real spend so
+  // zero-total reports don't inflate the session group.
+  const usageSummary = useMemo<{ latest?: TokenUsage; totals: SessionUsageTotals }>(() => {
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let turns = 0;
+    let latest: TokenUsage | undefined;
+    for (const m of messages) {
+      if (m.role !== "assistant" || !m.usage) continue;
+      latest = m.usage;
+      if (!hasSpend(m.usage)) continue;
+      inputTokens += m.usage.inputTokens;
+      outputTokens += m.usage.outputTokens;
+      turns++;
+    }
+    return { latest, totals: { inputTokens, outputTokens, turns } };
+  }, [messages]);
+
   const sidebarCollapsed = settings.sidebarCollapsed ?? false;
 
   return (
@@ -1703,6 +1740,14 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
                         m.content
                       )}
                     </div>
+                    {m.role === "assistant" && m.usage && !m.streaming && hasSpend(m.usage) && (
+                      <div
+                        className="chat-usage-meta"
+                        title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
+                      >
+                        ↑ {formatTokens(m.usage.inputTokens)} ↓ {formatTokens(m.usage.outputTokens)}
+                      </div>
+                    )}
                     {/* Add-to-notebook on persisted, non-streaming, non-system
                         messages. Gated on isPersistedMessageId so the buttons
                         only appear once the done-frame reconcile has swapped the
@@ -1784,6 +1829,13 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
             {selectedProvider?.capabilities.tools === true && tools.length > 0 && (
               <ToolsChip count={tools.length} popoverId={TOOLS_POPOVER_ID} disabled={streaming} />
             )}
+            {usageSummary.latest !== undefined && (
+              <UsageChip
+                latest={usageSummary.latest}
+                totals={usageSummary.totals}
+                popoverId={USAGE_POPOVER_ID}
+              />
+            )}
             <span className="chat-composer-spacer" />
             {queued !== null && (
               <button
@@ -1853,6 +1905,14 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
 
         {selectedProvider?.capabilities.tools === true && tools.length > 0 && (
           <ToolsPopover popoverId={TOOLS_POPOVER_ID} tools={tools} />
+        )}
+
+        {usageSummary.latest !== undefined && (
+          <UsagePopover
+            popoverId={USAGE_POPOVER_ID}
+            latest={usageSummary.latest}
+            totals={usageSummary.totals}
+          />
         )}
 
         <SlashCommandPopover

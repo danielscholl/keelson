@@ -110,11 +110,27 @@ export interface NodeContext {
   memoryRecall?: MemoryRecallContext;
 }
 
+/**
+ * Structural mirror of `@keelson/shared`'s TokenUsage — duplicated rather
+ * than imported to keep this package's dep graph free (same discipline as
+ * `MemoryTools` above). Consumers cast at the boundary.
+ */
+export interface NodeTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  contextTokens?: number;
+  contextWindow?: number;
+}
+
 export interface NodeResult {
   status: "succeeded" | "failed" | "skipped";
   output: NodeOutputBody;
   /** Set when status === "failed". */
   error?: string;
+  /** Provider-reported token usage for LLM-backed nodes; absent otherwise. */
+  usage?: NodeTokenUsage;
 }
 
 export interface NodeHandler {
@@ -650,11 +666,14 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     // undefined for top-level undefined / functions / symbols — those would
     // leave NodeOutput.output non-string, violating the schema and breaking
     // downstream substitution. Treat as a handler bug: fail loudly.
+    // Rewrap sites below spread `...result` so handler-attached fields
+    // (usage today, anything future) survive the rewrap — a rebuilt literal
+    // here silently zeroed token accounting for the LLM-backed paths.
     if (result.status === "succeeded" && result.output.kind === "structured") {
       if (typeof JSON.stringify(result.output.value) !== "string") {
         const error = `handler structured output is not JSON-serializable (typeof value: ${typeof result.output.value})`;
         emit({ type: "run_warning", nodeId: node.id, message: error });
-        result = { status: "failed", output: { kind: "text", text: "" }, error };
+        result = { ...result, status: "failed", output: { kind: "text", text: "" }, error };
       }
     }
     // Fail-closed output_schema check: a node that declares a schema but emits
@@ -668,7 +687,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
         if (!validation.ok) {
           const error = `output_schema validation failed: ${validation.error}`;
           emit({ type: "run_warning", nodeId: node.id, message: error });
-          result = { status: "failed", output: { kind: "text", text: "" }, error };
+          result = { ...result, status: "failed", output: { kind: "text", text: "" }, error };
         } else if (
           result.output.kind === "text" &&
           typeof captured === "object" &&
@@ -677,7 +696,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
           // A node that declares output_schema and emits JSON is a structured
           // producer: surface it as structured so $nodeId.output addressing and
           // the snapshot publish bridge see the value, not raw text.
-          result = { status: "succeeded", output: { kind: "structured", value: captured } };
+          result = { ...result, output: { kind: "structured", value: captured } };
         }
       }
     }

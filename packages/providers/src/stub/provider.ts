@@ -14,6 +14,8 @@ import type {
   SendQueryOptions,
 } from "../types.ts";
 
+const STUB_CONTEXT_WINDOW = 8192;
+
 export const STUB_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,
   streaming: true,
@@ -48,6 +50,18 @@ export class StubProvider implements IAgentProvider {
     for (const token of tokens) {
       yield { type: "text", content: `${token} ` };
     }
+    // Deterministic synthetic usage (1 word ≈ 1 token) so the keyless path
+    // exercises the same usage pipeline the real providers feed.
+    const count = tokens.length;
+    yield {
+      type: "usage",
+      usage: {
+        inputTokens: count,
+        outputTokens: count,
+        contextTokens: count * 2,
+        contextWindow: STUB_CONTEXT_WINDOW,
+      },
+    };
     yield { type: "done" };
   }
 }

@@ -22,6 +22,7 @@ import {
   bulkDeleteRunsBodySchema,
   bulkDeleteRunsResponseSchema,
   type ContentBlock,
+  coerceTokenUsage,
   getRunArtifactResponseSchema,
   type IsolationOverride,
   listWorkflowsResponseSchema,
@@ -1892,6 +1893,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
           completedAt: null,
           error: null,
+          usage: null,
         });
       } catch (err) {
         console.warn(
@@ -2009,6 +2011,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
           completedAt: null,
           error: null,
+          usage: null,
         });
       } catch (err) {
         console.warn(
@@ -2251,6 +2254,12 @@ function dispatchRunEvent(args: DispatchArgs): void {
           : JSON.stringify(event.result.output.value);
       const acc = nodeAccumulators.get(event.nodeId);
       const parts: ContentBlock[] | null = acc && acc.parts().length > 0 ? acc.parts() : null;
+      // Re-coerce at the trust boundary rather than trusting the handler's
+      // structural NodeTokenUsage: the prompt handler sanitizes its own
+      // capture, but any embedder-supplied handler can set result.usage
+      // directly, and a nonconforming value here would fail the SPA's strict
+      // frame parse — silently dropping the whole node_done.
+      const usage = coerceTokenUsage(event.result.usage) ?? null;
       store.upsertNodeOutput({
         runId,
         nodeId: event.nodeId,
@@ -2260,12 +2269,14 @@ function dispatchRunEvent(args: DispatchArgs): void {
         startedAt,
         completedAt,
         error: event.result.error ?? null,
+        usage,
       });
       subscribers.broadcast(runId, {
         type: "node_done",
         nodeId: event.nodeId,
         status,
         error: event.result.error ?? null,
+        ...(usage !== null ? { usage } : {}),
       });
       // Tier-0 bridge (#73): a structured node output becomes the latest frame
       // on the run-scoped snapshot key.

@@ -1304,3 +1304,110 @@ describe("makePromptHandler — project notebook injection", () => {
     expect(calls[0]?.options?.systemPrompt).toBe("SEED");
   });
 });
+
+describe("prompt handler — token usage", () => {
+  test("captures the provider's usage chunk on NodeResult and keeps it off the chunk channel", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "text", content: "hello" },
+        {
+          type: "usage",
+          usage: { inputTokens: 50, outputTokens: 12, contextTokens: 62, contextWindow: 200000 },
+        },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const events: NodeStreamEvent[] = [];
+    const result = await handler.handle(stubNode, buildCtx({ onEvent: (e) => events.push(e) }));
+
+    expect(result.status).toBe("succeeded");
+    expect(result.usage).toEqual({
+      inputTokens: 50,
+      outputTokens: 12,
+      contextTokens: 62,
+      contextWindow: 200000,
+    });
+    // usage rides NodeResult → node_done, never the node_chunk channel.
+    const chunkEvents = events.filter((e) => e.type === "node_chunk");
+    for (const e of chunkEvents) {
+      expect((e as { chunk: { type?: string } }).chunk.type).not.toBe("usage");
+    }
+  });
+
+  test("attaches usage to a failed result when the turn spent tokens before erroring", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "usage", usage: { inputTokens: 9, outputTokens: 1 } },
+        { type: "error", message: "provider blew up" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+
+    expect(result.status).toBe("failed");
+    expect(result.usage).toEqual({ inputTokens: 9, outputTokens: 1 });
+  });
+
+  test("leaves usage absent when the provider reports none", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "hi" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+
+    expect(result.status).toBe("succeeded");
+    expect(result.usage).toBeUndefined();
+  });
+});
+
+describe("prompt handler — usage sanitation at the provider boundary", () => {
+  test("strips unknown fields and floors float counts from a nonconforming provider", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        {
+          type: "usage",
+          usage: {
+            inputTokens: 421.7,
+            outputTokens: 37,
+            totalTokens: 458, // unknown field — must not reach the wire frame
+            contextWindow: 200000,
+          },
+        },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.usage).toEqual({ inputTokens: 421, outputTokens: 37, contextWindow: 200000 });
+  });
+
+  test("drops usage payloads missing required counts entirely", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "usage", usage: { tokens: 5 } },
+        { type: "usage", usage: [1, 2] },
+        { type: "usage", usage: "lots" },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.usage).toBeUndefined();
+  });
+});

@@ -822,6 +822,68 @@ nodes:
     expect(parts.map((p) => p.type)).toEqual(["text", "tool_use", "tool_result", "text"]);
   });
 
+  test("prompt node token usage persists onto the run detail; bash nodes stay null", async () => {
+    writeWorkflow(
+      "usagewf.yaml",
+      `name: usagewf
+description: bash + prompt with usage
+nodes:
+  - id: collect
+    bash: echo collected
+  - id: summarize
+    depends_on: [collect]
+    prompt: summarize $collect.output
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const spyProvider = {
+      async *sendQuery() {
+        yield { type: "text", content: "summary" };
+        yield {
+          type: "usage",
+          usage: { inputTokens: 420, outputTokens: 37, contextTokens: 457, contextWindow: 200000 },
+        };
+        yield { type: "done" };
+      },
+    };
+    const promptHandler = makePromptHandler({
+      getProvider: () => spyProvider,
+      getRegisteredTools: () => [],
+    });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore: createConversationStore(db),
+      defaultCwd: tmpDir,
+      promptHandler,
+    });
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/usagewf/runs", { inputs: {}, workingDir: tmpDir }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{
+        nodeId: string;
+        status: string;
+        usage: { inputTokens: number; outputTokens: number } | null;
+      }>;
+    };
+    expect(run.status).toBe("succeeded");
+    const summarize = run.nodes.find((n) => n.nodeId === "summarize");
+    expect(summarize?.usage).toEqual({
+      inputTokens: 420,
+      outputTokens: 37,
+      contextTokens: 457,
+      contextWindow: 200000,
+    });
+    const collect = run.nodes.find((n) => n.nodeId === "collect");
+    expect(collect?.usage).toBeNull();
+  });
+
   test("fail_on_tool_error fails the node when a tool errors, even on a normal text reply", async () => {
     writeWorkflow(
       "failtool.yaml",

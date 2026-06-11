@@ -1401,3 +1401,252 @@ describe("WebSocket upgrade gate", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("handleChatRequest — token usage", () => {
+  function makeFrame(conversationId: string, providerId: string, prompt: string): ClientFrame {
+    return {
+      version: WIRE_PROTOCOL_VERSION,
+      conversationId,
+      message: { type: "request", providerId, prompt },
+    };
+  }
+
+  test("streams the provider's usage chunk to the client", async () => {
+    const store = makeMemStore();
+    const conv = store.create({ providerId: "stub" });
+    const sent: ChatFrame[] = [];
+
+    await handleChatRequest(makeFrame(conv.id, "stub", "one two three"), {
+      send: (f) => sent.push(f),
+      store,
+      abortSignal: new AbortController().signal,
+    });
+
+    for (const f of sent) chatFrameSchema.parse(f);
+    const usageFrames = sent.filter(
+      (f) => f.event.type === "chunk" && f.event.payload.type === "usage",
+    );
+    expect(usageFrames).toHaveLength(1);
+    const event = usageFrames[0].event;
+    if (event.type === "chunk" && event.payload.type === "usage") {
+      expect(event.payload.usage).toEqual({
+        inputTokens: 3,
+        outputTokens: 3,
+        contextTokens: 6,
+        contextWindow: 8192,
+      });
+    }
+  });
+
+  test("persists usage on the assistant message and round-trips through the store", async () => {
+    const store = makeMemStore();
+    const conv = store.create({ providerId: "stub" });
+
+    await handleChatRequest(makeFrame(conv.id, "stub", "alpha beta"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+    });
+
+    const stored = store.get(conv.id);
+    expect(stored).toBeDefined();
+    const assistant = stored!.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant!.usage).toEqual({
+      inputTokens: 2,
+      outputTokens: 2,
+      contextTokens: 4,
+      contextWindow: 8192,
+    });
+    // The user row never carries usage.
+    const user = stored!.messages.find((m) => m.role === "user");
+    expect(user!.usage).toBeUndefined();
+    // And the full conversation still validates against the wire schema.
+    conversationSchema.parse(stored);
+  });
+});
+
+describe("handleChatRequest — usage-only turn persistence", () => {
+  test("a turn that reports usage but streams no content still persists an assistant row", async () => {
+    const spyId = `usage-only-${crypto.randomUUID().slice(0, 8)}`;
+    const capabilities: ProviderCapabilities = {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      models: ["m"],
+      defaultModel: "m",
+    };
+    registerProvider({
+      id: spyId,
+      displayName: "UsageOnly",
+      builtIn: false,
+      capabilities,
+      factory: () => ({
+        getType: () => "spy",
+        getCapabilities: () => capabilities,
+        listModels: async () => [{ id: "m" }],
+        async *sendQuery(): AsyncGenerator<MessageChunk> {
+          yield { type: "usage", usage: { inputTokens: 12, outputTokens: 0 } };
+          yield { type: "done" };
+        },
+      }),
+    });
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+
+    await handleChatRequest(
+      {
+        version: WIRE_PROTOCOL_VERSION,
+        conversationId: conv.id,
+        message: { type: "request", providerId: spyId, prompt: "spend tokens" },
+      },
+      { send: () => {}, store, abortSignal: new AbortController().signal },
+    );
+
+    const stored = store.get(conv.id);
+    const assistant = stored!.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant!.content).toBe("");
+    expect(assistant!.usage).toEqual({ inputTokens: 12, outputTokens: 0 });
+  });
+});
+
+describe("handleChatRequest — usage boundary hardening", () => {
+  function spyCapabilities(): ProviderCapabilities {
+    return {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      models: ["m"],
+      defaultModel: "m",
+    };
+  }
+
+  test("a malformed provider usage payload is coerced, not thrown by the strict frame parse", async () => {
+    const spyId = `junk-usage-${crypto.randomUUID().slice(0, 8)}`;
+    const capabilities = spyCapabilities();
+    registerProvider({
+      id: spyId,
+      displayName: "JunkUsage",
+      builtIn: false,
+      capabilities,
+      factory: () => ({
+        getType: () => "spy",
+        getCapabilities: () => capabilities,
+        listModels: async () => [{ id: "m" }],
+        async *sendQuery(): AsyncGenerator<MessageChunk> {
+          yield { type: "text", content: "fine answer" };
+          // Float count + extra key — the shape an out-of-tree provider
+          // might emit. Cast past the union: the runtime boundary is the test.
+          yield {
+            type: "usage",
+            usage: { inputTokens: 421.7, outputTokens: 37, totalTokens: 458 },
+          } as unknown as MessageChunk;
+          yield { type: "done" };
+        },
+      }),
+    });
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    const sent: ChatFrame[] = [];
+
+    await handleChatRequest(
+      {
+        version: WIRE_PROTOCOL_VERSION,
+        conversationId: conv.id,
+        message: { type: "request", providerId: spyId, prompt: "hi" },
+      },
+      { send: (f) => sent.push(f), store, abortSignal: new AbortController().signal },
+    );
+
+    // No error frame — the turn succeeded; every sent frame is wire-valid.
+    for (const f of sent) chatFrameSchema.parse(f);
+    expect(sent.some((f) => f.event.type === "error")).toBe(false);
+    const assistant = store.get(conv.id)!.messages.find((m) => m.role === "assistant");
+    expect(assistant!.truncated).toBeUndefined();
+    expect(assistant!.usage).toEqual({ inputTokens: 421, outputTokens: 37 });
+  });
+
+  test("usage delivered after a user abort still persists on the truncated row", async () => {
+    const spyId = `abort-usage-${crypto.randomUUID().slice(0, 8)}`;
+    const capabilities = spyCapabilities();
+    const abort = new AbortController();
+    registerProvider({
+      id: spyId,
+      displayName: "AbortUsage",
+      builtIn: false,
+      capabilities,
+      factory: () => ({
+        getType: () => "spy",
+        getCapabilities: () => capabilities,
+        listModels: async () => [{ id: "m" }],
+        async *sendQuery(): AsyncGenerator<MessageChunk> {
+          yield { type: "text", content: "partial" };
+          // Providers deliver accumulated usage after the drain on a Stop.
+          yield { type: "usage", usage: { inputTokens: 900, outputTokens: 12 } };
+        },
+      }),
+    });
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+
+    await handleChatRequest(
+      {
+        version: WIRE_PROTOCOL_VERSION,
+        conversationId: conv.id,
+        message: { type: "request", providerId: spyId, prompt: "hi" },
+      },
+      {
+        // Abort as soon as the first content frame lands — the usage chunk
+        // arrives while the signal is already aborted.
+        send: (f) => {
+          if (f.event.type === "chunk" && f.event.payload.type === "text") abort.abort();
+        },
+        store,
+        abortSignal: abort.signal,
+      },
+    );
+
+    const assistant = store.get(conv.id)!.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant!.truncated).toBe(true);
+    expect(assistant!.usage).toEqual({ inputTokens: 900, outputTokens: 12 });
+  });
+
+  test("a zero-spend context-only report does not mint an empty assistant row", async () => {
+    const spyId = `ctx-only-${crypto.randomUUID().slice(0, 8)}`;
+    const capabilities = spyCapabilities();
+    registerProvider({
+      id: spyId,
+      displayName: "CtxOnly",
+      builtIn: false,
+      capabilities,
+      factory: () => ({
+        getType: () => "spy",
+        getCapabilities: () => capabilities,
+        listModels: async () => [{ id: "m" }],
+        async *sendQuery(): AsyncGenerator<MessageChunk> {
+          yield {
+            type: "usage",
+            usage: { inputTokens: 0, outputTokens: 0, contextTokens: 900, contextWindow: 64000 },
+          };
+          yield { type: "done" };
+        },
+      }),
+    });
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+
+    await handleChatRequest(
+      {
+        version: WIRE_PROTOCOL_VERSION,
+        conversationId: conv.id,
+        message: { type: "request", providerId: spyId, prompt: "hi" },
+      },
+      { send: () => {}, store, abortSignal: new AbortController().signal },
+    );
+
+    const messages = store.get(conv.id)!.messages;
+    expect(messages.filter((m) => m.role === "assistant")).toHaveLength(0);
+  });
+});

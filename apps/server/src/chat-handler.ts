@@ -14,6 +14,7 @@ import {
   type ClientFrame,
   chatFrameSchema,
   clientFrameSchema,
+  coerceTokenUsage,
   DEFAULT_PROJECT_NAME,
   inferToolFamily,
   type MessageChunk,
@@ -23,6 +24,7 @@ import {
   type RecallResponse,
   registeredToolInfoSchema,
   renameConversationBodySchema,
+  type TokenUsage,
   type ToolDefinition,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
@@ -381,6 +383,10 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // tool_use / tool_result become their own. Thinking chunks excluded.
   const acc = createContentPartsAccumulator();
   let streamFailed = false;
+  // Providers emit at most one usage chunk per turn, at stream end; captured
+  // here and persisted on the assistant row (the chunk also streams to the
+  // client so the live UI updates without a refetch).
+  let turnUsage: TokenUsage | undefined;
 
   // Harness-owned tools (workflow_* and, below, note_project) are authoritative:
   // a rib that registers a colliding name must not shadow them, and the SDK
@@ -459,6 +465,21 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       ...(allTools.length > 0 ? { tools: allTools } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     })) {
+      // Usage is handled BEFORE the abort check — providers deliver it after
+      // the drain on a user Stop, and it must reach the persisted row. It is
+      // also coerced rather than forwarded raw: sendFrame strict-parses every
+      // frame, so an out-of-tree provider's malformed payload would otherwise
+      // throw mid-stream and fail a turn that succeeded.
+      if (chunk.type === "usage") {
+        const coerced = coerceTokenUsage(chunk.usage);
+        if (coerced !== undefined) {
+          turnUsage = coerced;
+          if (!deps.abortSignal.aborted) {
+            deps.send(chunkFrame(conversationId, { type: "usage", usage: coerced }));
+          }
+        }
+        continue;
+      }
       if (deps.abortSignal.aborted) return;
       if (chunk.type === "done") continue;
       acc.ingest(chunk);
@@ -475,7 +496,15 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     // these rows.
     const assistantContent = acc.text();
     const contentParts = acc.parts();
-    const hasPersistable = assistantContent.length > 0 || contentParts.length > 0;
+    // Usage alone is persistable only when it carries real spend: an errored
+    // turn that streamed no content still spent tokens, and dropping the row
+    // would shrink session totals on reload. A context-only zero-total report
+    // adds nothing to any rollup, so it doesn't justify minting an empty
+    // assistant bubble.
+    const hasPersistable =
+      assistantContent.length > 0 ||
+      contentParts.length > 0 ||
+      (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0);
     if (hasPersistable) {
       const truncated = deps.abortSignal.aborted || streamFailed;
       deps.store.appendMessage(conversationId, {
@@ -484,6 +513,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         content: assistantContent,
         ...(contentParts.length > 0 ? { contentParts } : {}),
         ...(truncated ? { truncated: true } : {}),
+        ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
         createdAt: new Date().toISOString(),
       });
     }

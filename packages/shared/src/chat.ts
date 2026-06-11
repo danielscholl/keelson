@@ -13,7 +13,10 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // Contract schema marker shared by /api/health, /api/config, and the CLI's
 // `version` command. Bump on any breaking change to the chat / workflow /
 // tools schemas in this package.
-export const SCHEMA_VERSION = "0.1" as const;
+// 0.2: token usage — new `usage` MessageChunk variant, Message.usage,
+// NodeOutputRow.usage, node_done frame usage. Pre-0.2 clients strict-reject
+// frames carrying these.
+export const SCHEMA_VERSION = "0.2" as const;
 
 // Copilot reasoning tier. Sibling of `thinking` (Anthropic's boolean
 // adaptive-thinking) rather than a polymorphic merge — both providers stream
@@ -21,10 +24,74 @@ export const SCHEMA_VERSION = "0.1" as const;
 export const reasoningEffortLevelSchema = z.enum(["none", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffortLevel = z.infer<typeof reasoningEffortLevelSchema>;
 
+// Normalized per-turn token usage. Two distinct measures live here and must
+// never be conflated: inputTokens/outputTokens are TURN TOTALS (summed across
+// the turn's API calls — what the turn cost), while contextTokens/contextWindow
+// describe CONTEXT FILL (input-side tokens of the turn's final API call vs the
+// model's window — what the next turn starts from). Fields are optional where
+// a provider may not report them; emitters omit the whole object rather than
+// fabricating zeros — except context-only reporters (e.g. Copilot when only
+// session.usage_info fires), which carry real context fields alongside zero
+// totals; display surfaces gate ↑/↓ rendering on a non-zero total for that
+// case.
+export const tokenUsageSchema = z
+  .object({
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cacheReadInputTokens: z.number().int().nonnegative().optional(),
+    cacheCreationInputTokens: z.number().int().nonnegative().optional(),
+    contextTokens: z.number().int().nonnegative().optional(),
+    contextWindow: z.number().int().positive().optional(),
+  })
+  .strict();
+export type TokenUsage = z.infer<typeof tokenUsageSchema>;
+
+// Rebuilds a provider-supplied usage payload from known fields only, flooring
+// floats and dropping extras. Providers are pluggable, and raw payloads ride
+// strictly-validated wire frames — an unknown key or non-integer count from an
+// out-of-tree provider would otherwise fail the frame parse, not just the
+// field. Returns undefined (emit/persist nothing) when the required counts are
+// missing. packages/workflows keeps a dep-free structural mirror of this in
+// its prompt handler (sanitizeNodeUsage) — keep the two in lockstep.
+export function coerceTokenUsage(u: unknown): TokenUsage | undefined {
+  if (u === null || typeof u !== "object" || Array.isArray(u)) return undefined;
+  const rec = u as Record<string, unknown>;
+  const count = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
+  const inputTokens = count(rec.inputTokens);
+  const outputTokens = count(rec.outputTokens);
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const out: TokenUsage = { inputTokens, outputTokens };
+  const cacheRead = count(rec.cacheReadInputTokens);
+  if (cacheRead !== undefined) out.cacheReadInputTokens = cacheRead;
+  const cacheCreation = count(rec.cacheCreationInputTokens);
+  if (cacheCreation !== undefined) out.cacheCreationInputTokens = cacheCreation;
+  const contextTokens = count(rec.contextTokens);
+  if (contextTokens !== undefined) out.contextTokens = contextTokens;
+  const contextWindow = count(rec.contextWindow);
+  if (contextWindow !== undefined && contextWindow > 0) out.contextWindow = contextWindow;
+  return out;
+}
+
+// Hydrates a persisted usage_json column; degrades to undefined on malformed
+// rows so a bad write can't break conversation/run loads.
+export function parsePersistedTokenUsage(raw: string | null): TokenUsage | undefined {
+  if (raw === null) return undefined;
+  try {
+    const result = tokenUsageSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const messageChunkSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("system"), content: z.string() }).strict(),
   z.object({ type: z.literal("text"), content: z.string() }).strict(),
   z.object({ type: z.literal("thinking"), content: z.string() }).strict(),
+  // Emitted at most once per turn, at stream end, from the provider's final
+  // usage-bearing SDK event. Never accumulated across stream events.
+  z.object({ type: z.literal("usage"), usage: tokenUsageSchema }).strict(),
   z
     .object({
       type: z.literal("tool_use"),
@@ -85,6 +152,9 @@ export const messageSchema = z
     // UI marker for turns that ended without a clean `done` (abort or
     // provider error). Providers resume via providerSessionId, not these rows.
     truncated: z.boolean().optional(),
+    // Per-turn token usage on assistant rows; absent when the provider
+    // reported none.
+    usage: tokenUsageSchema.optional(),
     createdAt: z.string().datetime(),
   })
   .strict();

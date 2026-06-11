@@ -253,6 +253,16 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    description: "token usage: per-message and per-workflow-node usage_json",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE messages ADD COLUMN usage_json TEXT;
+        ALTER TABLE workflow_node_outputs ADD COLUMN usage_json TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
