@@ -134,10 +134,11 @@ export class PiProvider implements IAgentProvider {
       try {
         unsubscribe = session.subscribe((event) => {
           for (const chunk of mapPiEvent(event)) queue.push(chunk);
-          // pi signals end-of-turn with agent_end; close so the consumer ends
-          // even if prompt() is still settling its promise.
-          if (event.type === "agent_end") queue.close();
         });
+        // prompt() resolves only when the whole turn is done (including any pi
+        // auto-retry), so the finally below is the single, correct close point.
+        // Closing on an `agent_end` event would truncate a turn pi is about to
+        // retry (its session agent_end carries `willRetry`).
         await session.prompt(text);
       } catch (err) {
         terminalError = err instanceof Error ? err : new Error(String(err));
@@ -154,9 +155,15 @@ export class PiProvider implements IAgentProvider {
         if (options?.abortSignal?.aborted) break;
         yield chunk;
       }
-      await producer;
-      if (terminalError) {
-        yield { type: "error", message: (terminalError as Error).message };
+      // On abort, return without awaiting the turn: pi has no interrupt, so the
+      // producer only settles when prompt() finishes. It never rejects (all
+      // failures are captured into terminalError), so leaving it detached is
+      // safe and lets cancellation free the generator promptly.
+      if (!options?.abortSignal?.aborted) {
+        await producer;
+        if (terminalError) {
+          yield { type: "error", message: (terminalError as Error).message };
+        }
       }
     } finally {
       unsubscribe();

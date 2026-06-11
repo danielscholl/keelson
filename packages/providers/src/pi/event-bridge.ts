@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { TokenUsage } from "@keelson/shared";
+import { toTokenCount } from "../token-count.ts";
 import type { MessageChunk } from "../types.ts";
 
 // Loose view of pi's AgentSessionEvent — only the fields the bridge reads. The
@@ -17,6 +18,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
+function nonEmptyString(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
 function stringify(v: unknown): string {
   if (typeof v === "string") return v;
   if (v === undefined || v === null) return "";
@@ -28,17 +33,28 @@ function stringify(v: unknown): string {
 }
 
 // pi Usage { input, output, cacheRead, cacheWrite, ... } → keelson TokenUsage.
-// Cache fields are emitted only when positive so a cache-miss turn's 0 doesn't
-// render as a "Cache read 0" row (same gate the claude path applies).
+// Counts are sanitized through toTokenCount (drops non-numbers / negatives), and
+// when pi reports no usable count at all (e.g. an empty `{}`) we emit nothing
+// rather than a fabricated zero row. Cache fields are kept only when positive so
+// a cache-miss turn's 0 doesn't render as a "Cache read 0" row. Mirrors the
+// claude path's policy.
 function mapPiUsage(u: unknown): TokenUsage | undefined {
   if (!isRecord(u)) return undefined;
-  const input = typeof u.input === "number" ? u.input : 0;
-  const output = typeof u.output === "number" ? u.output : 0;
-  const usage: TokenUsage = { inputTokens: input, outputTokens: output };
-  if (typeof u.cacheRead === "number" && u.cacheRead > 0) usage.cacheReadInputTokens = u.cacheRead;
-  if (typeof u.cacheWrite === "number" && u.cacheWrite > 0) {
-    usage.cacheCreationInputTokens = u.cacheWrite;
+  const input = toTokenCount(u.input);
+  const output = toTokenCount(u.output);
+  const cacheRead = toTokenCount(u.cacheRead);
+  const cacheWrite = toTokenCount(u.cacheWrite);
+  if (
+    input === undefined &&
+    output === undefined &&
+    cacheRead === undefined &&
+    cacheWrite === undefined
+  ) {
+    return undefined;
   }
+  const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
+  if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
+  if (cacheWrite !== undefined && cacheWrite > 0) usage.cacheCreationInputTokens = cacheWrite;
   return usage;
 }
 
@@ -53,16 +69,20 @@ export function mapPiEvent(event: PiRawEvent): MessageChunk[] {
         ? mapAssistantEvent(event.assistantMessageEvent)
         : [];
     case "tool_execution_start": {
+      // Drop a call with no id: a tool_use without an id can never pair with its
+      // tool_result, so it would render an orphan row. pi always supplies one.
+      const id = nonEmptyString(event.toolCallId);
+      if (!id) return [];
       const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
-      const id = typeof event.toolCallId === "string" ? event.toolCallId : undefined;
       const args = isRecord(event.args) ? event.args : undefined;
-      const base: MessageChunk = id
-        ? { type: "tool_use", id, toolName }
-        : { type: "tool_use", toolName };
+      const base: MessageChunk = { type: "tool_use", id, toolName };
       return [args ? { ...base, toolInput: args } : base];
     }
     case "tool_execution_end": {
-      const toolUseId = typeof event.toolCallId === "string" ? event.toolCallId : "";
+      // toolUseId is required for pairing; skip an unpairable result rather than
+      // emit one with an empty id.
+      const toolUseId = nonEmptyString(event.toolCallId);
+      if (!toolUseId) return [];
       const chunk: MessageChunk = {
         type: "tool_result",
         toolUseId,

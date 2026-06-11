@@ -69,8 +69,9 @@ export function checkPiAuth(opts: CheckPiAuthOptions = {}): PiAuthStatus {
 // Default factory: drives the real pi SDK. The SDK is lazy-imported inside
 // createSession so a missing or broken pi install never crashes unrelated
 // commands, and so pi's own package.json self-read happens only when a turn
-// actually runs. This adapter is the one untestable seam — the chat path is
-// written against pi 0.79 and exercised with real pi credentials.
+// actually runs. This adapter is the one seam with no unit coverage: it is
+// written against pi 0.79.1 but the SDK-call path is not yet exercised live
+// (that needs real pi credentials).
 export class PiAgentSessionFactory implements PiSessionFactory {
   async createSession(params: PiCreateSessionParams): Promise<PiSession> {
     const sdk = await import("@earendil-works/pi-coding-agent");
@@ -101,6 +102,7 @@ async function resolveModel(ref: string): Promise<unknown | undefined> {
   if (slash <= 0) return undefined;
   const vendor = ref.slice(0, slash);
   const modelId = ref.slice(slash + 1);
+  if (!modelId) return undefined;
   try {
     const piai = await import("@earendil-works/pi-ai");
     const getModel = piai.getModel as (p: string, m: string) => unknown;

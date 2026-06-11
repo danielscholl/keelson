@@ -67,6 +67,27 @@ describe("mapPiEvent", () => {
     ]);
   });
 
+  test("done with an empty usage object emits no usage chunk (no fabricated zeros)", () => {
+    expect(
+      mapPiEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "done", message: { usage: {} } },
+      }),
+    ).toEqual([]);
+  });
+
+  test("done sanitizes non-numeric usage fields", () => {
+    expect(
+      mapPiEvent({
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "done",
+          message: { usage: { input: "12", output: 5, cacheRead: -3, cacheWrite: 0 } },
+        },
+      }),
+    ).toEqual([{ type: "usage", usage: { inputTokens: 0, outputTokens: 5 } }]);
+  });
+
   test("error without message uses a fallback string", () => {
     const out = mapPiEvent({
       type: "message_update",
@@ -107,6 +128,16 @@ describe("mapPiEvent", () => {
       isError: true,
     });
     expect(out).toEqual([{ type: "tool_result", toolUseId: "t1", content: "nope", isError: true }]);
+  });
+
+  test("tool events without a toolCallId are skipped (unpairable)", () => {
+    expect(mapPiEvent({ type: "tool_execution_start", toolName: "read", args: {} })).toEqual([]);
+    expect(
+      mapPiEvent({ type: "tool_execution_end", toolName: "read", result: "x", isError: false }),
+    ).toEqual([]);
+    expect(
+      mapPiEvent({ type: "tool_execution_start", toolCallId: "", toolName: "read", args: {} }),
+    ).toEqual([]);
   });
 
   test("unknown / ignored events map to nothing", () => {
@@ -172,7 +203,7 @@ describe("PiProvider", () => {
     expect(models.map((m) => m.id)).toEqual(PI_CAPABILITIES.models);
   });
 
-  test("streams text deltas then a usage chunk, ends on agent_end", async () => {
+  test("streams text deltas then a usage chunk; stream ends when prompt() resolves", async () => {
     const provider = new PiProvider({
       factory: fakeFactory([
         textDelta("Hello"),
@@ -184,7 +215,9 @@ describe("PiProvider", () => {
             message: { usage: { input: 4, output: 2, cacheRead: 0, cacheWrite: 0 } },
           },
         },
-        { type: "agent_end" },
+        // agent_end no longer closes the queue (pi's session agent_end carries
+        // willRetry); it must be a harmless no-op here.
+        { type: "agent_end", willRetry: false },
       ]),
     });
     const chunks = await collect(provider.sendQuery("hi", "/tmp"));
@@ -192,6 +225,24 @@ describe("PiProvider", () => {
       { type: "text", content: "Hello" },
       { type: "text", content: " world" },
       { type: "usage", usage: { inputTokens: 4, outputTokens: 2 } },
+    ]);
+  });
+
+  test("an agent_end with willRetry does not truncate the retried output", async () => {
+    const provider = new PiProvider({
+      factory: fakeFactory([
+        textDelta("partial"),
+        { type: "agent_end", willRetry: true },
+        textDelta(" retried answer"),
+        { type: "agent_end", willRetry: false },
+      ]),
+    });
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    // Both deltas survive — an early close on the first agent_end would drop the
+    // second.
+    expect(chunks).toEqual([
+      { type: "text", content: "partial" },
+      { type: "text", content: " retried answer" },
     ]);
   });
 
