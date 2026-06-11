@@ -1,0 +1,132 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License").
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
+import { resolveKeelsonHome } from "./paths.ts";
+
+const CONFIG_FILE_NAME = "config.json";
+
+// Canonical built-in provider ids, in registration order. The workflow
+// fallback ("first non-stub") and the default-provider pick both key off this
+// order, so keep stub first and real providers after it.
+export const BUILT_IN_PROVIDER_IDS = ["stub", "copilot", "claude"] as const;
+export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number];
+
+// Out-of-the-box enablement when neither KEELSON_PROVIDERS nor config.json says
+// otherwise: copilot is the default agent, stub stays as the offline/no-keys
+// safety net, claude is opt-in. A config `providers` map is merged over this.
+export const DEFAULT_PROVIDER_ENABLEMENT: Readonly<Record<string, boolean>> = {
+  stub: true,
+  copilot: true,
+  claude: false,
+};
+
+// Per-provider settings block. Only `model` is read today; the shape stays open
+// so a provider can grow settings without a config migration.
+const providerSettingsSchema = z.object({ model: z.string().optional() });
+
+const keelsonConfigSchema = z.object({
+  // Per-provider enable flags, merged over DEFAULT_PROVIDER_ENABLEMENT — a
+  // config need only list the providers it wants to flip.
+  providers: z.record(z.string(), z.boolean()).optional(),
+  // Preferred provider for new chats and the workflow fallback. Honored only
+  // when that provider is actually registered.
+  defaultProvider: z.string().optional(),
+  pi: providerSettingsSchema.optional(),
+});
+
+export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;
+
+// Read <home>/config.json (or KEELSON_CONFIG, when set). Tolerant by design: a
+// missing file, unreadable file, non-JSON body, or shape mismatch all degrade
+// to {} with a warning rather than throwing — config must never block boot.
+export function loadKeelsonConfig(home: string = resolveKeelsonHome()): KeelsonConfig {
+  const path = process.env.KEELSON_CONFIG?.trim() || join(home, CONFIG_FILE_NAME);
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.warn(`[keelson] ignoring ${path}: invalid JSON (${(err as Error).message}).`);
+    return {};
+  }
+  const result = keelsonConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    const where = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
+    console.warn(`[keelson] ignoring ${path}: ${issue?.message ?? "invalid shape"}${where}.`);
+    return {};
+  }
+  return result.data;
+}
+
+export interface ResolveEnabledProvidersOptions {
+  readonly config: KeelsonConfig;
+  // Raw KEELSON_PROVIDERS value. When set non-empty it is an exact override of
+  // the enabled list, ignoring config + defaults (back-compat + the test path).
+  readonly envProviders?: string;
+  // Ids the caller knows how to register, in canonical order. Output is a
+  // subset of this, preserving its order.
+  readonly known: readonly string[];
+  readonly onWarn?: (message: string) => void;
+}
+
+// Resolve which providers to register. Precedence: KEELSON_PROVIDERS env (exact
+// list) → config.providers merged over DEFAULT_PROVIDER_ENABLEMENT → defaults.
+export function resolveEnabledProviders(opts: ResolveEnabledProvidersOptions): string[] {
+  const warn = opts.onWarn ?? ((m: string) => console.warn(m));
+  const knownSet = new Set(opts.known);
+
+  const env = opts.envProviders?.trim();
+  if (env) {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const part of env.split(",")) {
+      const id = part.trim().toLowerCase();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      if (knownSet.has(id)) out.push(id);
+      else warn(`[keelson] KEELSON_PROVIDERS contains unknown provider '${id}'; ignoring.`);
+    }
+    return out;
+  }
+
+  const merged: Record<string, boolean> = { ...DEFAULT_PROVIDER_ENABLEMENT };
+  if (opts.config.providers) {
+    for (const [rawId, enabled] of Object.entries(opts.config.providers)) {
+      const id = rawId.trim().toLowerCase();
+      if (!knownSet.has(id)) {
+        warn(`[keelson] config.json providers names unknown provider '${rawId}'; ignoring.`);
+        continue;
+      }
+      merged[id] = enabled === true;
+    }
+  }
+  return opts.known.filter((id) => merged[id] === true);
+}
+
+// Pick the provider new chats and the workflow fallback default to. Honors
+// config.defaultProvider when that provider is actually registered, else
+// prefers copilot, then the first real (non-stub, non-workflow) provider, then
+// stub. Returns undefined only when nothing is registered.
+export function resolveDefaultProvider(
+  config: KeelsonConfig,
+  registeredIds: readonly string[],
+): string | undefined {
+  const ids = new Set(registeredIds);
+  const preferred = config.defaultProvider?.trim().toLowerCase();
+  if (preferred && ids.has(preferred)) return preferred;
+  if (ids.has("copilot")) return "copilot";
+  const realFirst = registeredIds.find((id) => id !== "stub" && id !== "workflow");
+  if (realFirst) return realFirst;
+  if (ids.has("stub")) return "stub";
+  return registeredIds[0];
+}

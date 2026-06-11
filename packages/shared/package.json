@@ -34,6 +34,11 @@
       "types": "./dist/chat.d.ts",
       "default": "./dist/chat.js"
     },
+    "./config": {
+      "bun": "./src/config.ts",
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
     "./exec": {
       "bun": "./src/exec.ts",
       "types": "./dist/exec.d.ts",

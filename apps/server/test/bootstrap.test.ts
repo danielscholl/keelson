@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   clearRegistry as clearProviderRegistry,
+  getProviderInfoList,
   type IAgentProvider,
   type MessageChunk,
   type ProviderCapabilities,
@@ -19,9 +20,9 @@ import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
 import { z } from "zod";
 import {
   bootstrapPromptHandler,
+  bootstrapProviders,
   bootstrapRibs,
   parsePromptTimeoutMs,
-  parseProviderList,
   parseToolDenylist,
   registerRibTools,
 } from "../src/bootstrap.ts";
@@ -472,34 +473,33 @@ describe("bootstrapRibs", () => {
   });
 });
 
-describe("parseProviderList", () => {
-  const ALL_BUILT_INS = ["stub", "copilot", "claude"];
+describe("bootstrapProviders", () => {
+  const envBefore = process.env.KEELSON_PROVIDERS;
+  const noCredential = async () => undefined;
+  const ids = () => getProviderInfoList().map((p) => p.id);
 
-  test("unset / empty returns all built-ins", () => {
-    expect(parseProviderList(undefined)).toEqual(ALL_BUILT_INS);
-    expect(parseProviderList("")).toEqual(ALL_BUILT_INS);
-    expect(parseProviderList("   ")).toEqual(ALL_BUILT_INS);
+  beforeEach(() => clearProviderRegistry());
+  afterEach(() => {
+    clearProviderRegistry();
+    if (envBefore === undefined) delete process.env.KEELSON_PROVIDERS;
+    else process.env.KEELSON_PROVIDERS = envBefore;
   });
 
-  test("single id returns just that provider", () => {
-    expect(parseProviderList("stub")).toEqual(["stub"]);
-    expect(parseProviderList("claude")).toEqual(["claude"]);
+  test("default set registers copilot + stub (claude opt-in) and defaults to copilot", () => {
+    delete process.env.KEELSON_PROVIDERS;
+    const res = bootstrapProviders({ getCredential: noCredential });
+    expect(ids()).toContain("copilot");
+    expect(ids()).toContain("stub");
+    expect(ids()).not.toContain("claude");
+    expect(res.defaultProvider).toBe("copilot");
   });
 
-  test("multiple ids preserve order", () => {
-    expect(parseProviderList("copilot,claude")).toEqual(["copilot", "claude"]);
-  });
-
-  test("unknown id is dropped with a warning, valid ones survive", () => {
-    expect(parseProviderList("stub,nope")).toEqual(["stub"]);
-  });
-
-  test("case-insensitive match", () => {
-    expect(parseProviderList("STUB,Copilot")).toEqual(["stub", "copilot"]);
-  });
-
-  test("duplicates collapse to one entry", () => {
-    expect(parseProviderList("stub,stub")).toEqual(["stub"]);
+  test("KEELSON_PROVIDERS overrides to exactly the listed set", () => {
+    process.env.KEELSON_PROVIDERS = "claude";
+    const res = bootstrapProviders({ getCredential: noCredential });
+    // 'workflow' is the always-on synthetic provider; ignore it for the set check.
+    expect(ids().filter((id) => id !== "workflow")).toEqual(["claude"]);
+    expect(res.defaultProvider).toBe("claude");
   });
 });
 

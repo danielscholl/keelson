@@ -1,0 +1,94 @@
+---
+title: Configuration
+description: Choose which providers the harness loads and which one chat defaults to, with a config file or environment variables.
+sidebar:
+  order: 2
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Keelson reads its settings from one file in your home directory and a handful of
+`KEELSON_*` environment variables. The most common thing you will set is which
+agent providers load and which one new chats default to.
+
+## The config file
+
+Settings live in `config.json` under the keelson home, which is `~/.keelson` by
+default. It is plain JSON, optional, and read at server boot. A missing or
+malformed file is ignored with a warning, so a typo never blocks startup.
+
+```json
+// ~/.keelson/config.json
+{
+  "providers": {
+    "copilot": true,
+    "claude": true
+  },
+  "defaultProvider": "claude"
+}
+```
+
+| Key | Type | What it does |
+|---|---|---|
+| `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. |
+| `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. |
+
+The built-in provider ids are `copilot`, `claude`, and `stub` (the offline echo
+provider). Out of the box, **copilot and stub load and claude is off**, so a
+fresh install defaults to Copilot. Flip the ones you want:
+
+```json
+// Claude only
+{
+  "providers": { "copilot": false, "claude": true }
+}
+```
+
+<Aside type="note" title="Where home resolves">
+The keelson home is `KEELSON_HOME` if set, otherwise the first `.keelson/`
+directory found walking up from the working directory (the monorepo dev case),
+otherwise `~/.keelson`. Point `KEELSON_CONFIG` at a file to override the config
+path directly.
+</Aside>
+
+## Precedence
+
+A provider is enabled by the first of these that has an opinion:
+
+1. `KEELSON_PROVIDERS`, a comma-separated list, when set. It is an exact
+   override: only the providers you name load, ignoring the config file.
+2. The `providers` map in `config.json`.
+3. The built-in defaults (copilot and stub on, claude off).
+
+So `KEELSON_PROVIDERS=stub` gives you an offline run with no keys regardless of
+what `config.json` says, and the config file is the durable setting for everyday
+use.
+
+## Environment variables
+
+The config file covers providers; these variables cover the rest and override
+the matching config value when set.
+
+| Variable | Default | What it controls |
+|---|---|---|
+| `KEELSON_HOME` | `~/.keelson` | The keelson home directory (db, workflows, config). |
+| `KEELSON_CONFIG` | `<home>/config.json` | Path to the config file. |
+| `KEELSON_PROVIDERS` | unset | Exact list of providers to load. Overrides the config file. |
+| `KEELSON_WORKFLOW_PROVIDER` | first real provider | Provider that backs workflow `prompt` nodes. |
+| `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
+| `KEELSON_WORKSPACE` | `~/keelson` | Root for project workspaces. |
+| `KEELSON_BASH` | auto-detected | Path to a POSIX shell for `bash` workflow nodes (Windows). |
+
+## Confirm what loaded
+
+`keelson doctor` reports the resolved set under the auth category, so you can
+check the config took effect:
+
+```text
+auth
+  ok   keyring round-trip   service=keelson
+  ok   providers            enabled=stub, claude; default=claude (source: config.json)
+```
+
+The `source` tells you where the decision came from: `KEELSON_PROVIDERS`,
+`config.json`, or `defaults`.

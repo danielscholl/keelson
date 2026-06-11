@@ -60,6 +60,21 @@ Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
 credentials. `keelson service` (no subcommand) runs in the foreground instead;
 `keelson service stop` shuts the background server down.
 
+By default Keelson loads Copilot (plus the offline `stub`) and leaves Claude
+opt-in. Pick which providers load and which one chat defaults to in
+`~/.keelson/config.json`:
+
+```json
+{
+  "providers": { "copilot": true, "claude": true },
+  "defaultProvider": "claude"
+}
+```
+
+`KEELSON_PROVIDERS` still overrides the file when set. See the
+[configuration guide](https://danielscholl.github.io/keelson/docs/guides/configuration/)
+for every setting and the `KEELSON_*` variables.
+
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and
 > Keelson auto-discovers its `bash.exe` (`KEELSON_BASH` overrides). The `prompt`,

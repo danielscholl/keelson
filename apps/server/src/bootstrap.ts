@@ -33,6 +33,12 @@ import type {
   WorkflowDiscoveryNotice,
   WorkflowSource,
 } from "@keelson/shared";
+import {
+  BUILT_IN_PROVIDER_IDS,
+  loadKeelsonConfig,
+  resolveDefaultProvider,
+  resolveEnabledProviders,
+} from "@keelson/shared/config";
 import { runJSON, runText } from "@keelson/shared/exec";
 import { projectWorkflowsDir } from "@keelson/shared/paths";
 import { getRegisteredTools, isRegisteredTool, registerTool } from "@keelson/skills";
@@ -67,13 +73,21 @@ export interface BootstrapProvidersResult {
   // credentials handler uses these to render CLI-aware sign-in surfaces.
   copilotAuthProbe?: CopilotAuthProbe;
   claudeAuthProbe?: ClaudeAuthProbe;
+  // The provider new chats and the workflow fallback default to. Undefined only
+  // when nothing chat-capable is registered.
+  defaultProvider?: string;
 }
 
-const BUILT_IN_IDS = ["stub", "copilot", "claude"] as const;
-type BuiltInId = (typeof BUILT_IN_IDS)[number];
-
 export function bootstrapProviders(options: BootstrapProvidersOptions): BootstrapProvidersResult {
-  const requested = parseProviderList(process.env.KEELSON_PROVIDERS);
+  // Precedence: KEELSON_PROVIDERS env → config.json `providers` map → defaults
+  // (copilot + stub on, claude opt-in). Resolution lives in @keelson/shared so
+  // the server and the CLI's in-process path register the identical set.
+  const config = loadKeelsonConfig();
+  const requested = resolveEnabledProviders({
+    config,
+    envProviders: process.env.KEELSON_PROVIDERS,
+    known: BUILT_IN_PROVIDER_IDS,
+  });
   const result: BootstrapProvidersResult = {};
   for (const id of requested) {
     switch (id) {
@@ -100,35 +114,11 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
   // Registered AFTER the selectable providers so it sits at the end of
   // getProviderInfoList() and isn't picked as a chat default.
   registerWorkflowProvider();
+  result.defaultProvider = resolveDefaultProvider(
+    config,
+    getProviderInfoList().map((p) => p.id),
+  );
   return result;
-}
-
-// Exported for tests; not public.
-export function parseProviderList(raw: string | undefined): BuiltInId[] {
-  // Unset / empty / whitespace-only → include all built-ins.
-  if (!raw || raw.trim() === "") return [...BUILT_IN_IDS];
-
-  const requested = raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0);
-
-  const out: BuiltInId[] = [];
-  const seen = new Set<string>();
-  for (const id of requested) {
-    if (seen.has(id)) continue;
-    seen.add(id);
-    if (isBuiltIn(id)) {
-      out.push(id);
-    } else {
-      console.warn(`[keelson] KEELSON_PROVIDERS contains unknown provider '${id}'; ignoring.`);
-    }
-  }
-  return out;
-}
-
-function isBuiltIn(id: string): id is BuiltInId {
-  return (BUILT_IN_IDS as readonly string[]).includes(id);
 }
 
 export interface BootstrapRibsOptions {
@@ -604,7 +594,17 @@ export function bootstrapPromptHandler(
     );
     return undefined;
   }
-  const requestedId = process.env.KEELSON_WORKFLOW_PROVIDER?.trim();
+  // Pin precedence: KEELSON_WORKFLOW_PROVIDER → config.json defaultProvider (when
+  // registered) → first non-stub. Keeps the workflow default aligned with the
+  // chat default a config sets.
+  const envProvider = process.env.KEELSON_WORKFLOW_PROVIDER?.trim();
+  const configDefault = loadKeelsonConfig().defaultProvider?.trim();
+  const requestedId =
+    envProvider && envProvider.length > 0
+      ? envProvider
+      : configDefault && isRegisteredProvider(configDefault)
+        ? configDefault
+        : undefined;
   let providerId: string;
   if (requestedId && requestedId.length > 0) {
     providerId = requestedId;

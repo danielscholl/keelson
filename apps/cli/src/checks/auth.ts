@@ -2,6 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import {
+  BUILT_IN_PROVIDER_IDS,
+  loadKeelsonConfig,
+  resolveDefaultProvider,
+  resolveEnabledProviders,
+} from "@keelson/shared/config";
 import type { RunText } from "./toolchain.ts";
 import type { CategoryResult, CheckResult } from "./types.ts";
 
@@ -67,9 +73,33 @@ const defaultKeyring: KeyringProbe = {
   },
 };
 
+// Which providers boot will register and where that decision came from. Pure
+// over config.json + KEELSON_PROVIDERS, so doctor reports it without booting.
+export interface ProviderSummary {
+  enabled: string[];
+  defaultProvider?: string;
+  source: "KEELSON_PROVIDERS" | "config.json" | "defaults";
+}
+
+function defaultProviderSummary(): ProviderSummary {
+  const config = loadKeelsonConfig();
+  const enabled = resolveEnabledProviders({
+    config,
+    envProviders: process.env.KEELSON_PROVIDERS,
+    known: BUILT_IN_PROVIDER_IDS,
+  });
+  const source = process.env.KEELSON_PROVIDERS?.trim()
+    ? "KEELSON_PROVIDERS"
+    : config.providers || config.defaultProvider
+      ? "config.json"
+      : "defaults";
+  return { enabled, defaultProvider: resolveDefaultProvider(config, enabled), source };
+}
+
 export interface AuthDeps {
   runText?: RunText;
   keyring?: KeyringProbe;
+  providerSummary?: () => ProviderSummary;
 }
 
 export async function runAuthCheck(deps: AuthDeps = {}): Promise<CategoryResult> {
@@ -87,6 +117,22 @@ export async function runAuthCheck(deps: AuthDeps = {}): Promise<CategoryResult>
           hint: "unlock the OS keychain (macOS Keychain Access / Linux Secret Service) — provider credentials won't load otherwise",
         },
   ];
+
+  const summary = (deps.providerSummary ?? defaultProviderSummary)();
+  checks.push(
+    summary.enabled.length > 0
+      ? {
+          name: "providers",
+          status: "ok",
+          detail: `enabled=${summary.enabled.join(", ")}; default=${summary.defaultProvider ?? "none"} (source: ${summary.source})`,
+        }
+      : {
+          name: "providers",
+          status: "warn",
+          detail: `none enabled (source: ${summary.source})`,
+          hint: 'enable a provider in ~/.keelson/config.json ("providers": { "copilot": true }) or set KEELSON_PROVIDERS',
+        },
+  );
 
   return { category: "auth", checks };
 }

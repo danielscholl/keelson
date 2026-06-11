@@ -54,6 +54,9 @@ export interface ChatRoutesOptions {
   // production, conversations resolve cwd via the linked project's rootPath
   // and fall back to the default project when projectId is omitted.
   projectsStore?: ProjectsStore;
+  // The provider the picker should preselect (config.defaultProvider → copilot
+  // → first real). Surfaced on GET /api/providers; absent when unresolved.
+  defaultProvider?: string;
 }
 
 const createConversationBodySchema = z
@@ -78,7 +81,12 @@ export function chatRoutes(
   workflowDeps: ChatRoutesWorkflowDeps,
   opts: ChatRoutesOptions = {},
 ): void {
-  app.get("/api/providers", (c) => c.json({ providers: getProviderInfoList() }));
+  app.get("/api/providers", (c) =>
+    c.json({
+      providers: getProviderInfoList(),
+      ...(opts.defaultProvider ? { defaultProvider: opts.defaultProvider } : {}),
+    }),
+  );
 
   // Picker calls this on provider select. Providers never throw — signed-out
   // states return their curated fallback — so this just propagates.

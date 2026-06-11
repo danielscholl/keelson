@@ -113,9 +113,18 @@ export async function fetchConfig(): Promise<ServerConfig> {
   };
 }
 
-export async function fetchProviders(): Promise<ProviderInfo[]> {
-  const body = await apiRequest<{ providers: ProviderInfo[] }>("/api/providers");
-  return body.providers;
+export interface ProvidersResponse {
+  providers: ProviderInfo[];
+  // The provider the picker should preselect; null when the server didn't
+  // resolve one (e.g. nothing chat-capable registered).
+  defaultProvider: string | null;
+}
+
+export async function fetchProviders(): Promise<ProvidersResponse> {
+  const body = await apiRequest<{ providers: ProviderInfo[]; defaultProvider?: string }>(
+    "/api/providers",
+  );
+  return { providers: body.providers, defaultProvider: body.defaultProvider ?? null };
 }
 
 export async function fetchProviderModels(providerId: string): Promise<ModelInfo[]> {
