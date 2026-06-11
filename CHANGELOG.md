@@ -3,6 +3,23 @@
 All notable changes to Keelson are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] — 2026-06-11 — Multi-turn chat session continuity
+
+Follow-up turns in chat lost all prior context — drafting a workflow and then
+replying "yes, save it" answered "I don't have context on what you'd like to
+save." Conversations now carry forward across turns.
+
+### Fixed
+
+- **Provider session is persisted and resumed across turns.** The chat handler
+  passed a resume id to the provider but never captured the one the provider
+  created, so every turn opened a fresh session with no history. Providers now
+  surface their session id through a new `onSessionId` callback, and the handler
+  persists it and resumes it on the next turn. Both the resume and the write are
+  gated on the turn's provider matching the conversation's, so a mid-thread
+  provider swap can't cross-resume or overwrite the stored session. Copilot and
+  Claude now advertise `sessionResume: true`.
+
 ## [0.2.0] — 2026-06-11 — Project-scoped workflows and chat authoring
 
 Workflows now come in two scopes, and the chat agent can write them. Each
