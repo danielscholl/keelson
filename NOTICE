@@ -5,6 +5,11 @@ This product includes software developed at Anthropic (Claude Agent SDK),
 GitHub (Copilot SDK), and OpenAI (Codex SDK), used under the terms of their
 respective licenses.
 
+The interactive chat TUI in `apps/cli` depends on @earendil-works/pi-tui by
+Mario Zechner (https://github.com/badlogic/pi-mono, MIT License), and its
+interaction design is modeled on the pi coding agent's interactive mode from
+the same project.
+
 ==============================================================================
 Concepts from: Archon (packages/workflows/src/schema, executor design)
 ==============================================================================

@@ -40,17 +40,24 @@ const ZOD_RANGE = SHARED_PKG.dependencies.zod;
 const PROVIDERS_PKG = JSON.parse(
   readFileSync(join(ROOT, "packages", "providers", "package.json"), "utf8"),
 ) as { dependencies: Record<string, string> };
+const CLI_PKG = JSON.parse(readFileSync(join(ROOT, "apps", "cli", "package.json"), "utf8")) as {
+  dependencies: Record<string, string>;
+};
 const CLAUDE_SDK_RANGE = PROVIDERS_PKG.dependencies["@anthropic-ai/claude-agent-sdk"];
 const COPILOT_SDK_RANGE = PROVIDERS_PKG.dependencies["@github/copilot-sdk"];
 const PI_SDK_RANGE = PROVIDERS_PKG.dependencies["@earendil-works/pi-coding-agent"];
 const PI_AI_RANGE = PROVIDERS_PKG.dependencies["@earendil-works/pi-ai"];
 const CODEX_SDK_RANGE = PROVIDERS_PKG.dependencies["@openai/codex-sdk"];
+const PI_TUI_RANGE = CLI_PKG.dependencies["@earendil-works/pi-tui"];
 // A missing range would be dropped by JSON.stringify below, silently shipping a
 // manifest without the SDK while the bundle still marks it external.
 if (!CLAUDE_SDK_RANGE || !COPILOT_SDK_RANGE || !PI_SDK_RANGE || !PI_AI_RANGE || !CODEX_SDK_RANGE) {
   throw new Error(
     "packages/providers/package.json must declare @anthropic-ai/claude-agent-sdk, @github/copilot-sdk, @earendil-works/pi-coding-agent, @earendil-works/pi-ai, and @openai/codex-sdk dependencies",
   );
+}
+if (!PI_TUI_RANGE) {
+  throw new Error("apps/cli/package.json must declare @earendil-works/pi-tui");
 }
 const REPO = "danielscholl/keelson";
 // The starter-asset dirs shipped in the cli tarball and seeded into a fresh home
@@ -76,13 +83,15 @@ mkdirSync(join(CLI_PKG_DIR, "dist"), { recursive: true });
 //    binary, copilot-sdk resolves the @github/copilot CLI it spawns,
 //    pi-coding-agent reads its own package.json at init, and codex-sdk resolves
 //    its per-platform native codex binary), so inlining them breaks that
-//    resolution and chat fails on those providers.
+//    resolution and chat fails on those providers. pi-tui is external for the
+//    same reason: it loads its optional darwin native module relative to its
+//    own module path.
 console.log("[release] bundling @keelson/cli");
 await $`bun build ${join(ROOT, "apps/cli/bin/keelson.ts")} --target=bun --outfile ${join(
   CLI_PKG_DIR,
   "dist",
   "keelson.js",
-)} --external @keelson/shared --external zod --external @napi-rs/keyring --external @anthropic-ai/claude-agent-sdk --external @github/copilot-sdk --external @earendil-works/pi-coding-agent --external @earendil-works/pi-ai --external @openai/codex-sdk`;
+)} --external @keelson/shared --external zod --external @napi-rs/keyring --external @anthropic-ai/claude-agent-sdk --external @github/copilot-sdk --external @earendil-works/pi-coding-agent --external @earendil-works/pi-ai --external @openai/codex-sdk --external @earendil-works/pi-tui`;
 
 // 2. CLI release manifest. shared is an optional peer (the home provides it);
 //    keyring is a real native dep bun fetches per-platform; the provider SDKs
@@ -98,6 +107,7 @@ const cliPkg = {
     "@anthropic-ai/claude-agent-sdk": CLAUDE_SDK_RANGE,
     "@earendil-works/pi-ai": PI_AI_RANGE,
     "@earendil-works/pi-coding-agent": PI_SDK_RANGE,
+    "@earendil-works/pi-tui": PI_TUI_RANGE,
     "@github/copilot-sdk": COPILOT_SDK_RANGE,
     "@napi-rs/keyring": "1.3.0",
     "@openai/codex-sdk": CODEX_SDK_RANGE,

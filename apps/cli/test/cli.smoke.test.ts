@@ -99,18 +99,27 @@ describe("keelson CLI smoke", () => {
     expect(envelope.code).toBe("commander.unknownCommand");
   });
 
-  test("missing required arg exits 2 with bad-args envelope in JSON mode", async () => {
+  // `chat` with no message opens the interactive TUI on a TTY; spawned with
+  // pipes (no TTY) or under --json the entry must reject instead of hanging
+  // on a TUI that can't render.
+  test("chat with no message in JSON mode exits 2 (interactive is TTY-only)", async () => {
     const { stdout, exitCode } = await runCli(["--json", "chat"]);
     expect(exitCode).toBe(2);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(false);
-    expect(envelope.code).toBe("commander.missingArgument");
+    expect(envelope.code).toBe("BAD_INPUTS");
+    expect(envelope.error).toContain("interactive mode is TTY-only");
   });
 
-  test("missing required arg in human mode still exits 2", async () => {
+  test("chat with no message without a TTY exits 2", async () => {
     const { stderr, exitCode } = await runCli(["chat"]);
     expect(exitCode).toBe(2);
-    expect(stderr).toContain("missing required argument");
+    expect(stderr).toContain("chat <message> is required");
+  });
+
+  test("chat with a blank message still exits 2", async () => {
+    const { exitCode } = await runCli(["chat", "   "]);
+    expect(exitCode).toBe(2);
   });
 
   test("--json with no command emits a structured help envelope", async () => {
@@ -234,7 +243,7 @@ describe("keelson CLI smoke", () => {
     expect(exitCode).toBe(2);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(false);
-    expect(envelope.code).toBe("commander.missingArgument");
+    expect(envelope.code).toBe("BAD_INPUTS");
   });
 
   test("-p after a subcommand exits 2 instead of being silently swallowed", async () => {
