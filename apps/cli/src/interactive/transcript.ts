@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { Markdown, Text } from "@earendil-works/pi-tui";
+import { type Component, Markdown, Text } from "@earendil-works/pi-tui";
 import type { MessageChunk } from "@keelson/shared";
 import { brass, dim, italic, markdownTheme, red } from "./theme.ts";
 
@@ -30,7 +30,7 @@ export function summarizeToolResult(content: string, isError?: boolean): string 
 // Structural slice of pi-tui's TUI that the turn view appends to; tests pass
 // a recording fake instead of a live terminal.
 export interface TranscriptSurface {
-  addChild(component: { render(width: number): string[] }): void;
+  addChild(component: Component): void;
   requestRender(): void;
 }
 

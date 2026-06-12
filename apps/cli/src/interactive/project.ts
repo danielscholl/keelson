@@ -97,3 +97,14 @@ export function detectGitRoot(cwd: string): string | null {
   const root = res.stdout.toString().trim();
   return root.length > 0 ? root : null;
 }
+
+export function detectGitBranch(cwd: string): string | null {
+  const res = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd,
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  if (res.exitCode !== 0) return null;
+  const branch = res.stdout.toString().trim();
+  return branch.length > 0 ? branch : null;
+}
