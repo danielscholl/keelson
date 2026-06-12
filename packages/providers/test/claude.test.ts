@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { z } from "zod";
 import type {
   ClaudeQueryOptions,
@@ -19,6 +19,7 @@ import {
   CLAUDE_CAPABILITIES,
   CLAUDE_CREDENTIAL_SERVICE_ID,
   CLAUDE_DEFAULT_MODEL,
+  type ClaudeCliRunner,
   ClaudeProvider,
   ClaudeQueryFactory,
   clearRegistry,
@@ -26,6 +27,22 @@ import {
   isRegisteredProvider,
   registerClaudeProvider,
 } from "../src/index.ts";
+
+// claude auth status --json runner stub. Captures the env it was handed so a
+// test can assert the subscription probe strips ANTHROPIC_API_KEY.
+function fakeCliRunner(
+  body: Record<string, unknown> | { fail: true },
+  calls?: { count: number; env?: Record<string, string> },
+): ClaudeCliRunner {
+  return async (env) => {
+    if (calls) {
+      calls.count++;
+      calls.env = env;
+    }
+    if ("fail" in body) return { exitCode: 1, stdout: "", stderr: "not logged in" };
+    return { exitCode: 0, stdout: JSON.stringify(body), stderr: "" };
+  };
+}
 
 // --- Mock SDK harness ---
 
@@ -191,13 +208,14 @@ describe("ClaudeProvider — identity", () => {
   });
 });
 
-describe("ClaudeProvider — credential modes", () => {
+describe("ClaudeProvider — credential modes (api-key)", () => {
   it("omits env when no API key is saved (CLI auth fallback)", async () => {
     const sdk = makeMockSdk({ scenario: pushSuccess });
     const loader = loaderFor(sdk);
     const provider = new ClaudeProvider({
       getCredential: async () => undefined,
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loader.load }),
+      authPreference: "api-key",
     });
     await drain(provider.sendQuery("hi", "/tmp"));
 
@@ -213,11 +231,147 @@ describe("ClaudeProvider — credential modes", () => {
     const provider = new ClaudeProvider({
       getCredential: async () => "sk-ant-xyz",
       queryFactory: new ClaudeQueryFactory({ sdkLoader: loader.load }),
+      authPreference: "api-key",
     });
     await drain(provider.sendQuery("hi", "/tmp"));
 
     const options = sdk.lastOptions();
     expect(options!.env).toEqual({ ANTHROPIC_API_KEY: "sk-ant-xyz" });
+  });
+});
+
+describe("ClaudeProvider — subscription preference", () => {
+  // Set an ambient key so "stripped" is observable, restored after each test.
+  let savedKey: string | undefined;
+  beforeEach(() => {
+    savedKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-ambient";
+  });
+  afterEach(() => {
+    if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = savedKey;
+  });
+
+  it("auto: uses the subscription (strips the key) when one is detected", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "sk-ant-saved",
+      queryFactory: new ClaudeQueryFactory({
+        sdkLoader: loaderFor(sdk).load,
+        cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: "max" }),
+      }),
+      // authPreference defaults to "auto"
+    });
+    await drain(provider.sendQuery("hi", "/tmp"));
+
+    const options = sdk.lastOptions();
+    // Subscription wins over the saved token; the key is absent from the spawn.
+    expect(options!.env).toBeDefined();
+    expect(options!.env?.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("auto: falls back to the API key when no subscription is detected", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "sk-ant-saved",
+      queryFactory: new ClaudeQueryFactory({
+        sdkLoader: loaderFor(sdk).load,
+        cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: null }),
+      }),
+    });
+    await drain(provider.sendQuery("hi", "/tmp"));
+
+    expect(sdk.lastOptions()!.env).toEqual({ ANTHROPIC_API_KEY: "sk-ant-saved" });
+  });
+
+  it("auto: falls back to the API key when the probe fails", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => undefined,
+      queryFactory: new ClaudeQueryFactory({
+        sdkLoader: loaderFor(sdk).load,
+        cliRunner: fakeCliRunner({ fail: true }),
+      }),
+    });
+    await drain(provider.sendQuery("hi", "/tmp"));
+
+    // No subscription, no saved token → env omitted (ambient key in effect).
+    expect(sdk.lastOptions()!.env).toBeUndefined();
+  });
+
+  it("subscription: forces the subscription route without probing", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const calls = { count: 0 };
+    const provider = new ClaudeProvider({
+      getCredential: async () => "sk-ant-saved",
+      queryFactory: new ClaudeQueryFactory({
+        sdkLoader: loaderFor(sdk).load,
+        cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: "max" }, calls),
+      }),
+      authPreference: "subscription",
+    });
+    await drain(provider.sendQuery("hi", "/tmp"));
+
+    expect(calls.count).toBe(0); // explicit mode skips detection
+    expect(sdk.lastOptions()!.env?.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("api-key: never strips even when a subscription exists", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const calls = { count: 0 };
+    const provider = new ClaudeProvider({
+      getCredential: async () => "sk-ant-saved",
+      queryFactory: new ClaudeQueryFactory({
+        sdkLoader: loaderFor(sdk).load,
+        cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: "max" }, calls),
+      }),
+      authPreference: "api-key",
+    });
+    await drain(provider.sendQuery("hi", "/tmp"));
+
+    expect(calls.count).toBe(0);
+    expect(sdk.lastOptions()!.env).toEqual({ ANTHROPIC_API_KEY: "sk-ant-saved" });
+  });
+
+  it("auto: probes once across turns (memoized)", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const calls = { count: 0 };
+    const provider = new ClaudeProvider({
+      getCredential: async () => undefined,
+      queryFactory: new ClaudeQueryFactory({
+        sdkLoader: loaderFor(sdk).load,
+        cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: "max" }, calls),
+      }),
+    });
+    await drain(provider.sendQuery("one", "/tmp"));
+    await drain(provider.sendQuery("two", "/tmp"));
+
+    expect(calls.count).toBe(1);
+  });
+});
+
+describe("ClaudeQueryFactory.detectSubscription", () => {
+  it("true when the key-stripped status reports a subscription", async () => {
+    const calls = { count: 0 };
+    const factory = new ClaudeQueryFactory({
+      cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: "max" }, calls),
+    });
+    expect(await factory.detectSubscription()).toBe(true);
+    // The probe runs against an ANTHROPIC_API_KEY-stripped env.
+    expect(calls.env).toBeDefined();
+    expect(calls.env?.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("false when logged in via API key (no subscriptionType)", async () => {
+    const factory = new ClaudeQueryFactory({
+      cliRunner: fakeCliRunner({ loggedIn: true, subscriptionType: null }),
+    });
+    expect(await factory.detectSubscription()).toBe(false);
+  });
+
+  it("false when the CLI is not logged in / fails", async () => {
+    const factory = new ClaudeQueryFactory({ cliRunner: fakeCliRunner({ fail: true }) });
+    expect(await factory.detectSubscription()).toBe(false);
   });
 });
 

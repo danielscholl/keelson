@@ -7,6 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { TokenUsage, ToolContext } from "@keelson/shared";
+import type { ClaudeAuthMode } from "@keelson/shared/config";
 import { ChunkQueue } from "../chunk-queue.ts";
 import { toTokenCount } from "../token-count.ts";
 import type {
@@ -73,15 +74,29 @@ export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>
 export interface ClaudeProviderOptions {
   getCredential: GetCredentialFn;
   queryFactory?: ClaudeQueryFactory;
+  // Credential preference; defaults to "auto" (prefer a Pro/Max subscription
+  // when one is detected, else fall back to the API key).
+  authPreference?: ClaudeAuthMode;
 }
 
 export class ClaudeProvider implements IAgentProvider {
   private readonly getCredential: GetCredentialFn;
   private readonly factory: ClaudeQueryFactory;
+  private readonly authPreference: ClaudeAuthMode;
 
   constructor(options: ClaudeProviderOptions) {
     this.getCredential = options.getCredential;
     this.factory = options.queryFactory ?? new ClaudeQueryFactory();
+    this.authPreference = options.authPreference ?? "auto";
+  }
+
+  // Whether this turn should strip the API key and bill the subscription:
+  // explicit modes are honored verbatim; "auto" prefers a detected subscription
+  // over any API key, else falls back to the key.
+  private preferSubscription(): Promise<boolean> {
+    if (this.authPreference === "subscription") return Promise.resolve(true);
+    if (this.authPreference === "api-key") return Promise.resolve(false);
+    return this.factory.detectSubscription();
   }
 
   getType(): string {
@@ -112,6 +127,11 @@ export class ClaudeProvider implements IAgentProvider {
     const token = await this.getCredential(CLAUDE_CREDENTIAL_SERVICE_ID);
     if (options?.abortSignal?.aborted) return;
 
+    // "auto" mode probes `claude auth status` (cached); subscription wins over
+    // any API key when present.
+    const preferSubscription = await this.preferSubscription();
+    if (options?.abortSignal?.aborted) return;
+
     const controller = new AbortController();
     const detachAbort = forwardAbort(options?.abortSignal, controller);
 
@@ -134,6 +154,7 @@ export class ClaudeProvider implements IAgentProvider {
     try {
       handle = await this.factory.createQuery({
         token,
+        preferSubscription,
         cwd,
         prompt,
         abortController: controller,

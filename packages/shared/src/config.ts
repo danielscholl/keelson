@@ -30,6 +30,18 @@ export const DEFAULT_PROVIDER_ENABLEMENT: Readonly<Record<string, boolean>> = {
 // so a provider can grow settings without a config migration.
 const providerSettingsSchema = z.object({ model: z.string().optional() });
 
+// How the claude provider chooses a credential. "auto" (default) prefers a
+// Pro/Max subscription when `claude auth status` reports one and falls back to
+// the API key otherwise; "subscription" / "api-key" pin one route. The provider
+// strips ANTHROPIC_API_KEY from just the spawned CLI's env to reach the
+// subscription, so this never requires unsetting the key globally.
+export const CLAUDE_AUTH_MODES = ["auto", "subscription", "api-key"] as const;
+export type ClaudeAuthMode = (typeof CLAUDE_AUTH_MODES)[number];
+
+const claudeSettingsSchema = providerSettingsSchema.extend({
+  auth: z.enum(CLAUDE_AUTH_MODES).optional(),
+});
+
 const keelsonConfigSchema = z.object({
   // Per-provider enable flags, merged over DEFAULT_PROVIDER_ENABLEMENT — a
   // config need only list the providers it wants to flip.
@@ -38,6 +50,7 @@ const keelsonConfigSchema = z.object({
   // when that provider is actually registered.
   defaultProvider: z.string().optional(),
   pi: providerSettingsSchema.optional(),
+  claude: claudeSettingsSchema.optional(),
 });
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;

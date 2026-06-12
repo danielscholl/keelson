@@ -11,8 +11,22 @@
 // so tests can pass any compatible shape via sdkLoader.
 
 import type { ToolContext } from "@keelson/shared";
+import { ensureSpawnPath } from "@keelson/shared/exec";
 import type { MessageChunk, ToolDefinition } from "../types.ts";
 import { buildSDKHooksFromYAML, mergeSDKHooks, type YAMLHookMatcher } from "./hooks-projection.ts";
+
+// A copy of the ambient env with ANTHROPIC_API_KEY removed. The Claude CLI/SDK
+// prefers an explicit ANTHROPIC_API_KEY over its stored OAuth login, so stripping
+// it from just the spawned process's env is what makes keelson reach the user's
+// Pro/Max subscription without them having to unset the key globally.
+function envWithoutAnthropicKey(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k === "ANTHROPIC_API_KEY" || v === undefined) continue;
+    env[k] = v;
+  }
+  return ensureSpawnPath(env);
+}
 
 // Single source of truth for the MCP server name we register our skill
 // catalog under (see options.mcpServers below). The SDK exposes registered
@@ -182,6 +196,9 @@ export interface ClaudeToolProjectionContext {
 
 export interface CreateQueryParams {
   token: string | undefined;
+  // When true, spawn the SDK with ANTHROPIC_API_KEY stripped from its env so the
+  // turn bills against the Claude subscription (OAuth) login, not an API key.
+  preferSubscription?: boolean;
   cwd: string;
   prompt: string;
   sessionId?: string;
@@ -302,23 +319,30 @@ export interface ClaudeCliAuthResult {
   authMethod?: string;
   email?: string;
   orgName?: string;
+  // "max" / "pro" / … when the active login is a Claude subscription; absent for
+  // an API-key login. Drives the "auto" auth mode's subscription detection.
+  subscriptionType?: string;
   error?: string;
 }
 
-// Pluggable so tests can inject a stub.
-export type ClaudeCliRunner = () => Promise<{
+// Pluggable so tests can inject a stub. `env`, when passed, replaces the child's
+// environment (the subscription probe hands an ANTHROPIC_API_KEY-stripped env so
+// `claude auth status` reports the OAuth login rather than the api-key view).
+export type ClaudeCliRunner = (env?: Record<string, string>) => Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
 }>;
 
-const defaultClaudeCliRunner: ClaudeCliRunner = async () => {
-  // Inherit env implicitly: handing Bun.spawn an explicit env (even
-  // process.env itself) bypasses its case-insensitive PATH lookup on Windows,
-  // where the search path is exposed as `Path`, and `claude` fails ENOENT.
+const defaultClaudeCliRunner: ClaudeCliRunner = async (env) => {
+  // Omit env to inherit implicitly: handing Bun.spawn an explicit env bypasses
+  // its case-insensitive PATH lookup on Windows (search path exposed as `Path`)
+  // and `claude` fails ENOENT. The subscription probe passes an explicit env
+  // already normalized through ensureSpawnPath.
   const proc = Bun.spawn(["claude", "auth", "status", "--json"], {
     stdout: "pipe",
     stderr: "pipe",
+    ...(env ? { env } : {}),
   });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -331,17 +355,37 @@ const defaultClaudeCliRunner: ClaudeCliRunner = async () => {
 export class ClaudeQueryFactory {
   private readonly loadSdk: ClaudeSdkLoader;
   private readonly cliRunner: ClaudeCliRunner;
+  // Memoizes the per-process subscription probe so the "auto" auth mode pays the
+  // `claude auth status` spawn once, not once per turn.
+  private subscriptionProbe: Promise<boolean> | null = null;
 
   constructor(options: ClaudeQueryFactoryOptions & { cliRunner?: ClaudeCliRunner } = {}) {
     this.loadSdk = options.sdkLoader ?? defaultSdkLoader;
     this.cliRunner = options.cliRunner ?? defaultClaudeCliRunner;
   }
 
+  // Status against the ambient env (api-key view when ANTHROPIC_API_KEY is set).
   // Normalized result regardless of failure mode.
-  async checkAuthStatus(): Promise<ClaudeCliAuthResult> {
+  checkAuthStatus(): Promise<ClaudeCliAuthResult> {
+    return this.runAuthStatus();
+  }
+
+  // True when a Pro/Max subscription login is usable. Probed with the API key
+  // stripped so the CLI reports the OAuth login rather than the api-key view;
+  // any failure (CLI missing, not logged in, parse error) resolves false so the
+  // caller falls back to the API key. Memoized per process.
+  detectSubscription(): Promise<boolean> {
+    this.subscriptionProbe ??= (async () => {
+      const res = await this.runAuthStatus(envWithoutAnthropicKey());
+      return res.loggedIn && res.subscriptionType !== undefined;
+    })();
+    return this.subscriptionProbe;
+  }
+
+  private async runAuthStatus(env?: Record<string, string>): Promise<ClaudeCliAuthResult> {
     let result: { exitCode: number; stdout: string; stderr: string };
     try {
-      result = await this.cliRunner();
+      result = await this.cliRunner(env);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { loggedIn: false, error: msg };
@@ -366,6 +410,9 @@ export class ClaudeQueryFactory {
       ...(typeof obj.authMethod === "string" ? { authMethod: obj.authMethod } : {}),
       ...(typeof obj.email === "string" ? { email: obj.email } : {}),
       ...(typeof obj.orgName === "string" ? { orgName: obj.orgName } : {}),
+      ...(typeof obj.subscriptionType === "string"
+        ? { subscriptionType: obj.subscriptionType }
+        : {}),
     };
   }
 
@@ -451,8 +498,13 @@ export class ClaudeQueryFactory {
       });
       options.mcpServers = { [MCP_SERVER_NAME]: serverInstance };
     }
-    // Omitting env lets the SDK fall back to `claude auth login` credentials.
-    if (params.token !== undefined) {
+    // Subscription route: hand the SDK a full env with ANTHROPIC_API_KEY removed
+    // so the spawned `claude` uses its OAuth (Pro/Max) login — no need for the
+    // operator to unset the key globally. Otherwise a saved keelson token injects
+    // the key, and absent that, omitting env inherits the ambient credentials.
+    if (params.preferSubscription === true) {
+      options.env = envWithoutAnthropicKey();
+    } else if (params.token !== undefined) {
       options.env = { ANTHROPIC_API_KEY: params.token };
     }
     return sdk.query({ prompt: params.prompt, options });

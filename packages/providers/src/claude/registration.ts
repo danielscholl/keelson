@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import type { ClaudeAuthMode } from "@keelson/shared/config";
 import { isRegisteredProvider, registerProvider } from "../registry.ts";
 import { type ClaudeCliAuthResult, ClaudeQueryFactory } from "./factory.ts";
 import {
@@ -19,6 +20,8 @@ import {
 export interface RegisterClaudeProviderOptions {
   getCredential: GetCredentialFn;
   queryFactory?: ClaudeQueryFactory;
+  // Credential preference from config.claude.auth; defaults to "auto".
+  authPreference?: ClaudeAuthMode;
 }
 
 // Probe used by the credentials handler to render the Claude SignIn UI.
@@ -39,6 +42,7 @@ export function registerClaudeProvider(
   const factoryOptions: ClaudeProviderOptions = {
     getCredential: options.getCredential,
     queryFactory,
+    ...(options.authPreference !== undefined ? { authPreference: options.authPreference } : {}),
   };
   if (!isRegisteredProvider("claude")) {
     registerProvider({

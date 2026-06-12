@@ -105,6 +105,7 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
       case "claude": {
         const reg = registerClaudeProvider({
           getCredential: options.getCredential,
+          ...(config.claude?.auth !== undefined ? { authPreference: config.claude.auth } : {}),
         });
         result.claudeAuthProbe = reg.checkAuthStatus;
         break;
