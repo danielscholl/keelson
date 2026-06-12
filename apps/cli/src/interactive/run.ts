@@ -184,8 +184,8 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         }
       } catch (err) {
         dropLoader();
-        const message = err instanceof Error ? err.message : String(err);
-        tui.addChild(new Text(red(`✗ ${message}`), 1, 0));
+        const errText = err instanceof Error ? err.message : String(err);
+        tui.addChild(new Text(red(`✗ ${errText}`), 1, 0));
       } finally {
         currentAbort = null;
         busy = false;
