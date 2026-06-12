@@ -10,6 +10,7 @@ import type {
   ProviderCapabilities,
   SendQueryOptions,
 } from "../types.ts";
+import { type PiCatalogSource, realPiCatalogSource } from "./catalog.ts";
 import { mapPiEvent } from "./event-bridge.ts";
 import { PiAgentSessionFactory, type PiSession, type PiSessionFactory } from "./factory.ts";
 
@@ -69,16 +70,28 @@ export const PI_CAPABILITIES: ProviderCapabilities = {
   defaultModel: PI_DEFAULT_MODEL,
 };
 
+// Deep copy of the static baseline, returned when the dynamic catalog can't run.
+function curatedModels(): ModelInfo[] {
+  return PI_MODEL_CATALOG.map((m) => ({
+    ...m,
+    ...(m.supports ? { supports: { ...m.supports } } : {}),
+  }));
+}
+
 export interface PiProviderOptions {
   // Injected in tests; defaults to the real lazy-loaded pi SDK adapter.
   factory?: PiSessionFactory;
+  // Injected in tests; defaults to the real lazy-loaded pi SDK + auth read.
+  catalogSource?: PiCatalogSource;
 }
 
 export class PiProvider implements IAgentProvider {
   private readonly factory: PiSessionFactory;
+  private readonly catalogSource: PiCatalogSource;
 
   constructor(options: PiProviderOptions = {}) {
     this.factory = options.factory ?? new PiAgentSessionFactory();
+    this.catalogSource = options.catalogSource ?? realPiCatalogSource;
   }
 
   getType(): string {
@@ -89,11 +102,18 @@ export class PiProvider implements IAgentProvider {
     return PI_CAPABILITIES;
   }
 
+  // The picker's catalog: pi's real, per-vendor authenticated models (with a
+  // truthful metered/subscription billing tag). Falls back to the curated
+  // baseline when the source can't run — a missing pi install, an unreadable
+  // auth.json, or an empty result — so the picker is never left blank.
   async listModels(): Promise<ModelInfo[]> {
-    return PI_MODEL_CATALOG.map((m) => ({
-      ...m,
-      ...(m.supports ? { supports: { ...m.supports } } : {}),
-    }));
+    try {
+      const dynamic = await this.catalogSource();
+      if (dynamic.length > 0) return dynamic;
+    } catch {
+      // fall through to the curated baseline below
+    }
+    return curatedModels();
   }
 
   async *sendQuery(

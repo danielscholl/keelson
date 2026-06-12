@@ -6,7 +6,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MessageChunk } from "@keelson/shared";
+import type { MessageChunk, ModelInfo } from "@keelson/shared";
+import {
+  buildPiCatalog,
+  costTierFromOutput,
+  type PiAiLike,
+  type PiAuthStorageLike,
+} from "../src/pi/catalog.ts";
 import type { PiRawEvent } from "../src/pi/event-bridge.ts";
 import { mapPiEvent } from "../src/pi/event-bridge.ts";
 import type { PiCreateSessionParams, PiSession, PiSessionFactory } from "../src/pi/factory.ts";
@@ -197,9 +203,33 @@ describe("PiProvider", () => {
     expect(PI_CAPABILITIES.sessionResume).toBe(false);
   });
 
-  test("listModels returns the curated catalog and never throws", async () => {
-    const models = await new PiProvider({ factory: fakeFactory([]) }).listModels();
-    expect(models.length).toBeGreaterThan(0);
+  test("listModels returns the dynamic catalog from the injected source", async () => {
+    const dynamic: ModelInfo[] = [
+      { id: "anthropic/claude-opus-4.5", displayName: "Claude Opus 4.5", billing: "metered" },
+      { id: "github-copilot/gpt-5.5", displayName: "GPT-5.5", billing: "subscription" },
+    ];
+    const models = await new PiProvider({
+      factory: fakeFactory([]),
+      catalogSource: async () => dynamic,
+    }).listModels();
+    expect(models).toEqual(dynamic);
+  });
+
+  test("listModels falls back to the curated baseline when the source throws", async () => {
+    const models = await new PiProvider({
+      factory: fakeFactory([]),
+      catalogSource: async () => {
+        throw new Error("pi not installed");
+      },
+    }).listModels();
+    expect(models.map((m) => m.id)).toEqual(PI_CAPABILITIES.models);
+  });
+
+  test("listModels falls back to the curated baseline when the source is empty", async () => {
+    const models = await new PiProvider({
+      factory: fakeFactory([]),
+      catalogSource: async () => [],
+    }).listModels();
     expect(models.map((m) => m.id)).toEqual(PI_CAPABILITIES.models);
   });
 
@@ -330,5 +360,79 @@ describe("checkPiAuth", () => {
 
   test("reports unauthenticated when nothing is present", () => {
     expect(checkPiAuth({ env: {}, authFile: "/nope/auth.json" })).toEqual({ authenticated: false });
+  });
+});
+
+type FakeModel = {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  input: string[];
+  cost: { output: number };
+};
+
+const FAKE_MODELS: Record<string, FakeModel[]> = {
+  anthropic: [
+    {
+      id: "claude-opus-4.5",
+      name: "Claude Opus 4.5",
+      reasoning: true,
+      input: ["text", "image"],
+      cost: { output: 25 },
+    },
+  ],
+  "github-copilot": [
+    { id: "gpt-5.5", name: "GPT-5.5", reasoning: true, input: ["text"], cost: { output: 0 } },
+  ],
+  openai: [{ id: "gpt-4", name: "GPT-4", reasoning: false, input: ["text"], cost: { output: 60 } }],
+  unauthed: [
+    { id: "ghost", name: "Ghost", reasoning: false, input: ["text"], cost: { output: 1 } },
+  ],
+};
+
+// anthropic + openai resolve an env key; github-copilot is OAuth-only (no env
+// key); unauthed has neither, so it should be filtered out.
+const fakePiAi: PiAiLike = {
+  getProviders: () => ["anthropic", "github-copilot", "openai", "unauthed"],
+  getEnvApiKey: (p) => (p === "anthropic" || p === "openai" ? "sk-test" : undefined),
+  getModels: (p) => FAKE_MODELS[p] ?? [],
+};
+// Only github-copilot has a stored credential, and it's an OAuth subscription.
+const fakeAuth: PiAuthStorageLike = {
+  get: (p) => (p === "github-copilot" ? { type: "oauth" } : undefined),
+};
+
+describe("buildPiCatalog", () => {
+  test("includes only authenticated vendors (stored credential or env key)", () => {
+    const ids = buildPiCatalog(fakePiAi, fakeAuth).map((m) => m.id);
+    expect(ids).toEqual(["anthropic/claude-opus-4.5", "github-copilot/gpt-5.5", "openai/gpt-4"]);
+  });
+
+  test("tags stored OAuth as subscription and env/api-key as metered", () => {
+    const byId = new Map(buildPiCatalog(fakePiAi, fakeAuth).map((m) => [m.id, m]));
+    expect(byId.get("github-copilot/gpt-5.5")?.billing).toBe("subscription");
+    expect(byId.get("anthropic/claude-opus-4.5")?.billing).toBe("metered");
+    expect(byId.get("openai/gpt-4")?.billing).toBe("metered");
+  });
+
+  test("derives cost tier from output price and maps reasoning + vision", () => {
+    const byId = new Map(buildPiCatalog(fakePiAi, fakeAuth).map((m) => [m.id, m]));
+    const opus = byId.get("anthropic/claude-opus-4.5");
+    expect(opus?.costTier).toBe("high");
+    expect(opus?.displayName).toBe("Claude Opus 4.5");
+    expect(opus?.supports).toEqual({ thinking: true, vision: true });
+    // text-only, no reasoning → vision omitted, thinking false
+    expect(byId.get("openai/gpt-4")?.supports).toEqual({ thinking: false });
+    expect(byId.get("github-copilot/gpt-5.5")?.costTier).toBe("free");
+  });
+});
+
+describe("costTierFromOutput", () => {
+  test("buckets by USD per 1M output tokens", () => {
+    expect(costTierFromOutput(0)).toBe("free");
+    expect(costTierFromOutput(4)).toBe("low");
+    expect(costTierFromOutput(15)).toBe("mid");
+    expect(costTierFromOutput(25)).toBe("high");
+    expect(costTierFromOutput(60)).toBe("high");
   });
 });

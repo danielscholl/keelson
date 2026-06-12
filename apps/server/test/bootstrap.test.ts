@@ -485,11 +485,11 @@ describe("bootstrapProviders", () => {
     else process.env.KEELSON_PROVIDERS = envBefore;
   });
 
-  test("default set registers copilot + stub (claude opt-in) and defaults to copilot", () => {
+  test("default set registers copilot only (stub, claude opt-in) and defaults to copilot", () => {
     delete process.env.KEELSON_PROVIDERS;
     const res = bootstrapProviders({ getCredential: noCredential });
     expect(ids()).toContain("copilot");
-    expect(ids()).toContain("stub");
+    expect(ids()).not.toContain("stub");
     expect(ids()).not.toContain("claude");
     expect(res.defaultProvider).toBe("copilot");
   });

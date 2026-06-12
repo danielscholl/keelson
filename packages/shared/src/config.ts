@@ -16,11 +16,11 @@ export const BUILT_IN_PROVIDER_IDS = ["stub", "copilot", "claude", "pi"] as cons
 export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number];
 
 // Out-of-the-box enablement when neither KEELSON_PROVIDERS nor config.json says
-// otherwise: copilot is the default agent, stub stays as the offline/no-keys
-// safety net, claude and pi are opt-in. A config `providers` map is merged over
-// this.
+// otherwise: copilot is the default agent; stub (offline echo), claude, and pi
+// are opt-in. stub is off by default so a fresh install presents a real coding
+// agent, not the echo provider. A config `providers` map is merged over this.
 export const DEFAULT_PROVIDER_ENABLEMENT: Readonly<Record<string, boolean>> = {
-  stub: true,
+  stub: false,
   copilot: true,
   claude: false,
   pi: false,

@@ -35,8 +35,8 @@ so a typo never blocks startup.
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, and `stub` (the offline
-echo provider). Out of the box, **copilot and stub load; claude and pi are off**,
-so a fresh install defaults to Copilot. Flip the ones you want:
+echo provider). Out of the box, **only copilot loads; stub, claude, and pi are
+off**, so a fresh install defaults to Copilot. Flip the ones you want:
 
 ```jsonc
 // Claude only
@@ -59,7 +59,7 @@ A provider is enabled by the first of these that has an opinion:
 1. `KEELSON_PROVIDERS`, a comma-separated list, when set. It is an exact
    override: only the providers you name load, ignoring the config file.
 2. The `providers` map in `config.json`.
-3. The built-in defaults (copilot and stub on, claude off).
+3. The built-in defaults (copilot on; stub, claude, and pi off).
 
 So `KEELSON_PROVIDERS=stub` gives you an offline run with no keys regardless of
 what `config.json` says, and the config file is the durable setting for everyday

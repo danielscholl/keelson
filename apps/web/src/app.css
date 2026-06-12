@@ -2342,11 +2342,39 @@ button.tab:focus-visible {
 }
 
 .model-picker-popover-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--dim);
   padding: 6px 14px 4px;
+}
+
+.model-picker-popover-section-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+
+/* Sub-header inside a multi-vendor (pi) section: one row per vendor with a
+   model count, indented past the section title so the hierarchy reads. */
+.model-picker-popover-vendor-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  padding: 5px 14px 2px 18px;
+}
+
+.model-picker-popover-vendor-count {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
 }
 
 .model-picker-popover-section-rows {
@@ -2490,35 +2518,50 @@ button.tab:focus-visible {
   padding: 1px 6px;
   border-radius: 8px;
   letter-spacing: 0.02em;
-  border: 1px solid rgba(170, 160, 255, 0.12);
-  background: rgba(170, 160, 255, 0.06);
-  color: rgba(215, 210, 255, 0.55);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: color-mix(in srgb, var(--accent) 55%, var(--muted));
 }
 
 .model-picker-popover-pick-cost.cost-free {
-  border-color: rgba(120, 220, 160, 0.14);
-  background: rgba(120, 220, 160, 0.06);
-  color: rgba(170, 220, 180, 0.60);
+  border-color: color-mix(in srgb, var(--green) 26%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  color: color-mix(in srgb, var(--green) 60%, var(--muted));
 }
 
 .model-picker-popover-pick-cost.cost-low {
   /* Same tokens as the default — declared for explicitness so the
      low/mid/high progression reads in one place. */
-  border-color: rgba(170, 160, 255, 0.12);
-  background: rgba(170, 160, 255, 0.06);
-  color: rgba(215, 210, 255, 0.55);
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: color-mix(in srgb, var(--accent) 55%, var(--muted));
 }
 
 .model-picker-popover-pick-cost.cost-mid {
-  border-color: rgba(170, 160, 255, 0.18);
-  background: rgba(170, 160, 255, 0.08);
-  color: rgba(215, 210, 255, 0.62);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 65%, var(--muted));
 }
 
 .model-picker-popover-pick-cost.cost-high {
-  border-color: rgba(170, 160, 255, 0.24);
-  background: rgba(170, 160, 255, 0.10);
-  color: rgba(220, 215, 255, 0.70);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: color-mix(in srgb, var(--accent) 75%, var(--fg-strong));
+}
+
+/* Billing route. Amber sits apart from the purple cost family so "metered"
+   reads as a different axis than "expensive" — a model can be cheap and still
+   spend an API key. Only shown for metered (API-key) models; subscription and
+   unknown render nothing. */
+.model-picker-popover-pick-billing {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 1px 6px;
+  border-radius: 8px;
+  letter-spacing: 0.04em;
+  border: 1px solid color-mix(in srgb, var(--orange) 32%, transparent);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  color: color-mix(in srgb, var(--orange) 72%, var(--muted));
 }
 
 .model-picker-popover-empty {
