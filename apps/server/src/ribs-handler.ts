@@ -29,7 +29,7 @@ export interface RibsRoutesDeps {
 // GET /api/ribs + POST /api/ribs/:id/action. The SPA discovers active ribs and
 // their view descriptors here without an App.tsx edit. The action route is the
 // inbound half of the rib back-channel — loopback-trusted (guarded by the
-// /api/* CORS gate); the capability-token envelope is a later milestone.
+// /api/* CORS gate); there is no capability-token enforcement yet.
 export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
   const { manifests, probes, actionHandlers } = deps;
 

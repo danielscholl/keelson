@@ -117,7 +117,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
 
   // Stub provider is the deterministic fallback when nothing else is
   // registered. Real providers (claude / copilot) would need keychain
-  // bootstrap and are out of scope for C3's headless path — operators who
+  // bootstrap and are out of scope for the headless path — operators who
   // want them up should `keelson service` first so the run routes via HTTP.
   registerStubProvider();
   const providerId = opts.provider ?? "stub";

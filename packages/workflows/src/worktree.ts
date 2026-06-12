@@ -386,7 +386,7 @@ export function repoPathFromWorktree(worktreeDir: string): string | null {
 /**
  * List the worktrees registered under `repoPath`. Output is `git worktree
  * list --porcelain` parsed into `{ path, branch }` entries; useful for the
- * `keelson worktree prune` command (slice 4).
+ * `keelson worktree prune` command.
  */
 export async function listWorktrees(
   repoPath: string,

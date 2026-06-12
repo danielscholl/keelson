@@ -121,9 +121,37 @@ needed — explains *why*, not *what*; the diff already shows the what.
 - Keep PRs scoped to one thing. Split refactors out of feature work.
 - The PR description should answer: what changed, why now, how it was tested.
 - Don't add new abstractions ahead of a concrete second caller.
-- Don't add comments that narrate the bug fix — that belongs in the PR
-  description, not the source. Add a comment only when it captures
-  non-obvious *why* a reader would need.
+- Keep narration out of source — see [Comments](#comments). "What changed and
+  why" belongs in the PR description, not a code comment.
+
+## Comments
+
+Comments live in source long after the PR that motivated them merges. Default to
+**none** — add one only when it captures a non-obvious *why* a future reader
+needs: a hidden constraint, a workaround for a specific bug, a non-obvious order
+dependency, or an invariant that lives in another module. A well-named
+identifier already says *what*; a comment that restates the next line is noise.
+
+Do **not** write:
+
+- **Milestone or issue shorthand** — `#123`, `Slice 4`, `M7`, `C1`, `Tier-0`,
+  `Phase 4.5`, "later milestone", "follow-up slice". This is the most common
+  drift we clean up: point-in-time narration that goes stale the moment the
+  milestone ships. If the *why* is real, keep the sentence and drop the token.
+- **What-just-changed notes** — "no longer drives fetching", "renamed from…",
+  "per CodeRabbit review", "addresses the review comment". That belongs in the
+  commit message or PR description.
+- **Verbose narration** — multi-paragraph blocks or bulleted `/* */`
+  explanations. A single sentence soft-wrapped over two lines is fine; the rule
+  targets the narration, not the line count.
+
+Do keep the rare single line that captures load-bearing intent the code can't
+express — an invariant another module depends on, or a workaround for a specific
+bug (link it).
+
+This section is authoritative. `CLAUDE.md` mirrors it for agents, and
+`.coderabbit.yaml` disables the docstring-coverage check to keep the policy
+consistent — don't re-enable it.
 
 ## Architecture rules
 

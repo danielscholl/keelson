@@ -77,7 +77,7 @@ export interface RibExec {
 }
 
 // ---------------------------------------------------------------------------
-// Agent invocation (C1) — a rib runs one agent turn through the harness.
+// Agent invocation — a rib runs one agent turn through the harness.
 //
 // Types only, no `@keelson/providers` back-dep: `MessageChunk` is the shared
 // chat streaming unit. The host routes the turn through the provider registry,
@@ -138,7 +138,7 @@ export interface RibContext {
   // attempt to reach another rib's keys. Optional so minimal test contexts
   // without a credential store still satisfy the interface.
   getCredential?: (serviceId: string) => Promise<string | undefined>;
-  // Run one agent turn (C1). Optional, like the accessors above, so a rib that
+  // Run one agent turn. Optional, like the accessors above, so a rib that
   // needs rooms but finds it absent fails closed. Provider routing is global,
   // not namespace-scoped. See RibAgentTurn for the stream/result contract.
   runAgentTurn?: (req: RibAgentTurnRequest) => RibAgentTurn;
@@ -210,7 +210,7 @@ export type RibSurfaceDescriptor = z.infer<typeof ribSurfaceDescriptorSchema>;
 // Inbound action a rib receives over POST /api/ribs/:id/action. The base never
 // enumerates `type` (a rib-defined verb); `payload` stays opaque and the rib
 // narrows at its edge. The capability-token envelope + outbound dispatcher are
-// a later milestone — today this path is loopback-trusted.
+// not yet wired; today this path is loopback-trusted.
 export const ribActionSchema = z
   .object({
     type: z.string().min(1),

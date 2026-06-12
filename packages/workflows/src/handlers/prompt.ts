@@ -40,7 +40,7 @@ export interface PromptHandlerProvider {
     options?: PromptHandlerSendOptions,
   ): AsyncGenerator<unknown>;
   // Optional structural mirror of `IAgentProvider.getType()`. Used only
-  // by the per-run provider-mismatch warning (Slice 4). Spy / fake
+  // by the per-run provider-mismatch warning. Spy / fake
   // providers in tests can omit it; the handler treats the absence as
   // "unknown provider" and skips the warning.
   getType?(): string;
@@ -205,7 +205,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           : undefined;
       const effectiveProviderId = nodeProvider ?? workflowProvider;
 
-      // Slice 4 — surface a one-off `run_warning` when the active provider
+      // Surface a one-off `run_warning` when the active provider
       // can't honor the per-node config we just resolved. Only claude
       // implements the tool-gate / hook forwarding today; other providers
       // would silently no-op.

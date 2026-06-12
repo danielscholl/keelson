@@ -35,7 +35,7 @@ export interface CreateRunInput {
   projectId?: string | null;
   // The cwd the executor will spawn against. Always set on new runs.
   workingDir: string;
-  // Populated by the executor only when isolation is on (slice 3); null until then.
+  // Populated by the executor only when isolation is on; null otherwise.
   worktreePath?: string | null;
   // How the run was triggered. Omitted → 'manual' (the operator paths). The
   // heartbeat / panel-refresh pass 'scheduled' so producer runs stay out of the

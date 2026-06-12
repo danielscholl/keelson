@@ -62,7 +62,7 @@ export interface WorkflowLoadWarning {
     | "ignored_capability"
     | "invalid_field_value"
     | "interactive_loop_in_non_interactive_workflow"
-    // Slice 4 — fields the schema accepts and the executor *can* honor,
+    // Fields the schema accepts and the executor *can* honor,
     // but only when paired with the claude provider. Emitted at load
     // time so the warning surfaces even if the workflow never runs.
     | "provider_specific_capability";
@@ -179,7 +179,7 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
     });
   }
 
-  // Slice 4 — warn for fields whose enforcement is provider-dependent.
+  // Warn for fields whose enforcement is provider-dependent.
   // AI-shaped fields on non-AI nodes are already covered by the
   // `ai_fields_on_non_ai_node` warning above, so skip them here.
   const claudeOnlyPresent = CLAUDE_ONLY_FIELDS_PER_NODE.filter(
