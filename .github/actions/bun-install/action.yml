@@ -1,0 +1,24 @@
+name: Install dependencies (bun)
+description: >-
+  bun install --frozen-lockfile, retried with backoff to ride out transient
+  npm registry failures — the registry intermittently fails to serve or
+  extract an optional platform tarball mid-install, which is fatal to a
+  one-shot frozen install but clears on a retry.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        attempts=3
+        for attempt in $(seq 1 "$attempts"); do
+          if bun install --frozen-lockfile; then
+            exit 0
+          fi
+          if [ "$attempt" -lt "$attempts" ]; then
+            echo "bun install failed (attempt ${attempt}/${attempts}); retrying after backoff" >&2
+            sleep $((attempt * 10))
+          fi
+        done
+        echo "bun install failed after ${attempts} attempts" >&2
+        exit 1
