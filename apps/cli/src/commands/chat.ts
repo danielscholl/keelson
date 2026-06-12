@@ -13,6 +13,7 @@ import {
   type ProviderInfoRow,
   pickDefaultHttpProvider,
 } from "../http/chat-client.ts";
+import { listProjects } from "../http/projects-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { chatHeadless } from "../in-process/chat.ts";
 import { emit } from "../output.ts";
@@ -23,6 +24,10 @@ export interface ChatOptions {
   provider?: string;
   model?: string;
   conversationId?: string;
+  // Named project the new conversation binds to. One-shots deliberately do NO
+  // cwd→project resolution (that's the interactive TUI's binding rule);
+  // omitted means the server's default project.
+  project?: string;
   thinking?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
   baseUrl?: string;
@@ -117,9 +122,25 @@ async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOption
   // the WS path already updates conv.model on mismatch — being explicit at
   // creation time avoids the implicit second write).
   if (!conversationId) {
+    let projectId: string | undefined;
+    if (opts.project) {
+      const match = (await listProjects(baseUrl)).find((p) => p.name === opts.project);
+      if (!match) {
+        emit(
+          {
+            error: `no project named '${opts.project}' (see \`keelson project list\`)`,
+            code: "PROJECT_NOT_FOUND",
+          },
+          { json: opts.json },
+        );
+        process.exit(EXIT_NOT_FOUND);
+      }
+      projectId = match.id;
+    }
     const conv = await createConversation(baseUrl, {
       providerId,
       ...(effectiveModel ? { model: effectiveModel } : {}),
+      ...(projectId ? { projectId } : {}),
     });
     conversationId = conv.id;
   }
@@ -232,6 +253,18 @@ async function runChatInProcess(message: string, opts: ChatOptions): Promise<nev
 // message on a TTY opens the interactive TUI (server required).
 export async function runChatEntry(message: string | undefined, opts: ChatOptions): Promise<never> {
   if (message !== undefined) return runChat(message, opts);
+  if (opts.project !== undefined) {
+    // The TUI binds via its cwd rule and rebinds with /project; seeding the
+    // initial interactive binding from this flag is a tracked follow-up.
+    emit(
+      {
+        error: "--project applies to one-shot chat; in interactive chat use /project <name>",
+        code: "BAD_INPUTS",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_BAD_ARGS);
+  }
   if (opts.json) {
     emit(
       {
@@ -284,6 +317,20 @@ export async function runChat(message: string, opts: ChatOptions): Promise<never
     process.exit(EXIT_BAD_ARGS);
   }
 
+  // A conversation's project binding is creation-time only (like its
+  // provider), so rebinding an existing conversation is a conflict, not a
+  // merge. Static check — no server round-trip needed.
+  if (opts.project && opts.conversationId) {
+    emit(
+      {
+        error: `--project conflicts with --conversation '${opts.conversationId}'; the conversation keeps the project it was created with`,
+        code: "BAD_INPUTS",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_BAD_ARGS);
+  }
+
   const baseUrl = opts.baseUrl;
   const info = baseUrl ? null : await probeServer();
   const effectiveBase = baseUrl ?? info?.baseUrl;
@@ -316,6 +363,20 @@ export async function runChat(message: string, opts: ChatOptions): Promise<never
       emit({ error: message, code: "CHAT_FAILED" }, { json: opts.json });
       process.exit(EXIT_FAIL);
     }
+  }
+
+  // Server-down path: `--project <name>` is meaningless because the project
+  // store lives behind the server. Same reasoning as `--conversation` below.
+  if (opts.project) {
+    emit(
+      {
+        error:
+          "--project requires a running server (start with `keelson service`); the in-process path has no project store",
+        code: "NO_SERVER",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_NO_SERVER);
   }
 
   // Server-down path: `--conversation <id>` is meaningless because the
