@@ -1,0 +1,145 @@
+---
+title: The CLI
+description: The keelson command tree, the global flags, the JSON envelope, and the stable exit-code contract.
+sidebar:
+  order: 4
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`keelson` is the operator CLI. When the server is up, commands route to it over
+HTTP and WebSocket; when it is down, `chat` and `workflow run` fall back to
+in-process execution, and the server-backed commands report exit code `3`. This
+page is the command tree, the flags, and the two contracts a script depends on:
+the `--json` envelope and the exit codes.
+
+## Global flags
+
+| Flag | Effect |
+| --- | --- |
+| `--json` | Emit a machine-readable JSON envelope to stdout. Every entry point, including help and errors, produces a parseable payload. |
+| `-p, --prompt <message>` | Sugar for `keelson chat <message>`. Must come before any subcommand. |
+| `-v, --version` | Print the CLI, Bun, and contract schema versions and exit. |
+| `-h, --help` | Print help. Works at every level (`keelson rib --help`). |
+
+## Exit codes
+
+The codes are a stable contract: values never get renumbered, so a script can
+branch on them.
+
+| Code | Name | Meaning |
+| --- | --- | --- |
+| `0` | OK | Success. |
+| `1` | FAIL | The command ran and failed. |
+| `2` | BAD_ARGS | Bad arguments: unknown command or option, missing operand, excess operand, an empty option value. |
+| `3` | NO_SERVER | A server-required command was run while the server is down. |
+| `4` | NOT_FOUND | The named target (a workflow, a rib) does not exist. |
+
+## The JSON envelope
+
+In `--json` mode, success is `{ "data": ... }` and failure is
+`{ "error": "...", "code": "..." }`. The human-readable output is suppressed, so
+the envelope is the only thing on stdout, which is what makes the CLI scriptable
+end to end.
+
+```sh
+keelson --json workflow list | jq '.data.workflows[].name'
+```
+
+## Server lifecycle
+
+| Command | Does |
+| --- | --- |
+| `keelson service` | Run the server in the foreground. `--db <path>` overrides the database for the run. Alias: `serve`. |
+| `keelson service start` | Start the server in the background and report its URL. `--db <path>` overrides the database. |
+| `keelson service stop` | Stop the background server (graceful shutdown, kill fallback). |
+| `keelson service status` | Report whether the server is running and its URL. Exit `0` up, `3` down. |
+
+## Workflows
+
+| Command | Does |
+| --- | --- |
+| `keelson workflow list` | List workflows discovered under the home and project `workflows/` directories. |
+| `keelson workflow validate [name]` | Validate one workflow, or all of them. |
+| `keelson workflow run <name>` | Run a workflow. Server-up over HTTP, server-down in-process. |
+| `keelson workflow respond <runId> <nodeId> <text>` | Resume a paused run by replying to its approval node. Server-required. |
+| `keelson workflow status [runId]` | Show recent runs, or one run's status. Server-required. |
+
+`workflow run` options:
+
+| Option | Effect |
+| --- | --- |
+| `--inputs <k=v>` | A workflow input; repeat to set several. |
+| `--watch` / `--no-watch` | Stream node events, or emit one envelope at completion. Watch is the default on a TTY. |
+| `--provider <id>` | Provider for in-process runs (default `stub`). |
+| `--project <name>` | Run against a named project; the server resolves its root path. |
+| `--working-dir <path>` | Override the working directory directly. |
+| `--worktree` / `--no-worktree` | Force or forbid a git-worktree isolated run, overriding the workflow default. |
+| `--base-url <url>` | An explicit server URL, skipping the probe. |
+
+`workflow respond` takes `--pause-id <id>`, the per-pause token from the
+`approval_awaiting` frame, to disambiguate retries against interactive loops.
+`workflow status` takes `--workflow <name>` to filter to one workflow's runs.
+
+## Ribs
+
+| Command | Does |
+| --- | --- |
+| `keelson rib list` | List discovered ribs with their tools, surfaces, and auth. Server-required, unless `--installed`. |
+| `keelson rib add <source>` | Install a rib from any bun-installable source: a GitHub URL, `github:owner/repo`, a git URL, an npm name, or a local path. |
+| `keelson rib remove <id>` | Uninstall a rib from the home. |
+| `keelson rib show <id>` | Show one rib's tools, views, surfaces, and auth. Server-required. |
+
+`rib list --installed` reads the home directly, so it works whether or not the
+server is running. Most other rib commands talk to the running server and report
+`3` when it is down.
+
+## Projects
+
+| Command | Does |
+| --- | --- |
+| `keelson project list` | List registered projects. Server-required. |
+| `keelson project add <name> <rootPath>` | Register a project pointing at a local directory. Server-required. |
+| `keelson project remove <nameOrId>` | Remove a project by name or id. Server-required. |
+
+## Chat
+
+```sh
+keelson chat <message>
+```
+
+One chat turn. Server-up it goes over HTTP and shows up in the SPA; server-down
+it runs in-process and prints to stdout.
+
+| Option | Effect |
+| --- | --- |
+| `--provider <id>` | Provider id; default mirrors the server, else the first non-stub provider. |
+| `--model <id>` | Model id passed to the provider. |
+| `--conversation <id>` | Continue an existing conversation (server-up only). |
+| `--thinking` | Enable Claude extended thinking for the turn. |
+| `--reasoning-effort <level>` | Copilot reasoning tier. |
+| `--base-url <url>` | An explicit server URL. |
+
+## Maintenance
+
+| Command | Does |
+| --- | --- |
+| `keelson doctor` | Probe the toolchain, server, database, auth, and workflows. `--strict` exits non-zero on warnings too. |
+| `keelson update` | Update the harness and GitHub-sourced ribs in place. `--check` reports the available version; `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
+| `keelson worktree prune` | Remove leftover isolated-run worktrees. `--dry-run` lists candidates; `--force` also removes dirty ones. |
+| `keelson version` | Print the CLI, Bun, and schema versions. |
+
+<Aside type="note" title="--base-url skips the probe">
+Server-backed commands normally probe for a running server. Pass `--base-url`
+to point at a known URL and skip the probe, which is the form to use from a
+script or against a non-default port.
+</Aside>
+
+## Related
+
+- [Operating the server](../../guides/operating-the-server/): the service
+  lifecycle as a how-to, including the background server and its shutdown token.
+- [Your first run](../../tutorials/first-run/): the install, `doctor`, and the
+  first chat turn, walked end to end.
+- [Configuration](../../guides/configuration/): the `KEELSON_*` variables the
+  CLI and server read.

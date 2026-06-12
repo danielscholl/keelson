@@ -1,0 +1,279 @@
+---
+title: Workflow nodes
+description: The seven node kinds, the fields every node shares, the substitution model, and the rules the loader enforces.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+A workflow is one YAML file describing a DAG of nodes the engine runs
+deterministically. For why deterministic YAML sits next to an agent at all, read
+[Workflows](../../concepts/workflows/) first. What follows is the schema those
+concepts compile down to: the top-level fields, the seven node kinds, the shared
+fields, the data-flow model, and the rules the loader enforces.
+
+```yaml
+name: example
+description: |
+  Use when: you need a one-line schema reminder
+  Does: nothing, it is a docs example
+nodes:
+  - id: hello
+    bash: echo "hi"
+```
+
+## Top-level fields
+
+A workflow's `name:` field, not its filename, is its catalog key, and the two
+must match. The catalog hot-reloads: a saved file is listable and runnable
+immediately, with no server restart.
+
+| Field | Required | Value |
+| --- | --- | --- |
+| `name` | yes | kebab-case identifier (`pr-review`, not `PR Review`). `runs` is reserved. |
+| `description` | yes | The structured block below. |
+| `nodes` | yes | A non-empty list of DAG nodes. |
+| `provider` | no | `claude`, `copilot`, `codex`, `pi`, or `stub`; omitted uses the runner default. |
+| `model` | no | Default model for agent nodes. |
+| `modelReasoningEffort` | no | `minimal` \| `low` \| `medium` \| `high` \| `xhigh`. |
+| `webSearchMode` | no | `disabled` \| `cached` \| `live`. |
+| `interactive` | no | `true` is required when any loop node sets `loop.interactive: true`. |
+| `tags` | no | A list of strings for filtering. |
+| `worktree` | no | `{ enabled, branch }` pins git-worktree isolation per run; `branch` accepts `{workflow}` and `{run_id_short}`. |
+| `effort`, `thinking` | no | Claude-only reasoning controls. |
+
+The loader **accepts but ignores** these workflow-level fields, dropping them
+with a warning so a cross-runtime file still loads: `sandbox`, `betas`,
+`fallbackModel`, `additionalDirectories`, `mutates_checkout`.
+
+### Description format
+
+The Workflows UI cards and the `workflow_list` tool parse the structured
+block-scalar labels, so use them:
+
+```yaml
+description: |
+  Use when: a PR needs a structured review before merge
+  Triggers: "review PR 42", "look at this pull request"
+  Does: fetches the diff, reviews it, posts findings as a comment
+  NOT for: writing new code or fixing the issues it finds
+```
+
+All four labels are optional, but `Use when:` and `Does:` should always be
+present. Keep each to one line.
+
+## The node kinds
+
+Every node has an `id` plus **exactly one** of these seven mode fields. The
+three families are the determinism dial: deterministic nodes establish facts,
+agent nodes do judgment work, control nodes shape the run.
+
+| Family | Kind | What it runs |
+| --- | --- | --- |
+| Agent | `prompt` | One inline agent turn. The default choice for agent work. |
+| Agent | `command` | A named markdown prompt from `<home>/commands/`; the file must already exist on disk. |
+| Agent | `loop` | An agent prompt repeated until a completion signal, bounded by `max_iterations`. |
+| Deterministic | `bash` | A shell script; stdout becomes the node output. Optional `timeout` (ms). |
+| Deterministic | `script` | Inline TypeScript/JavaScript (`runtime: bun`) or Python (`runtime: uv`); `runtime` required, optional `deps`. |
+| Control | `approval` | Pauses the run for a human decision. |
+| Control | `cancel` | Terminates a branch with a recorded reason. |
+
+### Mode-specific fields
+
+`loop` repeats its `prompt` until `until` text appears in the output, or until
+`until_bash` exits `0`, hard-bounded by `max_iterations`. `fresh_context: true`
+starts a new session each iteration. `loop.interactive: true` requires
+workflow-level `interactive: true` and a `gate_message`.
+
+```yaml
+- id: fix-until-green
+  loop:
+    prompt: "Run the tests, fix one failure, reply DONE when all pass."
+    until: "DONE"
+    max_iterations: 5
+```
+
+`approval` pauses for a human. `capture_response: true` exposes the reply as the
+node's output so downstream nodes can branch on it; `on_reject` re-prompts on
+rejection.
+
+```yaml
+- id: gate
+  approval:
+    message: "Apply this plan?"
+    capture_response: true
+```
+
+`cancel` terminates the run with a reason; pair it with `when:` for a guard
+branch.
+
+```yaml
+- id: bail
+  cancel: "nothing to do"
+  when: "$classify.output == 'NONE'"
+```
+
+`command` runs a named markdown prompt from `<home>/commands/`. The file must
+already exist on disk, so a `command` node cannot be authored from chat; use an
+inline `prompt` node there instead.
+
+## Common node fields
+
+These apply across kinds (some only to agent nodes, as noted).
+
+| Field | Applies to | Meaning |
+| --- | --- | --- |
+| `depends_on` | all | `[id, ...]` DAG edges. Omitted means a root node. |
+| `when` | all | A condition that must hold or the node skips. See [conditions](#conditions). |
+| `trigger_rule` | all | Join semantics across dependencies. See the table below. |
+| `model`, `provider` | agent | Per-node overrides. |
+| `context` | agent | `fresh` forces a new agent session for the node; `shared` reuses one. |
+| `allowed_tools`, `denied_tools` | agent | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
+| `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
+| `output_format` | agent | Provider structured-output request (Claude). |
+| `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
+| `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
+| `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
+| `systemPrompt`, `effort`, `thinking` | agent | Claude-only per-node controls. |
+| `memory`, `notebook` | all | Recall/writeback blocks wired to the memory store and the project notebook. |
+| `hooks` | agent | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
+
+Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
+`fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. Agent-only fields placed on a
+non-agent node (`bash`, `script`, `loop`, `approval`, `cancel`) are also ignored
+with a warning.
+
+### trigger_rule
+
+| Value | The node runs when |
+| --- | --- |
+| `all_success` (default) | Every dependency succeeded. |
+| `one_success` | At least one dependency succeeded, so a branch can rescue a failing sibling. |
+| `none_failed_min_one_success` | Nothing failed and at least one succeeded. |
+| `all_done` | Every dependency reached a terminal state, for collector nodes. |
+
+### Conditions
+
+`when:` is a condition over upstream output. A false condition skips the node.
+
+- Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`.
+- Compound: `&&` and `||`, where `||` has lower precedence than `&&`. No
+  parentheses.
+- Operands are an upstream reference and a literal:
+  `$classify.output == 'BUG'`, `$check.output.count != '0'`.
+
+An unknown reference, an empty output, or a failed JSON access resolves to the
+empty string, so write conditions that fail closed.
+
+## Data flow
+
+Upstream output reaches a downstream node through one of two channels, and the
+split is a security boundary, not a style choice.
+
+**The workflow layer substitutes text** in prompts, `when:` conditions, and
+cancel reasons:
+
+| Reference | Resolves to |
+| --- | --- |
+| `$ARGUMENTS` | The free-form text the run was started with. |
+| `$1` … `$9` | Positional words of `$ARGUMENTS`. `\$` escapes a literal `$`. |
+| `$<id>.output` | The full text output of an upstream node. The node must be an ancestor via `depends_on`. |
+| `$<id>.output.<field>` | A field of the upstream output after JSON parsing (empty string when the output is not JSON). |
+| `$ARTIFACTS_DIR` | The per-run scratch directory (in prompt text). |
+
+Substitution is a single atomic pass: if an upstream output itself contains
+`$something.output`, that marker stays literal instead of expanding again.
+
+**Shell nodes read the environment instead.** A `bash` or `script` node runs its
+body exactly as written, with upstream output delivered as environment
+variables, never spliced into the source:
+
+| Variable | Carries |
+| --- | --- |
+| `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (the id's hyphens become underscores). |
+| `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
+
+<Aside type="note" title="Why two channels">
+Prompt text is interpreted by a model that treats it as language; shell source
+is executed by a machine that treats it as instructions. The first can absorb
+hostile text; the second must never see it. That is why they are two channels
+and not one.
+</Aside>
+
+Reserved node ids, because they collide with substitution namespaces: `inputs`,
+`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`.
+
+## Validation rules
+
+`keelson workflow validate` (and the `workflow_save` tool) run the real loader.
+The loader is **strict on structure and lenient on vocabulary**: anything that
+breaks the graph is a hard error; a recognized-but-unhonored field only warns.
+
+These errors block a save or run:
+
+- YAML syntax errors, or a missing `name`, `description`, or `nodes`.
+- A node with zero or more than one mode field.
+- Per-node schema violations.
+- Duplicate node ids, unknown `depends_on` targets, dependency cycles.
+- Reserved workflow names (`runs`) or node ids (`inputs`, `ARGUMENTS`,
+  `ARTIFACTS_DIR`, `memory`).
+- A `$<id>.output` reference to a node that is not an ancestor (a forward or
+  sibling reference), which would otherwise silently resolve to the empty
+  string at run time.
+
+Not checked until run time: whether a `provider` or `model` id is valid for the
+runner, and whether a `command:` or named `script:` file exists on disk.
+
+## Scopes
+
+Workflows live in two scopes, and the catalog merges them:
+
+| Scope | Location | Visibility |
+| --- | --- | --- |
+| global | `<home>/workflows/` | Every project and conversation. |
+| project | `<root>/.keelson/workflows/` | Only conversations and runs inside that project. |
+
+A project workflow **shadows** a same-named global one within its project. Ribs
+also contribute workflows into the catalog at activation, optionally
+[bound to a snapshot key](../snapshots/#bound-workflows).
+
+## Example
+
+A complete three-node workflow: a deterministic check, an agent summary, a human
+gate.
+
+```yaml
+name: test-triage
+description: |
+  Use when: the test suite is failing and you want a triaged summary
+  Triggers: "triage the tests", "why are tests failing"
+  Does: runs the suite, summarizes failures, waits for approval to file notes
+  NOT for: fixing the failures themselves
+nodes:
+  - id: run-tests
+    bash: bun test 2>&1 | tail -80
+    timeout: 300000
+
+  - id: summarize
+    prompt: |
+      Summarize these test failures by root cause, most likely culprit first:
+      $run-tests.output
+    depends_on: [run-tests]
+
+  - id: confirm
+    approval:
+      message: "File these findings to the project notebook?"
+    depends_on: [summarize]
+```
+
+## Related
+
+- [Workflows](../../concepts/workflows/): the execution model, the two data
+  channels, and the run lifecycle.
+- [Run your first workflow](../../tutorials/run-a-workflow/): authoring a DAG and
+  watching it execute.
+- [Authoring workflows](../../guides/authoring-workflows/): the recipes for the
+  common control-flow shapes.
+- [Memory and state](../../concepts/memory-and-state/): the `memory` and
+  `notebook` blocks a node can declare.

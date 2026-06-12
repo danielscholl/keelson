@@ -16,8 +16,8 @@ file fixes what runs, in what order, under what conditions. Inside that fixed
 frame, individual nodes can still do agent work, with the leash declared in
 the same file.
 
-This page covers the execution model behind that trade: how the graph runs,
-how data moves between nodes, what a run leaves behind, and where the agency
+What that file buys you, and what it costs, plays out below: how the graph runs,
+how data crosses between nodes, what a run leaves behind, and where the agency
 is bounded.
 
 ## The graph is the contract
@@ -25,16 +25,15 @@ is bounded.
 A workflow is a set of nodes and `depends_on` edges, a directed acyclic
 graph. The executor sorts it into layers: nodes with no unmet dependencies
 run first, concurrently; each later layer starts when the layer before it
-settles. You saw that shape in
-[the first-workflow tutorial](../../tutorials/run-a-workflow/), where two
-independent nodes started together.
+settles. The [first-workflow tutorial](../../tutorials/run-a-workflow/) walks
+this shape end to end, with two independent nodes starting together.
 
 Whether a node runs at all is decided by two declarations on the node, both
 evaluated against upstream results:
 
 - **`when:`** is a data gate: a condition over upstream output, like
   `$check.output.status == 'ok'`, with `==`, `!=`, and numeric comparisons,
-  joined by `and` / `or`. A false gate skips the node.
+  joined by `&&` / `||`. A false gate skips the node.
 - **`trigger_rule:`** is a dependency-merge rule: what pattern of upstream
   outcomes lets the node fire.
 
@@ -112,7 +111,7 @@ shows every state a run can occupy:
   </figcaption>
 </figure>
 
-The dashed edge deserves its sentence. An approval pause is held by the
+The dashed edge is the honest one. An approval pause is held by the
 running server process, not by the database. If the server restarts while a
 run is paused or mid-flight, boot reconciliation finds the stale run and
 marks it failed rather than pretending it can continue. Runs are durable as
@@ -162,5 +161,6 @@ refresh button becomes a workflow run; that pipeline is the subject of
   four-node DAG and watches it execute.
 - [Memory and state](../memory-and-state/) covers what runs leave behind,
   and the memory hooks nodes can declare.
-- The [reference tier](../../reference/) will hold the full node-by-node
-  schema as it lands.
+- The [workflow node reference](../../reference/workflow-nodes/) is the full
+  node-by-node schema, and [Authoring workflows](../../guides/authoring-workflows/)
+  has the control-flow recipes.

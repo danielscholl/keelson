@@ -3,12 +3,37 @@ title: Guides
 description: Task-oriented how-tos for running and operating keelson.
 ---
 
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
 The guides are task-oriented: short, do-this-then-that pages for operating the
-harness. Planned guides:
+harness once you know its shape. New to keelson? Start with the
+[tutorials](../tutorials/) instead, then come back here for the operational
+corners.
 
-- Install and run keelson.
-- Install a rib and watch its surface appear.
-- Author and run a YAML workflow.
-- Configure the harness with the `KEELSON_*` environment variables.
-
-These pages land here as the framework fills out.
+<CardGrid>
+  <LinkCard
+    title="Operating the server"
+    href="operating-the-server/"
+    description="Start the server in the foreground or background, check its health, and stop it cleanly."
+  />
+  <LinkCard
+    title="Configuration"
+    href="configuration/"
+    description="Choose which providers load and which one chat defaults to, with a config file or environment variables."
+  />
+  <LinkCard
+    title="Authoring workflows"
+    href="authoring-workflows/"
+    description="The authoring loop and the recipes for fan-out, branch, approval gate, and loop-until-done."
+  />
+  <LinkCard
+    title="Managing ribs"
+    href="managing-ribs/"
+    description="Install, inspect, activate, update, and remove the capability packages that extend the harness."
+  />
+  <LinkCard
+    title="Managing memory"
+    href="managing-memory/"
+    description="How memories get written, how you review them, and how one earns the right to instruct the agent."
+  />
+</CardGrid>

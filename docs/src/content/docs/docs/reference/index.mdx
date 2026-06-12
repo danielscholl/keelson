@@ -5,7 +5,9 @@ description: The contract tier for rib developers and workflow authors.
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-The reference tier is the contract: precise, terse, and stable.
+The reference tier is the contract: precise, terse, and stable. It is the
+companion to the [concepts](../concepts/), which explain why each piece is
+shaped the way it is.
 
 <CardGrid>
   <LinkCard
@@ -13,12 +15,39 @@ The reference tier is the contract: precise, terse, and stable.
     href="rib-contract/"
     description="The Rib interface, the context the harness injects, the validation rules it enforces, and the activation lifecycle."
   />
+  <LinkCard
+    title="Workflow nodes"
+    href="workflow-nodes/"
+    description="The seven node kinds, the fields every node shares, the substitution model, and the loader's rules."
+  />
+  <LinkCard
+    title="Snapshots and the canvas"
+    href="snapshots/"
+    description="The SnapshotManager interface, the frame wire shape, and the closed canvas vocabulary a payload must satisfy."
+  />
+  <LinkCard
+    title="The CLI"
+    href="cli/"
+    description="The keelson command tree, the global flags, the JSON envelope, and the stable exit-code contract."
+  />
+  <LinkCard
+    title="Providers"
+    href="providers/"
+    description="The IAgentProvider interface, the capability shape, and the matrix of what each built-in provider supports."
+  />
+  <LinkCard
+    title="The HTTP and WS API"
+    href="api/"
+    description="The server's local API surface grouped by resource, the WebSocket streams, and the conventions a client relies on."
+  />
+  <LinkCard
+    title="Directories"
+    href="directories/"
+    description="How the keelson home is resolved, what lives inside it, and the variables that relocate each piece."
+  />
+  <LinkCard
+    title="Troubleshooting"
+    href="troubleshooting/"
+    description="The common failure modes, what causes each, and the fix, anchored on the doctor health sweep."
+  />
 </CardGrid>
-
-More pages land here as the contract is documented:
-
-- Snapshots and surfaces: the streaming substrate ribs publish to.
-- Workflow nodes: the seven-node taxonomy, the DAG features, and the substitution
-  model.
-- The CLI: commands, flags, and the stable exit-code contract.
-- Providers: the `IAgentProvider` interface and the provider matrix.

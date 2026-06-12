@@ -13,9 +13,9 @@ run that failed last week, the constraint you taught it once, the credential
 it needs every time. Keelson's answer is deliberate about both halves of the
 problem: **what** is remembered, and **where** it physically lives. The where
 is simple and strict: one directory, one database, your operating system's
-keychain, all on your machine. The server binds to `127.0.0.1` and
-state-changing endpoints are gated to loopback origins; "local-only" is a
-property of the wiring, not a promise in the README.
+keychain, all on your machine. The server binds to `127.0.0.1`, and
+state-changing endpoints are gated to loopback origins, so local-only is a
+property of the wiring you can verify.
 
 ## One home, one database, one keychain
 

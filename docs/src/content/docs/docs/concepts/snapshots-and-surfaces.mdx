@@ -7,16 +7,16 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-Extension systems die on the UI question. Either extensions embed their own
-web views, and the host becomes a browser for mutually distrustful apps, or
-extensions get no UI at all and live as command-line afterthoughts. Keelson
-takes a third path: **ribs publish data, never UI.** A rib hands the harness
-typed payloads under namespaced keys; the browser renders every rib with the
-same small set of components. The whole web app contains exactly one view for
-rib content, and it works for all of them.
+A rib has no way to ship its own UI, by design: it publishes data, and the
+harness draws it. The rib hands over typed payloads under namespaced keys, and
+the browser renders every rib with the same small set of components, one view
+that serves all of them. The alternative is the trap most extension systems fall
+into, where either extensions embed their own web views and the host becomes a
+browser for mutually distrustful apps, or they get no UI and live as
+command-line afterthoughts.
 
-This page explains the substrate that makes that possible: frames, the
-snapshot manager, the canvas vocabulary, and the surface layout model.
+The substrate underneath has four moving parts: frames, the snapshot manager,
+the canvas vocabulary, and the surface layout model.
 
 ## Frames on keys
 
@@ -122,8 +122,8 @@ progress under run-scoped keys the browser watches the same way, and the
 built-in surfaces ride the same pump as rib surfaces. The strongest evidence
 is the shape of the web app itself: its views directory holds Chat,
 Workflows, Memory, and a single generic `Surface` component that renders
-every rib ever installed. When a new rib lights up a new tab, no UI code
-shipped anywhere; data did.
+every rib ever installed. When a new rib lights up a new tab, no new UI code
+ships; the rib only published data.
 
 ## Where to go next
 
@@ -133,3 +133,5 @@ shipped anywhere; data did.
 - [Build your first rib](../../tutorials/build-your-first-rib/) ends where
   this page begins: with a tool-only rib, one `composeBundle` away from a
   live board.
+- [Snapshots and the canvas](../../reference/snapshots/) is the precise
+  contract: the `SnapshotManager` interface and the board section vocabulary.

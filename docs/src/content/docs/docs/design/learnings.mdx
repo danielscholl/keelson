@@ -1,0 +1,77 @@
+---
+title: Learnings
+description: What the design got right, what is still partial in this alpha, and what we would tell the next builder.
+sidebar:
+  order: 2
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Keelson is alpha. The [decisions](../decisions/) list the bets this system rests
+on; this is where they paid off, where the implementation is still behind the
+design, and what we would tell someone building on it. It is the narrative the
+source-comment policy keeps out of the code.
+
+## What held up
+
+**Zero wiring mostly held.** A tool a rib registers is reachable from the chat
+agent and from any workflow `prompt` node that opts it in, with no per-rib
+plumbing either way. The bet that capability scales by adding packages rather
+than editing the harness held the first time a second rib lit up a new tab and
+no UI code shipped anywhere.
+
+**Data-not-UI simplified the client more than expected.** The web app carries a
+single generic surface renderer for all rib content. The closed canvas
+vocabulary felt restrictive while it was being written and felt obviously right
+the moment a rib's board rendered consistently with the built-in surfaces, on
+the same pump, with no special case.
+
+**Fail-closed everywhere paid for itself.** Discovery skips a broken rib with a
+warning instead of crashing the boot; a composer that throws keeps the last good
+frame; a workflow output that fails its schema is dropped rather than propagated.
+None of these are glamorous, and each one is the reason an unexpected failure
+degrades a corner of the system rather than the whole thing.
+
+## What is still partial
+
+We would rather name the gaps than let the headline copy imply they are closed.
+
+| Area | Where it actually is |
+| --- | --- |
+| Cross-restart resume | Runs are durable as records, not as processes. A pause is held by the running server; a restart fails a stale run during boot reconciliation rather than faking a resume. |
+| Redaction | The console redaction pipeline is wired but not yet active. Treat output as unredacted for now. |
+| Offline story | The server-down CLI fallback runs the `stub` provider only. The full harness needs the server up. |
+| Rib actions | The `onAction` path is loopback-trusted today; the capability-token envelope and outbound dispatcher are a later milestone. |
+| Tool projection | Copilot and Claude receive the harness tool registry; Codex and Pi do not yet (Codex acts agentically with its own sandboxed tools, Pi is chat-only). |
+| The `html` canvas kind | Declared in the schema and reserved, unrendered until an iframe-origin sandboxing pass lands. |
+
+<Aside type="caution" title="Alpha means alpha">
+None of the above is a bug to file; each is a known edge of the current
+implementation. They are listed so an operator's trust decisions match the code,
+not the ambition.
+</Aside>
+
+## What we would tell the next builder
+
+**Make the contract narrow before you make it powerful.** Every accessor on the
+`RibContext` is optional, and a rib that needs an absent one fails closed. That
+discipline is what lets a minimal test context satisfy the same interface the
+real server implements, and it is worth more than any individual capability.
+
+**State non-goals as clearly as goals.** The boundary is not a sandbox; the
+offline story is stub-only; resume is process-lifetime. Writing these down was
+uncomfortable and is the single most useful thing in the docs, because the
+alternative is an operator who trusts a guarantee that does not exist.
+
+**Let the lenient loader warn, not reject.** Borrowing Archon's schema meant
+inheriting fields this runtime does not honor. Warning on them, and refusing
+only what breaks the graph, kept the door open to a large body of existing
+workflows without pretending to support what we do not.
+
+## Related
+
+- [Decisions](../decisions/): the choices this page reflects on.
+- [Architecture](../../concepts/architecture/): the system these learnings are
+  about.
+- [Memory and state](../../concepts/memory-and-state/): the durability story,
+  in concept form.

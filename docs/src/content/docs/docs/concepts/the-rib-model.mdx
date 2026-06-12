@@ -7,16 +7,15 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-Every agent harness eventually faces the same question: where does new
-capability go? Most answers couple your code to someone else's release train.
-You fork the harness and maintain the fork, or you upstream a plugin into a
-monolith and wait for reviews, or you wire a sidecar and invent a protocol.
-Keelson's answer is the rib: a capability is a package, in its own repository,
-on its own version, and the harness it bolts onto never changes.
+A rib is a capability in its own package, on its own version, bolted onto a
+harness that never changes. It is a deliberate alternative to the usual ways new
+capability gets added: forking the harness and maintaining the fork, upstreaming
+a plugin into a monolith and waiting on review, or running a sidecar and
+inventing a protocol to reach it. A rib is a dependency you add and remove,
+nothing more.
 
-This page explains the model behind that answer: what a rib is allowed to
-contribute, how contributions reach every surface without wiring, and the
-boundary the harness enforces rather than requests.
+The contract that makes that work, and the boundary it rests on, are the rest of
+this page.
 
 ## Packages, not forks
 
@@ -61,7 +60,7 @@ specific place in the harness. The figure shows the full set of destinations:
 
 | Hook | What it contributes |
 | --- | --- |
-| `registerTools` | Tools for the shared registry. They reach the chat agent and workflow `prompt` nodes with no further wiring. |
+| `registerTools` | Tools for the shared registry. They reach the chat agent with no further wiring; a workflow `prompt` node opts each one in by name. |
 | `composeBundle` | A snapshot composer under the rib's key namespace. The browser renders the published data as live boards. |
 | `views`, `surfaces` | Static declarations of how those snapshots appear, up to a full top-level tab in the browser. |
 | `contributeWorkflows` | Workflow definitions merged into the catalog at activation, optionally bound so a run's output republishes a snapshot key. |
@@ -127,5 +126,5 @@ shared, capability scales by adding packages, not by modifying the harness.
   two-file minimum through install and verification.
 - [Snapshots and surfaces](../snapshots-and-surfaces/) covers the publishing
   substrate behind `composeBundle`, views, and surfaces.
-- The [reference tier](../../reference/) holds the precise contract as its
-  pages land.
+- [The Rib contract](../../reference/rib-contract/) is the precise interface,
+  the context the harness injects, and the validation rules it enforces.

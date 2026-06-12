@@ -1,0 +1,99 @@
+---
+title: Operating the server
+description: Start the server in the foreground or the background, check its health, and stop it cleanly.
+sidebar:
+  order: 1
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+One server owns everything: the SQLite store, the providers, the ribs, and the
+browser UI, all on port 7878. Here is how to run it, check it, and stop it
+cleanly.
+
+## Foreground or background
+
+`keelson service` runs in the foreground. It builds the database, ribs, and
+routes, installs graceful-shutdown handlers, and stays attached to the terminal
+until you press Ctrl-C. Use it when you want the boot log in front of you.
+
+```sh
+keelson service
+```
+
+```text
+keelson server listening on http://127.0.0.1:7878/
+```
+
+`keelson service start` runs it in the background and returns. It re-launches the
+server as a detached process that outlives the terminal, then reports the URL.
+
+```sh
+keelson service start
+```
+
+Open [http://127.0.0.1:7878](http://127.0.0.1:7878) and you get the full UI from
+the same port as the API: Chat, Workflows, Memory, and a tab for each installed
+rib.
+
+<Aside type="note" title="Running offline">
+Real agents need a Copilot subscription or an Anthropic API key. With no keys,
+start with `KEELSON_PROVIDERS=stub` for the offline echo provider, which is
+enough to exercise the harness, the workflow engine, and your ribs' wiring
+without credentials.
+</Aside>
+
+## Check it
+
+`keelson service status` reports whether the server is running and where, and
+cleans up a stale record if it finds one. The exit code is scriptable: `0` when
+the server is up, `3` when it is down.
+
+```sh
+keelson service status
+```
+
+For a full health sweep, `keelson doctor` probes five categories in one pass:
+toolchain, server, database, auth, and workflows. Every check that fails or
+warns carries a `hint` naming the next command, so doctor is the first thing to
+run whenever the harness behaves unexpectedly.
+
+```sh
+keelson doctor          # add --strict to exit non-zero on warnings too
+```
+
+## Stop it
+
+```sh
+keelson service stop
+```
+
+Stop drains in-flight runs, closes the database, and exits, falling back to a
+signal only if the graceful path does not land. It is safe to run when nothing
+is up: it reports `not running` and cleans any stale state.
+
+## Where the state lives
+
+| Path | What |
+| --- | --- |
+| `~/.keelson/keelson.db` | The SQLite store: conversations, runs, node outputs, memory. |
+| `~/.keelson/server.json` | The running server's record: its URL, pid, version, and shutdown token. |
+| `~/.keelson/` | The managed home overall, including `workflows/` and installed ribs. |
+
+`KEELSON_HOME` relocates the whole home; see [Configuration](../configuration/)
+for that and the other `KEELSON_*` variables.
+
+<Aside type="caution" title="Local-only, by wiring">
+The server binds to `127.0.0.1`, and state-changing endpoints are gated to
+loopback origins. The background server's shutdown endpoint is gated by a token
+written into `server.json`, so only a caller that can read your disk can stop it.
+</Aside>
+
+## Related
+
+- [The CLI](../../reference/cli/): the full `service` command tree and the
+  exit-code contract.
+- [Your first run](../../tutorials/first-run/): install, the health sweep, and a
+  first chat turn, walked end to end.
+- [Configuration](../configuration/): the providers and `KEELSON_*` variables
+  the server reads at boot.
