@@ -44,6 +44,7 @@ export interface ProviderCapabilitiesRow {
   // Empty string means "let the SDK decide" — matches packages/shared
   // providerCapabilitiesSchema.
   defaultModel: string;
+  models: string[];
 }
 
 export interface ProviderInfoRow {
@@ -97,6 +98,26 @@ export async function createConversation(
     throw new HttpError(res.status, `POST /api/conversations failed: ${res.status} ${body}`);
   }
   return (await res.json()) as ConversationRow;
+}
+
+export interface ConversationSummaryRow {
+  id: string;
+  providerId: string;
+  name?: string;
+  updatedAt?: string;
+}
+
+// List conversations for the interactive welcome card's recent-sessions
+// section; tolerant of absent name/updatedAt on older rows.
+export async function listConversations(baseUrl: string): Promise<ConversationSummaryRow[]> {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/conversations`, {
+    headers: { accept: "application/json", origin: originHeader(baseUrl) },
+  });
+  if (!res.ok) {
+    throw new HttpError(res.status, `GET /api/conversations failed: ${res.status}`);
+  }
+  const payload = (await res.json()) as { conversations?: ConversationSummaryRow[] };
+  return payload.conversations ?? [];
 }
 
 // Resolve an existing conversation so `keelson chat --conversation <id>`

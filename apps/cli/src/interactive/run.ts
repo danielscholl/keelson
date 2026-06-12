@@ -4,6 +4,8 @@
 
 import {
   CombinedAutocompleteProvider,
+  type Component,
+  Container,
   Editor,
   Loader,
   matchesKey,
@@ -13,21 +15,45 @@ import {
   Text,
   TUI,
 } from "@earendil-works/pi-tui";
-import type { ReasoningEffortLevel } from "@keelson/shared";
+import type { Project, ReasoningEffortLevel, TokenUsage, WorkflowFrame } from "@keelson/shared";
+import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import {
   chatViaServer,
   createConversation,
   getConversation,
+  listConversations,
   listProviders,
+  type ProviderInfoRow,
   pickDefaultHttpProvider,
 } from "../http/chat-client.ts";
 import { createProject, listProjects } from "../http/projects-client.ts";
-import { isServerDownError } from "../http/workflow-client.ts";
+import { listRibs } from "../http/ribs-client.ts";
+import {
+  attachRun,
+  isServerDownError,
+  listWorkflows,
+  startRun,
+  type WorkflowSummary,
+} from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
-import { detectGitRoot, type ProjectBinding, resolveProjectBinding } from "./project.ts";
+import { StatusFooter } from "./footer.ts";
+import {
+  firstClause,
+  formatUsageMeter,
+  parseRunArg,
+  parseSlashCommand,
+  relativeAge,
+} from "./format.ts";
+import {
+  detectGitBranch,
+  detectGitRoot,
+  type ProjectBinding,
+  resolveProjectBinding,
+} from "./project.ts";
 import { brass, dim, editorTheme, navy, red } from "./theme.ts";
 import { AssistantTurnView, userLine } from "./transcript.ts";
+import { buildWelcomeLines, type WelcomeData } from "./welcome.ts";
 
 export interface InteractiveChatOptions {
   baseUrl: string;
@@ -38,16 +64,18 @@ export interface InteractiveChatOptions {
   reasoningEffort?: ReasoningEffortLevel;
 }
 
-const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "new", description: "start a new conversation" },
-  { name: "exit", description: "leave interactive chat" },
-];
-
 interface SessionSetup {
+  providers: ProviderInfoRow[];
   providerId: string;
   model?: string;
   conversationId?: string;
   binding: ProjectBinding;
+  welcome: WelcomeData;
+}
+
+function defaultModelFor(providers: readonly ProviderInfoRow[], id: string): string | undefined {
+  const def = providers.find((p) => p.id === id)?.capabilities.defaultModel;
+  return def && def.length > 0 ? def : undefined;
 }
 
 async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetup> {
@@ -61,10 +89,7 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
   } else {
     providerId = opts.provider ?? pickDefaultHttpProvider(providers);
   }
-  if (model === undefined) {
-    const def = providers.find((p) => p.id === providerId)?.capabilities.defaultModel;
-    if (def && def.length > 0) model = def;
-  }
+  model = model ?? defaultModelFor(providers, providerId);
   // A resumed conversation keeps its server-side project binding; only fresh
   // sessions resolve one from cwd.
   const binding: ProjectBinding = opts.conversationId
@@ -75,11 +100,42 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
         listProjects: () => listProjects(opts.baseUrl),
         createProject: (input) => createProject(opts.baseUrl, input),
       });
+
+  // Welcome-card data is decorative; a failing endpoint degrades to an empty
+  // section rather than blocking the session.
+  const [ribsRes, convsRes] = await Promise.allSettled([
+    listRibs(opts.baseUrl),
+    listConversations(opts.baseUrl),
+  ]);
+  const ribs = ribsRes.status === "fulfilled" ? ribsRes.value : [];
+  const conversations = convsRes.status === "fulfilled" ? convsRes.value : [];
+  const recent = conversations
+    .filter((c) => c.updatedAt !== undefined)
+    .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
+    .slice(0, 3)
+    .map((c) => ({
+      name: c.name && c.name.length > 0 ? c.name : c.id.slice(0, 8),
+      ago: relativeAge(c.updatedAt ?? ""),
+    }));
+
+  const welcome: WelcomeData = {
+    version: pkg.version,
+    providerId,
+    ...(model !== undefined ? { model } : {}),
+    projectName: binding.name,
+    ...(binding.note !== undefined ? { projectNote: binding.note } : {}),
+    branch: detectGitBranch(process.cwd()),
+    ribs: ribs.map((r) => ({ displayName: r.displayName, tools: r.registered.length })),
+    recent,
+  };
+
   return {
+    providers,
     providerId,
     ...(model !== undefined ? { model } : {}),
     ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
     binding,
+    welcome,
   };
 }
 
@@ -102,37 +158,293 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const terminal = new ProcessTerminal();
   const tui = new TUI(terminal);
-  let conversationId = setup.conversationId;
+  const session = {
+    providerId: setup.providerId,
+    model: setup.model,
+    conversationId: setup.conversationId,
+    binding: setup.binding,
+  };
   let busy = false;
+  let activeRuns = 0;
   let currentAbort: AbortController | null = null;
   const queue: string[] = [];
+  const usageTotals = { input: 0, output: 0 };
+  let latestUsage: TokenUsage | undefined;
 
   const exit = (code: number): never => {
     tui.stop();
     process.exit(code);
   };
 
-  const modelSuffix = setup.model !== undefined ? ` · ${setup.model}` : "";
-  tui.addChild(
-    new Text(
-      `${brass("keelson chat")} ${dim(`· ${setup.providerId}${modelSuffix} · project ${setup.binding.name}`)}`,
-      1,
-      0,
-    ),
-  );
-  if (setup.binding.note !== undefined) {
-    tui.addChild(new Text(dim(setup.binding.note), 1, 0));
+  for (const line of buildWelcomeLines(setup.welcome)) {
+    tui.addChild(new Text(line, 1, 0));
   }
+
+  // Turn output appends into this container so it stays above the editor.
+  const transcript = new Container();
+  tui.addChild(transcript);
   tui.addChild(new Spacer(1));
 
+  const surface = {
+    addChild(component: Component) {
+      transcript.addChild(component);
+    },
+    requestRender() {
+      tui.requestRender();
+    },
+  };
+  const info = (line: string): void => {
+    surface.addChild(new Text(dim(line), 1, 0));
+    tui.requestRender();
+  };
+  const warn = (line: string): void => {
+    surface.addChild(new Text(red(line), 1, 0));
+    tui.requestRender();
+  };
+
+  const footer = new StatusFooter({
+    providerId: session.providerId,
+    ...(session.model !== undefined ? { model: session.model } : {}),
+    projectName: session.binding.name,
+    branch: setup.welcome.branch,
+    meter: formatUsageMeter(undefined, usageTotals),
+    activity: "idle",
+  });
+  const refreshActivity = (): void => {
+    footer.set({ activity: busy ? "working" : activeRuns > 0 ? "workflow" : "idle" });
+    tui.requestRender();
+  };
+
+  const resetConversation = (reason: string): void => {
+    session.conversationId = undefined;
+    info(`── ${reason} ──`);
+  };
+
+  // Lazy caches behind the slash-argument completions.
+  let projectsCache: Project[] | null = null;
+  const loadProjectsCached = async (): Promise<Project[]> => {
+    projectsCache ??= await listProjects(opts.baseUrl);
+    return projectsCache;
+  };
+  let workflowsCache: WorkflowSummary[] | null = null;
+  const loadWorkflowsCached = async (): Promise<WorkflowSummary[]> => {
+    workflowsCache ??= (await listWorkflows(opts.baseUrl)).workflows;
+    return workflowsCache;
+  };
+
+  const chatProviders = setup.providers.filter((p) => p.id !== "workflow");
+
+  const runWorkflowCommand = async (arg: string): Promise<void> => {
+    const parsed = parseRunArg(arg);
+    if (parsed === null) {
+      warn("usage: /run <workflow> [key=value …]");
+      return;
+    }
+    let runId: string;
+    try {
+      const body = {
+        inputs: parsed.inputs,
+        ...(session.binding.projectId !== undefined
+          ? { projectId: session.binding.projectId }
+          : { workingDir: process.cwd() }),
+      };
+      ({ runId } = await startRun(opts.baseUrl, parsed.name, body));
+    } catch (err) {
+      warn(`✗ ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    surface.addChild(new Text(`${brass("▶")} ${parsed.name} ${dim(`run ${runId}`)}`, 1, 0));
+    activeRuns += 1;
+    refreshActivity();
+    const onFrame = (frame: WorkflowFrame): void => {
+      switch (frame.type) {
+        case "node_started":
+          info(`  ⚙ ${frame.nodeId}`);
+          break;
+        case "node_done":
+          if (frame.error !== null) warn(`  ✗ ${frame.nodeId}: ${frame.error}`);
+          else info(`  ✓ ${frame.nodeId}`);
+          break;
+        case "run_warning":
+          warn(`  ⚠ ${frame.message}`);
+          break;
+        case "approval_awaiting":
+          surface.addChild(
+            new Text(
+              `${brass("⏸")} ${frame.nodeId} awaits approval — respond in the SPA or \`keelson workflow respond\``,
+              1,
+              0,
+            ),
+          );
+          break;
+        case "run_done":
+          surface.addChild(
+            new Text(
+              frame.status === "succeeded"
+                ? `${brass("▶")} ${parsed.name} ${dim("succeeded")}`
+                : red(`▶ ${parsed.name} ${frame.status}`),
+              1,
+              0,
+            ),
+          );
+          break;
+        default:
+          break;
+      }
+      tui.requestRender();
+    };
+    void attachRun({ baseUrl: opts.baseUrl, runId, onFrame })
+      .catch((err) => {
+        warn(`✗ run stream: ${err instanceof Error ? err.message : String(err)}`);
+      })
+      .finally(() => {
+        activeRuns -= 1;
+        refreshActivity();
+      });
+  };
+
+  const slashHandlers: { command: SlashCommand; run: (arg: string) => void | Promise<void> }[] = [
+    {
+      command: { name: "new", description: "start a new conversation" },
+      run: () => resetConversation("new conversation"),
+    },
+    {
+      command: {
+        name: "provider",
+        description: "switch provider (starts a new conversation)",
+        argumentHint: "<id>",
+        getArgumentCompletions: (prefix) =>
+          chatProviders
+            .filter((p) => p.id.startsWith(prefix))
+            .map((p) => ({ value: p.id, label: p.id, description: p.displayName })),
+      },
+      run: (arg) => {
+        if (arg.length === 0) {
+          info(
+            `provider: ${session.providerId} (available: ${chatProviders.map((p) => p.id).join(", ")})`,
+          );
+          return;
+        }
+        if (!chatProviders.some((p) => p.id === arg)) {
+          warn(
+            `unknown provider '${arg}'; available: ${chatProviders.map((p) => p.id).join(", ")}`,
+          );
+          return;
+        }
+        session.providerId = arg;
+        session.model = defaultModelFor(setup.providers, arg);
+        footer.set({
+          providerId: arg,
+          ...(session.model !== undefined ? { model: session.model } : { model: undefined }),
+        });
+        resetConversation(`provider ${arg}`);
+      },
+    },
+    {
+      command: {
+        name: "model",
+        description: "switch model for the next turn",
+        argumentHint: "<id>",
+        getArgumentCompletions: (prefix) => {
+          const models =
+            setup.providers.find((p) => p.id === session.providerId)?.capabilities.models ?? [];
+          return models.filter((m) => m.startsWith(prefix)).map((m) => ({ value: m, label: m }));
+        },
+      },
+      run: (arg) => {
+        if (arg.length === 0) {
+          info(`model: ${session.model ?? "(provider default)"}`);
+          return;
+        }
+        session.model = arg;
+        footer.set({ model: arg });
+        info(`model → ${arg}`);
+      },
+    },
+    {
+      command: {
+        name: "project",
+        description: "rebind the session's project (starts a new conversation)",
+        argumentHint: "<name>",
+        getArgumentCompletions: async (prefix) =>
+          (await loadProjectsCached())
+            .filter((p) => p.name.startsWith(prefix))
+            .map((p) => ({ value: p.name, label: p.name, description: p.rootPath })),
+      },
+      run: async (arg) => {
+        if (arg.length === 0) {
+          info(
+            `project: ${session.binding.name}${session.binding.rootPath !== undefined ? ` (${session.binding.rootPath})` : ""}`,
+          );
+          return;
+        }
+        const match = (await loadProjectsCached()).find((p) => p.name === arg);
+        if (match === undefined) {
+          warn(`no project named '${arg}' (see \`keelson project list\`)`);
+          return;
+        }
+        session.binding = {
+          projectId: match.id,
+          name: match.name,
+          rootPath: match.rootPath,
+          autoRegistered: false,
+        };
+        footer.set({ projectName: match.name });
+        resetConversation(`project ${match.name}`);
+      },
+    },
+    {
+      command: { name: "workflows", description: "list runnable workflows" },
+      run: async () => {
+        const workflows = await loadWorkflowsCached();
+        if (workflows.length === 0) {
+          info("no workflows in the catalog");
+          return;
+        }
+        for (const wf of workflows) {
+          surface.addChild(
+            new Text(`${brass("·")} ${wf.name} ${dim(`— ${firstClause(wf.description)}`)}`, 1, 0),
+          );
+        }
+        tui.requestRender();
+      },
+    },
+    {
+      command: {
+        name: "run",
+        description: "run a workflow",
+        argumentHint: "<workflow> [key=value …]",
+        getArgumentCompletions: async (prefix) =>
+          (await loadWorkflowsCached())
+            .filter((w) => w.name.startsWith(prefix))
+            .map((w) => ({
+              value: w.name,
+              label: w.name,
+              description: firstClause(w.description),
+            })),
+      },
+      run: runWorkflowCommand,
+    },
+    {
+      command: { name: "exit", description: "leave interactive chat" },
+      run: () => exit(EXIT_OK),
+    },
+  ];
+  const handlerByName = new Map(slashHandlers.map((h) => [h.command.name, h]));
+
   const editor = new Editor(tui, editorTheme);
-  editor.setAutocompleteProvider(new CombinedAutocompleteProvider(SLASH_COMMANDS, process.cwd()));
+  editor.setAutocompleteProvider(
+    new CombinedAutocompleteProvider(
+      slashHandlers.map((h) => h.command),
+      process.cwd(),
+    ),
+  );
 
   let loader: Loader | null = null;
   const dropLoader = (): void => {
     if (loader !== null) {
       loader.stop();
-      tui.removeChild(loader);
+      transcript.removeChild(loader);
       loader = null;
     }
   };
@@ -142,54 +454,60 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     const message = queue.shift();
     if (message === undefined) return;
     busy = true;
+    refreshActivity();
     void (async () => {
       try {
-        if (conversationId === undefined) {
+        if (session.conversationId === undefined) {
           const conv = await createConversation(opts.baseUrl, {
-            providerId: setup.providerId,
-            ...(setup.model !== undefined ? { model: setup.model } : {}),
-            ...(setup.binding.projectId !== undefined
-              ? { projectId: setup.binding.projectId }
+            providerId: session.providerId,
+            ...(session.model !== undefined ? { model: session.model } : {}),
+            ...(session.binding.projectId !== undefined
+              ? { projectId: session.binding.projectId }
               : {}),
           });
-          conversationId = conv.id;
+          session.conversationId = conv.id;
         }
-        tui.addChild(userLine(message));
+        surface.addChild(userLine(message));
         loader = new Loader(tui, navy, dim, "thinking");
-        tui.addChild(loader);
-        const view = new AssistantTurnView(tui, {
+        transcript.addChild(loader);
+        const view = new AssistantTurnView(surface, {
           ...(opts.thinking !== undefined ? { showThinking: opts.thinking } : {}),
         });
         const abort = new AbortController();
         currentAbort = abort;
         const result = await chatViaServer({
           baseUrl: opts.baseUrl,
-          conversationId,
-          providerId: setup.providerId,
+          conversationId: session.conversationId,
+          providerId: session.providerId,
           message,
-          ...(setup.model !== undefined ? { model: setup.model } : {}),
+          ...(session.model !== undefined ? { model: session.model } : {}),
           ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
           ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
           onChunk: (chunk) => {
             dropLoader();
+            if (chunk.type === "usage") {
+              latestUsage = chunk.usage;
+              usageTotals.input += chunk.usage.inputTokens;
+              usageTotals.output += chunk.usage.outputTokens;
+              footer.set({ meter: formatUsageMeter(latestUsage, usageTotals) });
+            }
             view.handleChunk(chunk);
           },
           signal: abort.signal,
         });
         dropLoader();
         if (abort.signal.aborted) {
-          tui.addChild(new Text(dim("✗ interrupted"), 1, 0));
+          info("✗ interrupted");
         } else if (result.errored) {
           view.fail(result.errorMessage ?? "chat stream errored");
         }
       } catch (err) {
         dropLoader();
-        const errText = err instanceof Error ? err.message : String(err);
-        tui.addChild(new Text(red(`✗ ${errText}`), 1, 0));
+        warn(`✗ ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         currentAbort = null;
         busy = false;
-        tui.requestRender();
+        refreshActivity();
         pump();
       }
     })();
@@ -198,11 +516,18 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
   editor.onSubmit = (raw: string) => {
     const text = raw.trim();
     if (text.length === 0) return;
-    if (text === "/exit") exit(EXIT_OK);
-    if (text === "/new") {
-      conversationId = undefined;
-      tui.addChild(new Text(dim("── new conversation ──"), 1, 0));
-      tui.requestRender();
+    if (text.startsWith("/")) {
+      const parsed = parseSlashCommand(text);
+      const handler = parsed === null ? undefined : handlerByName.get(parsed.name);
+      if (parsed === null || handler === undefined) {
+        warn(`unknown command '${text}' (type / to see commands)`);
+        return;
+      }
+      // Async handlers hit the server; surface a rejection instead of
+      // letting the command silently no-op.
+      void Promise.resolve(handler.run(parsed.arg)).catch((err) => {
+        warn(`✗ ${err instanceof Error ? err.message : String(err)}`);
+      });
       return;
     }
     queue.push(text);
@@ -210,6 +535,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
   };
 
   tui.addChild(editor);
+  tui.addChild(footer);
   tui.setFocus(editor);
   tui.addInputListener((data) => {
     if (matchesKey(data, "ctrl+c")) exit(EXIT_OK);
