@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { ModelInfo, ProviderInfo } from "@keelson/shared";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelRef } from "../../hooks/useSettings.ts";
 
 interface ModelPickerPopoverProps {
@@ -46,6 +46,59 @@ const COST_LABEL: Record<NonNullable<ModelInfo["costTier"]>, string> = {
   mid: "$$",
   high: "$$$",
 };
+
+// Multi-vendor providers (pi) prefix model ids as "vendor/model". The picker
+// sub-groups by that prefix so a 200-model authenticated catalog stays
+// scannable; single-vendor providers (Copilot/Claude) have no "/" and render
+// flat with no sub-header.
+function vendorOf(modelId: string): string | null {
+  const slash = modelId.indexOf("/");
+  return slash > 0 ? modelId.slice(0, slash) : null;
+}
+
+const VENDOR_LABELS: Record<string, string> = {
+  "github-copilot": "GitHub Copilot",
+  openai: "OpenAI",
+  xai: "xAI",
+  deepseek: "DeepSeek",
+  "google-vertex": "Google Vertex",
+  openrouter: "OpenRouter",
+};
+
+function prettyVendor(vendor: string): string {
+  return (
+    VENDOR_LABELS[vendor] ??
+    vendor
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
+}
+
+interface VendorGroup {
+  vendor: string | null;
+  models: ModelInfo[];
+}
+
+// Group only CONSECUTIVE runs of the same vendor, preserving the incoming
+// (canonical) model order. The catalog already arrives vendor-grouped, so each
+// vendor normally yields one run; keeping it order-preserving means the rendered
+// order always matches the keyboard/Enter-select order derived from the same
+// list, and an interleaved catalog shows a vendor's sub-header per run rather
+// than silently reordering rows.
+function groupByVendor(models: ModelInfo[]): VendorGroup[] {
+  const groups: VendorGroup[] = [];
+  for (const m of models) {
+    const vendor = vendorOf(m.id);
+    const last = groups[groups.length - 1];
+    if (last && last.vendor === vendor) {
+      last.models.push(m);
+      continue;
+    }
+    groups.push({ vendor, models: [m] });
+  }
+  return groups;
+}
 
 // Cost is the only metadata that differentiates rows here. Vision is
 // effectively universal across both providers' catalogs; thinking
@@ -279,30 +332,45 @@ export function ModelPickerPopover({
           const models = modelsByProvider[provider.id] ?? [];
           const visible = models.filter((info) => filterMatches(provider.id, info.id));
           if (visible.length === 0) return null;
+          const renderRow = (info: ModelInfo) => {
+            const ref = makeRef(provider.id, info.id);
+            return (
+              <Row
+                key={refKey(ref)}
+                popoverId={popoverId}
+                ref_={ref}
+                info={info}
+                providerLabel={provider.displayName}
+                isActive={
+                  activeRef !== null &&
+                  activeRef.providerId === provider.id &&
+                  activeRef.modelId === info.id
+                }
+                isFavorite={favoritesKey.has(refKey(ref))}
+                disabled={lockedProviderId !== null && lockedProviderId !== provider.id}
+                showProviderPrefix={false}
+                onSelect={() => handleRowSelect(ref)}
+                onToggleFavorite={() => onToggleFavorite(ref)}
+              />
+            );
+          };
           return (
-            <Section key={provider.id} title={provider.displayName}>
-              {visible.map((info) => {
-                const ref = makeRef(provider.id, info.id);
-                return (
-                  <Row
-                    key={refKey(ref)}
-                    popoverId={popoverId}
-                    ref_={ref}
-                    info={info}
-                    providerLabel={provider.displayName}
-                    isActive={
-                      activeRef !== null &&
-                      activeRef.providerId === provider.id &&
-                      activeRef.modelId === info.id
-                    }
-                    isFavorite={favoritesKey.has(refKey(ref))}
-                    disabled={lockedProviderId !== null && lockedProviderId !== provider.id}
-                    showProviderPrefix={false}
-                    onSelect={() => handleRowSelect(ref)}
-                    onToggleFavorite={() => onToggleFavorite(ref)}
-                  />
-                );
-              })}
+            <Section key={provider.id} title={provider.displayName} count={visible.length}>
+              {groupByVendor(visible).map((group) => (
+                // First model id is globally unique, so it keys each consecutive
+                // run distinctly even when a vendor appears in more than one run.
+                <Fragment key={group.models[0]?.id ?? group.vendor ?? "vendor"}>
+                  {group.vendor && (
+                    <div className="model-picker-popover-vendor-title">
+                      <span>{prettyVendor(group.vendor)}</span>
+                      <span className="model-picker-popover-vendor-count">
+                        {group.models.length}
+                      </span>
+                    </div>
+                  )}
+                  {group.models.map(renderRow)}
+                </Fragment>
+              ))}
             </Section>
           );
         })}
@@ -315,10 +383,21 @@ export function ModelPickerPopover({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count?: number;
+  children: React.ReactNode;
+}) {
   return (
     <div className="model-picker-popover-section">
-      <div className="model-picker-popover-section-title">{title}</div>
+      <div className="model-picker-popover-section-title">
+        <span>{title}</span>
+        {count != null && <span className="model-picker-popover-section-count">{count}</span>}
+      </div>
       <div className="model-picker-popover-section-rows">{children}</div>
     </div>
   );
@@ -409,13 +488,27 @@ function Row({
           <span className="model-picker-popover-pick-prefix">{providerLabel}</span>
         )}
         <span className="model-picker-popover-pick-id">{label}</span>
-        {info.costTier && (
-          <span
-            className={`model-picker-popover-pick-meta model-picker-popover-pick-cost cost-${info.costTier}`}
-            role="img"
-            aria-label={`Cost tier: ${info.costTier}`}
-          >
-            {COST_LABEL[info.costTier]}
+        {(info.costTier || info.billing === "metered") && (
+          <span className="model-picker-popover-pick-meta">
+            {info.costTier && (
+              <span
+                className={`model-picker-popover-pick-cost cost-${info.costTier}`}
+                role="img"
+                aria-label={`Cost tier: ${info.costTier}`}
+              >
+                {COST_LABEL[info.costTier]}
+              </span>
+            )}
+            {info.billing === "metered" && (
+              <span
+                className="model-picker-popover-pick-billing"
+                role="img"
+                title="Metered — billed per token via an API key"
+                aria-label="Metered: billed per token via an API key"
+              >
+                API
+              </span>
+            )}
           </span>
         )}
       </button>

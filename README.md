@@ -60,7 +60,7 @@ Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
 credentials. `keelson service` (no subcommand) runs in the foreground instead;
 `keelson service stop` shuts the background server down.
 
-By default Keelson loads Copilot (plus the offline `stub`) and leaves Claude and
+By default Keelson loads only Copilot, leaving the offline `stub`, Claude, and
 Pi (a multi-vendor community agent) opt-in. Pick which providers load and which
 one chat defaults to in `~/.keelson/config.json`:
 

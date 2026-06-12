@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a capability or change to the harness.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keelson is the harness; capabilities usually live in **ribs**. If your
+        idea is a domain integration, it may belong in a rib rather than core —
+        but propose it here and we'll figure out where it fits.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that's hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like to see. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the harness does this touch?
+      options:
+        - CLI
+        - Server
+        - Web / SPA
+        - Workflows
+        - Providers
+        - Rib contract
+        - Docs
+        - Not sure / other
+    validations:
+      required: true

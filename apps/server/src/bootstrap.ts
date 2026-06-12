@@ -81,7 +81,7 @@ export interface BootstrapProvidersResult {
 
 export function bootstrapProviders(options: BootstrapProvidersOptions): BootstrapProvidersResult {
   // Precedence: KEELSON_PROVIDERS env → config.json `providers` map → defaults
-  // (copilot + stub on, claude opt-in). Resolution lives in @keelson/shared so
+  // (copilot on; stub, claude, pi opt-in). Resolution lives in @keelson/shared so
   // the server and the CLI's in-process path register the identical set.
   const config = loadKeelsonConfig();
   const requested = resolveEnabledProviders({

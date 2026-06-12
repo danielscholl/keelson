@@ -76,23 +76,19 @@ describe("loadKeelsonConfig", () => {
 });
 
 describe("resolveEnabledProviders", () => {
-  test("empty config → defaults: copilot + stub, claude off", () => {
+  test("empty config → defaults: copilot only (stub, claude, pi off)", () => {
     const enabled = resolveEnabledProviders({ config: {}, known: KNOWN, onWarn: silent });
-    expect(enabled).toEqual(["stub", "copilot"]);
+    expect(enabled).toEqual(["copilot"]);
   });
 
   test("config flips claude on and copilot off", () => {
     const config: KeelsonConfig = { providers: { claude: true, copilot: false } };
-    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
-      "stub",
-      "claude",
-    ]);
+    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual(["claude"]);
   });
 
   test("output preserves canonical (known) order, not config order", () => {
     const config: KeelsonConfig = { providers: { claude: true } };
     expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
-      "stub",
       "copilot",
       "claude",
     ]);
@@ -119,29 +115,28 @@ describe("resolveEnabledProviders", () => {
   test("empty/whitespace env falls through to config/defaults (not an empty list)", () => {
     expect(
       resolveEnabledProviders({ config: {}, envProviders: "   ", known: KNOWN, onWarn: silent }),
-    ).toEqual(["stub", "copilot"]);
+    ).toEqual(["copilot"]);
   });
 
   test("unknown provider in config map is ignored", () => {
     const config: KeelsonConfig = { providers: { ollama: true } };
-    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
-      "stub",
-      "copilot",
-    ]);
+    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual(["copilot"]);
   });
 
   test("pi is a known provider, opt-in via config", () => {
     const config: KeelsonConfig = { providers: { pi: true } };
     expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
-      "stub",
       "copilot",
       "pi",
     ]);
   });
 
-  test("disabling stub leaves only copilot by default", () => {
-    const config: KeelsonConfig = { providers: { stub: false } };
-    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual(["copilot"]);
+  test("stub is off by default, opt-in via config", () => {
+    const config: KeelsonConfig = { providers: { stub: true } };
+    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
+      "stub",
+      "copilot",
+    ]);
   });
 });
 

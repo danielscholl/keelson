@@ -229,6 +229,11 @@ export const modelInfoSchema = z
     displayName: z.string().optional(),
     description: z.string().optional(),
     costTier: z.enum(["free", "low", "mid", "high"]).optional(),
+    // How the underlying turn is billed. "metered" = a per-token API key;
+    // "subscription" = a flat-rate OAuth login. Undefined = unknown — the
+    // picker shows a mark only for "metered". Driven by pi's per-vendor auth
+    // route today; other providers may populate it later.
+    billing: z.enum(["metered", "subscription"]).optional(),
     supports: z
       .object({
         vision: z.boolean().optional(),
