@@ -80,21 +80,24 @@ interface VendorGroup {
   models: ModelInfo[];
 }
 
-// Preserve the incoming (canonical) model order; group consecutive vendors.
+// Group only CONSECUTIVE runs of the same vendor, preserving the incoming
+// (canonical) model order. The catalog already arrives vendor-grouped, so each
+// vendor normally yields one run; keeping it order-preserving means the rendered
+// order always matches the keyboard/Enter-select order derived from the same
+// list, and an interleaved catalog shows a vendor's sub-header per run rather
+// than silently reordering rows.
 function groupByVendor(models: ModelInfo[]): VendorGroup[] {
-  const order: string[] = [];
-  const byVendor = new Map<string, ModelInfo[]>();
+  const groups: VendorGroup[] = [];
   for (const m of models) {
-    const key = vendorOf(m.id) ?? "";
-    let bucket = byVendor.get(key);
-    if (!bucket) {
-      bucket = [];
-      byVendor.set(key, bucket);
-      order.push(key);
+    const vendor = vendorOf(m.id);
+    const last = groups[groups.length - 1];
+    if (last && last.vendor === vendor) {
+      last.models.push(m);
+      continue;
     }
-    bucket.push(m);
+    groups.push({ vendor, models: [m] });
   }
-  return order.map((key) => ({ vendor: key === "" ? null : key, models: byVendor.get(key) ?? [] }));
+  return groups;
 }
 
 // Cost is the only metadata that differentiates rows here. Vision is
@@ -354,7 +357,9 @@ export function ModelPickerPopover({
           return (
             <Section key={provider.id} title={provider.displayName} count={visible.length}>
               {groupByVendor(visible).map((group) => (
-                <Fragment key={group.vendor ?? "_flat"}>
+                // First model id is globally unique, so it keys each consecutive
+                // run distinctly even when a vendor appears in more than one run.
+                <Fragment key={group.models[0]?.id ?? group.vendor ?? "vendor"}>
                   {group.vendor && (
                     <div className="model-picker-popover-vendor-title">
                       <span>{prettyVendor(group.vendor)}</span>

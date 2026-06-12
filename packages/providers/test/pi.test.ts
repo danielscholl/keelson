@@ -425,6 +425,29 @@ describe("buildPiCatalog", () => {
     expect(byId.get("openai/gpt-4")?.supports).toEqual({ thinking: false });
     expect(byId.get("github-copilot/gpt-5.5")?.costTier).toBe("free");
   });
+
+  test("skips a vendor whose getModels throws, keeping the rest of the catalog", () => {
+    const piai: PiAiLike = {
+      getProviders: () => ["anthropic", "boom", "openai"],
+      getEnvApiKey: () => "sk-test",
+      getModels: (vendor) => {
+        if (vendor === "boom") throw new Error("vendor exploded");
+        return [{ id: "m", name: "M", reasoning: false, input: ["text"], cost: { output: 4 } }];
+      },
+    };
+    const auth: PiAuthStorageLike = { get: () => undefined };
+    expect(buildPiCatalog(piai, auth).map((m) => m.id)).toEqual(["anthropic/m", "openai/m"]);
+  });
+
+  test("treats a model with no cost block as free", () => {
+    const piai = {
+      getProviders: () => ["x"],
+      getEnvApiKey: () => "sk-test",
+      getModels: () => [{ id: "m", name: "M", reasoning: false, input: ["text"] }],
+    } as unknown as PiAiLike;
+    const auth: PiAuthStorageLike = { get: () => undefined };
+    expect(buildPiCatalog(piai, auth)[0]?.costTier).toBe("free");
+  });
 });
 
 describe("costTierFromOutput", () => {
@@ -434,5 +457,16 @@ describe("costTierFromOutput", () => {
     expect(costTierFromOutput(15)).toBe("mid");
     expect(costTierFromOutput(25)).toBe("high");
     expect(costTierFromOutput(60)).toBe("high");
+  });
+
+  test("pins the inclusive bucket boundaries", () => {
+    // Guards the `<= 5` / `<= 20` edges against an off-by-one tidy-up.
+    expect(costTierFromOutput(5)).toBe("low");
+    expect(costTierFromOutput(20)).toBe("mid");
+  });
+
+  test("degrades a non-positive or NaN price to free", () => {
+    expect(costTierFromOutput(-3)).toBe("free");
+    expect(costTierFromOutput(Number.NaN)).toBe("free");
   });
 });

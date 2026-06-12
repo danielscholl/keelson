@@ -54,31 +54,27 @@ export interface PiAiLike {
 export function buildPiCatalog(piai: PiAiLike, auth: PiAuthStorageLike): ModelInfo[] {
   const out: ModelInfo[] = [];
   for (const vendor of piai.getProviders()) {
-    const stored = auth.get(vendor);
-    let envKey: string | undefined;
+    // One bad vendor — a throwing auth.get / getEnvApiKey / getModels — skips
+    // only itself, not the whole catalog; every vendor that resolves cleanly
+    // still reaches the picker.
     try {
-      envKey = piai.getEnvApiKey(vendor);
+      const stored = auth.get(vendor);
+      const envKey = piai.getEnvApiKey(vendor);
+      if (!stored && !envKey) continue;
+      const billing: NonNullable<ModelInfo["billing"]> =
+        stored?.type === "oauth" ? "subscription" : "metered";
+      for (const m of piai.getModels(vendor)) {
+        const vision = Array.isArray(m.input) && m.input.includes("image");
+        out.push({
+          id: `${vendor}/${m.id}`,
+          displayName: m.name,
+          costTier: costTierFromOutput(m.cost?.output ?? 0),
+          billing,
+          supports: { thinking: Boolean(m.reasoning), ...(vision ? { vision: true } : {}) },
+        });
+      }
     } catch {
-      envKey = undefined;
-    }
-    if (!stored && !envKey) continue;
-    const billing: NonNullable<ModelInfo["billing"]> =
-      stored?.type === "oauth" ? "subscription" : "metered";
-    let models: readonly PiModelLike[];
-    try {
-      models = piai.getModels(vendor);
-    } catch {
-      continue;
-    }
-    for (const m of models) {
-      const vision = Array.isArray(m.input) && m.input.includes("image");
-      out.push({
-        id: `${vendor}/${m.id}`,
-        displayName: m.name,
-        costTier: costTierFromOutput(m.cost?.output ?? 0),
-        billing,
-        supports: { thinking: Boolean(m.reasoning), ...(vision ? { vision: true } : {}) },
-      });
+      // skip this vendor; keep the rest of the catalog
     }
   }
   return out;
