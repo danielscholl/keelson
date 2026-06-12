@@ -16,8 +16,8 @@
 # DRY_RUN: KEELSON_TRIAGE_DRY_RUN=1 (the default) prints intended actions without
 # touching the repo. Set it to 0 to apply.
 #
-# Headless runs register only the stub provider today, so route this through
-# your running `keelson service`.
+# Runs headless (`keelson workflow run` with no server) or through a running
+# `keelson service` — both register the same provider set.
 
 name: repo-triage
 description: |

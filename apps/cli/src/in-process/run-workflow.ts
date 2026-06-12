@@ -6,7 +6,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getAgentProvider, isRegisteredProvider, registerStubProvider } from "@keelson/providers";
+import {
+  getAgentProvider,
+  getProviderInfoList,
+  isRegisteredProvider,
+  registerStubProvider,
+} from "@keelson/providers";
+import { loadKeelsonConfig } from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
 import {
   bashHandler,
@@ -35,6 +41,7 @@ import {
 } from "@keelson/workflows";
 
 import { defaultWorkflowsDir } from "../paths.ts";
+import { bootstrapCliProviders } from "./providers.ts";
 
 export interface RunHeadlessOptions {
   name: string;
@@ -87,6 +94,25 @@ export class MemoryRequiresServerError extends Error {
   }
 }
 
+// Default-provider pin for headless prompt nodes, mirroring the server's
+// bootstrapPromptHandler precedence so the same invocation resolves to the
+// same provider whether or not the run routes through `keelson service`:
+// --provider → KEELSON_WORKFLOW_PROVIDER → config defaultProvider (when
+// registered) → first non-stub → stub.
+// Exported for tests; not public.
+export function resolveHeadlessProviderId(explicit?: string): string {
+  const flag = explicit?.trim();
+  if (flag) return flag;
+  const envPin = process.env.KEELSON_WORKFLOW_PROVIDER?.trim();
+  if (envPin) return envPin;
+  const registered = getProviderInfoList().map((p) => p.id);
+  const configDefault = loadKeelsonConfig().defaultProvider?.trim().toLowerCase();
+  if (configDefault && configDefault !== "workflow" && registered.includes(configDefault)) {
+    return configDefault;
+  }
+  return registered.find((id) => id !== "stub" && id !== "workflow") ?? "stub";
+}
+
 // Find a workflow definition by name. Discovery walks the resolved home's
 // global workflow directory only — registered-project overlays live behind
 // the server, so the in-process fallback cannot see project-scoped workflows.
@@ -115,23 +141,26 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     throw new MemoryRequiresServerError(opts.name, memoryNodes);
   }
 
-  // Stub provider is the deterministic fallback when nothing else is
-  // registered. Real providers (claude / copilot) would need keychain
-  // bootstrap and are out of scope for the headless path — operators who
-  // want them up should `keelson service` first so the run routes via HTTP.
+  // Register the same provider set the in-process chat path uses
+  // (KEELSON_PROVIDERS / config.json), so headless runs drive real providers
+  // with no server. Stub stays registered unconditionally — the documented
+  // offline escape hatch (--provider stub) and the fallback when nothing real
+  // is enabled.
+  bootstrapCliProviders();
   registerStubProvider();
-  const providerId = opts.provider ?? "stub";
-  if (!isRegisteredProvider(providerId)) {
+  const providerId = resolveHeadlessProviderId(opts.provider);
+  // Fail fast only on an explicit --provider; an unregistered default pin
+  // (env/config) surfaces lazily when a prompt node first needs it, so
+  // bash-only workflows still run.
+  if (opts.provider !== undefined && !isRegisteredProvider(providerId)) {
+    const available = getProviderInfoList()
+      .map((p) => p.id)
+      .join(", ");
     throw new Error(
-      `provider '${providerId}' is not registered. Use --provider stub for headless runs, or ` +
-        `start the server with credentials configured (\`keelson service\`) and route this run through it.`,
+      `provider '${providerId}' is not registered. Available: ${available}. ` +
+        `Set KEELSON_PROVIDERS (or config.json providers) to include it.`,
     );
   }
-  // @keelson/workflows declares `PromptHandlerProvider` structurally to keep
-  // its dep graph free of @keelson/providers + @keelson/shared (see the
-  // comment block above PromptHandlerProvider). Cast at the boundary — the
-  // structural shape matches; the same cast happens server-side.
-  const provider = getAgentProvider(providerId) as unknown as PromptHandlerProvider;
 
   const abort = new AbortController();
   if (opts.abortSignal) {
@@ -145,19 +174,21 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // approval should route through `keelson service` + the SPA.
   const promptHandler = makePromptHandler({
     getProvider: (id) => {
-      // Headless runs register exactly one provider (stub by default; the
-      // claude/copilot bootstrap path requires keychain + credentials and only
-      // wires under `keelson service`). If the workflow's `provider:` (or a
-      // node's override) names a different id, fail loudly rather than
-      // silently substituting — `keelson service` is the only path that can
-      // dispatch to the full provider set.
-      if (id !== undefined && id !== providerId) {
+      const target = id ?? providerId;
+      if (!isRegisteredProvider(target)) {
+        const available = getProviderInfoList()
+          .map((p) => p.id)
+          .join(", ");
         throw new Error(
-          `workflow declares 'provider: ${id}' but headless mode only has '${providerId}'. ` +
-            `Run \`keelson service\` and route this workflow through the server to use ${id}.`,
+          `provider '${target}' is not registered. Available: ${available}. ` +
+            `Set KEELSON_PROVIDERS to include it, or remove 'provider:' from the workflow.`,
         );
       }
-      return provider;
+      // @keelson/workflows declares `PromptHandlerProvider` structurally to
+      // keep its dep graph free of @keelson/providers + @keelson/shared. Cast
+      // at the boundary — the same cast happens server-side. Resolving here
+      // (not eagerly) keeps bash-only workflows from instantiating an SDK.
+      return getAgentProvider(target) as unknown as PromptHandlerProvider;
     },
     // Tools from `@keelson/skills` are `ToolDefinition` (typed name + schema);
     // `PromptHandlerProvider` accepts the structural `{ name; [k]: unknown }`

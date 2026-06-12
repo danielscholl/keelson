@@ -41,14 +41,28 @@ function noEntry(err: unknown): boolean {
   return m.includes("no entry") || m.includes("not found");
 }
 
-async function getCredential(serviceId: string): Promise<string | undefined> {
+let keyringWarned = false;
+
+// An unavailable OS keychain (headless runner, no Secret Service) reads as "no
+// stored credential" so providers fall through to their env API keys instead of
+// failing the whole turn. The `loader` parameter exists for tests.
+export async function getCliCredential(
+  serviceId: string,
+  loader: () => Promise<KeyringModule> = loadKeyring,
+): Promise<string | undefined> {
   try {
-    const mod = await loadKeyring();
+    const mod = await loader();
     const entry = new mod.Entry(KEYRING_SERVICE, serviceId);
     return entry.getPassword() ?? undefined;
   } catch (err) {
     if (noEntry(err)) return undefined;
-    throw new Error(`keyring get failed for '${serviceId}': ${(err as Error).message}`);
+    if (!keyringWarned) {
+      keyringWarned = true;
+      console.warn(
+        `[keelson] OS keychain unavailable (${(err as Error).message}); using environment credentials only`,
+      );
+    }
+    return undefined;
   }
 }
 
@@ -74,13 +88,13 @@ export function bootstrapCliProviders(): BootstrapResult {
       continue;
     }
     if (id === "copilot") {
-      registerCopilotProvider({ getCredential });
+      registerCopilotProvider({ getCredential: getCliCredential });
       registered.push("copilot");
       continue;
     }
     if (id === "claude") {
       registerClaudeProvider({
-        getCredential,
+        getCredential: getCliCredential,
         ...(config.claude?.auth !== undefined ? { authPreference: config.claude.auth } : {}),
       });
       registered.push("claude");
