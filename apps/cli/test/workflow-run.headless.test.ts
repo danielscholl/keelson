@@ -2,12 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { isRegisteredProvider, registerStubProvider } from "@keelson/providers";
+import { clearRegistry, isRegisteredProvider, registerStubProvider } from "@keelson/providers";
 import type { RunStreamEvent } from "@keelson/workflows";
 
 import { getCliCredential } from "../src/in-process/providers.ts";
@@ -18,6 +18,28 @@ import {
 } from "../src/in-process/run-workflow.ts";
 
 const FIXTURES = resolve(import.meta.dir, "fixtures");
+
+// runHeadless registers providers into the process-global registry per
+// KEELSON_PROVIDERS. Pin the env per test and clear the registry after each so
+// no SDK-backed registration leaks into other test files (their default-pick
+// assertions depend on what's registered, and file order varies by platform).
+const ENV_KEYS = ["KEELSON_PROVIDERS", "KEELSON_WORKFLOW_PROVIDER", "KEELSON_HOME"] as const;
+const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
+beforeAll(() => {
+  for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+});
+beforeEach(() => {
+  process.env.KEELSON_PROVIDERS = "stub";
+  delete process.env.KEELSON_WORKFLOW_PROVIDER;
+});
+afterEach(() => {
+  for (const k of ENV_KEYS) {
+    const v = savedEnv[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  clearRegistry();
+});
 
 describe("runHeadless (in-process executor)", () => {
   test("bash-only fixture runs to succeeded and emits node events", async () => {
@@ -60,20 +82,6 @@ describe("runHeadless (in-process executor)", () => {
 });
 
 describe("headless provider registration", () => {
-  const ENV_KEYS = ["KEELSON_PROVIDERS", "KEELSON_WORKFLOW_PROVIDER", "KEELSON_HOME"] as const;
-  const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
-
-  beforeAll(() => {
-    for (const k of ENV_KEYS) saved[k] = process.env[k];
-  });
-  afterEach(() => {
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  });
-
   test("explicit unknown --provider fails fast with the available list", async () => {
     const promise = runHeadless({
       name: "smoke-bash",
