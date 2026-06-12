@@ -1,11 +1,10 @@
 # Keelson Direction
 
-The maintainer automation (repo-triage, pr-review-bot) consults this document to
-classify issues and PRs and to reason about which contributions fit the project.
-It is committed and shared. Edit it deliberately: when a triage or decline
-decision needs justification, add a clause here so the next run reaches the same
-conclusion. When declining something, cite the clause (e.g.
-`direction.md §not-a-hosted-service`).
+The `repo-triage` workflow consults this document to classify issues and to
+reason about which contributions fit the project. It is committed and shared.
+Edit it deliberately: when a triage decision needs justification, add a clause
+here so the next run reaches the same conclusion. When noting that something runs
+against the project, cite the clause (e.g. `direction.md §not-a-hosted-service`).
 
 ---
 
@@ -19,86 +18,72 @@ conclusion. When declining something, cite the clause (e.g.
 - **Useful on its own.** Chat, Workflows, and Memory ship and work standalone
   with just a provider. Ribs extend the harness; they do not enable it.
 - **Provider-agnostic.** One `IAgentProvider` over Copilot, Claude, Codex, the
-  multi-vendor Pi, and an offline `stub`. Swappable per chat turn and per
-  workflow node.
+  multi-vendor Pi, and an offline `stub`.
 - **Deterministic where it counts.** Workflows are YAML DAGs the engine runs the
   same way every time, with the agent's leash declared in the file.
 - **Local-state by design.** SQLite for conversations, runs, memory; the OS
   keychain for secrets. Nothing leaves the machine that the user did not send.
-- **A Bun + TypeScript monorepo.** Strict TypeScript. Biome for lint/format.
-- **Alpha.** Claims track the code. Known-partial areas are stated honestly
-  (process-lifetime-only resume, redaction wired-but-inactive, offline fallback
-  is stub-only).
+- **Alpha.** Claims track the code; known-partial areas are stated honestly.
 
 ## What Keelson is NOT
 
 - **§not-a-hosted-service** — Not a hosted service or control plane. No
-  multi-tenant accounts, no SaaS scaffolding, no proprietary backend. PRs adding
-  these conflict with the local-only, single-user thesis.
+  multi-tenant accounts, no SaaS scaffolding, no proprietary backend.
 - **§no-in-tree-ribs** — No ribs ship in the keelson repo. A new capability or
-  tool belongs in a rib package, not in core. PRs that add a built-in tool or
-  domain integration to the harness are decline candidates; the answer is "make
-  it a rib."
-- **§core-never-imports-a-rib** — The boundary is load-bearing. PRs that make the
-  core depend on a specific rib break it.
+  tool belongs in a rib package, not in core. "Make it a rib" is usually the
+  answer to a domain-integration request.
+- **§core-never-imports-a-rib** — The boundary is load-bearing.
 - **§ribs-extend-not-enable** — Positioning must never imply a rib is required
-  for keelson to be useful. Docs and copy name the standalone value first.
-- **§not-a-workflow-marketplace** — Bundled workflows are reference patterns, not
-  a distribution hub.
+  for keelson to be useful.
+- **§not-a-workflow-marketplace** — Bundled workflows are reference patterns.
 - **§one-docs-identity** — The docs are one Astro Starlight site with a single
-  "keelson blueprint" identity. No second site generator, no per-page palette
-  fork. `docs/STYLE.md` is authoritative.
-- **§alpha-honesty** — No marketing register, no quantified hype, no claims about
-  dormant or partial capabilities. Comments and copy serve future readers.
+  identity; `docs/STYLE.md` is authoritative.
+- **§alpha-honesty** — No marketing register, no claims about partial or dormant
+  capabilities.
 
 ---
 
-## Label taxonomy
+## Labels
 
-Triage applies labels from this fixed set. The automation ensures these exist
-(idempotent create) before applying.
+Triage uses the repository's existing labels only. It never creates labels;
+anything it cannot express with an existing label goes in the comment for the
+maintainer to handle.
 
-**Area** (where the work lands, mirrors the monorepo):
+**Area** (the monorepo workspace the work lands in — apply the single most
+relevant one, or none):
 
 | Label | Scope |
 |---|---|
-| `area:cli` | `apps/cli` — the `keelson` command, in-process fallback, exit codes |
-| `area:server` | `apps/server` — HTTP/WS, store, handlers, composition root |
-| `area:web` | `apps/web` — the React SPA surfaces |
-| `area:workflows` | `packages/workflows` — DAG executor, schema, loader |
-| `area:providers` | `packages/providers` — provider adapters |
-| `area:ribs` | `packages/shared` rib contract, discovery, the extension seam |
-| `area:docs` | `docs/` — the Starlight site and STYLE.md |
-| `area:build` | install, release, CI, `scripts/` |
+| `apps/cli` | the `keelson` command, in-process fallback, exit codes |
+| `apps/server` | HTTP/WS, store, handlers, composition root |
+| `apps/web` | the React SPA surfaces |
+| `packages/workflows` | DAG executor, schema, loader |
+| `packages/providers` | provider adapters |
+| `packages/shared` | the rib contract, snapshots, shared types |
+| `packages/skills` | bundled skills |
+| `github-actions` | CI, release, repo automation |
 
-**Type** (what kind of work):
-
-| Label | Meaning |
-|---|---|
-| `type:bug` | Something is broken against documented or intended behavior |
-| `type:feature` | New capability or enhancement |
-| `type:docs` | Documentation only |
-| `type:chore` | Maintenance, refactor, dependency, tooling |
-| `type:question` | A question or support request, not actionable work |
-
-**Triage flags** (the automation's own signals, never closing on their own):
+**Type** (apply the single best one, or none):
 
 | Label | Meaning |
 |---|---|
-| `needs-info` | The report lacks enough detail to act (empty template, no repro) |
-| `stale` | No activity for a while; a human should confirm or close |
-| `possible-duplicate` | Likely a duplicate of another open issue (cited in a comment) |
+| `bug` | broken against documented or intended behavior |
+| `enhancement` | new capability or improvement |
+| `documentation` | docs only |
+| `question` | a question or support request, not actionable work |
+
+The repository also carries `duplicate`, `wontfix`, `invalid`, `help wanted`,
+`good first issue`, and `dependencies`. Triage does **not** apply these; they are
+maintainer judgment calls. If an issue looks like a duplicate, say so with the
+`#N` in the comment rather than labeling it.
 
 ## Triage guidance
 
-- Apply exactly one `type:*` and the most-specific `area:*` (or none if unclear).
-- Flag `needs-info` when a bug report has no reproduction or an obviously empty
-  body, and say what's missing in the comment.
-- Flag `possible-duplicate` only with a specific `#N` to compare against, and
-  only when the symptom genuinely overlaps. Never close.
-- Flag `stale` based on the staleness threshold the run passes in; never close.
-- When an issue or PR proposes something the project does NOT do (see "What
-  Keelson is NOT"), say so politely in the triage comment and cite the clause.
-  Do not close it; surface it for the maintainer to decide.
-- Be terse and neutral. The triage comment is a starting point for the
-  maintainer, not a verdict.
+- Apply at most one `area:` and one `type:` label from the lists above, only when
+  reasonably confident. Prefer none over a wrong guess.
+- Put everything else in a terse, neutral comment for the maintainer:
+  - a likely duplicate (cite the `#N`),
+  - a stale issue (no recent activity, based on the age the run reports),
+  - a bug report missing a reproduction or with an essentially empty body,
+  - anything that runs against the project (cite the `direction.md` clause).
+- The comment is a starting point for the maintainer, not a verdict. Be brief.
