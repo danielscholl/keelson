@@ -204,7 +204,7 @@ describe("rib contract backward-compatibility", () => {
       }),
     };
     expect(ctx.getCredential).toBeUndefined();
-    // The C1 seam is optional too — a minimal context omits it (rooms fail closed).
+    // The agent-turn seam is optional too — a minimal context omits it (rooms fail closed).
     expect(ctx.runAgentTurn).toBeUndefined();
   });
 

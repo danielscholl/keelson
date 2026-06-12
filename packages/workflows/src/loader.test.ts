@@ -224,8 +224,8 @@ nodes:
 `;
     const result = parseWorkflow(yaml, "hooks.yaml");
     expect(result.error).toBeNull();
-    // Slice 2 removed `hooks` from PI_IGNORED_FIELDS_PER_NODE; the loader
-    // no longer claims the field is dropped.
+    // hooks is honored, not dropped, so the loader emits no
+    // ignored_capability warning for it.
     expect(
       result.warnings.some((w) => w.kind === "ignored_capability" && w.message.includes("hooks")),
     ).toBe(false);

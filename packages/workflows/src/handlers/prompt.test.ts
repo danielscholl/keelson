@@ -29,7 +29,7 @@ interface SpyProviderOptions {
   throwAt?: number;
   throwError?: Error;
   chunkDelayMs?: number;
-  // Slice 4 — when set, makeSpyProvider exposes `getType()` returning this
+  // When set, makeSpyProvider exposes `getType()` returning this
   // string so the handler's provider-mismatch check has a value to inspect.
   // Omit to keep the structural-subset behavior used by existing tests.
   type?: string;
@@ -757,9 +757,8 @@ describe("makePromptHandler", () => {
       },
     });
     const result = await handler.handle(stubNode, buildCtx());
-    // Hook failures must NOT take the run down — the seam is best-effort
-    // per the W5 forward-compat contract (Phase 4.5 memory layer plugs in
-    // here and any storage hiccup must degrade gracefully).
+    // Hook failures must NOT take the run down — the seam is best-effort,
+    // so a storage hiccup in a hook degrades gracefully.
     expect(result.status).toBe("succeeded");
     expect(result.output.kind === "text" ? result.output.text : "").toBe("ok");
   });

@@ -98,7 +98,7 @@ export interface ApplyRibsOptions {
   // Builds a rib's namespaced read-only credential reader. Optional so unit
   // tests without a credential store stay deterministic.
   readonly getRibCredential?: (ribId: string, serviceId: string) => Promise<string | undefined>;
-  // Runs one agent turn for a rib (C1). NOT namespace-scoped — provider routing
+  // Runs one agent turn for a rib. NOT namespace-scoped — provider routing
   // is global; `ribId` is passed for future per-rib policy/logging. Optional so
   // test rigs without a provider/CLI stay deterministic.
   readonly runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;

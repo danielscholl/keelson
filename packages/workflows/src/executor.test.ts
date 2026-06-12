@@ -724,10 +724,10 @@ nodes:
   });
 
   test("bash $X.output is NOT pre-quoted — author owns quoting", async () => {
-    // W1 contract: all substitutions are raw. $X.output is treated the same as
+    // All substitutions are raw. $X.output is treated the same as
     // $ARGUMENTS and $inputs.foo for bash. Author must wrap in single quotes
     // in the YAML (e.g. `bash: "echo '$X.output'"`) to defang upstream output.
-    // Safer interpolation against hostile output (env / argv) is a W2 concern;
+    // Safer interpolation against hostile output (env / argv) is not done here;
     // no quoting strategy in `bash -c <text>` is universally safe.
     const workflow = parseInline(`
 name: t
@@ -1113,7 +1113,7 @@ describe("runWorkflow — onEvent resilience", () => {
   test("an async onEvent that rejects after await does not kill the run", async () => {
     // Regression: a sync try/catch around onEvent doesn't catch rejections
     // from an async callback that throws *after* an await — that becomes an
-    // unhandled rejection. W2-style consumers using onEvent for SQLite
+    // unhandled rejection. Consumers using onEvent for SQLite
     // persistence are exactly this shape.
     const workflow = loadStarter("hello-world");
     const { handler } = echoHandler("prompt");

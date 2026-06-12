@@ -269,8 +269,8 @@ function nodeBodyOf(node: DagNode): string {
 //
 // All substitutions are RAW. Author owns quoting — for bash, wrap substitutions
 // in single quotes in the YAML. Bash command-injection safety against hostile
-// upstream output is a W2 concern: no in-string quoting is universally safe;
-// the W2 bash handler will adopt out-of-band interpolation (env / argv).
+// upstream output is not solved here: no in-string quoting is universally safe;
+// a bash handler would need out-of-band interpolation (env / argv).
 // The boundary after the reserved tokens prevents `$ARGUMENTS2.output` /
 // `$ARTIFACTS_DIR_FOO` / `$ARTIFACTS_DIR-cache.output` from greedily matching
 // the reserved alt — without the boundary, the regex engine commits to the

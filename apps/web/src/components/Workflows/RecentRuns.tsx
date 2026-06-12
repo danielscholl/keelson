@@ -61,7 +61,7 @@ function formatStarted(startedAt: string): string {
 
 export interface RecentRunsProps {
   // The catalog — used to map a run's ribId to the rib's display name for the
-  // row badge. No longer drives fetching (the feed is a single endpoint).
+  // row badge.
   workflows: ReadonlyArray<WorkflowSummary>;
   // runProjectId is the run's own project — the detail fetch must use the
   // run's scope, not the viewer's active project (the feed is cross-project).

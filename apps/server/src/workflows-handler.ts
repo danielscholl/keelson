@@ -129,7 +129,7 @@ export interface WorkflowsHandlerOptions {
   // both are no-ops.
   projectNotebookStore?: ProjectNotebookStore;
   // Optional snapshot manager. When set, a run republishes its latest
-  // structured node output under a run-scoped key (the Tier-0 bridge, #73);
+  // structured node output under a run-scoped key;
   // undefined → runs never publish a snapshot.
   snapshotManager?: SnapshotManager;
   // Rib-contributed workflows bound to a rib-namespaced snapshot key, by
@@ -1741,7 +1741,7 @@ interface ExecuteRunArgs {
   // Project-notebook handle, pre-bound + gated to a project the working dir sits
   // inside. Undefined → prompt nodes inject nothing and the `notebook:` hook no-ops.
   notebook?: NotebookAdapter;
-  // Tier-0 snapshot bridge (#73): when set, the run republishes its latest
+  // Snapshot bridge: when set, the run republishes its latest
   // structured node output under the `workflow:run:<id>` snapshot key.
   snapshotManager?: SnapshotManager;
   // Rib-contributed workflow bindings by name; a bound run also fans its
@@ -1956,9 +1956,8 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // map (keyed by nodeId) so the existing POST /resume + DELETE abort drain
   // paths handle both pause types without branching. The only persisted
   // difference is the node's `outputText` (gate message) at the iteration
-  // boundary; iteration count / sessionId are forward-declared on
-  // ApprovalContext but only used in-memory for now — the SPA renders the
-  // pause through the same approval_awaiting frame.
+  // boundary; the SPA renders the pause through the same approval_awaiting
+  // frame.
   //
   // Unlike approval, the loop handler does NOT return after resume — it
   // continues into the next iteration. So on settle.resolve we MUST flip
@@ -2117,11 +2116,11 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     if (entry) entry.artifactsDir = artifactsDir;
   }
 
-  // Tier-0 snapshot bridge (#73): expose this run's latest structured node
+  // Snapshot bridge: expose this run's latest structured node
   // output under a run-scoped key so a snapshot-backed canvas renders it live.
   // The substrate stays domain-free — `data` is the structured value verbatim.
-  // Deferred to M7: per-key schema validation + redaction (the producer here is
-  // a trusted in-tree workflow and the snapshot WS is loopback-origin-gated).
+  // No per-key schema validation or redaction here: the producer is a trusted
+  // in-tree workflow and the snapshot WS is loopback-origin-gated.
   let unregisterSnapshot: (() => void) | undefined;
   let publishStructured: ((value: unknown) => void) | undefined;
   // The most recent recompose, awaited before unregister so the final frame
@@ -2137,7 +2136,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       lastRecompose = snapshotManager.recompose(snapshotKey).catch(() => undefined);
     };
   }
-  // When this run's workflow is bound to a rib-owned key (M8), fan the same
+  // When this run's workflow is bound to a rib-owned key, fan the same
   // structured output to it. Bindings are keyed by the definition *object*, and
   // `workflow` here is the object the catalog resolved for this run at start
   // (`catalog.get(name)` in both run entry points). So a project file that
@@ -2197,7 +2196,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     // Worktree cleanup before activeRuns.delete so the shutdown drain awaits
     // it via `entry.done`. Only on a clean terminal status — failed /
     // cancelled runs leave the worktree behind for inspection. `keelson
-    // worktree prune` (slice 4) is the operator's escape hatch.
+    // worktree prune` is the operator's escape hatch.
     if (worktreePathForCleanup !== null && cleanupOnSuccessOnly && terminalStatus === "succeeded") {
       // Force-remove on success: a successful run may have produced
       // intentional untracked files (e.g. an `architect` PR-creation node
@@ -2238,7 +2237,7 @@ interface DispatchArgs {
   subscribers: WorkflowSubscribers;
   nodeStart: Map<string, string>;
   nodeAccumulators: Map<string, ReturnType<typeof createContentPartsAccumulator>>;
-  // Tier-0 snapshot bridge (#73): when set, a node's structured output is
+  // Snapshot bridge: when set, a node's structured output is
   // republished under the run-scoped snapshot key. Undefined → no publish.
   publishStructured?: (value: unknown) => void;
 }
@@ -2320,7 +2319,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
         error: event.result.error ?? null,
         ...(usage !== null ? { usage } : {}),
       });
-      // Tier-0 bridge (#73): a structured node output becomes the latest frame
+      // Snapshot bridge: a structured node output becomes the latest frame
       // on the run-scoped snapshot key.
       if (event.result.output.kind === "structured") {
         publishStructured?.(event.result.output.value);

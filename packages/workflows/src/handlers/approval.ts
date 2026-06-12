@@ -15,7 +15,7 @@
  * The handler does no IO of its own. The route layer's `awaitApproval`
  * callback is what writes `paused` to SQLite, registers the pending promise,
  * and resolves it when POST /api/workflows/runs/:runId/resume arrives. The
- * schema's `on_reject` re-prompt loop is not yet wired up — follow-up slice.
+ * schema's `on_reject` re-prompt loop is not yet wired up.
  */
 
 import type { NodeHandler, NodeResult } from "../executor.ts";

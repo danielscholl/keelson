@@ -15,7 +15,6 @@ The harness is useful on its own. When you need more, you bolt on **ribs** —
 installable extensions that add tools, workflows, and whole new surfaces without
 forking the harness.
 
-> Alpha: the APIs and workflow schema still move. [Read the docs](https://danielscholl.github.io/keelson/).
 
 ## What you get
 
@@ -154,9 +153,8 @@ with stable exit codes: `0` success, `1` failure, `2` bad args, `3` server
 required but down, `4` not found.
 
 The workflow engine borrows its schema and DAG concepts from
-[Archon](https://github.com/coleam00/Archon) (MIT, by Cole Medin): most Archon
-workflows load directly, and the loader warns rather than hard-errors on fields
-it doesn't yet support. Full attribution lives in [NOTICE](NOTICE).
+[Archon](https://github.com/coleam00/Archon) (MIT, by Cole Medin): a fantastic and well thought out project go check it out and support his [channel](https://www.youtube.com/@ColeMedin). 
+Full attribution lives in [NOTICE](NOTICE).
 
 ## Documentation
 

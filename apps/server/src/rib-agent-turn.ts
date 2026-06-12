@@ -21,7 +21,7 @@ import type {
   RibAgentTurnResult,
 } from "@keelson/shared";
 
-// Registry-routed C1 `runAgentTurn` seam (packages/shared/src/rib.ts): resolve a
+// Registry-routed `runAgentTurn` seam (packages/shared/src/rib.ts): resolve a
 // provider the same way workflow `prompt` nodes do (req.provider hint →
 // KEELSON_WORKFLOW_PROVIDER → first non-stub) and drive one turn through
 // `IAgentProvider.sendQuery`, adapting its chunk stream into the settled
@@ -30,11 +30,11 @@ import type {
 // result — the room loop — sees the same settled outcome).
 //
 // Invariants the seam owns, not each rib:
-//   - a turn never inherits the host repo cwd (#114): an omitted `cwd` defaults
+//   - a turn never inherits the host repo cwd: an omitted `cwd` defaults
 //     to a neutral non-repo directory;
 //   - an empty/whitespace prompt is rejected with a clear seam-level error
-//     (#115) rather than leaking the CLI's "Input must be provided" wording;
-//   - provider routing honors configuration (#111) — `providerId` reflects the
+//     rather than leaking the CLI's "Input must be provided" wording;
+//   - provider routing honors configuration — `providerId` reflects the
 //     provider actually used.
 
 export interface MakeRibAgentTurnDeps {
@@ -100,7 +100,7 @@ function resolveProviderId(
 }
 
 async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<RibAgentTurnResult> {
-  // #115 — reject an empty/whitespace prompt at the seam, before touching a
+  // Reject an empty/whitespace prompt at the seam, before touching a
   // provider, so a transiently-empty prompt is a legible contract violation.
   if (!req.prompt || req.prompt.trim().length === 0) {
     return { status: "error", text: "", error: "prompt must be non-empty" };
@@ -122,7 +122,7 @@ async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<Ri
     return { status: "error", text: "", error: errMessage(err), providerId };
   }
 
-  // #114 — never inherit the server's (host repo) cwd; a turn that omits `cwd`
+  // Never inherit the server's (host repo) cwd; a turn that omits `cwd`
   // runs in the neutral directory.
   const cwd = req.cwd ?? deps.neutralCwd;
 
@@ -185,7 +185,7 @@ async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<Ri
   return { status: "ok", text: assistantText, providerId };
 }
 
-// Map the request's tool rails onto SendQueryOptions, preserving the C1 intent:
+// Map the request's tool rails onto SendQueryOptions:
 // `tools`/`allowedTools` present (even empty) means "these and no others", and a
 // turn with no tool fields at all is text-only (the room default — no Bash/Edit
 // between turns), expressed as an empty allow-list. A `disallowedTools`-only

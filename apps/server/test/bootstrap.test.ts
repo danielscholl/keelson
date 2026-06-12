@@ -295,7 +295,7 @@ describe("bootstrapRibs", () => {
       },
     };
     await bootstrapRibs({ available: { alpha: ribWithBundle }, snapshotManager });
-    // The composeBundle key is namespaced under rib:<id> (M8), not the bare id.
+    // The composeBundle key is namespaced under rib:<id>, not the bare id.
     expect(snapshotManager.keys()).toEqual(["rib:alpha"]);
     const frame = await snapshotManager.recompose<{ generation: number }>("rib:alpha");
     expect(frame?.data).toEqual({ generation: 1 });
