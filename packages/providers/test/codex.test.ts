@@ -348,13 +348,13 @@ describe("CodexProvider", () => {
     });
     await collect(
       provider.sendQuery("question", "/repo", undefined, {
-        model: "gpt-5.3-codex",
+        model: "gpt-5.5",
         systemPrompt: "you are helpful",
         reasoningEffort: "none",
       }),
     );
     expect(input).toBe("you are helpful\n\nquestion");
-    expect(captured?.model).toBe("gpt-5.3-codex");
+    expect(captured?.model).toBe("gpt-5.5");
     // keelson "none" has no codex equivalent → "minimal".
     expect(captured?.reasoningEffort).toBe("minimal");
   });

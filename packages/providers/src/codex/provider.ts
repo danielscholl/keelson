@@ -25,27 +25,29 @@ export const CODEX_DEFAULT_MODEL = "" as const;
 
 // Curated picker baseline. The codex CLI has no programmatic models.list, so
 // this is hand-maintained (like claude). capabilities.models projects these ids
-// so the two can't drift.
+// so the two can't drift. Leaving the model unset (defaultModel "") lets codex
+// fall back to the account's own ~/.codex default, which never forces an
+// inaccessible model.
 const CODEX_MODEL_CATALOG: readonly ModelInfo[] = [
   {
-    id: "gpt-5.3-codex",
-    displayName: "GPT-5.3 Codex",
-    description: "OpenAI's latest coding model via Codex. Needs `codex login` or OPENAI_API_KEY.",
+    id: "gpt-5.5",
+    displayName: "GPT-5.5",
+    description: "OpenAI's latest model via Codex. Needs `codex login` or OPENAI_API_KEY.",
     costTier: "high",
     supports: { tools: true, reasoningEffort: true },
   },
   {
-    id: "gpt-5.2-codex",
-    displayName: "GPT-5.2 Codex",
-    description: "Prior Codex coding model.",
+    id: "gpt-5.4",
+    displayName: "GPT-5.4",
+    description: "Prior-generation Codex model.",
     costTier: "mid",
     supports: { tools: true, reasoningEffort: true },
   },
   {
-    id: "gpt-5-codex",
-    displayName: "GPT-5 Codex",
-    description: "Original GPT-5 Codex coding model.",
-    costTier: "mid",
+    id: "gpt-5.4-mini",
+    displayName: "GPT-5.4 mini",
+    description: "Faster, lower-cost Codex model.",
+    costTier: "low",
     supports: { tools: true, reasoningEffort: true },
   },
 ];
