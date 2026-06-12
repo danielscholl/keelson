@@ -1,0 +1,71 @@
+# On-demand keelson PR review. A collaborator comments `/keelson review` on a
+# PR; keelson runs its `pr-review-bot` workflow (the engine reviewing its own
+# project) and posts the review back as a comment. Complements, does not
+# replace, the existing CodeRabbit / Copilot reviews.
+name: keelson pr review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: keelson-pr-review-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Only on a PR, only the trigger phrase, only from a collaborator.
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/keelson review') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acknowledge the request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes >/dev/null 2>&1 || true
+
+      # Checkout the default branch: it carries the maintainer workflows and the
+      # convention docs the reviewer reads. The PR's diff comes from `gh pr diff`,
+      # so the PR head does not need to be checked out.
+      - uses: actions/checkout@v6
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set up an unlocked keyring
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            gnome-keyring libsecret-1-0 dbus-x11 >/dev/null
+
+      - name: Run keelson pr-review-bot
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          KEELSON_PROVIDERS: claude
+          KEELSON_CONFIG: ${{ runner.temp }}/keelson-config.json
+          KEELSON_WORKFLOWS_DIR: ${{ github.workspace }}/.keelson/maintainer-workflows
+          KEELSON_PR_REVIEW_DRY_RUN: "0"
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          printf '{ "providers": { "claude": true }, "claude": { "auth": "api-key" } }\n' > "$KEELSON_CONFIG"
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 || true
+            bun apps/cli/bin/keelson.ts workflow run pr-review-bot \
+              --inputs ARGUMENTS="$PR_NUMBER" --provider claude --watch
+          '
