@@ -98,6 +98,7 @@ exposes the reply as the node's output so a later node can branch on it.
   - id: gate
     approval:
       message: "Run this plan?"
+      capture_response: true
     depends_on: [plan]
   - id: execute
     prompt: "Execute the plan: $plan.output"

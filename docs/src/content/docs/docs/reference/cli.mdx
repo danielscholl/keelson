@@ -113,7 +113,7 @@ it runs in-process and prints to stdout.
 
 | Option | Effect |
 | --- | --- |
-| `--provider <id>` | Provider id; default mirrors the server, else the first non-stub provider. |
+| `--provider <id>` | Provider id. With the server up, defaults to the server's provider; with the server down, the in-process fallback runs the offline `stub`. |
 | `--model <id>` | Model id passed to the provider. |
 | `--conversation <id>` | Continue an existing conversation (server-up only). |
 | `--thinking` | Enable Claude extended thinking for the turn. |

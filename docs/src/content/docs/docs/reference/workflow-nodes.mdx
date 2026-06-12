@@ -140,9 +140,10 @@ These apply across kinds (some only to agent nodes, as noted).
 | `hooks` | agent | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
 
 Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
-`fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. Agent-only fields placed on a
-non-agent node (`bash`, `script`, `loop`, `approval`, `cancel`) are also ignored
-with a warning.
+`fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. The per-turn agent fields are
+also ignored, with a warning, on a node that does not take one: `bash`, `script`,
+`approval`, `cancel`, and `loop` (an agent kind, but one that carries its own
+`loop.prompt` and field set, so the node-level agent fields do not apply to it).
 
 ### trigger_rule
 
