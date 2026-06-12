@@ -1,0 +1,167 @@
+---
+title: Authoring workflows
+description: The authoring loop and the recipes for the common control-flow shapes like fan-out, branch, approval gate, and loop-until-done.
+sidebar:
+  order: 3
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A workflow is one YAML file you can read in a single screen. Here is the
+practical how-to: the loop you follow to write one, where workflows live, and the
+recipes for the shapes you reach for most. For the full schema, see
+[Workflow nodes](../../reference/workflow-nodes/); for a narrated first run, see
+[Run your first workflow](../../tutorials/run-a-workflow/).
+
+## The authoring loop
+
+<Aside type="tip" title="Start from a working example">
+Adapting the shape of an existing workflow beats a blank page. List your catalog
+with `keelson workflow list`, open one whose shape is close, and edit from there.
+</Aside>
+
+1. **Draft the YAML.** Prefer inline `prompt`, `bash`, and `script` nodes. A
+   `command:` node references a markdown file that must already exist on disk.
+2. **Validate.** `keelson workflow validate <name>` runs the real loader. Fix
+   every error and re-validate until it parses cleanly; read the warnings, which
+   are advisory.
+3. **Run it.** `keelson workflow run <name> --watch` streams the DAG executing
+   in dependency order.
+
+```sh
+keelson workflow validate test-triage
+keelson workflow run test-triage --watch
+```
+
+## Where workflows live
+
+| Scope | Location | Visible to |
+| --- | --- | --- |
+| global | `<home>/workflows/` | Every project and conversation. |
+| project | `<root>/.keelson/workflows/` | Only that project. |
+
+A project workflow shadows a same-named global one within its project. The
+catalog hot-reloads, so a saved file is runnable immediately, with no restart.
+The workflow's `name:` field is its catalog key and must match the filename.
+
+Give every workflow the structured description block so the UI cards and
+`workflow list` render it scannably:
+
+```yaml
+description: |
+  Use when: a PR needs a structured review before merge
+  Triggers: "review PR 42", "look at this pull request"
+  Does: fetches the diff, reviews it, posts findings as a comment
+  NOT for: writing new code or fixing the issues it finds
+```
+
+## Recipes
+
+### Fan-out and fan-in
+
+Independent nodes run in parallel; a join node waits for all of them. Reference
+each upstream output with `$<id>.output`.
+
+```yaml
+nodes:
+  - id: lint
+    bash: bun run check
+  - id: types
+    bash: bun --filter '*' typecheck
+  - id: verdict
+    prompt: "Summarize: lint=$lint.output types=$types.output"
+    depends_on: [lint, types]
+```
+
+### Classify, then branch
+
+A node emits a label; downstream nodes gate on it with `when:`. A false condition
+skips the node.
+
+```yaml
+  - id: classify
+    prompt: "Reply with exactly BUG or FEATURE for: $ARGUMENTS"
+  - id: fix
+    prompt: "Investigate and fix: $ARGUMENTS"
+    depends_on: [classify]
+    when: "$classify.output == 'BUG'"
+```
+
+### Approval gate
+
+Plan, pause for a human, then act only on approval. `capture_response: true`
+exposes the reply as the node's output so a later node can branch on it.
+
+```yaml
+  - id: plan
+    prompt: "Draft a plan for: $ARGUMENTS"
+  - id: gate
+    approval:
+      message: "Run this plan?"
+      capture_response: true
+    depends_on: [plan]
+  - id: execute
+    prompt: "Execute the plan: $plan.output"
+    depends_on: [gate]
+```
+
+Resume a paused run from the CLI with `keelson workflow respond <runId> <nodeId>
+<text>`, or from the Workflows surface in the browser.
+
+### Loop until done
+
+A `loop` repeats its prompt until a completion token appears, hard-bounded by
+`max_iterations` so it can never run away.
+
+```yaml
+  - id: fix-until-green
+    loop:
+      prompt: "Run the tests, fix one failure, reply DONE when all pass."
+      until: "DONE"
+      max_iterations: 5
+```
+
+### Guard with cancel
+
+End a branch deliberately, with a recorded reason, when there is nothing to do.
+
+```yaml
+  - id: classify
+    prompt: "Reply NONE if there is nothing actionable, else describe the work."
+  - id: bail
+    cancel: "nothing actionable"
+    when: "$classify.output == 'NONE'"
+    depends_on: [classify]
+```
+
+## Bound an agent's reach
+
+Agent nodes run inside declared limits. The file picks the provider and model
+per node, gates tools with `allowed_tools` and `denied_tools` (rib tools are
+default-off, so opt in by name), bounds stalls with `idle_timeout`, and pins
+output shape with `output_schema`. Above the file, the operator floor still
+applies: `KEELSON_WORKFLOW_PROVIDER` pins the provider every `prompt` node uses.
+
+## Feed agent output into a script safely
+
+A `prompt` node's output can flow into a `bash` or `script` node, but the two
+channels keep it safe: shell nodes read upstream output from
+`KEELSON_NODE_<id>_OUTPUT` environment variables, never spliced into the source,
+so the model's text is always data and never code.
+
+```yaml
+  - id: draft
+    prompt: "Write a one-line release note for: $ARGUMENTS"
+  - id: record
+    bash: 'printf "%s\n" "$KEELSON_NODE_draft_OUTPUT" >> NOTES.md'
+    depends_on: [draft]
+```
+
+## Related
+
+- [Workflow nodes](../../reference/workflow-nodes/): the full schema, every
+  field, and the validation rules.
+- [Workflows](../../concepts/workflows/): the execution model and the run
+  lifecycle.
+- [Run your first workflow](../../tutorials/run-a-workflow/): a narrated first
+  build, breaking it on purpose to see what validation catches.

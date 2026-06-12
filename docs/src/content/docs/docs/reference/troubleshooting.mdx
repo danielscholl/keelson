@@ -1,0 +1,141 @@
+---
+title: Troubleshooting
+description: The common failure modes, what causes each one, and the fix, anchored on the keelson doctor health sweep.
+sidebar:
+  order: 8
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Most problems announce themselves in one place. Run the health sweep first:
+
+```sh
+keelson doctor
+```
+
+It probes five categories, toolchain, server, database, auth, and workflows, and
+every check that fails or warns carries a `hint` naming the next command. This
+page expands the cases that need more than a one-line hint, grouped by what you
+see.
+
+The paths below assume the default home, `~/.keelson`. If you set `KEELSON_HOME`
+or run from a dev checkout, substitute your home (see
+[Directories](../directories/)).
+
+## The browser UI will not load
+
+The server is down. `doctor`'s server check warns `not reachable`. Start it:
+
+```sh
+keelson service start          # background
+keelson service status         # confirm: exit 0 up, 3 down
+```
+
+If `status` reports the server is running but nothing answers, the log under the
+home has the boot error:
+
+```sh
+cat ~/.keelson/logs/server.log
+```
+
+## "already running" or a port conflict on 7878
+
+A server is already bound to the port. Check whether it is yours:
+
+```sh
+keelson service status
+```
+
+If it reports a live server, that is the one holding the port; use it, or
+`keelson service stop` first. If `status` says a recorded process is alive but
+not responding, `server.json` is stale from a crash. The error message names the
+file to remove; delete `~/.keelson/server.json` and retry.
+
+## doctor warns on schema_version
+
+The database check reports the migration state, and the hint tells you which way
+to go:
+
+| Detail | Fix |
+| --- | --- |
+| The database does not exist | Run `keelson service` once; it creates and migrates the database at boot. |
+| Migrations are pending | Run `keelson service` to apply them. |
+| The on-disk schema is newer than this binary | Upgrade keelson with `keelson update`; the database was written by a later version. |
+
+## doctor warns on the keychain
+
+The auth check's `keyring round-trip` failed, so provider credentials cannot
+load. Unlock the OS keychain (Keychain Access on macOS, the Secret Service on
+Linux) and re-run `doctor`.
+
+## The agent only echoes my message
+
+You are on the `stub` provider, which echoes by design. This is expected with
+`KEELSON_PROVIDERS=stub` and in the server-down CLI fallback, which runs the stub
+only. For a real agent, enable a real provider:
+
+```jsonc
+// ~/.keelson/config.json
+{ "providers": { "copilot": true } }
+```
+
+Then restart the server. See [Configuration](../../guides/configuration/) for
+each provider's setup.
+
+## A provider errors mid-turn on auth
+
+`doctor`'s auth category reports each provider's credential state. The fix
+depends on the provider:
+
+| Provider | Fix |
+| --- | --- |
+| `claude` | Sign in with a Pro/Max plan (`claude auth login`) or set `ANTHROPIC_API_KEY`. Choose between them with `claude.auth` in `config.json`. |
+| `copilot` | Sign in through the app's Copilot surface, or store a token. |
+| `pi` | Run pi's own login or set a vendor key such as `ANTHROPIC_API_KEY`; pi reads `~/.pi/agent/auth.json`. |
+| `codex` | Run `codex login` or set `OPENAI_API_KEY` / `CODEX_API_KEY`; codex reads `~/.codex/auth.json`. |
+
+## A rib I installed does not appear
+
+Discovery runs once, at boot. After `keelson rib add` the command reports
+`restartRequired: true`; restart `keelson service` so discovery picks the package
+up. If it still does not appear:
+
+- Check `KEELSON_RIBS`. When set, it filters which discovered ribs activate;
+  unset it to activate everything.
+- Read the boot log. A rib that fails validation is skipped with one warning
+  naming the reason, most often a declared id that does not match the package
+  suffix (`rib-weather` must export id `weather`).
+
+See [Managing ribs](../../guides/managing-ribs/) for the full lifecycle.
+
+## A paused run shows failed after a restart
+
+This is expected. An approval pause is held by the running server process, not by
+the database, so a restart cannot resume it. Boot reconciliation finds the stale
+run and marks it failed rather than pretending it can continue. Runs are durable
+as records; they are not yet resumable as processes.
+
+## A command exits non-zero from a script
+
+The CLI's exit codes are stable, so the number tells you the category:
+
+| Code | Meaning | Likely cause |
+| --- | --- | --- |
+| `2` | Bad arguments | A typo'd flag, a missing operand, or an empty option value. |
+| `3` | Server required but down | A rib, project, or status command run while the server is off. Start it, or pass `--base-url`. |
+| `4` | Not found | A workflow or rib name that is not in the catalog. Check `keelson workflow list` or `keelson rib list`. |
+
+## A bash workflow node fails on Windows
+
+The `bash` node and `loop` `until_bash` need a POSIX shell. Install
+[Git for Windows](https://git-scm.com/download/win); keelson auto-discovers its
+`bash.exe`, and `KEELSON_BASH` overrides the path. The `prompt`, `command`, and
+`script` node types have no such requirement.
+
+## Related
+
+- [Operating the server](../../guides/operating-the-server/): the service
+  lifecycle and where state lives.
+- [Configuration](../../guides/configuration/): providers, credentials, and the
+  `KEELSON_*` variables.
+- [The CLI](../cli/): the full command tree and the exit-code contract.

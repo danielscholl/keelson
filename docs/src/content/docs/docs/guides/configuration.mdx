@@ -87,7 +87,7 @@ environment, so keelson lets you choose with `claude.auth`:
 |---|---|
 | `auto` (default) | Use the subscription when `claude auth status` reports one, otherwise fall back to the API key. |
 | `subscription` | Always use the subscription login; the turn errors if there is none. |
-| `api-key` | Always use the API key — a keelson-saved token, otherwise `ANTHROPIC_API_KEY`. |
+| `api-key` | Always use the API key (a keelson-saved token, otherwise `ANTHROPIC_API_KEY`). |
 
 To reach the subscription, keelson removes `ANTHROPIC_API_KEY` from just the
 Claude process it spawns. Your shell keeps the variable for every other tool, so
@@ -145,8 +145,8 @@ confirm Codex found a credential.
 
 Codex is an **agentic coding provider**: its turns run inside the `codex exec`
 subprocess, which reads the repo and runs its own shell and file-edit tools. Those
-tool calls execute under Codex's own sandbox — keelson cannot gate them per call
-the way it gates Copilot and Claude tools — so the sandbox is the boundary. By
+tool calls execute under Codex's own sandbox, which keelson cannot gate per call
+the way it gates Copilot and Claude tools, so the sandbox is the boundary. By
 default keelson runs Codex with `sandbox: "workspace-write"` (read the repo, write
 within the conversation's project directory), `approvalPolicy: never`, and network
 access off. Tighten or loosen it with `codex.sandbox`, and toggle network reach
@@ -179,8 +179,10 @@ the matching config value when set.
 |---|---|---|
 | `KEELSON_HOME` | `~/.keelson` | The keelson home directory (db, workflows, config). |
 | `KEELSON_CONFIG` | `<home>/config.json` | Path to the config file. |
+| `KEELSON_WORKFLOWS_DIR` | `<home>/workflows` | The global workflows directory. |
 | `KEELSON_PROVIDERS` | unset | Exact list of providers to load. Overrides the config file. |
 | `KEELSON_WORKFLOW_PROVIDER` | first real provider | Provider that backs workflow `prompt` nodes. |
+| `KEELSON_WORKFLOW_TOOL_DENYLIST` | unset | Operator floor: tool names no workflow `prompt` node may use, subtracted on top of whatever a node allows. |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
 | `KEELSON_WORKSPACE` | `~/keelson` | Root for project workspaces. |
 | `KEELSON_BASH` | auto-detected | Path to a POSIX shell for `bash` workflow nodes (Windows). |

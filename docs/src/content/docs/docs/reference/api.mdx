@@ -1,0 +1,156 @@
+---
+title: The HTTP and WS API
+description: The server's local API surface, grouped by resource, plus the WebSocket streams and the conventions a client relies on.
+sidebar:
+  order: 6
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The server exposes one HTTP and WebSocket API on `http://127.0.0.1:7878`. The CLI
+and the browser SPA are both clients of it; a rib never reaches it, and an
+integration you write talks to the same surface they do. This page groups the
+endpoints by resource and documents the streams. The public wire shapes are
+typed in `@keelson/shared`, and the contract pages for each resource hold the
+exact payloads.
+
+## Conventions
+
+| Aspect | Behavior |
+| --- | --- |
+| Base URL | `http://127.0.0.1:7878`. The server binds to loopback only. |
+| Auth | None. Keelson is single-user and local; state-changing endpoints are gated to loopback origins, not to a token. |
+| Content type | JSON request and response bodies. |
+| Typed shapes | The rib, snapshot, provider, and tool responses are zod-typed in `@keelson/shared`; import the type rather than hand-rolling it. |
+
+<Aside type="caution" title="This is a local surface, not a public API">
+The API has no authentication because it is reachable only from your machine.
+Two endpoints are special: `POST /api/server/shutdown` is gated by the token in
+`server.json` and is operator-internal, and `POST /api/ribs/:id/action` is
+loopback-trusted today (the capability-token envelope is a later milestone).
+Treat the surface as stable for reading and local automation, not as a versioned
+public contract.
+</Aside>
+
+## Health and system
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/health` | Liveness and identity: the server name and schema version. Backs `doctor`'s server check. |
+| `GET` | `/api/config` | The resolved configuration the server booted with. |
+| `POST` | `/api/server/shutdown` | Graceful shutdown. Token-gated by the `server.json` bearer; operator-internal. |
+
+## Ribs and tools
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/ribs` | The active ribs. Returns `ListRibsResponse` (`{ ribs: RibSummary[] }`). |
+| `POST` | `/api/ribs/:id/action` | Dispatch an action to a rib's `onAction`. Returns `RibActionResponse`. Loopback-trusted. |
+| `GET` | `/api/tools` | The shared tool registry, including rib tools, with `family` and the advisory `state_changing` / `requires_confirmation` flags. |
+
+See [The Rib contract](../rib-contract/#wire-shapes) for the rib wire shapes.
+
+## Providers
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/providers` | The registered providers and their capabilities. |
+| `GET` | `/api/providers/:id/models` | The provider's live model list, the source the picker prefers over the curated baseline. |
+
+See [Providers](../providers/) for the capability shape.
+
+## Snapshots
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/snapshots` | The index of registered snapshot keys. |
+| `GET` | `/api/snapshots/:key` | The latest cached frame for a key (a `SnapshotFrame`). |
+| `WS` | `/api/snapshots/:key/ws` | Subscribe to a key: the latest frame on connect, then a `snapshot_update` on every recompose. |
+
+See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
+
+## Chat and conversations
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/conversations` | List conversations, including the workflow-run projection. |
+| `POST` | `/api/conversations` | Create a conversation. |
+| `GET` | `/api/conversations/:id` | One conversation with its messages. |
+| `PATCH` | `/api/conversations/:id` | Update a conversation (for example, rename). |
+| `DELETE` | `/api/conversations/:id` | Delete a conversation. |
+| `POST` | `/api/chat/:cid/messages/:mid/remember` | Promote a message into a memory draft. |
+| `WS` | `/api/chat/ws` | The chat turn stream: send a turn, receive `MessageChunk`s until `done`. |
+
+## Workflows
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/workflows` | The merged catalog. |
+| `GET` | `/api/workflows/:name` | One workflow definition. |
+| `POST` | `/api/workflows/:name/runs` | Start a run. |
+| `POST` | `/api/workflows/:name/refresh` | Re-run a workflow bound to a snapshot key (the board-refresh path). |
+| `GET` | `/api/workflows/:name/runs` | Runs for one workflow. |
+| `GET` | `/api/workflows/runs` | Recent runs across the catalog. |
+| `GET` | `/api/workflows/runs/:runId` | One run with its per-node outputs. |
+| `POST` | `/api/workflows/runs/:runId/resume` | Resume a paused run by replying to its approval node. |
+| `GET` | `/api/workflows/runs/:runId/artifact` | Read a file from a run's sandboxed artifact directory. |
+| `POST` | `/api/workflows/runs/bulk-delete` | Delete several runs at once. |
+| `GET` | `/api/workflows/worktree-paths` | The worktree directories isolated runs created. |
+| `WS` | `/api/workflows/runs/:runId/ws` | The run event stream: node start, stream, and settle, plus the approval-pause frame. |
+
+## Memory
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/memory/list` | List memory rows, filterable by project and review state. |
+| `POST` | `/api/memory/recall` | The read path: full-text search ranked by relevance and recency. |
+| `GET` | `/api/memory/review` | The pending review queue. |
+| `POST` | `/api/memory/review` | Route a pending memory (instruction-grade, evidence, restricted, rejected). |
+| `POST` | `/api/memory/writeback` | Draft a memory through the guardrail gate. |
+
+See [Memory and state](../../concepts/memory-and-state/) for the governance model.
+
+## Projects
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` / `POST` | `/api/projects` | List or register projects. |
+| `GET` / `PATCH` / `DELETE` | `/api/projects/:id` | Read, update, or remove a project. |
+| `POST` | `/api/projects/clone` | Register a project by cloning a repository. |
+| `GET` / `PUT` | `/api/projects/:id/notebook` | Read or replace the project notebook. |
+| `POST` | `/api/projects/:id/notebook/append` | Append to the notebook (the `note_project` path). |
+| `POST` | `/api/projects/:id/notebook/tidy` | Compact the notebook. |
+
+## Credentials
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/credentials/:serviceId/status` | Whether a credential exists, never its value. |
+| `POST` | `/api/credentials/:serviceId` | Store a credential in the OS keychain. |
+| `DELETE` | `/api/credentials/:serviceId` | Remove a stored credential. |
+| `GET` | `/api/credentials/copilot/cli-status`, `/api/credentials/claude/cli-status` | The provider CLI's own auth status, for the sign-in surfaces. |
+
+<Aside type="note" title="Credentials report existence, never value">
+The credential endpoints answer whether a secret is stored and remove it, but no
+endpoint ever returns a secret's value. Secrets live in the OS keychain; the
+database and the API only know that one exists.
+</Aside>
+
+## WebSocket streams
+
+Three resources stream over WebSocket, all under the same base URL. Each sends
+the current state on connect, then incremental frames.
+
+| Stream | Carries |
+| --- | --- |
+| `/api/chat/ws` | A chat turn: `MessageChunk`s until a terminal `done`. |
+| `/api/workflows/runs/:runId/ws` | Run events: node start, output, settle, and the approval-pause frame. |
+| `/api/snapshots/:key/ws` | The cached frame on connect, then a `snapshot_update` per recompose. |
+
+## Related
+
+- [The CLI](../cli/): the scriptable client over this surface, with the JSON
+  envelope and exit-code contract.
+- [The Rib contract](../rib-contract/): the typed rib endpoints and their shapes.
+- [Snapshots and the canvas](../snapshots/): the frame the snapshot stream
+  carries.

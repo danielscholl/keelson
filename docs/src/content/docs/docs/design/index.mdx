@@ -1,11 +1,24 @@
 ---
 title: Design
-description: Decision records and a candid account of what we learned.
+description: Decision records, and where the implementation stands against them.
 ---
 
-The design tier is where the reasoning lives: decision records and a candid
-account of what worked and what did not. It is the right home for the
-why-we-built-it-this-way narrative the source comment policy keeps out of the
-code.
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Decision records and a learnings page land here as the design surface grows.
+The design tier is where the reasoning lives: the choices the architecture rests
+on, and an account of where the implementation sits against them. It is
+the home for the why-we-built-it-this-way narrative the source comment policy
+keeps out of the code.
+
+<CardGrid>
+  <LinkCard
+    title="Decisions"
+    href="decisions/"
+    description="The load-bearing architectural choices, recorded with their reasoning so they are decided once and not re-argued."
+  />
+  <LinkCard
+    title="Learnings"
+    href="learnings/"
+    description="What the design got right, what is still partial in this alpha, and what we would tell the next builder."
+  />
+</CardGrid>

@@ -1,0 +1,125 @@
+---
+title: Providers
+description: The IAgentProvider interface, the capability shape, and the matrix of what each built-in provider supports.
+sidebar:
+  order: 5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A provider is a coding-agent SDK behind one interface. Chat turns and workflow
+`prompt` nodes both run through it, so swapping the provider swaps the agent
+without touching the conversation, the workflow, or the harness. For how to
+enable each one and where its credentials come from, read
+[Configuration](../../guides/configuration/). What follows is the
+`IAgentProvider` contract and the support matrix.
+
+## The interface
+
+```ts
+interface IAgentProvider {
+  sendQuery(
+    prompt: string,
+    cwd: string,
+    resumeSessionId?: string,
+    options?: SendQueryOptions,
+  ): AsyncGenerator<MessageChunk>;
+
+  getType(): string;
+  getCapabilities(): ProviderCapabilities;
+  listModels(): Promise<ModelInfo[]>;   // must never throw
+}
+```
+
+`sendQuery` streams the turn as `MessageChunk`s, the same unit chat and
+workflows consume. `listModels` must never throw: on any failure it falls back
+to a bare-id projection of `capabilities.models`, so the model picker never
+empties out.
+
+## Capabilities
+
+```ts
+interface ProviderCapabilities {
+  sessionResume: boolean;   // multi-turn context survives across turns
+  streaming: boolean;       // emits incremental chunks, not one final blob
+  tools: boolean;           // keelson projects its MCP / rib tools into the provider
+  models: string[];         // a curated baseline; the live list is a separate probe
+  defaultModel: string;     // "" means "let the SDK decide" (no model on the wire)
+}
+```
+
+The `tools` capability is specifically about **tool projection**: whether the
+harness hands its tool registry to the provider. A provider can be `tools: false`
+and still act agentically with its own built-in tools, as Codex does.
+
+## SendQuery options
+
+`SendQueryOptions` carries everything a turn needs beyond the prompt. The fields
+are provider-neutral: a provider consumes what it supports and ignores the rest.
+
+| Option | For |
+| --- | --- |
+| `model` | The model id; absent uses the provider default. |
+| `systemPrompt` | The assembled system prompt for the turn. |
+| `tools` | The `ToolDefinition`s to project (the harness tool registry). |
+| `allowedTools` / `disallowedTools` | SDK-level tool gates. Claude gates by name; Copilot gates the built-in capability the names map to. |
+| `thinking` | Extended thinking. Consumed by Claude. |
+| `reasoningEffort` | `none` … `xhigh`. Consumed by Copilot on reasoning models. |
+| `mcpServers` | stdio MCP servers to attach. |
+| `abortSignal` | Cancels an in-flight turn. |
+| `onSessionId` | Called once when the backend session id is known, so the next turn can resume it. |
+| `hooks` | Per-node hook matchers. Claude honors all events; Copilot honors `PreToolUse` / `PostToolUse`. |
+
+## The provider matrix
+
+Five providers ship built in. Out of the box only Copilot loads; the rest are
+opt-in (see [Configuration](../../guides/configuration/)).
+
+| Provider | id | Resume | Stream | Tool projection | Auth |
+| --- | --- | --- | --- | --- | --- |
+| GitHub Copilot | `copilot` | yes | yes | yes | keelson keychain |
+| Claude | `claude` | yes | yes | yes | keelson keychain (subscription or API key) |
+| Codex | `codex` | yes | yes | no | self-managed |
+| Pi (community) | `pi` | no | yes | no | self-managed |
+| Stub (echo) | `stub` | no | yes | no | none |
+
+A few rows need their footnote:
+
+- **Codex** runs its own shell and file-edit tools inside the `codex exec`
+  subprocess, gated by its sandbox, so the harness does not project tools into
+  it. Its activity surfaces in chat as command-execution and file-change rows.
+- **Pi** is chat and reasoning only for now: its built-in tools stay off (they
+  would run outside the harness rails) and the harness does not yet project
+  tools into it, so each turn is a fresh session.
+- **Stub** is the offline echo provider: no credentials, no tool calls,
+  deterministic output. It exists so every loop can be verified without keys.
+
+<Aside type="note" title="Self-managed auth">
+Copilot and Claude store their credential in the keelson keychain and have a
+sign-in surface in the app. Codex and Pi manage their own credentials
+(`~/.codex/auth.json`, `~/.pi/agent/auth.json`, and per-vendor env keys), so
+there is nothing in the keelson keychain for them; `keelson doctor` reports
+whether each found a credential.
+</Aside>
+
+## Where a provider is chosen
+
+| Scope | Mechanism |
+| --- | --- |
+| A chat turn | The model picker in the app, or `keelson chat --provider <id>`. |
+| A workflow node | The node's `provider:` field, or the workflow's top-level `provider:`. |
+| The workflow floor | `KEELSON_WORKFLOW_PROVIDER` pins the provider every `prompt` node uses, independent of chat. |
+| Which providers load | The `providers` map in `config.json`, or `KEELSON_PROVIDERS` (an exact override). |
+
+Models follow the same two-tier pattern: `capabilities.models` is a curated
+baseline, and `GET /api/providers/:id/models` returns the live list the picker
+prefers.
+
+## Related
+
+- [Configuration](../../guides/configuration/): enabling providers, the
+  precedence rules, and how each provider's credentials resolve.
+- [Workflow nodes](../workflow-nodes/): the `provider` and `model` fields a node
+  and a workflow can set.
+- [Architecture](../../concepts/architecture/): where the provider registry sits
+  in the server's composition root.

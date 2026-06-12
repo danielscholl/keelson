@@ -96,8 +96,8 @@ server is the composition root that wires them together at startup.
     borrow concepts from Archon.
   </Card>
   <Card title="packages/providers">
-    The coding-agent SDKs behind one interface: Copilot, Claude, and a no-auth
-    stub for offline use.
+    The coding-agent SDKs behind one interface: Copilot, Claude, Codex, the
+    multi-vendor Pi, and a no-auth stub for offline use.
   </Card>
   <Card title="The keelson home">
     The runtime home at `~/.keelson`: the SQLite database, the bundled starter
@@ -115,9 +115,9 @@ rib can bind to it.
 
 <Steps>
 
-1. **Bootstrap providers.** Build the provider registry over the Copilot SDK, the
-   Claude Agent SDK, and the offline stub, each reading credentials through the
-   keychain.
+1. **Bootstrap providers.** Build the provider registry over the enabled
+   provider SDKs (Copilot, Claude, Codex, Pi, and the offline stub), each
+   resolving its own credentials.
 
 2. **Create the snapshot manager.** Stand up the generic streaming substrate that
    ribs publish boards through, before any rib can bind to it.
@@ -194,8 +194,8 @@ The exact shapes, rules, and order live in [the rib contract](../../reference/ri
 
 ## The boundary rule
 
-One rule keeps the harness and the ribs apart, and it is four concrete
-boundaries, not a slogan.
+One rule keeps the harness and the ribs apart, and it shows up as four concrete
+boundaries.
 
 - **Static dependency.** The harness has no compile-time dependency on any rib.
   Installed ribs are discovered and imported at boot through the `Rib` contract,

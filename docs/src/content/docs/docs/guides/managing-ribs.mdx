@@ -1,0 +1,97 @@
+---
+title: Managing ribs
+description: Install, inspect, activate, update, and remove the capability packages that extend the harness.
+sidebar:
+  order: 4
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Ribs are how the harness gains capability: separately versioned packages that
+register tools, workflows, and surfaces through a typed contract. Keelson keeps
+no registry of which ribs exist, so installing one is dependency management, not
+integration work. What follows is the operator's reference for the rib
+lifecycle: install, inspect, activate, update, remove.
+
+## Install
+
+`keelson rib add` hands your source to `bun` and installs into the managed home.
+Any bun-installable source works:
+
+| Source form | Example |
+| --- | --- |
+| GitHub URL | `https://github.com/danielscholl/keelson-rib-chamber` |
+| GitHub shorthand | `github:you/keelson-rib-yours` |
+| Git URL | `git@github.com:you/keelson-rib-yours.git` |
+| npm package | `@keelson/rib-yours` |
+| Local path | `./keelson-rib-yours` |
+
+```sh
+keelson rib add https://github.com/danielscholl/keelson-rib-chamber
+```
+
+Discovery happens once, at boot, so a rib installed while the server is running
+is not active until the next restart. The command reports
+`restartRequired: true` when that is the case.
+
+<Aside type="caution" title="A rib is code you choose to run">
+Installing a rib executes someone else's package inside your harness, with the
+same access to your machine as any dependency. The namespace and credential
+rules guard against collisions and cross-rib reads; they are not a sandbox.
+Install ribs from sources you trust.
+</Aside>
+
+## Inspect
+
+```sh
+keelson rib list --installed     # reads the home directly; no server needed
+keelson rib list                 # discovered + active, with tools and surfaces (server-required)
+keelson rib show <id>            # one rib's tools, views, surfaces, and auth (server-required)
+```
+
+`rib show` is the inspection tool: it reports the tools the rib registered, the
+views and surfaces it declared, whether it handles board actions, and its auth
+status if it declares a probe. The same inventory backs the browser UI, where an
+installed rib appears as a top-level tab with its tools on tap in Chat.
+
+## Activate
+
+Installed and active are distinct states. `KEELSON_RIBS` is the operator's
+filter between them, applied per process:
+
+```sh
+KEELSON_RIBS=chamber keelson service    # activate only chamber
+keelson service                         # unset: activate everything discovered
+```
+
+This makes experiments cheap: keep several ribs installed and activate one. A
+rib that fails validation at boot is skipped with a single warning in the log,
+never a crash, so the boot log is the audit trail for what activated and what
+did not.
+
+## Update
+
+```sh
+keelson update            # advances the harness and GitHub-sourced ribs together
+keelson update --check    # report available versions without applying
+```
+
+An installed rib stays a managed dependency that advances with the harness, not
+a fork you maintain.
+
+## Remove
+
+```sh
+keelson rib remove chamber     # by rib id
+```
+
+## Related
+
+- [Install a rib](../../tutorials/install-a-rib/): the same lifecycle as a
+  guided walk-through, with discovery explained step by step.
+- [Build your first rib](../../tutorials/build-your-first-rib/): write one in two
+  files and install it from a local path.
+- [The rib model](../../concepts/the-rib-model/): why capabilities are packages
+  and the boundary the harness enforces.
+- [The Rib contract](../../reference/rib-contract/): the precise interface a rib
+  implements.

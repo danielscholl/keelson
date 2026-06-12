@@ -1,0 +1,94 @@
+---
+title: Managing memory
+description: How memories get written, how you review them, and how a memory earns the right to instruct the agent.
+sidebar:
+  order: 5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The harness remembers across sessions, but it does not trust everything it
+remembers. Standing context comes in two tiers, and one rule governs both:
+writing a memory and trusting it are separate events, and only you connect them.
+
+## Two tiers of context
+
+| Tier | What it is | How it is governed |
+| --- | --- | --- |
+| The project notebook | One markdown document per project, injected into every chat turn for that project. | You edit it directly; the agent can append through a `note_project` tool. No ranking, always present. |
+| Memory | Typed rows that accumulate over time: a decision, lesson, constraint, or failure. | Written as evidence, reviewed by you, recalled by relevance and recency. |
+
+The notebook is the simplest lever: the conventions and standing facts you want
+the agent to hold without being asked. Reach for it first. Memory is the harder
+tier, for facts that accumulate from runs you were not watching.
+
+## How a memory gets written
+
+Memories are drafted, not committed by the agent. A workflow node declares a
+`memory.writeback`; when the node settles, a typed memory row is drafted with its
+provenance hard-coded to `generated`. Before it lands, guardrails screen every
+draft:
+
+- Known secret patterns are rejected.
+- Size is capped.
+- Reference-type memories must point at a source rather than inline it.
+- An idempotency key keeps re-runs from writing duplicates.
+
+A draft that survives the guardrails arrives as `pending`. It is recorded, but
+it cannot yet influence the agent.
+
+## Reviewing the queue
+
+New memories land in the **Memory surface** in the browser, which is the review
+queue. Reviewing is a human-in-the-loop activity by design; there is no
+auto-promotion. Your action on each pending memory routes it:
+
+| Action | Effect |
+| --- | --- |
+| Confirm | Instruction-grade: eligible to be injected into future system prompts. |
+| Keep as evidence | Retained and searchable, but never auto-injected. |
+| Restrict | Held out of automatic injection. |
+| Reject | Discarded. |
+
+<Aside type="caution" title="Remembered is not believed">
+An agent-generated memory cannot mark itself safe to instruct future agents.
+Influence is granted only by your review, and every action lands in an audit
+journal. This asymmetry is the point: it is what lets the harness accumulate
+knowledge from unattended runs without letting an unattended run teach the next
+one something wrong.
+</Aside>
+
+## How recall works
+
+Chat and workflows read memory through full-text search, ranked by relevance and
+weighted by recency with a thirty-day half-life, so stale facts fade rather than
+linger. What recall returns is scoped to the project and filtered by review
+policy:
+
+- A chat turn injects at most a handful of short, instruction-approved items
+  into the system prompt.
+- A workflow node with a `memory.recall` block receives results as data under
+  `$memory.recall`.
+
+Recall is traced: the harness records what was offered to each turn, so "why did
+the agent think that" stays an answerable question.
+
+## What the agent sees each turn
+
+Everything converges in the system prompt assembled for a chat turn, in a fixed
+order. Nothing else is silently added:
+
+1. The project notebook, in full.
+2. The memory recall section: a few approved, recent, relevant items.
+3. The conversation's seed prompt, when a surface primed one.
+4. Workflow guidance, when workflow tools are active for the turn.
+
+If the agent knows something across sessions, it came through one of those four
+doors, and three of them are files or rows you can read.
+
+## Related
+
+- [Memory and state](../../concepts/memory-and-state/): the design rationale and
+  where every byte physically lives.
+- [Workflow nodes](../../reference/workflow-nodes/): the `memory` and `notebook`
+  blocks a node declares to write back and recall.

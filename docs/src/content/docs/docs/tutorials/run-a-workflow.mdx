@@ -15,8 +15,8 @@ validation catches, and watch it run.
 
 ## Hit the wall first
 
-[Your first run](../first-run/) ended with `doctor` reporting zero workflows.
-Try to run one anyway:
+[Your first run](../first-run/) seeded a few starter workflows, but not the one
+you have in mind. Try running a name that does not exist yet:
 
 ```sh
 keelson workflow run hello-harness
@@ -189,7 +189,8 @@ You have used two node kinds. There are seven:
 | `cancel` | A controlled early exit for a branch. |
 
 Combined with `depends_on`, `when:`, and `trigger_rule:` for merge semantics,
-this is the entire vocabulary. Confirm your catalog is no longer empty:
+this is the entire vocabulary. Confirm your workflow joined the catalog,
+alongside the seeded starters:
 
 ```sh
 keelson workflow list
@@ -201,7 +202,7 @@ workflows:
     description: Three node kinds, one dependency, one gate. A first workflow.
     nodeCount: 4
     path: /Users/you/.keelson/workflows/hello-harness.yaml
-    source: project
+    source: global
 ```
 
 ## What you proved

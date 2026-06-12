@@ -1,0 +1,117 @@
+---
+title: Decisions
+description: The load-bearing architectural choices behind keelson, and the reasoning that is not re-litigated.
+sidebar:
+  order: 1
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+These are the choices the rest of the system is built on. Each one is recorded
+here, with its reasoning, so it is decided once and not re-argued in every
+review. They are deliberately few: the small set of bets the architecture rests
+on.
+
+## Capability lives in ribs, discovered at boot
+
+The harness ships finished and deliberately capability-empty. No ribs live in
+the repository. Capability arrives as separately versioned packages the server
+discovers at boot from `node_modules/@keelson/`, and the core never imports a
+rib.
+
+The alternative, a plugin folder inside the harness, couples every capability to
+the harness's release train and turns the core into a monolith that grows
+without bound. Discovery decouples them: capability scales by adding packages,
+and the harness ships once and stays stable while any number of ribs come and
+go. The cost is that a rib's contract has to be narrow and explicit, which is a
+cost worth paying.
+
+## Ribs publish data, never UI
+
+A rib hands the harness typed payloads under namespaced keys. The browser renders
+every rib with the same closed set of components. A rib never ships a web view,
+opens a port, or touches the database.
+
+Extension systems usually die on the UI question: either extensions embed their
+own web views and the host becomes a browser for mutually distrustful apps, or
+they get no UI and live as command-line afterthoughts. The data-not-UI rule is
+the third path. The whole web app contains one generic surface renderer that
+works for every rib ever installed, and the closed canvas vocabulary is what
+lets the harness promise that every rib's surface is consistent and safe to
+render.
+
+## Two data channels, because text is not code
+
+Inside a workflow, upstream output reaches a downstream node two ways: the
+workflow layer substitutes `$node.output` into prompt text and conditions, while
+shell nodes read upstream output from environment variables, never spliced into
+their source.
+
+The split is a security boundary, not a convenience. Prompt text is interpreted
+by a model that treats it as language and can absorb hostile input; shell source
+is executed by a machine that treats it as instructions and must never see it.
+That separation is the only reason an agent's output can flow into a `script`
+node safely.
+
+## A memory is evidence until a human promotes it
+
+The memory subsystem treats writing a memory and trusting a memory as separate
+events. A workflow writes memories as `generated` evidence; only a human review
+can mark one instruction-grade and eligible for injection into a future prompt.
+An agent-generated memory cannot mark itself safe.
+
+This asymmetry is what lets the harness accumulate knowledge from runs nobody
+was watching without letting an unattended run teach the next one something
+wrong. Influence is earned through review, and every routing decision lands in
+an audit journal.
+
+## The boundary is enforced, but it is not a sandbox
+
+Everything a rib publishes is namespaced under `rib:<id>`, registering an
+out-of-namespace key throws, and a rib's credential reader is scoped read-only to
+its own keys. These rules are checked, not trusted.
+
+But they are about collisions and cross-rib reach, not isolation. A rib runs
+in-process with the server, with the same access to your machine as any
+dependency you install. Saying so plainly is the honest position: the boundary
+guards against accidents, and you choose rib sources the way you choose any
+package.
+
+<Aside type="note" title="Why state this as a non-goal">
+Promising a sandbox the architecture does not provide would be worse than
+promising nothing. An operator who believes a rib is isolated makes different
+trust decisions than one who knows it is not. The boundary's value is real and
+narrow, so we state it narrowly.
+</Aside>
+
+## Local-only is a property of the wiring
+
+The server binds to `127.0.0.1`, state-changing endpoints are gated to loopback
+origins, secrets live in the OS keychain rather than the database, and the
+background server's shutdown endpoint is gated by a token written to the
+operator's disk.
+
+Keelson is a single-user harness that runs on your laptop, so the trust model is
+the operating system, not a hosted control plane. "Local-only" is something the
+wiring enforces, not a sentence in the README.
+
+## Lenient on vocabulary, strict on structure
+
+The workflow loader hard-errors on anything that breaks the graph: duplicate
+ids, unknown dependencies, cycles, reserved names, non-ancestor references. A
+field it recognizes but does not honor only warns.
+
+The schema and DAG concepts are borrowed from
+[Archon](https://github.com/coleam00/Archon), and the leniency is deliberate: it
+lets most Archon workflows load unmodified while the strictness still catches the
+mistakes that would fail silently at run time. The warning channel is honest
+about the gap between what a field promises and what this runtime does with it.
+
+## Related
+
+- [Learnings](../learnings/): what these decisions cost and where the harness is
+  still partial.
+- [Architecture](../../concepts/architecture/): how the pieces wire together at
+  boot.
+- [The rib model](../../concepts/the-rib-model/): the extension philosophy these
+  decisions serve.

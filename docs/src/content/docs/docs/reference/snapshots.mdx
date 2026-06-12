@@ -1,0 +1,211 @@
+---
+title: Snapshots and the canvas
+description: The SnapshotManager interface, the frame wire shape, and the closed canvas vocabulary a payload must satisfy to render.
+sidebar:
+  order: 3
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Snapshots are the substrate a rib publishes data onto; the canvas is the closed
+set of shapes the browser knows how to render. For the design rationale, read
+[Snapshots and surfaces](../../concepts/snapshots-and-surfaces/) first. What
+follows is the contract underneath it: the `SnapshotManager` interface, the
+frame envelope, and the canvas vocabulary a `view` must satisfy.
+
+## The SnapshotManager
+
+The harness owns one `SnapshotManager`. A rib receives a namespace-scoped view
+of it through `ctx.getSnapshotManager?.()`.
+
+```ts
+interface SnapshotManager {
+  register<T>(
+    key: string,
+    compose: () => Promise<T> | T,
+    opts?: { validate?: (data: unknown) => T },
+  ): () => void;                                  // returns an unregister handle
+  recompose<T>(key: string): Promise<SnapshotFrame<T> | undefined>;
+  latest<T>(key: string): SnapshotFrame<T> | undefined;
+  keys(): string[];
+  dispose(): Promise<void>;
+}
+```
+
+| Method | Behavior |
+| --- | --- |
+| `register` | Registers a composer under a key. Throws on a duplicate key; call the returned handle before re-registering. An optional `validate` runs on every composed payload. |
+| `recompose` | Runs the composer, validates, caches, and broadcasts a frame. Concurrent calls coalesce into one composer run. Returns `undefined` if the key is unregistered or the composer threw. |
+| `latest` | The last cached frame for a key, or `undefined`. Wrapped (not bare data) so a late client can compare `version`. |
+| `keys` | The registered keys; backs `GET /api/snapshots`. |
+| `dispose` | Idempotent teardown; closes subscriber sockets and drops cached state. |
+
+A rib's `composeBundle` is registered as the composer for `rib.id`
+automatically. Additional keys are registered imperatively. Every key a rib
+registers must live under `rib:<id>` or `rib:<id>:*`; registering outside the
+namespace throws, and reading another rib's keys returns nothing.
+
+## The frame
+
+A frame is the versioned envelope every snapshot travels in, both in `latest()`
+and over the WebSocket.
+
+```ts title="the wire shape"
+{
+  type: "snapshot_update",
+  key: "rib:example:board",
+  version: 7,                          // non-negative int, increments per compose
+  composedAt: "2026-06-09T18:20:04Z",  // ISO 8601 with offset
+  data: /* the payload */
+}
+```
+
+Each successful compose increments `version`, replaces the cached frame, and
+broadcasts to subscribers. Versions let a late-joining client read the cached
+frame first, then subscribe and discard any frame it has already seen.
+
+## Fail closed, three times
+
+A frame is checked at three points, and every rejection preserves the last good
+state.
+
+1. **At the producer.** A `validate` registered with the key (canonically a zod
+   `parse`) runs before caching or broadcast. An invalid payload is dropped and
+   the prior frame survives.
+2. **At the composer.** If the composer throws, the failure is logged once and
+   the cached frame is untouched. A flaky external system degrades a board to
+   stale, never to broken.
+3. **At the renderer.** The browser parses every frame against the canvas schema
+   before rendering. A mismatch renders a one-line note instead of a component.
+
+For a `view` payload, `expectView(key, kind)` is the canonical producer guard: it
+parses `data` through the full canvas-view union (so the uniqueness checks the
+render gate runs are enforced producer-side) and asserts the expected
+discriminant.
+
+## Canvas kinds
+
+A payload declares what it is. The renderer set is closed: the browser either
+has a renderer for the declared kind or refuses politely.
+
+| Kind | Renders as |
+| --- | --- |
+| `markdown` | Formatted text. |
+| `view` | A typed visualization: a `table`, a `graph`, or a `board`. |
+| `html` | Reserved. Declared in the schema, unrendered until an iframe-origin sandboxing pass lands. |
+
+A `view` payload carries its own `view` discriminant, one of three:
+
+### table
+
+```ts
+{ view: "table",
+  columns: [{ key, label? }],          // keys must be unique
+  rows: [ { [columnKey]: Cell } ],
+  caption? }
+```
+
+A `Cell` is a bare scalar (`string | number | boolean | null`) or a wrapped
+`{ value?, tone?, badges? }`, where each badge is `{ text, tone? }`. A wrapped
+cell must render something: a value or at least one badge.
+
+### graph
+
+```ts
+{ view: "graph",
+  nodes: [{ id, label?, kind? }],      // ids must be unique
+  edges: [{ source, target, label? }] }
+```
+
+`kind` is a generic category string a rib colors by, never a base-side enum.
+
+### board
+
+The workhorse: an ordered stack of dashboard sections.
+
+```ts
+{ view: "board",
+  title?,
+  header?: { status?: Pill, chip?, segments?: Segment[] },
+  sections: BoardSection[] }
+```
+
+## Board sections
+
+Each section is discriminated on `kind`. Eight are leaf sections; `columns` is a
+one-level layout wrapper that nests leaf sections side by side.
+
+| `kind` | Shape | For |
+| --- | --- | --- |
+| `stats` | `items: [{ label, value, sub?, tone? }]` | KPI tiles. |
+| `segments` | `items: [{ label, n, tone? }]` | A summary pulse. |
+| `bars` | `inline?`, `items: [{ label, value, total, tone?, trailing? }]` | Meters and offender lists. |
+| `table` | `columns`, `rows`, `caption?` | The same table shape as the view. |
+| `cards` | `boxed?`, `items: [{ title, titleTone?, mono?, dot?, pill?, href?, bar?, fields?, footnote?, reason? }]` | Rich item cards. |
+| `rows` | `boxed?`, `items: [{ icon?, glyph?, chip?, text, href?, trailing? }]` | A status or feed list. |
+| `actions` | `items: ActionItem[]` | Buttons. See below. |
+| `grid` | `cells: [{ label, href?, badge: { text, tone? } }]` | A dense at-a-glance matrix. |
+| `columns` | `columns: [{ weight?, sections: LeafSection[] }]` | Lays leaf sections side by side. One level deep only. |
+
+A card `field` is `{ label?, value, tone?, href?, copyable?, copyAction? }`. A
+card may also carry a `reason: { label?, text }` annotation line.
+
+### Tones
+
+Every section primitive accepts a `tone`, a generic visual category the renderer
+maps to a color, never a domain enum. The semantic core is the first four; the
+rest extend the ramp for grade scales, decorative lane glyphs, and hash-keyed
+category hues.
+
+| Tone | Use |
+| --- | --- |
+| `ok` / `warn` / `error` / `neutral` | The semantic core: status. |
+| `info` / `caution` | Extend a multi-step scale (an A–E grade chip). |
+| `brand` / `accent` | Decorative identity, distinct neighboring hues. |
+
+## Actions
+
+An `actions` section gives a board buttons. Clicking one dispatches a
+rib-defined verb to the rib that owns the board's key, resolved from the key's
+namespace, and reaches the rib's `onAction`.
+
+```ts
+ActionItem = {
+  type,                 // a rib-defined verb the base never enumerates
+  label,
+  glyph?, tone?,
+  destructive?,         // a confirm affordance on the button
+  payload?,             // opaque rib-defined context, dispatched verbatim
+  fields?: ActionField[]   // input collected before dispatch
+}
+```
+
+An `ActionField` is `{ name, label, placeholder?, required?, multiline? }`. When
+a button declares `fields`, clicking it opens a small form, and the collected
+`{ name: value }` map is merged into the dispatched payload. Field names must be
+unique within an action.
+
+<Aside type="note" title="Revealing a secret on copy">
+A card field's `copyAction` is reveal-on-copy: the copy button dispatches the
+action to the owning rib and writes the returned `data` to the clipboard, so a
+credential is fetched on click and never rides in the board payload, the
+client's state, or a cached snapshot. A field sets at most one of `copyable`
+(copy a value already in the payload) or `copyAction`.
+</Aside>
+
+## Bound workflows
+
+A rib's `contributeWorkflows` can bind a workflow's structured output to one of
+its snapshot keys with `bindSnapshotKey`. When that workflow runs, its output is
+run through the contribution's `validate` (the producer-side fail-closed gate)
+and republished to the key, so a board refresh is a workflow run. A surface
+region names that workflow in its `workflow` field, and `cadenceMs` (floored at
+30s) re-runs it on a heartbeat while the surface is open.
+
+## Related
+
+- [Snapshots and surfaces](../../concepts/snapshots-and-surfaces/): the design
+  rationale and the surface layout model.
+- [The Rib contract](../rib-contract/): `composeBundle`, `views`, `surfaces`, and
+  `onAction`, where these payloads are declared and handled.
+- [Workflow nodes](../workflow-nodes/): the runs that repopulate a bound key.

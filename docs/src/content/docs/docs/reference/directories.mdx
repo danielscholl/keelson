@@ -1,0 +1,85 @@
+---
+title: Directories
+description: How the keelson home is resolved, what lives inside it, and the environment variables that relocate each piece.
+sidebar:
+  order: 7
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Everything keelson manages lives in one directory, the home, resolved
+deterministically at every entry point. Secrets are the single exception: they
+live in your OS keychain, never in the home. Below is the exact layout, and the
+variables that relocate each piece.
+
+## How the home resolves
+
+The home is the first of these that applies, checked in order:
+
+| Precedence | Source | When it wins |
+| --- | --- | --- |
+| 1 | `KEELSON_HOME` | Set and non-empty. The explicit override. |
+| 2 | An existing `.keelson/` walking up from the working directory | The monorepo dev layout, where the home is `<repo>/.keelson`. |
+| 3 | `~/.keelson` | The default for an installed harness. |
+
+The walk-up branch is what lets keelson data live beside an embedding project's
+source during development; an installed harness almost always lands on
+`~/.keelson`.
+
+## What lives in the home
+
+| Path | What |
+| --- | --- |
+| `keelson.db` | The SQLite store: conversations, workflow runs and node outputs, projects and notebooks, memory rows. |
+| `config.json` | Provider enablement and defaults. Optional; a missing file falls back to defaults. |
+| `server.json` | The running server's record: URL, pid, version, and the shutdown token. Written on start, cleaned on stop. |
+| `workflows/` | Your global workflow YAML files. |
+| `commands/` | Named markdown prompt files a workflow `command` node runs. |
+| `node_modules/@keelson/` | Installed rib packages, discovered at boot. |
+| `worktrees/` | Leftover git worktrees from isolated runs; `keelson worktree prune` cleans them. |
+| `logs/server.log` | The background server's log, named in the error hints when something is wrong. |
+
+## Relocating pieces
+
+Each path has an override, applied over the resolved home:
+
+| Variable | Relocates |
+| --- | --- |
+| `KEELSON_HOME` | The whole home. |
+| `KEELSON_DB` | The database file (for `keelson service --db`, too). |
+| `KEELSON_WORKFLOWS_DIR` | The global workflows directory. |
+| `KEELSON_CONFIG` | The config file. |
+
+See [Configuration](../../guides/configuration/) for the full `KEELSON_*` table.
+
+<Aside type="note" title="Where ribs are discovered">
+Discovery reads `<home>/node_modules/@keelson`. In the monorepo dev layout the
+home is `<repo>/.keelson` and has no `node_modules` of its own, so discovery
+falls back to the repo root's `node_modules/@keelson`, where the workspace
+symlinks and any dev-linked ribs live. The resolution is deterministic, never
+cwd-dependent.
+</Aside>
+
+## Project-local state
+
+A registered project carries its own `.keelson/` under its root path. Today that
+holds `workflows/`: a project workflow shadows a same-named global one within
+that project. Conversations and runs attach to the project, and memory recall is
+scoped by it.
+
+## Secrets are not here
+
+No secret is stored in the home. Provider keys and rib credentials live in the OS
+keychain under the `keelson` service; the database and the API only ever report
+that a credential exists, never its value. The split is the trust model: data you
+may want to inspect sits in files you can open, and secrets sit behind the
+operating system's own lock.
+
+## Related
+
+- [Operating the server](../../guides/operating-the-server/): `server.json`, the
+  shutdown token, and the service lifecycle.
+- [Configuration](../../guides/configuration/): the `KEELSON_*` variables and the
+  config file.
+- [Memory and state](../../concepts/memory-and-state/): what the database holds
+  and how secrets stay out of it.

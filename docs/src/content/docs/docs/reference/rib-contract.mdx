@@ -12,10 +12,10 @@ interface, `Rib`, exported from `@keelson/shared`, and a rib package
 default-exports one object that implements it. Every hook is optional: a rib
 implements the subset it needs and the harness fills in the rest.
 
-This page is the precise contract. For why capabilities are packages and how a
-contribution reaches every surface without wiring, read
-[The rib model](../../concepts/the-rib-model/) first; this page assumes that
-model and states the exact shapes, rules, and order the harness enforces.
+For why capabilities are packages and how a contribution reaches every surface
+without wiring, read [The rib model](../../concepts/the-rib-model/) first. What
+follows is the exact contract: the shapes, the rules, and the order the harness
+enforces.
 
 ```ts
 import type { Rib } from "@keelson/shared";
@@ -80,8 +80,9 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 <Steps>
 
 1. **`registerTools(ctx)`** returns the rib's tools for the shared registry.
-   They reach the chat agent and workflow `prompt` nodes through the provider
-   tool adapters with no further wiring. Tool names are global: a name already
+   They reach the chat agent through the provider tool adapters with no further
+   wiring; a workflow `prompt` node treats rib tools as default-off and runs one
+   only when it names it in `allowed_tools`. Tool names are global: a name already
    claimed by another rib is skipped with a warning, which is why rib tools
    carry a family prefix (the substring before the first underscore, so
    `demo_ping` has family `demo`). A `ToolDefinition` is `name`, `description`,
@@ -322,5 +323,7 @@ export default rib;
   and how a contribution reaches every surface.
 - [Snapshots and surfaces](../../concepts/snapshots-and-surfaces/): the
   publishing substrate behind `composeBundle`, views, and surfaces.
+- [Snapshots and the canvas](../snapshots/): the precise `SnapshotManager`
+  interface and the canvas payload vocabulary a `view` must satisfy.
 - [Build your first rib](../../tutorials/build-your-first-rib/): the two-file
   minimum, through install and verification.
