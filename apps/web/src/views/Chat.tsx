@@ -211,7 +211,7 @@ function reconcileTurnIds<T extends { id: string; role: string }>(
     const idx = local.findIndex((m) => m.id === snap.assistantClientId);
     const row = idx >= 0 ? local[idx] : undefined;
     if (row) {
-      if (updated === null) updated = local.slice();
+      updated = local.slice();
       updated[idx] = { ...row, id: serverAssistant.id };
     }
   }
