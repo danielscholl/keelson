@@ -102,6 +102,75 @@ describe("mapPiEvent", () => {
     expect(out).toEqual([{ type: "error", message: "pi turn ended with an error" }]);
   });
 
+  test("agent_end whose final assistant message errored → error chunk (no silent dead turn)", () => {
+    expect(
+      mapPiEvent({
+        type: "agent_end",
+        willRetry: false,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+          {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: "OpenAI API error (421): 421 Misdirected Request",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          },
+        ],
+      }),
+    ).toEqual([{ type: "error", message: "OpenAI API error (421): 421 Misdirected Request" }]);
+  });
+
+  test("agent_end surfaces usage alongside the error when the failed turn spent tokens", () => {
+    expect(
+      mapPiEvent({
+        type: "agent_end",
+        willRetry: false,
+        messages: [
+          {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "rate limited",
+            usage: { input: 30, output: 0 },
+          },
+        ],
+      }),
+    ).toEqual([
+      { type: "usage", usage: { inputTokens: 30, outputTokens: 0 } },
+      { type: "error", message: "rate limited" },
+    ]);
+  });
+
+  test("agent_end mid-retry (willRetry) is not surfaced — pi will run the turn again", () => {
+    expect(
+      mapPiEvent({
+        type: "agent_end",
+        willRetry: true,
+        messages: [{ role: "assistant", stopReason: "error", errorMessage: "transient" }],
+      }),
+    ).toEqual([]);
+  });
+
+  test("a successful agent_end (stopReason stop) maps to nothing", () => {
+    expect(
+      mapPiEvent({
+        type: "agent_end",
+        willRetry: false,
+        messages: [{ role: "assistant", stopReason: "stop", content: [] }],
+      }),
+    ).toEqual([]);
+  });
+
+  test("agent_end whose final message errored without a message uses the fallback string", () => {
+    expect(
+      mapPiEvent({
+        type: "agent_end",
+        willRetry: false,
+        messages: [{ role: "assistant", stopReason: "error" }],
+      }),
+    ).toEqual([{ type: "error", message: "pi turn ended with an error" }]);
+  });
+
   test("tool_execution_start → tool_use chunk", () => {
     expect(
       mapPiEvent({
@@ -312,6 +381,34 @@ describe("PiProvider", () => {
     });
     const chunks = await collect(provider.sendQuery("hi", "/tmp"));
     expect(chunks).toEqual([{ type: "error", message: "stream died" }]);
+  });
+
+  test("a turn that errors before streaming surfaces the error, not silence", async () => {
+    // pi swallows the upstream failure into the final assistant message and
+    // resolves prompt() cleanly — no throw, no text. Without agent_end mapping
+    // this is the "no reply, no error" dead turn.
+    const provider = new PiProvider({
+      factory: fakeFactory([
+        { type: "turn_start" },
+        { type: "message_start", message: { role: "assistant", content: [] } },
+        {
+          type: "agent_end",
+          willRetry: false,
+          messages: [
+            {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "OpenAI API error (421): 421 Misdirected Request",
+            },
+          ],
+        },
+      ]),
+    });
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(chunks).toEqual([
+      { type: "error", message: "OpenAI API error (421): 421 Misdirected Request" },
+    ]);
   });
 
   test("an already-aborted signal yields nothing and never creates a session", async () => {

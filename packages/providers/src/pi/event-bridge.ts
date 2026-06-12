@@ -59,15 +59,18 @@ function mapPiUsage(u: unknown): TokenUsage | undefined {
 }
 
 // Pure: a pi AgentSessionEvent (loosely typed) → keelson MessageChunk[].
-// Streaming text/thinking, the completion usage, and errors all arrive inside
-// message_update's assistantMessageEvent; tool calls arrive as tool_execution_*
-// events. Everything else maps to nothing.
+// Streaming text/thinking, the completion usage, and mid-stream errors arrive
+// inside message_update's assistantMessageEvent; tool calls arrive as
+// tool_execution_* events; a turn that fails before streaming surfaces on
+// agent_end (see mapTerminalError). Everything else maps to nothing.
 export function mapPiEvent(event: PiRawEvent): MessageChunk[] {
   switch (event.type) {
     case "message_update":
       return isRecord(event.assistantMessageEvent)
         ? mapAssistantEvent(event.assistantMessageEvent)
         : [];
+    case "agent_end":
+      return mapTerminalError(event);
     case "tool_execution_start": {
       // Drop a call with no id: a tool_use without an id can never pair with its
       // tool_result, so it would render an orphan row. pi always supplies one.
@@ -94,6 +97,27 @@ export function mapPiEvent(event: PiRawEvent): MessageChunk[] {
     default:
       return [];
   }
+}
+
+// A turn that fails before any assistant text (e.g. a github-copilot endpoint
+// 421) emits no message_update — its error rides on the final assistant message
+// of agent_end, so mapping it here is what turns a silent dead turn into a
+// visible error. willRetry means pi will rerun the turn, so only a terminal
+// failure is surfaced, and only an assistant message (not the echoed user turn)
+// with stopReason "error". Usage rides along only on real spend (no zero row).
+function mapTerminalError(event: PiRawEvent): MessageChunk[] {
+  if (event.willRetry === true) return [];
+  const messages = Array.isArray(event.messages) ? event.messages : [];
+  const last = messages[messages.length - 1];
+  if (!isRecord(last) || last.role !== "assistant" || last.stopReason !== "error") return [];
+  const out: MessageChunk[] = [];
+  const usage = mapPiUsage(last.usage);
+  if (usage && usage.inputTokens + usage.outputTokens > 0) out.push({ type: "usage", usage });
+  out.push({
+    type: "error",
+    message: nonEmptyString(last.errorMessage) ?? "pi turn ended with an error",
+  });
+  return out;
 }
 
 function mapAssistantEvent(e: Record<string, unknown>): MessageChunk[] {

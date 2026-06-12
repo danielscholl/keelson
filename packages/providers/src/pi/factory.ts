@@ -94,19 +94,34 @@ export class PiAgentSessionFactory implements PiSessionFactory {
   }
 }
 
-// "vendor/model" → pi Model. getModel is literal-typed, so resolve from strings
-// through a loose cast. Returns undefined on an unknown ref so pi falls back to
-// its settings default rather than throwing.
+// Resolve via pi's model registry, not pi-ai's static getModel: the registry
+// applies github-copilot's modifyModels hook, which rewrites the model baseUrl
+// to the account's own token endpoint (individual/business/enterprise). Static
+// getModel keeps the hardcoded individual host, so a non-individual account
+// gets HTTP 421 Misdirected Request. Fallbacks (static def, then undefined)
+// keep an unresolvable ref from throwing.
 async function resolveModel(ref: string): Promise<unknown | undefined> {
   const slash = ref.indexOf("/");
   if (slash <= 0) return undefined;
-  const vendor = ref.slice(0, slash);
+  const provider = ref.slice(0, slash);
   const modelId = ref.slice(slash + 1);
   if (!modelId) return undefined;
   try {
+    const sdk = await import("@earendil-works/pi-coding-agent");
+    const registry = sdk.ModelRegistry.create(
+      sdk.AuthStorage.create(),
+      join(sdk.getAgentDir(), "models.json"),
+    );
+    const match = registry.getAvailable().find((m) => m.provider === provider && m.id === modelId);
+    if (match) return match;
+  } catch {
+    // registry unavailable (missing pi install / unreadable config) — fall
+    // through to the static definition below.
+  }
+  try {
     const piai = await import("@earendil-works/pi-ai");
     const getModel = piai.getModel as (p: string, m: string) => unknown;
-    return getModel(vendor, modelId);
+    return getModel(provider, modelId);
   } catch {
     return undefined;
   }
