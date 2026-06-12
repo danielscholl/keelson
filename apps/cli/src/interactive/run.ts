@@ -523,7 +523,11 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         warn(`unknown command '${text}' (type / to see commands)`);
         return;
       }
-      void handler.run(parsed.arg);
+      // Async handlers hit the server; surface a rejection instead of
+      // letting the command silently no-op.
+      void Promise.resolve(handler.run(parsed.arg)).catch((err) => {
+        warn(`✗ ${err instanceof Error ? err.message : String(err)}`);
+      });
       return;
     }
     queue.push(text);
