@@ -1,0 +1,192 @@
+# Keelson self-triage. Concept ported from Archon's repo-triage (MIT, see
+# NOTICE), rewritten as a self-contained keelson DAG using only supported node
+# types — no inline `agents:`, no `mcp:`.
+#
+# Determinism split: bash nodes do all the `gh` I/O (gather facts, apply
+# results); one AI node does the judgment (labels, dupes, direction fit). The
+# AI's output reaches the apply node only through KEELSON_NODE_classify_OUTPUT,
+# never spliced into the shell, so an issue body can't inject commands.
+#
+# Safe to re-run: labels are idempotent, and the triage comment carries a hidden
+# marker the apply node checks before posting again. It never closes anything.
+#
+# DRY_RUN: set KEELSON_TRIAGE_DRY_RUN=1 (the default) to print intended actions
+# without touching the repo. The Action sets it to 0 to go live.
+
+name: repo-triage
+description: |
+  Use when: Periodic maintenance pass over open issues — label by area/type,
+            flag likely duplicates, stale issues, and reports that need info,
+            and surface anything that runs against project direction.
+  Triggers: "triage issues", "repo triage", "label the issues".
+  Does: Fetches open issues + PRs -> classifies each against direction.md and
+        the fixed label taxonomy -> applies labels and posts one terse triage
+        comment per issue. Idempotent; never closes.
+  NOT for: Reviewing a PR (use pr-review-bot). Closing issues. Fixing bugs.
+
+nodes:
+  # ── Layer 0: gather facts in parallel (no AI) ──
+
+  - id: context
+    bash: |
+      set -euo pipefail
+      cat ".keelson/maintainer-workflows/direction.md"
+
+  - id: gather
+    bash: |
+      set -euo pipefail
+      LIMIT="${KEELSON_TRIAGE_LIMIT:-30}"
+      STALE_DAYS="${KEELSON_TRIAGE_STALE_DAYS:-30}"
+
+      gh issue list --state open --limit "$LIMIT" \
+        --json number,title,body,labels,author,createdAt,updatedAt \
+        > "$KEELSON_ARTIFACTS_DIR/issues.json"
+      gh pr list --state open --limit 50 --json number,title \
+        > "$KEELSON_ARTIFACTS_DIR/prs.json"
+
+      COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/issues.json")
+      echo "gathered ${COUNT} open issue(s); stale threshold ${STALE_DAYS}d" >&2
+
+      jq -n \
+        --argjson stale_days "$STALE_DAYS" \
+        --slurpfile issues "$KEELSON_ARTIFACTS_DIR/issues.json" \
+        --slurpfile prs "$KEELSON_ARTIFACTS_DIR/prs.json" \
+        '{
+           stale_days: $stale_days,
+           open_prs: $prs[0],
+           issues: ($issues[0] | map({
+             number,
+             title,
+             body: ((.body // "") | .[0:1200]),
+             labels: [.labels[].name],
+             author: .author.login,
+             age_days: ((now - (.updatedAt | fromdateiso8601)) / 86400 | floor)
+           }))
+         }'
+
+  # ── Layer 1: classify (the only AI node) ──
+
+  - id: classify
+    depends_on: [context, gather]
+    idle_timeout: 120000
+    prompt: |
+      You are the keelson repository triage assistant. Classify every open issue
+      using the project's direction and the fixed label taxonomy below.
+
+      ## Project direction and label taxonomy
+
+      $context.output
+
+      ## Open issues and context (JSON)
+
+      $gather.output
+
+      ## Decide, per issue
+
+      - `area_label`: the single best `area:*` from the taxonomy, or null if unclear.
+      - `type_label`: the single best `type:*`, or null if unclear.
+      - `needs_info`: true only when a bug report has no reproduction or an
+        essentially empty body.
+      - `stale`: true when the issue's `age_days` is at least the `stale_days`
+        value in the JSON.
+      - `duplicate_of`: another open issue's number this most likely duplicates,
+        or null. Set it only when the core symptom genuinely overlaps.
+      - `off_direction`: a direction clause id (for example "not-a-hosted-service")
+        when the issue asks for something the project explicitly does not do,
+        else null.
+      - `comment`: a terse, neutral 1-3 sentence triage note for the maintainer.
+        If `off_direction` is set, note it politely and cite the clause. If
+        `needs_info`, say what is missing. This is a starting point, not a verdict.
+
+      ## Output
+
+      Output ONLY a JSON object. No markdown fences, no prose before or after:
+
+      {"issues":[{"number":0,"area_label":null,"type_label":null,"needs_info":false,"stale":false,"duplicate_of":null,"off_direction":null,"comment":""}]}
+
+  # ── Layer 2: apply (no AI; DRY_RUN-aware; idempotent) ──
+
+  - id: apply
+    depends_on: [classify]
+    timeout: 120000
+    bash: |
+      set -uo pipefail
+      DRY="${KEELSON_TRIAGE_DRY_RUN:-1}"
+      MARKER="<!-- keelson-triage -->"
+
+      # Strip any markdown fences the model may have wrapped the JSON in.
+      JSON=$(printf '%s' "$KEELSON_NODE_classify_OUTPUT" \
+        | sed -e 's/^[[:space:]]*```json[[:space:]]*$//' \
+              -e 's/^[[:space:]]*```[[:space:]]*$//')
+
+      if ! printf '%s' "$JSON" | jq -e '.issues' >/dev/null 2>&1; then
+        echo "ERROR: classify output is not valid JSON with an .issues array" >&2
+        printf '%s\n' "$JSON" | head -20 >&2
+        exit 1
+      fi
+
+      if [ "$DRY" != "1" ]; then
+        ensure_label() { gh label create "$1" --color "$2" --description "$3" --force >/dev/null 2>&1 || true; }
+        for a in cli server web workflows providers ribs docs build; do
+          ensure_label "area:$a" "1f6feb" "area: $a"
+        done
+        for t in bug feature docs chore question; do
+          ensure_label "type:$t" "5319e7" "type: $t"
+        done
+        ensure_label "needs-info" "d4c5f9" "report lacks enough detail to act"
+        ensure_label "stale" "795548" "no recent activity; a human should confirm or close"
+        ensure_label "possible-duplicate" "fef2c0" "likely duplicates another open issue"
+      fi
+
+      printf '%s' "$JSON" | jq -c '.issues[]' | while read -r row; do
+        N=$(printf '%s' "$row" | jq -r '.number')
+        [ -z "$N" ] || [ "$N" = "null" ] && continue
+        AREA=$(printf '%s' "$row" | jq -r '.area_label // empty')
+        TYPE=$(printf '%s' "$row" | jq -r '.type_label // empty')
+        NEEDS=$(printf '%s' "$row" | jq -r '.needs_info')
+        STALE=$(printf '%s' "$row" | jq -r '.stale')
+        DUP=$(printf '%s' "$row" | jq -r '.duplicate_of // empty')
+        COMMENT=$(printf '%s' "$row" | jq -r '.comment // empty')
+
+        LABELS=""
+        [ -n "$AREA" ] && LABELS="$LABELS,$AREA"
+        [ -n "$TYPE" ] && LABELS="$LABELS,$TYPE"
+        [ "$NEEDS" = "true" ] && LABELS="$LABELS,needs-info"
+        [ "$STALE" = "true" ] && LABELS="$LABELS,stale"
+        [ -n "$DUP" ] && [ "$DUP" != "null" ] && LABELS="$LABELS,possible-duplicate"
+        LABELS="${LABELS#,}"
+
+        BODY="$COMMENT"
+        [ -n "$DUP" ] && [ "$DUP" != "null" ] && BODY="$BODY"$'\n\n'"Possible duplicate of #$DUP."
+        BODY="$BODY"$'\n\n'"$MARKER"
+
+        if [ "$DRY" = "1" ]; then
+          echo "DRY-RUN #$N  labels[${LABELS:-none}]"
+          printf '%s\n' "$COMMENT" | sed 's/^/         /'
+          continue
+        fi
+
+        # Remove conflicting type:/area: labels before re-adding, so each issue
+        # keeps at most one of each (direction.md: exactly one type and area).
+        CURRENT=$(gh issue view "$N" --json labels --jq '.labels[].name' 2>/dev/null || true)
+        REMOVE=""
+        while IFS= read -r L; do
+          [ -z "$L" ] && continue
+          case "$L" in
+            type:*) { [ -n "$TYPE" ] && [ "$L" = "$TYPE" ]; } || REMOVE="$REMOVE,$L" ;;
+            area:*) { [ -n "$AREA" ] && [ "$L" = "$AREA" ]; } || REMOVE="$REMOVE,$L" ;;
+          esac
+        done <<< "$CURRENT"
+        REMOVE="${REMOVE#,}"
+        [ -n "$REMOVE" ] && gh issue edit "$N" --remove-label "$REMOVE" >/dev/null 2>&1 || true
+        [ -n "$LABELS" ] && gh issue edit "$N" --add-label "$LABELS" >/dev/null 2>&1 || true
+
+        # Post the triage comment once: skip if our marker is already present.
+        if gh issue view "$N" --json comments \
+             --jq '.comments[].body' 2>/dev/null | grep -qF "$MARKER"; then
+          echo "applied #$N  labels[${LABELS:-none}]  (comment already present)"
+        else
+          printf '%s' "$BODY" | gh issue comment "$N" --body-file - >/dev/null 2>&1 || true
+          echo "applied #$N  labels[${LABELS:-none}]  + comment"
+        fi
+      done

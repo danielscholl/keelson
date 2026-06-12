@@ -1,0 +1,65 @@
+# Keelson triages its own repo. Runs the keelson `repo-triage` workflow (the
+# engine maintaining its own project) on a schedule, and on demand for a safe
+# dry-run. The workflow's brain lives in .keelson/maintainer-workflows/.
+name: keelson triage
+
+on:
+  schedule:
+    - cron: "0 14 * * 1-5" # weekdays 14:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print intended actions without writing to the repo"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: keelson-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Keelson's credential lookup probes the OS keychain even in api-key mode.
+      # A headless runner has no Secret Service, so stand up an unlocked keyring;
+      # the probe then finds "no entry" and falls through to ANTHROPIC_API_KEY.
+      - name: Set up an unlocked keyring
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            gnome-keyring libsecret-1-0 dbus-x11 >/dev/null
+
+      - name: Run keelson repo-triage
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          KEELSON_PROVIDERS: claude
+          KEELSON_CONFIG: ${{ runner.temp }}/keelson-config.json
+          KEELSON_WORKFLOWS_DIR: ${{ github.workspace }}/.keelson/maintainer-workflows
+          # Live on schedule; dry-run on manual dispatch unless explicitly disabled.
+          KEELSON_TRIAGE_DRY_RUN: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) && '0' || '1' }}
+        run: |
+          printf '{ "providers": { "claude": true }, "claude": { "auth": "api-key" } }\n' > "$KEELSON_CONFIG"
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 || true
+            bun apps/cli/bin/keelson.ts workflow run repo-triage --provider claude --watch
+          '
