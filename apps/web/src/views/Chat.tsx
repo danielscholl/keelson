@@ -159,7 +159,8 @@ function pickEffortSeed(
 }
 
 function newId(): string {
-  return Math.random().toString(36).slice(2, 10);
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => (b % 36).toString(36)).join("");
 }
 
 // Server-side message IDs are `crypto.randomUUID()` (36 chars, dashed) —
@@ -209,7 +210,7 @@ function reconcileTurnIds<T extends { id: string; role: string }>(
   ) {
     const idx = local.findIndex((m) => m.id === snap.assistantClientId);
     const row = idx >= 0 ? local[idx] : undefined;
-    if (idx >= 0 && row) {
+    if (row) {
       if (updated === null) updated = local.slice();
       updated[idx] = { ...row, id: serverAssistant.id };
     }
@@ -222,7 +223,7 @@ function reconcileTurnIds<T extends { id: string; role: string }>(
     const base = updated ?? local;
     const idx = base.findIndex((m) => m.id === snap.userClientId);
     const row = idx >= 0 ? base[idx] : undefined;
-    if (idx >= 0 && row) {
+    if (row) {
       if (updated === null) updated = local.slice();
       updated[idx] = { ...row, id: serverUser.id };
     }

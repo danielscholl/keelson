@@ -125,7 +125,11 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
   const log = logPath(home);
   mkdirSync(join(home, "logs"), { recursive: true });
   // Keep one previous generation for post-mortems; the live file starts fresh.
-  if (existsSync(log)) renameSync(log, `${log}.old`);
+  try {
+    renameSync(log, `${log}.old`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
   const fd = openSync(log, "a");
 
   // Re-exec this same CLI entry (dev: bin/keelson.ts, installed: dist/keelson.js)

@@ -740,10 +740,10 @@ export function discoverWorkflows(roots: readonly DiscoveryRoot[]): DiscoveryRes
   const warnings: WorkflowLoadWarning[] = [];
 
   for (const root of roots) {
-    let entries: string[];
+    let entries: fs.Dirent[];
     try {
       if (!fs.existsSync(root.dir)) continue;
-      entries = fs.readdirSync(root.dir);
+      entries = fs.readdirSync(root.dir, { withFileTypes: true });
     } catch (err) {
       errors.push({
         filename: root.dir,
@@ -752,13 +752,15 @@ export function discoverWorkflows(roots: readonly DiscoveryRoot[]): DiscoveryRes
       });
       continue;
     }
-    for (const entry of entries.sort()) {
-      if (!entry.endsWith(".yaml") && !entry.endsWith(".yml")) continue;
-      const filePath = path.join(root.dir, entry);
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (!entry.name.endsWith(".yaml") && !entry.name.endsWith(".yml")) continue;
+      // Dirent.isFile() doesn't follow symlinks; let symlinked workflows through
+      // and let readFileSync reject any that point at non-files.
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+      const filePath = path.join(root.dir, entry.name);
       let content: string;
       try {
-        const stat = fs.statSync(filePath);
-        if (!stat.isFile()) continue;
         content = fs.readFileSync(filePath, "utf-8");
       } catch (err) {
         errors.push({
