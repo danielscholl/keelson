@@ -12,7 +12,7 @@ import { seedStarterAssets } from "@keelson/workflows";
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 
-import { runChat } from "./commands/chat.ts";
+import { runChatEntry } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
@@ -65,7 +65,7 @@ export function buildProgram(): Command {
     .option("--json", "emit machine-readable JSON envelope to stdout", false)
     .option(
       "-p, --prompt <message>",
-      "one-shot chat turn; alias for `chat <message>` (same options apply)",
+      "one-shot chat turn; alias for `chat [message]` (same options apply; no message on a TTY opens interactive chat)",
     )
     .showHelpAfterError()
     .configureHelp({ sortSubcommands: true });
@@ -387,9 +387,9 @@ export function buildProgram(): Command {
     });
 
   program
-    .command("chat <message>")
+    .command("chat [message]")
     .description(
-      "one-shot chat turn (server-up: HTTP+SPA-visible; server-down: in-process to stdout)",
+      "one-shot chat turn (server-up: HTTP+SPA-visible; server-down: in-process to stdout); no message on a TTY opens interactive chat",
     )
     .option("--provider <id>", "provider id (default: mirror server / pick first non-stub)")
     .option("--model <id>", "model id passed to the provider (default: provider default)")
@@ -402,7 +402,7 @@ export function buildProgram(): Command {
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .action(async function chatAction(
       this: Command,
-      message: string,
+      message: string | undefined,
       chatOpts: {
         provider?: string;
         model?: string;
@@ -443,7 +443,7 @@ export function buildProgram(): Command {
         }
         reasoningEffort = parsed.data;
       }
-      await runChat(message, {
+      await runChatEntry(message, {
         json,
         ...(provider ? { provider } : {}),
         ...(model ? { model } : {}),

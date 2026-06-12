@@ -11,6 +11,7 @@ import {
   getConversation,
   listProviders,
   type ProviderInfoRow,
+  pickDefaultHttpProvider,
 } from "../http/chat-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { chatHeadless } from "../in-process/chat.ts";
@@ -53,21 +54,6 @@ function lastUsage(chunks: readonly MessageChunk[]): TokenUsage | undefined {
     if (c.type === "usage") return c.usage;
   }
   return undefined;
-}
-
-// Mirror the SPA's pickInitialRef (apps/web/src/views/Chat.tsx:131):
-// copilot → stub → first registered non-workflow. The synthetic `workflow`
-// provider is registered for run-as-conversation rows but rejects chat
-// turns, so we skip it in the fallback.
-function pickDefaultHttpProvider(providers: readonly ProviderInfoRow[]): string {
-  const ids = new Set(providers.map((p) => p.id));
-  if (ids.has("copilot")) return "copilot";
-  if (ids.has("stub")) return "stub";
-  const first = providers.find((p) => p.id !== "workflow");
-  if (first) return first.id;
-  throw new Error(
-    "no chat-capable provider registered on the server; run `keelson service` with KEELSON_PROVIDERS unset or include stub/copilot/claude",
-  );
 }
 
 async function runChatViaHttp(baseUrl: string, message: string, opts: ChatOptions): Promise<never> {
@@ -240,6 +226,56 @@ async function runChatInProcess(message: string, opts: ChatOptions): Promise<nev
     emit({ error: message, code: "CHAT_FAILED" }, { json: opts.json });
     process.exit(EXIT_FAIL);
   }
+}
+
+// Entry for `keelson chat [message]`: a message runs the one-shot paths; no
+// message on a TTY opens the interactive TUI (server required).
+export async function runChatEntry(message: string | undefined, opts: ChatOptions): Promise<never> {
+  if (message !== undefined) return runChat(message, opts);
+  if (opts.json) {
+    emit(
+      {
+        error: "--json requires a one-shot message; interactive mode is TTY-only",
+        code: "BAD_INPUTS",
+      },
+      { json: true },
+    );
+    process.exit(EXIT_BAD_ARGS);
+  }
+  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
+    emit(
+      {
+        error: "chat <message> is required when not attached to a terminal",
+        code: "BAD_INPUTS",
+      },
+      { json: false },
+    );
+    process.exit(EXIT_BAD_ARGS);
+  }
+  const baseUrl = opts.baseUrl;
+  const info = baseUrl ? null : await probeServer();
+  const effectiveBase = baseUrl ?? info?.baseUrl;
+  if (!effectiveBase) {
+    emit(
+      {
+        error: "interactive chat requires a running server; start it with `keelson service start`",
+        code: "NO_SERVER",
+      },
+      { json: false },
+    );
+    process.exit(EXIT_NO_SERVER);
+  }
+  // Dynamic import keeps the TUI dependency off the one-shot and scripted
+  // paths entirely.
+  const { runInteractiveChat } = await import("../interactive/run.ts");
+  return runInteractiveChat({
+    baseUrl: effectiveBase,
+    ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
+    ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
+    ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
+  });
 }
 
 export async function runChat(message: string, opts: ChatOptions): Promise<never> {

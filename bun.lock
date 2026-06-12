@@ -12,11 +12,12 @@
     },
     "apps/cli": {
       "name": "@keelson/cli",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "bin": {
         "keelson": "./bin/keelson.ts",
       },
       "dependencies": {
+        "@earendil-works/pi-tui": "0.79.1",
         "@keelson/providers": "workspace:*",
         "@keelson/server": "workspace:*",
         "@keelson/shared": "workspace:*",
@@ -31,7 +32,7 @@
     },
     "apps/server": {
       "name": "@keelson/server",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@keelson/providers": "workspace:*",
         "@keelson/shared": "workspace:*",
@@ -47,7 +48,7 @@
     },
     "apps/web": {
       "name": "@keelson/web",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@dagrejs/dagre": "^3.0.0",
         "@keelson/shared": "workspace:*",
@@ -76,7 +77,7 @@
     },
     "packages/providers": {
       "name": "@keelson/providers",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.3.150",
         "@earendil-works/pi-ai": "^0.79.1",
@@ -92,7 +93,7 @@
     },
     "packages/shared": {
       "name": "@keelson/shared",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "zod": "^4.4.3",
       },
@@ -102,7 +103,7 @@
     },
     "packages/skills": {
       "name": "@keelson/skills",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@keelson/shared": "workspace:*",
       },
@@ -113,7 +114,7 @@
     },
     "packages/workflows": {
       "name": "@keelson/workflows",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "yaml": "^2.6.1",
         "zod": "^4.4.3",
@@ -948,7 +949,7 @@
 
     "markdown-table": ["markdown-table@3.0.4", "", {}, "sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw=="],
 
-    "marked": ["marked@17.0.6", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-gB0gkNafnonOw0obSTEGZTT86IuhILt2Wfx0mWH/1Au83kybTayroZ/V6nS25mN7u8ASy+5fMhgB3XPNrOZdmA=="],
+    "marked": ["marked@15.0.12", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 
@@ -1308,8 +1309,6 @@
 
     "@earendil-works/pi-ai/@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.91.1", "", { "dependencies": { "json-schema-to-ts": "^3.1.1" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-LAmu761tSN9r66ixvmciswUj/ZC+1Q4iAfpedTfSVLeswRwnY3n2Nb6Tsk+cLPP28aLOPWeMgIuTuCcMC6W/iw=="],
 
-    "@earendil-works/pi-tui/marked": ["marked@15.0.12", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA=="],
-
     "bun-types/@types/node": ["@types/node@22.19.19", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-dyh/xO2Fh5bYrfWaaqGrRQQGkNdmYw6AmaAUvYeUMNTWQtvb796ikLdmTchRmOlOiIJ1TDXfWgVx1QkUlQ6Hew=="],
 
     "cytoscape-fcose/cose-base": ["cose-base@2.2.0", "", { "dependencies": { "layout-base": "^2.0.0" } }, "sha512-AzlgcsCbUMymkADOJtQm3wO9S3ltPfYOFD5033keQn9NJzIbtnZj+UdBJe7DYml/8TdbtHJW3j58SOnKhWY/5g=="],
@@ -1331,6 +1330,8 @@
     "parse-entities/@types/unist": ["@types/unist@2.0.11", "", {}, "sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA=="],
 
     "parse5/entities": ["entities@6.0.1", "", {}, "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g=="],
+
+    "streamdown/marked": ["marked@17.0.6", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-gB0gkNafnonOw0obSTEGZTT86IuhILt2Wfx0mWH/1Au83kybTayroZ/V6nS25mN7u8ASy+5fMhgB3XPNrOZdmA=="],
 
     "type-is/content-type": ["content-type@2.0.0", "", {}, "sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ=="],
 

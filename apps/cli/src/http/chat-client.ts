@@ -56,6 +56,24 @@ export interface ProviderInfoRow {
 export interface CreateConversationOpts {
   providerId: string;
   model?: string;
+  // Omitted → the server binds the conversation to the default workspace
+  // project; the bound project's root becomes the agent's cwd.
+  projectId?: string;
+}
+
+// Mirror the SPA's pickInitialRef (apps/web/src/views/Chat.tsx:131):
+// copilot → stub → first registered non-workflow. The synthetic `workflow`
+// provider is registered for run-as-conversation rows but rejects chat
+// turns, so we skip it in the fallback.
+export function pickDefaultHttpProvider(providers: readonly ProviderInfoRow[]): string {
+  const ids = new Set(providers.map((p) => p.id));
+  if (ids.has("copilot")) return "copilot";
+  if (ids.has("stub")) return "stub";
+  const first = providers.find((p) => p.id !== "workflow");
+  if (first) return first.id;
+  throw new Error(
+    "no chat-capable provider registered on the server; run `keelson service` with KEELSON_PROVIDERS unset or include stub/copilot/claude",
+  );
 }
 
 // Server-up chat creates a regular conversation row so the SPA sidebar
@@ -71,6 +89,7 @@ export async function createConversation(
     body: JSON.stringify({
       providerId: opts.providerId,
       ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.projectId ? { projectId: opts.projectId } : {}),
     }),
   });
   if (!res.ok) {
