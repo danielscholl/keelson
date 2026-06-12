@@ -59,8 +59,9 @@ export interface BootstrapResult {
 // built-ins when unset), each with the keyring-backed credential getter.
 // Idempotent — re-registration is a no-op inside the registry.
 export function bootstrapCliProviders(): BootstrapResult {
+  const config = loadKeelsonConfig();
   const requested = resolveEnabledProviders({
-    config: loadKeelsonConfig(),
+    config,
     envProviders: process.env.KEELSON_PROVIDERS,
     known: BUILT_IN_PROVIDER_IDS,
   });
@@ -77,7 +78,10 @@ export function bootstrapCliProviders(): BootstrapResult {
       continue;
     }
     if (id === "claude") {
-      registerClaudeProvider({ getCredential });
+      registerClaudeProvider({
+        getCredential,
+        ...(config.claude?.auth !== undefined ? { authPreference: config.claude.auth } : {}),
+      });
       registered.push("claude");
       continue;
     }

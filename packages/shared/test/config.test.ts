@@ -63,6 +63,19 @@ describe("loadKeelsonConfig", () => {
     expect(loadKeelsonConfig(home)).toEqual({ defaultProvider: "copilot" });
   });
 
+  test("reads claude.auth when valid", () => {
+    writeConfig(JSON.stringify({ providers: { claude: true }, claude: { auth: "subscription" } }));
+    expect(loadKeelsonConfig(home)).toEqual({
+      providers: { claude: true },
+      claude: { auth: "subscription" },
+    });
+  });
+
+  test("an invalid claude.auth value degrades the config to {}", () => {
+    writeConfig(JSON.stringify({ claude: { auth: "bogus" } }));
+    expect(loadKeelsonConfig(home)).toEqual({});
+  });
+
   test("KEELSON_CONFIG overrides the home path", () => {
     const other = mkdtempSync(join(tmpdir(), "keelson-config-alt-"));
     try {

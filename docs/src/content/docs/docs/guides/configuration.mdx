@@ -33,6 +33,7 @@ so a typo never blocks startup.
 |---|---|---|
 | `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. |
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. |
+| `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, and `stub` (the offline
 echo provider). Out of the box, **only copilot loads; stub, claude, and pi are
@@ -64,6 +65,36 @@ A provider is enabled by the first of these that has an opinion:
 So `KEELSON_PROVIDERS=stub` gives you an offline run with no keys regardless of
 what `config.json` says, and the config file is the durable setting for everyday
 use.
+
+## Claude credentials
+
+The `claude` provider runs the Claude Agent SDK, which can authenticate with a
+Pro/Max **subscription** (your `claude` CLI login) or an **API key**
+(`ANTHROPIC_API_KEY`). The SDK prefers an explicit API key whenever one is in the
+environment, so keelson lets you choose with `claude.auth`:
+
+```jsonc
+{
+  "providers": { "claude": true },
+  "claude": { "auth": "auto" }
+}
+```
+
+| Value | Behavior |
+|---|---|
+| `auto` (default) | Use the subscription when `claude auth status` reports one, otherwise fall back to the API key. |
+| `subscription` | Always use the subscription login; the turn errors if there is none. |
+| `api-key` | Always use the API key — a keelson-saved token, otherwise `ANTHROPIC_API_KEY`. |
+
+To reach the subscription, keelson removes `ANTHROPIC_API_KEY` from just the
+Claude process it spawns. Your shell keeps the variable for every other tool, so
+you never unset it globally.
+
+<Aside type="note" title="Detecting a subscription">
+`auto` probes `claude auth status` once per server run. Sign in with `claude auth
+login` if you have a Pro/Max plan; with no subscription and no key, the turn
+surfaces an auth error.
+</Aside>
 
 ## Pi (community provider)
 
