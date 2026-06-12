@@ -335,6 +335,38 @@ describe("keelson CLI smoke", () => {
     expect(envelope.code).toBe("BAD_INPUTS");
   });
 
+  test("chat --project requires the server (in-process has no project store)", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "chat",
+      "hi",
+      "--provider",
+      "stub",
+      "--project",
+      "keelson",
+    ]);
+    expect(exitCode).toBe(3);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.code).toBe("NO_SERVER");
+  });
+
+  test("chat --project conflicts with --conversation (binding is creation-time)", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "chat",
+      "hi",
+      "--project",
+      "keelson",
+      "--conversation",
+      "some-conv-id",
+    ]);
+    expect(exitCode).toBe(2);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.code).toBe("BAD_INPUTS");
+  });
+
   test("chat --conversation requires the server (in-process has no store)", async () => {
     // No server is running in CI, so the probe fails. The conversation arg
     // makes no sense in the in-process path; surface NO_SERVER cleanly.

@@ -394,6 +394,10 @@ export function buildProgram(): Command {
     .option("--provider <id>", "provider id (default: mirror server / pick first non-stub)")
     .option("--model <id>", "model id passed to the provider (default: provider default)")
     .option("--conversation <id>", "continue an existing conversation (server-up only)")
+    .option(
+      "--project <name>",
+      "bind the new conversation to a named project (server-required; default: the server's default project)",
+    )
     .option("--thinking", "enable Claude extended thinking for this turn")
     .option(
       "--reasoning-effort <level>",
@@ -407,6 +411,7 @@ export function buildProgram(): Command {
         provider?: string;
         model?: string;
         conversation?: string;
+        project?: string;
         thinking?: boolean;
         reasoningEffort?: string;
         baseUrl?: string;
@@ -421,6 +426,7 @@ export function buildProgram(): Command {
       const provider = requireNonEmpty(json, "--provider", chatOpts.provider);
       const model = requireNonEmpty(json, "--model", chatOpts.model);
       const conversationId = requireNonEmpty(json, "--conversation", chatOpts.conversation);
+      const project = requireNonEmpty(json, "--project", chatOpts.project);
       const baseUrl = requireNonEmpty(json, "--base-url", chatOpts.baseUrl);
       // Validate --reasoning-effort against the locked Zod enum so an
       // invalid tier exits 2 cleanly instead of creating an orphan
@@ -448,6 +454,7 @@ export function buildProgram(): Command {
         ...(provider ? { provider } : {}),
         ...(model ? { model } : {}),
         ...(conversationId ? { conversationId } : {}),
+        ...(project ? { project } : {}),
         ...(chatOpts.thinking !== undefined ? { thinking: chatOpts.thinking } : {}),
         ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
         ...(baseUrl ? { baseUrl } : {}),
