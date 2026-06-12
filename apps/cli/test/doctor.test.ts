@@ -237,6 +237,43 @@ describe("auth check", () => {
     expect(pi?.status).toBe("warn");
     expect(pi?.detail).toContain("no pi credential");
   });
+
+  test("codex auth check appears only when codex is enabled", async () => {
+    const withoutCodex = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: summaryStub,
+      codexAuth: () => ({ authenticated: true, source: "env" }),
+    });
+    expect(withoutCodex.checks.find((c) => c.name === "codex auth")).toBeUndefined();
+
+    const withCodex = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: () => ({
+        enabled: ["stub", "codex"],
+        defaultProvider: "codex",
+        source: "config.json",
+      }),
+      codexAuth: () => ({ authenticated: true, source: "auth.json" }),
+    });
+    const codex = withCodex.checks.find((c) => c.name === "codex auth");
+    expect(codex?.status).toBe("ok");
+    expect(codex?.detail).toContain("auth.json");
+  });
+
+  test("codex auth check warns when codex is enabled but has no credential", async () => {
+    const result = await runAuthCheck({
+      keyring: { roundTrip: async () => ({ ok: true }) },
+      providerSummary: () => ({
+        enabled: ["codex"],
+        defaultProvider: "codex",
+        source: "config.json",
+      }),
+      codexAuth: () => ({ authenticated: false }),
+    });
+    const codex = result.checks.find((c) => c.name === "codex auth");
+    expect(codex?.status).toBe("warn");
+    expect(codex?.detail).toContain("no codex credential");
+  });
 });
 
 describe("workflows check", () => {

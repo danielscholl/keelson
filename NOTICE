@@ -1,8 +1,9 @@
 Keelson
 Copyright 2026 Daniel Scholl
 
-This product includes software developed at Anthropic (Claude Agent SDK)
-and GitHub (Copilot SDK), used under the terms of their respective licenses.
+This product includes software developed at Anthropic (Claude Agent SDK),
+GitHub (Copilot SDK), and OpenAI (Codex SDK), used under the terms of their
+respective licenses.
 
 ==============================================================================
 Concepts from: Archon (packages/workflows/src/schema, executor design)

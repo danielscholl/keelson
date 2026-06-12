@@ -15,6 +15,7 @@ import {
   getProviderInfoList,
   isRegisteredProvider,
   registerClaudeProvider,
+  registerCodexProvider,
   registerCopilotProvider,
   registerPiProvider,
   registerStubProvider,
@@ -114,6 +115,16 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
         // Self-managed auth (pi's own ~/.pi/agent/auth.json + vendor env keys),
         // so nothing to thread through getCredential.
         registerPiProvider();
+        break;
+      case "codex":
+        // Self-managed auth (codex's own ~/.codex/auth.json + OPENAI_API_KEY),
+        // so nothing to thread through getCredential.
+        registerCodexProvider({
+          ...(config.codex?.sandbox !== undefined ? { sandboxMode: config.codex.sandbox } : {}),
+          ...(config.codex?.network !== undefined
+            ? { networkAccessEnabled: config.codex.network }
+            : {}),
+        });
         break;
     }
   }

@@ -33,6 +33,29 @@ export {
   type RegisterClaudeProviderResult,
   registerClaudeProvider,
 } from "./claude/registration.ts";
+export type { CodexRawEvent } from "./codex/event-bridge.ts";
+export { mapCodexEvent } from "./codex/event-bridge.ts";
+export {
+  type CheckCodexAuthOptions,
+  type CodexAuthStatus,
+  type CodexCreateThreadParams,
+  type CodexReasoningEffort,
+  type CodexSandboxMode,
+  type CodexThread,
+  type CodexThreadFactory,
+  checkCodexAuth,
+} from "./codex/factory.ts";
+export {
+  CODEX_CAPABILITIES,
+  CODEX_DEFAULT_MODEL,
+  CodexProvider,
+  type CodexProviderOptions,
+} from "./codex/provider.ts";
+export {
+  type CodexAuthProbe,
+  type RegisterCodexProviderResult,
+  registerCodexProvider,
+} from "./codex/registration.ts";
 export { buildFriendlyCopilotError } from "./copilot/errors.ts";
 export {
   type CopilotAuthStatus,
