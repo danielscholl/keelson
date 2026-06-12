@@ -150,14 +150,18 @@ function fail(message: string, code: string, json: boolean): never {
 export async function runUpdate(opts: UpdateOptions): Promise<never> {
   const home = resolveKeelsonHome();
   const manifestPath = join(home, "package.json");
-  if (!existsSync(manifestPath)) {
+  let manifestRaw: string;
+  try {
+    manifestRaw = readFileSync(manifestPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     fail(
       `no installed keelson home at ${home} — \`keelson update\` upgrades an install.sh-provisioned home, not a source checkout`,
       "NOT_INSTALLED",
       opts.json,
     );
   }
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as HomeManifest;
+  const manifest = JSON.parse(manifestRaw) as HomeManifest;
   if (!manifest.dependencies?.["@keelson/cli"]) {
     fail(
       `${home} is not an installed keelson home (no @keelson/cli dependency); in a source checkout, update with git`,

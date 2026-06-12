@@ -14,9 +14,11 @@ export { resolveKeelsonHome };
 export function ensureHome(home: string = resolveKeelsonHome()): string {
   mkdirSync(home, { recursive: true });
   const pkgPath = join(home, "package.json");
-  if (!existsSync(pkgPath)) {
-    const pkg = { name: "keelson-home", private: true, dependencies: {} };
-    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  const pkg = { name: "keelson-home", private: true, dependencies: {} };
+  try {
+    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, { flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
   }
   return home;
 }
