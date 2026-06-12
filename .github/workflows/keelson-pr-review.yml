@@ -25,6 +25,7 @@ jobs:
       startsWith(github.event.comment.body, '/keelson review') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Acknowledge the request
         env:
@@ -38,6 +39,8 @@ jobs:
       # convention docs the reviewer reads. The PR's diff comes from `gh pr diff`,
       # so the PR head does not need to be checked out.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

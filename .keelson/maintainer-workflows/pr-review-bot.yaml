@@ -114,7 +114,7 @@ nodes:
     depends_on: [review]
     timeout: 60000
     bash: |
-      set -uo pipefail
+      set -euo pipefail
       DRY="${KEELSON_PR_REVIEW_DRY_RUN:-1}"
       MARKER="<!-- keelson-pr-review -->"
 

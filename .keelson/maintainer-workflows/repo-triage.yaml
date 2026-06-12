@@ -166,6 +166,19 @@ nodes:
           continue
         fi
 
+        # Remove conflicting type:/area: labels before re-adding, so each issue
+        # keeps at most one of each (direction.md: exactly one type and area).
+        CURRENT=$(gh issue view "$N" --json labels --jq '.labels[].name' 2>/dev/null || true)
+        REMOVE=""
+        while IFS= read -r L; do
+          [ -z "$L" ] && continue
+          case "$L" in
+            type:*) { [ -n "$TYPE" ] && [ "$L" = "$TYPE" ]; } || REMOVE="$REMOVE,$L" ;;
+            area:*) { [ -n "$AREA" ] && [ "$L" = "$AREA" ]; } || REMOVE="$REMOVE,$L" ;;
+          esac
+        done <<< "$CURRENT"
+        REMOVE="${REMOVE#,}"
+        [ -n "$REMOVE" ] && gh issue edit "$N" --remove-label "$REMOVE" >/dev/null 2>&1 || true
         [ -n "$LABELS" ] && gh issue edit "$N" --add-label "$LABELS" >/dev/null 2>&1 || true
 
         # Post the triage comment once: skip if our marker is already present.
