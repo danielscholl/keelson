@@ -16,8 +16,8 @@
 # DRY_RUN: KEELSON_TRIAGE_DRY_RUN=1 (the default) prints intended actions without
 # touching the repo. Set it to 0 to apply.
 #
-# Headless real-provider runs are tracked in issue #171; until then, route this
-# through your running `keelson service`.
+# Headless runs register only the stub provider today, so route this through
+# your running `keelson service`.
 
 name: repo-triage
 description: |
@@ -156,15 +156,30 @@ nodes:
           if in_set "$TYPE_LABELS" "$L" && [ "$L" != "$TYPE" ]; then REMOVE="$REMOVE,$L"; fi
         done <<< "$CURRENT"
         REMOVE="${REMOVE#,}"
-        [ -n "$REMOVE" ] && gh issue edit "$N" --remove-label "$REMOVE" >/dev/null 2>&1 || true
-        [ -n "$ADD" ] && gh issue edit "$N" --add-label "$ADD" >/dev/null 2>&1 || true
+        APPLY_OK=1
+        if [ -n "$REMOVE" ] && ! gh issue edit "$N" --remove-label "$REMOVE" >/dev/null 2>&1; then
+          echo "WARN: failed to remove labels [$REMOVE] from issue $N" >&2
+          APPLY_OK=0
+        fi
+        if [ -n "$ADD" ] && ! gh issue edit "$N" --add-label "$ADD" >/dev/null 2>&1; then
+          echo "WARN: failed to add labels [$ADD] to issue $N" >&2
+          APPLY_OK=0
+        fi
 
         # Post the triage comment once: skip if our marker is already present.
         if gh issue view "$N" --json comments \
              --jq '.comments[].body' 2>/dev/null | grep -qF "$MARKER"; then
-          echo "applied #$N  +labels[${ADD:-none}]  (comment already present)"
+          NOTE="(comment already present)"
+        elif printf '%s\n\n%s' "$COMMENT" "$MARKER" | gh issue comment "$N" --body-file - >/dev/null 2>&1; then
+          NOTE="+ comment"
         else
-          printf '%s\n\n%s' "$COMMENT" "$MARKER" | gh issue comment "$N" --body-file - >/dev/null 2>&1 || true
-          echo "applied #$N  +labels[${ADD:-none}]  + comment"
+          echo "WARN: failed to post triage comment on issue $N" >&2
+          APPLY_OK=0
+          NOTE="(comment failed)"
+        fi
+        if [ "$APPLY_OK" = "1" ]; then
+          echo "applied #$N  +labels[${ADD:-none}]  $NOTE"
+        else
+          echo "incomplete #$N  +labels[${ADD:-none}]  $NOTE" >&2
         fi
       done

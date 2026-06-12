@@ -79,8 +79,9 @@ maintainer judgment calls. If an issue looks like a duplicate, say so with the
 
 ## Triage guidance
 
-- Apply at most one `area:` and one `type:` label from the lists above, only when
-  reasonably confident. Prefer none over a wrong guess.
+- Apply at most one **Area** label and one **Type** label from the tables above,
+  using the exact label strings (e.g. `apps/cli`, `bug`), only when reasonably
+  confident. Prefer none over a wrong guess.
 - Put everything else in a terse, neutral comment for the maintainer:
   - a likely duplicate (cite the `#N`),
   - a stale issue (no recent activity, based on the age the run reports),
