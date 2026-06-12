@@ -144,6 +144,14 @@ describe("resolveEnabledProviders", () => {
     ]);
   });
 
+  test("codex is a known provider, opt-in via config (after pi in registration order)", () => {
+    const config: KeelsonConfig = { providers: { codex: true } };
+    expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([
+      "copilot",
+      "codex",
+    ]);
+  });
+
   test("stub is off by default, opt-in via config", () => {
     const config: KeelsonConfig = { providers: { stub: true } };
     expect(resolveEnabledProviders({ config, known: KNOWN, onWarn: silent })).toEqual([

@@ -12,18 +12,20 @@ const CONFIG_FILE_NAME = "config.json";
 // Canonical built-in provider ids, in registration order. The workflow
 // fallback ("first non-stub") and the default-provider pick both key off this
 // order, so keep stub first and real providers after it.
-export const BUILT_IN_PROVIDER_IDS = ["stub", "copilot", "claude", "pi"] as const;
+export const BUILT_IN_PROVIDER_IDS = ["stub", "copilot", "claude", "pi", "codex"] as const;
 export type BuiltInProviderId = (typeof BUILT_IN_PROVIDER_IDS)[number];
 
 // Out-of-the-box enablement when neither KEELSON_PROVIDERS nor config.json says
-// otherwise: copilot is the default agent; stub (offline echo), claude, and pi
-// are opt-in. stub is off by default so a fresh install presents a real coding
-// agent, not the echo provider. A config `providers` map is merged over this.
+// otherwise: copilot is the default agent; stub (offline echo), claude, pi, and
+// codex are opt-in. stub is off by default so a fresh install presents a real
+// coding agent, not the echo provider. A config `providers` map is merged over
+// this.
 export const DEFAULT_PROVIDER_ENABLEMENT: Readonly<Record<string, boolean>> = {
   stub: false,
   copilot: true,
   claude: false,
   pi: false,
+  codex: false,
 };
 
 // Per-provider settings block. Only `model` is read today; the shape stays open
@@ -42,6 +44,19 @@ const claudeSettingsSchema = providerSettingsSchema.extend({
   auth: z.enum(CLAUDE_AUTH_MODES).optional(),
 });
 
+// codex runs its own tools inside the `codex exec` subprocess, gated by the
+// sandbox it is given (keelson can't gate them per-call). Defaults to
+// "workspace-write" (read the repo, write within the project cwd); pin tighter
+// with "read-only" or looser with "danger-full-access". `network` toggles the
+// subprocess's network access (off by default).
+export const CODEX_SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
+export type CodexSandboxModeConfig = (typeof CODEX_SANDBOX_MODES)[number];
+
+const codexSettingsSchema = providerSettingsSchema.extend({
+  sandbox: z.enum(CODEX_SANDBOX_MODES).optional(),
+  network: z.boolean().optional(),
+});
+
 const keelsonConfigSchema = z.object({
   // Per-provider enable flags, merged over DEFAULT_PROVIDER_ENABLEMENT — a
   // config need only list the providers it wants to flip.
@@ -51,6 +66,7 @@ const keelsonConfigSchema = z.object({
   defaultProvider: z.string().optional(),
   pi: providerSettingsSchema.optional(),
   claude: claudeSettingsSchema.optional(),
+  codex: codexSettingsSchema.optional(),
 });
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;

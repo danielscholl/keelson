@@ -14,6 +14,7 @@ import {
   getProviderInfoList,
   isRegisteredProvider,
   registerClaudeProvider,
+  registerCodexProvider,
   registerCopilotProvider,
   registerPiProvider,
   registerStubProvider,
@@ -89,6 +90,17 @@ export function bootstrapCliProviders(): BootstrapResult {
       // Self-managed auth — no keyring credential to pass.
       registerPiProvider();
       registered.push("pi");
+      continue;
+    }
+    if (id === "codex") {
+      // Self-managed auth — no keyring credential to pass.
+      registerCodexProvider({
+        ...(config.codex?.sandbox !== undefined ? { sandboxMode: config.codex.sandbox } : {}),
+        ...(config.codex?.network !== undefined
+          ? { networkAccessEnabled: config.codex.network }
+          : {}),
+      });
+      registered.push("codex");
     }
   }
   return { registered };

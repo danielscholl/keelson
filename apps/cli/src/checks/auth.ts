@@ -2,7 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { checkPiAuth, type PiAuthStatus } from "@keelson/providers";
+import {
+  type CodexAuthStatus,
+  checkCodexAuth,
+  checkPiAuth,
+  type PiAuthStatus,
+} from "@keelson/providers";
 import {
   BUILT_IN_PROVIDER_IDS,
   loadKeelsonConfig,
@@ -103,6 +108,8 @@ export interface AuthDeps {
   providerSummary?: () => ProviderSummary;
   // Defaults to the real pi credential probe; injected in tests.
   piAuth?: () => PiAuthStatus;
+  // Defaults to the real codex credential probe; injected in tests.
+  codexAuth?: () => CodexAuthStatus;
 }
 
 export async function runAuthCheck(deps: AuthDeps = {}): Promise<CategoryResult> {
@@ -149,6 +156,22 @@ export async function runAuthCheck(deps: AuthDeps = {}): Promise<CategoryResult>
             status: "warn",
             detail: "no pi credential found",
             hint: "run pi's own login or set a vendor key (e.g. ANTHROPIC_API_KEY); pi reads ~/.pi/agent/auth.json",
+          },
+    );
+  }
+
+  // codex is self-managed too — report its credential presence only when codex
+  // is enabled.
+  if (summary.enabled.includes("codex")) {
+    const codex = (deps.codexAuth ?? checkCodexAuth)();
+    checks.push(
+      codex.authenticated
+        ? { name: "codex auth", status: "ok", detail: `credential found (${codex.source})` }
+        : {
+            name: "codex auth",
+            status: "warn",
+            detail: "no codex credential found",
+            hint: "run `codex login` or set OPENAI_API_KEY or CODEX_API_KEY; codex reads ~/.codex/auth.json",
           },
     );
   }

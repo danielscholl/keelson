@@ -34,10 +34,13 @@ so a typo never blocks startup.
 | `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. |
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. |
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
+| `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
+| `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 
-The built-in provider ids are `copilot`, `claude`, `pi`, and `stub` (the offline
-echo provider). Out of the box, **only copilot loads; stub, claude, and pi are
-off**, so a fresh install defaults to Copilot. Flip the ones you want:
+The built-in provider ids are `copilot`, `claude`, `pi`, `codex`, and `stub` (the
+offline echo provider). Out of the box, **only copilot loads; stub, claude, pi,
+and codex are off**, so a fresh install defaults to Copilot. Flip the ones you
+want:
 
 ```jsonc
 // Claude only
@@ -60,7 +63,7 @@ A provider is enabled by the first of these that has an opinion:
 1. `KEELSON_PROVIDERS`, a comma-separated list, when set. It is an exact
    override: only the providers you name load, ignoring the config file.
 2. The `providers` map in `config.json`.
-3. The built-in defaults (copilot on; stub, claude, and pi off).
+3. The built-in defaults (copilot on; stub, claude, pi, and codex off).
 
 So `KEELSON_PROVIDERS=stub` gives you an offline run with no keys regardless of
 what `config.json` says, and the config file is the durable setting for everyday
@@ -123,6 +126,49 @@ rails), keelson's own tools are not yet projected into pi, and there is no
 session resume yet, so each turn starts fresh. Run `keelson doctor` to confirm pi
 found a credential.
 </Aside>
+
+## Codex (community provider)
+
+`codex` wraps OpenAI's [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk),
+which drives the native `codex` CLI. It is opt-in:
+
+```json
+{
+  "providers": { "codex": true }
+}
+```
+
+Like pi, Codex manages its own credentials, so there is no keelson sign-in for
+it. Codex reads `~/.codex/auth.json` (set up with `codex login`) or an
+`OPENAI_API_KEY` / `CODEX_API_KEY` environment variable. Run `keelson doctor` to
+confirm Codex found a credential.
+
+Codex is an **agentic coding provider**: its turns run inside the `codex exec`
+subprocess, which reads the repo and runs its own shell and file-edit tools. Those
+tool calls execute under Codex's own sandbox — keelson cannot gate them per call
+the way it gates Copilot and Claude tools — so the sandbox is the boundary. By
+default keelson runs Codex with `sandbox: "workspace-write"` (read the repo, write
+within the conversation's project directory), `approvalPolicy: never`, and network
+access off. Tighten or loosen it with `codex.sandbox`, and toggle network reach
+with `codex.network`:
+
+```jsonc
+{
+  "providers": { "codex": true },
+  "codex": { "sandbox": "read-only" }
+}
+```
+
+| Value | Behavior |
+|---|---|
+| `read-only` | Codex may read the repo and reason, but not write files or run mutating commands. |
+| `workspace-write` (default) | Codex may also write within the project directory. |
+| `danger-full-access` | No sandbox restrictions. |
+
+Codex resumes conversations across turns (it persists threads under
+`~/.codex/sessions`), and its command, file-change, and reasoning activity surface
+in chat as tool and thinking rows. Leave the model unset to use your `~/.codex`
+default, or pick a `gpt-5.x` model in the picker.
 
 ## Environment variables
 
