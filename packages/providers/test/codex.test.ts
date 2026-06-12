@@ -399,6 +399,28 @@ describe("CodexProvider", () => {
     ]);
   });
 
+  test("an abort during runStreamed startup returns without an error chunk", async () => {
+    const controller = new AbortController();
+    const factory: CodexThreadFactory = {
+      async createThread(): Promise<CodexThread> {
+        return {
+          async runStreamed(): Promise<AsyncIterable<CodexRawEvent>> {
+            // The caller aborts just as the turn starts; the SDK rejects in
+            // response. That rejection is cancellation, not a turn failure.
+            controller.abort();
+            throw new Error("aborted before stream");
+          },
+        };
+      },
+    };
+    const chunks = await collect(
+      new CodexProvider({ factory }).sendQuery("hi", "/r", undefined, {
+        abortSignal: controller.signal,
+      }),
+    );
+    expect(chunks).toEqual([]);
+  });
+
   test("a mid-stream throw (not aborted) surfaces as an error chunk", async () => {
     const events = (async function* (): AsyncGenerator<CodexRawEvent> {
       yield item({ id: "a1", type: "agent_message", text: "partial" });

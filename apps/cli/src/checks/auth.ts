@@ -171,7 +171,7 @@ export async function runAuthCheck(deps: AuthDeps = {}): Promise<CategoryResult>
             name: "codex auth",
             status: "warn",
             detail: "no codex credential found",
-            hint: "run `codex login` or set OPENAI_API_KEY; codex reads ~/.codex/auth.json",
+            hint: "run `codex login` or set OPENAI_API_KEY or CODEX_API_KEY; codex reads ~/.codex/auth.json",
           },
     );
   }

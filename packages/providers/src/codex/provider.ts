@@ -159,6 +159,10 @@ export class CodexProvider implements IAgentProvider {
       events = await thread.runStreamed(input, controller.signal);
     } catch (err) {
       detachAbort();
+      // A caller abort that lands during runStreamed() startup rejects the
+      // call; that's cancellation, not a turn failure (matches the stream-loop
+      // catch below), so return without surfacing an error.
+      if (options?.abortSignal?.aborted || controller.signal.aborted) return;
       yield { type: "error", message: `codex turn failed: ${errMessage(err)}` };
       return;
     }
