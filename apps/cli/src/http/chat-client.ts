@@ -6,7 +6,11 @@ import {
   type ChatEvent,
   type ClientFrame,
   chatFrameSchema,
+  listPersonasResponseSchema,
   type MessageChunk,
+  type OpenChatSeed,
+  openChatSeedSchema,
+  type PersonaRef,
   type ReasoningEffortLevel,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
@@ -60,6 +64,9 @@ export interface CreateConversationOpts {
   // Omitted → the server binds the conversation to the default workspace
   // project; the bound project's root becomes the agent's cwd.
   projectId?: string;
+  // Seed a persona's system prompt + name (the `/mind` path).
+  seedSystemPrompt?: string;
+  name?: string;
 }
 
 // Mirror the SPA's pickInitialRef (apps/web/src/views/Chat.tsx:131):
@@ -91,6 +98,8 @@ export async function createConversation(
       providerId: opts.providerId,
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.projectId ? { projectId: opts.projectId } : {}),
+      ...(opts.seedSystemPrompt ? { seedSystemPrompt: opts.seedSystemPrompt } : {}),
+      ...(opts.name ? { name: opts.name } : {}),
     }),
   });
   if (!res.ok) {
@@ -98,6 +107,32 @@ export async function createConversation(
     throw new HttpError(res.status, `POST /api/conversations failed: ${res.status} ${body}`);
   }
   return (await res.json()) as ConversationRow;
+}
+
+// Personas (the `/mind` source). Both reach the server's /api/personas routes;
+// resolve returns the seed the caller hands to createConversation.
+export async function listPersonas(baseUrl: string): Promise<PersonaRef[]> {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/personas`, {
+    headers: { accept: "application/json" },
+  });
+  if (!res.ok) throw new HttpError(res.status, `GET /api/personas failed: ${res.status}`);
+  return listPersonasResponseSchema.parse(await res.json()).personas;
+}
+
+export async function resolvePersona(
+  baseUrl: string,
+  ribId: string,
+  slug: string,
+): Promise<OpenChatSeed> {
+  const res = await fetch(
+    `${normalizeBase(baseUrl)}/api/personas/${encodeURIComponent(ribId)}/${encodeURIComponent(slug)}/resolve`,
+    { method: "POST", headers: jsonHeaders(baseUrl) },
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new HttpError(res.status, `resolve persona failed: ${res.status} ${body}`);
+  }
+  return openChatSeedSchema.parse(await res.json());
 }
 
 export interface ConversationSummaryRow {

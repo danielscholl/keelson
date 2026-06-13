@@ -20,6 +20,8 @@
  */
 
 import {
+  type OpenChatSeed,
+  type PersonaSummary,
   type Rib,
   type RibAction,
   type RibActionResult,
@@ -69,6 +71,9 @@ export interface ApplyRibsResult {
   readonly disposers: RibDisposer[];
   readonly probes: Map<string, () => Promise<RibAuthStatus>>;
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
+  // Live persona discovery/resolution, keyed by rib id (the /mind source).
+  readonly personaListers: Map<string, () => Promise<readonly PersonaSummary[]>>;
+  readonly personaResolvers: Map<string, (slug: string) => Promise<OpenChatSeed | null>>;
   readonly workflowContributions: RibWorkflowContribution[];
   // Validated, de-duplicated tools across every active rib, in activation
   // order. The composition root registers these into the shared tool registry
@@ -138,6 +143,8 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
   const disposers: RibDisposer[] = [];
   const probes = new Map<string, () => Promise<RibAuthStatus>>();
   const actionHandlers = new Map<string, (action: RibAction) => Promise<RibActionResult>>();
+  const personaListers = new Map<string, () => Promise<readonly PersonaSummary[]>>();
+  const personaResolvers = new Map<string, (slug: string) => Promise<OpenChatSeed | null>>();
   const workflowContributions: RibWorkflowContribution[] = [];
   const tools: ToolDefinition[] = [];
   const seen = new Set<string>();
@@ -230,6 +237,14 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       const handler = rib.onAction.bind(rib);
       actionHandlers.set(rib.id, (action) => Promise.resolve(handler(action, ribCtx)));
     }
+    if (rib.listPersonas) {
+      const lister = rib.listPersonas.bind(rib);
+      personaListers.set(rib.id, () => Promise.resolve(lister(ribCtx)));
+    }
+    if (rib.resolvePersona) {
+      const resolver = rib.resolvePersona.bind(rib);
+      personaResolvers.set(rib.id, (slug) => Promise.resolve(resolver(slug, ribCtx)));
+    }
 
     // Auto-register the rib's composeBundle (if any) under `rib:<id>`. The
     // base manager's `dispose()` clears every registration on shutdown, so we
@@ -295,7 +310,16 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       disposers.push({ id: rib.id, dispose: rib.dispose.bind(rib) });
     }
   }
-  return { manifests, disposers, probes, actionHandlers, workflowContributions, tools };
+  return {
+    manifests,
+    disposers,
+    probes,
+    actionHandlers,
+    personaListers,
+    personaResolvers,
+    workflowContributions,
+    tools,
+  };
 }
 
 // Narrow a rib's `registerTools` return into validated, non-colliding tools.
