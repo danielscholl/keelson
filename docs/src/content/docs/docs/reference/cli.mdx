@@ -59,8 +59,8 @@ keelson --json workflow list | jq '.data.workflows[].name'
 
 | Command | Does |
 | --- | --- |
-| `keelson workflow list` | List workflows discovered under the home and project `workflows/` directories. |
-| `keelson workflow validate [name]` | Validate one workflow, or all of them. |
+| `keelson workflow list [--dir <path>]` | List workflows in the home catalog, or in an explicit directory such as a project's `.keelson/workflows`. |
+| `keelson workflow validate [name] [--dir <path>]` | Validate one workflow or all of them, from the home catalog or an explicit directory. |
 | `keelson workflow run <name>` | Run a workflow. Server-up over HTTP, server-down in-process. |
 | `keelson workflow respond <runId> <nodeId> <text>` | Resume a paused run by replying to its approval node. Server-required. |
 | `keelson workflow status [runId]` | Show recent runs, or one run's status. Server-required. |

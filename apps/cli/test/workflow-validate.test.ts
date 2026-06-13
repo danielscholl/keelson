@@ -7,7 +7,43 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseWorkflow } from "@keelson/workflows";
 
+const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 const FIXTURES = resolve(import.meta.dir, "fixtures");
+
+async function runCli(args: readonly string[]): Promise<{ stdout: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", BIN, ...args], { stdout: "pipe", stderr: "pipe" });
+  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  return { stdout, exitCode };
+}
+
+describe("workflow validate --dir (CLI)", () => {
+  test("validates a named workflow from an explicit directory", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "workflow",
+      "validate",
+      "smoke-bash",
+      "--dir",
+      FIXTURES,
+    ]);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.failed).toBe(0);
+  });
+
+  test("exits 4 when the name is missing from the explicit directory", async () => {
+    const { exitCode } = await runCli([
+      "--json",
+      "workflow",
+      "validate",
+      "no-such-workflow",
+      "--dir",
+      FIXTURES,
+    ]);
+    expect(exitCode).toBe(4);
+  });
+});
 
 describe("workflow validate (parseWorkflow fixture coverage)", () => {
   test("a valid fixture parses with no error", () => {
