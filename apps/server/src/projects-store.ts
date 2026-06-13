@@ -7,7 +7,8 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { Database } from "bun:sqlite";
-import { isAbsolute, relative, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { Project } from "@keelson/shared";
 
 export interface CreateProjectInput {
@@ -67,6 +68,45 @@ function trimSlash(p: string): string {
   return p.replace(/[/\\]+$/, "");
 }
 
+// realpathSync.native first (resolves through the OS, which also expands
+// Windows 8.3 short names like `C:\Users\RUNNER~1\...` the portable variant
+// leaves intact), then realpathSync, then null. Mirrors the semantics of
+// `canonicalPath` in packages/workflows/src/worktree.ts; the two are
+// deliberately separate copies because `@keelson/workflows` stays
+// dependency-free (no `@keelson/shared` back-dep), so they cannot share a
+// helper — same reason that package mirrors shared types instead of importing
+// them.
+function resolveExisting(p: string): string | null {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  }
+}
+
+// Symlink-resolved form of a path. Project roots and run working dirs reach
+// the server in whatever form the caller's shell produced (macOS `/tmp` vs
+// `/private/tmp`), so every containment comparison must happen on canonical
+// paths or equal directories fail to match. When the path does not exist,
+// the deepest existing ancestor is resolved and the rest re-appended, so a
+// not-yet-created child of a symlinked root still canonicalizes consistently.
+export function canonicalPath(p: string): string {
+  let base = p;
+  let suffix = "";
+  for (;;) {
+    const real = resolveExisting(base);
+    if (real !== null) return suffix === "" ? real : join(real, suffix);
+    const parent = dirname(base);
+    if (parent === base) return p;
+    suffix = suffix === "" ? basename(base) : join(basename(base), suffix);
+    base = parent;
+  }
+}
+
 // True when `child` is `parent` itself or nested within it. Uses path.relative
 // so it stays separator- and platform-correct (Windows `\` as well as POSIX `/`)
 // rather than a raw `${parent}/` prefix test, which never matches a Windows path.
@@ -107,15 +147,20 @@ export function createProjectsStore(db: Database): ProjectsStore {
       return row ? rowToProject(row) : undefined;
     },
     findByPathPrefix(absPath) {
+      const query = canonicalPath(absPath);
       const rows = listStmt.all() as ProjectRow[];
       let best: Project | undefined;
       let bestLen = -1;
       for (const row of rows) {
         const project = rowToProject(row);
-        if (!isPathInside(project.rootPath, absPath)) continue;
-        const len = trimSlash(project.rootPath).length;
+        const root = canonicalPath(project.rootPath);
+        if (!isPathInside(root, query)) continue;
+        const len = trimSlash(root).length;
         if (len > bestLen) {
-          best = project;
+          // Canonical rootPath so callers comparing it against a canonical
+          // workingDir (notebook binding, worktree anchoring) agree with the
+          // match made here.
+          best = { ...project, rootPath: root };
           bestLen = len;
         }
       }

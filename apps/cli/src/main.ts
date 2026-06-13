@@ -149,17 +149,25 @@ export function buildProgram(): Command {
   workflow
     .command("list")
     .description("list workflows discovered under .keelson/workflows/")
-    .action(async function listAction(this: Command) {
+    .option("--dir <path>", "workflows directory to read (default: the keelson home catalog)")
+    .action(async function listAction(this: Command, listOpts: { dir?: string }) {
       const { json } = globalOpts(this);
-      await runWorkflowList({ json });
+      const dir = requireNonEmpty(json, "--dir", listOpts.dir);
+      await runWorkflowList({ json, ...(dir ? { dir } : {}) });
     });
 
   workflow
     .command("validate [name]")
     .description("validate one or all workflow YAML files")
-    .action(async function validateAction(this: Command, name?: string) {
+    .option("--dir <path>", "workflows directory to read (default: the keelson home catalog)")
+    .action(async function validateAction(
+      this: Command,
+      name: string | undefined,
+      validateOpts: { dir?: string },
+    ) {
       const { json } = globalOpts(this);
-      await runWorkflowValidate(name, { json });
+      const dir = requireNonEmpty(json, "--dir", validateOpts.dir);
+      await runWorkflowValidate(name, { json, ...(dir ? { dir } : {}) });
     });
 
   workflow

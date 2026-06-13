@@ -5,7 +5,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "../src/db/init.ts";
@@ -117,6 +117,27 @@ describe("ProjectsStore", () => {
     expect(store.findByPathPrefix("/tmp/ab")?.name).toBe("ab");
     expect(store.findByPathPrefix("/tmp/ab/")?.name).toBe("ab");
     expect(store.findByPathPrefix("/tmp/ab/x")?.name).toBe("ab");
+  });
+
+  test("findByPathPrefix matches across symlinked path forms", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createProjectsStore(db);
+    const realRoot = join(tmpDir, "real-root");
+    mkdirSync(realRoot);
+    const linkRoot = join(tmpDir, "link-root");
+    symlinkSync(realRoot, linkRoot);
+
+    // Stored via the symlink (a shell's logical $PWD), queried via the
+    // resolved form (process.cwd()), and the reverse.
+    const project = store.create({ name: "linked", rootPath: linkRoot });
+    const canonicalRoot = realpathSync(realRoot);
+
+    const viaCanonical = store.findByPathPrefix(join(canonicalRoot, "src"));
+    expect(viaCanonical?.id).toBe(project.id);
+    expect(viaCanonical?.rootPath).toBe(canonicalRoot);
+
+    const viaLink = store.findByPathPrefix(join(linkRoot, "deep", "file.ts"));
+    expect(viaLink?.id).toBe(project.id);
   });
 });
 

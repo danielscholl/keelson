@@ -166,8 +166,11 @@ async function runViaHttp(
     ...(body.workingDir !== undefined ? { workingDir: body.workingDir } : {}),
     ...(body.isolation !== undefined ? { isolation: body.isolation } : {}),
   });
-  // Echo the run's target up front so the human-mode operator can see what
-  // the run is acting against before frames start arriving.
+  // Echo the run's target and id up front so the human-mode operator can see
+  // what the run is acting against before frames start arriving. The header
+  // is printed from the POST response rather than the run_started frame: the
+  // WS attach can lose the race against a fast first node, and the id is what
+  // `workflow respond` / `workflow status` need.
   if (watch && !json) {
     const targetParts: string[] = [];
     if (body.project) targetParts.push(`project=${body.project}`);
@@ -176,6 +179,7 @@ async function runViaHttp(
     if (targetParts.length > 0) {
       process.stdout.write(`◆ target: ${targetParts.join(" ")}\n`);
     }
+    process.stdout.write(`▶ run ${runId.slice(0, 8)} (${name})\n`);
   }
 
   // Always attach the WS so we can wait for the terminal status — the CLI's
@@ -192,7 +196,7 @@ async function runViaHttp(
     onFrame: (frame) => {
       if (watch) frames.push(frame);
       if (frame.type === "run_done") terminalStatus = frame.status;
-      if (watch && !json) {
+      if (watch && !json && frame.type !== "run_started") {
         const line = formatWorkflowFrame(frame);
         if (line) process.stdout.write(`${line}\n`);
       }
