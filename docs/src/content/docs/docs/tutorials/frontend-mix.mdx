@@ -1,0 +1,246 @@
+---
+title: One workflow, many models
+description: Clone the frontend-mix template, register it as a project, and run a real app build that routes each phase to a different model. Then swap a model and compare.
+sidebar:
+  order: 5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Every team that adopts coding agents ends up in the same argument: which
+model should do which job? Strong models are expensive on grind work, fast
+models are reckless on judgment calls, and everyone has an opinion. The
+useful move is to stop debating and run the experiment. That is what this
+field exercise does: one workflow builds a real web app, each phase routed
+to a different model class, and swapping any phase to a different model (or
+a different provider) is a one-line edit away.
+
+The first four tutorials ran on the offline stub so every checkpoint was
+free. This page is the graduation run: real models, real tokens, a real app
+in your working tree at the end. Expect a full run to take a while (it
+builds, validates, and smoke-tests an actual application) and to spend real
+model turns doing it.
+
+<Aside type="note" title="Prerequisites">
+A running keelson server ([Your first run](../first-run/)) with the default
+GitHub Copilot provider signed in (`keelson doctor` confirms both), plus
+`git` and the [GitHub CLI](https://cli.github.com/) to create your copy of
+the template. [Bun](https://bun.sh/) you already have.
+</Aside>
+
+## Get the template
+
+[`danielscholl/keelson-sample`](https://github.com/danielscholl/keelson-sample)
+is a GitHub template repository: a ready-made keelson project carrying one
+workflow, a spec to build from, and a worked example. Create your own copy
+and clone it (the Use this template button on GitHub does the same thing):
+
+```sh
+gh repo create my-frontend-mix --template danielscholl/keelson-sample --private --clone
+cd my-frontend-mix
+```
+
+Three things in the tree matter for this exercise:
+
+| Path | What it is |
+| --- | --- |
+| `.keelson/workflows/frontend-mix.yaml` | The workflow: a ten-node DAG with a model pinned per phase |
+| `spec.md` | The input brief: "Cosmos", a no-login, local-only planetarium app |
+| `examples/cosmos/` | A finished run's artifact trail, so you can read what good handoffs look like |
+
+The workflow routes each phase to a model class. Fast models take the grind
+work (explore, validate, smoke), strong-reasoning models take the judgment
+calls (plan, integrate, fix, deploy), and a UI-strong model takes the design
+step. Here is the same file as the engine sees it:
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/frontend-mix-dag.svg`}
+    alt="The frontend-mix DAG, drawn as two rows. Row one runs left to right: explore, plan, build-ui, integrate, validate, each labeled with its model class. A drop edge carries the flow to row two, which runs right to left: fix-validation, smoke, approve-deploy, deploy, finalize. The approve-deploy node is brass, marking the human approval gate. A dashed note says every edge hands off a markdown artifact."
+  />
+  <figcaption>
+    Figure 1. The frontend-mix DAG. Each node pins a model class; the brass
+    node is a human approval gate, and every edge hands off a markdown
+    artifact rather than shared chat history.
+  </figcaption>
+</figure>
+
+The handoff is the trick to stare at. Each node writes its conclusions to a
+markdown file in the run's artifact directory, and the next node opens that
+file with its own fresh context. Two models that have never seen each
+other's conversation cooperate cleanly because the file is the contract.
+That is also exactly why the models are swappable: no phase depends on
+another phase's chat history, only on its artifact.
+
+## Register the project
+
+Your clone carries its workflow in `.keelson/workflows/`, but the server
+does not scan every directory on your disk. You tell it which directories
+are projects; the catalog then includes each project's workflows alongside
+the global ones from `~/.keelson/workflows`:
+
+```sh
+keelson project add frontend-mix "$(pwd)"
+```
+
+From now on, any run you start from inside this directory resolves to this
+project, and the Workflows surface at `http://127.0.0.1:7878` shows
+`frontend-mix` as a card under the project's scope.
+
+Before running anything, validate. `workflow validate` reads the global
+catalog by default; point it at the project's directory with `--dir`:
+
+```sh
+keelson workflow validate frontend-mix --dir .keelson/workflows
+```
+
+```text
+results:
+  -     filename: /Users/you/my-frontend-mix/.keelson/workflows/frontend-mix.yaml
+    ok: true
+    warnings:
+    error:
+failed: 0
+total: 1
+```
+
+## Run the build
+
+The workflow takes its brief through the `ARGUMENTS` input. Point it at the
+bundled spec and say the deployment is local-only, so nothing tries to leave
+your machine:
+
+```sh
+keelson workflow run frontend-mix --watch \
+  --inputs ARGUMENTS="Build the app described in spec.md. Local only - no deployment this run."
+```
+
+The watch stream shows the DAG executing in dependency order, exactly as in
+[Run your first workflow](../run-a-workflow/), except now each `✓` is a real
+model finishing a real phase:
+
+```text
+◆ target: cwd=/Users/you/my-frontend-mix
+▶ run 096d8e56 (frontend-mix)
+  ✓ explore
+  ✓ plan
+  ✓ build-ui
+  ✓ integrate
+  ✓ validate
+  ✓ fix-validation
+  ✓ smoke
+  · approve-deploy …
+```
+
+This is the long part: the build-ui and integrate phases are doing genuine
+work. Watch the same run as live cards in the Workflows surface if you
+prefer; both views are the same stream. Note the run id in the header (here
+`096d8e56`); you need it to answer the gate.
+
+When the smoke phase finishes, the run does something the earlier tutorials
+never did: it stops and waits for you.
+
+```text
+⏸ approve-deploy awaiting approval — Build, validation, and smoke test are
+complete. Review the smoke verdict above (and try the app locally if you
+like) before anything leaves this machine.
+```
+
+This is the `approval` node from the taxonomy table, now in earnest. The
+build is done and validated, the smoke test has driven the running app, and
+nothing deploys until a human says so. Read the smoke verdict, then answer
+from the Workflows surface, or from a second terminal:
+
+```sh
+keelson workflow respond <runId> approve-deploy "skip"
+```
+
+(The run id is in the watch header. "deploy" runs the plan's deployment
+section; "skip" records your sign-off and finishes without deploying. With a
+local-only plan both end the same way, but the gate is the point: you just
+held a multi-model pipeline at a human checkpoint with one line of YAML.)
+
+The final node is plain bash: it copies the run's artifact directory into
+`.agents/artifacts/` and commits everything, because the per-run scratch
+directory is deleted when the run completes. Your repo now holds both the
+app and the paper trail.
+
+## Read the trail
+
+```sh
+ls .agents/artifacts
+```
+
+```text
+context.md
+deploy-summary.md
+integration-summary.md
+plan.md
+resolution-summary.md
+smoke-summary.md
+ui-summary.md
+validation-summary.md
+```
+
+Open `plan.md` first. The strong-reasoning model wrote the actual headlines
+and button labels the UI model built from (SECTION A), the integration scope
+the integrate phase implemented (SECTION B), and the deploy decision the
+gate protected (SECTION C). Then open `smoke-summary.md` for the verdict on
+the running app. The worked example in `examples/cosmos/` shows the same
+trail from a finished build, including the classic catch: a page that
+compiled green but rendered broken, found only by the smoke phase.
+
+The app itself is in your working tree, validated and committed. Run it:
+
+```sh
+bun run dev
+```
+
+## Swap a model and compare
+
+Now the experiment the setup paid for. Open
+`.keelson/workflows/frontend-mix.yaml` and find the `build-ui` node: it pins
+the UI-strong model. Change that one line to any other model your provider
+serves, then re-run with `--worktree`:
+
+```sh
+keelson workflow run frontend-mix --worktree --watch \
+  --inputs ARGUMENTS="Build the app described in spec.md. Local only - no deployment this run."
+```
+
+`--worktree` runs the build in an isolated git worktree on its own branch
+(`keelson/frontend-mix/<run-id>`), so your first build stays untouched and
+the comparison is a branch diff:
+
+```sh
+git branch --list 'keelson/*'
+git diff main keelson/frontend-mix/<run-id> -- app/
+```
+
+Same spec, same prompts, same pipeline, different model on one phase: the
+difference you see in that diff is the model, isolated. That is the whole
+test bench. From here you can take it further:
+
+- **Swap whole providers.** Enable Claude, Codex, or Pi in
+  `~/.keelson/config.json` and add a `provider:` line to any node. The
+  [configuration guide](../../guides/configuration/) covers enablement; the
+  [providers reference](../../reference/providers/) covers what each one
+  needs.
+- **Pin the whole chain to one provider** with `KEELSON_WORKFLOW_PROVIDER`
+  to compare vendor against vendor instead of model against model.
+- **Rewrite the spec.** `spec.md` is a content-and-intent brief, not a
+  wireframe. Describe your own app and the same pipeline builds it.
+
+## What you proved
+
+A workflow file can encode a team's model-routing policy: who plans, who
+builds, who checks, where a human signs off. The artifact handoff makes the
+phases independent enough that swapping a model is a one-line diff, and
+worktree isolation makes comparing attempts a git operation instead of a
+copy-paste archaeology dig. The harness carried the state, the streams, and
+the approval gate; the models just did their phases.
+
+The [authoring workflows guide](../../guides/authoring-workflows/) covers
+the full node vocabulary when you are ready to encode a pipeline of your
+own, and [Workflows](../../concepts/workflows/) explains the engine
+underneath this page.
