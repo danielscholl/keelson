@@ -36,6 +36,7 @@ so a typo never blocks startup.
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
+| `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, `codex`, and `stub` (the
 offline echo provider). Out of the box, **only copilot loads; stub, claude, pi,
@@ -120,11 +121,11 @@ cover in the model picker, or leave the default and let pi choose from its own
 settings.
 
 <Aside type="caution" title="Alpha scope">
-The pi provider drives chat and reasoning only for now. Pi's built-in file and
-shell tools stay off (they would run outside keelson's permission and redaction
-rails), keelson's own tools are not yet projected into pi, and there is no
-session resume yet, so each turn starts fresh. Run `keelson doctor` to confirm pi
-found a credential.
+Pi's own built-in file and shell tools stay off (they would run outside keelson's
+permission and redaction rails), and there is no session resume yet, so each turn
+starts fresh. The harness does project its own tool registry into the pi session
+as custom tools, so rib and workflow tools reach a pi turn. Run `keelson doctor`
+to confirm pi found a credential.
 </Aside>
 
 ## Codex (community provider)
@@ -170,6 +171,34 @@ Codex resumes conversations across turns (it persists threads under
 in chat as tool and thinking rows. Leave the model unset to use your `~/.codex`
 default, or pick a `gpt-5.x` model in the picker.
 
+## MCP gateway
+
+The server exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io)
+at `/api/mcp`, so another agent can call your ribs' tools. It comes up with the
+server and is read-only and tokenless on loopback by default. The `mcp` block
+tunes it; [Using keelson over MCP](../using-mcp/) is the task guide.
+
+```jsonc
+{
+  "mcp": {
+    "enabled": true,
+    "exposeStateChanging": false,
+    "requireToken": false,
+    "toolDenylist": []
+  }
+}
+```
+
+| Key | Type | What it does |
+|---|---|---|
+| `enabled` | boolean | Whether `/api/mcp` mounts. Default `true`. |
+| `exposeStateChanging` | boolean | Also expose state-changing tools (`workflow_run`, `workflow_respond`, a rib's mutating tools). Default `false`, so only read-only tools cross. |
+| `requireToken` | boolean | Gate the endpoint behind the bearer token in `server.json`. Default `false` (loopback, no token). |
+| `toolDenylist` | string array | Tool names never exposed over MCP, whatever the flags above allow. |
+
+Each key has a `KEELSON_MCP_*` environment override (see below) that wins over
+the config value, the same way `KEELSON_PROVIDERS` wins over `providers`.
+
 ## Environment variables
 
 The config file covers providers; these variables cover the rest and override
@@ -178,12 +207,18 @@ the matching config value when set.
 | Variable | Default | What it controls |
 |---|---|---|
 | `KEELSON_HOME` | `~/.keelson` | The keelson home directory (db, workflows, config). |
+| `KEELSON_DB` | `<home>/keelson.db` | The SQLite database file. `keelson start --db` overrides it per run. |
 | `KEELSON_CONFIG` | `<home>/config.json` | Path to the config file. |
 | `KEELSON_WORKFLOWS_DIR` | `<home>/workflows` | The global workflows directory. |
 | `KEELSON_PROVIDERS` | unset | Exact list of providers to load. Overrides the config file. |
 | `KEELSON_WORKFLOW_PROVIDER` | first real provider | Provider that backs workflow `prompt` nodes. |
 | `KEELSON_WORKFLOW_TOOL_DENYLIST` | unset | Operator floor: tool names no workflow `prompt` node may use, subtracted on top of whatever a node allows. |
+| `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
+| `KEELSON_MCP_DISABLED` | unset | Set to `1` to not mount `/api/mcp`. Overrides `mcp.enabled`. |
+| `KEELSON_MCP_EXPOSE_STATE_CHANGING` | unset | Set to `1` to expose state-changing tools over MCP. Overrides `mcp.exposeStateChanging`. |
+| `KEELSON_MCP_REQUIRE_TOKEN` | unset | Set to `1` to gate `/api/mcp` behind the `server.json` token. Overrides `mcp.requireToken`. |
+| `KEELSON_MCP_DENYLIST` | unset | Comma-separated tool names to hide over MCP. Merged with `mcp.toolDenylist`. |
 | `KEELSON_WORKSPACE` | `~/keelson` | Root for project workspaces. |
 | `KEELSON_BASH` | auto-detected | Path to a POSIX shell for `bash` workflow nodes (Windows). |
 

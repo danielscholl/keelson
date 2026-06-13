@@ -185,7 +185,7 @@ Six single-word tiles in one row, grounded in capabilities that genuinely ship
 | Memory | Persistent, searchable, and governed. |
 | Ribs | Capabilities ship as packages, not forks. |
 | Surfaces | Ribs emit JSON; the app renders live boards. |
-| Providers | Copilot or Claude, swappable. No lock-in. |
+| Providers | Copilot, Claude, Codex, Pi. Swappable, no lock-in. |
 
 Each tile uses a custom inline line icon (see Icon family). If the set ever grows
 to eight, the natural additions are Local and Governed (approval gates, the

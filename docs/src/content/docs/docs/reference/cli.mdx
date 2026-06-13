@@ -18,7 +18,7 @@ the `--json` envelope and the exit codes.
 | Flag | Effect |
 | --- | --- |
 | `--json` | Emit a machine-readable JSON envelope to stdout. Every entry point, including help and errors, produces a parseable payload. |
-| `-p, --prompt <message>` | Sugar for `keelson chat <message>`. Must come before any subcommand. |
+| `-p, --prompt <message>` | Sugar for `keelson chat <message>`; with no message on a TTY it opens interactive chat. Must come before any subcommand. |
 | `-v, --version` | Print the CLI, Bun, and contract schema versions and exit. |
 | `-h, --help` | Print help. Works at every level (`keelson rib --help`). |
 
@@ -56,6 +56,16 @@ keelson --json workflow list | jq '.data.workflows[].name'
 
 The former `keelson service` group (`service start` / `stop` / `status`, alias
 `serve`) still works as a hidden, deprecated alias. Prefer the top-level verbs.
+
+## MCP bridge
+
+| Command | Does |
+| --- | --- |
+| `keelson mcp [--base-url <url>]` | Bridge a stdio-only MCP client to the running server's HTTP MCP endpoint (`/api/mcp`). Reads JSON-RPC on stdin, forwards it to the server, writes replies to stdout. Exits `3` when the server is down. |
+
+This is for MCP clients that speak stdio only; a client that speaks HTTP points
+straight at `http://127.0.0.1:7878/api/mcp` and skips the bridge. See
+[Using keelson over MCP](../../guides/using-mcp/).
 
 ## Workflows
 
@@ -107,16 +117,21 @@ server is running. Most other rib commands talk to the running server and report
 ## Chat
 
 ```sh
-keelson chat <message>
+keelson chat <message>      # one turn
+keelson chat                # no message on a TTY: interactive chat (server-required)
 ```
 
-One chat turn. Server-up it goes over HTTP and shows up in the SPA; server-down
-it runs in-process and prints to stdout.
+`keelson chat <message>` runs one turn: server-up it goes over HTTP and shows up
+in the SPA; server-down it runs in-process and prints to stdout. A bare `keelson
+chat` on a TTY opens the interactive chat instead, which needs the server up and
+ignores `--json` and `--project` (switch projects with the in-chat `/project`
+command). The options below apply to the one-shot form.
 
 | Option | Effect |
 | --- | --- |
 | `--provider <id>` | Provider id. With the server up, defaults to the server's provider; with the server down, the in-process fallback runs the offline `stub`. |
 | `--model <id>` | Model id passed to the provider. |
+| `--project <name>` | Bind the new conversation to a named project. Server-required. |
 | `--conversation <id>` | Continue an existing conversation (server-up only). |
 | `--thinking` | Enable Claude extended thinking for the turn. |
 | `--reasoning-effort <level>` | Copilot reasoning tier. |

@@ -19,7 +19,10 @@ do the work. The CLI and the browser both speak to the Keelson server over HTTP
 and WebSocket. The server owns the provider registry, the tool registry, the
 workflow executor, and the snapshot manager, and each of those grounds into local
 state: your OS keychain, the rib packages you install, the SQLite store, and the
-WebSocket frames the browser renders as live surfaces.
+WebSocket frames the browser renders as live surfaces. The tool registry also
+faces outward: the server re-exposes it over the Model Context Protocol at
+`/api/mcp`, so an external agent can call the same rib and workflow tools the chat
+agent uses.
 
 <figure>
   <img
@@ -146,7 +149,11 @@ rib can bind to it.
    populated; rib tools are passed in default-off, so a workflow `prompt` node
    sees one only when it allows it by name.
 
-10. **Schedule surfaces and serve.** A heartbeat scheduler keeps snapshot-backed
+10. **Mount the MCP gateway.** When `mcp.enabled` (the default), the server mounts
+    `/api/mcp`, exposing the now-populated tool registry to external agents over
+    the Model Context Protocol, read-only by default.
+
+11. **Schedule surfaces and serve.** A heartbeat scheduler keeps snapshot-backed
     regions fresh on their cadence, then Bun serves the HTTP and WebSocket routes
     on `127.0.0.1:7878`.
 

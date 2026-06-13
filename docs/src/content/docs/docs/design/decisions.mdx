@@ -95,6 +95,20 @@ Keelson is a single-user harness that runs on your laptop, so the trust model is
 the operating system, not a hosted control plane. "Local-only" is something the
 wiring enforces, not a sentence in the README.
 
+## The tool registry faces outward, read-only by default
+
+A rib's tools already reach the chat agent and workflow `prompt` nodes through one
+registry. The server re-exposes that same registry over the Model Context Protocol
+at `/api/mcp`, so an external agent can call a rib's real capability rather than a
+reimplementation. The endpoint is loopback-bound, tokenless, and read-only out of
+the box; state-changing tools, a bearer token, and a denylist are each opt-in.
+
+Exposing the registry rather than hand-writing a bridge means a rib reaches
+external agents the same way it reaches chat: register a tool once and every
+consumer sees it. Defaulting to read-only keeps that reach from becoming a
+surprise. An external agent gets the harness's read surface immediately, and the
+operator opts in, deliberately, before anything can mutate state through it.
+
 ## Lenient on vocabulary, strict on structure
 
 The workflow loader hard-errors on anything that breaks the graph: duplicate

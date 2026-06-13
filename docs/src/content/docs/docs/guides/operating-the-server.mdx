@@ -7,9 +7,9 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-One server owns everything: the SQLite store, the providers, the ribs, and the
-browser UI, all on port 7878. Here is how to run it, check it, and stop it
-cleanly.
+One server owns everything: the SQLite store, the providers, the ribs, the
+browser UI, and an MCP endpoint for other agents, all on port 7878. Here is how
+to run it, check it, and stop it cleanly.
 
 ## Start it
 
@@ -76,12 +76,24 @@ Stop drains in-flight runs, closes the database, and exits, falling back to a
 signal only if the graceful path does not land. It is safe to run when nothing
 is up: it reports `not running` and cleans any stale state.
 
+## The MCP endpoint
+
+The same server speaks the [Model Context Protocol](https://modelcontextprotocol.io)
+at `/api/mcp`, so other agents (Claude Code, Cursor, the Codex CLI) can call your
+ribs' tools. It mounts automatically with the server and exposes only read-only
+tools on loopback, with no token, by default. `keelson status` reports its URL
+when it is mounted.
+
+Tune what crosses, or gate it behind a token, in the `mcp` config block. The
+[Using keelson over MCP](../using-mcp/) guide walks a client through connecting,
+and [Configuration](../configuration/#mcp-gateway) documents every knob.
+
 ## Where the state lives
 
 | Path | What |
 | --- | --- |
 | `~/.keelson/keelson.db` | The SQLite store: conversations, runs, node outputs, memory. |
-| `~/.keelson/server.json` | The running server's record: its URL, pid, version, and shutdown token. |
+| `~/.keelson/server.json` | The running server's record: its URL, pid, version, shutdown token, and (when MCP token-gating is on) the MCP token. |
 | `~/.keelson/` | The managed home overall, including `workflows/` and installed ribs. |
 
 `KEELSON_HOME` relocates the whole home; see [Configuration](../configuration/)

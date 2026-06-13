@@ -1,0 +1,103 @@
+---
+title: Using keelson over MCP
+description: Expose your ribs' tools to other agents over the Model Context Protocol, read-only by default, and point an MCP client at the endpoint.
+sidebar:
+  order: 6
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Keelson exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io),
+so another MCP-capable agent (Claude Code, Cursor, the Copilot CLI, the Codex CLI)
+can call your installed ribs' tools and the workflow tools. The endpoint comes up
+with the server, so `keelson start` is the only setup it needs.
+
+Tools run **inside** the keelson server, where each rib keeps its credentials and
+exec access. An external agent that calls a rib's tool gets the rib's real
+capability, not a reimplementation, and never sees the secrets behind it.
+
+## What is exposed
+
+The gateway serves the same registry the chat agent reads: every active rib's
+tools, plus `workflow_list` and `workflow_status`. By default it is **read-only**,
+so only tools that do not change state cross. The state-changing tools,
+`workflow_run` and `workflow_respond` along with a rib's mutating tools (an OSDU
+cluster suspend, say), stay hidden until you opt in. A hidden or denied tool is
+reported as unknown, so the endpoint never reveals what it is withholding.
+
+<Aside type="note" title="Read-only by default">
+A fresh endpoint serves read-only tools on loopback with no token. Widen it
+deliberately: `exposeStateChanging` surfaces the mutating tools, `requireToken`
+adds a bearer token, and `toolDenylist` hides tools by name. See
+[Configuration](../configuration/#mcp-gateway) for every knob.
+</Aside>
+
+## Connect an HTTP client
+
+A client that speaks HTTP MCP points straight at the endpoint:
+
+```jsonc
+// Claude Code or Cursor: an HTTP MCP server
+{
+  "mcpServers": {
+    "keelson": { "type": "http", "url": "http://127.0.0.1:7878/api/mcp" }
+  }
+}
+```
+
+The endpoint is JSON-only: it answers `POST` with a single JSON-RPC reply and
+returns 405 for `GET`, since there is no server-to-client event stream.
+
+## Bridge a stdio-only client
+
+Some clients speak only stdio MCP. `keelson mcp` is a bridge: it reads JSON-RPC on
+stdin, forwards each message to the running server's `/api/mcp`, and writes the
+reply to stdout. It exits non-zero when the server is down.
+
+```toml
+# Codex CLI (~/.codex/config.toml)
+[mcp_servers.keelson]
+command = "keelson"
+args = ["mcp"]
+```
+
+The bridge follows the URL the running server recorded in `server.json`, so it
+finds a non-default port on its own; pass `--base-url` to target a specific
+server. When the endpoint is token-gated, the bridge sends the stored token only
+to that recorded server, never to an explicit `--base-url` target.
+
+## Gate it
+
+Four settings narrow the endpoint, in `~/.keelson/config.json` under `mcp`:
+
+- `exposeStateChanging: true` surfaces `workflow_run`, `workflow_respond`, and a
+  rib's mutating tools. Off by default.
+- `requireToken: true` gates every request behind the bearer token in
+  `server.json`. Off by default, since the bind is already loopback-only.
+- `toolDenylist` removes named tools, whatever the flags above allow.
+- `enabled: false` (or `KEELSON_MCP_DISABLED=1`) takes the endpoint down entirely.
+
+```jsonc
+// ~/.keelson/config.json: state-changing tools, behind a token
+{
+  "mcp": { "exposeStateChanging": true, "requireToken": true }
+}
+```
+
+Each setting has a `KEELSON_MCP_*` environment override that wins over the config
+value; [Configuration](../configuration/#mcp-gateway) is the full table.
+
+<Aside type="caution" title="Still a local surface">
+The endpoint binds to loopback like the rest of the API, so it is reachable only
+from your machine. The token gate is there for when you deliberately proxy it
+outward yourself; it is not a reason to relax the local-only posture.
+</Aside>
+
+## Related
+
+- [Configuration](../configuration/#mcp-gateway): the `mcp` config block and the
+  `KEELSON_MCP_*` environment overrides.
+- [The CLI](../../reference/cli/#mcp-bridge): the `keelson mcp` stdio bridge.
+- [The HTTP and WS API](../../reference/api/): `/api/mcp` alongside the rest of the
+  local surface.
+- [Managing ribs](../managing-ribs/): the ribs whose tools the gateway exposes.
