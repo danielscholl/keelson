@@ -5,11 +5,12 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "../src/db/init.ts";
 import {
+  canonicalPath,
   createProjectsStore,
   DuplicateProjectNameError,
   isPathInside,
@@ -128,9 +129,13 @@ describe("ProjectsStore", () => {
     symlinkSync(realRoot, linkRoot);
 
     // Stored via the symlink (a shell's logical $PWD), queried via the
-    // resolved form (process.cwd()), and the reverse.
+    // resolved form (process.cwd()), and the reverse. The expected value uses
+    // the production canonicalizer, not raw realpathSync: on Windows the store
+    // resolves via realpathSync.native (which expands 8.3 short names like
+    // RUNNER~1), so a plain realpathSync here would leave the short form and
+    // never match.
     const project = store.create({ name: "linked", rootPath: linkRoot });
-    const canonicalRoot = realpathSync(realRoot);
+    const canonicalRoot = canonicalPath(realRoot);
 
     const viaCanonical = store.findByPathPrefix(join(canonicalRoot, "src"));
     expect(viaCanonical?.id).toBe(project.id);
