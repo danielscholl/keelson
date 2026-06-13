@@ -52,7 +52,7 @@ export async function runDbCheck(deps: DbDeps = {}): Promise<CategoryResult> {
       name: "schema_version",
       status: "warn",
       detail: `db not found at ${path}`,
-      hint: "run `keelson service` once to create and migrate the SQLite database",
+      hint: "run `keelson start` once to create and migrate the SQLite database",
     };
     return { category: "db", checks: [check] };
   }
@@ -66,7 +66,7 @@ export async function runDbCheck(deps: DbDeps = {}): Promise<CategoryResult> {
       name: "schema_version",
       status: "fail",
       detail: `failed to read ${path}: ${message}`,
-      hint: "the SQLite file may be corrupt or locked; stop any running `keelson service` and try again",
+      hint: "the SQLite file may be corrupt or locked; stop any running server (`keelson stop`) and try again",
     };
     return { category: "db", checks: [check] };
   }
@@ -76,7 +76,7 @@ export async function runDbCheck(deps: DbDeps = {}): Promise<CategoryResult> {
       name: "schema_version",
       status: "warn",
       detail: "schema_version table is empty",
-      hint: "run `keelson service` once to apply migrations",
+      hint: "run `keelson start` once to apply migrations",
     };
     return { category: "db", checks: [check] };
   }
@@ -86,7 +86,7 @@ export async function runDbCheck(deps: DbDeps = {}): Promise<CategoryResult> {
       name: "schema_version",
       status: "warn",
       detail: `db at v${current}, expected v${latest}`,
-      hint: "run `keelson service` to apply pending migrations",
+      hint: "run `keelson start` to apply pending migrations",
     };
     return { category: "db", checks: [check] };
   }

@@ -123,7 +123,7 @@ export function bootstrapCliProviders(): BootstrapResult {
 // Pick a default provider when --provider is omitted. Shares resolveDefaultProvider
 // with the server and the SPA picker: config.defaultProvider → copilot → first
 // real provider → stub. Same invocation routes to the same provider whether or
-// not `keelson service` is running.
+// not `keelson start` is running.
 export function pickDefaultProvider(): string {
   const ids = getProviderInfoList().map((p) => p.id);
   const id = resolveDefaultProvider(loadKeelsonConfig(), ids);

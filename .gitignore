@@ -28,7 +28,7 @@ package.json.bak
 .keelson/keelson.db-wal
 .keelson/keelson.db-shm
 
-# Running-server record + background-serve logs (`keelson serve start`).
+# Running-server record + background-serve logs (`keelson start`).
 .keelson/server.json
 .keelson/logs/
 

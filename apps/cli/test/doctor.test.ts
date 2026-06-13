@@ -71,7 +71,7 @@ describe("server check", () => {
   test("server down → warn (never fail)", async () => {
     const result = await runServerCheck({ probeServer: async () => null });
     expect(result.checks[0]?.status).toBe("warn");
-    expect(result.checks[0]?.hint).toContain("keelson service");
+    expect(result.checks[0]?.hint).toContain("keelson start");
   });
 });
 

@@ -291,7 +291,7 @@ export async function runChatEntry(message: string | undefined, opts: ChatOption
   if (!effectiveBase) {
     emit(
       {
-        error: "interactive chat requires a running server; start it with `keelson service start`",
+        error: "interactive chat requires a running server; start it with `keelson start`",
         code: "NO_SERVER",
       },
       { json: false },
@@ -371,7 +371,7 @@ export async function runChat(message: string, opts: ChatOptions): Promise<never
     emit(
       {
         error:
-          "--project requires a running server (start with `keelson service`); the in-process path has no project store",
+          "--project requires a running server (start it with `keelson start`); the in-process path has no project store",
         code: "NO_SERVER",
       },
       { json: opts.json },
@@ -387,7 +387,7 @@ export async function runChat(message: string, opts: ChatOptions): Promise<never
     emit(
       {
         error:
-          "--conversation requires a running server (start with `keelson service`); the in-process path has no conversation store",
+          "--conversation requires a running server (start it with `keelson start`); the in-process path has no conversation store",
         code: "NO_SERVER",
       },
       { json: opts.json },

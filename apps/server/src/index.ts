@@ -78,14 +78,14 @@ export interface StartServerConfig {
   // When set, registers POST /api/server/shutdown gated by the bearer token.
   // The token never travels over the network unprompted — it lives in the
   // home's server.json, so only a caller that can read the operator's disk
-  // (keelson service stop) can present it. onShutdown is invoked after the
+  // (keelson stop) can present it. onShutdown is invoked after the
   // response is sent; the caller owns process exit.
   shutdown?: { token: string; onShutdown: () => void };
   // Bearer token the MCP endpoint requires when config.mcp.requireToken is set
   // (recorded in server.json by serveUntilSignal). Ignored when MCP runs
   // tokenless (the default). Separate from the shutdown token by design.
   mcpToken?: string;
-  // Operator-facing version recorded in server.json (`keelson service status`
+  // Operator-facing version recorded in server.json (`keelson status`
   // reports it). The CLI passes its release version; the private @keelson/server
   // package's own version is meaningless to an operator.
   version?: string;
@@ -139,7 +139,7 @@ export interface ServerHandle {
 
 // Build the database, ribs, workflow subsystem, and HTTP/WS routes, then serve.
 // Runs the same bootstrap whether invoked as the `bun src/index.ts` entrypoint
-// or imported in-process by `keelson service`. Reads its data home via
+// or imported in-process by `keelson start`. Reads its data home via
 // resolveKeelsonHome (KEELSON_HOME → project .keelson/ → ~/.keelson).
 export async function startServer(config: StartServerConfig = {}): Promise<ServerHandle> {
   // The managed keelson home: KEELSON_HOME → an existing .keelson/ walking up
@@ -543,11 +543,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
 
 // Run the server and block until a termination signal (or an authorized
 // POST /api/server/shutdown), then shut down once and exit. This is the
-// process-owning entry both `bun src/index.ts` (dev) and `keelson service`
+// process-owning entry both `bun src/index.ts` (dev) and `keelson start`
 // (in-process) use; startServer itself installs no signal handlers. It also
-// owns the home's server.json record so `keelson service status`/`stop` can
+// owns the home's server.json record so `keelson status`/`stop` can
 // find the pid, URL, and shutdown token. SIGHUP (SSH/terminal close) is a
-// graceful stop in the foreground; a `keelson service start` child sets
+// graceful stop in the foreground; a `keelson start` child sets
 // KEELSON_SERVE_BACKGROUND=1 and ignores it so the server outlives the
 // terminal that launched it.
 export async function serveUntilSignal(config: StartServerConfig = {}): Promise<never> {

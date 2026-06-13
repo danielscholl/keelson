@@ -38,7 +38,7 @@ keelson rib show anything
 ```
 
 ```text
-error: rib commands require `keelson service` to be running
+error: rib commands require a running server (`keelson start`)
 ```
 
 Exit code `3`: server required but down. The CLI's exit codes are stable, so
@@ -99,8 +99,9 @@ home: /Users/you/.keelson
 
 ## Restart and let discovery work
 
-Discovery happens once, at boot. Restart `keelson service` and the server walks
-the home's `node_modules/@keelson/` scope:
+Discovery happens once, at boot. Restart the server
+(`keelson stop && keelson start`) and the server walks the home's
+`node_modules/@keelson/` scope:
 
 <Steps>
 
@@ -139,8 +140,8 @@ Installed and activated are different states. `KEELSON_RIBS` is the
 operator's filter between them:
 
 ```sh
-KEELSON_RIBS=chamber keelson service    # activate only chamber
-keelson service                         # unset: activate everything discovered
+KEELSON_RIBS=chamber keelson start    # activate only chamber
+keelson start                         # unset: activate everything discovered
 ```
 
 This makes experiments cheap: install several ribs, activate one. And

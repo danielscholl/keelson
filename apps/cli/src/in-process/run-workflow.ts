@@ -69,7 +69,7 @@ export class WorkflowNotFoundError extends Error {
     public readonly searched: string,
   ) {
     super(
-      `no workflow named '${name}' under ${searched} (project-scoped workflows need the server — run \`keelson service start\`)`,
+      `no workflow named '${name}' under ${searched} (project-scoped workflows need the server — run \`keelson start\`)`,
     );
     this.name = "WorkflowNotFoundError";
   }
@@ -79,7 +79,7 @@ export class WorkflowNotFoundError extends Error {
  * Thrown by `runHeadless` when the loaded workflow declares one or more
  * `memory:` blocks. The headless path has no MemoryStore wired (single-DB
  * invariant; the server owns the connection), so memory-bearing workflows
- * route through `keelson service`. The CLI command translates this to exit
+ * route through `keelson start`. The CLI command translates this to exit
  * code 3 (server required).
  */
 export class MemoryRequiresServerError extends Error {
@@ -88,7 +88,7 @@ export class MemoryRequiresServerError extends Error {
     public readonly memoryNodeIds: readonly string[],
   ) {
     super(
-      `workflow '${workflowName}' declares 'memory:' on ${memoryNodeIds.length} node(s) (${memoryNodeIds.join(", ")}). Memory requires the server. Run \`keelson service\` first.`,
+      `workflow '${workflowName}' declares 'memory:' on ${memoryNodeIds.length} node(s) (${memoryNodeIds.join(", ")}). Memory requires the server. Run \`keelson start\` first.`,
     );
     this.name = "MemoryRequiresServerError";
   }
@@ -96,7 +96,7 @@ export class MemoryRequiresServerError extends Error {
 
 // Default-provider pin for headless prompt nodes, mirroring the server's
 // bootstrapPromptHandler precedence so the same invocation resolves to the
-// same provider whether or not the run routes through `keelson service`:
+// same provider whether or not the run routes through `keelson start`:
 // --provider → KEELSON_WORKFLOW_PROVIDER → config defaultProvider (when
 // registered) → first non-stub → stub.
 // Exported for tests; not public.
@@ -171,7 +171,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // Approval / cancel handlers in headless mode: there's no UI to receive
   // a pause callout and no second client to resume the run, so an approval
   // node fails immediately with a clear message. Operators who need
-  // approval should route through `keelson service` + the SPA.
+  // approval should route through `keelson start` + the SPA.
   const promptHandler = makePromptHandler({
     getProvider: (id) => {
       const target = id ?? providerId;
@@ -199,7 +199,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const approvalHandler = makeApprovalHandler({
     awaitApproval: async (_runId, nodeId, message) => {
       throw new Error(
-        `approval node '${nodeId}' cannot resolve in headless mode (message: "${message}"). Run via \`keelson service\` for interactive approval.`,
+        `approval node '${nodeId}' cannot resolve in headless mode (message: "${message}"). Run via \`keelson start\` for interactive approval.`,
       );
     },
   });
