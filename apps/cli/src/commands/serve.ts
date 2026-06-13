@@ -324,11 +324,27 @@ export async function runServeStatus(opts: { json: boolean }): Promise<void> {
   if (info) {
     const owned = state !== null && isPidAlive(state.pid);
     const uptime = owned && state.startedAt ? uptimeSince(state.startedAt) : null;
+    // Reflect what the RUNNING server actually mounted, not local config (which
+    // may differ from the env the server was started with). A 404 means the MCP
+    // route isn't mounted; any other status (405, or 401 when token-gated) means
+    // it's live.
+    const mcpUrl = `${info.baseUrl}/api/mcp`;
+    let mcpMounted = false;
+    try {
+      const probe = await fetch(mcpUrl, {
+        method: "GET",
+        signal: AbortSignal.timeout(STATUS_PROBE_TIMEOUT_MS),
+      });
+      mcpMounted = probe.status !== 404;
+    } catch {
+      mcpMounted = false;
+    }
     emit(
       {
         data: {
           status: "running",
           url: info.baseUrl,
+          ...(mcpMounted ? { mcpUrl } : {}),
           ...(owned ? { pid: state.pid } : {}),
           ...(uptime ? { uptime } : {}),
           ...(owned && state.version ? { version: state.version } : {}),

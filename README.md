@@ -138,6 +138,47 @@ See [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) for the full
 contract — snapshots, views, surfaces, workflow contributions — and the
 [docs](https://danielscholl.github.io/keelson/) for a walkthrough.
 
+## Use from other agents (MCP)
+
+`keelson service` exposes every registered tool — your installed ribs' tools plus
+the workflow tools — over the [Model Context Protocol](https://modelcontextprotocol.io)
+at `http://127.0.0.1:7878/api/mcp`. It starts automatically with the server, so any
+MCP-capable agent (Claude Code, Cursor, Copilot CLI, Codex CLI) can call them. Tools
+run **inside** the keelson server, where each rib keeps its credentials and exec
+access — so an external agent gets a rib's real capabilities, not a reimplementation.
+
+By default the endpoint is open on loopback (no token) and exposes only **read-only**
+tools. Point a client at it:
+
+```jsonc
+// Claude Code / Cursor: an HTTP MCP server
+{ "mcpServers": { "keelson": { "type": "http", "url": "http://127.0.0.1:7878/api/mcp" } } }
+```
+
+```toml
+# Codex CLI (~/.codex/config.toml): the HTTP endpoint, or the stdio bridge below
+[mcp_servers.keelson]
+command = "keelson"
+args = ["mcp"]
+```
+
+`keelson mcp` is a stdio bridge for clients that only speak stdio MCP — it pipes them
+to the running server (and exits non-zero if the server is down).
+
+Tune it in `~/.keelson/config.json` (or the matching env overrides
+`KEELSON_MCP_DISABLED`, `KEELSON_MCP_EXPOSE_STATE_CHANGING`,
+`KEELSON_MCP_REQUIRE_TOKEN`, `KEELSON_MCP_DENYLIST`):
+
+```json
+{ "mcp": { "enabled": true, "exposeStateChanging": false, "requireToken": false, "toolDenylist": [] } }
+```
+
+The read-only endpoint exposes `workflow_list`/`workflow_status` and a rib's read
+tools. Set `exposeStateChanging: true` to also surface state-changing tools —
+`workflow_run`/`workflow_respond` and a rib's mutation tools (e.g. OSDU cluster
+suspend), all hidden by default. `requireToken: true` gates the endpoint behind a
+bearer token recorded in `~/.keelson/server.json`.
+
 ## How it fits
 
 | Piece | What it is |

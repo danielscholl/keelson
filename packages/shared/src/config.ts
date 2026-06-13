@@ -57,6 +57,18 @@ const codexSettingsSchema = providerSettingsSchema.extend({
   network: z.boolean().optional(),
 });
 
+// MCP gateway settings. The server exposes the tool registry over MCP when
+// `enabled` (default true); only read-only tools cross unless
+// `exposeStateChanging` is set. `toolDenylist` removes tools by name;
+// `requireToken` gates the endpoint behind a bearer token recorded in
+// server.json. KEELSON_MCP_* env vars override these (see resolveMcpSettings).
+const mcpSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  exposeStateChanging: z.boolean().optional(),
+  toolDenylist: z.array(z.string()).optional(),
+  requireToken: z.boolean().optional(),
+});
+
 const keelsonConfigSchema = z.object({
   // Per-provider enable flags, merged over DEFAULT_PROVIDER_ENABLEMENT — a
   // config need only list the providers it wants to flip.
@@ -67,6 +79,7 @@ const keelsonConfigSchema = z.object({
   pi: providerSettingsSchema.optional(),
   claude: claudeSettingsSchema.optional(),
   codex: codexSettingsSchema.optional(),
+  mcp: mcpSettingsSchema.optional(),
 });
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;
@@ -162,4 +175,31 @@ export function resolveDefaultProvider(
   // Never default to the synthetic non-chat 'workflow' provider — undefined when
   // nothing chat-capable is registered.
   return registeredIds.find((id) => id !== "workflow");
+}
+
+// Resolved MCP gateway settings — config.mcp with KEELSON_MCP_* env overrides
+// applied. Env wins over config (mirrors KEELSON_PROVIDERS over config.providers).
+export interface McpSettings {
+  enabled: boolean;
+  exposeStateChanging: boolean;
+  toolDenylist: string[];
+  requireToken: boolean;
+}
+
+export function resolveMcpSettings(
+  config: KeelsonConfig,
+  env: Record<string, string | undefined> = process.env,
+): McpSettings {
+  const m = config.mcp ?? {};
+  const envList = (env.KEELSON_MCP_DENYLIST ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return {
+    enabled: env.KEELSON_MCP_DISABLED === "1" ? false : m.enabled !== false,
+    exposeStateChanging:
+      env.KEELSON_MCP_EXPOSE_STATE_CHANGING === "1" ? true : m.exposeStateChanging === true,
+    toolDenylist: [...new Set([...(m.toolDenylist ?? []), ...envList])],
+    requireToken: env.KEELSON_MCP_REQUIRE_TOKEN === "1" ? true : m.requireToken === true,
+  };
 }

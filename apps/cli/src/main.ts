@@ -14,6 +14,7 @@ import pkg from "../package.json" with { type: "json" };
 
 import { runChatEntry } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
+import { runMcpBridge } from "./commands/mcp.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
 import { runServe, runServeStart, runServeStatus, runServeStop } from "./commands/serve.ts";
@@ -140,6 +141,16 @@ export function buildProgram(): Command {
     .action(async function serveStatusAction(this: Command) {
       const { json } = globalOpts(this);
       await runServeStatus({ json });
+    });
+
+  program
+    .command("mcp")
+    .description("bridge a stdio MCP client to the running server's HTTP MCP endpoint")
+    .option("--base-url <url>", "server base URL (default: http://127.0.0.1:7878)")
+    .action(async function mcpAction(this: Command, mcpOpts: { baseUrl?: string }) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", mcpOpts.baseUrl);
+      await runMcpBridge({ ...(baseUrl ? { baseUrl } : {}) });
     });
 
   const workflow = program

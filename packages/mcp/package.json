@@ -1,0 +1,25 @@
+{
+  "name": "@keelson/mcp",
+  "version": "0.7.1",
+  "private": true,
+  "license": "Apache-2.0",
+  "author": "Daniel Scholl",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@keelson/shared": "workspace:*",
+    "@keelson/skills": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14"
+  }
+}
