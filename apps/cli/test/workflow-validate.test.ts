@@ -43,6 +43,13 @@ describe("workflow validate --dir (CLI)", () => {
     ]);
     expect(exitCode).toBe(4);
   });
+
+  test("rejects an empty --dir rather than silently using the default catalog", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "workflow", "validate", "--dir", ""]);
+    expect(exitCode).toBe(2);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(false);
+  });
 });
 
 describe("workflow validate (parseWorkflow fixture coverage)", () => {

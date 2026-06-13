@@ -68,6 +68,26 @@ function trimSlash(p: string): string {
   return p.replace(/[/\\]+$/, "");
 }
 
+// realpathSync.native first (resolves through the OS, which also expands
+// Windows 8.3 short names like `C:\Users\RUNNER~1\...` the portable variant
+// leaves intact), then realpathSync, then null. Mirrors the semantics of
+// `canonicalPath` in packages/workflows/src/worktree.ts; the two are
+// deliberately separate copies because `@keelson/workflows` stays
+// dependency-free (no `@keelson/shared` back-dep), so they cannot share a
+// helper — same reason that package mirrors shared types instead of importing
+// them.
+function resolveExisting(p: string): string | null {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  }
+}
+
 // Symlink-resolved form of a path. Project roots and run working dirs reach
 // the server in whatever form the caller's shell produced (macOS `/tmp` vs
 // `/private/tmp`), so every containment comparison must happen on canonical
@@ -78,15 +98,12 @@ export function canonicalPath(p: string): string {
   let base = p;
   let suffix = "";
   for (;;) {
-    try {
-      const real = realpathSync(base);
-      return suffix === "" ? real : join(real, suffix);
-    } catch {
-      const parent = dirname(base);
-      if (parent === base) return p;
-      suffix = suffix === "" ? basename(base) : join(basename(base), suffix);
-      base = parent;
-    }
+    const real = resolveExisting(base);
+    if (real !== null) return suffix === "" ? real : join(real, suffix);
+    const parent = dirname(base);
+    if (parent === base) return p;
+    suffix = suffix === "" ? basename(base) : join(basename(base), suffix);
+    base = parent;
   }
 }
 

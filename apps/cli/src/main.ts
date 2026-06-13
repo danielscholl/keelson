@@ -152,7 +152,8 @@ export function buildProgram(): Command {
     .option("--dir <path>", "workflows directory to read (default: the keelson home catalog)")
     .action(async function listAction(this: Command, listOpts: { dir?: string }) {
       const { json } = globalOpts(this);
-      await runWorkflowList({ json, ...(listOpts.dir ? { dir: listOpts.dir } : {}) });
+      const dir = requireNonEmpty(json, "--dir", listOpts.dir);
+      await runWorkflowList({ json, ...(dir ? { dir } : {}) });
     });
 
   workflow
@@ -165,10 +166,8 @@ export function buildProgram(): Command {
       validateOpts: { dir?: string },
     ) {
       const { json } = globalOpts(this);
-      await runWorkflowValidate(name, {
-        json,
-        ...(validateOpts.dir ? { dir: validateOpts.dir } : {}),
-      });
+      const dir = requireNonEmpty(json, "--dir", validateOpts.dir);
+      await runWorkflowValidate(name, { json, ...(dir ? { dir } : {}) });
     });
 
   workflow
