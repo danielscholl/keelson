@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { bold, brass, cyan, dim } from "./theme.ts";
+import { bold, brass, cyan, dim, navy } from "./theme.ts";
 
 export interface WelcomeData {
   version: string;
@@ -25,12 +25,20 @@ function row(label: string, value: string): string {
   return `${cyan(label.padEnd(12))}${value}`;
 }
 
+// The keelson mark, matching the favicon (docs/public/assets/keelson-mark.svg):
+// two navy ribs crossed by the brass beam, with the wordmark riding the beam.
+const RIBS = " │ │";
+const BEAM = "━┿━┿━";
+
 // Interaction design modeled on the pi coding agent's startup card
 // (MIT, see NOTICE): tips, loaded context, recent sessions.
 export function buildWelcomeLines(data: WelcomeData): string[] {
   const lines: string[] = [
     "",
-    `${PAD}${bold(brass("◤◢ keelson"))} ${dim(`chat · v${data.version}`)}`,
+    `${PAD}${navy(RIBS)}`,
+    `${PAD}${navy(RIBS)}`,
+    `${PAD}${bold(brass(BEAM))} ${bold(brass("keelson"))} ${dim(`chat · v${data.version}`)}`,
+    `${PAD}${navy(RIBS)}`,
     "",
   ];
 

@@ -6,7 +6,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MessageChunk, ModelInfo } from "@keelson/shared";
+import type { MessageChunk, ModelInfo, ToolDefinition } from "@keelson/shared";
+import { z } from "zod";
 import {
   buildPiCatalog,
   costTierFromOutput,
@@ -18,6 +19,7 @@ import { mapPiEvent } from "../src/pi/event-bridge.ts";
 import type { PiCreateSessionParams, PiSession, PiSessionFactory } from "../src/pi/factory.ts";
 import { checkPiAuth } from "../src/pi/factory.ts";
 import { PI_CAPABILITIES, PiProvider } from "../src/pi/provider.ts";
+import { projectToolsForPi } from "../src/pi/tool-projection.ts";
 
 const textDelta = (delta: string): PiRawEvent => ({
   type: "message_update",
@@ -205,6 +207,43 @@ describe("mapPiEvent", () => {
     expect(out).toEqual([{ type: "tool_result", toolUseId: "t1", content: "nope", isError: true }]);
   });
 
+  test("tool_execution_end extracts text from an AgentToolResult-shaped result", () => {
+    const out = mapPiEvent({
+      type: "tool_execution_end",
+      toolCallId: "t1",
+      toolName: "workflow_run",
+      result: {
+        content: [
+          { type: "text", text: "run started" },
+          { type: "image", data: "…" },
+          { type: "text", text: "runId: r-1" },
+        ],
+        details: undefined,
+      },
+      isError: false,
+    });
+    expect(out).toEqual([
+      { type: "tool_result", toolUseId: "t1", content: "run started\nrunId: r-1" },
+    ]);
+  });
+
+  test("tool_execution_end with a text-free content array falls back to stringify", () => {
+    const out = mapPiEvent({
+      type: "tool_execution_end",
+      toolCallId: "t1",
+      toolName: "render",
+      result: { content: [{ type: "image", data: "abc" }] },
+      isError: false,
+    });
+    expect(out).toEqual([
+      {
+        type: "tool_result",
+        toolUseId: "t1",
+        content: '{"content":[{"type":"image","data":"abc"}]}',
+      },
+    ]);
+  });
+
   test("tool events without a toolCallId are skipped (unpairable)", () => {
     expect(mapPiEvent({ type: "tool_execution_start", toolName: "read", args: {} })).toEqual([]);
     expect(
@@ -233,6 +272,7 @@ function fakeFactory(
     throwOnPrompt?: Error;
     capture?: (p: PiCreateSessionParams) => void;
     capturePrompt?: (text: string) => void;
+    modelRef?: string;
   } = {},
 ): PiSessionFactory {
   return {
@@ -252,6 +292,7 @@ function fakeFactory(
           if (opts.throwOnPrompt) throw opts.throwOnPrompt;
           for (const e of events) listener?.(e);
         },
+        ...(opts.modelRef !== undefined ? { modelRef: opts.modelRef } : {}),
       };
     },
   };
@@ -268,7 +309,7 @@ describe("PiProvider", () => {
     const p = new PiProvider({ factory: fakeFactory([]) });
     expect(p.getType()).toBe("pi");
     expect(p.getCapabilities()).toEqual(PI_CAPABILITIES);
-    expect(PI_CAPABILITIES.tools).toBe(false);
+    expect(PI_CAPABILITIES.tools).toBe(true);
     expect(PI_CAPABILITIES.sessionResume).toBe(false);
   });
 
@@ -365,6 +406,63 @@ describe("PiProvider", () => {
     );
     expect(promptedModel).toBe("google/gemini-2.5-pro");
     expect(promptedText).toBe("you are helpful\n\nquestion");
+  });
+
+  test("emits the session-resolved model before the stream", async () => {
+    const provider = new PiProvider({
+      factory: fakeFactory([textDelta("hi")], { modelRef: "openai/gpt-5.2" }),
+    });
+    const chunks = await collect(provider.sendQuery("hi", "/tmp"));
+    expect(chunks).toEqual([
+      { type: "model", model: "openai/gpt-5.2" },
+      { type: "text", content: "hi" },
+    ]);
+  });
+
+  test("projects options.tools into the session's customTools", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    const tool: ToolDefinition = {
+      name: "workflow_run",
+      description: "Run a workflow",
+      inputSchema: z.object({ name: z.string() }),
+      execute: async () => {},
+    };
+    await collect(provider.sendQuery("hi", "/tmp", undefined, { tools: [tool] }));
+    expect(captured?.customTools?.map((t) => t.name)).toEqual(["workflow_run"]);
+    expect(captured?.customTools?.[0]?.parameters).toMatchObject({
+      type: "object",
+      properties: { name: { type: "string" } },
+    });
+  });
+
+  test("an abort during session creation skips the turn entirely", async () => {
+    const abort = new AbortController();
+    let prompted = false;
+    const factory = fakeFactory([textDelta("never")], {
+      capture: () => abort.abort(),
+      capturePrompt: () => {
+        prompted = true;
+      },
+      modelRef: "openai/gpt-5.2",
+    });
+    const provider = new PiProvider({ factory });
+    const chunks = await collect(
+      provider.sendQuery("hi", "/tmp", undefined, { abortSignal: abort.signal }),
+    );
+    expect(chunks).toEqual([]);
+    expect(prompted).toBe(false);
+  });
+
+  test("no tools option → no customTools handed to the factory", async () => {
+    let captured: PiCreateSessionParams | undefined;
+    const provider = new PiProvider({
+      factory: fakeFactory([{ type: "agent_end" }], { capture: (p) => (captured = p) }),
+    });
+    await collect(provider.sendQuery("hi", "/tmp"));
+    expect(captured?.customTools).toBeUndefined();
   });
 
   test("session-creation failure yields a single error chunk", async () => {
@@ -565,5 +663,138 @@ describe("costTierFromOutput", () => {
   test("degrades a non-positive or NaN price to free", () => {
     expect(costTierFromOutput(-3)).toBe("free");
     expect(costTierFromOutput(Number.NaN)).toBe("free");
+  });
+});
+
+describe("projectToolsForPi", () => {
+  const noSignal = new AbortController().signal;
+
+  function makeTool(overrides: Partial<ToolDefinition> = {}): ToolDefinition {
+    return {
+      name: "echo_tool",
+      description: "Echo the input",
+      inputSchema: z.object({ value: z.string() }),
+      execute: async (input, ctx) => {
+        ctx.emit({
+          type: "tool_result",
+          toolUseId: "",
+          content: `echo: ${(input as { value: string }).value}`,
+        });
+      },
+      ...overrides,
+    };
+  }
+
+  test("execute returns the emitted tool_result as text content", async () => {
+    const [projected] = projectToolsForPi([makeTool()], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+    });
+    if (!projected) throw new Error("narrow");
+    const result = await projected.execute("t1", { value: "hi" }, noSignal);
+    expect(result).toEqual({ content: [{ type: "text", text: "echo: hi" }], details: undefined });
+  });
+
+  test("non-result chunks stream through pushChunk; the tool_result does not", async () => {
+    const streamed: MessageChunk[] = [];
+    const tool = makeTool({
+      execute: async (_input, ctx) => {
+        ctx.emit({ type: "system", content: "working…" });
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "done" });
+      },
+    });
+    const [projected] = projectToolsForPi([tool], {
+      cwd: "/tmp",
+      pushChunk: (c) => streamed.push(c),
+    });
+    if (!projected) throw new Error("narrow");
+    await projected.execute("t1", { value: "x" }, noSignal);
+    expect(streamed).toEqual([{ type: "system", content: "working…" }]);
+  });
+
+  test("invalid input throws (pi converts a throw into an error tool result)", async () => {
+    const [projected] = projectToolsForPi([makeTool()], { cwd: "/tmp", pushChunk: () => {} });
+    if (!projected) throw new Error("narrow");
+    await expect(projected.execute("t1", { value: 42 }, noSignal)).rejects.toThrow(
+      "Invalid input for tool 'echo_tool'",
+    );
+  });
+
+  test("an isError tool_result throws with its content", async () => {
+    const tool = makeTool({
+      execute: async (_input, ctx) => {
+        ctx.emit({
+          type: "tool_result",
+          toolUseId: "",
+          content: "workflow not found",
+          isError: true,
+        });
+      },
+    });
+    const [projected] = projectToolsForPi([tool], { cwd: "/tmp", pushChunk: () => {} });
+    if (!projected) throw new Error("narrow");
+    await expect(projected.execute("t1", { value: "x" }, noSignal)).rejects.toThrow(
+      "workflow not found",
+    );
+  });
+
+  test("a throwing execute propagates", async () => {
+    const tool = makeTool({
+      execute: async () => {
+        throw new Error("boom");
+      },
+    });
+    const [projected] = projectToolsForPi([tool], { cwd: "/tmp", pushChunk: () => {} });
+    if (!projected) throw new Error("narrow");
+    await expect(projected.execute("t1", { value: "x" }, noSignal)).rejects.toThrow("boom");
+  });
+
+  test("a tool that emits nothing returns empty text (success for the loop)", async () => {
+    const tool = makeTool({ execute: async () => {} });
+    const [projected] = projectToolsForPi([tool], { cwd: "/tmp", pushChunk: () => {} });
+    if (!projected) throw new Error("narrow");
+    const result = await projected.execute("t1", { value: "x" }, noSignal);
+    expect(result.content).toEqual([{ type: "text", text: "" }]);
+  });
+
+  test("zero-arg tools get an empty object parameters schema", () => {
+    const tool = makeTool({ inputSchema: z.object({}) });
+    const [projected] = projectToolsForPi([tool], { cwd: "/tmp", pushChunk: () => {} });
+    expect(projected?.parameters).toEqual({ type: "object", properties: {} });
+  });
+
+  test("the pi-supplied signal reaches the tool's context", async () => {
+    const abort = new AbortController();
+    let seen: AbortSignal | undefined;
+    const tool = makeTool({
+      execute: async (_input, ctx) => {
+        seen = ctx.abortSignal;
+      },
+    });
+    const [projected] = projectToolsForPi([tool], { cwd: "/tmp", pushChunk: () => {} });
+    if (!projected) throw new Error("narrow");
+    await projected.execute("t1", { value: "x" }, abort.signal);
+    expect(seen).toBe(abort.signal);
+  });
+
+  test("keelson's turn signal aborts the tool even when pi supplies its own signal", async () => {
+    const turnAbort = new AbortController();
+    const piAbort = new AbortController();
+    let seen: AbortSignal | undefined;
+    const tool = makeTool({
+      execute: async (_input, ctx) => {
+        seen = ctx.abortSignal;
+      },
+    });
+    const [projected] = projectToolsForPi([tool], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+      abortSignal: turnAbort.signal,
+    });
+    if (!projected) throw new Error("narrow");
+    await projected.execute("t1", { value: "x" }, piAbort.signal);
+    expect(seen?.aborted).toBe(false);
+    turnAbort.abort();
+    expect(seen?.aborted).toBe(true);
   });
 });

@@ -16,7 +16,10 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // 0.2: token usage — new `usage` MessageChunk variant, Message.usage,
 // NodeOutputRow.usage, node_done frame usage. Pre-0.2 clients strict-reject
 // frames carrying these.
-export const SCHEMA_VERSION = "0.2" as const;
+// 0.3: resolved model — new `model` MessageChunk variant emitted by providers
+// whose model is resolved session-side (pi). Pre-0.3 clients strict-reject
+// frames carrying it.
+export const SCHEMA_VERSION = "0.3" as const;
 
 // Copilot reasoning tier. Sibling of `thinking` (Anthropic's boolean
 // adaptive-thinking) rather than a polymorphic merge — both providers stream
@@ -92,6 +95,10 @@ export const messageChunkSchema = z.discriminatedUnion("type", [
   // Emitted at most once per turn, at stream end, from the provider's final
   // usage-bearing SDK event. Never accumulated across stream events.
   z.object({ type: z.literal("usage"), usage: tokenUsageSchema }).strict(),
+  // The model the provider's session actually resolved for this turn, for
+  // providers whose default is decided session-side (pi's defaultModel is "").
+  // Display-only: consumers must not pin it onto subsequent requests.
+  z.object({ type: z.literal("model"), model: z.string().min(1) }).strict(),
   z
     .object({
       type: z.literal("tool_use"),
