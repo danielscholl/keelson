@@ -5,7 +5,7 @@
 import { readServerState } from "@keelson/shared/server-state";
 import { EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
-import { probeServer } from "../server-probe.ts";
+import { probeServer, type ServerInfo } from "../server-probe.ts";
 
 export interface McpBridgeOptions {
   baseUrl?: string;
@@ -18,7 +18,25 @@ export interface McpBridgeOptions {
 // process is a dumb pump, so all diagnostics go to stderr to keep stdout a
 // clean MCP channel.
 export async function runMcpBridge(opts: McpBridgeOptions = {}): Promise<void> {
-  const probe = await probeServer(opts.baseUrl ? { baseUrl: opts.baseUrl } : {});
+  // Resolve the target the same way `service status`/`stop` do: an explicit
+  // --base-url wins; otherwise follow the URL the running service recorded in
+  // server.json (which may be a non-default port), falling back to the default.
+  // The stored MCP token is paired ONLY with that recorded server — never sent
+  // to an explicit --base-url target (a possibly different host the operator
+  // owns) nor to the default fallback (which may be a different server).
+  let probe: ServerInfo | null;
+  let token: string | undefined;
+  if (opts.baseUrl) {
+    probe = await probeServer({ baseUrl: opts.baseUrl });
+  } else {
+    const state = readServerState(resolveKeelsonHome());
+    probe = state ? await probeServer({ baseUrl: state.url }) : null;
+    if (probe) {
+      token = state?.mcpToken;
+    } else {
+      probe = await probeServer();
+    }
+  }
   if (!probe) {
     process.stderr.write(
       "keelson mcp: server not reachable; start it with `keelson service start`\n",
@@ -26,10 +44,6 @@ export async function runMcpBridge(opts: McpBridgeOptions = {}): Promise<void> {
     process.exit(EXIT_NO_SERVER);
   }
   const endpoint = `${probe.baseUrl}/api/mcp`;
-  // The local server.json token only applies to the local server; when
-  // --base-url targets a different host, sending it would be wrong (and the
-  // operator owns that server's auth), so read it only for the default target.
-  const token = opts.baseUrl ? undefined : readServerState(resolveKeelsonHome())?.mcpToken;
 
   const writeLine = (text: string): void => {
     process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
