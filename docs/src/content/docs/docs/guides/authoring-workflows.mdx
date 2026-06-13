@@ -106,7 +106,10 @@ exposes the reply as the node's output so a later node can branch on it.
 ```
 
 Resume a paused run from the CLI with `keelson workflow respond <runId> <nodeId>
-<text>`, or from the Workflows surface in the browser.
+<text>`, or from the Workflows surface in the browser. A simple approval gate like
+this one needs only those three arguments; an interactive-loop pause also takes
+`--pause-id`, the per-pause token from the run's `approval_awaiting` frame, to
+disambiguate retries.
 
 ### Loop until done
 

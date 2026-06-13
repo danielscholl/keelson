@@ -36,7 +36,6 @@ source during development; an installed harness almost always lands on
 | `workflows/` | Your global workflow YAML files. |
 | `commands/` | Named markdown prompt files a workflow `command` node runs. |
 | `node_modules/@keelson/` | Installed rib packages, discovered at boot. |
-| `worktrees/` | Leftover git worktrees from isolated runs; `keelson worktree prune` cleans them. |
 | `logs/server.log` | The background server's log, named in the error hints when something is wrong. |
 
 ## Relocating pieces
@@ -65,7 +64,9 @@ cwd-dependent.
 A registered project carries its own `.keelson/` under its root path. Today that
 holds `workflows/`: a project workflow shadows a same-named global one within
 that project. Conversations and runs attach to the project, and memory recall is
-scoped by it.
+scoped by it. A git-worktree isolated run (`workflow run --worktree`) checks out
+under `<project>/.worktrees/`, and `keelson worktree prune` sweeps the leftovers
+there, not in the home.
 
 ## Secrets are not here
 

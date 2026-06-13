@@ -25,11 +25,12 @@ exact payloads.
 
 <Aside type="caution" title="This is a local surface, not a public API">
 The API has no authentication because it is reachable only from your machine.
-Two endpoints are special: `POST /api/server/shutdown` is gated by the token in
-`server.json` and is operator-internal, and `POST /api/ribs/:id/action` is
-loopback-trusted today (the capability-token envelope is a later milestone).
-Treat the surface as stable for reading and local automation, not as a versioned
-public contract.
+A few endpoints are special: `POST /api/server/shutdown` is gated by the token in
+`server.json` and is operator-internal; `POST /api/ribs/:id/action` is
+loopback-trusted today (the capability-token envelope is a later milestone); and
+`POST /api/mcp` exposes only read-only tools by default and can be gated behind a
+bearer token. Treat the surface as stable for reading and local automation, not
+as a versioned public contract.
 </Aside>
 
 ## Health and system
@@ -37,7 +38,7 @@ public contract.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness and identity: the server name and schema version. Backs `doctor`'s server check. |
-| `GET` | `/api/config` | The resolved configuration the server booted with. |
+| `GET` | `/api/config` | The schema and wire-protocol version handshake a client checks on connect. |
 | `POST` | `/api/server/shutdown` | Graceful shutdown. Token-gated by the `server.json` bearer; operator-internal. |
 
 ## Ribs and tools
@@ -47,6 +48,7 @@ public contract.
 | `GET` | `/api/ribs` | The active ribs. Returns `ListRibsResponse` (`{ ribs: RibSummary[] }`). |
 | `POST` | `/api/ribs/:id/action` | Dispatch an action to a rib's `onAction`. Returns `RibActionResponse`. Loopback-trusted. |
 | `GET` | `/api/tools` | The shared tool registry, including rib tools, with `family` and the advisory `state_changing` / `requires_confirmation` flags. |
+| `POST` | `/api/mcp` | The MCP gateway: the same tool registry over the Model Context Protocol, for external agents. Read-only and tokenless by default; `GET` returns 405 (no SSE stream). See [Using keelson over MCP](../../guides/using-mcp/). |
 
 See [The Rib contract](../rib-contract/#wire-shapes) for the rib wire shapes.
 
@@ -115,7 +117,7 @@ See [Memory and state](../../concepts/memory-and-state/) for the governance mode
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` / `POST` | `/api/projects` | List or register projects. |
-| `GET` / `PATCH` / `DELETE` | `/api/projects/:id` | Read, update, or remove a project. |
+| `PATCH` / `DELETE` | `/api/projects/:id` | Update or remove a project. |
 | `POST` | `/api/projects/clone` | Register a project by cloning a repository. |
 | `GET` / `PUT` | `/api/projects/:id/notebook` | Read or replace the project notebook. |
 | `POST` | `/api/projects/:id/notebook/append` | Append to the notebook (the `note_project` path). |

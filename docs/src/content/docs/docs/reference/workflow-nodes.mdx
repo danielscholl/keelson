@@ -135,7 +135,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
 | `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
 | `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
-| `systemPrompt`, `effort`, `thinking` | agent | Claude-only per-node controls. |
+| `systemPrompt`, `effort`, `thinking` | agent | Claude-only per-node controls. `effort` is `low` / `medium` / `high` / `max`; `thinking` is `adaptive` / `enabled` / `disabled`. |
 | `memory`, `notebook` | all | Recall/writeback blocks wired to the memory store and the project notebook. |
 | `hooks` | agent | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
 

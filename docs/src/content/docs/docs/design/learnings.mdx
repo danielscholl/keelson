@@ -42,7 +42,7 @@ We would rather name the gaps than let the headline copy imply they are closed.
 | Redaction | The console redaction pipeline is wired but not yet active. Treat output as unredacted for now. |
 | Offline story | The server-down CLI fallback runs the `stub` provider only. The full harness needs the server up. |
 | Rib actions | The `onAction` path is loopback-trusted today; the capability-token envelope and outbound dispatcher are a later milestone. |
-| Tool projection | Copilot and Claude receive the harness tool registry; Codex and Pi do not yet (Codex acts agentically with its own sandboxed tools, Pi is chat-only). |
+| Tool projection | Copilot, Claude, and Pi receive the harness tool registry; Codex does not (it acts agentically inside its own sandbox). Pi takes the registry as custom tools but keeps its own built-in tools off. |
 | The `html` canvas kind | Declared in the schema and reserved, unrendered until an iframe-origin sandboxing pass lands. |
 
 <Aside type="caution" title="Alpha means alpha">

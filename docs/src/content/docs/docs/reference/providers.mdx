@@ -80,7 +80,7 @@ opt-in (see [Configuration](../../guides/configuration/)).
 | GitHub Copilot | `copilot` | yes | yes | yes | keelson keychain |
 | Claude | `claude` | yes | yes | yes | keelson keychain (subscription or API key) |
 | Codex | `codex` | yes | yes | no | self-managed |
-| Pi (community) | `pi` | no | yes | no | self-managed |
+| Pi (community) | `pi` | no | yes | yes | self-managed |
 | Stub (echo) | `stub` | no | yes | no | none |
 
 A few rows need their footnote:
@@ -88,9 +88,10 @@ A few rows need their footnote:
 - **Codex** runs its own shell and file-edit tools inside the `codex exec`
   subprocess, gated by its sandbox, so the harness does not project tools into
   it. Its activity surfaces in chat as command-execution and file-change rows.
-- **Pi** is chat and reasoning only for now: its built-in tools stay off (they
-  would run outside the harness rails) and the harness does not yet project
-  tools into it, so each turn is a fresh session.
+- **Pi** projects the harness tool registry into its session as pi custom tools,
+  so rib and workflow tools reach a pi turn. Its own built-in file and shell
+  tools stay off (they would run outside the harness rails), and session resume
+  is not wired yet, so each turn is a fresh session.
 - **Stub** is the offline echo provider: no credentials, no tool calls,
   deterministic output. It exists so every loop can be verified without keys.
 

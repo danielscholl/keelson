@@ -23,6 +23,9 @@ which is which.
   overrides it.
 - **server**: the Bun process on `127.0.0.1:7878` that owns state, providers,
   ribs, and every stream. The CLI and the browser are both clients of it.
+- **MCP gateway**: the `/api/mcp` endpoint that re-exposes the tool registry to
+  external Model Context Protocol clients (other agents). Loopback, read-only,
+  and tokenless by default. See [Using keelson over MCP](../../guides/using-mcp/).
 - **surface**: two senses. Broadly, a way into the harness: the CLI and the
   browser app are keelson's two surfaces. Specifically, a *rib surface* is a
   browser tab a rib declares as a layout of regions. Pages say "rib surface"
