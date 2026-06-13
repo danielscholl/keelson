@@ -1,4 +1,9 @@
-import type { RibAction, RibActionResult } from "@keelson/shared";
+import {
+  type OpenChatSeed,
+  type RibAction,
+  type RibActionResult,
+  ribClientEffectSchema,
+} from "@keelson/shared";
 import { useCallback, useMemo } from "react";
 import { postRibAction } from "../api.ts";
 import type { BoardActionApi } from "../components/Canvas/BoardActionContext.tsx";
@@ -16,10 +21,14 @@ export function useRibActionDispatch(
   ribId: string | null,
   opts?: {
     onSuccess?: (action: RibAction, result: Extract<RibActionResult, { ok: true }>) => void;
+    // A successful action may carry an `open-chat` directive in `data`; the host
+    // wires this to its "open a seeded conversation" path (the ✦ flow).
+    onOpenChat?: (seed: OpenChatSeed) => void;
   },
 ): BoardActionApi {
   const toast = useToast();
   const onSuccess = opts?.onSuccess;
+  const onOpenChat = opts?.onOpenChat;
 
   const run = useCallback(
     async (action: RibAction): Promise<RibActionResult> => {
@@ -27,6 +36,19 @@ export function useRibActionDispatch(
       try {
         const result = await postRibAction(ribId, action);
         if (result.ok) {
+          // An open-chat directive navigates away to a fresh seeded chat — no
+          // success toast, no region reload. A directive that's shaped like
+          // open-chat but fails validation (e.g. an oversized prompt) surfaces an
+          // error rather than a misleading ✓.
+          if (onOpenChat && isOpenChatShaped(result.data)) {
+            const parsed = ribClientEffectSchema.safeParse(result.data);
+            if (parsed.success && parsed.data.effect === "open-chat") {
+              onOpenChat(parsed.data.seed);
+            } else {
+              toast.push({ kind: "error", message: `${action.type}: invalid open-chat directive` });
+            }
+            return result;
+          }
           toast.push({ kind: "ok", message: `${action.type} ✓` });
           // Isolate the callback: a throwing onSuccess must not turn a
           // successful action into a failure result.
@@ -46,7 +68,7 @@ export function useRibActionDispatch(
         return { ok: false, error: message };
       }
     },
-    [ribId, toast, onSuccess],
+    [ribId, toast, onSuccess, onOpenChat],
   );
 
   // Raw: no toast, no reload. The copy button shows its own flash and the
@@ -64,4 +86,15 @@ export function useRibActionDispatch(
   );
 
   return useMemo(() => ({ run, reveal }), [run, reveal]);
+}
+
+// Cheap pre-check so non-directive `data` (undefined, a copy-on-reveal string)
+// flows through the normal success path untouched; only data that announces
+// itself as an open-chat directive gets validated/handled.
+function isOpenChatShaped(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { effect?: unknown }).effect === "open-chat"
+  );
 }
