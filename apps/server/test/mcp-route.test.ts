@@ -64,6 +64,14 @@ describe("POST /api/mcp (tokenless, default)", () => {
     expect(tokenless.mcpToken).toBeUndefined();
   });
 
+  test("GET (the optional SSE probe) is rejected with 405, not a dead stream", async () => {
+    const res = await fetch(new URL("/api/mcp", tokenless.url), {
+      method: "GET",
+      headers: MCP_HEADERS,
+    });
+    expect(res.status).toBe(405);
+  });
+
   test("initialize round-trips and identifies the keelson server", async () => {
     const res = await fetch(new URL("/api/mcp", tokenless.url), {
       method: "POST",

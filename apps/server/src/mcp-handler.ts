@@ -52,6 +52,14 @@ export function createMcpRoutes(opts: McpRoutesOptions): McpRoutesHandle {
             return c.json({ error: "invalid mcp token" }, 401);
           }
         }
+        // Stateless JSON-only mode offers neither a server→client SSE stream (GET)
+        // nor a session lifecycle (DELETE). Per the Streamable-HTTP spec, answer
+        // GET with 405 so clients treat SSE as unsupported and proceed — rather
+        // than opening an SSE stream that the per-request transport tears down,
+        // which surfaces as a client transport error.
+        if (c.req.method !== "POST") {
+          return c.json({ error: "method not allowed" }, 405);
+        }
         return http.handleRequest(c.req.raw);
       });
     },
