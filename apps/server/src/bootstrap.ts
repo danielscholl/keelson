@@ -22,6 +22,8 @@ import {
   registerWorkflowProvider,
 } from "@keelson/providers";
 import type {
+  OpenChatSeed,
+  PersonaSummary,
   Project,
   Rib,
   RibAction,
@@ -163,6 +165,9 @@ export interface RibBootstrap {
   readonly probes: Map<string, () => Promise<RibAuthStatus>>;
   // Inbound action handlers keyed by rib id, dispatched by POST /api/ribs/:id/action.
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
+  // Persona discovery/resolution keyed by rib id — the /api/personas (/mind) source.
+  readonly personaListers: Map<string, () => Promise<readonly PersonaSummary[]>>;
+  readonly personaResolvers: Map<string, (slug: string) => Promise<OpenChatSeed | null>>;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
   // Validated, de-duplicated tools across every active rib. The composition
@@ -190,7 +195,16 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   // The CLI-backed agent-turn seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
   const runAgentTurn = options.runAgentTurn ?? makeRibAgentTurn();
-  const { manifests, disposers, probes, actionHandlers, workflowContributions, tools } = applyRibs({
+  const {
+    manifests,
+    disposers,
+    probes,
+    actionHandlers,
+    personaListers,
+    personaResolvers,
+    workflowContributions,
+    tools,
+  } = applyRibs({
     active,
     available,
     ctx,
@@ -202,6 +216,8 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     manifests,
     probes,
     actionHandlers,
+    personaListers,
+    personaResolvers,
     workflowContributions,
     tools,
     async disposeAll() {
