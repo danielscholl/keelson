@@ -18,6 +18,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@keelson/mcp": "workspace:*",
     "@keelson/providers": "workspace:*",
     "@keelson/shared": "workspace:*",
     "@keelson/skills": "workspace:*",

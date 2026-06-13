@@ -12,6 +12,7 @@ import {
   loadKeelsonConfig,
   resolveDefaultProvider,
   resolveEnabledProviders,
+  resolveMcpSettings,
 } from "../src/config.ts";
 
 const KNOWN = BUILT_IN_PROVIDER_IDS;
@@ -193,5 +194,53 @@ describe("resolveDefaultProvider", () => {
   test("never returns the synthetic 'workflow' provider as the default", () => {
     expect(resolveDefaultProvider({}, ["workflow"])).toBeUndefined();
     expect(resolveDefaultProvider({ defaultProvider: "workflow" }, ["workflow"])).toBeUndefined();
+  });
+});
+
+describe("resolveMcpSettings", () => {
+  test("defaults: enabled, read-only, no token, no denylist", () => {
+    expect(resolveMcpSettings({}, {})).toEqual({
+      enabled: true,
+      exposeStateChanging: false,
+      toolDenylist: [],
+      requireToken: false,
+    });
+  });
+
+  test("config values are honored", () => {
+    expect(
+      resolveMcpSettings(
+        {
+          mcp: {
+            enabled: false,
+            exposeStateChanging: true,
+            requireToken: true,
+            toolDenylist: ["a"],
+          },
+        },
+        {},
+      ),
+    ).toEqual({
+      enabled: false,
+      exposeStateChanging: true,
+      toolDenylist: ["a"],
+      requireToken: true,
+    });
+  });
+
+  test("env overrides win over config and merge denylists", () => {
+    const out = resolveMcpSettings(
+      { mcp: { enabled: true, exposeStateChanging: false, toolDenylist: ["a"] } },
+      {
+        KEELSON_MCP_DISABLED: "1",
+        KEELSON_MCP_EXPOSE_STATE_CHANGING: "1",
+        KEELSON_MCP_REQUIRE_TOKEN: "1",
+        KEELSON_MCP_DENYLIST: "b, c ,a",
+      },
+    );
+    expect(out.enabled).toBe(false);
+    expect(out.exposeStateChanging).toBe(true);
+    expect(out.requireToken).toBe(true);
+    expect(out.toolDenylist).toEqual(["a", "b", "c"]);
   });
 });

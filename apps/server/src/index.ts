@@ -2,11 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
+import { loadKeelsonConfig, resolveMcpSettings } from "@keelson/shared/config";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
 import { seedStarterAssets } from "@keelson/workflows";
@@ -28,6 +29,7 @@ import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, createRibCredentialAccessor, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
+import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
@@ -45,6 +47,7 @@ import {
   snapshotsRoutes,
   snapshotWebSocketHandlers,
 } from "./snapshots-handler.ts";
+import { constantTimeTokenEqual } from "./token-compare.ts";
 import { createWorkflowAuthoringTools } from "./workflow-authoring-tools.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
 import { createWorkflowChatTools } from "./workflow-tools.ts";
@@ -78,18 +81,14 @@ export interface StartServerConfig {
   // (keelson service stop) can present it. onShutdown is invoked after the
   // response is sent; the caller owns process exit.
   shutdown?: { token: string; onShutdown: () => void };
+  // Bearer token the MCP endpoint requires when config.mcp.requireToken is set
+  // (recorded in server.json by serveUntilSignal). Ignored when MCP runs
+  // tokenless (the default). Separate from the shutdown token by design.
+  mcpToken?: string;
   // Operator-facing version recorded in server.json (`keelson service status`
   // reports it). The CLI passes its release version; the private @keelson/server
   // package's own version is meaningless to an operator.
   version?: string;
-}
-
-// Hash both sides so timingSafeEqual gets equal-length buffers regardless of
-// what the caller presented.
-function shutdownTokenMatches(presented: string, expected: string): boolean {
-  const a = createHash("sha256").update(presented).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
 }
 
 // Serve a file from the built SPA, with a single-page-app fallback: an
@@ -128,6 +127,11 @@ export async function serveSpaAsset(webDir: string, pathname: string): Promise<R
 export interface ServerHandle {
   readonly server: Server<WsData>;
   readonly url: string;
+  // The MCP bearer token actually being enforced (undefined when the endpoint
+  // is tokenless or disabled). serveUntilSignal persists exactly this to
+  // server.json, so the on-disk token never disagrees with what the handler
+  // enforces — startServer is the single authority on the requireToken decision.
+  readonly mcpToken?: string;
   // Drain runs, dispose ribs, close the snapshot manager + database. Does NOT
   // call process.exit — the signal handlers installed by startServer do that.
   shutdown(): Promise<void>;
@@ -313,6 +317,12 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // in-flight composes), then close the database. Process-signal handling lives
   // in serveUntilSignal so the factory installs no global handlers (tests and
   // embedders call startServer + handle.shutdown() without leaking listeners).
+  // MCP gateway over the tool registry. Resolved here (registry is populated
+  // and WORKSPACE_ROOT is known); constructed + mounted alongside the other
+  // routes below, and torn down in drain before ribs dispose.
+  const mcpSettings = resolveMcpSettings(loadKeelsonConfig());
+  let mcpRoutes: McpRoutesHandle | null = null;
+
   const drain = async (): Promise<void> => {
     // Stop the heartbeat first so no tick enqueues a fresh run mid-drain.
     scheduler.stop();
@@ -321,6 +331,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[keelson] workflow run drain during shutdown failed: ${msg}`);
+    }
+    if (mcpRoutes) {
+      try {
+        await mcpRoutes.dispose();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[keelson] MCP transport teardown during shutdown failed: ${msg}`);
+      }
     }
     await ribs.disposeAll();
     await snapshotManager.dispose();
@@ -354,7 +372,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     app.post("/api/server/shutdown", (c) => {
       const header = c.req.header("authorization") ?? "";
       const presented = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-      if (presented.length === 0 || !shutdownTokenMatches(presented, token)) {
+      if (presented.length === 0 || !constantTimeTokenEqual(presented, token)) {
         return c.json({ ok: false, error: "invalid shutdown token" }, 401);
       }
       // Let the response flush before the listener is torn down.
@@ -397,6 +415,32 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     copilotAuthProbe: bootstrap.copilotAuthProbe,
     claudeAuthProbe: bootstrap.claudeAuthProbe,
   });
+
+  // The MCP token actually enforced, reported on the handle so serveUntilSignal
+  // persists exactly it (single source of truth for the requireToken decision).
+  let enforcedMcpToken: string | undefined;
+  if (mcpSettings.enabled) {
+    if (mcpSettings.requireToken && config.mcpToken === undefined) {
+      // Fail closed: a gate was requested but no token is available to enforce
+      // it (e.g. an embedder calling startServer without serveUntilSignal).
+      console.warn(
+        "[keelson] config.mcp.requireToken is set but no MCP token was provided; MCP endpoint disabled.",
+      );
+    } else {
+      mcpRoutes = createMcpRoutes({
+        settings: mcpSettings,
+        defaultCwd: WORKSPACE_ROOT,
+        version: config.version ?? pkg.version,
+        // Workflow chat tools live on the chat path, not the registry; inject
+        // them so MCP clients see workflow_list/status (and, when
+        // exposeStateChanging is set, workflow_run/respond — both state-changing).
+        extraTools: workflowTools,
+        ...(config.mcpToken !== undefined ? { token: config.mcpToken } : {}),
+      });
+      mcpRoutes.mount(app);
+      if (mcpSettings.requireToken) enforcedMcpToken = config.mcpToken;
+    }
+  }
 
   // Only reached when no built SPA is present (a source checkout) — the static
   // handler below serves index.html for `/` when WEB_DIR is set.
@@ -487,6 +531,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   return {
     server,
     url: server.url.href,
+    ...(enforcedMcpToken !== undefined ? { mcpToken: enforcedMcpToken } : {}),
     // Stop accepting connections (freeing the port) before draining + closing
     // the database, so a programmatic shutdown leaves no listener behind.
     async shutdown() {
@@ -508,6 +553,12 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
 export async function serveUntilSignal(config: StartServerConfig = {}): Promise<never> {
   const home = resolveKeelsonHome();
   const shutdownToken = randomBytes(32).toString("hex");
+  // Always mint a candidate MCP token and hand it to startServer; startServer
+  // is the single authority on whether the gate is active and echoes back the
+  // token it actually enforces (handle.mcpToken). We persist only that, so a
+  // tokenless run writes no token and the on-disk value never disagrees with
+  // what the handler enforces.
+  const mcpToken = randomBytes(32).toString("hex");
   let handle: ServerHandle | null = null;
   let shuttingDown = false;
   const stopOnce = () => {
@@ -521,6 +572,7 @@ export async function serveUntilSignal(config: StartServerConfig = {}): Promise<
   handle = await startServer({
     ...config,
     shutdown: { token: shutdownToken, onShutdown: stopOnce },
+    mcpToken,
   });
   try {
     writeServerState(
@@ -531,6 +583,7 @@ export async function serveUntilSignal(config: StartServerConfig = {}): Promise<
         version: config.version ?? pkg.version,
         schemaVersion: SCHEMA_VERSION,
         shutdownToken,
+        ...(handle.mcpToken !== undefined ? { mcpToken: handle.mcpToken } : {}),
       },
       home,
     );

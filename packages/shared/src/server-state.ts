@@ -18,6 +18,10 @@ export interface ServerState {
   readonly version: string;
   readonly schemaVersion: string;
   readonly shutdownToken: string;
+  // Present only when the MCP gateway is token-gated (config.mcp.requireToken).
+  // Gates the /mcp endpoint, separate from shutdownToken so a leaked MCP token
+  // can't also stop the server.
+  readonly mcpToken?: string;
 }
 
 export function serverStatePath(home: string = resolveKeelsonHome()): string {
@@ -46,6 +50,7 @@ export function readServerState(home: string = resolveKeelsonHome()): ServerStat
       version: typeof raw.version === "string" ? raw.version : "",
       schemaVersion: typeof raw.schemaVersion === "string" ? raw.schemaVersion : "",
       shutdownToken: raw.shutdownToken,
+      ...(typeof raw.mcpToken === "string" ? { mcpToken: raw.mcpToken } : {}),
     };
   } catch {
     return null;

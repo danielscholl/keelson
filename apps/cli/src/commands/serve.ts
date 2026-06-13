@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { serveUntilSignal } from "@keelson/server";
+import { loadKeelsonConfig, resolveMcpSettings } from "@keelson/shared/config";
 import { ensureSpawnPath } from "@keelson/shared/exec";
 import {
   clearServerState,
@@ -324,11 +325,13 @@ export async function runServeStatus(opts: { json: boolean }): Promise<void> {
   if (info) {
     const owned = state !== null && isPidAlive(state.pid);
     const uptime = owned && state.startedAt ? uptimeSince(state.startedAt) : null;
+    const mcpEnabled = resolveMcpSettings(loadKeelsonConfig(home)).enabled;
     emit(
       {
         data: {
           status: "running",
           url: info.baseUrl,
+          ...(mcpEnabled ? { mcpUrl: `${info.baseUrl}/api/mcp` } : {}),
           ...(owned ? { pid: state.pid } : {}),
           ...(uptime ? { uptime } : {}),
           ...(owned && state.version ? { version: state.version } : {}),

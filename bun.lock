@@ -12,7 +12,7 @@
     },
     "apps/cli": {
       "name": "@keelson/cli",
-      "version": "0.5.0",
+      "version": "0.7.1",
       "bin": {
         "keelson": "./bin/keelson.ts",
       },
@@ -32,8 +32,9 @@
     },
     "apps/server": {
       "name": "@keelson/server",
-      "version": "0.5.0",
+      "version": "0.7.1",
       "dependencies": {
+        "@keelson/mcp": "workspace:*",
         "@keelson/providers": "workspace:*",
         "@keelson/shared": "workspace:*",
         "@keelson/skills": "workspace:*",
@@ -48,7 +49,7 @@
     },
     "apps/web": {
       "name": "@keelson/web",
-      "version": "0.5.0",
+      "version": "0.7.1",
       "dependencies": {
         "@dagrejs/dagre": "^3.0.0",
         "@keelson/shared": "workspace:*",
@@ -75,9 +76,22 @@
         "vite": "^8.0.14",
       },
     },
+    "packages/mcp": {
+      "name": "@keelson/mcp",
+      "version": "0.7.1",
+      "dependencies": {
+        "@keelson/shared": "workspace:*",
+        "@keelson/skills": "workspace:*",
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.1.14",
+      },
+    },
     "packages/providers": {
       "name": "@keelson/providers",
-      "version": "0.5.0",
+      "version": "0.7.1",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.3.150",
         "@earendil-works/pi-ai": "^0.79.1",
@@ -93,7 +107,7 @@
     },
     "packages/shared": {
       "name": "@keelson/shared",
-      "version": "0.5.0",
+      "version": "0.7.1",
       "dependencies": {
         "zod": "^4.4.3",
       },
@@ -103,7 +117,7 @@
     },
     "packages/skills": {
       "name": "@keelson/skills",
-      "version": "0.5.0",
+      "version": "0.7.1",
       "dependencies": {
         "@keelson/shared": "workspace:*",
       },
@@ -114,7 +128,7 @@
     },
     "packages/workflows": {
       "name": "@keelson/workflows",
-      "version": "0.5.0",
+      "version": "0.7.1",
       "dependencies": {
         "yaml": "^2.6.1",
         "zod": "^4.4.3",
@@ -274,6 +288,8 @@
     "@iconify/utils": ["@iconify/utils@3.1.3", "", { "dependencies": { "@antfu/install-pkg": "^1.1.0", "@iconify/types": "^2.0.0", "import-meta-resolve": "^4.2.0" } }, "sha512-LPKOXPn/zV+zis1oOfGWogaXVpqUybF3ZS6SCZIsz8vg0ivVp9+fVqyYB7xq0aiST/VhUQYGO1qo6uoYSiEJqw=="],
 
     "@keelson/cli": ["@keelson/cli@workspace:apps/cli"],
+
+    "@keelson/mcp": ["@keelson/mcp@workspace:packages/mcp"],
 
     "@keelson/providers": ["@keelson/providers@workspace:packages/providers"],
 
