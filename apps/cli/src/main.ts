@@ -572,18 +572,20 @@ function isCommanderError(err: unknown): err is CommanderLikeError {
 function commandSummary(
   cmd: Command,
 ): Array<{ name: string; description: string; commands?: ReturnType<typeof commandSummary> }> {
-  return cmd.commands.map((c) => {
-    const entry: {
-      name: string;
-      description: string;
-      commands?: ReturnType<typeof commandSummary>;
-    } = {
-      name: c.name(),
-      description: c.description(),
-    };
-    if (c.commands.length > 0) entry.commands = commandSummary(c);
-    return entry;
-  });
+  return cmd.commands
+    .filter((c) => !(c as Command & { _hidden?: boolean })._hidden)
+    .map((c) => {
+      const entry: {
+        name: string;
+        description: string;
+        commands?: ReturnType<typeof commandSummary>;
+      } = {
+        name: c.name(),
+        description: c.description(),
+      };
+      if (c.commands.length > 0) entry.commands = commandSummary(c);
+      return entry;
+    });
 }
 
 function helpEnvelope(cmd: Command, program: Command): { data: unknown } {

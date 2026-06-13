@@ -17,7 +17,7 @@
 # touching the repo. Set it to 0 to apply.
 #
 # Runs headless (`keelson workflow run` with no server) or through a running
-# `keelson service` — both register the same provider set.
+# `keelson start` — both register the same provider set.
 
 name: repo-triage
 description: |
