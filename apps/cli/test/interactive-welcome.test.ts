@@ -25,7 +25,8 @@ const base: WelcomeData = {
 describe("buildWelcomeLines", () => {
   test("renders wordmark, tips, and loaded sections", () => {
     const text = buildWelcomeLines(base).map(stripAnsi).join("\n");
-    expect(text).toContain("keelson");
+    expect(text).toContain("━┿━┿━ keelson");
+    expect(text).toContain(" │ │");
     expect(text).toContain("v0.5.0");
     expect(text).toContain("Tips");
     expect(text).toContain("provider");

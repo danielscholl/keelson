@@ -1650,3 +1650,82 @@ describe("handleChatRequest — usage boundary hardening", () => {
     expect(messages.filter((m) => m.role === "assistant")).toHaveLength(0);
   });
 });
+
+describe("handleChatRequest — resolved-model chunk", () => {
+  function spyCapabilities(): ProviderCapabilities {
+    return {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      models: ["m"],
+      defaultModel: "m",
+    };
+  }
+
+  function registerModelSpy(spyId: string, modelChunk: unknown): void {
+    const capabilities = spyCapabilities();
+    registerProvider({
+      id: spyId,
+      displayName: "ModelSpy",
+      builtIn: false,
+      capabilities,
+      factory: () => ({
+        getType: () => "spy",
+        getCapabilities: () => capabilities,
+        listModels: async () => [{ id: "m" }],
+        async *sendQuery(): AsyncGenerator<MessageChunk> {
+          yield modelChunk as MessageChunk;
+          yield { type: "text", content: "answer" };
+          yield { type: "done" };
+        },
+      }),
+    });
+  }
+
+  test("a model chunk is forwarded to the client and stays out of the persisted parts", async () => {
+    const spyId = `model-spy-${crypto.randomUUID().slice(0, 8)}`;
+    registerModelSpy(spyId, { type: "model", model: "openai/gpt-5.2" });
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    const sent: ChatFrame[] = [];
+
+    await handleChatRequest(
+      {
+        version: WIRE_PROTOCOL_VERSION,
+        conversationId: conv.id,
+        message: { type: "request", providerId: spyId, prompt: "hi" },
+      },
+      { send: (f) => sent.push(f), store, abortSignal: new AbortController().signal },
+    );
+
+    const modelFrames = sent.filter(
+      (f) => f.event.type === "chunk" && f.event.payload.type === "model",
+    );
+    expect(modelFrames).toHaveLength(1);
+    const assistant = store.get(conv.id)!.messages.find((m) => m.role === "assistant");
+    expect(assistant!.contentParts).toEqual([{ type: "text", text: "answer" }]);
+  });
+
+  test("a malformed model chunk is dropped, not thrown by the strict frame parse", async () => {
+    const spyId = `model-junk-${crypto.randomUUID().slice(0, 8)}`;
+    registerModelSpy(spyId, { type: "model", model: "" });
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    const sent: ChatFrame[] = [];
+
+    await handleChatRequest(
+      {
+        version: WIRE_PROTOCOL_VERSION,
+        conversationId: conv.id,
+        message: { type: "request", providerId: spyId, prompt: "hi" },
+      },
+      { send: (f) => sent.push(f), store, abortSignal: new AbortController().signal },
+    );
+
+    for (const f of sent) chatFrameSchema.parse(f);
+    expect(sent.some((f) => f.event.type === "error")).toBe(false);
+    expect(sent.some((f) => f.event.type === "chunk" && f.event.payload.type === "model")).toBe(
+      false,
+    );
+  });
+});

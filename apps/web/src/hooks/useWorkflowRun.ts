@@ -170,6 +170,7 @@ function applyChunkToNode(node: NodeView, chunk: MessageChunk): NodeView {
       };
     // usage rides the node_done frame, not the chunk channel; no-op here.
     case "usage":
+    case "model":
     case "system":
     case "error":
     case "done":

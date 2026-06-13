@@ -392,6 +392,16 @@ describe("messageChunkSchema", () => {
     ).toThrow();
   });
 
+  it("parses model chunk (0.3 — session-resolved model)", () => {
+    const chunk = messageChunkSchema.parse({ type: "model", model: "openai/gpt-5.2" });
+    if (chunk.type !== "model") throw new Error("narrow");
+    expect(chunk.model).toBe("openai/gpt-5.2");
+  });
+
+  it("rejects model chunk with an empty model id", () => {
+    expect(() => messageChunkSchema.parse({ type: "model", model: "" })).toThrow();
+  });
+
   it("rejects unknown keys on tool_result chunk (strict)", () => {
     expect(() =>
       messageChunkSchema.parse({

@@ -11,7 +11,7 @@
 // native binary (docs/architecture.md §4 provider rules).
 
 import type { ToolContext } from "@keelson/shared";
-import { z } from "zod";
+import { deriveToolParametersJsonSchema } from "../tool-params.ts";
 import type { MessageChunk, ModelInfo, ToolDefinition } from "../types.ts";
 
 // Structural — captures only what the provider drives. Keeps this file off a
@@ -196,7 +196,7 @@ export function projectToolsForCopilot(
   return tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    parameters: deriveCopilotParameters(tool),
+    parameters: deriveToolParametersJsonSchema(tool),
     // First-party tools; no interactive approval gate.
     skipPermission: true,
     handler: async (args: unknown, invocation: { toolCallId: string }): Promise<string> => {
@@ -204,40 +204,6 @@ export function projectToolsForCopilot(
       return runToolHandler(tool, args, invocation.toolCallId, ctx);
     },
   }));
-}
-
-// Projects a tool's ZodObject input schema into the JSON Schema the SDK ships
-// to the model, using Zod 4's built-in `z.toJSONSchema()`. Returns undefined
-// for truly zero-arg tools so the SDK omits the parameters block entirely.
-// Non-object / non-Zod schemas fall back to a permissive shape; runtime
-// validation in runToolHandler is the actual enforcement layer.
-function deriveCopilotParameters(tool: ToolDefinition): Record<string, unknown> | undefined {
-  const def = (tool.inputSchema as { _def?: { type?: string } })._def;
-  if (def?.type !== "object") {
-    return { type: "object", additionalProperties: true };
-  }
-  let jsonSchema: Record<string, unknown>;
-  try {
-    jsonSchema = z.toJSONSchema(tool.inputSchema as z.ZodType) as Record<string, unknown>;
-  } catch {
-    return { type: "object", additionalProperties: true };
-  }
-  // `$schema` is the JSON Schema draft URI; the SDK doesn't need it.
-  delete jsonSchema.$schema;
-  const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-  const hasNamedProps = !!properties && Object.keys(properties).length > 0;
-  // `z.object({}).passthrough()` / `z.object({}).catchall(...)` project to a
-  // schema with no named properties but `additionalProperties: true` (or a
-  // schema). Omitting `parameters` for those would advertise a zero-arg tool
-  // and silently drop the dynamic keys the rib intends to accept.
-  const additional = jsonSchema.additionalProperties;
-  const patternProps = jsonSchema.patternProperties as Record<string, unknown> | undefined;
-  const allowsDynamicKeys =
-    additional === true ||
-    (typeof additional === "object" && additional !== null) ||
-    (!!patternProps && Object.keys(patternProps).length > 0);
-  if (!hasNamedProps && !allowsDynamicKeys) return undefined;
-  return jsonSchema;
 }
 
 async function runToolHandler(

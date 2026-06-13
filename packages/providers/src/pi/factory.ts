@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PiRawEvent } from "./event-bridge.ts";
+import type { PiProjectedTool } from "./tool-projection.ts";
 
 // The slice of a pi AgentSession the provider drives. The real factory adapts
 // pi's session; tests supply a fake that emits scripted events.
@@ -14,6 +15,9 @@ export interface PiSession {
   subscribe(listener: (event: PiRawEvent) => void): () => void;
   // Run one turn. Resolves when the turn is done; events fire via subscribe.
   prompt(text: string): Promise<void>;
+  // "vendor/model" the session resolved (pi picks from its own settings when
+  // no model was requested). Undefined when pi found no usable model.
+  modelRef?: string;
 }
 
 export interface PiCreateSessionParams {
@@ -21,6 +25,10 @@ export interface PiCreateSessionParams {
   // "vendor/model" (e.g. "anthropic/claude-opus-4.5"). Omitted → pi picks from
   // its own settings/auth.
   model?: string;
+  // Keelson tools projected to pi's custom-tool shape. When present they also
+  // become the session's tool allowlist, so pi's built-ins and any installed
+  // pi extension tools stay disabled (see createSession).
+  customTools?: readonly PiProjectedTool[];
 }
 
 export interface PiSessionFactory {
@@ -76,20 +84,28 @@ export class PiAgentSessionFactory implements PiSessionFactory {
   async createSession(params: PiCreateSessionParams): Promise<PiSession> {
     const sdk = await import("@earendil-works/pi-coding-agent");
     const model = params.model ? await resolveModel(params.model) : undefined;
+    const customTools = params.customTools ?? [];
     const { session } = await sdk.createAgentSession({
       cwd: params.cwd,
-      // Pure chat/reasoning inside keelson: pi's built-in read/bash/edit/write
-      // tools would run without keelson's permission + redaction rails, so they
-      // stay off until that gating is wired.
-      noTools: "all",
+      // pi's built-in read/bash/edit/write would run without keelson's
+      // permission + redaction rails, so they stay off either way: keelson
+      // tools become the explicit allowlist (`tools:`), and with none to
+      // project the session starts with no tools at all.
+      ...(customTools.length > 0
+        ? // `as never` is the same cast boundary as `model` below: the
+          // projection is a structural slice of the SDK's ToolDefinition.
+          { tools: customTools.map((t) => t.name), customTools: customTools as never }
+        : { noTools: "all" as const }),
       // `as never` is the cast boundary: resolveModel returns the SDK's Model
       // resolved from a string ref, which the strict generic signature can't see.
       ...(model !== undefined ? { model: model as never } : {}),
     });
+    const resolved = session.model;
     return {
       subscribe: (listener) =>
         session.subscribe((event) => listener(event as unknown as PiRawEvent)),
       prompt: (text) => session.prompt(text),
+      ...(resolved !== undefined ? { modelRef: `${resolved.provider}/${resolved.id}` } : {}),
     };
   }
 }

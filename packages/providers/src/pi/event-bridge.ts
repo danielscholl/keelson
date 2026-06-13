@@ -32,6 +32,20 @@ function stringify(v: unknown): string {
   }
 }
 
+// pi tool results are AgentToolResult-shaped ({ content: [{type:"text",text}…],
+// details }); render the text items rather than JSON-dumping the envelope.
+// Anything else — older shapes, plain values, a content array with no text
+// items (e.g. image-only) — falls back to stringify so the payload survives.
+function toolResultText(result: unknown): string {
+  if (isRecord(result) && Array.isArray(result.content)) {
+    const texts = result.content
+      .filter((c): c is Record<string, unknown> => isRecord(c) && c.type === "text")
+      .map((c) => (typeof c.text === "string" ? c.text : ""));
+    if (texts.length > 0) return texts.join("\n");
+  }
+  return stringify(result);
+}
+
 // pi Usage { input, output, cacheRead, cacheWrite, ... } → keelson TokenUsage.
 // Counts are sanitized through toTokenCount (drops non-numbers / negatives), and
 // when pi reports no usable count at all (e.g. an empty `{}`) we emit nothing
@@ -89,7 +103,7 @@ export function mapPiEvent(event: PiRawEvent): MessageChunk[] {
       const chunk: MessageChunk = {
         type: "tool_result",
         toolUseId,
-        content: stringify(event.result),
+        content: toolResultText(event.result),
         ...(event.isError === true ? { isError: true } : {}),
       };
       return [chunk];

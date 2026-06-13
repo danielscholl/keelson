@@ -13,6 +13,7 @@ import type {
 import { type PiCatalogSource, realPiCatalogSource } from "./catalog.ts";
 import { mapPiEvent } from "./event-bridge.ts";
 import { PiAgentSessionFactory, type PiSession, type PiSessionFactory } from "./factory.ts";
+import { projectToolsForPi } from "./tool-projection.ts";
 
 // Empty → "let pi decide" (no model on the wire). pi is multi-vendor, so there
 // is no single right default; pi picks from the user's own settings/auth.
@@ -63,9 +64,9 @@ export const PI_CAPABILITIES: ProviderCapabilities = {
   // No server-side session resume wired yet — each turn is a fresh pi session.
   sessionResume: false,
   streaming: true,
-  // pi's built-in tools are disabled (no keelson rails); keelson MCP/rib tools
-  // are not yet projected to pi. Pure chat/reasoning for now.
-  tools: false,
+  // Keelson tools project into the session as pi custom tools; pi's own
+  // built-in read/bash/edit/write stay disabled (no keelson rails).
+  tools: true,
   models: PI_MODEL_CATALOG.map((m) => m.id),
   defaultModel: PI_DEFAULT_MODEL,
 };
@@ -124,11 +125,22 @@ export class PiProvider implements IAgentProvider {
   ): AsyncGenerator<MessageChunk> {
     if (options?.abortSignal?.aborted) return;
 
+    const queue = new ChunkQueue();
+    const customTools =
+      options?.tools !== undefined && options.tools.length > 0
+        ? projectToolsForPi(options.tools, {
+            cwd,
+            pushChunk: (chunk) => queue.push(chunk),
+            ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+          })
+        : undefined;
+
     let session: PiSession;
     try {
       session = await this.factory.createSession({
         cwd,
         ...(options?.model ? { model: options.model } : {}),
+        ...(customTools !== undefined ? { customTools } : {}),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -136,12 +148,21 @@ export class PiProvider implements IAgentProvider {
       return;
     }
 
+    // createSession is slow (SDK import + auth/registry load) — an abort that
+    // landed during it must not start a full, uninterruptible pi turn.
+    if (options?.abortSignal?.aborted) return;
+
+    // pi resolves the model session-side when none was requested (settings →
+    // auth fallback); surface the pick so footers/pickers can show the truth.
+    if (session.modelRef !== undefined) {
+      yield { type: "model", model: session.modelRef };
+    }
+
     // No system-prompt hook on a fresh pi session, so the identity + recall
     // prompt rides in front of the user text. Acceptable while sessionResume is
     // off (every turn is fresh and re-seeds it).
     const text = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
 
-    const queue = new ChunkQueue();
     let unsubscribe: () => void = () => {};
     // Captured by the producer; surfaced after the queue drains so any error
     // chunk reaches the consumer first.

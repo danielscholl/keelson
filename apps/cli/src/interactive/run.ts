@@ -491,6 +491,11 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
               usageTotals.output += chunk.usage.outputTokens;
               footer.set({ meter: formatUsageMeter(latestUsage, usageTotals) });
             }
+            // Display-only: the session keeps requesting the provider default;
+            // pinning session.model here would freeze a provider-side pick.
+            if (chunk.type === "model") {
+              footer.set({ model: chunk.model });
+            }
             view.handleChunk(chunk);
           },
           signal: abort.signal,

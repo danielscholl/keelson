@@ -533,6 +533,14 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       }
       if (deps.abortSignal.aborted) return;
       if (chunk.type === "done") continue;
+      // Same coerce-don't-forward policy as usage: a malformed model id from
+      // an out-of-tree provider must not fail the turn at the strict parse.
+      if (chunk.type === "model") {
+        if (typeof chunk.model === "string" && chunk.model.length > 0) {
+          deps.send(chunkFrame(conversationId, { type: "model", model: chunk.model }));
+        }
+        continue;
+      }
       acc.ingest(chunk);
       deps.send(chunkFrame(conversationId, chunk));
     }
