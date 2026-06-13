@@ -16,7 +16,7 @@ import type { WorkflowDefinition } from "@keelson/workflows";
 import { bootstrapWorkflows, type RibWorkflowBinding } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
-import { createProjectsStore } from "../src/projects-store.ts";
+import { canonicalPath, createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import {
   type ActiveRunEntry,
@@ -123,7 +123,10 @@ nodes:
   test("a concurrent start of a live bound producer returns the existing run", () => {
     const { db, store, activeRuns, controller } = makeRig(true);
     try {
-      activeRuns.register("pre-run", liveEntry(runDedupeKey("collect", tmpDir, {}), "pre-conv"));
+      activeRuns.register(
+        "pre-run",
+        liveEntry(runDedupeKey("collect", canonicalPath(tmpDir), {}), "pre-conv"),
+      );
 
       const result = controller.startRun({ name: "collect", inputs: {}, workingDir: tmpDir });
 
@@ -139,7 +142,10 @@ nodes:
   test("a workflow that is not a bound producer is never de-duped", async () => {
     const { db, store, activeRuns, controller } = makeRig(false);
     try {
-      activeRuns.register("pre-run", liveEntry(runDedupeKey("collect", tmpDir, {}), "pre-conv"));
+      activeRuns.register(
+        "pre-run",
+        liveEntry(runDedupeKey("collect", canonicalPath(tmpDir), {}), "pre-conv"),
+      );
 
       const result = controller.startRun({ name: "collect", inputs: {}, workingDir: tmpDir });
 
@@ -158,7 +164,10 @@ nodes:
   test("an isolated start of a bound producer is not de-duped", async () => {
     const { db, store, activeRuns, controller } = makeRig(true);
     try {
-      activeRuns.register("pre-run", liveEntry(runDedupeKey("collect", tmpDir, {}), "pre-conv"));
+      activeRuns.register(
+        "pre-run",
+        liveEntry(runDedupeKey("collect", canonicalPath(tmpDir), {}), "pre-conv"),
+      );
 
       const result = controller.startRun({
         name: "collect",

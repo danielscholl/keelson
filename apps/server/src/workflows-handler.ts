@@ -91,7 +91,7 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
-import { isPathInside, type ProjectsStore } from "./projects-store.ts";
+import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
 export interface WorkflowsHandlerOptions {
@@ -891,14 +891,15 @@ export function createWorkflowController(
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
   return {
-    startRun({ name, inputs, workingDir, isolation, origin }) {
+    startRun({ name, inputs, workingDir: rawWorkingDir, isolation, origin }) {
       try {
-        if (!statSync(workingDir).isDirectory()) {
-          return { ok: false, message: `workingDir is not a directory: ${workingDir}` };
+        if (!statSync(rawWorkingDir).isDirectory()) {
+          return { ok: false, message: `workingDir is not a directory: ${rawWorkingDir}` };
         }
       } catch {
-        return { ok: false, message: `workingDir does not exist: ${workingDir}` };
+        return { ok: false, message: `workingDir does not exist: ${rawWorkingDir}` };
       }
+      const workingDir = canonicalPath(rawWorkingDir);
       // Project resolution precedes the lookup so a workingDir inside a
       // registered project sees that project's workflows (shadowing global).
       // Scheduled producer runs are the exception: they must always resolve
@@ -1259,13 +1260,15 @@ export function workflowsRoutes(
       if (!isAbsolute(raw)) {
         return c.json({ error: "workingDir must be an absolute path" }, 400);
       }
-      workingDir = normalize(raw);
+      workingDir = canonicalPath(normalize(raw));
       if (parsed.data.projectId !== undefined && projectsStore) {
         const proj = projectsStore.get(parsed.data.projectId);
         if (!proj) {
           return c.json({ error: `unknown project '${parsed.data.projectId}'` }, 400);
         }
-        resolvedProject = proj;
+        // Canonical rootPath so containment checks against the (canonical)
+        // workingDir agree — the same contract findByPathPrefix returns.
+        resolvedProject = { ...proj, rootPath: canonicalPath(proj.rootPath) };
       } else if (projectsStore) {
         resolvedProject = projectsStore.findByPathPrefix(workingDir) ?? null;
       }
@@ -1280,11 +1283,11 @@ export function workflowsRoutes(
       if (!project) {
         return c.json({ error: `unknown project '${parsed.data.projectId}'` }, 400);
       }
-      resolvedProject = project;
+      resolvedProject = { ...project, rootPath: canonicalPath(project.rootPath) };
       projectId = project.id;
-      workingDir = project.rootPath;
+      workingDir = resolvedProject.rootPath;
     } else if (defaultCwd !== undefined) {
-      workingDir = defaultCwd;
+      workingDir = canonicalPath(defaultCwd);
     } else {
       return c.json({ error: "projectId or workingDir is required" }, 400);
     }
