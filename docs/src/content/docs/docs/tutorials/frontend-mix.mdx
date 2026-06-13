@@ -32,21 +32,20 @@ the template. [Bun](https://bun.sh/) you already have.
 
 [`danielscholl/keelson-sample`](https://github.com/danielscholl/keelson-sample)
 is a GitHub template repository: a ready-made keelson project carrying one
-workflow, a spec to build from, and a worked example. Create your own copy
-and clone it (the Use this template button on GitHub does the same thing):
+workflow and a spec to build from. Create your own copy and clone it (the
+Use this template button on GitHub does the same thing):
 
 ```sh
 gh repo create my-frontend-mix --template danielscholl/keelson-sample --private --clone
 cd my-frontend-mix
 ```
 
-Three things in the tree matter for this exercise:
+Two things in the tree matter for this exercise:
 
 | Path | What it is |
 | --- | --- |
 | `.keelson/workflows/frontend-mix.yaml` | The workflow: a ten-node DAG with a model pinned per phase |
 | `spec.md` | The input brief: "Cosmos", a no-login, local-only planetarium app |
-| `examples/cosmos/` | A finished run's artifact trail, so you can read what good handoffs look like |
 
 The workflow routes each phase to a model class. Fast models take the grind
 work (explore, validate, smoke), strong-reasoning models take the judgment
@@ -186,9 +185,11 @@ Open `plan.md` first. The strong-reasoning model wrote the actual headlines
 and button labels the UI model built from (SECTION A), the integration scope
 the integrate phase implemented (SECTION B), and the deploy decision the
 gate protected (SECTION C). Then open `smoke-summary.md` for the verdict on
-the running app. The worked example in `examples/cosmos/` shows the same
-trail from a finished build, including the classic catch: a page that
-compiled green but rendered broken, found only by the smoke phase.
+the running app. This is the phase that catches "compiles green, renders
+broken": a build that typechecks, lints, and serves HTTP 200 but renders
+blank or unstyled (a Tailwind `content` glob that misses a directory does
+exactly this). Static checks pass it; only driving the running app, the
+smoke phase's whole job, catches it.
 
 The app itself is in your working tree, validated and committed. Run it:
 
