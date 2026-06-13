@@ -27,8 +27,8 @@ or run from a dev checkout, substitute your home (see
 The server is down. `doctor`'s server check warns `not reachable`. Start it:
 
 ```sh
-keelson service start          # background
-keelson service status         # confirm: exit 0 up, 3 down
+keelson start          # background
+keelson status         # confirm: exit 0 up, 3 down
 ```
 
 If `status` reports the server is running but nothing answers, the log under the
@@ -43,11 +43,11 @@ cat ~/.keelson/logs/server.log
 A server is already bound to the port. Check whether it is yours:
 
 ```sh
-keelson service status
+keelson status
 ```
 
 If it reports a live server, that is the one holding the port; use it, or
-`keelson service stop` first. If `status` says a recorded process is alive but
+`keelson stop` first. If `status` says a recorded process is alive but
 not responding, `server.json` is stale from a crash. The error message names the
 file to remove; delete `~/.keelson/server.json` and retry.
 
@@ -58,8 +58,8 @@ to go:
 
 | Detail | Fix |
 | --- | --- |
-| The database does not exist | Run `keelson service` once; it creates and migrates the database at boot. |
-| Migrations are pending | Run `keelson service` to apply them. |
+| The database does not exist | Run `keelson start` once; it creates and migrates the database at boot. |
+| Migrations are pending | Run `keelson start` to apply them. |
 | The on-disk schema is newer than this binary | Upgrade keelson with `keelson update`; the database was written by a later version. |
 
 ## doctor warns on the keychain
@@ -97,8 +97,8 @@ depends on the provider:
 ## A rib I installed does not appear
 
 Discovery runs once, at boot. After `keelson rib add` the command reports
-`restartRequired: true`; restart `keelson service` so discovery picks the package
-up. If it still does not appear:
+`restartRequired: true`; restart the server (`keelson stop && keelson start`)
+so discovery picks the package up. If it still does not appear:
 
 - Check `KEELSON_RIBS`. When set, it filters which discovered ribs activate;
   unset it to activate everything.

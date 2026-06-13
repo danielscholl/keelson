@@ -77,17 +77,25 @@ afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe("keelson serve start/status/stop lifecycle", () => {
+describe("keelson start/status/stop lifecycle", () => {
   test("status before any start reports stopped with exit 3", async () => {
-    const { stdout, exitCode } = await runCli(["--json", "serve", "status"]);
+    const { stdout, exitCode } = await runCli(["--json", "status"]);
     expect(exitCode).toBe(3);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(true);
     expect(envelope.data.status).toBe("stopped");
   }, 30_000);
 
+  test("deprecated `service`/`serve` aliases still resolve to status", async () => {
+    for (const alias of ["service", "serve"]) {
+      const { stdout, exitCode } = await runCli(["--json", alias, "status"]);
+      expect(exitCode).toBe(3);
+      expect(JSON.parse(stdout.trim()).data.status).toBe("stopped");
+    }
+  }, 30_000);
+
   test("start detaches a background server and reports its URL", async () => {
-    const { stdout, exitCode } = await runCli(["--json", "serve", "start"]);
+    const { stdout, exitCode } = await runCli(["--json", "start"]);
     expect(exitCode).toBe(0);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(true);
@@ -102,7 +110,7 @@ describe("keelson serve start/status/stop lifecycle", () => {
   }, 60_000);
 
   test("start is idempotent while the server is up", async () => {
-    const { stdout, exitCode } = await runCli(["--json", "serve", "start"]);
+    const { stdout, exitCode } = await runCli(["--json", "start"]);
     expect(exitCode).toBe(0);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.data.status).toBe("already running");
@@ -110,7 +118,7 @@ describe("keelson serve start/status/stop lifecycle", () => {
   }, 30_000);
 
   test("status reports running with url, pid, and uptime", async () => {
-    const { stdout, exitCode } = await runCli(["--json", "serve", "status"]);
+    const { stdout, exitCode } = await runCli(["--json", "status"]);
     expect(exitCode).toBe(0);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.data.status).toBe("running");
@@ -122,7 +130,7 @@ describe("keelson serve start/status/stop lifecycle", () => {
   test("stop shuts the server down and clears the state file", async () => {
     const before = readServerState(home);
     expect(before).not.toBeNull();
-    const { stdout, exitCode } = await runCli(["--json", "serve", "stop"]);
+    const { stdout, exitCode } = await runCli(["--json", "stop"]);
     expect(exitCode).toBe(0);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.data.status).toBe("stopped");
@@ -132,7 +140,7 @@ describe("keelson serve start/status/stop lifecycle", () => {
   }, 60_000);
 
   test("stop is idempotent once the server is down", async () => {
-    const { stdout, exitCode } = await runCli(["--json", "serve", "stop"]);
+    const { stdout, exitCode } = await runCli(["--json", "stop"]);
     expect(exitCode).toBe(0);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.data.status).toBe("not running");
@@ -154,7 +162,7 @@ describe("keelson serve start/status/stop lifecycle", () => {
       home,
     );
     try {
-      const { stdout, exitCode } = await runCli(["--json", "serve", "stop"]);
+      const { stdout, exitCode } = await runCli(["--json", "stop"]);
       expect(exitCode).toBe(1);
       const envelope = JSON.parse(stdout.trim());
       expect(envelope.ok).toBe(false);
@@ -190,7 +198,7 @@ describe("keelson serve start/status/stop lifecycle", () => {
       home,
     );
     try {
-      const { stdout, exitCode } = await runCli(["--json", "serve", "stop"]);
+      const { stdout, exitCode } = await runCli(["--json", "stop"]);
       expect(exitCode).toBe(1);
       const envelope = JSON.parse(stdout.trim());
       expect(envelope.ok).toBe(false);

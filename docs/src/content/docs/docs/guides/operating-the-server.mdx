@@ -11,30 +11,34 @@ One server owns everything: the SQLite store, the providers, the ribs, and the
 browser UI, all on port 7878. Here is how to run it, check it, and stop it
 cleanly.
 
-## Foreground or background
+## Start it
 
-`keelson service` runs in the foreground. It builds the database, ribs, and
-routes, installs graceful-shutdown handlers, and stays attached to the terminal
-until you press Ctrl-C. Use it when you want the boot log in front of you.
+`keelson start` launches the server in the background and returns once it is
+listening, then reports the URL. It re-launches the server as a detached process
+that outlives the terminal.
 
 ```sh
-keelson service
+keelson start
+```
+
+Open [http://127.0.0.1:7878](http://127.0.0.1:7878) and you get the full UI from
+the same port as the API: Chat, Workflows, Memory, and a tab for each installed
+rib.
+
+Add `--foreground` (`-f`) to run it attached instead — it builds the database,
+ribs, and routes, installs graceful-shutdown handlers, and stays on the terminal
+until you press Ctrl-C, with the boot log in front of you.
+
+```sh
+keelson start --foreground
 ```
 
 ```text
 keelson server listening on http://127.0.0.1:7878/
 ```
 
-`keelson service start` runs it in the background and returns. It re-launches the
-server as a detached process that outlives the terminal, then reports the URL.
-
-```sh
-keelson service start
-```
-
-Open [http://127.0.0.1:7878](http://127.0.0.1:7878) and you get the full UI from
-the same port as the API: Chat, Workflows, Memory, and a tab for each installed
-rib.
+The former `keelson service` group (and its `serve` alias) still works as a
+hidden, deprecated alias; prefer the top-level `start` / `stop` / `status`.
 
 <Aside type="note" title="Running offline">
 Real agents need a Copilot subscription or an Anthropic API key. With no keys,
@@ -45,12 +49,12 @@ without credentials.
 
 ## Check it
 
-`keelson service status` reports whether the server is running and where, and
-cleans up a stale record if it finds one. The exit code is scriptable: `0` when
-the server is up, `3` when it is down.
+`keelson status` reports whether the server is running and where, and cleans up
+a stale record if it finds one. The exit code is scriptable: `0` when the server
+is up, `3` when it is down.
 
 ```sh
-keelson service status
+keelson status
 ```
 
 For a full health sweep, `keelson doctor` probes five categories in one pass:
@@ -65,7 +69,7 @@ keelson doctor          # add --strict to exit non-zero on warnings too
 ## Stop it
 
 ```sh
-keelson service stop
+keelson stop
 ```
 
 Stop drains in-flight runs, closes the database, and exits, falling back to a
@@ -91,8 +95,8 @@ written into `server.json`, so only a caller that can read your disk can stop it
 
 ## Related
 
-- [The CLI](../../reference/cli/): the full `service` command tree and the
-  exit-code contract.
+- [The CLI](../../reference/cli/): the full command tree and the exit-code
+  contract.
 - [Your first run](../../tutorials/first-run/): install, the health sweep, and a
   first chat turn, walked end to end.
 - [Configuration](../configuration/): the providers and `KEELSON_*` variables

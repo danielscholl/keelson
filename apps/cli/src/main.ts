@@ -106,39 +106,70 @@ export function buildProgram(): Command {
       );
     });
 
-  const serve = program
-    .command("service")
-    .alias("serve")
-    .description("run the Keelson server in the foreground (use `service start` for background)")
+  program
+    .command("start")
+    .description("start the Keelson server in the background and report its URL")
+    .option("-f, --foreground", "run attached in the foreground instead of detaching", false)
     .option("--db <path>", "override KEELSON_DB for this run")
-    .action(async function serveAction(this: Command) {
+    .action(async function startAction(this: Command) {
+      const { json } = globalOpts(this);
+      const { foreground, db } = this.opts<{ foreground: boolean; db?: string }>();
+      if (foreground) await runServe({ db, json });
+      else await runServeStart({ db, json });
+    });
+
+  program
+    .command("stop")
+    .description("stop the background server (graceful shutdown, kill fallback)")
+    .action(async function stopAction(this: Command) {
+      const { json } = globalOpts(this);
+      await runServeStop({ json });
+    });
+
+  program
+    .command("status")
+    .description("report whether the server is running and its URL (exit 0 up, 3 down)")
+    .action(async function statusAction(this: Command) {
+      const { json } = globalOpts(this);
+      await runServeStatus({ json });
+    });
+
+  // Deprecated `service`/`serve` group, hidden from help and kept one release
+  // so existing scripts and muscle memory keep working. Bare `service` ran the
+  // server in the foreground — now `start --foreground`.
+  const service = program
+    .command("service", { hidden: true })
+    .alias("serve")
+    .description("deprecated: use `keelson start` (foreground: `keelson start --foreground`)")
+    .option("--db <path>", "override KEELSON_DB for this run")
+    .action(async function serviceAction(this: Command) {
       const { json } = globalOpts(this);
       const { db } = this.opts<{ db?: string }>();
       await runServe({ db, json });
     });
 
-  serve
+  service
     .command("start")
-    .description("start the server in the background and report its URL")
+    .description("deprecated: use `keelson start`")
     .option("--db <path>", "override KEELSON_DB for the background server")
-    .action(async function serveStartAction(this: Command) {
+    .action(async function serviceStartAction(this: Command) {
       const { json } = globalOpts(this);
       const { db } = this.opts<{ db?: string }>();
       await runServeStart({ db, json });
     });
 
-  serve
+  service
     .command("stop")
-    .description("stop the background server (graceful shutdown, kill fallback)")
-    .action(async function serveStopAction(this: Command) {
+    .description("deprecated: use `keelson stop`")
+    .action(async function serviceStopAction(this: Command) {
       const { json } = globalOpts(this);
       await runServeStop({ json });
     });
 
-  serve
+  service
     .command("status")
-    .description("report whether the server is running and its URL (exit 0 up, 3 down)")
-    .action(async function serveStatusAction(this: Command) {
+    .description("deprecated: use `keelson status`")
+    .action(async function serviceStatusAction(this: Command) {
       const { json } = globalOpts(this);
       await runServeStatus({ json });
     });
@@ -541,18 +572,20 @@ function isCommanderError(err: unknown): err is CommanderLikeError {
 function commandSummary(
   cmd: Command,
 ): Array<{ name: string; description: string; commands?: ReturnType<typeof commandSummary> }> {
-  return cmd.commands.map((c) => {
-    const entry: {
-      name: string;
-      description: string;
-      commands?: ReturnType<typeof commandSummary>;
-    } = {
-      name: c.name(),
-      description: c.description(),
-    };
-    if (c.commands.length > 0) entry.commands = commandSummary(c);
-    return entry;
-  });
+  return cmd.commands
+    .filter((c) => !(c as Command & { _hidden?: boolean })._hidden)
+    .map((c) => {
+      const entry: {
+        name: string;
+        description: string;
+        commands?: ReturnType<typeof commandSummary>;
+      } = {
+        name: c.name(),
+        description: c.description(),
+      };
+      if (c.commands.length > 0) entry.commands = commandSummary(c);
+      return entry;
+    });
 }
 
 function helpEnvelope(cmd: Command, program: Command): { data: unknown } {

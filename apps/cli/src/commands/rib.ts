@@ -48,7 +48,7 @@ function effectiveBaseUrl(opts: BaseOptions): string {
 
 function noServer(opts: BaseOptions): never {
   emit(
-    { error: "rib commands require `keelson service` to be running", code: "NO_SERVER" },
+    { error: "rib commands require a running server (`keelson start`)", code: "NO_SERVER" },
     { json: opts.json },
   );
   process.exit(EXIT_NO_SERVER);
@@ -101,7 +101,7 @@ function toShowItem(rib: RibSummary) {
 
 export interface RibListOptions extends BaseOptions {
   // Read installed ribs straight from the home's node_modules instead of the
-  // running server — works before `keelson service` is up, but only carries ids.
+  // running server — works before `keelson start` is up, but only carries ids.
   installed?: boolean;
 }
 
@@ -148,7 +148,9 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
     if (added.length > 0) {
       process.stdout.write(`added ${added.join(", ")}\n`);
       if (server !== null) {
-        process.stdout.write("restart `keelson service` to activate the new rib\n");
+        process.stdout.write(
+          "restart the server (`keelson stop && keelson start`) to activate the new rib\n",
+        );
       }
     } else {
       // bun add succeeded but no new @keelson/rib-* appeared: either an
@@ -195,7 +197,9 @@ export async function runRibRemove(id: string, opts: BaseOptions): Promise<never
   if (!opts.json) {
     process.stdout.write(`removed ${trimmed}\n`);
     if (server !== null) {
-      process.stdout.write("restart `keelson service` to deactivate it\n");
+      process.stdout.write(
+        "restart the server (`keelson stop && keelson start`) to deactivate it\n",
+      );
     }
   }
   process.exit(EXIT_OK);

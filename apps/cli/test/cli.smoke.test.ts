@@ -58,7 +58,9 @@ describe("keelson CLI smoke", () => {
     expect(exitCode).toBe(0);
     for (const cmd of [
       "version",
-      "service",
+      "start",
+      "stop",
+      "status",
       "workflow",
       "chat",
       "doctor",
@@ -129,7 +131,7 @@ describe("keelson CLI smoke", () => {
     expect(envelope.ok).toBe(true);
     expect(envelope.data.name).toBe("@keelson/cli");
     const names = (envelope.data.commands as Array<{ name: string }>).map((c) => c.name);
-    for (const expected of ["service", "workflow", "chat", "doctor", "version"]) {
+    for (const expected of ["start", "stop", "status", "workflow", "chat", "doctor", "version"]) {
       expect(names).toContain(expected);
     }
   });
@@ -255,13 +257,18 @@ describe("keelson CLI smoke", () => {
     expect(envelope.error).toContain("before any subcommand");
   });
 
-  test("service is the primary subcommand and serve remains an alias", async () => {
-    const primary = await runCli(["--json", "service", "--help"]);
-    expect(primary.exitCode).toBe(0);
-    expect(JSON.parse(primary.stdout.trim()).data.command).toBe("service");
-    const aliased = await runCli(["--json", "serve", "--help"]);
-    expect(aliased.exitCode).toBe(0);
-    expect(JSON.parse(aliased.stdout.trim()).data.command).toBe("service");
+  test("start/stop/status are top-level; service/serve remain hidden aliases", async () => {
+    for (const cmd of ["start", "stop", "status"]) {
+      const res = await runCli(["--json", cmd, "--help"]);
+      expect(res.exitCode).toBe(0);
+      expect(JSON.parse(res.stdout.trim()).data.command).toBe(cmd);
+    }
+    // The deprecated `service` group (alias `serve`) still resolves for back-compat.
+    for (const alias of ["service", "serve"]) {
+      const res = await runCli(["--json", alias, "--help"]);
+      expect(res.exitCode).toBe(0);
+      expect(JSON.parse(res.stdout.trim()).data.command).toBe("service");
+    }
   });
 
   test("chat with stub provider on a pipe emits only the assistant text", async () => {

@@ -50,10 +50,12 @@ keelson --json workflow list | jq '.data.workflows[].name'
 
 | Command | Does |
 | --- | --- |
-| `keelson service` | Run the server in the foreground. `--db <path>` overrides the database for the run. Alias: `serve`. |
-| `keelson service start` | Start the server in the background and report its URL. `--db <path>` overrides the database. |
-| `keelson service stop` | Stop the background server (graceful shutdown, kill fallback). |
-| `keelson service status` | Report whether the server is running and its URL. Exit `0` up, `3` down. |
+| `keelson start` | Start the server in the background and report its URL. `--foreground` (`-f`) runs it attached instead; `--db <path>` overrides the database. |
+| `keelson stop` | Stop the background server (graceful shutdown, kill fallback). |
+| `keelson status` | Report whether the server is running and its URL. Exit `0` up, `3` down. |
+
+The former `keelson service` group (`service start` / `stop` / `status`, alias
+`serve`) still works as a hidden, deprecated alias. Prefer the top-level verbs.
 
 ## Workflows
 

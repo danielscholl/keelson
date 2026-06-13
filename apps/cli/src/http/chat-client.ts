@@ -73,7 +73,7 @@ export function pickDefaultHttpProvider(providers: readonly ProviderInfoRow[]): 
   const first = providers.find((p) => p.id !== "workflow");
   if (first) return first.id;
   throw new Error(
-    "no chat-capable provider registered on the server; run `keelson service` with KEELSON_PROVIDERS unset or include stub/copilot/claude",
+    "no chat-capable provider registered on the server; run `keelson start` with KEELSON_PROVIDERS unset or include stub/copilot/claude",
   );
 }
 

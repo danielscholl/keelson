@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { resolveKeelsonHome } from "./paths.ts";
 
 // On-disk record of the running server process: written by the server once its
-// listener is up, removed on graceful shutdown. `keelson service status`/`stop`
+// listener is up, removed on graceful shutdown. `keelson status`/`stop`
 // read it to find the pid, URL, and shutdown token. The token gates
 // POST /api/server/shutdown so only a caller that can read the home directory
 // (the operator's CLI, not a browser page) can stop the server.

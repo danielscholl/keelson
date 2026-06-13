@@ -132,9 +132,9 @@ restartRequired: true
 added weather
 ```
 
-Two packages, because zod came along as your rib's own dependency. Restart
-`keelson service` so discovery runs, then inspect what the server actually
-registered:
+Two packages, because zod came along as your rib's own dependency. Restart the
+server (`keelson stop && keelson start`) so discovery runs, then inspect what
+the server actually registered:
 
 ```sh
 keelson rib show weather

@@ -43,7 +43,7 @@ Keelson is a **local-only agent harness**, not a hosted service. The harness is 
 
 **State.** SQLite (sessions, runs, node outputs, memory rows) + keychain credentials (`@napi-rs/keyring`). Schema migrations live in `apps/server/src/db/migrations.ts`; `keelson doctor` checks `schema_version` matches.
 
-**Server lifecycle.** `keelson service` runs in the foreground; `keelson service start` re-execs the CLI as a detached child with `KEELSON_SERVE_BACKGROUND=1` (internal env, not an operator knob — the child ignores SIGHUP so it outlives its terminal). A running server records pid/URL/shutdown token in `<home>/server.json`; `service status`/`service stop` read it, and `POST /api/server/shutdown` is gated by the token.
+**Server lifecycle.** `keelson start` runs the server in the background (reporting its URL); `keelson start --foreground` (`-f`) runs it attached. The background path re-execs the CLI as a detached `start --foreground` child with `KEELSON_SERVE_BACKGROUND=1` (internal env, not an operator knob — the child ignores SIGHUP so it outlives its terminal). A running server records pid/URL/shutdown token in `<home>/server.json`; `keelson status`/`keelson stop` read it, and `POST /api/server/shutdown` is gated by the token. The former `keelson service`/`serve` command group still works as a hidden, deprecated alias.
 
 **Provider/tool determinism.** `KEELSON_WORKFLOW_PROVIDER` pins the provider workflows use for `prompt` nodes; `KEELSON_WORKFLOW_TOOL_DENYLIST` is an operator floor for per-node tool filtering. `KEELSON_USE_STUBS=1` is a test-only env var (CI + bun test setup) — no production code reads it.
 

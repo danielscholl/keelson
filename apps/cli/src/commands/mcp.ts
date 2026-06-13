@@ -18,7 +18,7 @@ export interface McpBridgeOptions {
 // process is a dumb pump, so all diagnostics go to stderr to keep stdout a
 // clean MCP channel.
 export async function runMcpBridge(opts: McpBridgeOptions = {}): Promise<void> {
-  // Resolve the target the same way `service status`/`stop` do: an explicit
+  // Resolve the target the same way `status`/`stop` do: an explicit
   // --base-url wins; otherwise follow the URL the running service recorded in
   // server.json (which may be a non-default port), falling back to the default.
   // The stored MCP token is paired ONLY with that recorded server — never sent
@@ -38,9 +38,7 @@ export async function runMcpBridge(opts: McpBridgeOptions = {}): Promise<void> {
     }
   }
   if (!probe) {
-    process.stderr.write(
-      "keelson mcp: server not reachable; start it with `keelson service start`\n",
-    );
+    process.stderr.write("keelson mcp: server not reachable; start it with `keelson start`\n");
     process.exit(EXIT_NO_SERVER);
   }
   const endpoint = `${probe.baseUrl}/api/mcp`;

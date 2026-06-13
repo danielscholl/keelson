@@ -49,15 +49,15 @@ available).
 ## Quick Start
 
 ```bash
-keelson service start          # server + web UI + WS on :7878, in the background
+keelson start                # server + web UI + WS on :7878, in the background
 open http://127.0.0.1:7878   # Chat, Workflows, and your ribs' surfaces
 keelson doctor               # health sweep: toolchain, server, DB, auth, ribs
 ```
 
 Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
 `KEELSON_PROVIDERS=stub` for an offline echo provider to try the harness without
-credentials. `keelson service` (no subcommand) runs in the foreground instead;
-`keelson service stop` shuts the background server down.
+credentials. `keelson start --foreground` runs the server attached instead;
+`keelson stop` shuts the background server down.
 
 By default Keelson loads only Copilot, leaving the offline `stub`, Claude, Pi
 (a multi-vendor community agent), and Codex (OpenAI's coding agent) opt-in. Pick
@@ -140,12 +140,13 @@ contract — snapshots, views, surfaces, workflow contributions — and the
 
 ## Use from other agents (MCP)
 
-`keelson service` exposes every registered tool — your installed ribs' tools plus
+The keelson server exposes every registered tool — your installed ribs' tools plus
 the workflow tools — over the [Model Context Protocol](https://modelcontextprotocol.io)
-at `http://127.0.0.1:7878/api/mcp`. It starts automatically with the server, so any
-MCP-capable agent (Claude Code, Cursor, Copilot CLI, Codex CLI) can call them. Tools
-run **inside** the keelson server, where each rib keeps its credentials and exec
-access — so an external agent gets a rib's real capabilities, not a reimplementation.
+at `http://127.0.0.1:7878/api/mcp`. The endpoint comes up automatically with the
+server (`keelson start`), so any MCP-capable agent (Claude Code, Cursor, Copilot CLI,
+Codex CLI) can call them. Tools run **inside** the keelson server, where each rib
+keeps its credentials and exec access — so an external agent gets a rib's real
+capabilities, not a reimplementation.
 
 By default the endpoint is open on loopback (no token) and exposes only **read-only**
 tools. Point a client at it:

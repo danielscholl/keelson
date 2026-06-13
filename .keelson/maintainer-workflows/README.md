@@ -31,7 +31,7 @@ Routing through a running server works too — start it with the same
 **server's** environment, not the invoking shell):
 
 ```sh
-KEELSON_WORKFLOWS_DIR="$PWD/.keelson/maintainer-workflows" keelson service
+KEELSON_WORKFLOWS_DIR="$PWD/.keelson/maintainer-workflows" keelson start
 keelson workflow run repo-triage --watch   # in another shell
 ```
 
