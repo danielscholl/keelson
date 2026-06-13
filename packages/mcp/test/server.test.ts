@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ToolContext } from "@keelson/shared";
+import type { ToolContext, ToolDefinition } from "@keelson/shared";
 import { clearRegistry, registerTool } from "@keelson/skills";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";

@@ -165,7 +165,9 @@ args = ["mcp"]
 `keelson mcp` is a stdio bridge for clients that only speak stdio MCP — it pipes them
 to the running server (and exits non-zero if the server is down).
 
-Tune it in `~/.keelson/config.json` (or the matching `KEELSON_MCP_*` env vars):
+Tune it in `~/.keelson/config.json` (or the matching env overrides
+`KEELSON_MCP_DISABLED`, `KEELSON_MCP_EXPOSE_STATE_CHANGING`,
+`KEELSON_MCP_REQUIRE_TOKEN`, `KEELSON_MCP_DENYLIST`):
 
 ```json
 { "mcp": { "enabled": true, "exposeStateChanging": false, "requireToken": false, "toolDenylist": [] } }

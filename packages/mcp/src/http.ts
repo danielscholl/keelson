@@ -32,8 +32,10 @@ export function createKeelsonMcpHttp(opts: KeelsonMcpServerOptions): KeelsonMcpH
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
-      await server.connect(transport);
       try {
+        // connect inside the try so a connect-time throw still hits finally and
+        // closes the request-scoped server (no leaked resources).
+        await server.connect(transport);
         // JSON-response mode resolves the Response only after the handler runs,
         // so the result is fully materialized before we tear the server down.
         return await transport.handleRequest(req);

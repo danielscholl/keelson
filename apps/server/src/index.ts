@@ -371,7 +371,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     const { token, onShutdown } = config.shutdown;
     app.post("/api/server/shutdown", (c) => {
       const header = c.req.header("authorization") ?? "";
-      const presented = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+      const presented = /^bearer\s+(.+)$/i.exec(header.trim())?.[1] ?? "";
       if (presented.length === 0 || !constantTimeTokenEqual(presented, token)) {
         return c.json({ ok: false, error: "invalid shutdown token" }, 401);
       }

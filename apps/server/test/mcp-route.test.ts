@@ -43,10 +43,13 @@ beforeAll(async () => {
   tokenless = await startServer({ port: 0 });
 
   // Boot a second server with the token gate on. resolveMcpSettings reads the
-  // env at boot, so set it only across this construction.
+  // env at boot, so set it only across this construction, then restore it
+  // (don't clobber a value another suite may rely on).
+  const requireTokenBefore = process.env.KEELSON_MCP_REQUIRE_TOKEN;
   process.env.KEELSON_MCP_REQUIRE_TOKEN = "1";
   gated = await startServer({ port: 0, mcpToken: MCP_TOKEN });
-  delete process.env.KEELSON_MCP_REQUIRE_TOKEN;
+  if (requireTokenBefore === undefined) delete process.env.KEELSON_MCP_REQUIRE_TOKEN;
+  else process.env.KEELSON_MCP_REQUIRE_TOKEN = requireTokenBefore;
 });
 
 afterAll(async () => {
@@ -118,5 +121,14 @@ describe("POST /api/mcp (token-gated)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { result?: { serverInfo?: { name?: string } } };
     expect(body.result?.serverInfo?.name).toBe("keelson");
+  });
+
+  test("accepts a lowercase 'bearer' scheme (RFC 6750 is case-insensitive)", async () => {
+    const res = await fetch(new URL("/api/mcp", gated.url), {
+      method: "POST",
+      headers: { ...MCP_HEADERS, authorization: `bearer ${MCP_TOKEN}` },
+      body: initializeBody,
+    });
+    expect(res.status).toBe(200);
   });
 });

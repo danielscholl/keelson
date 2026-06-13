@@ -6,11 +6,10 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import type { ToolDefinition } from "@keelson/shared";
+import { type ToolDefinition, z } from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
 import { executeToolDefinition } from "./execute.ts";
 
 export interface KeelsonMcpServerOptions {

@@ -44,10 +44,12 @@ export function createMcpRoutes(opts: McpRoutesOptions): McpRoutesHandle {
   const gateToken = opts.settings.requireToken ? opts.token : undefined;
   return {
     mount(app) {
-      app.all(MCP_ROUTE_PATH, (c) => {
+      app.all(MCP_ROUTE_PATH, async (c) => {
         if (gateToken !== undefined) {
+          // The auth scheme is case-insensitive per RFC 6750.
           const header = c.req.header("authorization") ?? "";
-          const presented = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+          const match = /^bearer\s+(.+)$/i.exec(header.trim());
+          const presented = match?.[1] ?? "";
           if (presented.length === 0 || !constantTimeTokenEqual(presented, gateToken)) {
             return c.json({ error: "invalid mcp token" }, 401);
           }
@@ -60,7 +62,13 @@ export function createMcpRoutes(opts: McpRoutesOptions): McpRoutesHandle {
         if (c.req.method !== "POST") {
           return c.json({ error: "method not allowed" }, 405);
         }
-        return http.handleRequest(c.req.raw);
+        try {
+          return await http.handleRequest(c.req.raw);
+        } catch (err) {
+          // Surface a transport failure as a typed JSON envelope rather than a
+          // bare 500 from the framework.
+          return c.json({ error: "mcp transport error", message: String(err) }, 500);
+        }
       });
     },
     dispose: () => http.close(),
