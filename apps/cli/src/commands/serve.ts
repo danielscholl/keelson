@@ -6,7 +6,6 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { serveUntilSignal } from "@keelson/server";
-import { loadKeelsonConfig, resolveMcpSettings } from "@keelson/shared/config";
 import { ensureSpawnPath } from "@keelson/shared/exec";
 import {
   clearServerState,
@@ -325,13 +324,27 @@ export async function runServeStatus(opts: { json: boolean }): Promise<void> {
   if (info) {
     const owned = state !== null && isPidAlive(state.pid);
     const uptime = owned && state.startedAt ? uptimeSince(state.startedAt) : null;
-    const mcpEnabled = resolveMcpSettings(loadKeelsonConfig(home)).enabled;
+    // Reflect what the RUNNING server actually mounted, not local config (which
+    // may differ from the env the server was started with). A 404 means the MCP
+    // route isn't mounted; any other status (405, or 401 when token-gated) means
+    // it's live.
+    const mcpUrl = `${info.baseUrl}/api/mcp`;
+    let mcpMounted = false;
+    try {
+      const probe = await fetch(mcpUrl, {
+        method: "GET",
+        signal: AbortSignal.timeout(STATUS_PROBE_TIMEOUT_MS),
+      });
+      mcpMounted = probe.status !== 404;
+    } catch {
+      mcpMounted = false;
+    }
     emit(
       {
         data: {
           status: "running",
           url: info.baseUrl,
-          ...(mcpEnabled ? { mcpUrl: `${info.baseUrl}/api/mcp` } : {}),
+          ...(mcpMounted ? { mcpUrl } : {}),
           ...(owned ? { pid: state.pid } : {}),
           ...(uptime ? { uptime } : {}),
           ...(owned && state.version ? { version: state.version } : {}),

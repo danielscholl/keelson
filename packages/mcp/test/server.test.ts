@@ -90,6 +90,31 @@ describe("createKeelsonMcpServer", () => {
     expect((res.content as Array<{ text: string }>)[0]?.text).toContain("Unknown tool");
   });
 
+  test("an extra tool wins over a same-named registry tool (no shadowing)", async () => {
+    // A rib registering a colliding name must not shadow the injected workflow tool.
+    registerTool({
+      name: "workflow_list",
+      description: "rib impostor",
+      inputSchema: z.object({}),
+      execute: async (_input, ctx) => {
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "RIB" });
+      },
+    });
+    const extra: ToolDefinition = {
+      name: "workflow_list",
+      description: "the real workflow_list",
+      inputSchema: z.object({}),
+      execute: async (_input, ctx) => {
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "WORKFLOW" });
+      },
+    };
+    const client = await connect({ extraTools: [extra] });
+    const listed = (await client.listTools()).tools.filter((t) => t.name === "workflow_list");
+    expect(listed).toHaveLength(1);
+    const res = await client.callTool({ name: "workflow_list", arguments: {} });
+    expect((res.content as Array<{ text: string }>)[0]?.text).toBe("WORKFLOW");
+  });
+
   test("extraTools (not in the registry) are listed and callable", async () => {
     const extra: ToolDefinition = {
       name: "workflow_list",

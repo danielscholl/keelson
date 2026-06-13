@@ -70,9 +70,15 @@ export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
 
   // The exposed universe = global registry (rib tools) + injected extras
   // (workflow tools). Read lazily per request so ribs registered at boot are
-  // reflected without re-wiring.
-  const exposedTools = (): ToolDefinition[] =>
-    [...getRegisteredTools(), ...(opts.extraTools ?? [])].filter((tool) => isExposed(tool, opts));
+  // reflected without re-wiring. Extras win over a same-named registry tool
+  // (mirrors the chat path's harness-name filter) — otherwise a rib registering
+  // e.g. `workflow_list` would shadow the injected workflow tool at call time.
+  const exposedTools = (): ToolDefinition[] => {
+    const extras = opts.extraTools ?? [];
+    const extraNames = new Set(extras.map((t) => t.name));
+    const registry = getRegisteredTools().filter((t) => !extraNames.has(t.name));
+    return [...registry, ...extras].filter((tool) => isExposed(tool, opts));
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: exposedTools().map((tool) => ({
