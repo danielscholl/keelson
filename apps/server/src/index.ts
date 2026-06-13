@@ -32,6 +32,7 @@ import { openDatabase } from "./db/init.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
+import { personasRoutes } from "./personas-handler.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
 import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
@@ -406,6 +407,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     manifests: ribs.manifests,
     probes: ribs.probes,
     actionHandlers: ribs.actionHandlers,
+  });
+  personasRoutes(app, {
+    personaListers: ribs.personaListers,
+    personaResolvers: ribs.personaResolvers,
   });
   projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
   memoryRoutes(app, { memoryStore });
