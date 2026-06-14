@@ -38,8 +38,10 @@ curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/inst
 **Windows** — provisions `%USERPROFILE%\.keelson`, drops `keelson.cmd` in `%LOCALAPPDATA%\keelson\bin`, and adds it to your user `PATH`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/danielscholl/keelson/releases/latest/download/install.ps1 | iex"
+irm https://github.com/danielscholl/keelson/releases/latest/download/install.ps1 | iex
 ```
+
+> Run this from PowerShell (Windows PowerShell 5.1 or 7). From `cmd.exe`, start `pwsh` (or `powershell`) first, then paste it.
 
 Make sure `~/.local/bin` is on your `PATH` (Windows handles PATH for you). Re-run
 the installer any time to upgrade or repair — your installed ribs are preserved.
