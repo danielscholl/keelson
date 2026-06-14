@@ -39,6 +39,10 @@ function AppInner() {
   // from a surface to Chat (the two are never mounted together). Chat consumes
   // it on mount and clears it via onSeedConsumed.
   const [pendingSeed, setPendingSeed] = useState<ChatSeed | null>(null);
+  // Bumped on every seed so <Chat> remounts to consume it cleanly. The ✦ path
+  // remounts naturally (surface→chat tab swap); a `/mind` fired from inside Chat
+  // would otherwise race the command flow's input reset, so force the remount.
+  const [seedNonce, setSeedNonce] = useState(0);
   const pausedRunCount = usePausedRunCount();
   const pendingMemoryCount = usePendingMemoryCount();
 
@@ -101,6 +105,7 @@ function AppInner() {
   const handleExplore = useCallback(
     (seed: ChatSeed) => {
       setPendingSeed(seed);
+      setSeedNonce((n) => n + 1);
       goToFreshChat();
     },
     [goToFreshChat],
@@ -131,9 +136,11 @@ function AppInner() {
         <Memory />
       ) : (
         <Chat
+          key={seedNonce}
           onOpenWorkflowRun={handleOpenWorkflowRun}
           pendingSeed={pendingSeed}
           onSeedConsumed={() => setPendingSeed(null)}
+          onOpenSeededChat={handleExplore}
         />
       )}
     </div>
