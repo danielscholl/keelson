@@ -17,6 +17,7 @@ import {
   getWorkflowDetailResponseSchema,
   getWorkflowRunResponseSchema,
   type ListWorkflowsResponse,
+  listPersonasResponseSchema,
   listProjectsResponseSchema,
   listRibsResponseSchema,
   listRunsResponseSchema,
@@ -25,6 +26,9 @@ import {
   type MemoryListResponse,
   type ModelInfo,
   memoryListResponseSchema,
+  type OpenChatSeed,
+  openChatSeedSchema,
+  type PersonaRef,
   type Project,
   type ProviderInfo,
   type RegisteredToolInfo,
@@ -585,6 +589,21 @@ export async function postRibAction(id: string, action: RibAction): Promise<RibA
       body: JSON.stringify(action),
       errorBody: "json-error",
     }),
+  );
+}
+
+// === Personas (the /mind source) ==========================================
+
+export async function getPersonas(): Promise<PersonaRef[]> {
+  return listPersonasResponseSchema.parse(await apiRequest<unknown>("/api/personas")).personas;
+}
+
+export async function resolvePersona(ribId: string, slug: string): Promise<OpenChatSeed> {
+  return openChatSeedSchema.parse(
+    await apiRequest<unknown>(
+      `/api/personas/${encodeURIComponent(ribId)}/${encodeURIComponent(slug)}/resolve`,
+      { label: "/api/personas/resolve", method: "POST", errorBody: "json-error" },
+    ),
   );
 }
 

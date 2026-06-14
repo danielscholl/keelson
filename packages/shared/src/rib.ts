@@ -285,6 +285,15 @@ export interface Rib {
   contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
   // Inbound action handler reached via POST /api/ribs/:id/action.
   onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
+  // Personas the rib offers for direct chat, surfaced at GET /api/personas (the
+  // source for the `/mind` command). `listPersonas` is cheap — no system prompt
+  // assembled. `resolvePersona` lazily builds the seed for one slug on selection,
+  // returning null for an unknown slug.
+  listPersonas?(ctx: RibContext): readonly PersonaSummary[] | Promise<readonly PersonaSummary[]>;
+  resolvePersona?(
+    slug: string,
+    ctx: RibContext,
+  ): (OpenChatSeed | null) | Promise<OpenChatSeed | null>;
   // Auth-status probe surfaced in GET /api/ribs (and, optionally, doctor).
   authStatus?(ctx: RibContext): Promise<RibAuthStatus> | RibAuthStatus;
   // Sync or async — the harness awaits the returned promise (if any)
@@ -342,3 +351,30 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
   z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
 ]);
 export type RibClientEffect = z.infer<typeof ribClientEffectSchema>;
+
+// A persona a rib offers for direct chat — the cheap descriptor `listPersonas`
+// returns (no system prompt assembled here). `slug` is slash-safe so it can ride
+// a `/mind <slug>` command. `resolvePersona(slug)` later builds the full seed.
+export const personaSummarySchema = z
+  .object({
+    slug: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9][a-z0-9-]*$/, "slug must be lowercase alphanumeric/dash"),
+    name: z.string().min(1).max(80),
+    description: z.string().max(280).optional(),
+  })
+  .strict();
+export type PersonaSummary = z.infer<typeof personaSummarySchema>;
+
+// The aggregated wire shape from GET /api/personas — each summary namespaced
+// with its owning rib so the client can route a resolve back and disambiguate a
+// slug two ribs both expose.
+export const personaRefSchema = personaSummarySchema.extend({ ribId: ribIdSchema }).strict();
+export type PersonaRef = z.infer<typeof personaRefSchema>;
+
+export const listPersonasResponseSchema = z
+  .object({ personas: z.array(personaRefSchema) })
+  .strict();
+export type ListPersonasResponse = z.infer<typeof listPersonasResponseSchema>;

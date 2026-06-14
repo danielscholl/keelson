@@ -51,10 +51,13 @@ export function useRibActionDispatch(
                 const message = err instanceof Error ? err.message : String(err);
                 toast.push({ kind: "error", message: `open-chat handler failed: ${message}` });
               }
-            } else {
-              toast.push({ kind: "error", message: `${action.type}: invalid open-chat directive` });
+              return result;
             }
-            return result;
+            // Shaped like open-chat but invalid (e.g. an oversized prompt): report
+            // failure so the caller doesn't treat a dropped directive as success.
+            const error = `${action.type}: invalid open-chat directive`;
+            toast.push({ kind: "error", message: error });
+            return { ok: false, error };
           }
           toast.push({ kind: "ok", message: `${action.type} ✓` });
           // Isolate the callback: a throwing onSuccess must not turn a
