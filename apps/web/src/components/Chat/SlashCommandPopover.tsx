@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { useCallback, useEffect, useRef } from "react";
-import type { SlashCommand } from "../../lib/slashCommands.ts";
+import type { SlashCommand, SlashCommandFamily } from "../../lib/slashCommands.ts";
 
 interface SlashCommandPopoverProps {
   popoverId: string;
@@ -12,13 +12,15 @@ interface SlashCommandPopoverProps {
   anchorSelector?: string;
   // `list` shows filtered command rows for picking. `help` shows a single
   // usage strip for the command the user has already committed to (typed
-  // `/{name} ` with a trailing space). `args` shows workflow-name suggestions
-  // while the user is typing `/workflow run <partial>`.
+  // `/{name} ` with a trailing space). `args` shows argument suggestions
+  // (workflow names for `/workflow run`, persona slugs for `/mind`).
   mode: "list" | "help" | "args";
   // Filtered candidate list when mode is `list`. Ignored otherwise.
   items: readonly SlashCommand[];
-  // Workflow-name suggestions when mode is `args`. Ignored otherwise.
+  // Argument suggestions when mode is `args`. Ignored otherwise.
   argItems?: readonly { name: string; description?: string }[];
+  // Which command's args are showing — drives the row tag + empty-state copy.
+  argFamily?: SlashCommandFamily;
   // Index of the currently highlighted row (arrow-key controlled by the
   // composer's textarea — the popover is read-only for keyboard input).
   selectedIndex: number;
@@ -41,6 +43,7 @@ export function SlashCommandPopover({
   mode,
   items,
   argItems = [],
+  argFamily = "workflow",
   selectedIndex,
   helpCommand,
   onSelect,
@@ -138,7 +141,7 @@ export function SlashCommandPopover({
               }}
             >
               <span className="slash-popover-row-name">{item.name}</span>
-              <span className="slash-popover-row-tag">WORKFLOW</span>
+              <span className="slash-popover-row-tag">{familyTag(argFamily)}</span>
               {item.description !== undefined && (
                 <span className="slash-popover-row-desc">{item.description}</span>
               )}
@@ -147,7 +150,9 @@ export function SlashCommandPopover({
         </div>
       )}
       {mode === "args" && argItems.length === 0 && (
-        <div className="slash-popover-empty">No matching workflows.</div>
+        <div className="slash-popover-empty">
+          {argFamily === "mind" ? "No matching minds." : "No matching workflows."}
+        </div>
       )}
       {mode === "help" && helpCommand !== null && (
         <div className="slash-popover-help">

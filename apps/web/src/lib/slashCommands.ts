@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-export type SlashCommandFamily = "project" | "workflow";
+export type SlashCommandFamily = "project" | "workflow" | "mind";
 
 export interface SlashCommand {
   name: string;
@@ -23,6 +23,12 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     family: "workflow",
     description: "List workflows and start a run",
     usage: "run <name> [arguments]  ·  (no args: list)",
+  },
+  {
+    name: "mind",
+    family: "mind",
+    description: "Open a mind as a seeded chat",
+    usage: "<slug>  ·  (no args: list)",
   },
 ];
 
@@ -68,6 +74,15 @@ export function parseWorkflowCommand(rest: string): WorkflowCommand {
 const WORKFLOW_RUN_NAME_RE = /^\/workflow\s+run\s+(\S*)$/;
 export function workflowRunNamePartial(input: string): string | null {
   const m = WORKFLOW_RUN_NAME_RE.exec(input);
+  return m ? m[1]! : null;
+}
+
+// `/mind <partial>` — the slug is the first token after the name (no `run`
+// sub-verb), so the partial is whatever's typed after `/mind `. Drives the
+// persona type-ahead in the picker.
+const MIND_NAME_RE = /^\/mind\s+(\S*)$/;
+export function mindNamePartial(input: string): string | null {
+  const m = MIND_NAME_RE.exec(input);
   return m ? m[1]! : null;
 }
 
