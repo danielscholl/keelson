@@ -117,11 +117,16 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
     parsed?.success && parsed.data.view === "board" ? parsed.data : null;
 
   const expand = () =>
-    openCanvas({
-      kind: "view",
-      source: { type: "snapshot", key: region.key },
-      ...(board?.title ? { title: board.title } : {}),
-    });
+    openCanvas(
+      {
+        kind: "view",
+        source: { type: "snapshot", key: region.key },
+        ...(board?.title ? { title: board.title } : {}),
+      },
+      // So an Enter button clicked in the expanded drawer opens a seeded chat the
+      // same way it does inline, instead of being swallowed with a success toast.
+      { onOpenChat },
+    );
 
   // The gradient lane head: static identity (glyph + title) the rib supplies,
   // plus the board's live status/scope/pulse, and the region's own controls.
