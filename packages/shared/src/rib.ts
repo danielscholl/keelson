@@ -319,3 +319,26 @@ export const ribActionResponseSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false), error: z.string() }).strict(),
 ]);
 export type RibActionResponse = z.infer<typeof ribActionResponseSchema>;
+
+// A seed for a fresh, seeded chat — the systemPrompt and name capped at the
+// server's createConversation limits so a directive can be rejected client-side
+// rather than 400 at create. `openingPrompt` is optional: omitted means the chat
+// opens without an auto-fired first turn.
+export const openChatSeedSchema = z
+  .object({
+    systemPrompt: z.string().min(1).max(8000),
+    name: z.string().min(1).max(80),
+    openingPrompt: z.string().min(1).optional(),
+  })
+  .strict();
+export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
+
+// A directive a rib's onAction success MAY carry inside `data` to ask the SPA to
+// perform a client-side effect. Generic across ribs/actions; `RibActionResult.data`
+// stays `unknown` — this is an optional recognized shape, not a narrowing. Today
+// the only effect is `open-chat` (open a fresh conversation seeded with `seed`,
+// the same path the ✦ "Explore in chat" button uses).
+export const ribClientEffectSchema = z.discriminatedUnion("effect", [
+  z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
+]);
+export type RibClientEffect = z.infer<typeof ribClientEffectSchema>;

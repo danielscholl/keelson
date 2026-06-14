@@ -6,6 +6,7 @@ import {
   type CanvasBoardView,
   type CanvasTone,
   canvasViewSchema,
+  type OpenChatSeed,
   type RibSurfaceDescriptor,
   ribIdFromKey,
 } from "@keelson/shared";
@@ -18,7 +19,7 @@ import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
-import { buildExploreSeed, type ExploreHandler } from "../lib/exploreSeed.ts";
+import { buildExploreSeed, type ExploreHandler, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 
 interface Region {
   key: string;
@@ -98,7 +99,23 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
     () => (region.workflow ? runRefresh.trigger() : reload()),
     [region.workflow, runRefresh.trigger, reload],
   );
-  const actions = useRibActionDispatch(ribId, { onSuccess });
+  // An open-chat directive rides the same panel→chat path as the ✦ button; a
+  // missing openingPrompt defaults to the hidden seeded-opening sentinel.
+  const onOpenChat = useCallback(
+    (seed: OpenChatSeed) =>
+      onExplore?.({
+        systemPrompt: seed.systemPrompt,
+        name: seed.name,
+        openingPrompt: seed.openingPrompt ?? OPENING_PROMPT,
+      }),
+    [onExplore],
+  );
+  // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
+  // intercept an open-chat directive, no-op, and swallow the normal success path.
+  const actions = useRibActionDispatch(ribId, {
+    onSuccess,
+    onOpenChat: onExplore ? onOpenChat : undefined,
+  });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
