@@ -12,6 +12,7 @@
 export { z } from "zod";
 export * from "./canvas.ts";
 export * from "./chat.ts";
+export * from "./commands.ts";
 export * from "./description.ts";
 export * from "./memory.ts";
 export * from "./projects.ts";

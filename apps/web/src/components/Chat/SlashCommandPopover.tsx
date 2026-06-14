@@ -13,7 +13,7 @@ interface SlashCommandPopoverProps {
   // `list` shows filtered command rows for picking. `help` shows a single
   // usage strip for the command the user has already committed to (typed
   // `/{name} ` with a trailing space). `args` shows argument suggestions
-  // (workflow names for `/workflow run`, persona slugs for `/mind`).
+  // (workflow names for `/workflow run`, or a rib command's completions).
   mode: "list" | "help" | "args";
   // Filtered candidate list when mode is `list`. Ignored otherwise.
   items: readonly SlashCommand[];
@@ -151,7 +151,7 @@ export function SlashCommandPopover({
       )}
       {mode === "args" && argItems.length === 0 && (
         <div className="slash-popover-empty">
-          {argFamily === "mind" ? "No matching minds." : "No matching workflows."}
+          {argFamily === "workflow" ? "No matching workflows." : "No matching options."}
         </div>
       )}
       {mode === "help" && helpCommand !== null && (

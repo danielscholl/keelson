@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
 import type { MessageChunk } from "./chat.ts";
+import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
 import type { ToolDefinition } from "./tools.ts";
 
 /**
@@ -285,15 +286,36 @@ export interface Rib {
   contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
   // Inbound action handler reached via POST /api/ribs/:id/action.
   onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
-  // Personas the rib offers for direct chat, surfaced at GET /api/personas (the
-  // source for the `/mind` command). `listPersonas` is cheap — no system prompt
-  // assembled. `resolvePersona` lazily builds the seed for one slug on selection,
-  // returning null for an unknown slug.
-  listPersonas?(ctx: RibContext): readonly PersonaSummary[] | Promise<readonly PersonaSummary[]>;
-  resolvePersona?(
+  // Agents the rib offers for direct chat — named, reusable turn templates
+  // (a system prompt plus an optional model), surfaced at GET /api/agents.
+  // `listAgents` is cheap (no system prompt assembled); `resolveAgent` lazily
+  // builds one slug's seed on selection, returning null for an unknown slug. A
+  // rib's slash command or a board action resolves one and opens it as a seeded
+  // chat.
+  listAgents?(ctx: RibContext): readonly AgentSummary[] | Promise<readonly AgentSummary[]>;
+  resolveAgent?(
     slug: string,
     ctx: RibContext,
   ): (OpenChatSeed | null) | Promise<OpenChatSeed | null>;
+  // Slash commands the rib contributes to the chat composer, surfaced at
+  // GET /api/commands. `listCommands` is cheap (static descriptors). `invokeCommand`
+  // runs one server-side and returns a closed CommandEffect the surface performs
+  // (open one of the rib's agents, run a workflow, or show a message), keeping the
+  // rib's logic off the trusted surfaces. `completeCommand` (optional) backs the
+  // argument type-ahead for a command whose descriptor sets `argument.completes`.
+  listCommands?(
+    ctx: RibContext,
+  ): readonly RibCommandDescriptor[] | Promise<readonly RibCommandDescriptor[]>;
+  invokeCommand?(
+    name: string,
+    arg: string,
+    ctx: RibContext,
+  ): CommandInvokeResult | Promise<CommandInvokeResult>;
+  completeCommand?(
+    name: string,
+    prefix: string,
+    ctx: RibContext,
+  ): readonly CommandCompletion[] | Promise<readonly CommandCompletion[]>;
   // Auth-status probe surfaced in GET /api/ribs (and, optionally, doctor).
   authStatus?(ctx: RibContext): Promise<RibAuthStatus> | RibAuthStatus;
   // Sync or async — the harness awaits the returned promise (if any)
@@ -332,12 +354,15 @@ export type RibActionResponse = z.infer<typeof ribActionResponseSchema>;
 // A seed for a fresh, seeded chat — the systemPrompt and name capped at the
 // server's createConversation limits so a directive can be rejected client-side
 // rather than 400 at create. `openingPrompt` is optional: omitted means the chat
-// opens without an auto-fired first turn.
+// opens without an auto-fired first turn. `model` is the agent's configured
+// model, carried so entering an agent uses its model rather than the surface's
+// session default; omitted falls back to the selected model.
 export const openChatSeedSchema = z
   .object({
     systemPrompt: z.string().min(1).max(8000),
     name: z.string().min(1).max(80),
     openingPrompt: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
   })
   .strict();
 export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
@@ -352,10 +377,10 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
 ]);
 export type RibClientEffect = z.infer<typeof ribClientEffectSchema>;
 
-// A persona a rib offers for direct chat — the cheap descriptor `listPersonas`
+// An agent a rib offers for direct chat — the cheap descriptor `listAgents`
 // returns (no system prompt assembled here). `slug` is slash-safe so it can ride
-// a `/mind <slug>` command. `resolvePersona(slug)` later builds the full seed.
-export const personaSummarySchema = z
+// a slash command. `resolveAgent(slug)` later builds the full seed.
+export const agentSummarySchema = z
   .object({
     slug: z
       .string()
@@ -366,15 +391,13 @@ export const personaSummarySchema = z
     description: z.string().max(280).optional(),
   })
   .strict();
-export type PersonaSummary = z.infer<typeof personaSummarySchema>;
+export type AgentSummary = z.infer<typeof agentSummarySchema>;
 
-// The aggregated wire shape from GET /api/personas — each summary namespaced
+// The aggregated wire shape from GET /api/agents — each summary namespaced
 // with its owning rib so the client can route a resolve back and disambiguate a
 // slug two ribs both expose.
-export const personaRefSchema = personaSummarySchema.extend({ ribId: ribIdSchema }).strict();
-export type PersonaRef = z.infer<typeof personaRefSchema>;
+export const agentRefSchema = agentSummarySchema.extend({ ribId: ribIdSchema }).strict();
+export type AgentRef = z.infer<typeof agentRefSchema>;
 
-export const listPersonasResponseSchema = z
-  .object({ personas: z.array(personaRefSchema) })
-  .strict();
-export type ListPersonasResponse = z.infer<typeof listPersonasResponseSchema>;
+export const listAgentsResponseSchema = z.object({ agents: z.array(agentRefSchema) }).strict();
+export type ListAgentsResponse = z.infer<typeof listAgentsResponseSchema>;
