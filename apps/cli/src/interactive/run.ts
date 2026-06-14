@@ -23,9 +23,11 @@ import {
   createConversation,
   getConversation,
   listConversations,
+  listPersonas,
   listProviders,
   type ProviderInfoRow,
   pickDefaultHttpProvider,
+  resolvePersona,
 } from "../http/chat-client.ts";
 import { createProject, listProjects } from "../http/projects-client.ts";
 import { listRibs } from "../http/ribs-client.ts";
@@ -163,6 +165,10 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     model: setup.model,
     conversationId: setup.conversationId,
     binding: setup.binding,
+    // One-shot seed for the next conversation the pump creates (the `/mind` path),
+    // cleared once applied so later turns in the same chat don't re-seed.
+    seedSystemPrompt: undefined as string | undefined,
+    conversationName: undefined as string | undefined,
   };
   let busy = false;
   let activeRuns = 0;
@@ -426,6 +432,60 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
       run: runWorkflowCommand,
     },
     {
+      command: {
+        name: "mind",
+        description: "open a mind as a seeded chat (starts a new conversation)",
+        argumentHint: "<slug>",
+        getArgumentCompletions: async (prefix) => {
+          try {
+            return (await listPersonas(opts.baseUrl))
+              .filter((p) => p.slug.startsWith(prefix))
+              .map((p) => ({ value: p.slug, label: p.slug, description: p.description }));
+          } catch {
+            return [];
+          }
+        },
+      },
+      run: async (arg) => {
+        const slug = arg.trim();
+        let personas: Awaited<ReturnType<typeof listPersonas>>;
+        try {
+          personas = await listPersonas(opts.baseUrl);
+        } catch (e) {
+          warn(`couldn't load minds: ${e instanceof Error ? e.message : String(e)}`);
+          return;
+        }
+        if (personas.length === 0) {
+          info("no minds available — author one in Chamber first");
+          return;
+        }
+        if (slug.length === 0) {
+          for (const p of personas) {
+            surface.addChild(
+              new Text(`${brass("·")} ${p.slug} ${dim(`— ${p.description ?? ""}`)}`, 1, 0),
+            );
+          }
+          tui.requestRender();
+          return;
+        }
+        const ref = personas.find((p) => p.slug === slug);
+        if (!ref) {
+          warn(`no mind '${slug}'`);
+          return;
+        }
+        try {
+          const seed = await resolvePersona(opts.baseUrl, ref.ribId, ref.slug);
+          session.seedSystemPrompt = seed.systemPrompt;
+          session.conversationName = seed.name;
+          resetConversation(`entering ${seed.name}`);
+          queue.push(seed.openingPrompt ?? "Introduce yourself briefly, in character.");
+          pump();
+        } catch (e) {
+          warn(`couldn't open ${slug}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      },
+    },
+    {
       command: { name: "exit", description: "leave interactive chat" },
       run: () => exit(EXIT_OK),
     },
@@ -464,8 +524,15 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
             ...(session.binding.projectId !== undefined
               ? { projectId: session.binding.projectId }
               : {}),
+            ...(session.seedSystemPrompt !== undefined
+              ? { seedSystemPrompt: session.seedSystemPrompt }
+              : {}),
+            ...(session.conversationName !== undefined ? { name: session.conversationName } : {}),
           });
           session.conversationId = conv.id;
+          // One-shot: the seed belongs to this conversation only.
+          session.seedSystemPrompt = undefined;
+          session.conversationName = undefined;
         }
         surface.addChild(userLine(message));
         loader = new Loader(tui, navy, dim, "thinking");
