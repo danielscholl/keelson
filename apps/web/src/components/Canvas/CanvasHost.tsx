@@ -1,4 +1,4 @@
-import type { CanvasDocument, CanvasSource } from "@keelson/shared";
+import type { CanvasDocument, CanvasSource, OpenChatSeed } from "@keelson/shared";
 import { ribIdFromKey } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -16,6 +16,10 @@ import { ViewBody } from "./ViewBody.tsx";
 // handed in a docked footer below the scrollable body.
 interface CanvasOpenOptions {
   footer?: ReactNode;
+  // A board action rendered in the drawer may return an open-chat directive; the
+  // opener (e.g. a surface region) supplies the handler so the drawer's Enter
+  // buttons behave like the inline panel's instead of silently no-op'ing.
+  onOpenChat?: (seed: OpenChatSeed) => void;
 }
 
 interface CanvasApi {
@@ -26,6 +30,7 @@ interface CanvasApi {
 interface CanvasState {
   doc: CanvasDocument;
   footer: ReactNode;
+  onOpenChat?: (seed: OpenChatSeed) => void;
 }
 
 const CanvasContext = createContext<CanvasApi | null>(null);
@@ -49,7 +54,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CanvasState | null>(null);
   const openCanvas = useCallback(
     (doc: CanvasDocument, opts?: CanvasOpenOptions) =>
-      setState({ doc, footer: opts?.footer ?? null }),
+      setState({ doc, footer: opts?.footer ?? null, onOpenChat: opts?.onOpenChat }),
     [],
   );
   const close = useCallback(() => setState(null), []);
@@ -66,7 +71,14 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   return (
     <CanvasContext.Provider value={{ openCanvas, close }}>
       {children}
-      {state && <CanvasDrawer doc={state.doc} footer={state.footer} onClose={close} />}
+      {state && (
+        <CanvasDrawer
+          doc={state.doc}
+          footer={state.footer}
+          {...(state.onOpenChat ? { onOpenChat: state.onOpenChat } : {})}
+          onClose={close}
+        />
+      )}
     </CanvasContext.Provider>
   );
 }
@@ -74,10 +86,12 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
 function CanvasDrawer({
   doc,
   footer,
+  onOpenChat,
   onClose,
 }: {
   doc: CanvasDocument;
   footer: ReactNode;
+  onOpenChat?: (seed: OpenChatSeed) => void;
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
@@ -95,7 +109,7 @@ function CanvasDrawer({
         </button>
       </header>
       <div className="canvas-drawer-body">
-        <CanvasBody doc={doc} />
+        <CanvasBody doc={doc} onOpenChat={onOpenChat} />
       </div>
       {footer && <footer className="canvas-drawer-footer">{footer}</footer>}
     </aside>
@@ -105,13 +119,19 @@ function CanvasDrawer({
 // Closed canvas-kind registry: every CanvasKind has an explicit branch, and a
 // new kind makes this a compile error rather than a silent blank render. `html`
 // stays reserved until the iframe-origin security pass.
-function CanvasBody({ doc }: { doc: CanvasDocument }) {
+function CanvasBody({
+  doc,
+  onOpenChat,
+}: {
+  doc: CanvasDocument;
+  onOpenChat?: (seed: OpenChatSeed) => void;
+}) {
   switch (doc.kind) {
     case "markdown":
       return <MarkdownBody source={doc.source} />;
     case "view":
       // Key by source so switching sources remounts with fresh state.
-      return <ViewCanvas key={sourceKey(doc.source)} source={doc.source} />;
+      return <ViewCanvas key={sourceKey(doc.source)} source={doc.source} onOpenChat={onOpenChat} />;
     case "html":
       return (
         <p className="canvas-drawer-note">
@@ -128,9 +148,25 @@ function CanvasBody({ doc }: { doc: CanvasDocument }) {
 // A drawer-rendered board can carry an `actions` section; dispatch it to the
 // owning rib (id from the snapshot key). Unlike a surface region there's no
 // post-success reload here — the drawer's open WS pushes the recomposed frame.
-function ViewCanvas({ source }: { source: CanvasSource }) {
+function ViewCanvas({
+  source,
+  onOpenChat,
+}: {
+  source: CanvasSource;
+  onOpenChat?: (seed: OpenChatSeed) => void;
+}) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
-  const actions = useRibActionDispatch(ribId);
+  const { close } = useCanvas();
+  // Opening a seeded chat navigates away (to a fresh chat); close the drawer so
+  // it doesn't linger over the conversation.
+  const onOpenChatAndClose = useCallback(
+    (seed: OpenChatSeed) => {
+      onOpenChat?.(seed);
+      close();
+    },
+    [onOpenChat, close],
+  );
+  const actions = useRibActionDispatch(ribId, onOpenChat ? { onOpenChat: onOpenChatAndClose } : {});
   if (!ribId) return <ViewBody source={source} />;
   return (
     <BoardActionProvider run={actions.run} reveal={actions.reveal}>

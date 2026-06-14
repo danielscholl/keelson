@@ -1,4 +1,4 @@
-import type { Project } from "@keelson/shared";
+import type { PersonaRef, Project } from "@keelson/shared";
 import {
   type ChatFrame,
   type Conversation,
@@ -22,8 +22,10 @@ import {
   fetchProviders,
   fetchTools,
   getConversation,
+  getPersonas,
   listProjects,
   listWorkflows,
+  resolvePersona,
   startWorkflowRun,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
@@ -63,6 +65,7 @@ import {
   filterWorkflowNames,
   isCommittedToCommand,
   matchSlashCommand,
+  mindNamePartial,
   parseWorkflowCommand,
   type SlashCommand,
   type SlashCommandFamily,
@@ -311,9 +314,17 @@ export interface ChatProps {
   // Opens a started workflow run in the Workflows view (from a `/workflow run`
   // result block). App lifts this so it can switch tabs and deep-link the run.
   onOpenWorkflowRun?: (workflowName: string, runId: string) => void;
+  // Opens a fresh seeded conversation (the `/mind <slug>` path) — App wires this
+  // to the same setPendingSeed + goToFreshChat handler the ✦ button uses.
+  onOpenSeededChat?: (seed: ChatSeed) => void;
 }
 
-export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatProps = {}) {
+export function Chat({
+  pendingSeed,
+  onSeedConsumed,
+  onOpenWorkflowRun,
+  onOpenSeededChat,
+}: ChatProps = {}) {
   const { conversationId, setConversationId } = useConversation();
   const conversationIdRef = useRef<string | null>(conversationId);
   useEffect(() => {
@@ -414,6 +425,10 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
   // Guards the lazy fetch so rapid typing can't fire overlapping listWorkflows()
   // calls while the first is still in flight.
   const workflowNamesFetchingRef = useRef(false);
+  // Personas for `/mind <slug>` type-ahead, fetched lazily the first time the
+  // user enters that context; null until then. Same guard pattern as workflows.
+  const [personas, setPersonas] = useState<PersonaRef[] | null>(null);
+  const personasFetchingRef = useRef(false);
 
   // Add-to-notebook state. The modal opens when a target entry string is set
   // (the "Edit…" path); the one-click button appends directly. `saving` gates
@@ -1228,20 +1243,64 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     [activeProjectId, projectList],
   );
 
+  // `/mind` — no args lists the available minds; `/mind <slug>` resolves the
+  // mind's seed and opens a fresh seeded conversation (navigating away, so the
+  // inline command row is abandoned — the staleness guard no-ops its patch).
+  const dispatchMindCommand = useCallback(
+    async (rest: string): Promise<CommandResult> => {
+      const list = personas ?? (await getPersonas().catch(() => null));
+      if (!list || list.length === 0) return { ok: true, message: "No minds available." };
+      const slug = rest.trim();
+      if (slug.length === 0) {
+        const rows = list.map((p) =>
+          p.description ? `  ${p.slug} — ${p.description}` : `  ${p.slug}`,
+        );
+        return { ok: true, message: ["Minds:", ...rows].join("\n") };
+      }
+      // First match wins if two ribs expose the same slug (only chamber does today).
+      const ref = list.find((p) => p.slug === slug);
+      if (!ref) return { ok: false, message: `No mind "${slug}".` };
+      try {
+        const seed = await resolvePersona(ref.ribId, ref.slug);
+        onOpenSeededChat?.({
+          systemPrompt: seed.systemPrompt,
+          name: seed.name,
+          openingPrompt: seed.openingPrompt ?? OPENING_PROMPT,
+        });
+        return { ok: true, message: `Opening ${seed.name}…` };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    [personas, onOpenSeededChat],
+  );
+
   const slashFilteredItems = useMemo(() => filterSlashCommands(input), [input]);
   const slashHelpCommand = useMemo(() => matchSlashCommand(input), [input]);
   // Non-null while typing `/workflow run <partial>` — switches the picker to
   // workflow-name suggestions.
   const workflowRunPartial = useMemo(() => workflowRunNamePartial(input), [input]);
-  const slashArgItems = useMemo(
-    () =>
-      workflowRunPartial === null || workflowNames === null
-        ? []
-        : filterWorkflowNames(workflowNames, workflowRunPartial),
-    [workflowRunPartial, workflowNames],
-  );
+  // Non-null while typing `/mind <partial>` — switches the picker to persona
+  // suggestions. The slug is shown as the row `name`; matching is on slug.
+  const mindPartial = useMemo(() => mindNamePartial(input), [input]);
+  const slashArgItems = useMemo(() => {
+    if (workflowRunPartial !== null && workflowNames !== null) {
+      return filterWorkflowNames(workflowNames, workflowRunPartial);
+    }
+    if (mindPartial !== null && personas !== null) {
+      const rows = personas.map((p) =>
+        p.description ? { name: p.slug, description: p.description } : { name: p.slug },
+      );
+      return filterWorkflowNames(rows, mindPartial);
+    }
+    return [];
+  }, [workflowRunPartial, workflowNames, mindPartial, personas]);
   const slashMode: "list" | "help" | "args" =
-    workflowRunPartial !== null ? "args" : isCommittedToCommand(input) ? "help" : "list";
+    workflowRunPartial !== null || mindPartial !== null
+      ? "args"
+      : isCommittedToCommand(input)
+        ? "help"
+        : "list";
   // The navigable row count for the active mode (commands vs workflow names).
   const slashActiveLength = slashMode === "args" ? slashArgItems.length : slashFilteredItems.length;
 
@@ -1288,6 +1347,29 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     };
   }, [workflowRunPartial, workflowNames, activeProjectId]);
 
+  // Lazy-load personas the first time the user reaches `/mind <…>`. A failed
+  // fetch leaves the list null — the picker just shows no suggestions.
+  useEffect(() => {
+    if (mindPartial === null || personas !== null) return;
+    if (personasFetchingRef.current) return;
+    personasFetchingRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await getPersonas();
+        if (!cancelled) setPersonas(list);
+      } catch {
+        // Leave personas null; type-ahead simply offers nothing this session.
+      } finally {
+        personasFetchingRef.current = false;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      personasFetchingRef.current = false;
+    };
+  }, [mindPartial, personas]);
+
   // Open the picker when the user starts a slash command; close it as soon as
   // the input stops starting with `/`. Keeping selectedIndex in range as the
   // active candidate set (commands or workflow names) shrinks.
@@ -1321,12 +1403,16 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     setSlashSelectedIndex(0);
   }, []);
 
-  // Completing a workflow-name suggestion leaves a trailing space so the user
-  // can append $ARGUMENTS, or press Enter to run immediately.
-  const onSlashArgSelect = useCallback((name: string) => {
-    setInput(`/workflow run ${name} `);
-    setSlashSelectedIndex(0);
-  }, []);
+  // Completing an arg suggestion. For `/workflow run` the trailing space lets
+  // the user append $ARGUMENTS or Enter to run; for `/mind <slug>` the slug is
+  // the whole arg, so leave it ready to open on Enter.
+  const onSlashArgSelect = useCallback(
+    (name: string) => {
+      setInput(mindPartial !== null ? `/mind ${name} ` : `/workflow run ${name} `);
+      setSlashSelectedIndex(0);
+    },
+    [mindPartial],
+  );
 
   const onSubmit = useCallback(() => {
     const trimmed = input.trim();
@@ -1354,7 +1440,9 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
           ? dispatchProjectCommand
           : matched.name === "workflow"
             ? dispatchWorkflowCommand
-            : null;
+            : matched.name === "mind"
+              ? dispatchMindCommand
+              : null;
       if (dispatcher) {
         const commandMessageId = newId();
         setMessages((prev) => [
@@ -1404,7 +1492,15 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
     }
     setInput("");
     void doSend(trimmed);
-  }, [dispatchProjectCommand, dispatchWorkflowCommand, doSend, hydrating, input, streaming]);
+  }, [
+    dispatchProjectCommand,
+    dispatchWorkflowCommand,
+    dispatchMindCommand,
+    doSend,
+    hydrating,
+    input,
+    streaming,
+  ]);
 
   // Cancels auto-send by returning the prompt to the textarea for editing.
   const onCancelQueue = useCallback(() => {
@@ -1950,6 +2046,7 @@ export function Chat({ pendingSeed, onSeedConsumed, onOpenWorkflowRun }: ChatPro
           mode={slashMode}
           items={slashFilteredItems}
           argItems={slashArgItems}
+          argFamily={mindPartial !== null ? "mind" : "workflow"}
           selectedIndex={slashSelectedIndex}
           helpCommand={slashHelpCommand}
           onSelect={onSlashSelect}
