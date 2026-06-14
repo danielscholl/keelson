@@ -15,7 +15,14 @@ import {
   Text,
   TUI,
 } from "@earendil-works/pi-tui";
-import type { Project, ReasoningEffortLevel, TokenUsage, WorkflowFrame } from "@keelson/shared";
+import type {
+  CommandCompletion,
+  CommandRef,
+  Project,
+  ReasoningEffortLevel,
+  TokenUsage,
+  WorkflowFrame,
+} from "@keelson/shared";
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import {
@@ -23,12 +30,12 @@ import {
   createConversation,
   getConversation,
   listConversations,
-  listPersonas,
   listProviders,
   type ProviderInfoRow,
   pickDefaultHttpProvider,
-  resolvePersona,
+  resolveAgent,
 } from "../http/chat-client.ts";
+import { completeRibCommand, invokeRibCommand, listRibCommands } from "../http/commands-client.ts";
 import { createProject, listProjects } from "../http/projects-client.ts";
 import { listRibs } from "../http/ribs-client.ts";
 import {
@@ -73,6 +80,7 @@ interface SessionSetup {
   conversationId?: string;
   binding: ProjectBinding;
   welcome: WelcomeData;
+  ribCommands: CommandRef[];
 }
 
 function defaultModelFor(providers: readonly ProviderInfoRow[], id: string): string | undefined {
@@ -105,12 +113,14 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
 
   // Welcome-card data is decorative; a failing endpoint degrades to an empty
   // section rather than blocking the session.
-  const [ribsRes, convsRes] = await Promise.allSettled([
+  const [ribsRes, convsRes, commandsRes] = await Promise.allSettled([
     listRibs(opts.baseUrl),
     listConversations(opts.baseUrl),
+    listRibCommands(opts.baseUrl),
   ]);
   const ribs = ribsRes.status === "fulfilled" ? ribsRes.value : [];
   const conversations = convsRes.status === "fulfilled" ? convsRes.value : [];
+  const ribCommands = commandsRes.status === "fulfilled" ? commandsRes.value : [];
   const recent = conversations
     .filter((c) => c.updatedAt !== undefined)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
@@ -138,6 +148,7 @@ async function prepareSession(opts: InteractiveChatOptions): Promise<SessionSetu
     ...(opts.conversationId !== undefined ? { conversationId: opts.conversationId } : {}),
     binding,
     welcome,
+    ribCommands,
   };
 }
 
@@ -237,31 +248,39 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     workflowsCache ??= (await listWorkflows(opts.baseUrl)).workflows;
     return workflowsCache;
   };
-  // Personas are NOT session-cached like projects/workflows: a mind can be
-  // genesis-ed mid-session (a chat tool call), so /mind must read fresh each time.
-
+  // Per-command completion cache: fetch the full list once (empty prefix) and
+  // filter locally, like the project/workflow caches above and the SPA — avoids
+  // a server round-trip (and the rib's disk reads) on every keystroke. Relies on
+  // the completeCommand contract that an empty prefix returns the full candidate
+  // set (packages/shared/src/rib.ts); the local filter then narrows by prefix.
+  const ribCompletionsCache = new Map<string, CommandCompletion[]>();
+  const loadRibCompletionsCached = async (cmd: CommandRef): Promise<CommandCompletion[]> => {
+    let all = ribCompletionsCache.get(cmd.name);
+    if (all === undefined) {
+      all = await completeRibCommand(opts.baseUrl, cmd.ribId, cmd.name, "");
+      ribCompletionsCache.set(cmd.name, all);
+    }
+    return all;
+  };
   const chatProviders = setup.providers.filter((p) => p.id !== "workflow");
 
-  const runWorkflowCommand = async (arg: string): Promise<void> => {
-    const parsed = parseRunArg(arg);
-    if (parsed === null) {
-      warn("usage: /run <workflow> [key=value …]");
-      return;
-    }
+  // Start a workflow run and stream its node frames into the transcript. Shared by
+  // the `/run` command and a rib command's `run-workflow` effect.
+  const launchRun = async (name: string, inputs: Record<string, string>): Promise<void> => {
     let runId: string;
     try {
       const body = {
-        inputs: parsed.inputs,
+        inputs,
         ...(session.binding.projectId !== undefined
           ? { projectId: session.binding.projectId }
           : { workingDir: process.cwd() }),
       };
-      ({ runId } = await startRun(opts.baseUrl, parsed.name, body));
+      ({ runId } = await startRun(opts.baseUrl, name, body));
     } catch (err) {
       warn(`✗ ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    surface.addChild(new Text(`${brass("▶")} ${parsed.name} ${dim(`run ${runId}`)}`, 1, 0));
+    surface.addChild(new Text(`${brass("▶")} ${name} ${dim(`run ${runId}`)}`, 1, 0));
     activeRuns += 1;
     refreshActivity();
     const onFrame = (frame: WorkflowFrame): void => {
@@ -289,8 +308,8 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           surface.addChild(
             new Text(
               frame.status === "succeeded"
-                ? `${brass("▶")} ${parsed.name} ${dim("succeeded")}`
-                : red(`▶ ${parsed.name} ${frame.status}`),
+                ? `${brass("▶")} ${name} ${dim("succeeded")}`
+                : red(`▶ ${name} ${frame.status}`),
               1,
               0,
             ),
@@ -309,6 +328,15 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         activeRuns -= 1;
         refreshActivity();
       });
+  };
+
+  const runWorkflowCommand = async (arg: string): Promise<void> => {
+    const parsed = parseRunArg(arg);
+    if (parsed === null) {
+      warn("usage: /run <workflow> [key=value …]");
+      return;
+    }
+    await launchRun(parsed.name, parsed.inputs);
   };
 
   const slashHandlers: { command: SlashCommand; run: (arg: string) => void | Promise<void> }[] = [
@@ -434,71 +462,102 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
       run: runWorkflowCommand,
     },
     {
-      command: {
-        name: "mind",
-        description: "open a mind as a seeded chat (starts a new conversation)",
-        argumentHint: "<slug>",
-        getArgumentCompletions: async (prefix) => {
-          try {
-            return (await listPersonas(opts.baseUrl))
-              .filter((p) => p.slug.startsWith(prefix))
-              .map((p) => ({ value: p.slug, label: p.slug, description: p.description }));
-          } catch {
-            return [];
-          }
-        },
-      },
-      run: async (arg) => {
-        // A turn is streaming: the seed is a single one-shot slot the next created
-        // conversation consumes, so switching minds mid-stream would mis-seed the
-        // queued opener. Mirror the SPA, which refuses slash commands while busy.
-        if (busy) {
-          warn("finish the current turn before entering a mind");
-          return;
-        }
-        const slug = arg.trim();
-        let personas: Awaited<ReturnType<typeof listPersonas>>;
-        try {
-          personas = await listPersonas(opts.baseUrl);
-        } catch (e) {
-          warn(`couldn't load minds: ${e instanceof Error ? e.message : String(e)}`);
-          return;
-        }
-        if (personas.length === 0) {
-          info("no minds available — author one in Chamber first");
-          return;
-        }
-        if (slug.length === 0) {
-          for (const p of personas) {
-            surface.addChild(
-              new Text(`${brass("·")} ${p.slug} ${dim(`— ${p.description ?? ""}`)}`, 1, 0),
-            );
-          }
-          tui.requestRender();
-          return;
-        }
-        const ref = personas.find((p) => p.slug === slug);
-        if (!ref) {
-          warn(`no mind '${slug}'`);
-          return;
-        }
-        try {
-          const seed = await resolvePersona(opts.baseUrl, ref.ribId, ref.slug);
-          session.seedSystemPrompt = seed.systemPrompt;
-          session.conversationName = seed.name;
-          resetConversation(`entering ${seed.name}`);
-          queue.push(seed.openingPrompt ?? "Introduce yourself briefly, in character.");
-          pump();
-        } catch (e) {
-          warn(`couldn't open ${slug}: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      },
-    },
-    {
       command: { name: "exit", description: "leave interactive chat" },
       run: () => exit(EXIT_OK),
     },
   ];
+
+  // Rib-contributed commands (GET /api/commands) merge into the same slash menu as
+  // the base commands above. The harness performs the closed effect a command's
+  // invoke returns — open one of the rib's agents, run a workflow, or print a
+  // message — so the surface carries no per-rib command logic.
+  const performRibCommand = async (cmd: CommandRef, arg: string): Promise<void> => {
+    let result: Awaited<ReturnType<typeof invokeRibCommand>>;
+    try {
+      result = await invokeRibCommand(opts.baseUrl, cmd.ribId, cmd.name, arg);
+    } catch (e) {
+      warn(`✗ ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    if (!result.ok) {
+      warn(result.error);
+      return;
+    }
+    const effect = result.effect;
+    if (effect.effect === "message") {
+      for (const line of effect.text.split("\n")) surface.addChild(new Text(line, 1, 0));
+      tui.requestRender();
+      return;
+    }
+    if (effect.effect === "run-workflow") {
+      await launchRun(effect.workflow, effect.args ? { ARGUMENTS: effect.args } : {});
+      return;
+    }
+    // open-agent enters a fresh seeded chat, which resets the conversation — gate
+    // it while a turn is streaming. The invoke above is a side-effect-free resolver
+    // (rib contract), so running it before this check mutates nothing; only this
+    // conversation-resetting action is busy-incompatible — a message or run-workflow
+    // effect, like base /run, is fine mid-turn.
+    if (busy) {
+      warn("finish the current turn before entering an agent");
+      return;
+    }
+    try {
+      const seed = await resolveAgent(opts.baseUrl, effect.ribId, effect.slug);
+      // A turn can start during the await above; re-check before resetting so we
+      // never reset/seed the conversation mid-stream.
+      if (busy) {
+        warn("finish the current turn before entering an agent");
+        return;
+      }
+      session.seedSystemPrompt = seed.systemPrompt;
+      session.conversationName = seed.name;
+      // Apply the agent's model reference coherently: pin its provider when it
+      // names one, then its model — or reset to the (resulting) provider's
+      // default when the agent pins no model, so a prior agent's model can't leak
+      // into this conversation.
+      if (seed.providerId !== undefined && seed.providerId !== session.providerId) {
+        session.providerId = seed.providerId;
+      }
+      session.model = seed.model ?? defaultModelFor(setup.providers, session.providerId);
+      footer.set({
+        providerId: session.providerId,
+        ...(session.model !== undefined ? { model: session.model } : { model: undefined }),
+      });
+      resetConversation(`entering ${seed.name}`);
+      queue.push(seed.openingPrompt ?? "Introduce yourself briefly, in character.");
+      pump();
+    } catch (e) {
+      warn(`✗ ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  for (const cmd of setup.ribCommands) {
+    // Base commands are authoritative — skip a rib command that collides with one.
+    if (slashHandlers.some((h) => h.command.name === cmd.name)) continue;
+    const command: SlashCommand = {
+      name: cmd.name,
+      description: cmd.description,
+      ...(cmd.argument ? { argumentHint: cmd.argument.hint } : {}),
+      ...(cmd.argument?.completes
+        ? {
+            getArgumentCompletions: async (prefix: string) => {
+              try {
+                return (await loadRibCompletionsCached(cmd))
+                  .filter((c) => c.value.startsWith(prefix))
+                  .map((c) => ({
+                    value: c.value,
+                    label: c.value,
+                    ...(c.description !== undefined ? { description: c.description } : {}),
+                  }));
+              } catch {
+                return [];
+              }
+            },
+          }
+        : {}),
+    };
+    slashHandlers.push({ command, run: (arg) => performRibCommand(cmd, arg) });
+  }
   const handlerByName = new Map(slashHandlers.map((h) => [h.command.name, h]));
 
   const editor = new Editor(tui, editorTheme);

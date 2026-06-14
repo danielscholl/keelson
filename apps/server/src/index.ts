@@ -15,6 +15,7 @@ import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import pkg from "../package.json" with { type: "json" };
+import { agentsRoutes } from "./agents-handler.ts";
 import {
   bootstrapPromptHandler,
   bootstrapProviders,
@@ -25,6 +26,7 @@ import {
 } from "./bootstrap.ts";
 import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
 import { chatRememberRoutes } from "./chat-remember-handler.ts";
+import { commandsRoutes } from "./commands-handler.ts";
 import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, createRibCredentialAccessor, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
@@ -32,7 +34,6 @@ import { openDatabase } from "./db/init.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
-import { personasRoutes } from "./personas-handler.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
 import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
@@ -408,9 +409,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     probes: ribs.probes,
     actionHandlers: ribs.actionHandlers,
   });
-  personasRoutes(app, {
-    personaListers: ribs.personaListers,
-    personaResolvers: ribs.personaResolvers,
+  agentsRoutes(app, {
+    agentListers: ribs.agentListers,
+    agentResolvers: ribs.agentResolvers,
+  });
+  commandsRoutes(app, {
+    commandListers: ribs.commandListers,
+    commandInvokers: ribs.commandInvokers,
+    commandCompleters: ribs.commandCompleters,
   });
   projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
   memoryRoutes(app, { memoryStore });

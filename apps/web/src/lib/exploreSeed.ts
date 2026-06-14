@@ -18,6 +18,11 @@ export interface ChatSeed {
   systemPrompt: string;
   openingPrompt: string;
   name: string;
+  // An agent seed may pin the model (and the provider that serves it) its
+  // conversation should run on; omitted for a plain panel→chat handoff, which
+  // uses the picker's selected provider/model.
+  model?: string;
+  providerId?: string;
 }
 
 // The panel → chat callback a surface raises when its explore control fires.

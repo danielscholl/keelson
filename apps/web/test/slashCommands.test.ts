@@ -1,13 +1,32 @@
 import { describe, expect, test } from "bun:test";
+import type { CommandRef } from "@keelson/shared";
 import {
   filterSlashCommands,
   filterWorkflowNames,
   isCommittedToCommand,
+  matchRibArgContext,
   matchSlashCommand,
   parseWorkflowCommand,
+  ribCommandToSlash,
   SLASH_COMMANDS,
   workflowRunNamePartial,
 } from "../src/lib/slashCommands.ts";
+
+// A completing rib command (chamber's /mind) and a free-arg one (/genesis),
+// mirroring what GET /api/commands contributes.
+const MIND: CommandRef = {
+  ribId: "chamber",
+  name: "mind",
+  description: "Open a mind as a seeded chat",
+  argument: { hint: "<slug>", completes: true },
+};
+const GENESIS: CommandRef = {
+  ribId: "chamber",
+  name: "genesis",
+  description: "Forge a new mind",
+  argument: { hint: "<brief>" },
+};
+const MERGED = [...SLASH_COMMANDS, ribCommandToSlash(MIND), ribCommandToSlash(GENESIS)];
 
 describe("matchSlashCommand", () => {
   test("returns the registered command for bare name", () => {
@@ -179,5 +198,66 @@ describe("filterWorkflowNames", () => {
   test("excludes names with whitespace the slash command can't represent", () => {
     const withSpace = [{ name: "smoke-test" }, { name: "my flow" }];
     expect(filterWorkflowNames(withSpace, "").map((i) => i.name)).toEqual(["smoke-test"]);
+  });
+});
+
+describe("ribCommandToSlash", () => {
+  test("maps a descriptor into a rib-family slash command", () => {
+    expect(ribCommandToSlash(MIND)).toEqual({
+      name: "mind",
+      family: "rib",
+      description: "Open a mind as a seeded chat",
+      usage: "<slug>",
+      ribId: "chamber",
+      argument: { hint: "<slug>", completes: true },
+    });
+  });
+
+  test("a bare command (no argument) gets a placeholder usage and no argument", () => {
+    const cmd = ribCommandToSlash({ ribId: "demo", name: "ping", description: "Ping" });
+    expect(cmd.usage).toBe("(no args)");
+    expect(cmd.argument).toBeUndefined();
+  });
+});
+
+describe("slash command resolution against a merged command list", () => {
+  test("matchSlashCommand resolves rib and base commands", () => {
+    expect(matchSlashCommand("/mind smoke", MERGED)?.family).toBe("rib");
+    expect(matchSlashCommand("/genesis a brief", MERGED)?.name).toBe("genesis");
+    expect(matchSlashCommand("/workflow", MERGED)?.name).toBe("workflow");
+  });
+
+  test("filterSlashCommands includes rib commands", () => {
+    expect(filterSlashCommands("/m", MERGED).map((c) => c.name)).toEqual(["mind"]);
+  });
+
+  test("isCommittedToCommand recognizes committed rib commands", () => {
+    expect(isCommittedToCommand("/mind ", MERGED)).toBe(true);
+    expect(isCommittedToCommand("/genesis a brief", MERGED)).toBe(true);
+    // Default base list doesn't know rib commands.
+    expect(isCommittedToCommand("/mind ")).toBe(false);
+  });
+});
+
+describe("matchRibArgContext", () => {
+  test("returns the command + partial for a completing rib arg", () => {
+    expect(matchRibArgContext("/mind ", MERGED)).toEqual({
+      command: ribCommandToSlash(MIND),
+      partial: "",
+    });
+    expect(matchRibArgContext("/mind smo", MERGED)?.partial).toBe("smo");
+  });
+
+  test("null once the arg token is complete (trailing space)", () => {
+    expect(matchRibArgContext("/mind smoke ", MERGED)).toBeNull();
+  });
+
+  test("null for a rib command whose argument doesn't complete", () => {
+    expect(matchRibArgContext("/genesis bri", MERGED)).toBeNull();
+  });
+
+  test("null for base commands and unknown names", () => {
+    expect(matchRibArgContext("/workflow run x", MERGED)).toBeNull();
+    expect(matchRibArgContext("/nope x", MERGED)).toBeNull();
   });
 });

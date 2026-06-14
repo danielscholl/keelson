@@ -3,32 +3,20 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
+  type AgentRef,
   type ChatEvent,
   type ClientFrame,
   chatFrameSchema,
-  listPersonasResponseSchema,
+  listAgentsResponseSchema,
   type MessageChunk,
   type OpenChatSeed,
   openChatSeedSchema,
-  type PersonaRef,
   type ReasoningEffortLevel,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 
+import { normalizeBase, originHeader } from "./base.ts";
 import { HttpError } from "./workflow-client.ts";
-
-function normalizeBase(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
-}
-
-function originHeader(baseUrl: string): string {
-  try {
-    const u = new URL(baseUrl);
-    return `http://${u.hostname}:${u.port || (u.protocol === "https:" ? "443" : "80")}`;
-  } catch {
-    return "http://127.0.0.1:7878";
-  }
-}
 
 function jsonHeaders(baseUrl: string): Record<string, string> {
   return {
@@ -64,7 +52,7 @@ export interface CreateConversationOpts {
   // Omitted → the server binds the conversation to the default workspace
   // project; the bound project's root becomes the agent's cwd.
   projectId?: string;
-  // Seed a persona's system prompt + name (the `/mind` path).
+  // Seed an agent's system prompt + name (the open-as-chat path).
   seedSystemPrompt?: string;
   name?: string;
 }
@@ -109,28 +97,28 @@ export async function createConversation(
   return (await res.json()) as ConversationRow;
 }
 
-// Personas (the `/mind` source). Both reach the server's /api/personas routes;
+// Agents (the GET /api/agents source). Both reach the server's /api/agents routes;
 // resolve returns the seed the caller hands to createConversation.
-export async function listPersonas(baseUrl: string): Promise<PersonaRef[]> {
-  const res = await fetch(`${normalizeBase(baseUrl)}/api/personas`, {
+export async function listAgents(baseUrl: string): Promise<AgentRef[]> {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/agents`, {
     headers: { accept: "application/json" },
   });
-  if (!res.ok) throw new HttpError(res.status, `GET /api/personas failed: ${res.status}`);
-  return listPersonasResponseSchema.parse(await res.json()).personas;
+  if (!res.ok) throw new HttpError(res.status, `GET /api/agents failed: ${res.status}`);
+  return listAgentsResponseSchema.parse(await res.json()).agents;
 }
 
-export async function resolvePersona(
+export async function resolveAgent(
   baseUrl: string,
   ribId: string,
   slug: string,
 ): Promise<OpenChatSeed> {
   const res = await fetch(
-    `${normalizeBase(baseUrl)}/api/personas/${encodeURIComponent(ribId)}/${encodeURIComponent(slug)}/resolve`,
+    `${normalizeBase(baseUrl)}/api/agents/${encodeURIComponent(ribId)}/${encodeURIComponent(slug)}/resolve`,
     { method: "POST", headers: jsonHeaders(baseUrl) },
   );
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new HttpError(res.status, `resolve persona failed: ${res.status} ${body}`);
+    throw new HttpError(res.status, `resolve agent failed: ${res.status} ${body}`);
   }
   return openChatSeedSchema.parse(await res.json());
 }

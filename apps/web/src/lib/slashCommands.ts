@@ -2,13 +2,22 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-export type SlashCommandFamily = "project" | "workflow" | "mind";
+import type { CommandRef } from "@keelson/shared";
+
+// "rib" covers every rib-contributed command (e.g. chamber's /mind, /genesis);
+// the specific owner is carried on `ribId`. Base families stay first-class.
+export type SlashCommandFamily = "project" | "workflow" | "rib";
 
 export interface SlashCommand {
   name: string;
   family: SlashCommandFamily;
   description: string;
   usage: string;
+  // Set for `family: "rib"` — routes invoke/complete back to the owning rib.
+  ribId?: string;
+  // The single positional argument, when the command takes one. `completes`
+  // means the rib serves type-ahead for it via GET /api/commands/.../complete.
+  argument?: { hint: string; completes?: boolean };
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
@@ -24,27 +33,41 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     description: "List workflows and start a run",
     usage: "run <name> [arguments]  ·  (no args: list)",
   },
-  {
-    name: "mind",
-    family: "mind",
-    description: "Open a mind as a seeded chat",
-    usage: "<slug>  ·  (no args: list)",
-  },
 ];
 
-export function matchSlashCommand(input: string): SlashCommand | null {
+// Projects a rib's command descriptor into the surface's slash-command shape so
+// the picker renders it alongside the base commands. The usage strip is derived
+// from the argument hint (or "(no args)" for a bare command).
+export function ribCommandToSlash(ref: CommandRef): SlashCommand {
+  return {
+    name: ref.name,
+    family: "rib",
+    description: ref.description,
+    usage: ref.argument ? ref.argument.hint : "(no args)",
+    ribId: ref.ribId,
+    ...(ref.argument ? { argument: ref.argument } : {}),
+  };
+}
+
+export function matchSlashCommand(
+  input: string,
+  commands: readonly SlashCommand[] = SLASH_COMMANDS,
+): SlashCommand | null {
   if (!input.startsWith("/")) return null;
   const stripped = input.slice(1);
   const head = stripped.split(/\s/, 1)[0] ?? "";
-  return SLASH_COMMANDS.find((c) => c.name === head) ?? null;
+  return commands.find((c) => c.name === head) ?? null;
 }
 
-export function filterSlashCommands(input: string): SlashCommand[] {
+export function filterSlashCommands(
+  input: string,
+  commands: readonly SlashCommand[] = SLASH_COMMANDS,
+): SlashCommand[] {
   const stripped = input.startsWith("/") ? input.slice(1) : input;
   const head = stripped.split(/\s/, 1)[0] ?? "";
   const q = head.toLowerCase();
-  if (q.length === 0) return [...SLASH_COMMANDS];
-  return SLASH_COMMANDS.filter((c) => c.name.toLowerCase().includes(q));
+  if (q.length === 0) return [...commands];
+  return commands.filter((c) => c.name.toLowerCase().includes(q));
 }
 
 // Parses the text after `/workflow` into a sub-action. `run` keeps everything
@@ -77,13 +100,21 @@ export function workflowRunNamePartial(input: string): string | null {
   return m ? m[1]! : null;
 }
 
-// `/mind <partial>` — the slug is the first token after the name (no `run`
-// sub-verb), so the partial is whatever's typed after `/mind `. Drives the
-// persona type-ahead in the picker.
-const MIND_NAME_RE = /^\/mind\s+(\S*)$/;
-export function mindNamePartial(input: string): string | null {
-  const m = MIND_NAME_RE.exec(input);
-  return m ? m[1]! : null;
+// `/<name> <partial>` for a rib command whose single positional argument serves
+// completions — the arg is the first token after the name (no sub-verb), so the
+// partial is whatever's typed after `/<name> ` (`""` right after the space).
+// Returns the matched command + partial, or null. Drives rib arg type-ahead;
+// the trailing-space form (`/mind smoke `) no longer matches, closing the menu.
+const RIB_ARG_RE = /^\/(\S+)\s+(\S*)$/;
+export function matchRibArgContext(
+  input: string,
+  commands: readonly SlashCommand[],
+): { command: SlashCommand; partial: string } | null {
+  const m = RIB_ARG_RE.exec(input);
+  if (!m) return null;
+  const command = commands.find((c) => c.name === m[1] && c.family === "rib");
+  if (!command?.argument?.completes) return null;
+  return { command, partial: m[2] ?? "" };
 }
 
 // Forgiving filter for name type-ahead: compares on lowercased alphanumerics so
@@ -107,12 +138,15 @@ export function filterWorkflowNames<T extends { name: string }>(
 // Returns true when the input is `/<name> ` (name followed by whitespace) —
 // i.e. the user has committed to a command and is typing args. The picker
 // uses this to switch from list mode to help-strip mode.
-export function isCommittedToCommand(input: string): boolean {
+export function isCommittedToCommand(
+  input: string,
+  commands: readonly SlashCommand[] = SLASH_COMMANDS,
+): boolean {
   if (!input.startsWith("/")) return false;
   const stripped = input.slice(1);
   if (stripped.length === 0) return false;
   const firstSpace = stripped.search(/\s/);
   if (firstSpace === -1) return false;
   const head = stripped.slice(0, firstSpace);
-  return SLASH_COMMANDS.some((c) => c.name === head);
+  return commands.some((c) => c.name === head);
 }

@@ -1,14 +1,19 @@
 import {
+  type AgentRef,
   type BulkDeleteRunsBody,
   bulkDeleteRunsResponseSchema,
   type ClaudeCliStatus,
   type CloneProjectBody,
+  type CommandCompletion,
+  type CommandInvokeResult,
+  type CommandRef,
   type Conversation,
   type CopilotCliStatus,
   type CreateProjectBody,
   type CreateProjectResponse,
   type CredentialStatus,
   claudeCliStatusSchema,
+  commandInvokeResultSchema,
   copilotCliStatusSchema,
   createProjectResponseSchema,
   credentialStatusSchema,
@@ -17,7 +22,9 @@ import {
   getWorkflowDetailResponseSchema,
   getWorkflowRunResponseSchema,
   type ListWorkflowsResponse,
-  listPersonasResponseSchema,
+  listAgentsResponseSchema,
+  listCommandCompletionsResponseSchema,
+  listCommandsResponseSchema,
   listProjectsResponseSchema,
   listRibsResponseSchema,
   listRunsResponseSchema,
@@ -28,7 +35,6 @@ import {
   memoryListResponseSchema,
   type OpenChatSeed,
   openChatSeedSchema,
-  type PersonaRef,
   type Project,
   type ProviderInfo,
   type RegisteredToolInfo,
@@ -592,18 +598,58 @@ export async function postRibAction(id: string, action: RibAction): Promise<RibA
   );
 }
 
-// === Personas (the /mind source) ==========================================
+// === Agents (the GET /api/agents source) ===================================
 
-export async function getPersonas(): Promise<PersonaRef[]> {
-  return listPersonasResponseSchema.parse(await apiRequest<unknown>("/api/personas")).personas;
+export async function getAgents(): Promise<AgentRef[]> {
+  return listAgentsResponseSchema.parse(await apiRequest<unknown>("/api/agents")).agents;
 }
 
-export async function resolvePersona(ribId: string, slug: string): Promise<OpenChatSeed> {
+export async function resolveAgent(ribId: string, slug: string): Promise<OpenChatSeed> {
   return openChatSeedSchema.parse(
     await apiRequest<unknown>(
-      `/api/personas/${encodeURIComponent(ribId)}/${encodeURIComponent(slug)}/resolve`,
-      { label: "/api/personas/resolve", method: "POST", errorBody: "json-error" },
+      `/api/agents/${encodeURIComponent(ribId)}/${encodeURIComponent(slug)}/resolve`,
+      { label: "/api/agents/resolve", method: "POST", errorBody: "json-error" },
     ),
+  );
+}
+
+// === Commands (rib-contributed slash commands) =============================
+
+// Merged with the surface's base commands (project / workflow) into the slash menu.
+export async function getCommands(): Promise<CommandRef[]> {
+  return listCommandsResponseSchema.parse(await apiRequest<unknown>("/api/commands")).commands;
+}
+
+// Argument type-ahead for a rib command whose descriptor sets argument.completes.
+// Propagates failures rather than swallowing them: the caller catches and leaves
+// its cache unset so a transient error retries on re-entry, instead of caching an
+// empty result that suppresses completions for the rest of the session.
+export async function completeRibCommand(
+  ribId: string,
+  name: string,
+  prefix: string,
+): Promise<CommandCompletion[]> {
+  const url = `/api/commands/${encodeURIComponent(ribId)}/${encodeURIComponent(name)}/complete?prefix=${encodeURIComponent(prefix)}`;
+  return listCommandCompletionsResponseSchema.parse(await apiRequest<unknown>(url, { label: url }))
+    .completions;
+}
+
+// Invoke a rib command; the returned effect is performed by the caller. A
+// rib-level failure ({ ok: false }) arrives as a 200, so it's a normal return.
+export async function invokeRibCommand(
+  ribId: string,
+  name: string,
+  arg: string,
+): Promise<CommandInvokeResult> {
+  const url = `/api/commands/${encodeURIComponent(ribId)}/${encodeURIComponent(name)}/invoke`;
+  return commandInvokeResultSchema.parse(
+    await apiRequest<unknown>(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ arg }),
+      errorBody: "json-error",
+      label: url,
+    }),
   );
 }
 

@@ -20,14 +20,17 @@
  */
 
 import {
+  type AgentSummary,
+  type CommandCompletion,
+  type CommandInvokeResult,
   type OpenChatSeed,
-  type PersonaSummary,
   type Rib,
   type RibAction,
   type RibActionResult,
   type RibAgentTurn,
   type RibAgentTurnRequest,
   type RibAuthStatus,
+  type RibCommandDescriptor,
   type RibContext,
   type RibSurfaceDescriptor,
   type RibViewDescriptor,
@@ -71,9 +74,19 @@ export interface ApplyRibsResult {
   readonly disposers: RibDisposer[];
   readonly probes: Map<string, () => Promise<RibAuthStatus>>;
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
-  // Live persona discovery/resolution, keyed by rib id (the /mind source).
-  readonly personaListers: Map<string, () => Promise<readonly PersonaSummary[]>>;
-  readonly personaResolvers: Map<string, (slug: string) => Promise<OpenChatSeed | null>>;
+  // Live agent discovery/resolution, keyed by rib id (the GET /api/agents source).
+  readonly agentListers: Map<string, () => Promise<readonly AgentSummary[]>>;
+  readonly agentResolvers: Map<string, (slug: string) => Promise<OpenChatSeed | null>>;
+  // Slash commands keyed by rib id — the GET /api/commands source.
+  readonly commandListers: Map<string, () => Promise<readonly RibCommandDescriptor[]>>;
+  readonly commandInvokers: Map<
+    string,
+    (name: string, arg: string) => Promise<CommandInvokeResult>
+  >;
+  readonly commandCompleters: Map<
+    string,
+    (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
+  >;
   readonly workflowContributions: RibWorkflowContribution[];
   // Validated, de-duplicated tools across every active rib, in activation
   // order. The composition root registers these into the shared tool registry
@@ -143,8 +156,17 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
   const disposers: RibDisposer[] = [];
   const probes = new Map<string, () => Promise<RibAuthStatus>>();
   const actionHandlers = new Map<string, (action: RibAction) => Promise<RibActionResult>>();
-  const personaListers = new Map<string, () => Promise<readonly PersonaSummary[]>>();
-  const personaResolvers = new Map<string, (slug: string) => Promise<OpenChatSeed | null>>();
+  const agentListers = new Map<string, () => Promise<readonly AgentSummary[]>>();
+  const agentResolvers = new Map<string, (slug: string) => Promise<OpenChatSeed | null>>();
+  const commandListers = new Map<string, () => Promise<readonly RibCommandDescriptor[]>>();
+  const commandInvokers = new Map<
+    string,
+    (name: string, arg: string) => Promise<CommandInvokeResult>
+  >();
+  const commandCompleters = new Map<
+    string,
+    (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
+  >();
   const workflowContributions: RibWorkflowContribution[] = [];
   const tools: ToolDefinition[] = [];
   const seen = new Set<string>();
@@ -237,13 +259,27 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       const handler = rib.onAction.bind(rib);
       actionHandlers.set(rib.id, (action) => Promise.resolve(handler(action, ribCtx)));
     }
-    if (rib.listPersonas) {
-      const lister = rib.listPersonas.bind(rib);
-      personaListers.set(rib.id, () => Promise.resolve(lister(ribCtx)));
+    if (rib.listAgents) {
+      const lister = rib.listAgents.bind(rib);
+      agentListers.set(rib.id, () => Promise.resolve(lister(ribCtx)));
     }
-    if (rib.resolvePersona) {
-      const resolver = rib.resolvePersona.bind(rib);
-      personaResolvers.set(rib.id, (slug) => Promise.resolve(resolver(slug, ribCtx)));
+    if (rib.resolveAgent) {
+      const resolver = rib.resolveAgent.bind(rib);
+      agentResolvers.set(rib.id, (slug) => Promise.resolve(resolver(slug, ribCtx)));
+    }
+    if (rib.listCommands) {
+      const lister = rib.listCommands.bind(rib);
+      commandListers.set(rib.id, () => Promise.resolve(lister(ribCtx)));
+    }
+    if (rib.invokeCommand) {
+      const invoker = rib.invokeCommand.bind(rib);
+      commandInvokers.set(rib.id, (name, arg) => Promise.resolve(invoker(name, arg, ribCtx)));
+    }
+    if (rib.completeCommand) {
+      const completer = rib.completeCommand.bind(rib);
+      commandCompleters.set(rib.id, (name, prefix) =>
+        Promise.resolve(completer(name, prefix, ribCtx)),
+      );
     }
 
     // Auto-register the rib's composeBundle (if any) under `rib:<id>`. The
@@ -315,8 +351,11 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     disposers,
     probes,
     actionHandlers,
-    personaListers,
-    personaResolvers,
+    agentListers,
+    agentResolvers,
+    commandListers,
+    commandInvokers,
+    commandCompleters,
     workflowContributions,
     tools,
   };

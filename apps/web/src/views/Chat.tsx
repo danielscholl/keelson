@@ -1,4 +1,4 @@
-import type { PersonaRef, Project } from "@keelson/shared";
+import type { CommandRef, Project } from "@keelson/shared";
 import {
   type ChatFrame,
   type Conversation,
@@ -15,17 +15,19 @@ import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cloneProject,
+  completeRibCommand,
   createConversation,
   createProject,
   deleteProject,
   fetchProviderModels,
   fetchProviders,
   fetchTools,
+  getCommands,
   getConversation,
-  getPersonas,
+  invokeRibCommand,
   listProjects,
   listWorkflows,
-  resolvePersona,
+  resolveAgent,
   startWorkflowRun,
 } from "../api.ts";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
@@ -64,9 +66,11 @@ import {
   filterSlashCommands,
   filterWorkflowNames,
   isCommittedToCommand,
+  matchRibArgContext,
   matchSlashCommand,
-  mindNamePartial,
   parseWorkflowCommand,
+  ribCommandToSlash,
+  SLASH_COMMANDS,
   type SlashCommand,
   type SlashCommandFamily,
   workflowRunNamePartial,
@@ -87,6 +91,14 @@ interface CommandResult {
   runId?: string;
   workflowName?: string;
 }
+
+// Shared CommandResult builders for the command dispatchers below.
+const okResult = (message: string, extra?: Partial<CommandResult>): CommandResult => ({
+  ok: true,
+  message,
+  ...extra,
+});
+const failResult = (message: string): CommandResult => ({ ok: false, message });
 
 interface CommandCall {
   command: string;
@@ -314,8 +326,9 @@ export interface ChatProps {
   // Opens a started workflow run in the Workflows view (from a `/workflow run`
   // result block). App lifts this so it can switch tabs and deep-link the run.
   onOpenWorkflowRun?: (workflowName: string, runId: string) => void;
-  // Opens a fresh seeded conversation (the `/mind <slug>` path) — App wires this
-  // to the same setPendingSeed + goToFreshChat handler the ✦ button uses.
+  // Opens a fresh seeded conversation (a rib command's open-agent effect, e.g.
+  // chamber's `/mind <slug>`) — App wires this to the same setPendingSeed +
+  // goToFreshChat handler the ✦ button uses.
   onOpenSeededChat?: (seed: ChatSeed) => void;
 }
 
@@ -425,10 +438,21 @@ export function Chat({
   // Guards the lazy fetch so rapid typing can't fire overlapping listWorkflows()
   // calls while the first is still in flight.
   const workflowNamesFetchingRef = useRef(false);
-  // Personas for `/mind <slug>` type-ahead, fetched lazily the first time the
-  // user enters that context; null until then. Same guard pattern as workflows.
-  const [personas, setPersonas] = useState<PersonaRef[] | null>(null);
-  const personasFetchingRef = useRef(false);
+  // Rib-contributed slash commands (chamber's /mind, /genesis, …), fetched once
+  // on mount and merged with the base commands below. A failed fetch leaves the
+  // list empty — only the base commands show.
+  const [ribCommands, setRibCommands] = useState<CommandRef[]>([]);
+  // Settles true once `/api/commands` resolves (or fails) — until then a `/<name>`
+  // that matches no command yet is held rather than leaked to the model as chat.
+  const [commandsReady, setCommandsReady] = useState(false);
+  // Completions for the active rib command's argument, fetched once per command
+  // the first time its arg context is reached. Keyed by `${ribId}/${name}`; the
+  // fetch effect keys on that stable identity, not the typed partial, so typing
+  // doesn't refetch (the request is always empty-prefix).
+  const [ribArgCompletions, setRibArgCompletions] = useState<{
+    key: string;
+    items: { name: string; description?: string }[];
+  } | null>(null);
 
   // Add-to-notebook state. The modal opens when a target entry string is set
   // (the "Edit…" path); the one-click button appends directly. `saving` gates
@@ -505,6 +529,24 @@ export function Chat({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    getCommands()
+      .then((list) => {
+        if (cancelled) return;
+        setRibCommands(list);
+      })
+      .catch(() => {
+        // non-fatal — only the base commands show
+      })
+      .finally(() => {
+        if (!cancelled) setCommandsReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Consume a lane Ask handoff exactly once. App clears conversationId
   // before flipping the tab, so by the time Chat mounts there's no
   // hydrating convo to conflict with. We prefill the composer and arm
@@ -516,6 +558,13 @@ export function Chat({
     pendingNameRef.current = pendingSeed.name;
     autoSendPromptRef.current = pendingSeed.openingPrompt;
     setInput(pendingSeed.openingPrompt);
+    // An agent seed may pin its model (and the provider that serves it); honor
+    // both so the seeded conversation uses the agent's model rather than the
+    // picker default. Pinning the provider keeps the pair coherent — a model
+    // from another provider would otherwise be sent with the default one (the
+    // default-pick effect below won't clobber an already-set provider/model).
+    if (pendingSeed.providerId) setSelectedProviderId(pendingSeed.providerId);
+    if (pendingSeed.model) setSelectedModel(pendingSeed.model);
     onSeedConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSeed, onSeedConsumed]);
@@ -557,7 +606,9 @@ export function Chat({
         defaultProvider,
       );
       if (!ref) return current;
-      setSelectedModel(ref.modelId);
+      // Don't clobber a model an agent seed already pinned (the seed consumer
+      // above); only fall back to the picked default when none is set.
+      setSelectedModel((m) => (m ? m : ref.modelId));
       return ref.providerId;
     });
     // settings reads intentionally only at provider-load time.
@@ -1176,14 +1227,49 @@ export function Chat({
     [activeProjectId, projectList, refreshProjects, switchActiveProject],
   );
 
+  // Shared workflow-start path for `/workflow run` and a rib command's
+  // run-workflow effect. The start route requires a project; activeProjectId is
+  // null until the catalog loads, so resolve the default the way useActiveProject
+  // does so a fresh/slow load still starts a run.
+  const startRun = useCallback(
+    async (name: string, args: string): Promise<CommandResult> => {
+      const ok = okResult;
+      const fail = failResult;
+      let projectId = activeProjectId;
+      if (!projectId) {
+        try {
+          const list = projectList.length > 0 ? projectList : await listProjects();
+          projectId = (list.find((p) => p.name === DEFAULT_PROJECT_NAME) ?? list[0])?.id ?? null;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return fail(`Couldn't load projects: ${msg}`);
+        }
+      }
+      if (!projectId) {
+        return fail("No project available yet — try again once projects finish loading.");
+      }
+      try {
+        const { runId, workflowName } = await startWorkflowRun(name, {
+          projectId,
+          ...(args ? { inputs: { ARGUMENTS: args } } : {}),
+        });
+        // Prefer the canonical name the server resolved (a fuzzy start like
+        // "smoketst" runs "smoke-test") so the run row + "open in Workflows"
+        // link use the real name, not what was typed.
+        const resolved = workflowName ?? name;
+        return ok(`Started ${resolved} — run ${runId}`, { runId, workflowName: resolved });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return fail(`Couldn't start ${name}: ${msg}`);
+      }
+    },
+    [activeProjectId, projectList],
+  );
+
   const dispatchWorkflowCommand = useCallback(
     async (rest: string): Promise<CommandResult> => {
-      const ok = (message: string, extra?: Partial<CommandResult>): CommandResult => ({
-        ok: true,
-        message,
-        ...extra,
-      });
-      const fail = (message: string): CommandResult => ({ ok: false, message });
+      const ok = okResult;
+      const fail = failResult;
 
       const parsed = parseWorkflowCommand(rest);
 
@@ -1199,37 +1285,7 @@ export function Chat({
       }
 
       if (parsed.kind === "run") {
-        const { name, args } = parsed;
-        // The start route requires a project; activeProjectId is null until the
-        // project catalog loads (or if its fetch failed). Resolve the default
-        // the way useActiveProject does so a fresh/slow load still starts a run.
-        let projectId = activeProjectId;
-        if (!projectId) {
-          try {
-            const list = projectList.length > 0 ? projectList : await listProjects();
-            projectId = (list.find((p) => p.name === DEFAULT_PROJECT_NAME) ?? list[0])?.id ?? null;
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return fail(`Couldn't load projects: ${msg}`);
-          }
-        }
-        if (!projectId) {
-          return fail("No project available yet — try again once projects finish loading.");
-        }
-        try {
-          const { runId, workflowName } = await startWorkflowRun(name, {
-            projectId,
-            ...(args ? { inputs: { ARGUMENTS: args } } : {}),
-          });
-          // Prefer the canonical name the server resolved (a fuzzy start like
-          // "smoketst" runs "smoke-test") so the run row + "open in Workflows"
-          // link use the real name, not what was typed.
-          const resolved = workflowName ?? name;
-          return ok(`Started ${resolved} — run ${runId}`, { runId, workflowName: resolved });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return fail(`Couldn't start ${name}: ${msg}`);
-        }
+        return startRun(parsed.name, parsed.args);
       }
 
       return fail(
@@ -1240,68 +1296,91 @@ export function Chat({
         ].join("\n"),
       );
     },
-    [activeProjectId, projectList],
+    [activeProjectId, startRun],
   );
 
-  // `/mind` — no args lists the available minds; `/mind <slug>` resolves the
-  // mind's seed and opens a fresh seeded conversation (navigating away, so the
-  // inline command row is abandoned — the staleness guard no-ops its patch).
-  const dispatchMindCommand = useCallback(
-    async (rest: string): Promise<CommandResult> => {
-      const list = personas ?? (await getPersonas().catch(() => null));
-      if (!list || list.length === 0) return { ok: true, message: "No minds available." };
-      const slug = rest.trim();
-      if (slug.length === 0) {
-        const rows = list.map((p) =>
-          p.description ? `  ${p.slug} — ${p.description}` : `  ${p.slug}`,
-        );
-        return { ok: true, message: ["Minds:", ...rows].join("\n") };
-      }
-      // First match wins if two ribs expose the same slug (only chamber does today).
-      const ref = list.find((p) => p.slug === slug);
-      if (!ref) return { ok: false, message: `No mind "${slug}".` };
-      try {
-        const seed = await resolvePersona(ref.ribId, ref.slug);
-        onOpenSeededChat?.({
-          systemPrompt: seed.systemPrompt,
-          name: seed.name,
-          openingPrompt: seed.openingPrompt ?? OPENING_PROMPT,
-        });
-        return { ok: true, message: `Opening ${seed.name}…` };
-      } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
-      }
+  // Invoke a rib command server-side and perform the returned effect: render a
+  // message inline, start a workflow run, or open one of the rib's agents as a
+  // seeded chat (resolving the seed through the agents seam — navigating away,
+  // so the inline command row is abandoned and the staleness guard no-ops).
+  const dispatchRibCommand = useCallback(
+    async (cmd: SlashCommand, arg: string): Promise<CommandResult> => {
+      if (!cmd.ribId) return { ok: false, message: `'/${cmd.name}' is missing a rib id.` };
+      const result = await invokeRibCommand(cmd.ribId, cmd.name, arg);
+      if (!result.ok) return { ok: false, message: result.error };
+      const { effect } = result;
+      if (effect.effect === "message") return { ok: true, message: effect.text };
+      if (effect.effect === "run-workflow") return startRun(effect.workflow, effect.args ?? "");
+      const seed = await resolveAgent(effect.ribId, effect.slug);
+      onOpenSeededChat?.({
+        systemPrompt: seed.systemPrompt,
+        name: seed.name,
+        openingPrompt: seed.openingPrompt ?? OPENING_PROMPT,
+        ...(seed.model ? { model: seed.model } : {}),
+        ...(seed.providerId ? { providerId: seed.providerId } : {}),
+      });
+      return { ok: true, message: `Opening ${seed.name}…` };
     },
-    [personas, onOpenSeededChat],
+    [onOpenSeededChat, startRun],
   );
 
-  const slashFilteredItems = useMemo(() => filterSlashCommands(input), [input]);
-  const slashHelpCommand = useMemo(() => matchSlashCommand(input), [input]);
+  // Base commands (project / workflow) plus rib-contributed commands. Base wins
+  // on a name collision; the server already deduped across ribs (first wins).
+  const mergedCommands = useMemo<SlashCommand[]>(() => {
+    const base = [...SLASH_COMMANDS];
+    const taken = new Set(base.map((c) => c.name));
+    const ribs = ribCommands.filter((c) => !taken.has(c.name)).map(ribCommandToSlash);
+    return [...base, ...ribs];
+  }, [ribCommands]);
+
+  const slashFilteredItems = useMemo(
+    () => filterSlashCommands(input, mergedCommands),
+    [input, mergedCommands],
+  );
+  const slashHelpCommand = useMemo(
+    () => matchSlashCommand(input, mergedCommands),
+    [input, mergedCommands],
+  );
   // Non-null while typing `/workflow run <partial>` — switches the picker to
   // workflow-name suggestions.
   const workflowRunPartial = useMemo(() => workflowRunNamePartial(input), [input]);
-  // Non-null while typing `/mind <partial>` — switches the picker to persona
-  // suggestions. The slug is shown as the row `name`; matching is on slug.
-  const mindPartial = useMemo(() => mindNamePartial(input), [input]);
+  // Non-null while typing the arg of a rib command that serves completions
+  // (e.g. `/mind <slug>`) — switches the picker to its suggestions.
+  const ribArgContext = useMemo(
+    () => matchRibArgContext(input, mergedCommands),
+    [input, mergedCommands],
+  );
+  // Stable per-command identity for the completion fetch. The fetch is keyed on
+  // this, not on `ribArgContext` (which changes object identity every keystroke),
+  // so typing the partial doesn't re-run the fetch — it's always empty-prefix.
+  const ribArgKey =
+    ribArgContext?.command.ribId !== undefined
+      ? `${ribArgContext.command.ribId}/${ribArgContext.command.name}`
+      : null;
+  const ribArgRibId = ribArgContext?.command.ribId;
+  const ribArgName = ribArgContext?.command.name;
   const slashArgItems = useMemo(() => {
     if (workflowRunPartial !== null && workflowNames !== null) {
       return filterWorkflowNames(workflowNames, workflowRunPartial);
     }
-    if (mindPartial !== null && personas !== null) {
-      const rows = personas.map((p) =>
-        p.description ? { name: p.slug, description: p.description } : { name: p.slug },
-      );
-      return filterWorkflowNames(rows, mindPartial);
+    // Only use cached completions when they belong to the active command — a
+    // stale cache from a different rib command would otherwise leak suggestions.
+    if (
+      ribArgContext !== null &&
+      ribArgCompletions !== null &&
+      ribArgCompletions.key === `${ribArgContext.command.ribId}/${ribArgContext.command.name}`
+    ) {
+      return filterWorkflowNames(ribArgCompletions.items, ribArgContext.partial);
     }
     return [];
-  }, [workflowRunPartial, workflowNames, mindPartial, personas]);
+  }, [workflowRunPartial, workflowNames, ribArgContext, ribArgCompletions]);
   const slashMode: "list" | "help" | "args" =
-    workflowRunPartial !== null || mindPartial !== null
+    workflowRunPartial !== null || ribArgContext !== null
       ? "args"
-      : isCommittedToCommand(input)
+      : isCommittedToCommand(input, mergedCommands)
         ? "help"
         : "list";
-  // The navigable row count for the active mode (commands vs workflow names).
+  // The navigable row count for the active mode (commands vs arg suggestions).
   const slashActiveLength = slashMode === "args" ? slashArgItems.length : slashFilteredItems.length;
 
   // The name cache is project-scoped; switching projects must drop it so the
@@ -1347,28 +1426,37 @@ export function Chat({
     };
   }, [workflowRunPartial, workflowNames, activeProjectId]);
 
-  // Lazy-load personas the first time the user reaches `/mind <…>`. A failed
-  // fetch leaves the list null — the picker just shows no suggestions.
+  // Lazy-load a rib command's arg completions the first time the user reaches
+  // its `/<name> <…>` context. Keyed on the stable `ribArgKey` (not the typed
+  // partial), so it runs at most once per command — typing the partial doesn't
+  // re-run it and the request is always empty-prefix (the completeCommand
+  // contract returns the full set there; we filter client-side). A failed fetch
+  // leaves the cache untouched so the picker just shows no suggestions.
   useEffect(() => {
-    if (mindPartial === null || personas !== null) return;
-    if (personasFetchingRef.current) return;
-    personasFetchingRef.current = true;
+    if (ribArgKey === null || ribArgRibId === undefined || ribArgName === undefined) return;
+    if (ribArgCompletions?.key === ribArgKey) return;
     let cancelled = false;
     void (async () => {
       try {
-        const list = await getPersonas();
-        if (!cancelled) setPersonas(list);
+        const list = await completeRibCommand(ribArgRibId, ribArgName, "");
+        if (!cancelled) {
+          setRibArgCompletions({
+            key: ribArgKey,
+            items: list.map((item) =>
+              item.description
+                ? { name: item.value, description: item.description }
+                : { name: item.value },
+            ),
+          });
+        }
       } catch {
-        // Leave personas null; type-ahead simply offers nothing this session.
-      } finally {
-        personasFetchingRef.current = false;
+        // Leave the cache as-is; type-ahead simply offers nothing this round.
       }
     })();
     return () => {
       cancelled = true;
-      personasFetchingRef.current = false;
     };
-  }, [mindPartial, personas]);
+  }, [ribArgKey, ribArgRibId, ribArgName, ribArgCompletions]);
 
   // Open the picker when the user starts a slash command; close it as soon as
   // the input stops starting with `/`. Keeping selectedIndex in range as the
@@ -1404,20 +1492,24 @@ export function Chat({
   }, []);
 
   // Completing an arg suggestion. For `/workflow run` the trailing space lets
-  // the user append $ARGUMENTS or Enter to run; for `/mind <slug>` the slug is
-  // the whole arg, so leave it ready to open on Enter.
+  // the user append $ARGUMENTS or Enter to run; for a rib command the arg is the
+  // whole token, so leave it ready to invoke on Enter.
   const onSlashArgSelect = useCallback(
     (name: string) => {
-      setInput(mindPartial !== null ? `/mind ${name} ` : `/workflow run ${name} `);
+      setInput(
+        ribArgContext !== null
+          ? `/${ribArgContext.command.name} ${name} `
+          : `/workflow run ${name} `,
+      );
       setSlashSelectedIndex(0);
     },
-    [mindPartial],
+    [ribArgContext],
   );
 
   const onSubmit = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || hydrating) return;
-    const matched = matchSlashCommand(trimmed);
+    const matched = matchSlashCommand(trimmed, mergedCommands);
     if (matched) {
       // Refuse while a turn is in flight — `switchActiveProject` clears the
       // active conversation, which would orphan a live WS stream.
@@ -1436,12 +1528,12 @@ export function Chat({
       setSlashOpen(false);
       const rest = trimmed.slice(`/${matched.name}`.length).trim();
       const dispatcher =
-        matched.name === "project"
-          ? dispatchProjectCommand
-          : matched.name === "workflow"
-            ? dispatchWorkflowCommand
-            : matched.name === "mind"
-              ? dispatchMindCommand
+        matched.family === "rib"
+          ? (r: string) => dispatchRibCommand(matched, r)
+          : matched.name === "project"
+            ? dispatchProjectCommand
+            : matched.name === "workflow"
+              ? dispatchWorkflowCommand
               : null;
       if (dispatcher) {
         const commandMessageId = newId();
@@ -1482,6 +1574,22 @@ export function Chat({
       }
       return;
     }
+    // A `/<name>` that matches nothing while rib command discovery is still in
+    // flight is almost certainly an intended rib command (e.g. `/mind`) not yet
+    // loaded — hold it with a diagnostic rather than leak the slash text to the
+    // model as a chat prompt. Once commands settle, an unmatched slash falls
+    // through to a normal send (a genuine non-command).
+    if (trimmed.startsWith("/") && !commandsReady) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newId(),
+          role: "system",
+          content: "Commands are still loading — try that again in a moment.",
+        },
+      ]);
+      return;
+    }
     // Mid-turn: stash for auto-flush on clean `done`. Single-slot — a second
     // Enter replaces the queued prompt.
     if (streaming) {
@@ -1493,12 +1601,14 @@ export function Chat({
     setInput("");
     void doSend(trimmed);
   }, [
+    commandsReady,
     dispatchProjectCommand,
     dispatchWorkflowCommand,
-    dispatchMindCommand,
+    dispatchRibCommand,
     doSend,
     hydrating,
     input,
+    mergedCommands,
     streaming,
   ]);
 
@@ -2046,7 +2156,7 @@ export function Chat({
           mode={slashMode}
           items={slashFilteredItems}
           argItems={slashArgItems}
-          argFamily={mindPartial !== null ? "mind" : "workflow"}
+          argFamily={ribArgContext !== null ? "rib" : "workflow"}
           selectedIndex={slashSelectedIndex}
           helpCommand={slashHelpCommand}
           onSelect={onSlashSelect}

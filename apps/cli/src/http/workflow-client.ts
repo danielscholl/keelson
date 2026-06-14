@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { WorkflowFrame } from "@keelson/shared";
+import { normalizeBase, originHeader } from "./base.ts";
 
 export interface WorkflowSummary {
   name: string;
@@ -65,26 +66,8 @@ export function isServerDownError(err: unknown): boolean {
   return false;
 }
 
-function normalizeBase(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
-}
-
 function url(baseUrl: string, path: string): string {
   return `${normalizeBase(baseUrl)}${path}`;
-}
-
-// Origin header for server-routed CLI calls. Bun's `fetch` doesn't attach
-// one by default, but the server's `isAllowedOrigin` rejects requests
-// without a loopback origin on POST routes that can run bash nodes
-// (CSRF defense). Derive a loopback origin from the base URL so the
-// server accepts the call — same shape the SPA sends.
-function originHeader(baseUrl: string): string {
-  try {
-    const u = new URL(baseUrl);
-    return `http://${u.hostname}:${u.port || (u.protocol === "https:" ? "443" : "80")}`;
-  } catch {
-    return "http://127.0.0.1:7878";
-  }
 }
 
 function defaultHeaders(baseUrl: string): Record<string, string> {

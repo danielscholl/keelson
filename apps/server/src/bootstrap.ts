@@ -22,8 +22,10 @@ import {
   registerWorkflowProvider,
 } from "@keelson/providers";
 import type {
+  AgentSummary,
+  CommandCompletion,
+  CommandInvokeResult,
   OpenChatSeed,
-  PersonaSummary,
   Project,
   Rib,
   RibAction,
@@ -31,6 +33,7 @@ import type {
   RibAgentTurn,
   RibAgentTurnRequest,
   RibAuthStatus,
+  RibCommandDescriptor,
   RibContext,
   SnapshotManager,
   ToolDefinition,
@@ -165,9 +168,19 @@ export interface RibBootstrap {
   readonly probes: Map<string, () => Promise<RibAuthStatus>>;
   // Inbound action handlers keyed by rib id, dispatched by POST /api/ribs/:id/action.
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
-  // Persona discovery/resolution keyed by rib id — the /api/personas (/mind) source.
-  readonly personaListers: Map<string, () => Promise<readonly PersonaSummary[]>>;
-  readonly personaResolvers: Map<string, (slug: string) => Promise<OpenChatSeed | null>>;
+  // Agent discovery/resolution keyed by rib id — the GET /api/agents source.
+  readonly agentListers: Map<string, () => Promise<readonly AgentSummary[]>>;
+  readonly agentResolvers: Map<string, (slug: string) => Promise<OpenChatSeed | null>>;
+  // Slash commands keyed by rib id — the GET /api/commands source.
+  readonly commandListers: Map<string, () => Promise<readonly RibCommandDescriptor[]>>;
+  readonly commandInvokers: Map<
+    string,
+    (name: string, arg: string) => Promise<CommandInvokeResult>
+  >;
+  readonly commandCompleters: Map<
+    string,
+    (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
+  >;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
   // Validated, de-duplicated tools across every active rib. The composition
@@ -200,8 +213,11 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     disposers,
     probes,
     actionHandlers,
-    personaListers,
-    personaResolvers,
+    agentListers,
+    agentResolvers,
+    commandListers,
+    commandInvokers,
+    commandCompleters,
     workflowContributions,
     tools,
   } = applyRibs({
@@ -216,8 +232,11 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     manifests,
     probes,
     actionHandlers,
-    personaListers,
-    personaResolvers,
+    agentListers,
+    agentResolvers,
+    commandListers,
+    commandInvokers,
+    commandCompleters,
     workflowContributions,
     tools,
     async disposeAll() {

@@ -21,8 +21,11 @@ const HOOK_FIELDS = [
   "contributeWorkflows",
   "onAction",
   "authStatus",
-  "listPersonas",
-  "resolvePersona",
+  "listAgents",
+  "resolveAgent",
+  "listCommands",
+  "invokeCommand",
+  "completeCommand",
 ] as const;
 
 const ARRAY_FIELDS = ["views", "surfaces"] as const;
