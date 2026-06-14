@@ -13,8 +13,10 @@ import { ribIdSchema } from "./rib.ts";
 // at GET /api/commands. `name` rides a `/<name>` affordance (lowercase kebab, so
 // it stays slash-safe). `argument`, when set, describes the single positional
 // argument for type-ahead; `completes` means the rib serves completions for it
-// via `completeCommand`. Static metadata — the surfaces merge these with their
-// own base commands (workflow / project / session) into one menu.
+// via `completeCommand` (which must return the full candidate set for an empty
+// prefix — surfaces fetch once and filter client-side). Static metadata — the
+// surfaces merge these with their own base commands (workflow / project /
+// session) into one menu.
 export const ribCommandDescriptorSchema = z
   .object({
     name: z
@@ -40,6 +42,22 @@ export type RibCommandDescriptor = z.infer<typeof ribCommandDescriptorSchema>;
 export const commandRefSchema = ribCommandDescriptorSchema.extend({ ribId: ribIdSchema }).strict();
 export type CommandRef = z.infer<typeof commandRefSchema>;
 
+// Command names the harness surfaces reserve for their own base commands — chat
+// session controls plus workflow/project. The server drops a rib command using
+// one of these from GET /api/commands so a name can't be available on one surface
+// and shadowed on another (the CLI's base set is larger than the SPA's). The
+// union of every surface's base command names.
+export const RESERVED_COMMAND_NAMES: ReadonlySet<string> = new Set([
+  "new",
+  "provider",
+  "model",
+  "project",
+  "workflow",
+  "workflows",
+  "run",
+  "exit",
+]);
+
 export const listCommandsResponseSchema = z
   .object({ commands: z.array(commandRefSchema) })
   .strict();
@@ -49,10 +67,11 @@ export type ListCommandsResponse = z.infer<typeof listCommandsResponseSchema>;
 // performs. `open-agent` opens one of the rib's agents as a seeded chat (the
 // surface resolves the seed through the agents seam, GET /api/agents/.../resolve);
 // `run-workflow` starts a catalog workflow with the typed argument as $ARGUMENTS;
-// `message` renders inline markdown (the no-arg "list" case). New variants are
-// non-breaking via the `effect` discriminator.
+// `message` is inline text the surface renders as-is in the command row (the
+// no-arg "list" case — plain text, not markdown, to match how command output is
+// displayed). New variants are non-breaking via the `effect` discriminator.
 export const commandEffectSchema = z.discriminatedUnion("effect", [
-  z.object({ effect: z.literal("message"), markdown: z.string().min(1).max(8000) }).strict(),
+  z.object({ effect: z.literal("message"), text: z.string().min(1).max(8000) }).strict(),
   z
     .object({
       effect: z.literal("open-agent"),
@@ -80,7 +99,9 @@ export const commandInvokeResultSchema = z.discriminatedUnion("ok", [
 export type CommandInvokeResult = z.infer<typeof commandInvokeResultSchema>;
 
 // One argument completion item for the type-ahead
-// (GET /api/commands/:ribId/:name/complete?prefix=).
+// (GET /api/commands/:ribId/:name/complete?prefix=). Surfaces request `prefix=""`
+// once and filter client-side, so the completer must return the full set for an
+// empty prefix.
 export const commandCompletionSchema = z
   .object({ value: z.string().min(1), description: z.string().optional() })
   .strict();

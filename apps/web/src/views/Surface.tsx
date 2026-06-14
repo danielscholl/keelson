@@ -108,6 +108,7 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
         name: seed.name,
         openingPrompt: seed.openingPrompt ?? OPENING_PROMPT,
         ...(seed.model ? { model: seed.model } : {}),
+        ...(seed.providerId ? { providerId: seed.providerId } : {}),
       }),
     [onExplore],
   );

@@ -303,6 +303,9 @@ export interface Rib {
   // (open one of the rib's agents, run a workflow, or show a message), keeping the
   // rib's logic off the trusted surfaces. `completeCommand` (optional) backs the
   // argument type-ahead for a command whose descriptor sets `argument.completes`.
+  // It MUST return the full candidate set for an empty `prefix`: surfaces fetch
+  // once with `prefix=""` and filter client-side (so the completer is called at
+  // most once per command, not per keystroke), then narrow `prefix` themselves.
   listCommands?(
     ctx: RibContext,
   ): readonly RibCommandDescriptor[] | Promise<readonly RibCommandDescriptor[]>;
@@ -354,15 +357,18 @@ export type RibActionResponse = z.infer<typeof ribActionResponseSchema>;
 // A seed for a fresh, seeded chat — the systemPrompt and name capped at the
 // server's createConversation limits so a directive can be rejected client-side
 // rather than 400 at create. `openingPrompt` is optional: omitted means the chat
-// opens without an auto-fired first turn. `model` is the agent's configured
-// model, carried so entering an agent uses its model rather than the surface's
-// session default; omitted falls back to the selected model.
+// opens without an auto-fired first turn. `model`/`providerId` are the agent's
+// configured model reference, carried so entering an agent uses its own model
+// rather than the surface's session default. Pin `providerId` alongside `model`
+// when the model belongs to a specific provider — otherwise the surface keeps
+// its current provider, which can't serve a model from a different one.
 export const openChatSeedSchema = z
   .object({
     systemPrompt: z.string().min(1).max(8000),
     name: z.string().min(1).max(80),
     openingPrompt: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
+    providerId: z.string().min(1).optional(),
   })
   .strict();
 export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;

@@ -14,10 +14,12 @@ import {
   commandInvokeResultSchema,
   listCommandCompletionsResponseSchema,
   listCommandsResponseSchema,
+  RESERVED_COMMAND_NAMES,
   type RibCommandDescriptor,
   ribCommandDescriptorSchema,
 } from "@keelson/shared";
 import type { Hono } from "hono";
+import { isAllowedOrigin } from "./server-context.ts";
 
 export interface CommandsRoutesDeps {
   commandListers: Map<string, () => Promise<readonly RibCommandDescriptor[]>>;
@@ -54,11 +56,14 @@ export function commandsRoutes(app: Hono, deps: CommandsRoutesDeps): void {
         }
       }),
     );
-    // Dedupe by name across ribs — first registered wins, so a later rib can't
-    // shadow an earlier rib's command (mirrors the global tool-name rule).
+    // Drop names a surface reserves for its base commands (so availability can't
+    // diverge between surfaces), then dedupe by name across ribs — first
+    // registered wins, so a later rib can't shadow an earlier rib's command
+    // (mirrors the global tool-name rule).
     const seen = new Set<string>();
     const commands: CommandRef[] = [];
     for (const ref of lists.flat()) {
+      if (RESERVED_COMMAND_NAMES.has(ref.name)) continue;
       if (seen.has(ref.name)) continue;
       seen.add(ref.name);
       commands.push(ref);
@@ -83,6 +88,11 @@ export function commandsRoutes(app: Hono, deps: CommandsRoutesDeps): void {
   });
 
   app.post("/api/commands/:ribId/:name/invoke", async (c) => {
+    // Mutating route — match the per-route origin gate every other state-changing
+    // POST uses (a present-but-foreign Origin is a browser cross-site call; a
+    // missing Origin is a non-browser client like the CLI and is allowed).
+    const origin = c.req.header("origin");
+    if (origin && !isAllowedOrigin(origin)) return c.json({ error: "forbidden origin" }, 403);
     const invoker = commandInvokers.get(c.req.param("ribId"));
     if (!invoker) return c.json({ error: "rib has no commands" }, 404);
     let body: unknown;

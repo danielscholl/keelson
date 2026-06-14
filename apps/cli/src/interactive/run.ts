@@ -16,6 +16,7 @@ import {
   TUI,
 } from "@earendil-works/pi-tui";
 import type {
+  CommandCompletion,
   CommandRef,
   Project,
   ReasoningEffortLevel,
@@ -247,6 +248,20 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     workflowsCache ??= (await listWorkflows(opts.baseUrl)).workflows;
     return workflowsCache;
   };
+  // Per-command completion cache: fetch the full list once (empty prefix) and
+  // filter locally, like the project/workflow caches above and the SPA — avoids
+  // a server round-trip (and the rib's disk reads) on every keystroke. Relies on
+  // the completeCommand contract that an empty prefix returns the full candidate
+  // set (packages/shared/src/rib.ts); the local filter then narrows by prefix.
+  const ribCompletionsCache = new Map<string, CommandCompletion[]>();
+  const loadRibCompletionsCached = async (cmd: CommandRef): Promise<CommandCompletion[]> => {
+    let all = ribCompletionsCache.get(cmd.name);
+    if (all === undefined) {
+      all = await completeRibCommand(opts.baseUrl, cmd.ribId, cmd.name, "");
+      ribCompletionsCache.set(cmd.name, all);
+    }
+    return all;
+  };
   const chatProviders = setup.providers.filter((p) => p.id !== "workflow");
 
   // Start a workflow run and stream its node frames into the transcript. Shared by
@@ -470,7 +485,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     }
     const effect = result.effect;
     if (effect.effect === "message") {
-      for (const line of effect.markdown.split("\n")) surface.addChild(new Text(line, 1, 0));
+      for (const line of effect.text.split("\n")) surface.addChild(new Text(line, 1, 0));
       tui.requestRender();
       return;
     }
@@ -487,10 +502,18 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
       const seed = await resolveAgent(opts.baseUrl, effect.ribId, effect.slug);
       session.seedSystemPrompt = seed.systemPrompt;
       session.conversationName = seed.name;
-      if (seed.model !== undefined) {
-        session.model = seed.model;
-        footer.set({ model: seed.model });
+      // Apply the agent's model reference coherently: pin its provider when it
+      // names one, then its model — or reset to the (resulting) provider's
+      // default when the agent pins no model, so a prior agent's model can't leak
+      // into this conversation.
+      if (seed.providerId !== undefined && seed.providerId !== session.providerId) {
+        session.providerId = seed.providerId;
       }
+      session.model = seed.model ?? defaultModelFor(setup.providers, session.providerId);
+      footer.set({
+        providerId: session.providerId,
+        ...(session.model !== undefined ? { model: session.model } : { model: undefined }),
+      });
       resetConversation(`entering ${seed.name}`);
       queue.push(seed.openingPrompt ?? "Introduce yourself briefly, in character.");
       pump();
@@ -509,13 +532,13 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         ? {
             getArgumentCompletions: async (prefix: string) => {
               try {
-                return (await completeRibCommand(opts.baseUrl, cmd.ribId, cmd.name, prefix)).map(
-                  (c) => ({
+                return (await loadRibCompletionsCached(cmd))
+                  .filter((c) => c.value.startsWith(prefix))
+                  .map((c) => ({
                     value: c.value,
                     label: c.value,
                     ...(c.description !== undefined ? { description: c.description } : {}),
-                  }),
-                );
+                  }));
               } catch {
                 return [];
               }

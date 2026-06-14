@@ -3,20 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { CreateProjectBody, ListProjectsResponse, Project } from "@keelson/shared";
+import { normalizeBase, originHeader } from "./base.ts";
 import { HttpError } from "./workflow-client.ts";
-
-function normalizeBase(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
-}
-
-function originHeader(baseUrl: string): string {
-  try {
-    const u = new URL(baseUrl);
-    return `http://${u.hostname}:${u.port || (u.protocol === "https:" ? "443" : "80")}`;
-  } catch {
-    return "http://127.0.0.1:7878";
-  }
-}
 
 function defaultHeaders(baseUrl: string): Record<string, string> {
   return { accept: "application/json", origin: originHeader(baseUrl) };

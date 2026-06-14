@@ -92,6 +92,14 @@ interface CommandResult {
   workflowName?: string;
 }
 
+// Shared CommandResult builders for the command dispatchers below.
+const okResult = (message: string, extra?: Partial<CommandResult>): CommandResult => ({
+  ok: true,
+  message,
+  ...extra,
+});
+const failResult = (message: string): CommandResult => ({ ok: false, message });
+
 interface CommandCall {
   command: string;
   args: string;
@@ -544,9 +552,12 @@ export function Chat({
     pendingNameRef.current = pendingSeed.name;
     autoSendPromptRef.current = pendingSeed.openingPrompt;
     setInput(pendingSeed.openingPrompt);
-    // An agent seed may pin its model; honor it so the seeded conversation uses
-    // the agent's model rather than the picker default (the default-pick effect
-    // below won't clobber it).
+    // An agent seed may pin its model (and the provider that serves it); honor
+    // both so the seeded conversation uses the agent's model rather than the
+    // picker default. Pinning the provider keeps the pair coherent — a model
+    // from another provider would otherwise be sent with the default one (the
+    // default-pick effect below won't clobber an already-set provider/model).
+    if (pendingSeed.providerId) setSelectedProviderId(pendingSeed.providerId);
     if (pendingSeed.model) setSelectedModel(pendingSeed.model);
     onSeedConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1216,12 +1227,8 @@ export function Chat({
   // does so a fresh/slow load still starts a run.
   const startRun = useCallback(
     async (name: string, args: string): Promise<CommandResult> => {
-      const ok = (message: string, extra?: Partial<CommandResult>): CommandResult => ({
-        ok: true,
-        message,
-        ...extra,
-      });
-      const fail = (message: string): CommandResult => ({ ok: false, message });
+      const ok = okResult;
+      const fail = failResult;
       let projectId = activeProjectId;
       if (!projectId) {
         try {
@@ -1255,12 +1262,8 @@ export function Chat({
 
   const dispatchWorkflowCommand = useCallback(
     async (rest: string): Promise<CommandResult> => {
-      const ok = (message: string, extra?: Partial<CommandResult>): CommandResult => ({
-        ok: true,
-        message,
-        ...extra,
-      });
-      const fail = (message: string): CommandResult => ({ ok: false, message });
+      const ok = okResult;
+      const fail = failResult;
 
       const parsed = parseWorkflowCommand(rest);
 
@@ -1300,7 +1303,7 @@ export function Chat({
       const result = await invokeRibCommand(cmd.ribId, cmd.name, arg);
       if (!result.ok) return { ok: false, message: result.error };
       const { effect } = result;
-      if (effect.effect === "message") return { ok: true, message: effect.markdown };
+      if (effect.effect === "message") return { ok: true, message: effect.text };
       if (effect.effect === "run-workflow") return startRun(effect.workflow, effect.args ?? "");
       const seed = await resolveAgent(effect.ribId, effect.slug);
       onOpenSeededChat?.({
@@ -1308,6 +1311,7 @@ export function Chat({
         name: seed.name,
         openingPrompt: seed.openingPrompt ?? OPENING_PROMPT,
         ...(seed.model ? { model: seed.model } : {}),
+        ...(seed.providerId ? { providerId: seed.providerId } : {}),
       });
       return { ok: true, message: `Opening ${seed.name}…` };
     },
