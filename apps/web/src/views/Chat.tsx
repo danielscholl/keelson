@@ -442,14 +442,17 @@ export function Chat({
   // on mount and merged with the base commands below. A failed fetch leaves the
   // list empty — only the base commands show.
   const [ribCommands, setRibCommands] = useState<CommandRef[]>([]);
+  // Settles true once `/api/commands` resolves (or fails) — until then a `/<name>`
+  // that matches no command yet is held rather than leaked to the model as chat.
+  const [commandsReady, setCommandsReady] = useState(false);
   // Completions for the active rib command's argument, fetched once per command
-  // the first time its arg context is reached. Keyed by `${ribId}/${name}` so
-  // switching between two completing commands refetches. Same guard as workflows.
+  // the first time its arg context is reached. Keyed by `${ribId}/${name}`; the
+  // fetch effect keys on that stable identity, not the typed partial, so typing
+  // doesn't refetch (the request is always empty-prefix).
   const [ribArgCompletions, setRibArgCompletions] = useState<{
     key: string;
     items: { name: string; description?: string }[];
   } | null>(null);
-  const ribArgFetchingRef = useRef<string | null>(null);
 
   // Add-to-notebook state. The modal opens when a target entry string is set
   // (the "Edit…" path); the one-click button appends directly. `saving` gates
@@ -535,6 +538,9 @@ export function Chat({
       })
       .catch(() => {
         // non-fatal — only the base commands show
+      })
+      .finally(() => {
+        if (!cancelled) setCommandsReady(true);
       });
     return () => {
       cancelled = true;
@@ -1344,6 +1350,15 @@ export function Chat({
     () => matchRibArgContext(input, mergedCommands),
     [input, mergedCommands],
   );
+  // Stable per-command identity for the completion fetch. The fetch is keyed on
+  // this, not on `ribArgContext` (which changes object identity every keystroke),
+  // so typing the partial doesn't re-run the fetch — it's always empty-prefix.
+  const ribArgKey =
+    ribArgContext?.command.ribId !== undefined
+      ? `${ribArgContext.command.ribId}/${ribArgContext.command.name}`
+      : null;
+  const ribArgRibId = ribArgContext?.command.ribId;
+  const ribArgName = ribArgContext?.command.name;
   const slashArgItems = useMemo(() => {
     if (workflowRunPartial !== null && workflowNames !== null) {
       return filterWorkflowNames(workflowNames, workflowRunPartial);
@@ -1412,24 +1427,21 @@ export function Chat({
   }, [workflowRunPartial, workflowNames, activeProjectId]);
 
   // Lazy-load a rib command's arg completions the first time the user reaches
-  // its `/<name> <…>` context. Cached per command (keyed by ribId/name); a
-  // failed fetch leaves the cache untouched so the picker shows no suggestions.
+  // its `/<name> <…>` context. Keyed on the stable `ribArgKey` (not the typed
+  // partial), so it runs at most once per command — typing the partial doesn't
+  // re-run it and the request is always empty-prefix (the completeCommand
+  // contract returns the full set there; we filter client-side). A failed fetch
+  // leaves the cache untouched so the picker just shows no suggestions.
   useEffect(() => {
-    if (ribArgContext === null) return;
-    const { command } = ribArgContext;
-    if (!command.ribId) return;
-    const ribId = command.ribId;
-    const key = `${ribId}/${command.name}`;
-    if (ribArgCompletions?.key === key) return;
-    if (ribArgFetchingRef.current === key) return;
-    ribArgFetchingRef.current = key;
+    if (ribArgKey === null || ribArgRibId === undefined || ribArgName === undefined) return;
+    if (ribArgCompletions?.key === ribArgKey) return;
     let cancelled = false;
     void (async () => {
       try {
-        const list = await completeRibCommand(ribId, command.name, "");
+        const list = await completeRibCommand(ribArgRibId, ribArgName, "");
         if (!cancelled) {
           setRibArgCompletions({
-            key,
+            key: ribArgKey,
             items: list.map((item) =>
               item.description
                 ? { name: item.value, description: item.description }
@@ -1439,15 +1451,12 @@ export function Chat({
         }
       } catch {
         // Leave the cache as-is; type-ahead simply offers nothing this round.
-      } finally {
-        ribArgFetchingRef.current = null;
       }
     })();
     return () => {
       cancelled = true;
-      ribArgFetchingRef.current = null;
     };
-  }, [ribArgContext, ribArgCompletions]);
+  }, [ribArgKey, ribArgRibId, ribArgName, ribArgCompletions]);
 
   // Open the picker when the user starts a slash command; close it as soon as
   // the input stops starting with `/`. Keeping selectedIndex in range as the
@@ -1565,6 +1574,22 @@ export function Chat({
       }
       return;
     }
+    // A `/<name>` that matches nothing while rib command discovery is still in
+    // flight is almost certainly an intended rib command (e.g. `/mind`) not yet
+    // loaded — hold it with a diagnostic rather than leak the slash text to the
+    // model as a chat prompt. Once commands settle, an unmatched slash falls
+    // through to a normal send (a genuine non-command).
+    if (trimmed.startsWith("/") && !commandsReady) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newId(),
+          role: "system",
+          content: "Commands are still loading — try that again in a moment.",
+        },
+      ]);
+      return;
+    }
     // Mid-turn: stash for auto-flush on clean `done`. Single-slot — a second
     // Enter replaces the queued prompt.
     if (streaming) {
@@ -1576,6 +1601,7 @@ export function Chat({
     setInput("");
     void doSend(trimmed);
   }, [
+    commandsReady,
     dispatchProjectCommand,
     dispatchWorkflowCommand,
     dispatchRibCommand,
