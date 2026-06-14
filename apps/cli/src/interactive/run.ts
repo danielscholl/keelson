@@ -237,6 +237,8 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     workflowsCache ??= (await listWorkflows(opts.baseUrl)).workflows;
     return workflowsCache;
   };
+  // Personas are NOT session-cached like projects/workflows: a mind can be
+  // genesis-ed mid-session (a chat tool call), so /mind must read fresh each time.
 
   const chatProviders = setup.providers.filter((p) => p.id !== "workflow");
 
@@ -447,6 +449,13 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         },
       },
       run: async (arg) => {
+        // A turn is streaming: the seed is a single one-shot slot the next created
+        // conversation consumes, so switching minds mid-stream would mis-seed the
+        // queued opener. Mirror the SPA, which refuses slash commands while busy.
+        if (busy) {
+          warn("finish the current turn before entering a mind");
+          return;
+        }
         const slug = arg.trim();
         let personas: Awaited<ReturnType<typeof listPersonas>>;
         try {
