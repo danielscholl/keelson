@@ -43,7 +43,14 @@ export function useRibActionDispatch(
           if (onOpenChat && isOpenChatShaped(result.data)) {
             const parsed = ribClientEffectSchema.safeParse(result.data);
             if (parsed.success && parsed.data.effect === "open-chat") {
-              onOpenChat(parsed.data.seed);
+              // Isolate the callback like onSuccess below: a throwing onOpenChat
+              // must not turn a successful action into a failure result.
+              try {
+                onOpenChat(parsed.data.seed);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                toast.push({ kind: "error", message: `open-chat handler failed: ${message}` });
+              }
             } else {
               toast.push({ kind: "error", message: `${action.type}: invalid open-chat directive` });
             }

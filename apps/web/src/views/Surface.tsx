@@ -110,7 +110,12 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
       }),
     [onExplore],
   );
-  const actions = useRibActionDispatch(ribId, { onSuccess, onOpenChat });
+  // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
+  // intercept an open-chat directive, no-op, and swallow the normal success path.
+  const actions = useRibActionDispatch(ribId, {
+    onSuccess,
+    onOpenChat: onExplore ? onOpenChat : undefined,
+  });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
