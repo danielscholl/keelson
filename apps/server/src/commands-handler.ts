@@ -93,15 +93,25 @@ export function commandsRoutes(app: Hono, deps: CommandsRoutesDeps): void {
     // missing Origin is a non-browser client like the CLI and is allowed).
     const origin = c.req.header("origin");
     if (origin && !isAllowedOrigin(origin)) return c.json({ error: "forbidden origin" }, 403);
-    const invoker = commandInvokers.get(c.req.param("ribId"));
+    const ribId = c.req.param("ribId");
+    const invoker = commandInvokers.get(ribId);
     if (!invoker) return c.json({ error: "rib has no commands" }, 404);
+    // Validate the body shape rather than coercing: a non-object body or a
+    // non-string `arg` is a malformed request (400), not a silent no-arg invoke.
+    // An absent `arg` is still the legitimate no-arg case (arg = "").
     let body: unknown;
     try {
       body = await c.req.json();
     } catch {
-      body = {};
+      return c.json({ error: "invalid JSON body" }, 400);
     }
-    const rawArg = (body as { arg?: unknown } | null)?.arg;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return c.json({ error: "body must be a JSON object" }, 400);
+    }
+    const rawArg = (body as { arg?: unknown }).arg;
+    if (rawArg !== undefined && typeof rawArg !== "string") {
+      return c.json({ error: "arg must be a string" }, 400);
+    }
     const arg = typeof rawArg === "string" ? rawArg : "";
     let result: CommandInvokeResult;
     try {
@@ -111,6 +121,15 @@ export function commandsRoutes(app: Hono, deps: CommandsRoutesDeps): void {
     }
     const parsed = commandInvokeResultSchema.safeParse(result);
     if (!parsed.success) return c.json({ error: "rib returned a malformed command result" }, 500);
+    // A command may only open its OWN rib's agents — reject an open-agent effect
+    // pointing at another rib so a rib can't reach across the boundary.
+    if (
+      parsed.data.ok &&
+      parsed.data.effect.effect === "open-agent" &&
+      parsed.data.effect.ribId !== ribId
+    ) {
+      return c.json({ error: "a command may only open its own rib's agents" }, 500);
+    }
     // A rib-level failure ({ ok: false }) is still a 200 — the surface renders the
     // error inline; only a malformed or throwing rib is a 5xx.
     return c.json(parsed.data);

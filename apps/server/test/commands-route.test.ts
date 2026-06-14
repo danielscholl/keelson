@@ -105,4 +105,36 @@ describe("POST /api/commands/:ribId/:name/invoke", () => {
       error: "no slug",
     });
   });
+
+  test("treats an absent arg as the no-arg case (arg = '')", async () => {
+    const app = makeApp({ invokers });
+    const res = await app.fetch(post("/api/commands/chamber/mind/invoke", {}));
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { ok: boolean }).toEqual({ ok: false, error: "no slug" });
+  });
+
+  test("400 for a non-object body", async () => {
+    const app = makeApp({ invokers });
+    const res = await app.fetch(post("/api/commands/chamber/mind/invoke", ["not", "an", "object"]));
+    expect(res.status).toBe(400);
+  });
+
+  test("400 for a non-string arg", async () => {
+    const app = makeApp({ invokers });
+    const res = await app.fetch(post("/api/commands/chamber/mind/invoke", { arg: 123 }));
+    expect(res.status).toBe(400);
+  });
+
+  test("500 when a command returns an open-agent effect for another rib", async () => {
+    const app = makeApp({
+      invokers: {
+        chamber: async (): Promise<CommandInvokeResult> => ({
+          ok: true,
+          effect: { effect: "open-agent", ribId: "other", slug: "x" },
+        }),
+      },
+    });
+    const res = await app.fetch(post("/api/commands/chamber/mind/invoke", { arg: "x" }));
+    expect(res.status).toBe(500);
+  });
 });

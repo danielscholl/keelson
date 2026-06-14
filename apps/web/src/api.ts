@@ -621,20 +621,17 @@ export async function getCommands(): Promise<CommandRef[]> {
 }
 
 // Argument type-ahead for a rib command whose descriptor sets argument.completes.
-// A failed completion degrades to nothing rather than breaking the composer.
+// Propagates failures rather than swallowing them: the caller catches and leaves
+// its cache unset so a transient error retries on re-entry, instead of caching an
+// empty result that suppresses completions for the rest of the session.
 export async function completeRibCommand(
   ribId: string,
   name: string,
   prefix: string,
 ): Promise<CommandCompletion[]> {
   const url = `/api/commands/${encodeURIComponent(ribId)}/${encodeURIComponent(name)}/complete?prefix=${encodeURIComponent(prefix)}`;
-  try {
-    return listCommandCompletionsResponseSchema.parse(
-      await apiRequest<unknown>(url, { label: url }),
-    ).completions;
-  } catch {
-    return [];
-  }
+  return listCommandCompletionsResponseSchema.parse(await apiRequest<unknown>(url, { label: url }))
+    .completions;
 }
 
 // Invoke a rib command; the returned effect is performed by the caller. A

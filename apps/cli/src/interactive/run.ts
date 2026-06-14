@@ -504,6 +504,12 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     }
     try {
       const seed = await resolveAgent(opts.baseUrl, effect.ribId, effect.slug);
+      // A turn can start during the await above; re-check before resetting so we
+      // never reset/seed the conversation mid-stream.
+      if (busy) {
+        warn("finish the current turn before entering an agent");
+        return;
+      }
       session.seedSystemPrompt = seed.systemPrompt;
       session.conversationName = seed.name;
       // Apply the agent's model reference coherently: pin its provider when it
