@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { basename, isAbsolute, relative, sep } from "node:path";
-import { DEFAULT_PROJECT_NAME, type Project } from "@keelson/shared";
+import { DEFAULT_PROJECT_NAME, type Project, projectNameSchema } from "@keelson/shared";
 import { HttpError } from "../http/workflow-client.ts";
 
 // Mirrors the server's isPathInside (apps/server/src/projects-store.ts) so
@@ -16,6 +16,22 @@ export function pathContains(parent: string, child: string): boolean {
 function trimSlash(p: string): string {
   if (p === "/") return p;
   return p.replace(/[/\\]+$/, "");
+}
+
+// A filesystem basename isn't constrained to the project-name charset — on
+// Windows especially, repo folders routinely carry uppercase letters or spaces.
+// Fold one into a name satisfying projectNameSchema (lowercase `[a-z0-9_-]`,
+// leading alphanumeric, max 64), or null when nothing valid survives. Mirrors
+// the clone path's deriveProjectNameFromUrl so both auto-register routes agree.
+export function sanitizeProjectName(raw: string): string | null {
+  const candidate = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^[^a-z0-9]+/, "")
+    .replace(/[-_]+$/, "")
+    .slice(0, 64)
+    .replace(/[-_]+$/, "");
+  return projectNameSchema.safeParse(candidate).success ? candidate : null;
 }
 
 export interface ProjectBinding {
@@ -66,7 +82,15 @@ export async function resolveProjectBinding(deps: ProjectBindingDeps): Promise<P
     return { name: DEFAULT_PROJECT_NAME, autoRegistered: false };
   }
 
-  const name = basename(trimSlash(gitRoot));
+  const rawName = basename(trimSlash(gitRoot));
+  const name = sanitizeProjectName(rawName);
+  if (name === null) {
+    return {
+      name: DEFAULT_PROJECT_NAME,
+      autoRegistered: false,
+      note: `repo folder '${rawName}' has no project-name-safe characters; using the default workspace (set one with \`keelson project add\`)`,
+    };
+  }
   try {
     const created = await deps.createProject({ name, rootPath: gitRoot });
     return {

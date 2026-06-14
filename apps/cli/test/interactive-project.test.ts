@@ -5,7 +5,11 @@
 import { describe, expect, test } from "bun:test";
 import type { Project } from "@keelson/shared";
 import { HttpError } from "../src/http/workflow-client.ts";
-import { pathContains, resolveProjectBinding } from "../src/interactive/project.ts";
+import {
+  pathContains,
+  resolveProjectBinding,
+  sanitizeProjectName,
+} from "../src/interactive/project.ts";
 
 function project(name: string, rootPath: string): Project {
   return { id: `id-${name}`, name, rootPath, createdAt: "2026-01-01T00:00:00.000Z" };
@@ -46,6 +50,28 @@ describe("pathContains", () => {
   });
 });
 
+describe("sanitizeProjectName", () => {
+  test("lowercases and collapses runs of disallowed chars to a dash", () => {
+    expect(sanitizeProjectName("Crispy-Chainsaw")).toBe("crispy-chainsaw");
+    expect(sanitizeProjectName("My Repo!!")).toBe("my-repo");
+    expect(sanitizeProjectName("OSDU")).toBe("osdu");
+  });
+
+  test("strips leading separators down to a leading alphanumeric", () => {
+    expect(sanitizeProjectName("__leading")).toBe("leading");
+    expect(sanitizeProjectName(".dotfolder")).toBe("dotfolder");
+  });
+
+  test("caps length at 64", () => {
+    expect(sanitizeProjectName("a".repeat(100))).toHaveLength(64);
+  });
+
+  test("returns null when nothing valid survives", () => {
+    expect(sanitizeProjectName("...")).toBeNull();
+    expect(sanitizeProjectName("")).toBeNull();
+  });
+});
+
 describe("resolveProjectBinding", () => {
   test("registered project containing cwd wins without touching git", async () => {
     const { deps: d, created } = deps({
@@ -79,6 +105,30 @@ describe("resolveProjectBinding", () => {
     expect(binding.name).toBe("newrepo");
     expect(binding.rootPath).toBe("/home/me/newrepo");
     expect(created).toEqual([{ name: "newrepo", rootPath: "/home/me/newrepo" }]);
+  });
+
+  test("auto-register sanitizes a basename outside the project-name charset", async () => {
+    const { deps: d, created } = deps({
+      cwd: "/home/me/Crispy Chainsaw/lib",
+      gitRoot: "/home/me/Crispy Chainsaw",
+    });
+    const binding = await resolveProjectBinding(d);
+    expect(binding.autoRegistered).toBe(true);
+    expect(binding.name).toBe("crispy-chainsaw");
+    expect(created).toEqual([{ name: "crispy-chainsaw", rootPath: "/home/me/Crispy Chainsaw" }]);
+  });
+
+  test("auto-register falls back to default when the basename sanitizes to empty", async () => {
+    const { deps: d, created } = deps({
+      cwd: "/home/me/...",
+      gitRoot: "/home/me/...",
+    });
+    const binding = await resolveProjectBinding(d);
+    expect(binding.projectId).toBeUndefined();
+    expect(binding.name).toBe("default");
+    expect(binding.autoRegistered).toBe(false);
+    expect(binding.note).toContain("...");
+    expect(created).toHaveLength(0);
   });
 
   test("name collision on auto-register falls back to the default workspace", async () => {
