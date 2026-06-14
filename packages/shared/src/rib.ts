@@ -301,7 +301,10 @@ export interface Rib {
   // GET /api/commands. `listCommands` is cheap (static descriptors). `invokeCommand`
   // runs one server-side and returns a closed CommandEffect the surface performs
   // (open one of the rib's agents, run a workflow, or show a message), keeping the
-  // rib's logic off the trusted surfaces. `completeCommand` (optional) backs the
+  // rib's logic off the trusted surfaces. It MUST be a side-effect-free resolver —
+  // it decides WHICH effect to perform; the SURFACE performs it, and may gate or
+  // defer that (e.g. refuse `open-agent` mid-turn), so the rib must not have
+  // mutated state by the time invoke returns. `completeCommand` (optional) backs the
   // argument type-ahead for a command whose descriptor sets `argument.completes`.
   // It MUST return the full candidate set for an empty `prefix`: surfaces fetch
   // once with `prefix=""` and filter client-side (so the completer is called at

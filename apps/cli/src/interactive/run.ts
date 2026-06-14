@@ -493,7 +493,11 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
       await launchRun(effect.workflow, effect.args ? { ARGUMENTS: effect.args } : {});
       return;
     }
-    // open-agent: resolve the seed through the agents seam, then seed a fresh chat.
+    // open-agent enters a fresh seeded chat, which resets the conversation — gate
+    // it while a turn is streaming. The invoke above is a side-effect-free resolver
+    // (rib contract), so running it before this check mutates nothing; only this
+    // conversation-resetting action is busy-incompatible — a message or run-workflow
+    // effect, like base /run, is fine mid-turn.
     if (busy) {
       warn("finish the current turn before entering an agent");
       return;
