@@ -10,7 +10,7 @@ import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@ke
 import { loadKeelsonConfig, resolveMcpSettings } from "@keelson/shared/config";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
-import { seedStarterAssets } from "@keelson/workflows";
+import { bundledWorkflowsDir, seedStarterAssets } from "@keelson/workflows";
 import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -228,6 +228,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   );
   const workflowCatalog = bootstrapWorkflows({
     workflowDir: paths.workflowsDir,
+    bundledDir: bundledWorkflowsDir(),
     listProjects: () => projectsStore.list(),
     extra: ribWorkflows.definitions,
     ribProvenance: ribWorkflows.provenance,

@@ -2682,3 +2682,62 @@ nodes:
     expect(run.status).toBe("succeeded");
   });
 });
+
+describe("bundled starter discovery (catalog)", () => {
+  let bundledDir: string;
+
+  beforeEach(() => {
+    bundledDir = join(tmpDir, "bundled");
+    mkdirSync(bundledDir, { recursive: true });
+  });
+
+  const writeBundled = (filename: string, body: string): void => {
+    writeFileSync(join(bundledDir, filename), body);
+  };
+
+  const node = (name: string) =>
+    `name: ${name}
+description: ${name} starter
+nodes:
+  - id: only
+    bash: 'true'
+`;
+
+  test("surfaces a bundled-only starter even when the global home is populated", () => {
+    // The original bug: seeding skips a populated home, so a starter added in a
+    // later release never reached the server catalog. The bundled root fixes it.
+    writeWorkflow("user-flow.yaml", node("user-flow"));
+    writeBundled("new-starter.yaml", node("new-starter"));
+
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir, bundledDir });
+    const names = catalog.list().map((w) => w.name);
+
+    expect(names).toContain("new-starter");
+    expect(names).toContain("user-flow");
+  });
+
+  test("a same-named global file overrides the bundled starter", () => {
+    writeBundled("shared.yaml", node("shared"));
+    writeWorkflow(
+      "shared.yaml",
+      `name: shared
+description: user override
+nodes:
+  - id: only
+    bash: echo overridden
+`,
+    );
+
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir, bundledDir });
+
+    expect(catalog.get("shared")?.description).toBe("user override");
+  });
+
+  test("without bundledDir the bundled starter is invisible (regression guard)", () => {
+    writeBundled("new-starter.yaml", node("new-starter"));
+
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+
+    expect(catalog.list().map((w) => w.name)).not.toContain("new-starter");
+  });
+});
