@@ -335,6 +335,12 @@ export interface BootstrapWorkflowsOptions {
   // Directory to scan for `*.yaml` workflow files. Production callers pass
   // `${REPO_ROOT}/.keelson/workflows`; tests pass a fixture dir.
   workflowDir: string;
+  // Lowest-precedence root for the shipped starter workflows, so new bundled
+  // starters surface even in a home seeding skipped because it was already
+  // populated (mirrors the CLI's discovery roots). Opt-in so fixture-based
+  // tests don't inherit the real shipped starters; production passes
+  // `bundledWorkflowsDir()`.
+  bundledDir?: string;
   // Registered projects whose `<root>/.keelson/workflows` layers over the
   // global dir (project shadows global by name, visible only with that
   // project's scope). A callback rather than the store so each scan observes
@@ -439,6 +445,7 @@ function catalogSignature(dir: string): string {
 // hit (no re-parse), keeping the polling-heavy run/list reads cheap.
 export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCatalog {
   const dir = opts.workflowDir;
+  const bundledDir = opts.bundledDir;
   const extra = opts.extra ?? [];
   const ribProvenance = opts.ribProvenance;
   const ribNames = opts.ribNames;
@@ -469,6 +476,7 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
     // The id:name prefix keys each fingerprint segment to the project, so
     // adding, removing, or renaming a project re-scans just like a file edit.
     const signature = [
+      ...(bundledDir ? [`bundled:${catalogSignature(bundledDir)}`] : []),
       `global:${catalogSignature(dir)}`,
       ...projects.map(
         (p) =>
@@ -476,7 +484,11 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
       ),
     ].join("\n");
     if (cached && cached.signature === signature) return cached;
-    const result = discoverWorkflows([{ dir, source: "global" }]);
+    // Bundled first so a same-named global file overrides it (later roots win).
+    const result = discoverWorkflows([
+      ...(bundledDir ? [{ dir: bundledDir, source: "bundled" as const }] : []),
+      { dir, source: "global" },
+    ]);
     const notices: WorkflowDiscoveryNotice[] = [];
     for (const error of result.errors) {
       console.warn(`[workflows] failed to load ${error.filename}: ${error.error}`);
