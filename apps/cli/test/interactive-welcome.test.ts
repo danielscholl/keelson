@@ -23,20 +23,26 @@ const base: WelcomeData = {
 };
 
 describe("buildWelcomeLines", () => {
-  test("renders wordmark, tips, and loaded sections", () => {
+  test("renders the mark, state echo, tips strip, and ribs", () => {
     const text = buildWelcomeLines(base).map(stripAnsi).join("\n");
-    expect(text).toContain("━┿━┿━ keelson");
+    expect(text).toContain("━┿━┿━  keelson");
     expect(text).toContain(" │ │");
     expect(text).toContain("v0.5.0");
-    expect(text).toContain("Tips");
-    expect(text).toContain("provider");
-    expect(text).toContain("pi · claude-sonnet");
-    expect(text).toContain("keelson · main");
+    // The footer owns live state; the card echoes provider · model · project once
+    // and never re-tables it.
+    expect(text).toContain("pi · claude-sonnet · keelson");
+    expect(text).not.toContain("provider");
+    // Tips are a single strip, not a table.
+    expect(text).toContain("commands");
+    expect(text).toContain("interrupt");
+    expect(text).toContain("exit");
+    // The empty-ribs line carries the add hint.
     expect(text).toContain("none installed");
-    expect(text).not.toContain("Recent sessions");
+    expect(text).toContain("keelson rib add <url>");
+    expect(text).not.toContain("Recent");
   });
 
-  test("lists ribs and recent sessions when present", () => {
+  test("lists installed ribs and recent sessions when present", () => {
     const text = buildWelcomeLines({
       ...base,
       ribs: [
@@ -51,12 +57,15 @@ describe("buildWelcomeLines", () => {
       .map(stripAnsi)
       .join("\n");
     expect(text).toContain("2 — Chamber, OSDU");
-    expect(text).toContain("Recent sessions");
-    expect(text).toContain("keelson (just now)");
-    expect(text).toContain("sample (20h ago)");
+    expect(text).toContain("Recent");
+    expect(text).toContain("sample");
+    expect(text).toContain("just now");
+    expect(text).toContain("20h ago");
+    // The add hint only appears when no ribs are installed.
+    expect(text).not.toContain("keelson rib add");
   });
 
-  test("surfaces the project note and omits branch when absent", () => {
+  test("surfaces the project note and keeps branch out of the card", () => {
     const text = buildWelcomeLines({
       ...base,
       branch: null,

@@ -9,6 +9,7 @@ import {
   chatFrameSchema,
   listAgentsResponseSchema,
   type MessageChunk,
+  type ModelInfo,
   type OpenChatSeed,
   openChatSeedSchema,
   type ReasoningEffortLevel,
@@ -172,6 +173,28 @@ export async function listProviders(baseUrl: string): Promise<ProviderInfoRow[]>
   }
   const payload = (await res.json()) as { providers?: ProviderInfoRow[] };
   return payload.providers ?? [];
+}
+
+// Live model list for one provider — GET /api/providers/:id/models. The server
+// runs the provider's listModels() probe (e.g. Copilot's SDK) and degrades to
+// the provider's curated fallback when the probe can't reach a live list, so a
+// signed-out state resolves to a usable list rather than an error.
+export async function listProviderModels(
+  baseUrl: string,
+  providerId: string,
+): Promise<ModelInfo[]> {
+  const res = await fetch(
+    `${normalizeBase(baseUrl)}/api/providers/${encodeURIComponent(providerId)}/models`,
+    { headers: { accept: "application/json", origin: originHeader(baseUrl) } },
+  );
+  if (!res.ok) {
+    throw new HttpError(
+      res.status,
+      `GET /api/providers/${providerId}/models failed: ${res.status}`,
+    );
+  }
+  const payload = (await res.json()) as { models?: ModelInfo[] };
+  return payload.models ?? [];
 }
 
 export interface ChatViaServerOptions {

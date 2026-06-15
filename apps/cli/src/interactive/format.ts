@@ -38,7 +38,7 @@ export function formatUsageMeter(
   if (cumulative.input > 0 || cumulative.output > 0) {
     return `↑${formatTokens(cumulative.input)} ↓${formatTokens(cumulative.output)}`;
   }
-  return "0%";
+  return "—";
 }
 
 // Catalog descriptions follow the multi-sentence "Use when / Triggers / Does /

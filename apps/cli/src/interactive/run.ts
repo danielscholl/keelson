@@ -30,6 +30,7 @@ import {
   createConversation,
   getConversation,
   listConversations,
+  listProviderModels,
   listProviders,
   type ProviderInfoRow,
   pickDefaultHttpProvider,
@@ -54,6 +55,7 @@ import {
   parseSlashCommand,
   relativeAge,
 } from "./format.ts";
+import { createModelLoader, toModelCompletions } from "./models.ts";
 import {
   detectGitBranch,
   detectGitRoot,
@@ -264,6 +266,17 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
   };
   const chatProviders = setup.providers.filter((p) => p.id !== "workflow");
 
+  // Live per-provider model lists for the `/model` picker, coalesced and cached
+  // for the session. Falls back to the static capabilities list the server
+  // already carries when the live probe can't run.
+  const loadModels = createModelLoader({
+    fetch: (id) => listProviderModels(opts.baseUrl, id),
+    fallback: (id) => setup.providers.find((p) => p.id === id)?.capabilities.models ?? [],
+  });
+  // Warm the current provider in the background so the first `/model` is instant;
+  // startup never blocks on the probe (Copilot spawns its CLI, ~1s).
+  void loadModels(session.providerId);
+
   // Start a workflow run and stream its node frames into the transcript. Shared by
   // the `/run` command and a rib command's `run-workflow` effect.
   const launchRun = async (name: string, inputs: Record<string, string>): Promise<void> => {
@@ -369,6 +382,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         }
         session.providerId = arg;
         session.model = defaultModelFor(setup.providers, arg);
+        void loadModels(arg);
         footer.set({
           providerId: arg,
           ...(session.model !== undefined ? { model: session.model } : { model: undefined }),
@@ -381,11 +395,12 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
         name: "model",
         description: "switch model for the next turn",
         argumentHint: "<id>",
-        getArgumentCompletions: (prefix) => {
-          const models =
-            setup.providers.find((p) => p.id === session.providerId)?.capabilities.models ?? [];
-          return models.filter((m) => m.startsWith(prefix)).map((m) => ({ value: m, label: m }));
-        },
+        getArgumentCompletions: async (prefix) =>
+          toModelCompletions(
+            await loadModels(session.providerId),
+            prefix,
+            defaultModelFor(setup.providers, session.providerId),
+          ),
       },
       run: (arg) => {
         if (arg.length === 0) {
