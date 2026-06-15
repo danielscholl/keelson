@@ -209,11 +209,30 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     const scoped = opts.snapshotManager
       ? createScopedSnapshotManager(opts.snapshotManager, rib.id)
       : undefined;
-    // Populated by the surface-validation loop below; the registerRegion seam
-    // captures it by reference and reads it only at call time (runtime, after
-    // activation has validated every surface), so a rib's tool can add a region
-    // to any surface it declares irrespective of declaration order.
+    // Validate view + surface descriptors at the activation boundary (the same
+    // spot the self-id is checked) so a malformed descriptor fails the rib here,
+    // not later inside GET /api/ribs where it would blank a panel. Done BEFORE
+    // registerTools so `surfaceIds` is complete when the registerRegion seam is
+    // bound below — a rib may then add a region to any surface it declares,
+    // whether synchronously in registerTools or later at runtime.
+    const views = rib.views ?? [];
+    for (const view of views) {
+      ribViewDescriptorSchema.parse(view);
+      assertInNamespace(rib.id, namespace, view.key, "view key");
+    }
     const surfaceIds = new Set<string>();
+    const surfaces = rib.surfaces ?? [];
+    for (const surface of surfaces) {
+      ribSurfaceDescriptorSchema.parse(surface);
+      if (surfaceIds.has(surface.id)) {
+        throw new Error(`rib '${rib.id}' declares duplicate surface id '${surface.id}'`);
+      }
+      surfaceIds.add(surface.id);
+      for (const region of allRegions(surface.layout)) {
+        assertInNamespace(rib.id, namespace, region.key, "surface region key");
+      }
+    }
+
     const ribCtx: RibContext = {
       ...opts.ctx,
       ...(scoped ? { getSnapshotManager: () => scoped } : {}),
@@ -233,25 +252,6 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       tools,
     );
 
-    // Validate view + surface descriptors at the activation boundary (the same
-    // spot the self-id is checked) so a malformed descriptor fails the rib here,
-    // not later inside GET /api/ribs where it would blank a panel.
-    const views = rib.views ?? [];
-    for (const view of views) {
-      ribViewDescriptorSchema.parse(view);
-      assertInNamespace(rib.id, namespace, view.key, "view key");
-    }
-    const surfaces = rib.surfaces ?? [];
-    for (const surface of surfaces) {
-      ribSurfaceDescriptorSchema.parse(surface);
-      if (surfaceIds.has(surface.id)) {
-        throw new Error(`rib '${rib.id}' declares duplicate surface id '${surface.id}'`);
-      }
-      surfaceIds.add(surface.id);
-      for (const region of allRegions(surface.layout)) {
-        assertInNamespace(rib.id, namespace, region.key, "surface region key");
-      }
-    }
     manifests.push({
       id: rib.id,
       displayName: rib.displayName,

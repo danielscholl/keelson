@@ -123,10 +123,12 @@ export function mergeSurfaceRegions(
   width: number = DEFAULT_REGION_ROW_WIDTH,
 ): RibSurfaceDescriptor {
   if (dynamicRegions.length === 0) return surface;
+  // Clamp so a non-positive width can't spin the chunk loop forever.
+  const step = width >= 1 ? Math.floor(width) : DEFAULT_REGION_ROW_WIDTH;
   const extraRows: { columns: RibSurfaceRegion[] }[] = [];
   for (const group of groupInOrder(dynamicRegions)) {
-    for (let i = 0; i < group.length; i += width) {
-      extraRows.push({ columns: group.slice(i, i + width) });
+    for (let i = 0; i < group.length; i += step) {
+      extraRows.push({ columns: group.slice(i, i + step) });
     }
   }
   return {

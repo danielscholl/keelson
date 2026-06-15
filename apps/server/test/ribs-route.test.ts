@@ -224,6 +224,30 @@ describe("GET /api/ribs dynamic regions", () => {
     const res = await app.fetch(get("/api/ribs"));
     expect(rowsOf((await res.json()) as RibsBody, "surf")).toEqual([["rib:surf:base"]]);
   });
+
+  test("lets a rib register a region synchronously during registerTools without crashing boot", async () => {
+    // Surfaces are validated before registerTools, so a rib's declared surface ids
+    // are known when it registers a default panel at activation time — this must not
+    // throw 'undeclared surface' and abort bootstrap.
+    const eager: Rib = {
+      id: "eager",
+      displayName: "Eager",
+      surfaces: [
+        { id: "main", title: "Main", layout: { rows: [{ columns: [{ key: "rib:eager:base" }] }] } },
+      ],
+      registerTools: (ctx) => {
+        ctx.registerRegion?.("main", { key: "rib:eager:lens:seed", group: "lens" });
+        return [];
+      },
+    };
+    const { app } = await makeRig({ available: { eager } });
+    const res = await app.fetch(get("/api/ribs"));
+    expect(res.status).toBe(200);
+    expect(rowsOf((await res.json()) as RibsBody, "eager")).toEqual([
+      ["rib:eager:base"],
+      ["rib:eager:lens:seed"],
+    ]);
+  });
 });
 
 describe("rib surface activation guards", () => {
