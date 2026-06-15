@@ -17,6 +17,7 @@ import { getRegisteredTools } from "@keelson/skills";
 import {
   bashHandler,
   createWorktree,
+  type DiscoveryRoot,
   defaultRunUntilBashProbe,
   discoverWorkflows,
   ensureWorktreeDeps,
@@ -40,7 +41,7 @@ import {
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
 
-import { defaultWorkflowsDir } from "../paths.ts";
+import { workflowDiscoveryRoots } from "../paths.ts";
 import { bootstrapCliProviders } from "./providers.ts";
 
 export interface RunHeadlessOptions {
@@ -113,11 +114,13 @@ export function resolveHeadlessProviderId(explicit?: string): string {
   return registered.find((id) => id !== "stub" && id !== "workflow") ?? "stub";
 }
 
-// Find a workflow definition by name. Discovery walks the resolved home's
-// global workflow directory only — registered-project overlays live behind
-// the server, so the in-process fallback cannot see project-scoped workflows.
-function loadWorkflowByName(dir: string, name: string): WorkflowDefinition | null {
-  const result = discoverWorkflows([{ dir, source: "global" }]);
+// Find a workflow definition by name across the CLI's discovery roots —
+// bundled code artifacts, the user-global home, and the project-local home
+// (later overrides earlier; discoverWorkflows dedupes by name). Registered-
+// project overlays still live behind the server, so the in-process fallback
+// cannot see those.
+function loadWorkflowByName(roots: DiscoveryRoot[], name: string): WorkflowDefinition | null {
+  const result = discoverWorkflows(roots);
   for (const wf of result.workflows) {
     if (wf.workflow.name === name) return wf.workflow;
   }
@@ -128,9 +131,13 @@ function loadWorkflowByName(dir: string, name: string): WorkflowDefinition | nul
 // event streaming via opts.onEvent — same shape the server's executor
 // emits, so a CLI consumer doesn't branch on transport.
 export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadlessResult> {
-  const workflowsDir = opts.workflowsDir ?? defaultWorkflowsDir();
-  const workflow = loadWorkflowByName(workflowsDir, opts.name);
-  if (!workflow) throw new WorkflowNotFoundError(opts.name, workflowsDir);
+  const roots: DiscoveryRoot[] = opts.workflowsDir
+    ? [{ dir: opts.workflowsDir, source: "global" }]
+    : workflowDiscoveryRoots();
+  const workflow = loadWorkflowByName(roots, opts.name);
+  if (!workflow) {
+    throw new WorkflowNotFoundError(opts.name, roots.map((r) => r.dir).join(", "));
+  }
 
   // Reject memory-bearing workflows up front — the headless path has no MemoryStore,
   // so let the operator see one clear error rather than per-node "missing adapter" warnings.

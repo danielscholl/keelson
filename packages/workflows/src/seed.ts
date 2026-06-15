@@ -14,6 +14,15 @@ import { COMMAND_EXTENSION, SCRIPT_EXT_RUNTIME } from "./handlers/discovery.ts";
 // a fresh <repo>/.keelson home the same way it fills an installed one.
 const BUNDLED_ROOT = join(import.meta.dir, "..", "assets");
 
+// Absolute path to the bundled starter workflows — the "code artifacts" dir
+// (`packages/workflows/assets/workflows` in source, `<pkg>/assets/workflows`
+// in the release bundle). Discovery surfaces add this as the lowest-precedence
+// root so shipped starters are visible without depending on first-run seeding
+// into a home that may already be populated.
+export function bundledWorkflowsDir(): string {
+  return join(BUNDLED_ROOT, "workflows");
+}
+
 // The single definition of "a workflow file" — shared so discovery and the seed
 // guard cannot drift on what counts as a starter.
 export function isWorkflowYaml(name: string): boolean {

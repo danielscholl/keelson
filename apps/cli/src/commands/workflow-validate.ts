@@ -9,7 +9,7 @@ import { parseWorkflow } from "@keelson/workflows";
 
 import { EXIT_BAD_ARGS, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import { emit } from "../output.ts";
-import { defaultWorkflowsDir } from "../paths.ts";
+import { workflowDiscoveryRoots } from "../paths.ts";
 
 export interface WorkflowValidateOptions {
   json: boolean;
@@ -35,13 +35,13 @@ function listYaml(dir: string): string[] {
   }
 }
 
-// Match a file whose workflow `name` field is `target`. If the file parses
-// successfully, use the resolved name. If the file fails schema validation
-// but its raw YAML names itself the same thing (toplevel `name: foo`),
-// still return it — the operator asked to validate `foo`, and the right
-// answer is to surface foo's validation error rather than "not found",
+// Match a file whose workflow `name` field is `target` within one dir. If the
+// file parses successfully, use the resolved name. If the file fails schema
+// validation but its raw YAML names itself the same thing (toplevel
+// `name: foo`), still return it — the operator asked to validate `foo`, and the
+// right answer is to surface foo's validation error rather than "not found",
 // which would hide the very failure they were trying to diagnose.
-function findByName(dir: string, target: string): string | null {
+function findByNameInDir(dir: string, target: string): string | null {
   const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const nameLine = new RegExp(`^name:\\s*['"]?${escaped}['"]?\\s*$`, "m");
   for (const filename of listYaml(dir)) {
@@ -58,18 +58,31 @@ function findByName(dir: string, target: string): string | null {
   return null;
 }
 
+// Resolve `target` across discovery dirs, highest precedence first
+// (project > global > bundled), so validate inspects the file that would
+// actually run when a name is defined in more than one root.
+function findByName(dirs: readonly string[], target: string): string | null {
+  for (const dir of [...dirs].reverse()) {
+    const hit = findByNameInDir(dir, target);
+    if (hit !== null) return hit;
+  }
+  return null;
+}
+
 export async function runWorkflowValidate(
   name: string | undefined,
   opts: WorkflowValidateOptions,
 ): Promise<never> {
-  const dir = opts.dir ?? defaultWorkflowsDir();
+  // An explicit --dir validates just that directory; otherwise validate every
+  // discoverable root (bundled + global + project).
+  const dirs = opts.dir ? [opts.dir] : workflowDiscoveryRoots().map((r) => r.dir);
   const files = name
-    ? [findByName(dir, name)].filter((f): f is string => f !== null)
-    : listYaml(dir);
+    ? [findByName(dirs, name)].filter((f): f is string => f !== null)
+    : dirs.flatMap(listYaml);
 
   if (name && files.length === 0) {
     emit(
-      { error: `no workflow named '${name}' under ${dir}`, code: "WORKFLOW_NOT_FOUND" },
+      { error: `no workflow named '${name}' under ${dirs.join(", ")}`, code: "WORKFLOW_NOT_FOUND" },
       { json: opts.json },
     );
     process.exit(EXIT_NOT_FOUND);

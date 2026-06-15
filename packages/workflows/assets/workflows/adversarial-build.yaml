@@ -1,0 +1,280 @@
+# Build an app under adversarial (GAN-style) tension. Concepts ported from
+# Archon's archon-adversarial-dev (MIT, see NOTICE), rewritten for Keelson:
+# Copilot models, and bash bodies that use the `$KEELSON_*` env channel (bash
+# runs raw for injection safety, so $ARTIFACTS_DIR-style substitution does not
+# apply inside shell). The loop is a single node that plays one role per
+# iteration off a state.json — Keelson runs every iteration with fresh context,
+# which is exactly the role separation this pattern wants.
+#
+# Based on Anthropic's harness-design guidance for long-running application
+# development: separate planning, building, and evaluation into distinct roles
+# with adversarial tension. The evaluator's job is to BREAK what the generator
+# builds; a sprint only passes when every criterion clears the bar.
+
+name: adversarial-build
+provider: copilot
+model: auto
+description: |
+  Use when: User wants to build a complete app from scratch under adversarial
+            development, where a generator and an evaluator push each other.
+  Triggers: "adversarial build", "adversarial dev", "gan dev", "build app
+            adversarially", "adversarial coding".
+  Does: A planner writes a spec with sprints, then a state-machine loop alternates
+        Contract-Negotiator -> Generator -> Evaluator with hard pass/fail
+        thresholds; failing criteria bounce back to the generator with adversarial
+        feedback until every criterion clears the bar or retries run out.
+  NOT for: Bug fixes, PR reviews, refactoring existing code, or simple one-off tasks.
+
+nodes:
+  # ─── Phase 1: Planning ─────────────────────────────────────────────────────
+  - id: plan
+    model: auto
+    allowed_tools: [Read, Write, Glob, Grep]
+    prompt: |
+      You are a product planning expert. Expand a short user prompt into a
+      comprehensive product specification.
+
+      ## User request
+
+      $ARGUMENTS
+
+      ## Task
+
+      Write the spec to `$ARTIFACTS_DIR/spec.md` with the Write tool. It MUST include:
+
+      ### 1. Product Overview
+      What it does, who it's for, the core value proposition.
+
+      ### 2. Tech Stack
+      Concrete, opinionated choices — exact frameworks, libraries, package names.
+      Not "a modern framework."
+
+      ### 3. Design Language
+      Visual style, specific color hex codes, typography, component patterns, spacing.
+
+      ### 4. Feature List
+      Every feature, organized by priority. Be exhaustive.
+
+      ### 5. Sprint Plan
+      Features grouped into 3-6 sprints, ordered by dependency:
+      - Sprint 1 establishes the foundation (setup, core data models, UI shell).
+      - Each later sprint builds on the previous.
+      - Label each clearly: "Sprint 1: Foundation", "Sprint 2: Core Features", …
+      - List the concrete deliverables per sprint.
+
+      The more concrete the spec (exact API paths, color codes, named libraries),
+      the better the generator can build and the evaluator can attack it.
+
+      IMPORTANT: write the file with the Write tool — do not just print it.
+
+  # ─── Phase 2: Workspace init (deterministic state machine seed) ─────────────
+  # bash runs raw: reach the scratch dir via $KEELSON_ARTIFACTS_DIR.
+  - id: init-workspace
+    depends_on: [plan]
+    timeout: 30000
+    bash: |
+      set -uo pipefail
+      ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
+
+      mkdir -p "$ARTIFACTS/contracts" "$ARTIFACTS/feedback" "$ARTIFACTS/app"
+
+      # Isolated git repo for the app so the generator can commit per feature
+      # without touching the caller's checkout.
+      cd "$ARTIFACTS/app"
+      git init -q
+      git commit --allow-empty -m "chore: adversarial-build workspace" -q
+
+      # Sprint count = highest "Sprint N" mentioned in the spec, clamped to [1,10].
+      SPEC="$ARTIFACTS/spec.md"
+      SPRINT_COUNT=3
+      if [ -f "$SPEC" ]; then
+        FOUND=$(grep -ioE 'sprint[[:space:]]+[0-9]+' "$SPEC" | grep -oE '[0-9]+' | sort -n | tail -1)
+        if [ -n "${FOUND:-}" ] && [ "$FOUND" -ge 1 ] 2>/dev/null; then SPRINT_COUNT=$FOUND; fi
+        if [ "$SPRINT_COUNT" -gt 10 ]; then SPRINT_COUNT=10; fi
+      fi
+
+      cat > "$ARTIFACTS/state.json" <<STATEEOF
+      {
+        "phase": "negotiating",
+        "sprint": 1,
+        "totalSprints": $SPRINT_COUNT,
+        "retry": 0,
+        "maxRetries": 3,
+        "passThreshold": 7,
+        "completedSprints": [],
+        "status": "running"
+      }
+      STATEEOF
+
+      echo "{\"totalSprints\": $SPRINT_COUNT, \"appDir\": \"$ARTIFACTS/app\", \"artifactsDir\": \"$ARTIFACTS\"}"
+
+  # ─── Phase 3: Adversarial sprint loop ───────────────────────────────────────
+  # One role per iteration, chosen by state.json's `phase`. Keelson starts each
+  # iteration fresh, so the negotiator, generator, and evaluator never share a
+  # context window. The model writes $ARTIFACTS_DIR paths via its own tools — the
+  # token is substituted to the real scratch path before the turn.
+  - id: adversarial-sprint
+    depends_on: [init-workspace]
+    model: auto
+    idle_timeout: 600000
+    loop:
+      max_iterations: 60
+      fresh_context: true
+      until: ADVERSARIAL_BUILD_DONE
+      until_bash: |
+        grep -qE '"status"[[:space:]]*:[[:space:]]*"(complete|failed)"' "$KEELSON_ARTIFACTS_DIR/state.json"
+      prompt: |
+        # Adversarial development — sprint loop
+
+        You play ONE role this iteration, decided by the current phase in the state file.
+
+        ## Rules for every iteration
+
+        - Play EXACTLY ONE role — the one named by `phase`. Never do another role's work.
+        - Always finish by updating `state.json` as your role specifies.
+        - The completion signal `ADVERSARIAL_BUILD_DONE` is emitted ONLY by the evaluator,
+          and ONLY when it sets `status` to "complete" or "failed". If you are the
+          negotiator or generator, NEVER write that token anywhere — the loop ends the
+          instant it appears, so emitting it early skips the adversarial evaluation.
+
+        ## FIRST: read state
+
+        Read `$ARTIFACTS_DIR/state.json` for: `phase`, `sprint`, `totalSprints`,
+        `retry`, `maxRetries` (default 3), `passThreshold` (default 7).
+        Then read `$ARTIFACTS_DIR/spec.md` for product context.
+
+        ## Directory layout
+
+        - App source: `$ARTIFACTS_DIR/app/`
+        - Sprint contracts: `$ARTIFACTS_DIR/contracts/sprint-{N}.json`
+        - Feedback: `$ARTIFACTS_DIR/feedback/sprint-{N}-round-{R}.json`
+        - State machine: `$ARTIFACTS_DIR/state.json`
+
+        ---
+
+        ## ROLE: CONTRACT NEGOTIATOR (phase = "negotiating")
+
+        Negotiate the success criteria for the current sprint. Play both sides:
+
+        1. **Propose** (generator's view): from the spec's sprint plan, propose
+           5-15 specific, testable criteria for Sprint {N}. Each must be concrete:
+           - GOOD: "GET /api/tasks returns 200 with a JSON array; each item has
+             id (number), title (string), status (string), createdAt (ISO date)"
+           - BAD: "The API works well"
+        2. **Tighten** (evaluator's view): for each criterion, ask — is it testable
+           programmatically? What edge cases are missing (empty inputs, special
+           characters, concurrency)? Raise the bar.
+
+        Write the final contract to `$ARTIFACTS_DIR/contracts/sprint-{N}.json`:
+        ```json
+        {
+          "sprintNumber": 0,
+          "features": ["..."],
+          "criteria": [
+            { "name": "kebab-name", "description": "testable description", "threshold": 7 }
+          ]
+        }
+        ```
+        Then update state.json: set `"phase": "building"` (keep every other field), and
+        end your reply with the single line `Phase set to: building`. Do not write the
+        completion token.
+
+        ---
+
+        ## ROLE: GENERATOR (phase = "building")
+
+        Build features that survive an adversarial evaluator who will try to break them.
+
+        Read: `$ARTIFACTS_DIR/spec.md`, `$ARTIFACTS_DIR/contracts/sprint-{N}.json`,
+        and — if `retry` > 0 — the latest `$ARTIFACTS_DIR/feedback/sprint-{N}-round-*.json`.
+        On a retry, address EVERY failed criterion: refine if scores were close
+        (5-6), pivot if the approach is fundamentally broken (1-4).
+
+        Rules:
+        - All code under `$ARTIFACTS_DIR/app/`.
+        - Build ONE feature at a time, verify it runs, then commit:
+          `cd $ARTIFACTS_DIR/app && git add -A && git commit -m "feat: ..."`.
+        - Install deps as needed; actually run the code (start the server, hit
+          endpoints, render the UI). Build defensively — handle edge cases and
+          invalid input, because the evaluator will probe them.
+
+        Then update state.json: set `"phase": "evaluating"` (keep every other field), and
+        end your reply with the single line `Phase set to: evaluating`. Do not write the
+        completion token — the evaluator has not run yet.
+
+        ---
+
+        ## ROLE: EVALUATOR (phase = "evaluating")
+
+        You are an adversarial QA agent. Your mandate is to BREAK what was built.
+        You are not generous.
+
+        Constraints:
+        - READ-ONLY on `$ARTIFACTS_DIR/app/` source — never Write or Edit it.
+        - You MAY use Bash to run the app, curl endpoints, run tests.
+        - Kill every background process you start before finishing:
+          `pkill -f "node|bun|python|npm|next|vite|webpack" 2>/dev/null || true`
+        - Score EVERY criterion in the contract. No skipping, no curve.
+
+        Scoring: 9-10 exceptional · 7-8 solid (meets the bar) · 5-6 partial (bugs /
+        missed edge cases) · 3-4 weak · 1-2 broken. A 7 means "genuinely meets it."
+
+        Write `$ARTIFACTS_DIR/feedback/sprint-{N}-round-{R}.json`:
+        ```json
+        {
+          "passed": false,
+          "scores": { "criterion-name": 0 },
+          "feedback": [
+            { "criterion": "name", "score": 0, "details": "file paths, line numbers, failing curl commands" }
+          ],
+          "overallSummary": "what worked, what didn't, what to fix"
+        }
+        ```
+        `passed` is true ONLY if every score >= `passThreshold`.
+
+        Update state.json from the result:
+        - **PASSED**: append the sprint to `completedSprints`. If `sprint` <
+          `totalSprints`: `"phase": "negotiating"`, `sprint` + 1, `"retry": 0`.
+          If `sprint` == `totalSprints`: `"phase": "complete"`, `"status": "complete"`.
+        - **FAILED**: if `retry` < `maxRetries`: `"phase": "building"`, `retry` + 1.
+          Else: `"phase": "failed"`, `"status": "failed"`.
+
+        Kill background processes before finishing (command above).
+
+        **Completion signal (evaluator only).** After you update state.json, read its
+        `status`:
+        - If `status` is now "complete" or "failed", make your FINAL line exactly
+          `<promise>ADVERSARIAL_BUILD_DONE</promise>` with nothing after it.
+        - If `status` is still "running" (a sprint passed but more remain, or a retry is
+          queued), do NOT write that token — the loop continues to the next role.
+
+  # ─── Phase 4: Report ────────────────────────────────────────────────────────
+  - id: report
+    depends_on: [adversarial-sprint]
+    trigger_rule: all_done
+    context: fresh
+    model: auto
+    allowed_tools: [Read, Write, Glob, Grep]
+    prompt: |
+      Summarize the adversarial-build run for the operator.
+
+      ## Read
+
+      1. `$ARTIFACTS_DIR/state.json` — final status and sprint count.
+      2. `$ARTIFACTS_DIR/spec.md` — the product spec.
+      3. `$ARTIFACTS_DIR/contracts/` — sprint contracts (use Glob).
+      4. `$ARTIFACTS_DIR/feedback/` — evaluation rounds (use Glob).
+
+      ## Write a report covering
+
+      - **Build summary**: what was built, final status (all sprints passed, or
+        failed on which sprint), sprints completed vs planned.
+      - **Per-sprint breakdown**: criteria required, retries needed, final scores,
+        the feedback that drove improvements.
+      - **Quality metrics**: average final-round score, which criteria needed the
+        most retries.
+      - **How to run it**: the app lives in `$ARTIFACTS_DIR/app/` — tech stack and
+        start command (from the spec), plus any setup steps.
+
+      Write it to `$ARTIFACTS_DIR/report.md` AND print it as your response so the
+      user sees it directly.
