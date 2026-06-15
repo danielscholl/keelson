@@ -1,7 +1,8 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ExecutorValidationError,
@@ -18,6 +19,7 @@ import {
 import { makeApprovalHandler } from "./handlers/approval.ts";
 import { parseWorkflow } from "./loader.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "./schema/index.ts";
+import { seedStarterAssets } from "./seed.ts";
 
 /**
  * Local mirror of @keelson/shared's MessageChunk shape. Defined here
@@ -1578,7 +1580,11 @@ describe("runWorkflow — smoke-test (every node type)", () => {
       ["script", makeScriptHandler()],
     ]);
 
-    const cwd = join(import.meta.dir, "..", "..", "..");
+    // Seed a throwaway home from the bundled assets so the command/script
+    // nodes resolve `e2e-echo-command` and `echo-args` from <cwd>/.keelson/,
+    // the same files production seeds into the real home on first run.
+    const cwd = mkdtempSync(join(tmpdir(), "keelson-smoke-"));
+    seedStarterAssets(join(cwd, ".keelson"));
     const summary = await runWorkflow({
       workflow,
       runId: "smoke-1",
