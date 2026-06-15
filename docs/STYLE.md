@@ -9,7 +9,7 @@ that share one identity:
 - a **bespoke landing** at `public/index.html`, hand-authored static HTML on
   `public/assets/keelson.css`. It is the marketing showcase and the design source
   of truth. It is served verbatim from `public/`.
-- the **docs tier** (concepts, guides, tutorials, reference, design), built with
+- the **docs tier** (concepts, guides, tutorials, workflows, reference, design), built with
   **Astro Starlight** under `src/content/docs/docs/`, themed to the same blueprint
   identity, authored in Markdown/MDX.
 
@@ -78,6 +78,10 @@ prose, not in cute paths.
   author workflows, configuration).
 - `tutorials/` — a problem-first learning rail, each page handing off to the
   next. The capstone is "build your first rib".
+- `workflows/` — the catalog of bundled starter workflows: an index that groups
+  what ships by purpose, plus a node-by-node walkthrough per workflow (the shape
+  as a figure, every node in a table, the patterns each one demonstrates). Worked
+  examples that bridge the `guides/` recipes to the real multi-node workflows.
 - `reference/` — the contract tier: `rib-contract` (the centerpiece, built on the
   contract-doc template: Overview, Terminology, Interface, Validation Rules,
   Lifecycle, Example), `snapshots`, `workflow-nodes`, `cli`, `providers`.
@@ -152,8 +156,8 @@ Keep the blueprint identity by theming, not by fighting the framework:
 The IA is the single source for both Starlight's sidebar and the landing's nav;
 keep them in sync.
 - Landing at `/`. Docs under `/docs/`, one folder per IA section:
-  `/docs/concepts/`, `/docs/guides/`, `/docs/tutorials/`, `/docs/reference/`,
-  `/docs/design/`.
+  `/docs/concepts/`, `/docs/guides/`, `/docs/tutorials/`, `/docs/workflows/`,
+  `/docs/reference/`, `/docs/design/`.
 - The landing is the bridge into the docs: the **Read the Docs** button targets
   `/docs/`, and the header nav links the top sections a newcomer needs
   (Concepts, Guides, Reference). The brand returns to `/`; **View on GitHub** is

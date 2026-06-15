@@ -1,0 +1,113 @@
+---
+title: Starter workflows
+description: The bundled workflow catalog, grouped by the job each does, with a node-by-node walkthrough for each.
+sidebar:
+  order: 0
+---
+
+import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
+
+Keelson ships seven workflows. They are real, runnable, and the place the
+[authoring recipes](../guides/authoring-workflows/) show up composed: a
+three-line approval-gate recipe is one thing, the same gate sitting inside a
+sixteen-node investigate-and-implement pipeline is where the shape clicks. This
+catalog groups what ships by the job it does, and each one gets a full
+node-by-node walkthrough.
+
+Each is also readable in a single screen, so opening the file is its own
+documentation.
+
+## Where these come from
+
+The seven are **bundled** starters: they ship with the package and seed into
+your home (`<home>/workflows/`) on first run, so `keelson workflow list` shows
+them as `global` once seeded. Copy and edit one freely; the bundled original
+stays as a clean fallback. See [scopes](../reference/workflow-nodes/#scopes) for
+how the layers merge.
+
+Run any of them the same way, streaming the DAG as it executes:
+
+```sh
+keelson workflow run smoke-test --watch
+keelson workflow run fix-issue --inputs ARGUMENTS="42"
+```
+
+<Aside type="note" title="What the Copilot workflows need">
+Six of the seven set `provider: copilot` and `model: auto`, so they need a
+GitHub Copilot subscription registered. The GitHub-facing ones (`fix-issue`,
+`pr-review`, `plan-act-evaluate`) also drive the `gh` CLI, so it must be
+installed and authenticated. The approval and interactive workflows pause for a
+human, which needs a running server (`keelson start`). `smoke-test` is the
+exception: it runs provider-free on the stub, with no credentials.
+</Aside>
+
+## Ship code
+
+The delivery flagships: an issue taken to a draft PR, a scoped PR review, and a
+plan-first lifecycle. Each composes gates, loops, and branches into a real
+pipeline, and each has a full walkthrough.
+
+<CardGrid>
+  <LinkCard
+    title="fix-issue"
+    href="fix-issue/"
+    description="16 nodes. Fetches a GitHub issue, plans, pauses for approval, implements, validates against the repo's own checks, self-fixes, opens a draft PR, then self-reviews. Teaches the approval-before-mutation gate and the self-correction loop."
+  />
+  <LinkCard
+    title="pr-review"
+    href="pr-review/"
+    description="9 nodes. Classifies a PR's complexity, runs only the review lanes that apply, and posts the synthesis as a comment. Teaches classify-then-branch and fan-in synthesis."
+  />
+  <LinkCard
+    title="plan-act-evaluate"
+    href="plan-act-evaluate/"
+    description="15 nodes. Records a plan as a GitHub issue, gates on a human, then either implements locally or delegates to the Copilot coding agent, with remote CI as the authoritative check. Teaches the plan, gate, branch lifecycle."
+  />
+</CardGrid>
+
+## Plan and shape
+
+Exploration workflows: turn a fuzzy idea into a validated requirements doc, or
+pressure-test a build by pitting a generator against an evaluator.
+
+<CardGrid>
+  <LinkCard
+    title="interactive-prd"
+    href="interactive-prd/"
+    description="8 nodes. A problem-first conversation: foundation questions, market and codebase research, a written PRD, then validates every technical claim against the real code. Teaches approval capture_response threading a multi-turn conversation."
+  />
+  <LinkCard
+    title="adversarial-build"
+    href="adversarial-build/"
+    description="4 nodes. A planner writes a spec, then a state-machine loop alternates Contract-Negotiator, Generator, and Evaluator with hard pass/fail thresholds, bouncing failures back with feedback. Teaches the role-gated loop completion signal."
+  />
+</CardGrid>
+
+## Author workflows
+
+<CardGrid>
+  <LinkCard
+    title="workflow-builder"
+    href="workflow-builder/"
+    description="5 nodes. A workflow that writes workflows: scans the repo, extracts intent as typed JSON, generates a Keelson YAML, validates it with a real Bun YAML parse, and installs it. Teaches structured output_format plus a deterministic validation gate."
+  />
+</CardGrid>
+
+## Verify the engine
+
+<CardGrid>
+  <LinkCard
+    title="smoke-test"
+    href="smoke-test/"
+    description="9 nodes. Exercises every CI-safe node kind (prompt, command, loop, bash, script) and DAG feature (depends_on, when, trigger_rule, output substitution), asserting each upstream node produced output. The fixture the engine is tested against, and a compact tour of the whole taxonomy."
+  />
+</CardGrid>
+
+## Related
+
+- [Authoring workflows](../guides/authoring-workflows/): the recipes these
+  compose, and the loop you follow to write one.
+- [Workflow nodes](../reference/workflow-nodes/): the full schema every node
+  here is built from.
+- [Workflows](../concepts/workflows/): why deterministic YAML sits next to an
+  agent, and the run lifecycle a workflow leaves behind.

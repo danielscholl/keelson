@@ -228,16 +228,20 @@ runner, and whether a `command:` or named `script:` file exists on disk.
 
 ## Scopes
 
-Workflows live in two scopes, and the catalog merges them:
+Workflows live in three scopes, lowest precedence first, and the catalog merges
+them:
 
 | Scope | Location | Visibility |
 | --- | --- | --- |
+| bundled | shipped with keelson (read-only) | The starter set, always present. |
 | global | `<home>/workflows/` | Every project and conversation. |
 | project | `<root>/.keelson/workflows/` | Only conversations and runs inside that project. |
 
-A project workflow **shadows** a same-named global one within its project. Ribs
-also contribute workflows into the catalog at activation, optionally
-[bound to a snapshot key](../snapshots/#bound-workflows).
+A later scope **shadows** a same-named earlier one: project over global over
+bundled. The bundled starters are also seeded into the home on first run, so they
+list as `global` once present. Ribs also contribute workflows into the catalog at
+activation, optionally [bound to a snapshot key](../snapshots/#bound-workflows).
+The [Workflows catalog](../../workflows/) documents the bundled set.
 
 ## Example
 

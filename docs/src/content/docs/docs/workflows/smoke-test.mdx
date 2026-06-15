@@ -1,0 +1,114 @@
+---
+title: smoke-test
+description: The engine's end-to-end fixture. It exercises the agent and deterministic node kinds and every DAG feature in one Bun-only run, asserting each node produced output.
+sidebar:
+  order: 7
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`smoke-test` is the workflow engine's self-test. In one run it exercises the
+agent and deterministic node kinds (`prompt`, `command`, `loop`, `bash`,
+`script`) and every DAG feature (`depends_on`, `when:`, `trigger_rule:`, and
+`$nodeId.output`
+substitution), then a final node asserts that every upstream node produced
+non-empty output. It is the fixture the engine is tested against after a fresh
+install or a change to the executor, and a compact tour of the node
+taxonomy.
+
+It is not for validating provider-specific features (Claude hooks, Copilot
+tools live in their own fixtures), and it deliberately skips the two control
+kinds, `approval` (it pauses for a human, incompatible with CI) and `cancel`,
+plus the Python `uv` script runtime, to keep the run Bun-only.
+
+## Invoke it
+
+```sh
+keelson workflow run smoke-test --watch
+```
+
+It pins no provider, so it runs against whatever the server registered, and it
+runs cleanly on the **stub provider with no credentials**, which is what makes it
+a true sanity check. It pulls in two files that ship beside it, a command
+(`e2e-echo-command`) and a Bun script (`echo-args`), so it also confirms command
+and script discovery work.
+
+<Aside type="tip" title="The zero-credential checkpoint">
+Because it runs on the stub, `smoke-test` is the fastest way to prove a fresh
+install's engine works end to end before you bring any keys. The
+[first workflow tutorial](../../tutorials/run-a-workflow/) builds a smaller
+version of this graph by hand.
+</Aside>
+
+## The shape
+
+Five independent roots, one per node kind, fan into a small join structure that
+exercises the DAG features, ending in an `assert` node that checks them all. The
+shape is incidental; the coverage is the point.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/smoke-test-dag.svg`}
+    alt="The smoke-test DAG. Five roots, one per node kind: prompt-node, command-node, loop-node, bash-json-node, script-bun-node. downstream depends on prompt-node; gated depends on bash-json-node behind a when condition. merge joins downstream, gated, and script-bun-node under all_success. assert joins merge, loop-node, and command-node under all_success and checks every node produced output."
+  />
+  <figcaption>
+    Figure 1. The smoke-test DAG. The five roots cover the agent and
+    deterministic node kinds; <code>downstream</code>, <code>gated</code>, and <code>merge</code>
+    exercise the env channel, a <code>when:</code> gate, and a
+    <code>trigger_rule</code> join; <code>assert</code> verifies every node
+    produced output.
+  </figcaption>
+</figure>
+
+## Node by node
+
+| Node | Kind | What it covers |
+| --- | --- | --- |
+| `prompt-node` | prompt | An inline agent turn with `effort`, verifying reasoning effort reaches the SDK. |
+| `command-node` | command | A named markdown command (`e2e-echo-command`) from the home. |
+| `loop-node` | loop | An agent loop bounded by `max_iterations: 2` so it cannot hang CI. |
+| `bash-json-node` | bash | A shell node emitting JSON, which unlocks dot-access downstream. |
+| `script-bun-node` | script | A Bun script (`echo-args`), confirming the `runtime: bun` path. |
+| `downstream` | bash | `depends_on: [prompt-node]`, reads its output via `KEELSON_NODE_prompt_node_OUTPUT`. |
+| `gated` | bash | `when: "$bash-json-node.output.status == 'ok'"`, the JSON dot-access gate. |
+| `merge` | bash | `trigger_rule: all_success` over three parents. |
+| `assert` | bash | Joins `merge`, `loop-node`, `command-node`; fails if any node produced empty output. |
+
+### The parts worth a second look
+
+**It is coverage, not a use case.** Each root is a node kind, and the downstream
+trio is a DAG feature: `downstream` proves the env channel
+(`KEELSON_NODE_<id>_OUTPUT`), `gated` proves the `when:` JSON dot-access path, and
+`merge` proves a `trigger_rule` join. Read the file as a checklist of what the
+engine supports.
+
+**The two data channels both appear.** The `when:` gate uses the workflow layer's
+`$bash-json-node.output.status` substitution; `downstream` and `assert` use the
+shell env channel `KEELSON_NODE_*`. The same run shows why there are two: the
+gate is workflow-layer text, the bash bodies run raw.
+
+**`assert` is the test oracle.** It depends on the end of every branch and checks
+each upstream `KEELSON_NODE_*` value is non-empty, exiting non-zero on the first
+failure. A green `smoke-test` run is a passing engine test.
+
+## Patterns it demonstrates
+
+- **[Fan-out and fan-in](../../guides/authoring-workflows/#fan-out-and-fan-in)**: five roots converging through `merge` to `assert`.
+- **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: the `when:` gate on `gated`, over JSON dot-access.
+- **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: `downstream` reads upstream output from the env channel.
+- **A runnable taxonomy reference**: every agent and deterministic node kind in one screen.
+
+## Adapt it
+
+- **Add a provider's features.** Copy it and add the nodes a specific provider
+  supports (Claude `hooks`, Copilot tool gates) to smoke-test that backend.
+- **Add the Python runtime.** Where `uv` is available, add a `script` node with
+  `runtime: uv` to cover the path this fixture skips.
+- **Use it as a template.** It is the cleanest single-file example of each node
+  kind wired together, a good starting point to copy from.
+
+## Related
+
+- [Run your first workflow](../../tutorials/run-a-workflow/): builds a smaller version of this graph, narrated.
+- [Workflow nodes](../../reference/workflow-nodes/): the full schema for every kind here.
+- [Workflows](../../concepts/workflows/): the two data channels this run exercises.

@@ -1,0 +1,122 @@
+---
+title: pr-review
+description: A scoped, adaptive PR review that classifies complexity, runs only the relevant lanes, and posts the synthesis as a single comment.
+sidebar:
+  order: 2
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`pr-review` reads a GitHub pull request, decides how much review it warrants,
+runs only the lanes that apply, and posts one synthesized comment. It is
+read-only by construction: every lane is capped to `Read`, `Glob`, and `Grep`,
+and the single step that touches the PR is the final `gh pr comment`. To fix an
+issue rather than review one, reach for [fix-issue](../fix-issue/); `pr-review`
+never mutates the branch it reads.
+
+It is the catalog's clearest case of **classify, then fan out**: one node
+decides which lanes are worth running, the lanes run in parallel behind a
+`when:` gate, and a synthesis node joins whatever ran.
+
+## Invoke it
+
+```sh
+keelson workflow run pr-review --inputs ARGUMENTS="review pr 42"
+keelson workflow run pr-review --inputs ARGUMENTS="review this pr"   # from a PR branch
+```
+
+It needs the `gh` CLI authenticated against the repo and a Copilot subscription
+(it pins `provider: copilot`, `model: auto`). It posts a comment but never
+pushes code, so it needs no approval gate and no running server.
+
+<Aside type="tip" title="Safe to run on any open PR">
+Every lane is read-only and the only write is the final comment, so `pr-review`
+cannot change the PR it reviews. Point it at anything open.
+</Aside>
+
+## The shape
+
+The run is five phases. Two deterministic `bash` nodes bookend it: `scope`
+gathers the diff up front, `post-comment` publishes at the end. In between, an
+agent classifier decides the work and a fan of agent lanes does it, converging
+on one report.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/pr-review-dag.svg`}
+    alt="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash); scope feeds classify (prompt). classify fans out to four review lanes (code-review, error-handling, test-coverage, docs-impact), three of them behind a dashed when-gate. All four lanes converge on synthesize (prompt) under a one_success join, which feeds post-comment (bash)."
+  />
+  <figcaption>
+    Figure 1. The pr-review DAG. The classifier fans out to four read-only
+    lanes; three are gated by a <code>when:</code> condition, so a trivial PR
+    runs fewer. <code>synthesize</code> joins on <code>one_success</code>, so it
+    proceeds even when lanes were skipped or one failed.
+  </figcaption>
+</figure>
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `extract-pr` | prompt | Parses the PR number out of `$ARGUMENTS`, or emits the literal `CURRENT` for the next node to resolve. |
+| `scope` | bash | Resolves the number (`CURRENT` becomes the current branch's PR), then writes `pr.json`, `diff.patch`, `changed-files.txt`, and a `scope.md` brief into the run's scratch dir. |
+| `classify` | prompt | Returns typed JSON: which of the four lanes to run, a complexity bucket, and the reasoning. |
+| `code-review` | prompt | Correctness and conventions pass over the diff. Runs unless the PR is non-code. |
+| `error-handling` | prompt | Audits new and changed failure paths. Gated on the classifier. |
+| `test-coverage` | prompt | Checks that changed source has matching test changes. Gated on the classifier. |
+| `docs-impact` | prompt | Flags user-facing changes (flags, env vars, APIs) with no doc update. Gated on the classifier. |
+| `synthesize` | prompt | Merges every lane that ran into one comment-ready report and saves `review.md`. |
+| `post-comment` | bash | Posts `review.md` to the PR with `gh pr comment`. |
+
+### The parts worth a second look
+
+**The classifier returns strings, not booleans.** Each lane flag is typed as an
+enum of `"true"` / `"false"`, not a JSON boolean, because the `when:` gates
+compare against a quoted literal:
+
+```yaml
+when: "$classify.output.run_error_handling == 'true'"
+```
+
+Substitution renders a JSON boolean as bare `true`, which would never match
+`== 'true'`. Typing the field as a string enum is what makes the gate fire. This
+is the one sharp edge in the workflow, and it generalizes to any classifier that
+drives a `when:`.
+
+**Every lane is read-only.** Each sets `allowed_tools: [Read, Glob, Grep]`, so
+the reviewers can read the tree but cannot write, run shell, or touch the
+network. On Copilot that gate is enforced at the capability layer, so the
+model's built-in write and shell tools are denied mid-review regardless of what
+it tries. The only write in the whole run is the final `gh pr comment`.
+
+**The lanes share state through files, not prompts.** `scope` writes the diff to
+`$ARTIFACTS_DIR/diff.patch` and each lane reads that file directly, rather than
+having a huge diff substituted into four prompts. Each lane also runs
+`context: fresh`, so they do not pollute each other's reasoning.
+
+**The join tolerates absence.** `synthesize` depends on all four lanes but sets
+`trigger_rule: one_success`, so a skipped lane (its `when:` was false) or a
+single failed lane does not strand the report. Whatever ran gets synthesized.
+
+## Patterns it demonstrates
+
+- **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: `classify` emits the labels; the lanes gate on them with `when:`.
+- **[Fan-out and fan-in](../../guides/authoring-workflows/#fan-out-and-fan-in)**: four lanes in parallel, joined by `synthesize`.
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: the read-only `allowed_tools` rail on every lane.
+- **Artifacts as the shared channel**: `bash` nodes stage files in `$ARTIFACTS_DIR` that agent nodes read, keeping large diffs out of prompt substitution.
+
+## Adapt it
+
+- **Add a lane.** A new review angle is four small edits: a flag on the
+  classifier's `output_format`, a rule in the classifier prompt, a gated lane
+  node, and a line in `synthesize`'s inputs.
+- **Change the rail.** Widen `allowed_tools` if a lane needs to run a linter, or
+  keep it read-only and let `synthesize` recommend commands instead.
+- **Repoint the output.** Swap the final `gh pr comment` for a different sink (a
+  file, a different command) without touching the review logic.
+
+## Related
+
+- [Authoring workflows](../../guides/authoring-workflows/): the recipes this composes.
+- [Workflow nodes](../../reference/workflow-nodes/): `when:`, `trigger_rule:`, and `output_format` in full.
+- [fix-issue](../fix-issue/): the sibling that *changes* code instead of reviewing it.

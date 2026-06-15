@@ -1,0 +1,142 @@
+---
+title: plan-act-evaluate
+description: A plan-first lifecycle that records the plan as a GitHub issue, gates on a human, then implements locally or delegates to the Copilot coding agent, with remote CI as the bar.
+sidebar:
+  order: 3
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`plan-act-evaluate` runs a change through a full lifecycle: it drafts a plan
+under a read-only boundary, records that plan as a GitHub issue, **pauses for a
+human to approve it**, then either implements the change locally or **delegates
+it to the GitHub Copilot coding agent**, and treats the resulting PR's CI as the
+authoritative signal. It is the catalog's heaviest workflow, and the one that
+shows a real two-arm branch reconverging.
+
+Reach for it when the *process* matters as much as the change: a plan in the
+system of record, a gate before code, a choice of who does the work, and an
+audit trail at the end. For a quick known fix, [fix-issue](../fix-issue/) is
+lighter; for reviewing an existing PR, use [pr-review](../pr-review/).
+
+## Invoke it
+
+```sh
+keelson workflow run plan-act-evaluate --inputs ARGUMENTS="add a --json flag to the status command"
+keelson workflow run plan-act-evaluate --inputs ARGUMENTS="42"          # plan onto an existing issue
+```
+
+It needs `gh` authenticated against a repo with Issues enabled, a Copilot
+subscription, and a running server (the approval gate pauses). The change lands
+best on a repo with CI, since CI is the authoritative check. The **delegate**
+path additionally needs the Copilot coding agent enabled on the repo or org (it
+must appear as `copilot-swe-agent` in the assignable actors).
+
+<Aside type="caution" title="It creates GitHub issues and PRs">
+Every run records the plan as a GitHub issue, and then opens a draft PR (local)
+or assigns the issue to Copilot (delegate). Run it where creating those is
+welcome.
+</Aside>
+
+## The shape
+
+Four lifecycle stages: **plan**, a human **gate**, **act**, and **evaluate**,
+ending in an audit report. The act stage is where it splits. The reviewer's
+reply chooses the arm: an approval implements locally, the word "delegate" hands
+the issue to Copilot. Both arms reconverge on one node that reads the PR's CI.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/plan-act-evaluate-dag.svg`}
+    alt="The plan-act-evaluate DAG, top to bottom. intake, then plan under a read-only boundary, then publish-plan records it as a GitHub issue. A brass approval gate follows; its reply feeds select-mode, which branches. The left arm (local, in a dashed worktree frame) is act-local, an evaluate loop, then open-pr. The right arm (delegate) is act-delegate then await-copilot. Both arms converge on ci-signals under a one_success join. A delegate-only review box hangs off ci-signals, and both ci-signals and that review feed the final deterministic report."
+  />
+  <figcaption>
+    Figure 1. The plan-act-evaluate DAG. The brass node is the human gate, and
+    its reply routes the branch below. The local arm (dashed frame) runs in an
+    isolated worktree; the delegate arm runs entirely on GitHub. Both arms
+    reconverge on <code>ci-signals</code>, the authoritative check.
+  </figcaption>
+</figure>
+
+## Node by node
+
+| Stage | Node | Kind | What it does |
+| --- | --- | --- | --- |
+| Plan | `intake` | bash | Classifies the request (issue #, plan file, or free text), loads context, detects the default branch. |
+| | `plan` | prompt | **Read-only** (`allowed_tools: [Read, Glob, Grep]`): authors the plan as text. Cannot write, branch, or commit. |
+| | `publish-plan` | bash | Records the plan as a GitHub issue (new, or a comment on the one you named), and as the `plan.md` review surface. |
+| Gate | `approve-plan` | approval | Pauses on the plan. The reply both approves and **chooses the path**. |
+| Act | `select-mode` | prompt | Typed JSON: `local` (an approval) or `delegate` (the reviewer said "delegate"). |
+| Act · local | `act-local` | prompt | **`when: mode == 'local'`**: implements on a branch, commits by name. |
+| | `evaluate` | loop | Review-and-improve loop (`max_iterations: 5`, `until: EVALUATION_COMPLETE`) on the project's own checks. |
+| | `open-pr` | prompt | Pushes the branch and opens a draft PR linking the plan issue. |
+| Act · delegate | `act-delegate` | bash | **`when: mode == 'delegate'`**: assigns the issue to `copilot-swe-agent` via the GitHub API. |
+| | `await-copilot` | bash | Polls until Copilot opens its PR (or its head SHA settles), captures the PR number. |
+| Evaluate | `ci-signals` | bash | **Reconverges both arms** (`trigger_rule: one_success`): `gh pr checks`, classified PASS / FAIL / NONE / PENDING_APPROVAL. |
+| Audit · delegate | `capture-diff` | bash | **`when: delegate`**: pulls the PR diff for review. |
+| | `self-review` | prompt | Read-only contributor-model review of Copilot's PR. |
+| | `pr-review` | prompt | Renders a formal PR review: `gh pr review --approve` or `--request-changes` (which feeds Copilot). |
+| Audit | `report` | bash | **Deterministic** 6-element audit trail (goal, plan, changeset, evidence, judgment, outcome) joined on `one_success`. |
+
+### The parts worth a second look
+
+**The planner cannot touch code.** `plan` sets `allowed_tools: [Read, Glob,
+Grep]`, an enforced capability boundary, not a guideline. It physically cannot
+write, run shell, branch, or commit; it emits the plan as text, and the
+deterministic `publish-plan` is the only node that records it. Separating "decide
+what to do" from "do it" with a hard rail is the workflow's founding idea.
+
+**The plan is a durable artifact.** `publish-plan` writes the plan to a GitHub
+issue, the system of record, not just a scratch file. The same content backs the
+approval canvas, so the human reviews the exact text that will guide the
+implementer, local or cloud.
+
+**One reply does two jobs.** `approve-plan` captures the reviewer's response, and
+`select-mode` reads it: an approval routes to `local`, the word "delegate" routes
+to Copilot. The gate is also the branch selector, so the human picks *who acts*
+without a second prompt.
+
+**Two arms, one reconvergence.** `select-mode` splits the DAG with `when:` gates.
+The local arm implements, loops to self-improve, and opens a PR; the delegate arm
+assigns the issue and waits. They rejoin at `ci-signals`, which sets
+`trigger_rule: one_success` so whichever arm ran flows through. The delegate-only
+review tail (`capture-diff`, `self-review`, `pr-review`) hangs off that join,
+because only Copilot's PR needs an external reviewer; the local arm already
+reviewed itself in the loop.
+
+**CI is the truth, not the agent.** `ci-signals` reads `gh pr checks`, an
+objective system signal, and classifies it carefully: it distinguishes "no CI on
+this repo" from "CI exists but is gated behind maintainer approval" (the common
+case for a bot's PR), so the audit trail never claims green when a human just
+hasn't approved the workflow yet.
+
+**The report is deterministic on purpose.** `report` is a `bash` node, not a
+prompt: every field is pulled from disk, git, or `gh`. An AI summary could
+hallucinate the goal or hang on the final node and fail an otherwise-green run.
+A facts-only audit trail can do neither.
+
+## Patterns it demonstrates
+
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: the read-only `plan` node: the capability boundary *is* the design.
+- **[Approval gate](../../guides/authoring-workflows/#approval-gate)**: `approve-plan`, whose captured reply also routes the branch.
+- **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: `select-mode` into two arms, reconverged by `ci-signals` on `one_success`.
+- **[Loop until done](../../guides/authoring-workflows/#loop-until-done)**: `evaluate` is a real `loop` node, in contrast to fix-issue's unrolled triad.
+- **External signal as the gate**: `gh pr checks` as the authoritative check, over the agent's own confidence.
+
+## Adapt it
+
+- **Local only.** If you never delegate, delete the `act-delegate`,
+  `await-copilot`, and the delegate review tail, and drop the `when:` gates on
+  the local arm. You are left with a plan-issue-gate-implement-evaluate flow.
+- **Change the authority.** `ci-signals` defines what "evaluated" means. Point it
+  at a different check (a deploy smoke test, a specific workflow run) to move the
+  bar.
+- **Keep the audit, swap the work.** The `report` node is reusable as-is: a
+  deterministic 6-element trail that any plan-act-evaluate-shaped workflow can end on.
+
+## Related
+
+- [fix-issue](../fix-issue/): the lighter sibling, no plan issue, no delegate arm.
+- [pr-review](../pr-review/): the review lanes `self-review` echoes here.
+- [Authoring workflows](../../guides/authoring-workflows/): the branch, gate, and loop recipes.
+- [Workflow nodes](../../reference/workflow-nodes/): `loop`, `approval`, `trigger_rule:`, and tool gates.

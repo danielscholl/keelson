@@ -1,0 +1,103 @@
+---
+title: adversarial-build
+description: Builds an app under GAN-style tension. A single loop node plays three roles off a state file, a generator builds and an adversarial evaluator tries to break it, sprint by sprint.
+sidebar:
+  order: 5
+---
+
+`adversarial-build` builds an application under adversarial tension. A planner
+writes a spec broken into sprints, then a state-machine loop alternates three
+roles: a **Contract-Negotiator** sets testable criteria, a **Generator** builds
+to them, and an **Evaluator** whose job is to *break* what was built. Failing
+criteria bounce back to the generator with feedback until every one clears the
+bar or the retries run out.
+
+It is the catalog's clearest demonstration of a loop as a **state machine**, and
+of using a separate adversarial agent to grade work instead of trusting the
+builder's own confidence. It is for greenfield building from a prompt, not for
+bug fixes, reviews, or refactors.
+
+## Invoke it
+
+```sh
+keelson workflow run adversarial-build --inputs ARGUMENTS="a task tracker API with JWT auth and a React UI"
+```
+
+It needs a Copilot subscription and runs long: it actually builds, runs, and
+probes the app. The app is written into the run's scratch dir
+(`$ARTIFACTS_DIR/app/`) on its own throwaway git repo, so it never touches your
+checkout. The report ends with how to run what it built.
+
+## The shape
+
+Four nodes, but the third is the whole show. `plan` writes the spec,
+`init-workspace` seeds a `state.json` and a scratch git repo, then
+`adversarial-sprint` loops, and `report` summarizes. The loop body plays exactly
+one role per iteration, chosen by the `phase` field in `state.json`.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/adversarial-build-dag.svg`}
+    alt="The adversarial-build flow. plan (prompt) feeds init-workspace (bash), which feeds adversarial-sprint, a loop node drawn as a cycle of three roles: Contract-Negotiator sets criteria, Generator builds, Evaluator scores. A pass advances to the next sprint's negotiation; a fail bounces back to the generator with feedback. When the state file reaches complete or failed, the loop exits to report."
+  />
+  <figcaption>
+    Figure 1. The adversarial-build state machine. The single loop node plays one
+    role per iteration off <code>state.json</code>'s <code>phase</code>. The
+    Evaluator's verdict drives the transition: a fail returns to the Generator
+    with feedback, a pass advances the sprint, and only the Evaluator can end the
+    loop.
+  </figcaption>
+</figure>
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `plan` | prompt | Expands the request into a concrete spec (tech stack, design, features) grouped into sprints, written to `spec.md`. |
+| `init-workspace` | bash | Seeds `state.json` (phase, sprint, thresholds), creates the app dir on a throwaway git repo. |
+| `adversarial-sprint` | loop | One role per iteration off `state.json` (`max_iterations: 60`, `fresh_context: true`), until `ADVERSARIAL_BUILD_DONE`. |
+| `report` | prompt | Reads the state, contracts, and feedback; writes a per-sprint breakdown and how to run the app. |
+
+### The parts worth a second look
+
+**One loop, three roles, a state file.** The loop runs each iteration with
+`fresh_context: true`, so the negotiator, generator, and evaluator never share a
+context window. The only thing passed between them is `state.json`: the body
+reads `phase`, plays that one role, updates `phase`, and ends. The next (fresh)
+iteration plays the next role. That is a state machine built from a single node,
+and Figure 1 traces the transitions: a passed sprint advances to the next
+sprint's negotiation, a failed one returns to the generator with feedback.
+
+**Only the Evaluator can end the loop.** A loop ends the instant its `until`
+token appears, so the negotiator and generator are told to *never* write
+`ADVERSARIAL_BUILD_DONE`. The evaluator emits it, and only when it has set
+`status` to `complete` or `failed`. A `until_bash` probe that greps `state.json`
+is the deterministic backstop, in case the signal is missed.
+
+**The evaluator is adversarial on purpose.** It is read-only on the app source,
+may run the app and curl its endpoints, and scores every criterion on a 1 to 10
+scale where a 7 is the bar. A sprint passes only when *every* criterion clears
+it, so the generator builds defensively against an agent trying to break it.
+
+## Patterns it demonstrates
+
+- **[Loop until done](../../guides/authoring-workflows/#loop-until-done)**: a `loop` node with a tagged completion signal and a `until_bash` backstop.
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: the evaluator is read-only on the app it grades.
+- **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: `until_bash` reads `state.json` from the scratch dir, never from spliced text.
+- **State machine in a loop**: `fresh_context` plus an external `state.json` to give one node multiple, isolated roles.
+
+## Adapt it
+
+- **Move the bar.** `init-workspace` seeds `passThreshold` (default 7) and
+  `maxRetries` (default 3) into `state.json`. Raise the threshold for a stricter
+  evaluator, or the retries for more patience.
+- **Re-cast the roles.** The three roles live in one prompt, gated on `phase`.
+  Add a fourth (a security auditor, say) by adding a phase and a transition.
+- **Reuse the loop shape.** The state-machine-in-a-loop pattern is reusable for any
+  multi-role process where the roles must not share context.
+
+## Related
+
+- [plan-act-evaluate](../plan-act-evaluate/): a single evaluate loop, against a real repo and its CI.
+- [Authoring workflows](../../guides/authoring-workflows/): the loop-until-done recipe.
+- [Workflow nodes](../../reference/workflow-nodes/): `loop`, `until`, `until_bash`, and `fresh_context`.
