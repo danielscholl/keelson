@@ -273,10 +273,6 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     fetch: (id) => listProviderModels(opts.baseUrl, id),
     fallback: (id) => setup.providers.find((p) => p.id === id)?.capabilities.models ?? [],
   });
-  const ensuredDefaultFor = (id: string): string | undefined => {
-    const def = setup.providers.find((p) => p.id === id)?.capabilities.defaultModel;
-    return def !== undefined && def.length > 0 ? def : undefined;
-  };
   // Warm the current provider in the background so the first `/model` is instant;
   // startup never blocks on the probe (Copilot spawns its CLI, ~1s).
   void loadModels(session.providerId);
@@ -403,7 +399,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
           toModelCompletions(
             await loadModels(session.providerId),
             prefix,
-            ensuredDefaultFor(session.providerId),
+            defaultModelFor(setup.providers, session.providerId),
           ),
       },
       run: (arg) => {
