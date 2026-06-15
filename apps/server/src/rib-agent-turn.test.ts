@@ -306,7 +306,7 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(opts?.registeredMcpToolNames).toBeUndefined();
   });
 
-  it("drops a denylisted tool from the projection (operator floor)", async () => {
+  it("drops a denylisted tool from the projection but still forwards the catalog", async () => {
     const opts = await optionsFor(
       { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
       {
@@ -317,6 +317,10 @@ describe("makeRibAgentTurn — tool rails", () => {
     // Still named in the allow-list, but never projected — so the model can't reach it.
     expect(opts?.allowedTools).toEqual(["chamber_emit_lens"]);
     expect(opts?.tools).toBeUndefined();
+    // The catalog MUST still be forwarded even when nothing projected, so the
+    // provider recognizes the still-allow-listed name as a (denied) registered
+    // tool and doesn't mis-send it to the SDK built-in gate.
+    expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens"]);
   });
 
   it("passes an explicit allow-list through verbatim", async () => {

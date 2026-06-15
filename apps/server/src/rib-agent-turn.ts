@@ -22,6 +22,7 @@ import type {
   ToolDefinition,
 } from "@keelson/shared";
 import { getRegisteredTools as liveRegisteredTools } from "@keelson/skills";
+import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
 
 // Registry-routed `runAgentTurn` seam (packages/shared/src/rib.ts): resolve a
 // provider the same way workflow `prompt` nodes do (req.provider hint →
@@ -76,7 +77,13 @@ export function makeRibAgentTurn(
     listProviderIds: deps.listProviderIds ?? (() => getProviderInfoList().map((p) => p.id)),
     neutralCwd: deps.defaultCwd ?? tmpdir(),
     getRegisteredTools: deps.getRegisteredTools ?? (() => liveRegisteredTools()),
-    denied: new Set(deps.denylist ?? parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST)),
+    // The shared operator floor (DEFAULT_TOOL_DENYLIST) always applies, plus the
+    // env / injected denylist — so a tool the workflow path forbids can't slip
+    // through a room turn even if DEFAULT_TOOL_DENYLIST gains entries later.
+    denied: new Set([
+      ...DEFAULT_TOOL_DENYLIST,
+      ...(deps.denylist ?? parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST)),
+    ]),
   };
   // ribId is accepted for future per-rib policy/logging; provider routing is
   // global, so it does not scope the turn today.
@@ -232,20 +239,20 @@ function toolOptions(req: RibAgentTurnRequest, deps: ResolvedDeps): Partial<Send
     const requested = new Set(req.tools.map((t) => t.name));
     const catalog = deps.getRegisteredTools();
     const projected = catalog.filter((t) => requested.has(t.name) && !deps.denied.has(t.name));
-    if (projected.length > 0) {
-      out.tools = [...projected];
-      // The FULL catalog, not the projected subset, so the provider recognizes a
-      // registered MCP name even when the denylist dropped it (it must not be
-      // mistaken for an SDK built-in). Mirrors the prompt handler.
-      out.registeredMcpToolNames = catalog.map((t) => t.name);
-    }
+    if (projected.length > 0) out.tools = [...projected];
+    // Forward the FULL catalog whenever any rib tool was requested — even if the
+    // denylist dropped every match — so the provider still recognizes a registered
+    // MCP name left in `allowedTools` and doesn't mis-send it to the SDK `--tools`
+    // built-in gate (which the CLI rejects, failing the whole turn). Mirrors the
+    // prompt handler, which sets this unconditionally.
+    if (catalog.length > 0) out.registeredMcpToolNames = catalog.map((t) => t.name);
   }
   return out;
 }
 
 // KEELSON_WORKFLOW_TOOL_DENYLIST → tool names to drop from the projection.
-// Comma-separated, trimmed, empties removed. Unset → no denylist, matching the
-// workflow path's empty DEFAULT_TOOL_DENYLIST.
+// Comma-separated, trimmed, empties removed. Unset → no env names (the shared
+// DEFAULT_TOOL_DENYLIST floor is layered on separately at construction).
 function parseToolDenylist(raw: string | undefined): string[] {
   if (!raw) return [];
   return raw
