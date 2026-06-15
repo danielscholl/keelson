@@ -50,7 +50,7 @@ describe("formatUsageMeter", () => {
   });
 
   test("placeholder before any usage arrives", () => {
-    expect(formatUsageMeter(undefined, { input: 0, output: 0 })).toBe("0%");
+    expect(formatUsageMeter(undefined, { input: 0, output: 0 })).toBe("—");
   });
 });
 

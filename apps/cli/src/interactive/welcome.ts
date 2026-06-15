@@ -16,6 +16,9 @@ export interface WelcomeData {
 }
 
 const PAD = "  ";
+// Gap between the beam and the wordmark; the subtitle aligns under the wordmark,
+// so SUBTITLE_INDENT tracks it.
+const MARK_GAP = "  ";
 
 function section(title: string, rows: readonly string[]): string[] {
   return [`${PAD}${bold(brass(title))}`, ...rows.map((r) => `${PAD}${r}`), ""];
@@ -25,52 +28,54 @@ function row(label: string, value: string): string {
   return `${cyan(label.padEnd(12))}${value}`;
 }
 
-// The keelson mark, matching the favicon (docs/public/assets/keelson-mark.svg):
-// two navy ribs crossed by the brass beam, with the wordmark riding the beam.
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+// The keelson mark echoing the favicon (docs/public/assets/keelson-mark.svg):
+// the brass beam crossing a navy rib stub, with the wordmark riding the beam.
 const RIBS = " │ │";
 const BEAM = "━┿━┿━";
+const SUBTITLE_INDENT = " ".repeat(PAD.length + BEAM.length + MARK_GAP.length);
 
-// Interaction design modeled on the pi coding agent's startup card
-// (MIT, see NOTICE): tips, loaded context, recent sessions.
+// An identity card, not a status table: the persistent footer owns live state
+// (provider/model/project/branch/usage), so the card echoes it once and then
+// shows only what the footer can't — installed ribs and recent sessions to
+// resume. Modeled on the pi coding agent's startup card (MIT, see NOTICE).
 export function buildWelcomeLines(data: WelcomeData): string[] {
+  const subtitle = [data.providerId, data.model, data.projectName]
+    .filter((s): s is string => s !== undefined)
+    .join(" · ");
   const lines: string[] = [
     "",
     `${PAD}${navy(RIBS)}`,
-    `${PAD}${navy(RIBS)}`,
-    `${PAD}${bold(brass(BEAM))} ${bold(brass("keelson"))} ${dim(`chat · v${data.version}`)}`,
-    `${PAD}${navy(RIBS)}`,
+    `${PAD}${bold(brass(BEAM))}${MARK_GAP}${bold(brass("keelson"))} ${dim(`chat · v${data.version}`)}`,
+    `${SUBTITLE_INDENT}${dim(subtitle)}`,
     "",
   ];
 
+  const tip = (key: string, label: string): string => `${cyan(key)} ${dim(label)}`;
   lines.push(
-    ...section("Tips", [
-      row("/", "commands"),
-      row("Esc", "interrupt a turn"),
-      row("Ctrl+C", "exit"),
-    ]),
+    `${PAD}${[tip("/", "commands"), tip("Esc", "interrupt"), tip("Ctrl+C", "exit")].join(dim(" · "))}`,
+    "",
   );
 
-  const providerValue =
-    data.model !== undefined ? `${data.providerId} ${dim(`· ${data.model}`)}` : data.providerId;
-  const projectValue =
-    data.branch !== null ? `${data.projectName} ${dim(`· ${data.branch}`)}` : data.projectName;
   const ribsValue =
     data.ribs.length === 0
-      ? dim("none installed")
+      ? `${dim("none installed · ")}${cyan("keelson rib add <url>")}`
       : `${data.ribs.length} ${dim(`— ${data.ribs.map((r) => r.displayName).join(", ")}`)}`;
-  const loadedRows = [
-    row("provider", providerValue),
-    row("project", projectValue),
-    row("ribs", ribsValue),
-  ];
-  if (data.projectNote !== undefined) loadedRows.push(dim(data.projectNote));
-  lines.push(...section("Loaded", loadedRows));
+  lines.push(`${PAD}${row("ribs", ribsValue)}`);
+  if (data.projectNote !== undefined) lines.push(`${PAD}${dim(data.projectNote)}`);
+  lines.push("");
 
   if (data.recent.length > 0) {
+    const width = Math.min(28, Math.max(...data.recent.map((r) => r.name.length)));
     lines.push(
       ...section(
-        "Recent sessions",
-        data.recent.map((r) => `${brass("·")} ${r.name} ${dim(`(${r.ago})`)}`),
+        "Recent",
+        data.recent.map(
+          (r) => `${brass("·")} ${truncate(r.name, width).padEnd(width)}   ${dim(r.ago)}`,
+        ),
       ),
     );
   }
