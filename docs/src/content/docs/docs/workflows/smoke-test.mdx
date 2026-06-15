@@ -1,24 +1,25 @@
 ---
 title: smoke-test
-description: The engine's end-to-end fixture. It exercises every CI-safe node kind and DAG feature in one Bun-only run, asserting each node produced output.
+description: The engine's end-to-end fixture. It exercises the agent and deterministic node kinds and every DAG feature in one Bun-only run, asserting each node produced output.
 sidebar:
   order: 7
 ---
 
 import { Aside } from "@astrojs/starlight/components";
 
-`smoke-test` is the workflow engine's self-test. In one run it exercises every
-CI-safe node kind (`prompt`, `command`, `loop`, `bash`, `script`) and every DAG
-feature (`depends_on`, `when:`, `trigger_rule:`, and `$nodeId.output`
+`smoke-test` is the workflow engine's self-test. In one run it exercises the
+agent and deterministic node kinds (`prompt`, `command`, `loop`, `bash`,
+`script`) and every DAG feature (`depends_on`, `when:`, `trigger_rule:`, and
+`$nodeId.output`
 substitution), then a final node asserts that every upstream node produced
 non-empty output. It is the fixture the engine is tested against after a fresh
-install or a change to the executor, and a compact tour of the whole node
+install or a change to the executor, and a compact tour of the node
 taxonomy.
 
 It is not for validating provider-specific features (Claude hooks, Copilot
-tools live in their own fixtures), and it deliberately skips two node kinds:
-`approval` (it pauses for a human, incompatible with CI) and `script` on the
-`uv` runtime (keeping the run Bun-only).
+tools live in their own fixtures), and it deliberately skips the two control
+kinds, `approval` (it pauses for a human, incompatible with CI) and `cancel`,
+plus the Python `uv` script runtime, to keep the run Bun-only.
 
 ## Invoke it
 
@@ -51,8 +52,8 @@ shape is incidental; the coverage is the point.
     alt="The smoke-test DAG. Five roots, one per node kind: prompt-node, command-node, loop-node, bash-json-node, script-bun-node. downstream depends on prompt-node; gated depends on bash-json-node behind a when condition. merge joins downstream, gated, and script-bun-node under all_success. assert joins merge, loop-node, and command-node under all_success and checks every node produced output."
   />
   <figcaption>
-    Figure 1. The smoke-test DAG. The five roots cover the five CI-safe node
-    kinds; <code>downstream</code>, <code>gated</code>, and <code>merge</code>
+    Figure 1. The smoke-test DAG. The five roots cover the agent and
+    deterministic node kinds; <code>downstream</code>, <code>gated</code>, and <code>merge</code>
     exercise the env channel, a <code>when:</code> gate, and a
     <code>trigger_rule</code> join; <code>assert</code> verifies every node
     produced output.
@@ -95,7 +96,7 @@ failure. A green `smoke-test` run is a passing engine test.
 - **[Fan-out and fan-in](../../guides/authoring-workflows/#fan-out-and-fan-in)**: five roots converging through `merge` to `assert`.
 - **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: the `when:` gate on `gated`, over JSON dot-access.
 - **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: `downstream` reads upstream output from the env channel.
-- **A runnable taxonomy reference**: every CI-safe node kind in one screen.
+- **A runnable taxonomy reference**: every agent and deterministic node kind in one screen.
 
 ## Adapt it
 
