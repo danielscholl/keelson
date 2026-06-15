@@ -40,6 +40,7 @@ export default defineConfig({
         { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }] },
         { label: "Guides", items: [{ autogenerate: { directory: "docs/guides" } }] },
         { label: "Tutorials", items: [{ autogenerate: { directory: "docs/tutorials" } }] },
+        { label: "Workflows", items: [{ autogenerate: { directory: "docs/workflows" } }] },
         { label: "Reference", items: [{ autogenerate: { directory: "docs/reference" } }] },
         { label: "Design", items: [{ autogenerate: { directory: "docs/design" } }] },
       ],

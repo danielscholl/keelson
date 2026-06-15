@@ -148,9 +148,14 @@ most Archon workflows load unmodified.
 
 ## Where workflows come from
 
-The catalog merges YAML files in the home's `workflows/` directory, files in
-a project's `.keelson/workflows/`, and definitions contributed by installed
-ribs at activation. A rib-contributed workflow can additionally bind its
+The catalog draws from three layers, lowest precedence first: the **bundled**
+starters that ship with keelson (read-only), your **global**
+`<home>/workflows/`, and a **project**'s `.keelson/workflows/`. A later layer
+shadows an earlier one by name, and installed ribs contribute their own at
+activation. On first run the bundled starters are also copied into your home, so
+they list as `global` once seeded, while the bundled layer keeps them
+discoverable in a fresh checkout. The [Workflows catalog](../../workflows/)
+documents the ones that ship. A rib-contributed workflow can additionally bind its
 run output to one of the rib's snapshot keys, which is how a browser board's
 refresh button becomes a workflow run; that pipeline is the subject of
 [Snapshots and surfaces](../snapshots-and-surfaces/).

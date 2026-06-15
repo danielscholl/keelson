@@ -16,8 +16,9 @@ recipes for the shapes you reach for most. For the full schema, see
 ## The authoring loop
 
 <Aside type="tip" title="Start from a working example">
-Adapting the shape of an existing workflow beats a blank page. List your catalog
-with `keelson workflow list`, open one whose shape is close, and edit from there.
+Adapting the shape of an existing workflow beats a blank page. Browse the
+[Workflows catalog](../../workflows/), or list your own with `keelson workflow
+list`, open one whose shape is close, and edit from there.
 </Aside>
 
 1. **Draft the YAML.** Prefer inline `prompt`, `bash`, and `script` nodes. A
@@ -37,10 +38,12 @@ keelson workflow run test-triage --watch
 
 | Scope | Location | Visible to |
 | --- | --- | --- |
+| bundled | shipped with keelson (read-only) | The starter set, always present. |
 | global | `<home>/workflows/` | Every project and conversation. |
 | project | `<root>/.keelson/workflows/` | Only that project. |
 
-A project workflow shadows a same-named global one within its project. The
+A later scope shadows a same-named earlier one: project over global over
+bundled. The
 catalog hot-reloads, so a saved file is runnable immediately, with no restart.
 The workflow's `name:` field is its catalog key and must match the filename.
 

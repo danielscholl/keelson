@@ -1,0 +1,110 @@
+---
+title: interactive-prd
+description: Authors a product requirements doc through a guided conversation, with three human gates threading your answers forward and a final pass that checks every claim against the real code.
+sidebar:
+  order: 4
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`interactive-prd` writes a product requirements document by *interviewing* you.
+It asks foundation questions, researches the market and your codebase, asks
+deep-dive questions, assesses technical feasibility from what already exists,
+asks scope questions, drafts the PRD, then validates every technical claim
+against the real code. The human is the input channel, not a yes/no rubber
+stamp: three gates capture your answers and thread them into the next phase.
+
+Reach for it when an idea is still fuzzy and you want to think it through. It
+will not generate a PRD without you, and it does not implement the plan it
+produces. To take a written plan to code, hand off to
+[plan-act-evaluate](../plan-act-evaluate/) or [fix-issue](../fix-issue/).
+
+## Invoke it
+
+```sh
+keelson workflow run interactive-prd --inputs ARGUMENTS="a usage dashboard for workflow runs"
+```
+
+It sets `interactive: true` and uses three `approval` gates, so it needs a
+**running server** (`keelson start`); the gates cannot resolve in the headless
+CLI fallback. It uses a Copilot subscription, and reads your repo to ground the
+PRD in real code.
+
+<Aside type="tip" title="Answer in the gate, not in chat">
+Each gate pauses on a set of questions. Your reply *is* the input to the next
+phase, so answer substantively. Resume a gate with `keelson workflow respond`,
+or from the Workflows surface in the browser.
+</Aside>
+
+## The shape
+
+A single conversational spine: a prompt asks, a gate captures, the next prompt
+builds on the answer. The three gates partition the work into foundation,
+deep-dive, and scope, narrowing from problem to MVP before a line of the PRD is
+written.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/interactive-prd-dag.svg`}
+    alt="The interactive-prd flow, left to right, alternating prompt nodes and brass approval gates: initiate, then foundation-gate, then research, then deepdive-gate, then technical, then scope-gate, then generate, then validate. Each gate captures the user's answers, which feed the following prompt."
+  />
+  <figcaption>
+    Figure 1. The interactive-prd conversation. The brass nodes are human gates;
+    each one captures your answers (<code>capture_response</code>) and the next
+    prompt reads them, so the interview narrows from problem to scope before the
+    PRD is generated and then validated against the code.
+  </figcaption>
+</figure>
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `initiate` | prompt | Restates the idea and asks the five foundation questions (who, what, why, why now, success). |
+| `foundation-gate` | approval | Captures your foundation answers. |
+| `research` | prompt | Researches competitors and explores the codebase for related work, then asks the deep-dive questions. |
+| `deepdive-gate` | approval | Captures your deep-dive answers (vision, primary user, job-to-be-done, constraints). |
+| `technical` | prompt | **Read-only** (`[Read, Glob, Grep]`): assesses feasibility from real files, cites `file:line`, asks scope questions. |
+| `scope-gate` | approval | Captures your scope answers (MVP, must-haves, hypothesis, exclusions). |
+| `generate` | prompt | Writes the PRD to the scratch dir, filled from the three sets of answers, referencing verified paths. |
+| `validate` | prompt | Re-reads the PRD and checks every path, API, data model, and component name against the real code, editing corrections in. |
+
+### The parts worth a second look
+
+**The human is the input channel.** The three gates set `capture_response: true`,
+so each reply becomes `$foundation-gate.output`, `$deepdive-gate.output`,
+`$scope-gate.output`, and the following prompt substitutes them in. The workflow
+is a structured interview: it cannot proceed without your answers, and each phase
+sees everything you have said so far.
+
+**It narrows on purpose.** Foundation establishes the problem, deep-dive the
+user and constraints, scope the MVP. Gating between them stops the PRD from
+running ahead of decisions you have not made yet.
+
+**It is grounded in real code, twice.** `technical` runs read-only and must cite
+`file:line` for every claim, preferring to extend what exists over inventing new
+surfaces. Then `validate` re-checks the finished PRD against the codebase and
+edits corrections in, so the document does not ship claims the code does not
+support.
+
+## Patterns it demonstrates
+
+- **[Approval gate](../../guides/authoring-workflows/#approval-gate)**, three of them: `capture_response` turning a human into the input channel.
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: `technical` is read-only; `generate` and `validate` widen to write and edit.
+- **Progressive disclosure**: each phase reads every prior answer, so context accumulates across the gates.
+
+## Adapt it
+
+- **Fewer rounds.** Two gates (foundation, scope) make a faster interview if you
+  do not need the deep-dive pass.
+- **Reshape the questions.** The question sets live in the prompt bodies. Swap them
+  for your team's discovery template without touching the structure.
+- **Drop the validation.** Cut the `validate` node for a quicker draft, at the
+  cost of the against-the-code accuracy check.
+
+## Related
+
+- [plan-act-evaluate](../plan-act-evaluate/): take the resulting plan to a PR.
+- [fix-issue](../fix-issue/): a lighter plan-then-build path.
+- [Authoring workflows](../../guides/authoring-workflows/): the approval-gate recipe.
+- [Workflow nodes](../../reference/workflow-nodes/): `approval`, `capture_response`, and `interactive`.

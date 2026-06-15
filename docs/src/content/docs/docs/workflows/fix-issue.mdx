@@ -1,0 +1,141 @@
+---
+title: fix-issue
+description: Takes a GitHub issue to a draft PR end-to-end, with a human gate before any code and the project's own checks as the bar.
+sidebar:
+  order: 1
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`fix-issue` takes a GitHub issue from a number to a draft pull request: it
+fetches and classifies the issue, plans, **pauses for a human to approve the
+plan**, implements, validates against the repository's own checks, self-fixes
+failures, opens a draft PR, then reviews its own diff and fixes what it finds.
+It is the catalog's most complete pipeline, and the clearest example of putting
+a human gate in front of irreversible work.
+
+It assumes nothing about your stack. The implement step discovers how *this*
+project checks itself by reading its docs and build config, writes those
+commands to a script, and every later validation runs that script. So the same
+workflow works in a Bun repo, a Cargo repo, or a Go repo without edits. For
+reviewing a PR rather than creating one, use [pr-review](../pr-review/).
+
+## Invoke it
+
+```sh
+keelson workflow run fix-issue --inputs ARGUMENTS="42"
+keelson workflow run fix-issue --inputs ARGUMENTS="fix the SQLite timestamp bug"
+```
+
+It needs the `gh` CLI authenticated, a Copilot subscription, and a **running
+server** (`keelson start`) because the approval gate pauses the run. It mutates
+the working tree (branch, commits, push, PR), so it sets `worktree.enabled`:
+every run executes in an isolated git worktree and cannot trample your editor
+state.
+
+<Aside type="caution" title="It writes to your repo and GitHub">
+`fix-issue` commits, pushes a branch, and opens a draft PR. The approval gate is
+the safety interlock: nothing is implemented until you approve the plan, and you
+can send changes back instead of approving.
+</Aside>
+
+## The shape
+
+Nine phases, top to bottom. The spine is mostly linear, with two structures
+worth naming: a **branch** early (a bug is investigated, anything else is
+planned, both writing one file), and a **self-correction** sequence after
+implementation (validate, fix, then a hard gate that refuses to open a PR over
+broken checks).
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/fix-issue-dag.svg`}
+    alt="The fix-issue pipeline, top to bottom, enclosed in a dashed frame labeled isolated git worktree. Stages: fetch and classify; a branch where investigate (when bug) and plan (when not bug) both feed plan-ready; an approval gate shown in brass; implement; a validate, fix, revalidate self-correction group ending in a hard gate; create draft PR; self-review and self-fix; re-validate and report."
+  />
+  <figcaption>
+    Figure 1. The fix-issue pipeline. The whole run executes in an isolated
+    worktree (dashed frame). The brass node is the human approval gate; nothing
+    downstream of it runs until the plan is approved. The hard gate after
+    self-correction fails the run rather than open a PR over broken checks.
+  </figcaption>
+</figure>
+
+## Node by node
+
+| Phase | Node | Kind | What it does |
+| --- | --- | --- | --- |
+| Fetch & classify | `extract-issue` | prompt | Parses the issue number from `$ARGUMENTS`, or searches `gh issue list` for the best match. |
+| | `fetch-issue` | bash | `gh issue view` to JSON, stashes the number in the scratch dir. |
+| | `classify` | prompt | Typed JSON: `issue_type` (bug, feature, …), a title, and reasoning. |
+| Plan | `investigate` | prompt | **`when: issue_type == 'bug'`**: root-cause analysis into `plan.md`. |
+| | `plan` | prompt | **`when: issue_type != 'bug'`**: an implementation plan into the *same* `plan.md`. |
+| | `plan-ready` | bash | Funnel (`trigger_rule: one_success`): asserts `plan.md` exists and has tasks, then prints it. |
+| Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. |
+| Implement | `implement` | prompt | Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
+| Validate | `validate` | bash | Runs `verify.sh` fail-fast. **Exits 0** and reports `VALIDATION_STATUS` so the fixer can read it. |
+| | `fix-validation` | prompt | If it failed, fixes only what broke and commits; if it passed, stops. |
+| | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
+| Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, captures the PR number and URL. |
+| Self-review | `self-review` | prompt | Reviews `git diff main...HEAD` against the conventions, lists findings. Does not edit. |
+| | `self-fix` | prompt | Applies the CRITICAL and HIGH findings, commits, and pushes. |
+| Re-validate | `post-fix-validate` | bash | Re-runs the checks after self-fix (exits 0) so the report shows the *real* status. |
+| Report | `report` | prompt | The operator summary: issue, branch, PR, what changed, the true validation status. |
+
+### The parts worth a second look
+
+**The human gate is the spine's hinge.** Everything before `approve-plan` is
+read-and-think (fetch, classify, investigate or plan); everything after is
+write (implement, commit, push, PR). The gate sits exactly on that seam.
+`capture_response: true` means the reviewer's reply is not just yes or no: if
+you send changes, `implement` is instructed to fold them into the plan before
+writing any code.
+
+**Two paths, one artifact.** `classify` splits the flow with a `when:` gate, a
+bug goes to `investigate`, everything else to `plan`, but both write the same
+`$ARTIFACTS_DIR/plan.md`. `plan-ready` then joins them with
+`trigger_rule: one_success`, so nothing downstream has to know which path ran.
+Branching to converge on a shared artifact keeps the rest of the DAG linear.
+
+**Soft checks report, hard checks gate.** `validate` and `post-fix-validate`
+exit 0 on purpose: their job is to *report* a status that an agent or the final
+report reads and acts on. `revalidate` exits non-zero on failure: its job is to
+*gate*, failing the node skips `create-pr`, so a PR is never opened over checks
+the run could not make pass. The exit code is the contract.
+
+**It learns the project's checks.** `implement` reads `CLAUDE.md`, `AGENTS.md`,
+`package.json`, a `Makefile`, `pyproject.toml`, whatever exists, and writes the
+type-check, test, and lint commands to `verify.sh` with `set -euo pipefail` so
+the first failure aborts. Every validation node runs that exact script. The
+workflow carries no assumption about the stack, which is what makes it portable.
+
+**Operational guardrails live in the prompts.** The implement and fix prompts
+forbid `git add -A` (stage by name) and forbid committing anything under
+`$ARTIFACTS_DIR`, so scratch files never leak into the PR. These are the kind of
+hard-won rules a generic "implement the plan" prompt omits.
+
+## Patterns it demonstrates
+
+- **[Approval gate](../../guides/authoring-workflows/#approval-gate)**: `approve-plan` with `capture_response`, sitting between plan and implementation.
+- **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: `investigate` vs `plan`, gated on `classify`.
+- **[Loop until done](../../guides/authoring-workflows/#loop-until-done)**, unrolled: the validate, fix, revalidate triad is a self-correction sequence with a deterministic hard gate instead of a `loop` node.
+- **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: every `bash` gate reads the agent's work from `verify.sh` and the scratch dir, never from spliced text.
+- **Worktree isolation**: `worktree.enabled` so a mutating run cannot touch your checkout.
+
+## Adapt it
+
+- **Change the bar.** The whole validation story is `verify.sh`. To enforce
+  extra checks (coverage, a security scan), have `implement` add them to that
+  script; every gate picks them up.
+- **Drop the self-review tail.** Phases 7 and 8 (`self-review`, `self-fix`,
+  `post-fix-validate`) are optional polish. Cut them and `create-pr` becomes the
+  last step for a leaner run.
+- **Swap the gate for autonomy.** Remove `approve-plan` (and point `implement`
+  at `plan-ready`) for an unattended run, at the cost of the safety interlock.
+  Keep the gate for anything that pushes to a shared remote.
+
+## Related
+
+- [pr-review](../pr-review/): the sibling that reviews a PR instead of creating one.
+- [plan-act-evaluate](../plan-act-evaluate/): a heavier lifecycle that records the plan as an issue and can delegate the work.
+- [Authoring workflows](../../guides/authoring-workflows/): the approval-gate and branch recipes.
+- [Workflow nodes](../../reference/workflow-nodes/): `approval`, `when:`, `trigger_rule:`, and `worktree`.

@@ -1,0 +1,109 @@
+---
+title: workflow-builder
+description: A workflow that writes workflows. It scans the repo, extracts intent as typed JSON, generates a Keelson YAML, validates it with a real parse, and installs it.
+sidebar:
+  order: 6
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`workflow-builder` is the meta-workflow: you describe a workflow in plain
+language and it scaffolds a real one for your project. It scans the repo for
+context, turns your request into structured intent, generates a Keelson YAML,
+**validates that the YAML actually parses**, and installs it under
+`.keelson/workflows/` so it is runnable immediately.
+
+It is the fastest way off a blank page. To author by hand instead, the
+[authoring guide](../../guides/authoring-workflows/) has the loop and the
+recipes; `workflow-builder` just runs that loop for you and hands back a file
+you should still read before running.
+
+## Invoke it
+
+```sh
+keelson workflow run workflow-builder --inputs ARGUMENTS="a workflow that runs my tests, then lints, and reports failures"
+```
+
+It needs a Copilot subscription (`provider: copilot`, `model: auto`) and write
+access to `.keelson/workflows/` in the current project. No server or approval
+gate.
+
+## The shape
+
+A straight five-node pipeline: gather context, decide the design, write the
+file, prove it parses, install it. The only agent nodes are the middle three;
+deterministic `bash` bookends gather context and the parse gate.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}assets/figures/workflow-builder-dag.svg`}
+    alt="The workflow-builder pipeline, left to right: scan-codebase (bash) feeds extract-intent (prompt, typed JSON), which feeds generate-yaml (prompt, with Read and Write tools), which feeds validate-yaml (bash, a YAML-parse gate that fails and skips install on a bad file), which feeds save-or-report (prompt, installs the workflow)."
+  />
+  <figcaption>
+    Figure 1. The workflow-builder pipeline. <code>extract-intent</code> emits
+    typed JSON the generator consumes; <code>validate-yaml</code> is a hard gate
+    that fails the run on a YAML that will not parse, so a broken file is never
+    installed.
+  </figcaption>
+</figure>
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `scan-codebase` | bash | Lists existing workflows and commands, reads the project's name and conventions. Cheap, no model. |
+| `extract-intent` | prompt | Typed JSON (`output_format`): a kebab-case name, a structured description, trigger phrases, proposed nodes, and an execution mode. |
+| `generate-yaml` | prompt | Writes the workflow YAML to the scratch dir with the `Write` tool, following an embedded Keelson schema reference. |
+| `validate-yaml` | bash | Structural gate: checks required fields and runs a real `Bun.YAML.parse`. Fails the node, and skips install, on a malformed file. |
+| `save-or-report` | prompt | Installs the validated file to `.keelson/workflows/` and reports how to validate and run it. |
+
+### The parts worth a second look
+
+**The classifier returns typed JSON.** `extract-intent` sets `output_format`, so
+its reply is a validated object the generator dot-accesses
+(`$extract-intent.output.workflow_name`). Forcing a shape on the intent is what
+lets a later node consume it reliably instead of re-parsing prose.
+
+**Generation is a write, not an echo.** `generate-yaml` sets `allowed_tools:
+[Read, Write]` and authors the file with the `Write` tool, rather than printing
+YAML that `bash` would have to capture (and mangle on special characters). On
+Copilot the gate is by capability, so `[Read, Write]` grants file writes but not
+shell. The node embeds the Keelson schema in its prompt, so the model emits the
+real node taxonomy and substitution rules.
+
+**The gate is a real parse.** `validate-yaml` does not eyeball the file; it runs
+`Bun.YAML.parse` on it:
+
+```bash
+KEELSON_VALIDATE_FILE="$FILE" bun -e 'Bun.YAML.parse(require("fs").readFileSync(process.env.KEELSON_VALIDATE_FILE,"utf8"))' \
+  || { echo "ERROR: generated YAML failed to parse"; exit 1; }
+```
+
+A syntax error exits non-zero, fails the node, and skips `save-or-report`, so the
+workflow never installs a file that would not load. The generated file reaches
+this `bash` node through `$KEELSON_ARTIFACTS_DIR`, never spliced into the script.
+
+## Patterns it demonstrates
+
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: the `[Read, Write]` rail on `generate-yaml`.
+- **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: `validate-yaml` reads the generated file from the scratch dir, never from spliced text.
+- **Typed handoff with `output_format`**: structured intent that a downstream node dot-accesses, covered in the [node reference](../../reference/workflow-nodes/#data-flow).
+- **Deterministic validation gate**: a `bash` node whose exit code decides whether the run proceeds.
+
+## Adapt it
+
+- **Teach it your house style.** The embedded schema reference in `generate-yaml`
+  is where the model learns Keelson's rules. Add your project's conventions there
+  (preferred providers, a description template) and every generated workflow
+  inherits them.
+- **Validate harder.** `validate-yaml` only parses. Add a `keelson workflow
+  validate` call (it runs the real loader) for full structural checking before
+  install.
+- **Change where it lands.** `save-or-report` installs into `.keelson/workflows/`;
+  point it at the global home instead to scaffold a personal workflow.
+
+## Related
+
+- [Authoring workflows](../../guides/authoring-workflows/): the loop and recipes this automates.
+- [Workflow nodes](../../reference/workflow-nodes/): the schema the generator targets.
+- [Run your first workflow](../../tutorials/run-a-workflow/): build one by hand to learn the shape.
