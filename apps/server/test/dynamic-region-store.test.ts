@@ -1,0 +1,127 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License").
+
+import { describe, expect, test } from "bun:test";
+import type { RibSurfaceDescriptor, RibSurfaceRegion } from "@keelson/shared";
+import { createDynamicRegionStore, mergeSurfaceRegions } from "../src/dynamic-region-store.ts";
+
+function surface(rows: { columns: RibSurfaceRegion[] }[]): RibSurfaceDescriptor {
+  return { id: "main", title: "Main", layout: { rows } };
+}
+const staticRow = { columns: [{ key: "rib:x:base" }] };
+
+describe("DynamicRegionStore.registerForRib", () => {
+  test("registers a region under a declared surface and reads it back", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const register = store.registerForRib("x", new Set(["main"]));
+    register("main", { key: "rib:x:lens:a", title: "A" });
+    expect(store.regionsFor("x", "main").map((r) => r.key)).toEqual(["rib:x:lens:a"]);
+  });
+
+  test("rejects a key outside the rib's namespace", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const register = store.registerForRib("x", new Set(["main"]));
+    expect(() => register("main", { key: "rib:other:lens:a" })).toThrow(/must be under/);
+  });
+
+  test("rejects an undeclared surface id", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const register = store.registerForRib("x", new Set(["main"]));
+    expect(() => register("nope", { key: "rib:x:lens:a" })).toThrow(/undeclared surface/);
+  });
+
+  test("rejects a malformed region (strict schema)", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const register = store.registerForRib("x", new Set(["main"]));
+    expect(() =>
+      register("main", { key: "rib:x:lens:a", bogus: true } as unknown as RibSurfaceRegion),
+    ).toThrow();
+  });
+
+  test("rejects a duplicate region key on the same surface", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const register = store.registerForRib("x", new Set(["main"]));
+    register("main", { key: "rib:x:lens:a" });
+    expect(() => register("main", { key: "rib:x:lens:a" })).toThrow(/already registered/);
+  });
+
+  test("enforces the per-surface ceiling", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const register = store.registerForRib("x", new Set(["main"]));
+    for (let i = 0; i < 256; i++) register("main", { key: `rib:x:lens:${i}` });
+    expect(() => register("main", { key: "rib:x:lens:over" })).toThrow(/limit/);
+  });
+
+  test("unregister removes the region, leaving siblings in place", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const register = store.registerForRib("x", new Set(["main"]));
+    register("main", { key: "rib:x:lens:a" });
+    const off = register("main", { key: "rib:x:lens:b" });
+    register("main", { key: "rib:x:lens:c" });
+    off();
+    expect(store.regionsFor("x", "main").map((r) => r.key)).toEqual([
+      "rib:x:lens:a",
+      "rib:x:lens:c",
+    ]);
+  });
+
+  test("bumps revision and calls onChange on add and remove, once each", () => {
+    let changes = 0;
+    const store = createDynamicRegionStore({ onChange: () => changes++ });
+    const register = store.registerForRib("x", new Set(["main"]));
+    expect(store.revision).toBe(0);
+    const off = register("main", { key: "rib:x:lens:a" });
+    expect(store.revision).toBe(1);
+    off();
+    expect(store.revision).toBe(2);
+    off(); // idempotent: no further bump
+    expect(store.revision).toBe(2);
+    expect(changes).toBe(2);
+  });
+});
+
+describe("mergeSurfaceRegions", () => {
+  const r = (key: string, group?: string): RibSurfaceRegion => ({
+    key,
+    ...(group ? { group } : {}),
+  });
+
+  test("returns the surface unchanged when there are no dynamic regions", () => {
+    const s = surface([staticRow]);
+    expect(mergeSurfaceRegions(s, [])).toBe(s);
+  });
+
+  test("appends dynamic regions as rows of width after the static rows", () => {
+    const merged = mergeSurfaceRegions(surface([staticRow]), [r("a"), r("b"), r("c"), r("d")], 3);
+    expect(merged.layout.rows.map((row) => row.columns.map((c) => c.key))).toEqual([
+      ["rib:x:base"],
+      ["a", "b", "c"],
+      ["d"],
+    ]);
+  });
+
+  test("emits no empty trailing row when the count is an exact multiple of width", () => {
+    const merged = mergeSurfaceRegions(surface([staticRow]), [r("a"), r("b"), r("c")], 3);
+    expect(merged.layout.rows).toHaveLength(2);
+    expect(merged.layout.rows.every((row) => row.columns.length >= 1)).toBe(true);
+  });
+
+  test("keeps groups contiguous instead of interleaving by arrival order", () => {
+    const merged = mergeSurfaceRegions(
+      surface([staticRow]),
+      [r("a", "lens"), r("x", "room"), r("b", "lens"), r("y", "room")],
+      3,
+    );
+    expect(merged.layout.rows.slice(1).map((row) => row.columns.map((c) => c.key))).toEqual([
+      ["a", "b"],
+      ["x", "y"],
+    ]);
+  });
+
+  test("is position-stable across an append (no remount of surviving panels)", () => {
+    const before = mergeSurfaceRegions(surface([staticRow]), [r("a"), r("b"), r("c")], 3);
+    const after = mergeSurfaceRegions(surface([staticRow]), [r("a"), r("b"), r("c"), r("d")], 3);
+    expect(after.layout.rows[1]).toEqual(before.layout.rows[1]);
+  });
+});

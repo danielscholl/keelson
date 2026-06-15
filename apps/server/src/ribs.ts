@@ -42,6 +42,7 @@ import {
   type SnapshotValidator,
   type ToolDefinition,
 } from "@keelson/shared";
+import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import { createScopedSnapshotManager } from "./scoped-snapshot-manager.ts";
 
 export interface RibManifest {
@@ -120,6 +121,9 @@ export interface ApplyRibsOptions {
   // is global; `ribId` is passed for future per-rib policy/logging. Optional so
   // test rigs without a provider/CLI stay deterministic.
   readonly runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
+  // Backs RibContext.registerRegion so a rib can add surface regions at runtime.
+  // Optional so unit tests for applyRibs without a manifest store stay simple.
+  readonly dynamicRegionStore?: DynamicRegionStore;
 }
 
 /**
@@ -205,32 +209,19 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     const scoped = opts.snapshotManager
       ? createScopedSnapshotManager(opts.snapshotManager, rib.id)
       : undefined;
-    const ribCtx: RibContext = {
-      ...opts.ctx,
-      ...(scoped ? { getSnapshotManager: () => scoped } : {}),
-      ...(opts.getRibCredential
-        ? { getCredential: (serviceId) => opts.getRibCredential!(rib.id, serviceId) }
-        : {}),
-      ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
-    };
-
-    const ribToolNames = collectRibTools(
-      rib.id,
-      rib.registerTools?.(ribCtx),
-      claimedToolNames,
-      tools,
-    );
-
     // Validate view + surface descriptors at the activation boundary (the same
     // spot the self-id is checked) so a malformed descriptor fails the rib here,
-    // not later inside GET /api/ribs where it would blank a panel.
+    // not later inside GET /api/ribs where it would blank a panel. Done BEFORE
+    // registerTools so `surfaceIds` is complete when the registerRegion seam is
+    // bound below — a rib may then add a region to any surface it declares,
+    // whether synchronously in registerTools or later at runtime.
     const views = rib.views ?? [];
     for (const view of views) {
       ribViewDescriptorSchema.parse(view);
       assertInNamespace(rib.id, namespace, view.key, "view key");
     }
-    const surfaces = rib.surfaces ?? [];
     const surfaceIds = new Set<string>();
+    const surfaces = rib.surfaces ?? [];
     for (const surface of surfaces) {
       ribSurfaceDescriptorSchema.parse(surface);
       if (surfaceIds.has(surface.id)) {
@@ -241,6 +232,26 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         assertInNamespace(rib.id, namespace, region.key, "surface region key");
       }
     }
+
+    const ribCtx: RibContext = {
+      ...opts.ctx,
+      ...(scoped ? { getSnapshotManager: () => scoped } : {}),
+      ...(opts.getRibCredential
+        ? { getCredential: (serviceId) => opts.getRibCredential!(rib.id, serviceId) }
+        : {}),
+      ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
+      ...(opts.dynamicRegionStore
+        ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
+        : {}),
+    };
+
+    const ribToolNames = collectRibTools(
+      rib.id,
+      rib.registerTools?.(ribCtx),
+      claimedToolNames,
+      tools,
+    );
+
     manifests.push({
       id: rib.id,
       displayName: rib.displayName,
