@@ -36,7 +36,7 @@ nodes:
   - id: context
     bash: |
       set -euo pipefail
-      cat ".keelson/maintainer-workflows/direction.md"
+      cat ".keelson/workflows/direction.md"
 
   - id: gather
     bash: |

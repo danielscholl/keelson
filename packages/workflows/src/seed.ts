@@ -6,13 +6,13 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } 
 import { extname, join, resolve } from "node:path";
 import { COMMAND_EXTENSION, SCRIPT_EXT_RUNTIME } from "./handlers/discovery.ts";
 
-// Root the bundled starter assets are staged under, as sibling dirs
-// `workflows/`, `commands/`, and `scripts/`. In the release bundle import.meta
-// resolves to <pkg>/dist, so `..` lands on <pkg> where scripts/build-release.ts
-// stages them; running from repo source it resolves to packages/workflows,
-// where those dirs don't exist and seeding no-ops (the dev home is
-// <repo>/.keelson, which already carries them).
-const BUNDLED_ROOT = join(import.meta.dir, "..");
+// Root the bundled starter assets live under, as sibling dirs `workflows/`,
+// `commands/`, and `scripts/`. In repo source this resolves to
+// `packages/workflows/assets`; in the release bundle import.meta resolves to
+// <pkg>/dist, so `../assets` lands on <pkg>/assets where scripts/build-release.ts
+// stages them. Present in both layouts, so seeding is live in dev too — it fills
+// a fresh <repo>/.keelson home the same way it fills an installed one.
+const BUNDLED_ROOT = join(import.meta.dir, "..", "assets");
 
 // The single definition of "a workflow file" — shared so discovery and the seed
 // guard cannot drift on what counts as a starter.

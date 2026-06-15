@@ -62,7 +62,7 @@ Comments live in source long after the PR that motivated them merges. Default to
 
 - **Commit messages**: conventional (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `test:`). One sentence subject under 70 chars.
 - **PR bodies**: three sections — *What*, *Why now*, *Test plan*. Skim recent merged PRs (`gh pr list --state merged --limit 3`) for voice. No "Generated with" footers.
-- **Workflow descriptions**: bundled workflows in `.keelson/workflows/` use the `Use when / Triggers / Does / NOT for` structured convention so the SPA workflow cards render scannably. Match that shape when adding new ones.
+- **Workflow descriptions**: bundled workflows in `packages/workflows/assets/workflows/` use the `Use when / Triggers / Does / NOT for` structured convention so the SPA workflow cards render scannably. Match that shape when adding new ones.
 
 ## Documentation
 

@@ -1,7 +1,8 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ExecutorValidationError,
@@ -18,6 +19,7 @@ import {
 import { makeApprovalHandler } from "./handlers/approval.ts";
 import { parseWorkflow } from "./loader.ts";
 import type { DagNode, NodeOutput, WorkflowDefinition } from "./schema/index.ts";
+import { seedStarterAssets } from "./seed.ts";
 
 /**
  * Local mirror of @keelson/shared's MessageChunk shape. Defined here
@@ -126,7 +128,7 @@ function loadStarter(name: string): WorkflowDefinition {
 // fixture and we want both the SPA card and this executor test to read the
 // same file. Separate helper so a future move of one doesn't drag the other.
 function loadBundled(name: string): WorkflowDefinition {
-  const root = join(import.meta.dir, "..", "..", "..", ".keelson", "workflows", `${name}.yaml`);
+  const root = join(import.meta.dir, "..", "assets", "workflows", `${name}.yaml`);
   const yaml = readFileSync(root, "utf-8");
   const result = parseWorkflow(yaml, root);
   if (result.error) throw new Error(`bundled load failed: ${result.error.error}`);
@@ -1578,7 +1580,11 @@ describe("runWorkflow — smoke-test (every node type)", () => {
       ["script", makeScriptHandler()],
     ]);
 
-    const cwd = join(import.meta.dir, "..", "..", "..");
+    // Seed a throwaway home from the bundled assets so the command/script
+    // nodes resolve `e2e-echo-command` and `echo-args` from <cwd>/.keelson/,
+    // the same files production seeds into the real home on first run.
+    const cwd = mkdtempSync(join(tmpdir(), "keelson-smoke-"));
+    seedStarterAssets(join(cwd, ".keelson"));
     const summary = await runWorkflow({
       workflow,
       runId: "smoke-1",
