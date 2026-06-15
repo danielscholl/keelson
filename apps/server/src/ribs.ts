@@ -42,6 +42,7 @@ import {
   type SnapshotValidator,
   type ToolDefinition,
 } from "@keelson/shared";
+import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import { createScopedSnapshotManager } from "./scoped-snapshot-manager.ts";
 
 export interface RibManifest {
@@ -120,6 +121,9 @@ export interface ApplyRibsOptions {
   // is global; `ribId` is passed for future per-rib policy/logging. Optional so
   // test rigs without a provider/CLI stay deterministic.
   readonly runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
+  // Backs RibContext.registerRegion so a rib can add surface regions at runtime.
+  // Optional so unit tests for applyRibs without a manifest store stay simple.
+  readonly dynamicRegionStore?: DynamicRegionStore;
 }
 
 /**
@@ -205,6 +209,11 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     const scoped = opts.snapshotManager
       ? createScopedSnapshotManager(opts.snapshotManager, rib.id)
       : undefined;
+    // Populated by the surface-validation loop below; the registerRegion seam
+    // captures it by reference and reads it only at call time (runtime, after
+    // activation has validated every surface), so a rib's tool can add a region
+    // to any surface it declares irrespective of declaration order.
+    const surfaceIds = new Set<string>();
     const ribCtx: RibContext = {
       ...opts.ctx,
       ...(scoped ? { getSnapshotManager: () => scoped } : {}),
@@ -212,6 +221,9 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         ? { getCredential: (serviceId) => opts.getRibCredential!(rib.id, serviceId) }
         : {}),
       ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
+      ...(opts.dynamicRegionStore
+        ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
+        : {}),
     };
 
     const ribToolNames = collectRibTools(
@@ -230,7 +242,6 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       assertInNamespace(rib.id, namespace, view.key, "view key");
     }
     const surfaces = rib.surfaces ?? [];
-    const surfaceIds = new Set<string>();
     for (const surface of surfaces) {
       ribSurfaceDescriptorSchema.parse(surface);
       if (surfaceIds.has(surface.id)) {

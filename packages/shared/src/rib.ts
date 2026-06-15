@@ -143,7 +143,21 @@ export interface RibContext {
   // needs rooms but finds it absent fails closed. Provider routing is global,
   // not namespace-scoped. See RibAgentTurn for the stream/result contract.
   runAgentTurn?: (req: RibAgentTurnRequest) => RibAgentTurn;
+  // Add a region (a snapshot-backed panel) to one of THIS rib's statically
+  // declared surfaces at runtime, returning an unregister handle. Layout-only:
+  // the rib still registers the region's snapshot key itself. The harness
+  // appends the region to the surface's layout (grouped by `region.group`) and
+  // nudges the SPA to re-fetch the manifest. `surfaceId` must name a surface the
+  // rib declared; `region.key` must be under `rib:<id>:*`. Optional so a rib
+  // built against an older harness degrades to no dynamic regions, not a throw.
+  registerRegion?: (surfaceId: string, region: RibSurfaceRegion) => () => void;
 }
+
+// The harness-owned snapshot key the SPA subscribes to as a manifest-revision
+// beacon: every runtime region add/remove bumps it, prompting a /api/ribs
+// re-fetch. Not under a `rib:*` namespace — the harness registers it on the base
+// snapshot manager, never a scoped one.
+export const RIBS_VERSION_SNAPSHOT_KEY = "keelson:ribs:version";
 
 // A view a rib declares so the harness surfaces a live canvas for one of the
 // rib's snapshot keys with no per-rib UI code. `canvasKind` is the closed
@@ -172,15 +186,21 @@ export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
 const regionGlyphSchema = z
   .object({ char: z.string().min(1), tone: canvasToneSchema.optional() })
   .strict();
-const surfaceRegionSchema = z
+export const surfaceRegionSchema = z
   .object({
     key: z.string().min(1),
     workflow: z.string().min(1).optional(),
     cadenceMs: z.number().int().min(30000).optional(),
     title: z.string().min(1).optional(),
     glyph: regionGlyphSchema.optional(),
+    // Clustering hint for regions added at runtime via RibContext.registerRegion:
+    // the GET /api/ribs merge keeps regions sharing a `group` contiguous so two
+    // producers' panels on one surface (e.g. lenses vs rooms) don't interleave by
+    // arrival order. Inert for statically-declared regions.
+    group: z.string().min(1).optional(),
   })
   .strict();
+export type RibSurfaceRegion = z.infer<typeof surfaceRegionSchema>;
 const collapsibleRegionSchema = z
   .object({
     key: z.string().min(1),

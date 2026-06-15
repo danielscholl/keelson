@@ -17,6 +17,7 @@ import {
   ribAuthStatusSchema,
 } from "@keelson/shared";
 import type { Hono } from "hono";
+import { type DynamicRegionStore, mergeSurfaceRegions } from "./dynamic-region-store.ts";
 import type { RibManifest } from "./ribs.ts";
 import { isAllowedOrigin } from "./server-context.ts";
 
@@ -24,6 +25,9 @@ export interface RibsRoutesDeps {
   manifests: readonly RibManifest[];
   probes: Map<string, () => Promise<RibAuthStatus>>;
   actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
+  // Runtime-registered regions merged onto each rib's static surfaces. Optional
+  // so test rigs without one serve the boot manifest verbatim.
+  dynamicRegionStore?: Pick<DynamicRegionStore, "regionsFor">;
 }
 
 // GET /api/ribs + POST /api/ribs/:id/action. The SPA discovers active ribs and
@@ -31,7 +35,7 @@ export interface RibsRoutesDeps {
 // inbound half of the rib back-channel — loopback-trusted (guarded by the
 // /api/* CORS gate); there is no capability-token enforcement yet.
 export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
-  const { manifests, probes, actionHandlers } = deps;
+  const { manifests, probes, actionHandlers, dynamicRegionStore } = deps;
 
   app.get("/api/ribs", async (c) => {
     const ribs: RibSummary[] = await Promise.all(
@@ -59,7 +63,13 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
           displayName: m.displayName,
           registered: [...m.registered],
           views: [...m.views],
-          surfaces: [...m.surfaces],
+          // Merge runtime regions onto each static surface (no-op when none): a
+          // newly-authored panel appears here without a server restart.
+          surfaces: m.surfaces.map((s) =>
+            dynamicRegionStore
+              ? mergeSurfaceRegions(s, dynamicRegionStore.regionsFor(m.id, s.id))
+              : s,
+          ),
           hasOnAction: m.hasOnAction,
           ...(auth ? { auth } : {}),
         };

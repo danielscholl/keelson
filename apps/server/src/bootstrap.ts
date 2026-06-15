@@ -61,6 +61,7 @@ import {
   type WorkflowWithSource,
   workflowDefinitionSchema,
 } from "@keelson/workflows";
+import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import { makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { discoverRibs } from "./rib-discovery.ts";
 import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
@@ -160,6 +161,9 @@ export interface BootstrapRibsOptions {
   // Agent-turn factory. Defaults to the CLI-backed makeRibAgentTurn;
   // injectable so tests pass a fake instead of shelling a provider CLI.
   runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
+  // Backs RibContext.registerRegion. Owned by the composition root (it also
+  // feeds the GET /api/ribs merge), so it's threaded in rather than created here.
+  dynamicRegionStore?: DynamicRegionStore;
 }
 
 export interface RibBootstrap {
@@ -227,6 +231,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     runAgentTurn,
     ...(snapshotManager ? { snapshotManager } : {}),
     ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
+    ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
   });
   return {
     manifests,

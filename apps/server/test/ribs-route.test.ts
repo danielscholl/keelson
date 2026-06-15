@@ -8,9 +8,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Rib, RibActionResult, RibAuthStatus } from "@keelson/shared";
+import type { Rib, RibActionResult, RibAuthStatus, RibContext } from "@keelson/shared";
 import { Hono } from "hono";
 import { bootstrapRibs, bootstrapWorkflows, prepareRibWorkflows } from "../src/bootstrap.ts";
+import { createDynamicRegionStore } from "../src/dynamic-region-store.ts";
 import { ribsRoutes } from "../src/ribs-handler.ts";
 import { createSnapshotManager } from "../src/snapshot-manager.ts";
 import ribV2 from "./fixtures/rib-discovery/rib-v2/index.ts";
@@ -29,10 +30,12 @@ afterEach(() => {
 
 async function makeRig(opts?: { available?: Record<string, Rib>; token?: string }) {
   const manager = createSnapshotManager();
+  const dynamicRegionStore = createDynamicRegionStore({ onChange: () => {} });
   const available = opts?.available ?? { v2: ribV2 };
   const ribs = await bootstrapRibs({
     available,
     snapshotManager: manager,
+    dynamicRegionStore,
     getRibCredential: (ribId, serviceId) =>
       Promise.resolve(
         opts?.token !== undefined && ribId === "v2" && serviceId === "token"
@@ -45,8 +48,9 @@ async function makeRig(opts?: { available?: Record<string, Rib>; token?: string 
     manifests: ribs.manifests,
     probes: ribs.probes,
     actionHandlers: ribs.actionHandlers,
+    dynamicRegionStore,
   });
-  return { app, manager, ribs };
+  return { app, manager, ribs, dynamicRegionStore };
 }
 
 function get(path: string): Request {
@@ -161,6 +165,64 @@ describe("GET /api/ribs", () => {
     expect(surface?.id).toBe("board");
     expect(surface?.title).toBe("Board");
     expect((surface?.layout as { rows: unknown[] }).rows).toHaveLength(1);
+  });
+});
+
+describe("GET /api/ribs dynamic regions", () => {
+  type RibsBody = {
+    ribs: Array<{
+      id: string;
+      surfaces: Array<{ layout: { rows: Array<{ columns: Array<{ key: string }> }> } }>;
+    }>;
+  };
+  const rowsOf = (body: RibsBody, id: string): string[][] =>
+    body.ribs
+      .find((r) => r.id === id)!
+      .surfaces[0]!.layout.rows.map((row) => row.columns.map((c) => c.key));
+
+  function surfacedRib(captured: { register?: RibContext["registerRegion"] }): Rib {
+    return {
+      id: "surf",
+      displayName: "Surf",
+      surfaces: [
+        { id: "main", title: "Main", layout: { rows: [{ columns: [{ key: "rib:surf:base" }] }] } },
+      ],
+      // The seam is captured here (during activation, before surface ids are
+      // populated) but only invoked at runtime, exercising the by-reference set.
+      registerTools: (ctx) => {
+        captured.register = ctx.registerRegion;
+        return [];
+      },
+    };
+  }
+
+  test("merges runtime-registered regions into the surface layout, grouped", async () => {
+    const captured: { register?: RibContext["registerRegion"] } = {};
+    const { app } = await makeRig({ available: { surf: surfacedRib(captured) } });
+    const register = captured.register!;
+    const off = register("main", { key: "rib:surf:lens:a", title: "A", group: "lens" });
+    register("main", { key: "rib:surf:lens:b", title: "B", group: "lens" });
+
+    const res = await app.fetch(get("/api/ribs"));
+    expect(res.status).toBe(200); // the merged layout still passes the response-schema parse
+    expect(rowsOf((await res.json()) as RibsBody, "surf")).toEqual([
+      ["rib:surf:base"],
+      ["rib:surf:lens:a", "rib:surf:lens:b"],
+    ]);
+
+    off();
+    const res2 = await app.fetch(get("/api/ribs"));
+    expect(rowsOf((await res2.json()) as RibsBody, "surf")).toEqual([
+      ["rib:surf:base"],
+      ["rib:surf:lens:b"],
+    ]);
+  });
+
+  test("serves the static surface verbatim when no regions are registered", async () => {
+    const captured: { register?: RibContext["registerRegion"] } = {};
+    const { app } = await makeRig({ available: { surf: surfacedRib(captured) } });
+    const res = await app.fetch(get("/api/ribs"));
+    expect(rowsOf((await res.json()) as RibsBody, "surf")).toEqual([["rib:surf:base"]]);
   });
 });
 

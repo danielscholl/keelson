@@ -6,7 +6,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
-import { DEFAULT_PROJECT_NAME, SCHEMA_VERSION, WIRE_PROTOCOL_VERSION } from "@keelson/shared";
+import {
+  DEFAULT_PROJECT_NAME,
+  RIBS_VERSION_SNAPSHOT_KEY,
+  SCHEMA_VERSION,
+  WIRE_PROTOCOL_VERSION,
+} from "@keelson/shared";
 import { loadKeelsonConfig, resolveMcpSettings } from "@keelson/shared/config";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
@@ -31,6 +36,7 @@ import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, createRibCredentialAccessor, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
+import { createDynamicRegionStore } from "./dynamic-region-store.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
@@ -172,6 +178,20 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const snapshotSubscribers = createSnapshotSubscribers();
   const snapshotManager = createSnapshotManager(snapshotSubscribers);
 
+  // Holds regions ribs add at runtime (RibContext.registerRegion); feeds both the
+  // per-rib seam and the GET /api/ribs merge. Each change recomposes the
+  // manifest-revision beacon below so subscribed SPAs re-fetch the manifest.
+  const dynamicRegionStore = createDynamicRegionStore({
+    onChange: () => void snapshotManager.recompose(RIBS_VERSION_SNAPSHOT_KEY),
+  });
+  // Registered once on the base manager and never unregistered: a re-register
+  // would reset the frame version and the client's version guard would then drop
+  // subsequent bumps. The payload is a debug aid; clients react to the version.
+  snapshotManager.register(RIBS_VERSION_SNAPSHOT_KEY, () => ({
+    revision: dynamicRegionStore.revision,
+  }));
+  void snapshotManager.recompose(RIBS_VERSION_SNAPSHOT_KEY);
+
   // Keyring store is needed before ribs so each rib gets a namespaced, read-only
   // credential reader scoped to its own keys.
   const credentialStore = createKeyringStore();
@@ -179,6 +199,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
+    dynamicRegionStore,
     getRibCredential: (ribId, serviceId) =>
       createRibCredentialAccessor(credentialStore, ribId)(serviceId),
   });
@@ -409,6 +430,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     manifests: ribs.manifests,
     probes: ribs.probes,
     actionHandlers: ribs.actionHandlers,
+    dynamicRegionStore,
   });
   agentsRoutes(app, {
     agentListers: ribs.agentListers,
