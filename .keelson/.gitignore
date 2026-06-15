@@ -1,0 +1,9 @@
+# Keelson runtime home when dogfooding keelson against this repo: SQLite
+# (keelson.db*), run state (runs/), logs/, the server record (server.json),
+# `keelson rib add` installs (package.json, bun.lock, node_modules/), and the
+# starter commands/ + scripts/ reseeded into the home on boot. All generated —
+# only this file and the committed maintainer workflows under workflows/ are
+# tracked. Anchored `/*` so reseeded files never sneak back in via `git add -A`.
+/*
+!/.gitignore
+!/workflows/

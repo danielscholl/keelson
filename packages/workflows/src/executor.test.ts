@@ -126,7 +126,7 @@ function loadStarter(name: string): WorkflowDefinition {
 // fixture and we want both the SPA card and this executor test to read the
 // same file. Separate helper so a future move of one doesn't drag the other.
 function loadBundled(name: string): WorkflowDefinition {
-  const root = join(import.meta.dir, "..", "..", "..", ".keelson", "workflows", `${name}.yaml`);
+  const root = join(import.meta.dir, "..", "assets", "workflows", `${name}.yaml`);
   const yaml = readFileSync(root, "utf-8");
   const result = parseWorkflow(yaml, root);
   if (result.error) throw new Error(`bundled load failed: ${result.error.error}`);

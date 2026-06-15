@@ -205,7 +205,7 @@ Full attribution lives in [NOTICE](NOTICE).
 
 - **[danielscholl.github.io/keelson](https://danielscholl.github.io/keelson/)** — the documentation site (concepts, guides, the rib contract)
 - [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) — the `Rib` contract
-- [`.keelson/workflows/`](.keelson/workflows/) — bundled starter workflows
+- [`packages/workflows/assets/workflows/`](packages/workflows/assets/workflows/) — bundled starter workflows
 - [CONTRIBUTING.md](CONTRIBUTING.md) — setup, required checks, PR hygiene
 - [SECURITY.md](SECURITY.md) — threat model and how to report
 

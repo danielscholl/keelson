@@ -13,8 +13,10 @@ build/
 # and removed by restore-package-json.ts; only on disk during an in-flight publish).
 package.json.bak
 
-# Workflow run state (per-context history, event logs).
-.keelson/runs/
+# The .keelson/ runtime home governs its own ignores via .keelson/.gitignore —
+# it's a generated dogfooding home (SQLite, runs, logs, reseeded starter
+# commands/scripts); only the committed maintainer workflows under
+# .keelson/workflows/ are tracked.
 
 # Per-run isolation worktrees (now carry an installed node_modules).
 .worktrees/
@@ -22,19 +24,6 @@ package.json.bak
 # Editor / IDE
 .idea/
 .vscode/
-
-# SQLite session + workflow-run persistence.
-.keelson/keelson.db
-.keelson/keelson.db-wal
-.keelson/keelson.db-shm
-
-# Running-server record + background-serve logs (`keelson start`).
-.keelson/server.json
-.keelson/logs/
-
-# A `keelson rib add` run against the repo-local home seeds these.
-.keelson/package.json
-.keelson/bun.lock
 
 # Playwright MCP scratch — screenshots, console logs, snapshots from
 # headless verification runs. Local-only; never committed.
