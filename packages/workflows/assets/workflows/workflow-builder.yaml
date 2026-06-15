@@ -1,0 +1,288 @@
+# A workflow that authors workflows. Concepts ported from Archon's
+# archon-workflow-builder (MIT, see NOTICE), rewritten for Keelson: Copilot
+# models, the `$KEELSON_*` bash env channel, a real `Bun.YAML.parse` gate
+# (Bun is a hard dependency), and a schema reference that teaches the model
+# Keelson's actual node taxonomy and substitution rules — so the workflow it
+# emits passes `keelson workflow validate`.
+
+name: workflow-builder
+provider: copilot
+model: auto
+description: |
+  Use when: User wants to scaffold a new custom workflow for their project from
+            a plain-language description.
+  Triggers: "build me a workflow", "create a workflow", "generate a workflow",
+            "new workflow", "make a workflow for", "workflow builder".
+  Does: Scans the repo for context -> extracts structured intent (JSON) ->
+        generates a Keelson workflow YAML -> structurally validates it (Bun YAML
+        parse + required fields) -> installs it under .keelson/workflows/ and
+        reports how to validate and run it.
+  NOT for: Editing an existing workflow, or generating non-workflow files.
+
+nodes:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. SCAN — cheap, deterministic repo context for the classifier.
+  #    Pure shell, no AI. First node, so no upstream env channel is needed.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: scan-codebase
+    bash: |
+      set -uo pipefail
+
+      echo "=== Existing workflows (.keelson/workflows) ==="
+      if [ -d ".keelson/workflows" ]; then
+        find .keelson/workflows -maxdepth 1 -type f \( -name "*.yaml" -o -name "*.yml" \) 2>/dev/null | sort | head -30
+      else
+        echo "(none)"
+      fi
+
+      echo ""
+      echo "=== Existing commands (.keelson/commands) ==="
+      if [ -d ".keelson/commands" ]; then
+        find .keelson/commands -maxdepth 1 -type f -name "*.md" 2>/dev/null | sort | head -30
+      else
+        echo "(none)"
+      fi
+
+      echo ""
+      echo "=== Project identity ==="
+      if [ -f "package.json" ]; then
+        grep -E '"name"|"scripts"' package.json | head -12
+      else
+        echo "(no package.json)"
+      fi
+
+      echo ""
+      echo "=== Project conventions (first 40 lines of the first that exists) ==="
+      for f in CLAUDE.md AGENTS.md CONTRIBUTING.md README.md; do
+        if [ -f "$f" ]; then
+          echo "--- $f ---"
+          head -40 "$f"
+          break
+        fi
+      done
+    timeout: 30000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. EXTRACT INTENT — structured classification of the request.
+  #    output_format forces a typed JSON reply so downstream nodes can
+  #    dot-access $extract-intent.output.<field>.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: extract-intent
+    depends_on: [scan-codebase]
+    model: auto
+    output_format:
+      type: object
+      required: [workflow_name, description, trigger_phrases, proposed_nodes, execution_mode]
+      properties:
+        workflow_name:
+          type: string
+        description:
+          type: string
+        trigger_phrases:
+          type: string
+        proposed_nodes:
+          type: string
+        execution_mode:
+          type: string
+          enum: [dag, loop]
+    prompt: |
+      You are a workflow-design classifier. Turn the user's request into
+      structured intent for a new Keelson workflow.
+
+      ## User's request
+
+      $ARGUMENTS
+
+      ## Repo context
+
+      $scan-codebase.output
+
+      ## Produce
+
+      - workflow_name: kebab-case, unique against the existing workflows above
+        (e.g. "lint-and-test", "deploy-staging"). Lowercase letters, digits, dashes.
+      - description: a one-paragraph summary following the house convention —
+        "Use when: … / Triggers: … / Does: … / NOT for: …".
+      - trigger_phrases: 4-7 short quoted phrases a user might type to invoke it.
+      - proposed_nodes: a numbered list. For each node give its id (kebab-case),
+        its type (one of bash / prompt / command / loop / script / approval / cancel),
+        and a one-line purpose. Order them so each node's inputs come from an
+        earlier node. Keep it minimal — the fewest nodes that do the job.
+      - execution_mode: "loop" if the job needs iterate-until-done semantics,
+        otherwise "dag".
+
+      Be concrete and grounded in the repo context — prefer the project's real
+      tooling (its actual test / lint / build commands) over generic placeholders.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. GENERATE — write the workflow YAML to the scratch dir.
+  #    allowed_tools: [Read, Write] grants the file-write capability but not
+  #    shell, so the YAML is authored with the Write tool rather than echoed
+  #    through bash (which would mangle special characters). Copilot gates by
+  #    capability kind, so [Write] covers create/edit alike — and denying Edit
+  #    would have denied Write too (same kind).
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: generate-yaml
+    depends_on: [extract-intent]
+    model: auto
+    allowed_tools: [Read, Write]
+    prompt: |
+      You are a Keelson workflow author. Write ONE complete, valid workflow YAML
+      file from the structured intent below.
+
+      ## Intent
+
+      - Name: $extract-intent.output.workflow_name
+      - Description: $extract-intent.output.description
+      - Trigger phrases: $extract-intent.output.trigger_phrases
+      - Proposed nodes: $extract-intent.output.proposed_nodes
+      - Execution mode: $extract-intent.output.execution_mode
+
+      ## Original request
+
+      $ARGUMENTS
+
+      ## Keelson workflow schema (authoritative — follow exactly)
+
+      ```yaml
+      name: <kebab-case, matches the intent name>
+      provider: copilot        # this project's models
+      model: auto              # let Copilot route each node
+      description: |
+        Use when: ...
+        Triggers: ...
+        Does: ...
+        NOT for: ...
+
+      nodes:
+        - id: <kebab-case-unique>
+          # exactly ONE body field per node — prompt | bash | command | loop | script | approval | cancel
+
+          # prompt — an AI turn. $ARGUMENTS, $ARTIFACTS_DIR, and
+          # $<upstreamId>.output[.field] are substituted INTO the prompt text.
+          prompt: |
+            Instructions for the agent...
+          # optional: model: auto | context: fresh | idle_timeout: <ms> |
+          #   output_format: { type: object, required: [...], properties: {...} }
+          # On Copilot, tool gates map to capability kinds (read / write / shell),
+          # not individual tools: allowed_tools: [Read, Write] permits file writes
+          # but not shell, and denying Edit also denies Write (same kind).
+
+          # bash — deterministic shell, NO AI. The body runs RAW (pre-substitution)
+          # for command-injection safety, so $<id>.output does NOT expand here.
+          # Reach workflow data through the env channel instead:
+          #   $KEELSON_ARTIFACTS_DIR     per-run scratch dir
+          #   $KEELSON_NODE_<id>_OUTPUT  an upstream node's output (dashes in the
+          #                              id become underscores: my-node -> my_node)
+          #   $KEELSON_ARGUMENTS         the invocation arguments
+          # stdout becomes this node's output.
+          bash: |
+            set -euo pipefail
+            echo "result"
+          # optional: timeout: <ms>
+
+          # command — runs a named markdown command from .keelson/commands/<name>.md
+          command: <command-name>
+
+          # script — deterministic TypeScript (bun) or Python (uv); stdout = output.
+          # Use for typed transforms a shell would mangle (JSON parsing, etc.).
+          script: |
+            console.log(JSON.stringify({ ok: true }))
+          runtime: bun           # 'bun' (.ts/.js) or 'uv' (.py)
+
+          # loop — repeats an AI turn until a signal. Prefer a tagged signal.
+          loop:
+            prompt: |
+              Do one step. When fully done, output <promise>ALL_DONE</promise>.
+            until: ALL_DONE
+            max_iterations: 10
+            # optional: until_bash: a probe; exit 0 also ends the loop.
+
+          # approval — human gate. Pauses the run (needs `keelson start`).
+          approval:
+            message: "Review the above. Approve to continue."
+            capture_response: true   # store the reviewer's reply as $<id>.output
+
+          # common to every node:
+          depends_on: [<other-id>]            # DAG edges
+          when: "$<id>.output == 'value'"     # conditional execution
+          trigger_rule: all_success           # all_success | one_success | all_done
+      ```
+
+      ## Rules
+
+      1. `name:` MUST equal: $extract-intent.output.workflow_name
+      2. `description:` MUST follow "Use when / Triggers / Does / NOT for".
+      3. Set `provider: copilot` and `model: auto` at the top.
+      4. Every node id is unique kebab-case; never use the reserved ids
+         `inputs`, `memory`, `ARGUMENTS`, or `ARTIFACTS_DIR`.
+      5. Use `depends_on` for order. A `$<id>.output` reference is only valid
+         when `<id>` is in this node's depends_on chain.
+      6. In `bash` / `script` bodies use the `$KEELSON_*` env channel — never
+         `$<id>.output` (it will not expand there).
+      7. Put a human gate (`approval`) before any irreversible or destructive step.
+      8. Add `output_format` to a prompt node only when a later node needs to
+         dot-access its structured fields.
+
+      ## Output
+
+      Write the complete YAML to `$ARTIFACTS_DIR/generated-workflow.yaml` using the
+      Write tool. Put no YAML in your reply text — output only the file path.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. VALIDATE — structural gate on the generated file. Real YAML parse via
+  #    Bun (a hard dependency) plus required-field checks. Fails the node (and
+  #    skips install) on a malformed file. bash runs raw: $KEELSON_ARTIFACTS_DIR.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: validate-yaml
+    depends_on: [generate-yaml]
+    bash: |
+      set -uo pipefail
+      FILE="$KEELSON_ARTIFACTS_DIR/generated-workflow.yaml"
+
+      [ -f "$FILE" ] || { echo "ERROR: generated-workflow.yaml not found at $FILE"; exit 1; }
+      [ -s "$FILE" ] || { echo "ERROR: generated-workflow.yaml is empty"; exit 1; }
+
+      grep -q "^name:" "$FILE"        || { echo "ERROR: missing top-level 'name:'"; exit 1; }
+      grep -q "^description:" "$FILE" || { echo "ERROR: missing top-level 'description:'"; exit 1; }
+      grep -q "^nodes:" "$FILE"       || { echo "ERROR: missing top-level 'nodes:'"; exit 1; }
+
+      NODE_COUNT=$(grep -cE '^[[:space:]]+- id:' "$FILE" || true)
+      [ "${NODE_COUNT:-0}" -ge 1 ]   || { echo "ERROR: no nodes found (need at least one '- id:')"; exit 1; }
+
+      # Real parse — Bun is required by the harness, so a YAML syntax error fails here.
+      if command -v bun >/dev/null 2>&1; then
+        KEELSON_VALIDATE_FILE="$FILE" bun -e 'Bun.YAML.parse(require("fs").readFileSync(process.env.KEELSON_VALIDATE_FILE,"utf8"))' \
+          || { echo "ERROR: generated YAML failed to parse"; exit 1; }
+      fi
+
+      echo "VALID — parsed cleanly, ${NODE_COUNT} node(s)"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. INSTALL & REPORT — copy the validated workflow into the project home so
+  #    Keelson discovers it, then tell the user how to validate and run it.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: save-or-report
+    depends_on: [validate-yaml]
+    model: auto
+    prompt: |
+      Install the generated workflow and report to the user.
+
+      ## Details
+
+      - Name: $extract-intent.output.workflow_name
+      - Trigger phrases: $extract-intent.output.trigger_phrases
+      - Source file: `$ARTIFACTS_DIR/generated-workflow.yaml`
+
+      ## Steps
+
+      1. Read the generated workflow from `$ARTIFACTS_DIR/generated-workflow.yaml`.
+      2. Create the project workflows directory if missing: `mkdir -p .keelson/workflows`.
+      3. Write it to `.keelson/workflows/$extract-intent.output.workflow_name.yaml`
+         using the Write tool (do not alter the content).
+      4. Report, exactly:
+         - The install path.
+         - The trigger phrases.
+         - Validate it: `keelson workflow validate $extract-intent.output.workflow_name`
+         - Run it: `keelson workflow run $extract-intent.output.workflow_name --inputs ARGUMENTS="your input"`
+         - One-line reminder that they should open the file and review it before running.

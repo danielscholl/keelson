@@ -90,6 +90,7 @@ export {
 } from "./loader.ts";
 export * from "./schema/index.ts";
 export {
+  bundledWorkflowsDir,
   isWorkflowYaml,
   type SeededAssets,
   seedStarterAssets,

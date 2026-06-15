@@ -1,0 +1,212 @@
+# Author a PRD through a guided conversation. Concepts ported from Archon's
+# archon-interactive-prd (MIT, see NOTICE), rewritten for Keelson: Copilot
+# models, and codebase-grounding made project-agnostic (it reads whatever the
+# repo actually has instead of Archon's own paths). Three `approval` gates with
+# capture_response thread the user's answers forward — the human IS the input
+# channel, not just a yes/no. Requires `keelson start` (approval gates pause for
+# input; they cannot resolve in the headless CLI fallback).
+
+name: interactive-prd
+provider: copilot
+model: auto
+interactive: true
+description: |
+  Use when: User wants to create a product requirements doc through guided,
+            problem-first conversation.
+  Triggers: "create a prd", "new prd", "interactive prd", "plan a feature",
+            "product requirements", "write a prd".
+  Does: Asks foundation questions -> researches market + codebase -> asks deep-dive
+        questions -> assesses technical feasibility from what already exists ->
+        asks scope questions -> writes a PRD -> validates every technical claim
+        against the real codebase.
+  NOT for: Autonomous PRD generation with no human input, or implementing a plan.
+
+nodes:
+  # ─── Phase 1: Initiate — understand the idea ────────────────────────────────
+  - id: initiate
+    model: auto
+    prompt: |
+      You are a sharp product manager starting a PRD. Think from first principles
+      — primitives, not features.
+
+      The user wants to build: $ARGUMENTS
+
+      If the input is clear, restate your understanding in 2-3 sentences and
+      confirm it. If it is vague or empty, ask what they want to build.
+
+      Then present the **Foundation Questions** (all at once — they answer next):
+
+      1. **Who** has this problem? Be specific about the role/person.
+      2. **What** problem are they facing? Describe the observable pain.
+      3. **Why** can't they solve it today? What alternatives fail, and why?
+      4. **Why now?** What changed that makes this worth building?
+      5. **How** will you know it's solved? What does success look like?
+
+      Keep it conversational. Do NOT generate any PRD content yet.
+
+  - id: foundation-gate
+    depends_on: [initiate]
+    approval:
+      message: "Answer the foundation questions above — your answers guide the research phase."
+      capture_response: true
+
+  # ─── Phase 2: Grounding — research market + codebase ────────────────────────
+  - id: research
+    depends_on: [foundation-gate]
+    model: auto
+    prompt: |
+      Research context for the PRD. First principles: know what exists before
+      proposing anything new.
+
+      **Idea**: $ARGUMENTS
+      **Foundation answers**: $foundation-gate.output
+
+      Research the landscape:
+      1. Similar products / competitors / how others solve this (use web search if
+         available; otherwise reason from known patterns).
+      2. **Explore the codebase deeply** — find related functionality, APIs, UI
+         components, data models, and patterns. Read actual files; cite exact paths.
+      3. Note common patterns and anti-patterns.
+
+      First-principles rule: before suggesting anything new, verify what already
+      exists. If something partially solves the problem, name it explicitly — the
+      best solution extends what exists rather than replacing it.
+
+      Present **What I found** (market insights; what already exists, with file
+      paths; the key insight that might change the approach). Then ask the
+      **Deep-Dive Questions**:
+
+      1. **Vision**: in one sentence, the ideal end state if this wildly succeeds.
+      2. **Primary user**: their role, context, and what triggers the need.
+      3. **Job to be done**: "When [situation], I want to [motivation], so I can [outcome]."
+      4. **Non-users**: who is explicitly NOT the target.
+      5. **Constraints**: time, budget, technical, regulatory.
+
+  - id: deepdive-gate
+    depends_on: [research]
+    approval:
+      message: "Answer the deep-dive questions above (vision, primary user, JTBD, constraints). Add any adjustments from the research."
+      capture_response: true
+
+  # ─── Phase 3: Technical grounding — feasibility from what exists ─────────────
+  - id: technical
+    depends_on: [deepdive-gate]
+    model: auto
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      Assess technical feasibility. First principles: start from what exists, not
+      a clean-slate build.
+
+      **Idea**: $ARGUMENTS
+      **Foundation answers**: $foundation-gate.output
+      **Deep-dive answers**: $deepdive-gate.output
+
+      CRITICAL: explore the codebase by READING actual files — do not guess. Cite
+      `file:line` for every claim.
+
+      1. **What already exists** that partially solves this? Read the real API
+         handlers/routes, data access, and UI components. Note exact function
+         names, schema/table/field names, component names, and what data is
+         already collected.
+      2. **Smallest change** that solves the core problem — prefer extending
+         existing files/endpoints/pages over creating new ones.
+      3. **Actual primitives** needed — a new query or an existing one with a
+         parameter? A new component or an existing one with a prop? A new endpoint
+         or one that already returns the data?
+      4. **Risk** — where could this go wrong, and what assumptions need validating?
+
+      Present:
+      - **What already exists (verified by reading code)**: `{thing}` at `{file:line}` — {what it does}
+      - **Smallest change to solve it**: {extend/modify} `{file}` — {what to do}
+      - **Technical context**: Feasibility HIGH/MEDIUM/LOW because {reason}; key
+        risk; rough phases.
+
+      Then ask the **Scope Questions**:
+
+      1. **MVP**: the absolute minimum to test whether this works.
+      2. **Must-have vs nice-to-have**: 2-3 things that MUST be in v1; what can wait.
+      3. **Key hypothesis**: "We believe [capability] will [solve problem] for
+         [users]. We'll know we're right when [measurable outcome]."
+      4. **Out of scope**: what you are explicitly NOT building.
+      5. **Open questions**: uncertainties that could change the approach.
+
+  - id: scope-gate
+    depends_on: [technical]
+    approval:
+      message: "Answer the scope questions above (MVP, must-haves, hypothesis, exclusions). This is the final input before PRD generation."
+      capture_response: true
+
+  # ─── Phase 4: Generate the PRD ──────────────────────────────────────────────
+  - id: generate
+    depends_on: [scope-gate]
+    model: auto
+    allowed_tools: [Read, Write, Glob, Grep, Bash]
+    prompt: |
+      Generate the PRD from the guided inputs.
+
+      **Idea**: $ARGUMENTS
+      **Foundation answers**: $foundation-gate.output
+      **Deep-dive answers**: $deepdive-gate.output
+      **Scope answers**: $scope-gate.output
+
+      Create the PRD at `$ARTIFACTS_DIR/prds/{kebab-case-name}.prd.md`
+      (first `mkdir -p $ARTIFACTS_DIR/prds`).
+
+      First-principles rule: before writing the Technical Approach, READ the
+      actual files you reference and verify paths, function/component names, API
+      endpoints, and schema/field names. Mark anything unverified as "needs verification".
+
+      The PRD MUST include, filled from the answers above:
+
+      1. **Problem Statement** — from the foundation answers (who/what/why).
+      2. **Evidence** — research findings + the user's evidence.
+      3. **Proposed Solution** — synthesized; prefer extending existing primitives.
+      4. **Key Hypothesis** — from the scope answers.
+      5. **What We're NOT Building** — from the scope answers.
+      6. **Success Metrics** — foundation "how will you know" + scope.
+      7. **Open Questions** — from the scope answers.
+      8. **Users & Context** — deep-dive (primary user, JTBD, non-users).
+      9. **Solution Detail** — a MoSCoW table from must-haves + the MVP definition.
+      10. **Technical Approach** — from feasibility; reference verified `file:line`s.
+      11. **Implementation Phases** — a status table with parallel opportunities.
+      12. **Decisions Log** — key decisions made during the conversation.
+
+      Rules: write "TBD — needs research" instead of filler; be specific; every
+      file path in Technical Approach must be verified by reading the file.
+
+      After writing the file, output ONLY its path — the validator checks it next.
+
+  # ─── Phase 5: Validate — check technical claims against the real codebase ────
+  - id: validate
+    depends_on: [generate]
+    model: auto
+    allowed_tools: [Read, Edit, Glob, Grep, Bash]
+    prompt: |
+      You are a technical validator checking a PRD for accuracy against THIS repo.
+
+      The generate node wrote the PRD here: $generate.output
+      (If that is unclear, the newest file under `$ARTIFACTS_DIR/prds/*.prd.md`.)
+
+      Read the whole PRD, then verify EVERY technical claim against the actual code:
+
+      - **File paths** — every file referenced in Technical Approach / Implementation
+        Phases exists. If not, note the correction.
+      - **APIs / endpoints / functions** — each referenced one exists in the project's
+        real source (search for it). If it already exists, the PRD should say
+        "extend", not "create"; flag any new thing proposed for data an existing
+        path already returns.
+      - **Data models** — every table/collection/field/type name matches the
+        project's real schema, migrations, or type definitions.
+      - **UI components / pages** — each referenced one exists; flag a proposed new
+        page when an existing one already serves a similar purpose.
+      - **Names** — function, type, and interface names are correct.
+
+      If anything needs correcting: edit the PRD directly to fix names/paths/refs,
+      and add a `## Validation Notes` section listing what changed. If everything
+      checks out, add a `## Validation Notes` section saying all references were
+      verified with no corrections.
+
+      Then print a short summary:
+      - File, counts checked (paths / endpoints / data refs / components),
+        number of corrections (and what they were).
+      - The next step to start implementation from this PRD.

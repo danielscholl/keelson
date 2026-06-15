@@ -38,6 +38,18 @@ const ALLOW_LIST: ReadonlyArray<{ readonly file: string; readonly reason: string
     file: "packages/workflows/assets/workflows/pr-review.yaml",
     reason: "Ported from Archon's archon-smart-pr-review (MIT) — header credits upstream",
   },
+  {
+    file: "packages/workflows/assets/workflows/adversarial-build.yaml",
+    reason: "Ported from Archon's archon-adversarial-dev (MIT) — header credits upstream",
+  },
+  {
+    file: "packages/workflows/assets/workflows/interactive-prd.yaml",
+    reason: "Ported from Archon's archon-interactive-prd (MIT) — header credits upstream",
+  },
+  {
+    file: "packages/workflows/assets/workflows/workflow-builder.yaml",
+    reason: "Ported from Archon's archon-workflow-builder (MIT) — header credits upstream",
+  },
   // Self-reference — this file greps for the patterns.
   { file: "packages/shared/test/rename-completeness.test.ts", reason: "self-reference" },
   // Lockfile churn — bun.lock includes transitive package names that may

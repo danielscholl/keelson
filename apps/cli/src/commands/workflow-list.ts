@@ -6,7 +6,7 @@ import { discoverWorkflows } from "@keelson/workflows";
 
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { emit } from "../output.ts";
-import { defaultWorkflowsDir } from "../paths.ts";
+import { workflowDiscoveryRoots } from "../paths.ts";
 
 export interface WorkflowListOptions {
   json: boolean;
@@ -22,8 +22,10 @@ export interface WorkflowListEntry {
 }
 
 export async function runWorkflowList(opts: WorkflowListOptions): Promise<never> {
-  const dir = opts.dir ?? defaultWorkflowsDir();
-  const result = discoverWorkflows([{ dir, source: "global" }]);
+  const roots = opts.dir
+    ? [{ dir: opts.dir, source: "global" as const }]
+    : workflowDiscoveryRoots();
+  const result = discoverWorkflows(roots);
 
   if (result.errors.length > 0 && result.workflows.length === 0) {
     emit(
