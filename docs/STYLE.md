@@ -79,7 +79,7 @@ prose, not in cute paths.
 - `tutorials/` — a problem-first learning rail, each page handing off to the
   next. The capstone is "build your first rib".
 - `workflows/` — the catalog of bundled starter workflows: an index that groups
-  what ships by purpose, plus a node-by-node walkthrough per flagship (the shape
+  what ships by purpose, plus a node-by-node walkthrough per workflow (the shape
   as a figure, every node in a table, the patterns each one demonstrates). Worked
   examples that bridge the `guides/` recipes to the real multi-node workflows.
 - `reference/` — the contract tier: `rib-contract` (the centerpiece, built on the
