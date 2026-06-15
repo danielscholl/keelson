@@ -12,7 +12,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "0.79.1",
+    "@earendil-works/pi-tui": "0.79.3",
     "@keelson/providers": "workspace:*",
     "@keelson/server": "workspace:*",
     "@keelson/shared": "workspace:*",
