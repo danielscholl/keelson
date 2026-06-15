@@ -19,7 +19,9 @@ import type {
   RibAgentTurn,
   RibAgentTurnRequest,
   RibAgentTurnResult,
+  ToolDefinition,
 } from "@keelson/shared";
+import { getRegisteredTools as liveRegisteredTools } from "@keelson/skills";
 
 // Registry-routed `runAgentTurn` seam (packages/shared/src/rib.ts): resolve a
 // provider the same way workflow `prompt` nodes do (req.provider hint →
@@ -45,6 +47,15 @@ export interface MakeRibAgentTurnDeps {
   // Neutral cwd for turns that don't pin one. Defaults to the OS temp dir so a
   // rib turn never runs in the server's (host repo) cwd.
   defaultCwd?: string;
+  // Resolve a turn's requested tool NAMES to full registered tool defs so a
+  // rib's own tools project to the provider (e.g. a Mind authoring a lens
+  // mid-room via chamber_emit_lens). Defaults to the live @keelson/skills
+  // registry. A turn only ever names tools its own rib registered, so this
+  // never reaches past the rib's catalog.
+  getRegisteredTools?: () => readonly ToolDefinition[];
+  // Operator denylist floor (KEELSON_WORKFLOW_TOOL_DENYLIST): names removed from
+  // the projection even when requested, matching the workflow prompt path.
+  denylist?: readonly string[];
 }
 
 interface ResolvedDeps {
@@ -52,6 +63,8 @@ interface ResolvedDeps {
   hasProvider: (id: string) => boolean;
   listProviderIds: () => string[];
   neutralCwd: string;
+  getRegisteredTools: () => readonly ToolDefinition[];
+  denied: ReadonlySet<string>;
 }
 
 export function makeRibAgentTurn(
@@ -62,6 +75,8 @@ export function makeRibAgentTurn(
     hasProvider: deps.isRegisteredProvider ?? registryHasProvider,
     listProviderIds: deps.listProviderIds ?? (() => getProviderInfoList().map((p) => p.id)),
     neutralCwd: deps.defaultCwd ?? tmpdir(),
+    getRegisteredTools: deps.getRegisteredTools ?? (() => liveRegisteredTools()),
+    denied: new Set(deps.denylist ?? parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST)),
   };
   // ribId is accepted for future per-rib policy/logging; provider routing is
   // global, so it does not scope the turn today.
@@ -147,7 +162,7 @@ async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<Ri
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
     ...(req.model ? { model: req.model } : {}),
-    ...toolOptions(req),
+    ...toolOptions(req, deps),
   };
 
   let assistantText = "";
@@ -191,11 +206,14 @@ async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<Ri
 // between turns), expressed as an empty allow-list. A `disallowedTools`-only
 // request is a deny rail that leaves the rest of the catalog available.
 //
-// `req.tools` is a loose `{ name }[]` (not projectable ToolDefinitions), so it
-// only contributes to the allow-list by name — it is NOT forwarded as
-// `options.tools`, which the providers would try to project as MCP defs and
-// crash on the missing inputSchema.
-function toolOptions(req: RibAgentTurnRequest): Partial<SendQueryOptions> {
+// `req.tools` is a loose `{ name }[]`, so it contributes the allow-list by name.
+// To make a named tool actually CALLABLE we resolve it against the live registry
+// to its full validated def and forward those as `options.tools` (plus the
+// catalog as `registeredMcpToolNames`) — the same projection workflow prompt
+// nodes use. A requested name with no registered def (an SDK built-in like Read)
+// resolves to nothing, so it stays allow-list-only and is never projected; the
+// text-only and built-in rails are unchanged.
+function toolOptions(req: RibAgentTurnRequest, deps: ResolvedDeps): Partial<SendQueryOptions> {
   const out: Partial<SendQueryOptions> = {};
 
   let allowedTools: string[] | undefined;
@@ -209,7 +227,31 @@ function toolOptions(req: RibAgentTurnRequest): Partial<SendQueryOptions> {
   }
   if (allowedTools !== undefined) out.allowedTools = allowedTools;
   if (req.disallowedTools !== undefined) out.disallowedTools = [...req.disallowedTools];
+
+  if (req.tools !== undefined && req.tools.length > 0) {
+    const requested = new Set(req.tools.map((t) => t.name));
+    const catalog = deps.getRegisteredTools();
+    const projected = catalog.filter((t) => requested.has(t.name) && !deps.denied.has(t.name));
+    if (projected.length > 0) {
+      out.tools = [...projected];
+      // The FULL catalog, not the projected subset, so the provider recognizes a
+      // registered MCP name even when the denylist dropped it (it must not be
+      // mistaken for an SDK built-in). Mirrors the prompt handler.
+      out.registeredMcpToolNames = catalog.map((t) => t.name);
+    }
+  }
   return out;
+}
+
+// KEELSON_WORKFLOW_TOOL_DENYLIST → tool names to drop from the projection.
+// Comma-separated, trimmed, empties removed. Unset → no denylist, matching the
+// workflow path's empty DEFAULT_TOOL_DENYLIST.
+function parseToolDenylist(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 function isAbortError(err: unknown): boolean {

@@ -8,9 +8,21 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import type { IAgentProvider, SendQueryOptions } from "@keelson/providers";
-import type { MessageChunk, Rib, RibContext } from "@keelson/shared";
+import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
+import { z } from "zod";
 import { type MakeRibAgentTurnDeps, makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { applyRibs } from "./ribs.ts";
+
+// A minimal registered tool def for tool-projection tests — only the fields the
+// seam reads (name) matter; the schema/execute satisfy the contract shape.
+function fakeTool(name: string): ToolDefinition {
+  return {
+    name,
+    description: `${name} tool`,
+    inputSchema: z.object({}),
+    async execute() {},
+  };
+}
 
 interface QueryCall {
   prompt: string;
@@ -66,6 +78,11 @@ function makeRun(
     isRegisteredProvider: deps.isRegisteredProvider ?? ((id) => ids.includes(id)),
     listProviderIds: deps.listProviderIds ?? (() => ids),
     defaultCwd: deps.defaultCwd ?? "/neutral",
+    // Default to an empty catalog so tool-rail tests are isolated from whatever
+    // the global @keelson/skills registry happens to hold; tool-projection tests
+    // inject their own.
+    getRegisteredTools: deps.getRegisteredTools ?? (() => []),
+    ...(deps.denylist !== undefined ? { denylist: deps.denylist } : {}),
   });
 }
 
@@ -236,9 +253,12 @@ describe("makeRibAgentTurn — seam invariants", () => {
 });
 
 describe("makeRibAgentTurn — tool rails", () => {
-  async function optionsFor(req: Parameters<ReturnType<typeof makeRibAgentTurn>>[1]) {
+  async function optionsFor(
+    req: Parameters<ReturnType<typeof makeRibAgentTurn>>[1],
+    deps: Partial<MakeRibAgentTurnDeps> = {},
+  ) {
     let seen: SendQueryOptions | undefined;
-    const run = makeRun(fakeProvider({ onQuery: (c) => (seen = c.options) }));
+    const run = makeRun(fakeProvider({ onQuery: (c) => (seen = c.options) }), deps);
     await run("chamber", req).result;
     return seen;
   }
@@ -254,11 +274,48 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(opts?.allowedTools).toEqual([]);
   });
 
-  it("derives the allow-list from a requested tool set without forwarding it as projectable tools", async () => {
+  it("derives the allow-list from a requested tool set without projecting built-ins", async () => {
     const opts = await optionsFor({ prompt: "hi", tools: [{ name: "Read" }, { name: "Edit" }] });
     expect(opts?.allowedTools).toEqual(["Read", "Edit"]);
-    // The loose `{ name }[]` is NOT forwarded as options.tools — a provider would
-    // try to project it as MCP defs and crash on the missing inputSchema.
+    // Read/Edit are SDK built-ins, not registered rib tools, so they resolve to
+    // no def and stay allow-list-only — never projected as options.tools.
+    expect(opts?.tools).toBeUndefined();
+  });
+
+  it("projects a requested REGISTERED rib tool so the model can call it", async () => {
+    const lens = fakeTool("chamber_emit_lens");
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      { getRegisteredTools: () => [lens, fakeTool("chamber_emit_genesis")] },
+    );
+    // The full validated def is forwarded so the provider projects it as an MCP
+    // tool; the allow-list (derived from the request) permits exactly it.
+    expect(opts?.tools).toEqual([lens]);
+    expect(opts?.allowedTools).toEqual(["chamber_emit_lens"]);
+    // The provider needs the full catalog to tell registered MCP names from built-ins.
+    expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens", "chamber_emit_genesis"]);
+  });
+
+  it("leaves a requested name that resolves to no registered def unprojected", async () => {
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      { getRegisteredTools: () => [] },
+    );
+    expect(opts?.allowedTools).toEqual(["chamber_emit_lens"]);
+    expect(opts?.tools).toBeUndefined();
+    expect(opts?.registeredMcpToolNames).toBeUndefined();
+  });
+
+  it("drops a denylisted tool from the projection (operator floor)", async () => {
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        denylist: ["chamber_emit_lens"],
+      },
+    );
+    // Still named in the allow-list, but never projected — so the model can't reach it.
+    expect(opts?.allowedTools).toEqual(["chamber_emit_lens"]);
     expect(opts?.tools).toBeUndefined();
   });
 
