@@ -24,6 +24,7 @@ import {
   type CommandCompletion,
   type CommandInvokeResult,
   type OpenChatSeed,
+  type Policy,
   type Rib,
   type RibAction,
   type RibActionResult,
@@ -43,6 +44,7 @@ import {
   type ToolDefinition,
 } from "@keelson/shared";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
+import type { RibPolicyContribution } from "./policy-engine.ts";
 import { createScopedSnapshotManager } from "./scoped-snapshot-manager.ts";
 
 export interface RibManifest {
@@ -89,6 +91,9 @@ export interface ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >;
   readonly workflowContributions: RibWorkflowContribution[];
+  // Policies each active rib contributed (Rib.contributePolicies), tagged with
+  // the owning rib id. The composition root folds these into the PolicyEngine.
+  readonly policies: RibPolicyContribution[];
   // Validated, de-duplicated tools across every active rib, in activation
   // order. The composition root registers these into the shared tool registry
   // (see `registerRibTools` in bootstrap.ts); `applyRibs` itself stays free of
@@ -172,6 +177,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >();
   const workflowContributions: RibWorkflowContribution[] = [];
+  const policies: RibPolicyContribution[] = [];
   const tools: ToolDefinition[] = [];
   const seen = new Set<string>();
   // Tool names are a single global namespace shared across ribs; track claims
@@ -353,6 +359,26 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       }
     }
 
+    if (rib.contributePolicies) {
+      // Defensive like collectRibTools: a non-array return (or a malformed
+      // entry) warns and is dropped rather than throwing, so one rib's bug can't
+      // take the server down at boot.
+      const contributed = rib.contributePolicies(ribCtx);
+      if (!Array.isArray(contributed)) {
+        console.warn(
+          `[keelson] rib '${rib.id}' contributePolicies did not return an array; ignoring`,
+        );
+      } else {
+        for (const policy of contributed) {
+          if (!isPolicy(policy)) {
+            console.warn(`[keelson] rib '${rib.id}' contributed a malformed policy; skipping`);
+            continue;
+          }
+          policies.push({ ribId: rib.id, policy });
+        }
+      }
+    }
+
     if (rib.dispose) {
       disposers.push({ id: rib.id, dispose: rib.dispose.bind(rib) });
     }
@@ -368,6 +394,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    policies,
     tools,
   };
 }
@@ -426,6 +453,32 @@ function isToolDefinition(value: unknown): value is ToolDefinition {
     (t.state_changing === undefined || typeof t.state_changing === "boolean") &&
     (t.requires_confirmation === undefined || typeof t.requires_confirmation === "boolean")
   );
+}
+
+// A contributed policy is usable if it has a non-empty string id, an `evaluate`
+// function, and — when present — an `on` that is a NON-EMPTY array of matcher
+// objects whose `phase` is a string and whose optional `tool` is a string.
+// Validating `on` here is load-bearing: the engine dereferences
+// `policy.on.some((m) => m.phase ...)` and compares `m.tool`, so a malformed
+// `on` (a bare string, an entry without a phase) would throw, and an empty array
+// or a non-string `tool` would make the policy a silently-dead matcher. Mirrors
+// isToolDefinition's defensive narrowing at the activation boundary.
+function isPolicy(value: unknown): value is Policy {
+  if (typeof value !== "object" || value === null) return false;
+  const p = value as Record<string, unknown>;
+  if (typeof p.id !== "string" || p.id.length === 0 || typeof p.evaluate !== "function") {
+    return false;
+  }
+  if (p.on === undefined) return true;
+  if (!Array.isArray(p.on) || p.on.length === 0) return false;
+  return p.on.every((m) => {
+    if (typeof m !== "object" || m === null) return false;
+    const entry = m as { phase?: unknown; tool?: unknown };
+    return (
+      typeof entry.phase === "string" &&
+      (entry.tool === undefined || typeof entry.tool === "string")
+    );
+  });
 }
 
 function assertInNamespace(ribId: string, namespace: string, key: string, label: string): void {

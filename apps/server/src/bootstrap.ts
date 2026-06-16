@@ -55,6 +55,7 @@ import {
   makePromptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
+  type PromptToolGate,
   validateWorkflowInvariants,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
@@ -62,6 +63,11 @@ import {
   workflowDefinitionSchema,
 } from "@keelson/workflows";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
+import {
+  createPolicyEngine,
+  type PolicyEngine,
+  type RibPolicyContribution,
+} from "./policy-engine.ts";
 import { makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { discoverRibs } from "./rib-discovery.ts";
 import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
@@ -161,6 +167,11 @@ export interface BootstrapRibsOptions {
   // Agent-turn factory. Defaults to the CLI-backed makeRibAgentTurn;
   // injectable so tests pass a fake instead of shelling a provider CLI.
   runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
+  // Lazy resolver for the policy engine the default makeRibAgentTurn consults
+  // when gating a turn's projected tools. Lazy because the engine is built from
+  // these same ribs' policies AFTER bootstrapRibs returns — the getter reads the
+  // composition root's late-bound binding at turn time, by which point boot is done.
+  getPolicyEngine?: () => PolicyEngine | undefined;
   // Backs RibContext.registerRegion. Owned by the composition root (it also
   // feeds the GET /api/ribs merge), so it's threaded in rather than created here.
   dynamicRegionStore?: DynamicRegionStore;
@@ -187,6 +198,9 @@ export interface RibBootstrap {
   >;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
+  // Rib-contributed policies, tagged by owning rib — folded into the PolicyEngine
+  // at the composition root.
+  readonly policies: RibPolicyContribution[];
   // Validated, de-duplicated tools across every active rib. The composition
   // root registers these via `registerRibTools` so they reach chat + workflow
   // prompt nodes; held here (not registered in this pure function) so the many
@@ -211,7 +225,9 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   };
   // The CLI-backed agent-turn seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
-  const runAgentTurn = options.runAgentTurn ?? makeRibAgentTurn();
+  const runAgentTurn =
+    options.runAgentTurn ??
+    makeRibAgentTurn(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {});
   const {
     manifests,
     disposers,
@@ -223,6 +239,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    policies,
     tools,
   } = applyRibs({
     active,
@@ -243,6 +260,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    policies,
     tools,
     async disposeAll() {
       for (const d of disposers) {
@@ -644,6 +662,27 @@ function toDiscoveryNotice(w: WorkflowLoadWarning): WorkflowDiscoveryNotice {
   };
 }
 
+// Construct the unified policy engine: the operator denylist floor
+// (DEFAULT_TOOL_DENYLIST + KEELSON_WORKFLOW_TOOL_DENYLIST) folded into the
+// `tool_denylist` builtin, plus the ribs' contributed policies. Built at the
+// composition root AFTER bootstrapRibs so rib-declared policies are known.
+export function bootstrapPolicyEngine(
+  opts: { ribPolicies?: readonly RibPolicyContribution[] } = {},
+): PolicyEngine {
+  return createPolicyEngine({
+    // parseToolDenylist returns DEFAULT_TOOL_DENYLIST only when the env var is
+    // UNSET; once it's set, it returns just the env names. Union DEFAULT_TOOL_DENYLIST
+    // in explicitly so the hard-coded floor is never lost when an operator also
+    // sets the env var — matching the rib-agent-turn fallback (the engine builtin
+    // dedups via a Set, so the unset double-include is harmless).
+    denylist: [
+      ...DEFAULT_TOOL_DENYLIST,
+      ...parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
+    ],
+    ...(opts.ribPolicies ? { ribPolicies: opts.ribPolicies } : {}),
+  });
+}
+
 // Workflow prompt-node handler. Env-gated:
 //   KEELSON_WORKFLOW_PROVIDER         - provider id (default: first non-stub)
 //   KEELSON_WORKFLOW_TOOL_DENYLIST    - comma-separated tool names. Unset →
@@ -655,7 +694,7 @@ function toDiscoveryNotice(w: WorkflowLoadWarning): WorkflowDiscoveryNotice {
 // on its placeholder-fallback path so the catalog still serves bash-only
 // workflows when prompt nodes can't run.
 export function bootstrapPromptHandler(
-  opts: { defaultOffTools?: readonly string[] } = {},
+  opts: { defaultOffTools?: readonly string[]; projectTools?: PromptToolGate } = {},
 ): NodeHandler | undefined {
   const providers = getProviderInfoList();
   if (providers.length === 0) {
@@ -728,7 +767,12 @@ export function bootstrapPromptHandler(
       `[workflows] default workflow provider is '${providerId}'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.`,
     );
   }
-  const denylist = parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST);
+  // When the policy engine is wired (projectTools present) it owns the operator
+  // denylist via its `tool_denylist` builtin, so the handler's own floor stands
+  // down to avoid double-filtering. Standalone callers keep the env floor.
+  const denylist = opts.projectTools
+    ? []
+    : parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST);
   const timeoutMs = parsePromptTimeoutMs(process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S);
   return makePromptHandler({
     getProvider,
@@ -737,6 +781,7 @@ export function bootstrapPromptHandler(
     // Rib tools are off by default in workflow prompt nodes — a node must opt in
     // via `allowed_tools` — so a workflow inherits no rib tool it didn't ask for.
     ...(opts.defaultOffTools ? { defaultOffTools: opts.defaultOffTools } : {}),
+    ...(opts.projectTools ? { projectTools: opts.projectTools } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
 }

@@ -84,6 +84,16 @@ export interface PromptHandlerLifecycle {
   afterNode?: (ctx: { runId: string; nodeId: string }, result: NodeResult) => void | Promise<void>;
 }
 
+// Final global tool gate applied after node-level resolution. The harness backs
+// it with the unified policy engine; `provider` is the node's effective provider
+// id (best-effort, undefined when the workflow relies on the default) so a
+// provider-scoped policy can match. Exported so the composition root and the
+// handler share one signature rather than re-spelling it.
+export type PromptToolGate = (
+  candidates: readonly { name: string; [k: string]: unknown }[],
+  provider?: string,
+) => Promise<readonly { name: string; [k: string]: unknown }[]>;
+
 export interface MakePromptHandlerOptions {
   /**
    * Resolves the provider to use for this node. Called once per invocation
@@ -105,6 +115,12 @@ export interface MakePromptHandlerOptions {
    * The global denylist always still applies on top.
    */
   defaultOffTools?: readonly string[];
+  /**
+   * Final global tool gate applied after node-level allow/deny/default-off
+   * resolution. Absent → the resolved set passes through unchanged (standalone /
+   * no-engine path). Must only drop tools, never add them.
+   */
+  projectTools?: PromptToolGate;
   /** Per-node timeout in milliseconds. Defaults to 10 minutes. */
   timeoutMs?: number;
   /** Memory hook seam. Default is no-ops; reserved for the future memory layer. */
@@ -284,6 +300,20 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         filteredTools = allTools.filter(
           (t) => !effectiveDeny.has(t.name) && !defaultOffSet.has(t.name),
         );
+      }
+
+      // Final global gate: the unified policy engine (operator denylist + rib
+      // policies). Runs after node-level resolution so a policy DENY can't be
+      // widened by a node's allowed_tools. The engine contains a faulty policy to
+      // itself (skips it) internally, so a throw here is an unexpected fault —
+      // keep the node-resolved tools (fail open) and warn rather than failing the node.
+      if (opts.projectTools) {
+        try {
+          filteredTools = await opts.projectTools(filteredTools, effectiveProviderId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[workflows] tool gate threw for node '${ctx.nodeId}': ${msg}`);
+        }
       }
 
       let assistantText = "";

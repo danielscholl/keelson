@@ -23,6 +23,7 @@ import type {
 } from "@keelson/shared";
 import { getRegisteredTools as liveRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
+import type { PolicyEngine } from "./policy-engine.ts";
 
 // Registry-routed `runAgentTurn` seam (packages/shared/src/rib.ts): resolve a
 // provider the same way workflow `prompt` nodes do (req.provider hint →
@@ -55,8 +56,16 @@ export interface MakeRibAgentTurnDeps {
   // never reaches past the rib's catalog.
   getRegisteredTools?: () => readonly ToolDefinition[];
   // Operator denylist floor (KEELSON_WORKFLOW_TOOL_DENYLIST): names removed from
-  // the projection even when requested, matching the workflow prompt path.
+  // the projection even when requested, matching the workflow prompt path. Used
+  // only on the no-engine fallback path; when `getPolicyEngine` resolves an
+  // engine, that engine's `tool_denylist` builtin owns this floor instead.
   denylist?: readonly string[];
+  // Lazy resolver for the unified policy engine. When it returns an engine, the
+  // turn's projected tools are gated through it (denylist builtin + rib
+  // policies, scoped to this rib's id); when absent (tests / boot race), the
+  // local `denied` floor applies. Lazy because the engine is built after the
+  // ribs that use it activate.
+  getPolicyEngine?: () => PolicyEngine | undefined;
 }
 
 interface ResolvedDeps {
@@ -66,6 +75,7 @@ interface ResolvedDeps {
   neutralCwd: string;
   getRegisteredTools: () => readonly ToolDefinition[];
   denied: ReadonlySet<string>;
+  getPolicyEngine?: () => PolicyEngine | undefined;
 }
 
 export function makeRibAgentTurn(
@@ -84,11 +94,13 @@ export function makeRibAgentTurn(
       ...DEFAULT_TOOL_DENYLIST,
       ...(deps.denylist ?? parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST)),
     ]),
+    ...(deps.getPolicyEngine ? { getPolicyEngine: deps.getPolicyEngine } : {}),
   };
-  // ribId is accepted for future per-rib policy/logging; provider routing is
-  // global, so it does not scope the turn today.
-  return (_ribId, req) => {
-    const result = runTurn(resolved, req);
+  // `ribId` scopes the turn's tool gate: it rides the policy event so a rib
+  // policy can govern its own (or another rib's) turn. Provider routing stays
+  // global.
+  return (ribId, req) => {
+    const result = runTurn(resolved, req, ribId);
     return { result, stream: toStream(result) };
   };
 }
@@ -121,7 +133,11 @@ function resolveProviderId(
   return { error: "no agent provider is registered" };
 }
 
-async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<RibAgentTurnResult> {
+async function runTurn(
+  deps: ResolvedDeps,
+  req: RibAgentTurnRequest,
+  ribId: string,
+): Promise<RibAgentTurnResult> {
   // Reject an empty/whitespace prompt at the seam, before touching a
   // provider, so a transiently-empty prompt is a legible contract violation.
   if (!req.prompt || req.prompt.trim().length === 0) {
@@ -169,7 +185,7 @@ async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<Ri
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
     ...(req.model ? { model: req.model } : {}),
-    ...toolOptions(req, deps),
+    ...(await toolOptions(req, deps, { ribId, providerId })),
   };
 
   let assistantText = "";
@@ -220,7 +236,11 @@ async function runTurn(deps: ResolvedDeps, req: RibAgentTurnRequest): Promise<Ri
 // nodes use. A requested name with no registered def (an SDK built-in like Read)
 // resolves to nothing, so it stays allow-list-only and is never projected; the
 // text-only and built-in rails are unchanged.
-function toolOptions(req: RibAgentTurnRequest, deps: ResolvedDeps): Partial<SendQueryOptions> {
+async function toolOptions(
+  req: RibAgentTurnRequest,
+  deps: ResolvedDeps,
+  meta: { ribId: string; providerId: string },
+): Promise<Partial<SendQueryOptions>> {
   const out: Partial<SendQueryOptions> = {};
 
   let allowedTools: string[] | undefined;
@@ -238,7 +258,33 @@ function toolOptions(req: RibAgentTurnRequest, deps: ResolvedDeps): Partial<Send
   if (req.tools !== undefined && req.tools.length > 0) {
     const requested = new Set(req.tools.map((t) => t.name));
     const catalog = deps.getRegisteredTools();
-    const projected = catalog.filter((t) => requested.has(t.name) && !deps.denied.has(t.name));
+    const matched = catalog.filter((t) => requested.has(t.name));
+    // Gate through the unified policy engine when wired (denylist builtin + this
+    // rib's policies); otherwise fall back to the local denylist floor. A gate
+    // fault falls back to the denylist floor (not the whole turn) — this seam's
+    // contract is to never throw, mirroring the workflow prompt gate.
+    // The requested tools that survive the local denylist floor — used as the
+    // no-engine / gate-fault fallback.
+    const withoutDenied = (): ToolDefinition[] => matched.filter((t) => !deps.denied.has(t.name));
+    const engine = deps.getPolicyEngine?.();
+    let projected: ToolDefinition[];
+    if (engine) {
+      try {
+        projected = (
+          await engine.projectTools(matched, {
+            surface: "rib",
+            ribId: meta.ribId,
+            provider: meta.providerId,
+          })
+        ).allowed;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[rib-agent-turn] policy gate threw for rib '${meta.ribId}': ${msg}`);
+        projected = withoutDenied();
+      }
+    } else {
+      projected = withoutDenied();
+    }
     if (projected.length > 0) out.tools = [...projected];
     // Forward the FULL catalog whenever any rib tool was requested — even if the
     // denylist dropped every match — so the provider still recognizes a registered

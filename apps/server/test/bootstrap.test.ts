@@ -19,6 +19,7 @@ import { clearRegistry, getRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
 import { z } from "zod";
 import {
+  bootstrapPolicyEngine,
   bootstrapPromptHandler,
   bootstrapProviders,
   bootstrapRibs,
@@ -586,5 +587,60 @@ describe("bootstrapPromptHandler", () => {
     const handler = bootstrapPromptHandler();
     expect(handler).toBeDefined();
     expect(handler?.type).toBe("prompt");
+  });
+});
+
+describe("bootstrapPolicyEngine", () => {
+  const envBefore = process.env.KEELSON_WORKFLOW_TOOL_DENYLIST;
+  afterEach(() => {
+    if (envBefore === undefined) delete process.env.KEELSON_WORKFLOW_TOOL_DENYLIST;
+    else process.env.KEELSON_WORKFLOW_TOOL_DENYLIST = envBefore;
+  });
+
+  test("folds KEELSON_WORKFLOW_TOOL_DENYLIST into the engine's tool_denylist builtin", async () => {
+    process.env.KEELSON_WORKFLOW_TOOL_DENYLIST = "kube_delete_cluster, secrets_reveal";
+    const engine = bootstrapPolicyEngine();
+    const { allowed, denied } = await engine.projectTools(
+      [{ name: "kube_delete_cluster" }, { name: "repo_get_state" }, { name: "secrets_reveal" }],
+      { surface: "workflow" },
+    );
+    expect(allowed.map((t) => t.name)).toEqual(["repo_get_state"]);
+    expect(denied.map((d) => d.tool).sort()).toEqual(["kube_delete_cluster", "secrets_reveal"]);
+  });
+
+  test("unset env still applies the DEFAULT_TOOL_DENYLIST floor (empty today → passthrough)", async () => {
+    delete process.env.KEELSON_WORKFLOW_TOOL_DENYLIST;
+    const engine = bootstrapPolicyEngine();
+    const { allowed } = await engine.projectTools([{ name: "a" }, { name: "b" }], {
+      surface: "workflow",
+    });
+    // The floor is exactly DEFAULT_TOOL_DENYLIST (empty), so nothing is dropped —
+    // the union in bootstrapPolicyEngine must not invent denials.
+    expect(allowed.map((t) => t.name)).toEqual(["a", "b"]);
+    expect(DEFAULT_TOOL_DENYLIST).toEqual([]);
+  });
+
+  test("rib-contributed policies are folded in alongside the denylist floor", async () => {
+    delete process.env.KEELSON_WORKFLOW_TOOL_DENYLIST;
+    const engine = bootstrapPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "chamber",
+          policy: {
+            id: "no-genesis",
+            on: [{ phase: "tool_call" }],
+            evaluate: (e) =>
+              e.phase === "tool_call" && e.tool === "genesis"
+                ? { outcome: "deny", reason: "gated" }
+                : { outcome: "allow" },
+          },
+        },
+      ],
+    });
+    const { allowed } = await engine.projectTools([{ name: "lens" }, { name: "genesis" }], {
+      surface: "rib",
+      ribId: "chamber",
+    });
+    expect(allowed.map((t) => t.name)).toEqual(["lens"]);
   });
 });
