@@ -1,0 +1,76 @@
+---
+import { getWorkflowCards } from "../lib/workflow-cards";
+
+interface Props {
+  names: string[];
+}
+
+const { names } = Astro.props;
+const cards = getWorkflowCards(names);
+
+// Tint the two most common node types plus approval, the blueprint way; every
+// other type renders as a neutral pill. Matches the app's restraint without
+// copying its palette.
+const PILL_TONE: Record<string, string> = {
+  prompt: "wf-pill-prompt",
+  bash: "wf-pill-bash",
+  approval: "wf-pill-approval",
+};
+---
+
+<div class="wf-cards" not-content>
+  {
+    cards.map((wf) => (
+      <a class="wf-card" href={`${wf.name}/`}>
+        <div class="wf-card-head">
+          <div class="wf-card-id">
+            <span class="wf-card-title">{wf.title}</span>
+            <span class="wf-card-slug">{wf.name}</span>
+          </div>
+          <span class="wf-card-arrow" aria-hidden="true">
+            →
+          </span>
+        </div>
+        <div class="wf-card-grid">
+          {wf.useWhen && (
+            <div class="wf-sec">
+              <div class="wf-sec-label">Use when</div>
+              <p class="wf-sec-body">{wf.useWhen}</p>
+            </div>
+          )}
+          {wf.does && (
+            <div class="wf-sec">
+              <div class="wf-sec-label">Does</div>
+              <p class="wf-sec-body">{wf.does}</p>
+            </div>
+          )}
+          {wf.triggers && (
+            <div class="wf-sec">
+              <div class="wf-sec-label">Triggers</div>
+              <p class="wf-sec-body">{wf.triggers}</p>
+            </div>
+          )}
+          {wf.notFor && (
+            <div class="wf-sec">
+              <div class="wf-sec-label">Not for</div>
+              <p class="wf-sec-body">{wf.notFor}</p>
+            </div>
+          )}
+          {wf.body && !wf.useWhen && !wf.does && (
+            <div class="wf-sec wf-sec-full">
+              <p class="wf-sec-body">{wf.body}</p>
+            </div>
+          )}
+        </div>
+        <div class="wf-card-foot">
+          {wf.pills.map((p) => (
+            <span class={`wf-pill ${PILL_TONE[p.type] ?? ""}`}>
+              {p.type}
+              {p.count > 1 ? `·${p.count}` : ""}
+            </span>
+          ))}
+        </div>
+      </a>
+    ))
+  }
+</div>

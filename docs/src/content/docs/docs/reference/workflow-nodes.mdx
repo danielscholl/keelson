@@ -67,7 +67,9 @@ present. Keep each to one line.
 
 Every node has an `id` plus **exactly one** of these seven mode fields. The
 three families are the determinism dial: deterministic nodes establish facts,
-agent nodes do judgment work, control nodes shape the run.
+agent nodes do judgment work, control nodes shape the run. Each kind is detailed
+below under its family heading; the [shared fields](#common-node-fields) apply on
+top of any kind.
 
 | Family | Kind | What it runs |
 | --- | --- | --- |
@@ -79,44 +81,149 @@ agent nodes do judgment work, control nodes shape the run.
 | Control | `approval` | Pauses the run for a human decision. |
 | Control | `cancel` | Terminates a branch with a recorded reason. |
 
-### Mode-specific fields
+## Agent nodes
 
-`loop` repeats its `prompt` until `until` text appears in the output, or until
-`until_bash` exits `0`, hard-bounded by `max_iterations`. `fresh_context: true`
-starts a new session each iteration. `loop.interactive: true` requires
-workflow-level `interactive: true` and a `gate_message`.
+Agent nodes run a model turn. `prompt` and `command` take the per-node agent
+fields from [common fields](#common-node-fields) (`model`, `provider`, `context`,
+`allowed_tools` / `denied_tools`, structured output, the Claude reasoning
+controls); `loop` carries its own field set, below.
+
+### `prompt`
+
+One agent turn, and the default for judgment work. The body is the instruction:
+`$ARGUMENTS`, `$ARTIFACTS_DIR`, and `$<id>.output` are substituted into the text
+before the turn runs.
+
+```yaml
+- id: summarize
+  prompt: |
+    Summarize these failures, most likely cause first:
+    $run-tests.output
+  depends_on: [run-tests]
+  context: fresh        # a new session, isolated from other nodes
+```
+
+Reach for `output_format` (or `output_schema`) only when a later node needs to
+dot-access fields of the reply (`$summarize.output.<field>`); a plain text turn
+needs neither.
+
+### `command`
+
+Runs a named markdown prompt from `<home>/commands/<name>.md` as one agent turn,
+with the same agent fields as `prompt`.
+
+```yaml
+- id: triage
+  command: triage-issue   # resolves <home>/commands/triage-issue.md
+  depends_on: [fetch]
+```
+
+The file must already exist on disk, so a `command` node cannot be authored from
+chat. Use an inline `prompt` node there instead.
+
+### `loop`
+
+Repeats one agent prompt until a completion signal, hard-bounded by
+`max_iterations`. It carries its own fields under `loop:`.
 
 ```yaml
 - id: fix-until-green
   loop:
     prompt: "Run the tests, fix one failure, reply DONE when all pass."
-    until: "DONE"
+    until: DONE              # completion text to detect in the output
     max_iterations: 5
+    fresh_context: true      # a new session each iteration (default false)
+    # until_bash: "bun test" # optional probe; exit 0 also ends the loop
+  depends_on: [setup]
 ```
 
-`approval` pauses for a human. `capture_response: true` exposes the reply as the
-node's output so downstream nodes can branch on it; `on_reject` re-prompts on
-rejection.
+| `loop.` field | Required | Value |
+| --- | --- | --- |
+| `prompt` | yes | The turn run each iteration. |
+| `until` | yes | Completion-signal text to detect in the output. |
+| `max_iterations` | yes | Hard ceiling; exceeding it fails the node. |
+| `fresh_context` | no | A new session each iteration (default `false`). |
+| `until_bash` | no | A probe run after each iteration; exit `0` ends the loop. |
+| `interactive` | no | Pause for input each iteration; needs workflow-level `interactive: true` and a `gate_message`. |
+
+`until` is required even when you set `until_bash`, and `retry` is not allowed on
+a loop, which manages its own iteration.
+
+## Deterministic nodes
+
+Deterministic nodes run code with no model. Upstream output reaches them on the
+[environment channel](#data-flow), never spliced into the source, so the per-node
+agent fields above do not apply (they warn and are dropped).
+
+### `bash`
+
+A shell script. Its stdout becomes the node output.
+
+```yaml
+- id: run-tests
+  bash: |
+    set -euo pipefail
+    bun test 2>&1 | tail -80
+  timeout: 300000         # ms, optional
+```
+
+The body runs **raw**: an upstream node's output arrives as
+`KEELSON_NODE_<id>_OUTPUT` (the id's hyphens become underscores), not by
+substitution. `$<id>.output` does **not** expand inside a `bash` body. That split
+is the [security boundary](#data-flow), not a style rule.
+
+### `script`
+
+Inline TypeScript/JavaScript (`runtime: bun`) or Python (`runtime: uv`); stdout
+becomes the output. Prefer it over `bash` for a typed transform a shell would
+mangle (JSON parsing, structured data).
+
+```yaml
+- id: count-failures
+  script: |
+    const r = JSON.parse(process.env.KEELSON_NODE_run_tests_OUTPUT)
+    console.log(r.failures.length)
+  runtime: bun            # 'bun' (.ts/.js) or 'uv' (.py); required
+  deps: [zod]             # optional packages, importable for this run
+  depends_on: [run-tests]
+```
+
+`runtime` is required. Like `bash`, a script reads upstream output from the
+`KEELSON_NODE_*` env channel, not `$<id>.output`. `uv` installs `deps` per run;
+`bun` auto-installs an imported package.
+
+## Control nodes
+
+Control nodes shape the run rather than produce work.
+
+### `approval`
+
+Pauses the run for a human decision. The pause needs a running server
+(`keelson start`).
 
 ```yaml
 - id: gate
   approval:
     message: "Apply this plan?"
-    capture_response: true
+    capture_response: true   # store the reply as $gate.output
+  depends_on: [plan]
 ```
 
-`cancel` terminates the run with a reason; pair it with `when:` for a guard
-branch.
+`capture_response: true` exposes the reviewer's reply as the node's output, so a
+downstream node can branch on approval versus requested changes. `on_reject`
+(`{ prompt, max_attempts }`) re-prompts on rejection instead of failing the run.
+
+### `cancel`
+
+Terminates the run with a recorded reason. Pair it with `when:` as a guard that
+stops a branch when there is nothing to do.
 
 ```yaml
 - id: bail
-  cancel: "nothing to do"
+  cancel: "nothing to review"
   when: "$classify.output == 'NONE'"
+  depends_on: [classify]
 ```
-
-`command` runs a named markdown prompt from `<home>/commands/`. The file must
-already exist on disk, so a `command` node cannot be authored from chat; use an
-inline `prompt` node there instead.
 
 ## Common node fields
 

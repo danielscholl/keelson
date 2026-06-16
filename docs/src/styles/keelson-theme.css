@@ -72,3 +72,140 @@ body {
 :root[data-theme="dark"] .sl-markdown-content .starlight-aside--note {
   background-color: rgba(47, 111, 176, 0.13);
 }
+
+/* Workflow catalog cards (src/components/WorkflowCards.astro). The app's
+   Use when / Does / Triggers / Not for quadrants plus node-type pills, themed to
+   the blueprint palette. Content is generated at build from the workflow YAML,
+   so a card stays in step with what the harness ships. */
+.wf-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 16px;
+  margin: 1.5rem 0;
+}
+.wf-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 12px;
+  background: var(--sl-color-gray-7);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 0.12s ease,
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+:root[data-theme="light"] .wf-card {
+  background: #ffffff;
+  border-color: rgba(30, 58, 95, 0.14);
+}
+.wf-card:hover {
+  border-color: var(--sl-color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px -14px rgba(30, 58, 95, 0.55);
+}
+.wf-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.wf-card-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wf-card-title {
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.2;
+  color: var(--sl-color-white);
+}
+.wf-card-slug {
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  color: var(--sl-color-gray-3);
+}
+.wf-card-arrow {
+  flex-shrink: 0;
+  font-size: 1.15rem;
+  line-height: 1;
+  color: var(--sl-color-accent);
+}
+.wf-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 18px;
+  margin-bottom: 14px;
+}
+.wf-sec-full {
+  grid-column: 1 / -1;
+}
+.wf-sec-label {
+  margin-bottom: 4px;
+  font-family: var(--sl-font-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-accent);
+}
+/* Clamp at 5 lines so an uneven Does / Not for block keeps the cards on a grid;
+   the walkthrough page carries the full text. */
+.wf-sec-body {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--sl-color-gray-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wf-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--sl-color-gray-6);
+}
+.wf-pill {
+  padding: 1px 7px;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 5px;
+  font-family: var(--sl-font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--sl-color-gray-3);
+}
+.wf-pill-prompt {
+  color: #2f6fb0;
+  border-color: color-mix(in srgb, #2f6fb0 45%, transparent);
+  background: color-mix(in srgb, #2f6fb0 12%, transparent);
+}
+.wf-pill-bash {
+  color: var(--sl-color-text-accent);
+  border-color: color-mix(in srgb, var(--sl-color-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--sl-color-accent) 12%, transparent);
+}
+.wf-pill-approval {
+  color: #2f8f5b;
+  border-color: color-mix(in srgb, #2f8f5b 45%, transparent);
+  background: color-mix(in srgb, #2f8f5b 12%, transparent);
+}
+:root[data-theme="dark"] .wf-pill-prompt {
+  color: #6ea8dd;
+}
+:root[data-theme="dark"] .wf-pill-approval {
+  color: #5cc088;
+}
+@media (max-width: 480px) {
+  .wf-card-grid {
+    grid-template-columns: 1fr;
+  }
+}

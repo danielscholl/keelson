@@ -18,6 +18,11 @@ export default defineConfig({
   markdown: {
     remarkPlugins: [remarkGfm],
   },
+  // The Starter workflows page builds its cards from the bundled workflow YAML in
+  // packages/workflows/, outside this project's root. Let the dev server read it.
+  vite: {
+    server: { fs: { allow: [".."] } },
+  },
   integrations: [
     starlight({
       title: "Keelson",

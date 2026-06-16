@@ -82,13 +82,17 @@ categories:
   -     category: db
     checks:
       -         name: schema_version
-        status: ok
-        detail: v4 (current)
+        status: warn
+        detail: db not found at /Users/you/.keelson/keelson.db
+        hint: run `keelson start` once to create and migrate the SQLite database
   -     category: auth
     checks:
       -         name: keyring round-trip
         status: ok
         detail: service=keelson
+      -         name: providers
+        status: ok
+        detail: enabled=copilot; default=copilot (source: defaults)
   -     category: workflows
     checks:
       -         name: discovery
@@ -99,24 +103,26 @@ categories:
         detail: all workflows parse cleanly
 summary:
   ok: 5
-  warn: 1
+  warn: 2
   fail: 0
   skip: 0
-  total: 6
+  total: 7
 strict: false
 ```
 
-Two lines matter here. The `server` category warns, and that is expected:
-nothing is running yet, and the `hint` names the exact next move. And
-`workflows` found seven files, the starter workflows a fresh install seeds, so
-the catalog is usable before you write anything. The next two tutorials build
-on it.
+Two checks warn, and both are expected. The `server` category cannot reach a
+server because none is running yet, and `db` has no database because the first
+`keelson start` is what creates and migrates it. Each warn carries a `hint`
+naming that exact next move. Meanwhile `workflows` already found seven files,
+the starter workflows a fresh install seeds, so the catalog is usable before
+you write anything. The next two tutorials build on it.
 
 <Aside type="note" title="Two different version numbers">
 `schemaVersion: 0.3` (from `keelson version` and `/api/health`) is the wire and
 protocol version a client checks on connect. `schema_version: v4` (the `db`
-check) is the local SQLite migration version `doctor` verifies. They move
-independently, so the two numbers will not match.
+check, once `keelson start` has created the database) is the local SQLite
+migration version `doctor` verifies. They move independently, so the two
+numbers will not match.
 </Aside>
 
 <Aside type="tip" title="Doctor is your reflex">
@@ -134,7 +140,7 @@ KEELSON_PROVIDERS=stub keelson start --foreground
 ```
 
 ```text
-[workflows] discovered 0 workflows
+[workflows] discovered 7 workflows
 [workflows] no non-stub provider registered; prompt nodes will use 'stub' (echo-only). Set KEELSON_PROVIDERS to include copilot or claude, or pin KEELSON_WORKFLOW_PROVIDER explicitly.
 [workflows] default workflow provider is 'stub'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.
 keelson server listening on http://127.0.0.1:7878/
@@ -162,15 +168,16 @@ keelson doctor
         status: ok
         detail: keelson, schema 0.3 @ http://127.0.0.1:7878
 summary:
-  ok: 6
+  ok: 7
   warn: 0
   fail: 0
   skip: 0
-  total: 6
+  total: 7
 ```
 
-All six checks pass. The warn you saw earlier resolved itself the way the hint
-said it would.
+All seven checks pass. Both warns you saw earlier, the server and the database,
+resolved themselves the way their hints said they would: the one `keelson
+start` brought up the server and created the database in a single move.
 
 ## Complete a first turn
 

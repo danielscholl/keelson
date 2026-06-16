@@ -29,8 +29,9 @@ gate.
 ## The shape
 
 A straight five-node pipeline: gather context, decide the design, write the
-file, prove it parses, install it. The only agent nodes are the middle three;
-deterministic `bash` bookends gather context and the parse gate.
+file, prove it parses, install it. Three of the five are agent (`prompt`) nodes;
+the deterministic work is two `bash` nodes, `scan-codebase` up front for context
+and `validate-yaml` as the parse gate.
 
 <figure>
   <img

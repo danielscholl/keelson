@@ -132,6 +132,48 @@ export async function getRun(baseUrl: string, runId: string): Promise<unknown> {
   return await res.json();
 }
 
+export type RunRefResolution = { runId: string } | { error: string; ambiguous: boolean };
+
+// `workflow run --watch` prints the run id abbreviated to its first 8 chars
+// (runId.slice(0, 8)), so `status` / `respond` accept that abbreviation
+// git-style: an exact id wins, otherwise a prefix that uniquely identifies one
+// run resolves to its full id. A prefix matching several runs is rejected
+// (caller asks for more characters) rather than answering the wrong run.
+// Transport / unexpected-status failures throw (so callers' server-down
+// handling still fires); only the resolution outcomes are returned.
+export async function resolveRunRef(baseUrl: string, ref: string): Promise<RunRefResolution> {
+  // Exact id is the common case (a full UUID, or one copied from the SPA) and
+  // is correct even for a run older than the prefix scan's feed window below.
+  const exact = await fetch(url(baseUrl, `/api/workflows/runs/${encodeURIComponent(ref)}`), {
+    headers: defaultHeaders(baseUrl),
+  });
+  if (exact.ok) return { runId: ref };
+  if (exact.status !== 404) {
+    throw new HttpError(exact.status, `resolve run '${ref}' failed: ${exact.status}`);
+  }
+  // Prefix fallback: scan the run feed (newest first) for ids starting with the
+  // abbreviation. The feed is capped, but a run you are answering is recent —
+  // it was just printed by the watch stream.
+  const res = await fetch(url(baseUrl, "/api/workflows/runs?limit=1000"), {
+    headers: defaultHeaders(baseUrl),
+  });
+  if (!res.ok) throw new HttpError(res.status, `resolve run '${ref}' failed: ${res.status}`);
+  const body = (await res.json()) as { runs?: Array<{ runId?: unknown }> };
+  const matches = (body.runs ?? [])
+    .map((r) => (typeof r.runId === "string" ? r.runId : ""))
+    .filter((id) => id.startsWith(ref));
+  const [first] = matches;
+  if (matches.length === 1 && first) return { runId: first };
+  if (matches.length === 0) return { error: `run '${ref}' not found`, ambiguous: false };
+  const shown = matches.slice(0, 4).map((id) => id.slice(0, 12));
+  return {
+    error: `run id '${ref}' is ambiguous — ${matches.length} runs match (${shown.join(", ")}${
+      matches.length > shown.length ? ", …" : ""
+    }); use more characters`,
+    ambiguous: true,
+  };
+}
+
 export async function listRunsByName(
   baseUrl: string,
   workflowName: string,
