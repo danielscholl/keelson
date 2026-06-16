@@ -37,7 +37,12 @@ export async function checkToolCallGate(
           : "denied";
       return { denied: true, message: `Tool '${tool}' denied by policy: ${reason}` };
     }
-    // allow, or any malformed/null result → not denied (fail open).
+    if (decision?.outcome !== "allow") {
+      // Malformed/missing decision → allow (fail open), but warn so a broken gate
+      // is a visible diagnostic, not a silent enforcement bypass — matching the
+      // engine's posture and the throw path below.
+      console.warn(`[policy] tool-call gate returned a malformed decision for '${tool}'; allowing`);
+    }
     return { denied: false };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
