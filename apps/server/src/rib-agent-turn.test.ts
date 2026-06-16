@@ -398,20 +398,28 @@ describe("makeRibAgentTurn — tool rails", () => {
   });
 
   it("fails open to the denylist floor (not the whole turn) when the policy gate throws", async () => {
+    // `gateCalled` proves the engine was actually consulted and its throw was
+    // swallowed — without it, the survivor assertion would pass even if the gate
+    // were never invoked. A denylist that WOULD drop the tool on the fallback
+    // path proves the fallback (not the engine result) is what survived.
+    let gateCalled = false;
     const throwingEngine = {
       projectTools: async () => {
+        gateCalled = true;
         throw new Error("engine boom");
       },
     } as unknown as ReturnType<typeof createPolicyEngine>;
     const opts = await optionsFor(
-      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }, { name: "chamber_emit_genesis" }] },
       {
-        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens"), fakeTool("chamber_emit_genesis")],
         getPolicyEngine: () => throwingEngine,
+        // On the throw, toolOptions falls back to this local denylist floor.
+        denylist: ["chamber_emit_genesis"],
       },
     );
-    // The turn still produced options (no throw escaped), and the tool survived
-    // via the local denylist fallback (empty denylist here → not dropped).
+    expect(gateCalled).toBe(true);
+    // No throw escaped, and the fallback denylist floor applied (genesis dropped).
     expect(opts?.tools?.map((t) => t.name)).toEqual(["chamber_emit_lens"]);
   });
 
@@ -507,14 +515,21 @@ describe("applyRibs wiring", () => {
     const rib: Rib = {
       id: "chamber",
       displayName: "Chamber",
-      // One valid policy + two malformed ones (no evaluate; a non-array `on`)
-      // that must be skipped — the bad `on` is rejected here so it never reaches
-      // the engine's matches() to throw.
+      // One valid policy + malformed ones that must all be skipped: no evaluate;
+      // a non-array `on`; an empty `on` (silently-dead matcher); a non-string
+      // `on[].tool` (silently mis-scopes). Rejecting them here keeps them off the
+      // engine, where a bad `on` would throw and a dead matcher would never fire.
       contributePolicies: () =>
         [
           goodPolicy,
           { id: "broken" } as unknown as typeof goodPolicy,
           { id: "bad-on", on: "tool_call", evaluate: () => ({ outcome: "allow" as const }) },
+          { id: "empty-on", on: [], evaluate: () => ({ outcome: "allow" as const }) },
+          {
+            id: "bad-tool",
+            on: [{ phase: "tool_call", tool: 123 }],
+            evaluate: () => ({ outcome: "allow" as const }),
+          },
         ] as unknown as ReturnType<NonNullable<Rib["contributePolicies"]>>,
     };
     const result = applyRibs({

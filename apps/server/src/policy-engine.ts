@@ -105,33 +105,52 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
         };
         let drop: string | undefined;
         for (const entry of ordered) {
-          let decision: PolicyDecision;
-          // `matches` and `evaluate` are both inside the try: a rib's `on`
-          // matcher or evaluate body can throw on malformed input, and a single
-          // bad policy must never crash the turn. `await` (not `instanceof
-          // Promise`) so a foreign thenable returned by evaluate resolves too.
+          // `matches`, `evaluate`, AND the decision dispatch all live inside the
+          // try: a rib's `on` matcher or evaluate body can throw, and a single
+          // bad policy must never crash the turn (it fails closed to no-opinion
+          // = allow). `await` (not `instanceof Promise`) so a foreign thenable
+          // returned by evaluate resolves too.
           try {
             if (!matches(entry.policy, event)) continue;
-            decision = await entry.policy.evaluate(event, ctx);
+            // Read defensively: a JS rib (or a TS rib without noImplicitReturns)
+            // can return null/undefined or an unknown outcome. A malformed
+            // decision is a no-op (allow) + a warning, never a crash (which would
+            // reject projectTools and fail the gate open) or a silent fail-open.
+            const decision = (await entry.policy.evaluate(event, ctx)) as
+              | { outcome?: unknown; reason?: unknown }
+              | null
+              | undefined;
+            const outcome = decision?.outcome;
+            const reason = decision?.reason;
+            if (outcome === "deny") {
+              // Coerce a missing/empty reason so a `{outcome:"deny"}` still drops
+              // the tool rather than leaving `drop` undefined → silently allowed.
+              drop = typeof reason === "string" && reason.length > 0 ? reason : "denied";
+              break;
+            }
+            if (outcome === "ask") {
+              // No approval round-trip at projection time — degrade to deny so the
+              // tool is withheld. Warn because an author's ASK silently becoming a
+              // drop is surprising until Phase 2 wires the real pause.
+              const why =
+                typeof reason === "string" && reason.length > 0 ? reason : "approval required";
+              drop = `requires approval (deferred): ${why}`;
+              console.warn(
+                `[policy] '${entry.id}' asked for approval on '${candidate.name}'; withheld (no approval round-trip yet)`,
+              );
+              break;
+            }
+            if (outcome !== "allow") {
+              // An unrecognized/malformed outcome is treated as allow (like a
+              // throw) but warned, so it isn't a silent fail-open.
+              console.warn(
+                `[policy] '${entry.id}' returned an unrecognized decision for '${candidate.name}'; treating as allow`,
+              );
+            }
           } catch (err) {
             // Fail closed for THIS policy only: it contributes no opinion (allow).
             const msg = err instanceof Error ? err.message : String(err);
             console.warn(`[policy] '${entry.id}' threw evaluating '${candidate.name}': ${msg}`);
-            continue;
-          }
-          if (decision.outcome === "deny") {
-            drop = decision.reason;
-            break;
-          }
-          if (decision.outcome === "ask") {
-            // No approval round-trip at projection time — degrade to deny so the
-            // tool is withheld. Warn because an author's ASK silently becoming a
-            // drop is surprising until Phase 2 wires the real pause.
-            drop = `requires approval (deferred): ${decision.reason}`;
-            console.warn(
-              `[policy] '${entry.id}' asked for approval on '${candidate.name}'; withheld (no approval round-trip yet)`,
-            );
-            break;
           }
         }
         if (drop === undefined) allowed.push(candidate);

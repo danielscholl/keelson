@@ -456,10 +456,12 @@ function isToolDefinition(value: unknown): value is ToolDefinition {
 }
 
 // A contributed policy is usable if it has a non-empty string id, an `evaluate`
-// function, and — when present — an `on` that is an array of `{ phase }` matcher
-// objects. Validating `on` here is load-bearing: the engine dereferences
-// `policy.on.some((m) => m.phase ...)`, so a malformed `on` (a bare string, or
-// entries without a phase) would throw at evaluation time. Mirrors
+// function, and — when present — an `on` that is a NON-EMPTY array of matcher
+// objects whose `phase` is a string and whose optional `tool` is a string.
+// Validating `on` here is load-bearing: the engine dereferences
+// `policy.on.some((m) => m.phase ...)` and compares `m.tool`, so a malformed
+// `on` (a bare string, an entry without a phase) would throw, and an empty array
+// or a non-string `tool` would make the policy a silently-dead matcher. Mirrors
 // isToolDefinition's defensive narrowing at the activation boundary.
 function isPolicy(value: unknown): value is Policy {
   if (typeof value !== "object" || value === null) return false;
@@ -468,13 +470,15 @@ function isPolicy(value: unknown): value is Policy {
     return false;
   }
   if (p.on === undefined) return true;
-  return (
-    Array.isArray(p.on) &&
-    p.on.every(
-      (m) =>
-        typeof m === "object" && m !== null && typeof (m as { phase?: unknown }).phase === "string",
-    )
-  );
+  if (!Array.isArray(p.on) || p.on.length === 0) return false;
+  return p.on.every((m) => {
+    if (typeof m !== "object" || m === null) return false;
+    const entry = m as { phase?: unknown; tool?: unknown };
+    return (
+      typeof entry.phase === "string" &&
+      (entry.tool === undefined || typeof entry.tool === "string")
+    );
+  });
 }
 
 function assertInNamespace(ribId: string, namespace: string, key: string, label: string): void {

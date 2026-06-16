@@ -144,6 +144,43 @@ describe("createPolicyEngine — projectTools", () => {
     expect(allowed.map((t) => t.name)).toEqual(["y"]);
   });
 
+  it("treats a null/undefined evaluate() return as allow, never crashing the projection", async () => {
+    // A JS rib (or a missing `else` return) yields undefined for non-matching
+    // tools — reading decision.outcome must not throw and reject projectTools.
+    const undefReturn = {
+      id: "implicit-undefined",
+      evaluate: (e: { phase: string; tool?: string }) =>
+        e.phase === "tool_call" && e.tool === "x" ? { outcome: "deny", reason: "no x" } : undefined,
+    } as unknown as Policy;
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy: undefReturn }] });
+    const { allowed, denied } = await engine.projectTools(tools("x", "y"), chat);
+    // `x` is denied; `y` (undefined return) is allowed — no throw, no fail-open of the whole gate.
+    expect(allowed.map((t) => t.name)).toEqual(["y"]);
+    expect(denied).toEqual([{ tool: "x", reason: "no x" }]);
+  });
+
+  it("still drops a tool for a deny decision that omits its reason", async () => {
+    const denyNoReason = {
+      id: "deny-no-reason",
+      evaluate: () => ({ outcome: "deny" }),
+    } as unknown as Policy;
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy: denyNoReason }] });
+    const { allowed, denied } = await engine.projectTools(tools("a"), chat);
+    expect(allowed).toEqual([]);
+    expect(denied).toEqual([{ tool: "a", reason: "denied" }]);
+  });
+
+  it("treats an unrecognized outcome as allow (not a silent deny, not a crash)", async () => {
+    const bogus = {
+      id: "bogus-outcome",
+      evaluate: () => ({ outcome: "maybe" }),
+    } as unknown as Policy;
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy: bogus }] });
+    const { allowed, denied } = await engine.projectTools(tools("a", "b"), chat);
+    expect(allowed.map((t) => t.name)).toEqual(["a", "b"]);
+    expect(denied).toEqual([]);
+  });
+
   it("surfaces the surface + rib id on the policy context", async () => {
     let seen: { surface: string; ribId?: string } | undefined;
     const recorder: Policy = {

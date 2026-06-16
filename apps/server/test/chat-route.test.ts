@@ -35,6 +35,7 @@ import {
 } from "../src/chat-handler.ts";
 import { type ConversationStore, createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
+import { createPolicyEngine } from "../src/policy-engine.ts";
 import type { WsData } from "../src/server-context.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { createActiveRuns } from "../src/workflows-handler.ts";
@@ -731,6 +732,61 @@ describe("handleChatRequest dispatch", () => {
     expect(captured!.tools).toBeDefined();
     expect(captured!.tools!).toHaveLength(1);
     expect(captured!.tools![0]!.name).toBe("echo");
+    clearToolRegistry();
+  });
+
+  test("a policy engine gates a denied tool out of the chat turn's provider.sendQuery options", async () => {
+    clearToolRegistry();
+    const safe: ToolDefinition = {
+      name: "safe_tool",
+      description: "allowed",
+      inputSchema: z.object({}).strict(),
+      async execute() {},
+    };
+    const danger: ToolDefinition = {
+      name: "danger_tool",
+      description: "gated by policy",
+      inputSchema: z.object({}).strict(),
+      async execute() {},
+    };
+    registerTool(safe);
+    registerTool(danger);
+
+    let captured: SendQueryOptions | undefined;
+    const spyId = "spy-policy-gate";
+    registerProvider(
+      makeScriptedProvider(spyId, [], (opts) => {
+        captured = opts;
+      }),
+    );
+
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "r",
+          policy: {
+            id: "deny-danger",
+            on: [{ phase: "tool_call" }],
+            evaluate: (e) =>
+              e.phase === "tool_call" && e.tool === "danger_tool"
+                ? { outcome: "deny", reason: "gated" }
+                : { outcome: "allow" },
+          },
+        },
+      ],
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+      policyEngine: engine,
+    });
+
+    // The denied tool is gated out before reaching the provider; the safe one stays.
+    expect(captured?.tools?.map((t) => t.name)).toEqual(["safe_tool"]);
     clearToolRegistry();
   });
 
