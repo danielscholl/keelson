@@ -304,9 +304,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       // Final global gate: the unified policy engine (operator denylist + rib
       // policies). Runs after node-level resolution so a policy DENY can't be
-      // widened by a node's allowed_tools. The engine fails closed per-policy
-      // internally, so a throw here is an unexpected fault — keep the
-      // node-resolved tools (fail open) and warn rather than failing the node.
+      // widened by a node's allowed_tools. The engine contains a faulty policy to
+      // itself (skips it) internally, so a throw here is an unexpected fault —
+      // keep the node-resolved tools (fail open) and warn rather than failing the node.
       if (opts.projectTools) {
         try {
           filteredTools = await opts.projectTools(filteredTools, effectiveProviderId);

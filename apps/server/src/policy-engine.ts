@@ -107,9 +107,10 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
         for (const entry of ordered) {
           // `matches`, `evaluate`, AND the decision dispatch all live inside the
           // try: a rib's `on` matcher or evaluate body can throw, and a single
-          // bad policy must never crash the turn (it fails closed to no-opinion
-          // = allow). `await` (not `instanceof Promise`) so a foreign thenable
-          // returned by evaluate resolves too.
+          // bad policy must never crash the turn — it is skipped (contributes no
+          // opinion), so the tool is allowed unless another policy denies it,
+          // while the floor and other policies still apply. `await` (not
+          // `instanceof Promise`) so a foreign thenable returned by evaluate resolves too.
           try {
             if (!matches(entry.policy, event)) continue;
             // Read defensively: a JS rib (or a TS rib without noImplicitReturns)
@@ -148,7 +149,8 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
               );
             }
           } catch (err) {
-            // Fail closed for THIS policy only: it contributes no opinion (allow).
+            // Contain the failure to THIS policy: it contributes no opinion, so
+            // the tool is allowed unless another policy denies it.
             const msg = err instanceof Error ? err.message : String(err);
             console.warn(`[policy] '${entry.id}' threw evaluating '${candidate.name}': ${msg}`);
           }
