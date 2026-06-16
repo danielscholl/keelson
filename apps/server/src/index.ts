@@ -293,6 +293,16 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
             })
             .then((r) => r.allowed)
         : Promise.resolve(candidates),
+    // Per-call args-aware gate for the same nodes — runs the policy stack again
+    // for each individual tool call with its args (a tool cleared into the
+    // projection above can still be denied here on the strength of its args).
+    evaluateToolCall: (call, provider) =>
+      policyEngine
+        ? policyEngine.evaluateToolCall(call, {
+            surface: "workflow",
+            ...(provider !== undefined ? { provider } : {}),
+          })
+        : Promise.resolve({ outcome: "allow" as const }),
   });
 
   // Shared handler options so the HTTP routes and the in-process WorkflowController

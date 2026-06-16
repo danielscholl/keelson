@@ -55,6 +55,7 @@ import {
   makePromptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
+  type PromptToolCallGate,
   type PromptToolGate,
   validateWorkflowInvariants,
   type WorkflowDefinition,
@@ -694,7 +695,11 @@ export function bootstrapPolicyEngine(
 // on its placeholder-fallback path so the catalog still serves bash-only
 // workflows when prompt nodes can't run.
 export function bootstrapPromptHandler(
-  opts: { defaultOffTools?: readonly string[]; projectTools?: PromptToolGate } = {},
+  opts: {
+    defaultOffTools?: readonly string[];
+    projectTools?: PromptToolGate;
+    evaluateToolCall?: PromptToolCallGate;
+  } = {},
 ): NodeHandler | undefined {
   const providers = getProviderInfoList();
   if (providers.length === 0) {
@@ -782,6 +787,7 @@ export function bootstrapPromptHandler(
     // via `allowed_tools` — so a workflow inherits no rib tool it didn't ask for.
     ...(opts.defaultOffTools ? { defaultOffTools: opts.defaultOffTools } : {}),
     ...(opts.projectTools ? { projectTools: opts.projectTools } : {}),
+    ...(opts.evaluateToolCall ? { evaluateToolCall: opts.evaluateToolCall } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
 }

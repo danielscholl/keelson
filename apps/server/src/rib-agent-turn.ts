@@ -286,6 +286,18 @@ async function toolOptions(
       projected = withoutDenied();
     }
     if (projected.length > 0) out.tools = [...projected];
+    // Per-call args-aware gate: when the engine is wired and this turn actually
+    // offers keelson tools, bind it to this rib's scope so the provider can deny
+    // an individual call on its args — a tool cleared into the projection above
+    // can still be denied here. Built-in tools never reach this gate.
+    if (engine && projected.length > 0) {
+      out.evaluateToolCall = (call) =>
+        engine.evaluateToolCall(call, {
+          surface: "rib",
+          ribId: meta.ribId,
+          provider: meta.providerId,
+        });
+    }
     // Forward the FULL catalog whenever any rib tool was requested — even if the
     // denylist dropped every match — so the provider still recognizes a registered
     // MCP name left in `allowedTools` and doesn't mis-send it to the SDK `--tools`

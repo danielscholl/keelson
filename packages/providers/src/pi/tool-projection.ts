@@ -3,8 +3,9 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { ToolContext } from "@keelson/shared";
+import { checkToolCallGate } from "../tool-gate.ts";
 import { deriveToolParametersJsonSchema } from "../tool-params.ts";
-import type { MessageChunk, ToolDefinition } from "../types.ts";
+import type { MessageChunk, ToolCallGate, ToolDefinition } from "../types.ts";
 
 // Structural slice of pi's extension ToolDefinition that the projection
 // produces; the factory casts it at the SDK boundary. `parameters` is a plain
@@ -36,6 +37,11 @@ export interface PiToolProjectionContext {
   // tool_execution_end event the bridge maps; pushing both would duplicate it.
   pushChunk: (chunk: MessageChunk) => void;
   abortSignal?: AbortSignal;
+  // Per-call policy gate (server-wired). When present, each tool call is
+  // evaluated WITH its validated args before execute and a deny throws (pi
+  // converts that into an error tool result). pi's own built-ins are disabled,
+  // so the projected keelson tools are the whole surface this gate governs.
+  evaluateToolCall?: ToolCallGate;
 }
 
 // Projects our streaming ToolDefinitions into pi's "execute returns result"
@@ -79,6 +85,16 @@ export function projectToolsForPi(
       const parsed = tool.inputSchema.safeParse(params);
       if (!parsed.success) {
         throw new Error(`Invalid input for tool '${tool.name}': ${parsed.error.message}`);
+      }
+      // Per-call policy gate, after validation so a policy sees normalized args.
+      // A deny throws — pi turns the throw into an error tool result.
+      const gateResult = await checkToolCallGate(
+        projection.evaluateToolCall,
+        tool.name,
+        parsed.data,
+      );
+      if (gateResult.denied) {
+        throw new Error(gateResult.message);
       }
       await tool.execute(parsed.data, ctx);
       if (resultIsError) {

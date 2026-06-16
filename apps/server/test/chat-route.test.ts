@@ -790,6 +790,68 @@ describe("handleChatRequest dispatch", () => {
     clearToolRegistry();
   });
 
+  test("the chat turn forwards a per-call gate scoped to the chat surface", async () => {
+    clearToolRegistry();
+    // Cleared into the projection (no args ⇒ allowed), then gated per-call on args.
+    const tool: ToolDefinition = {
+      name: "danger_tool",
+      description: "gated by args",
+      inputSchema: z.object({}).strict(),
+      async execute() {},
+    };
+    registerTool(tool);
+
+    let captured: SendQueryOptions | undefined;
+    const spyId = "spy-percall-gate";
+    registerProvider(
+      makeScriptedProvider(spyId, [], (opts) => {
+        captured = opts;
+      }),
+    );
+
+    let seenSurface: string | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "r",
+          policy: {
+            id: "deny-by-arg",
+            on: [{ phase: "tool_call" }],
+            evaluate: (e, ctx) => {
+              if (e.phase !== "tool_call") return { outcome: "allow" };
+              seenSurface = ctx.surface;
+              const blocked = (e.args as { blocked?: boolean } | undefined)?.blocked === true;
+              return blocked ? { outcome: "deny", reason: "arg blocked" } : { outcome: "allow" };
+            },
+          },
+        },
+      ],
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId });
+    await handleChatRequest(makeFrame(conv.id, spyId, "hi"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+      policyEngine: engine,
+    });
+
+    // danger_tool survives projection (no args), so the per-call gate is what governs it.
+    expect(captured?.tools?.map((t) => t.name)).toEqual(["danger_tool"]);
+    const gate = captured?.evaluateToolCall;
+    if (!gate) throw new Error("expected the chat turn to forward a per-call gate");
+    expect(await gate({ tool: "danger_tool", args: { blocked: false } })).toEqual({
+      outcome: "allow",
+    });
+    expect(await gate({ tool: "danger_tool", args: { blocked: true } })).toEqual({
+      outcome: "deny",
+      reason: "arg blocked",
+    });
+    expect(seenSurface).toBe("chat");
+    clearToolRegistry();
+  });
+
   test("a rib tool colliding with a harness workflow tool is dropped (no shadow, no duplicate)", async () => {
     clearToolRegistry();
     // A rib registers a tool named like a harness-injected one.

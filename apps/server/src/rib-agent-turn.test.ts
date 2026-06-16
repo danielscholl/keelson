@@ -423,6 +423,67 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(opts?.tools?.map((t) => t.name)).toEqual(["chamber_emit_lens"]);
   });
 
+  it("wires a per-call gate scoped to the rib when the engine projects tools", async () => {
+    let seenEvent: { ribId?: string; args?: unknown } | undefined;
+    let seenSurface: string | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "chamber",
+          policy: {
+            id: "deny-secret-topic",
+            on: [{ phase: "tool_call" }],
+            evaluate: (e, ctx) => {
+              if (e.phase !== "tool_call") return { outcome: "allow" };
+              seenEvent = { ribId: e.ribId, args: e.args };
+              seenSurface = ctx.surface;
+              const topic = (e.args as { topic?: string } | undefined)?.topic;
+              return topic === "secret"
+                ? { outcome: "deny", reason: "secret topic blocked" }
+                : { outcome: "allow" };
+            },
+          },
+        },
+      ],
+    });
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      { getRegisteredTools: () => [fakeTool("chamber_emit_lens")], getPolicyEngine: () => engine },
+    );
+    const gate = opts?.evaluateToolCall;
+    if (!gate) throw new Error("expected a per-call gate to be wired");
+    // A safe call clears the gate ...
+    expect(await gate({ tool: "chamber_emit_lens", args: { topic: "ok" } })).toEqual({
+      outcome: "allow",
+    });
+    // ... a call whose args trip the rib policy is denied per-call, and the event
+    // carried this rib's scope so the policy could make that args-aware decision.
+    expect(await gate({ tool: "chamber_emit_lens", args: { topic: "secret" } })).toEqual({
+      outcome: "deny",
+      reason: "secret topic blocked",
+    });
+    expect(seenEvent).toEqual({ ribId: "chamber", args: { topic: "secret" } });
+    expect(seenSurface).toBe("rib");
+  });
+
+  it("wires no per-call gate for a text-only turn (no keelson tools to govern)", async () => {
+    const engine = createPolicyEngine();
+    const opts = await optionsFor({ prompt: "hi" }, { getPolicyEngine: () => engine });
+    expect(opts?.tools).toBeUndefined();
+    expect(opts?.evaluateToolCall).toBeUndefined();
+  });
+
+  it("wires no per-call gate when no policy engine is present", async () => {
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      { getRegisteredTools: () => [fakeTool("chamber_emit_lens")] },
+    );
+    // The tool still projects via the local denylist floor — but with no engine
+    // there is no per-call policy to run, so the gate stays off.
+    expect(opts?.tools?.map((t) => t.name)).toEqual(["chamber_emit_lens"]);
+    expect(opts?.evaluateToolCall).toBeUndefined();
+  });
+
   it("passes an explicit allow-list through verbatim", async () => {
     const opts = await optionsFor({ prompt: "hi", allowedTools: ["Bash(git:*)", "Read"] });
     expect(opts?.allowedTools).toEqual(["Bash(git:*)", "Read"]);

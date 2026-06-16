@@ -7,7 +7,9 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import type { ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
+import { type ClaudeToolProjectionContext, projectToolsForClaude } from "../src/claude/factory.ts";
 import type {
   ClaudeQueryOptions,
   ClaudeSdkMessage,
@@ -1965,5 +1967,74 @@ describe("ClaudeProvider — usage built from partial result data", () => {
       type: "usage",
       usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 50000 },
     });
+  });
+});
+
+describe("projectToolsForClaude — per-call policy gate", () => {
+  const echoTool = (execute?: ToolDefinition["execute"]): ToolDefinition =>
+    ({
+      name: "echo",
+      description: "Echo the input",
+      inputSchema: z.object({ value: z.string() }),
+      execute:
+        execute ??
+        (async (input, ctx) => {
+          ctx.emit({
+            type: "tool_result",
+            toolUseId: "",
+            content: `echo:${(input as { value: string }).value}`,
+          });
+        }),
+    }) as ToolDefinition;
+
+  const projection = (
+    gate?: ClaudeToolProjectionContext["evaluateToolCall"],
+  ): ClaudeToolProjectionContext => ({
+    pushChunk: () => {},
+    contextFactory: () => ({
+      cwd: "/tmp",
+      emit: () => {},
+      abortSignal: new AbortController().signal,
+    }),
+    ...(gate ? { evaluateToolCall: gate } : {}),
+  });
+
+  it("returns an error tool_result and skips execute when the gate denies", async () => {
+    let executed = false;
+    const tool = echoTool(async () => {
+      executed = true;
+    });
+    const [def] = projectToolsForClaude(
+      [tool],
+      projection(async () => ({ outcome: "deny", reason: "no writes" })),
+    );
+    if (!def) throw new Error("narrow");
+    const result = await def.handler({ value: "x" }, {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Tool 'echo' denied by policy: no writes");
+    expect(executed).toBe(false);
+  });
+
+  it("runs the tool when the gate allows, receiving the validated args", async () => {
+    let seenArgs: unknown;
+    const [def] = projectToolsForClaude(
+      [echoTool()],
+      projection(async (call) => {
+        seenArgs = call.args;
+        return { outcome: "allow" };
+      }),
+    );
+    if (!def) throw new Error("narrow");
+    const result = await def.handler({ value: "hi" }, {});
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toBe("echo:hi");
+    expect(seenArgs).toEqual({ value: "hi" });
+  });
+
+  it("runs the tool when no gate is wired (back-compat)", async () => {
+    const [def] = projectToolsForClaude([echoTool()], projection());
+    if (!def) throw new Error("narrow");
+    const result = await def.handler({ value: "hi" }, {});
+    expect(result.isError).toBeUndefined();
   });
 });

@@ -12,7 +12,8 @@
 
 import type { ToolContext } from "@keelson/shared";
 import { ensureSpawnPath } from "@keelson/shared/exec";
-import type { MessageChunk, ToolDefinition } from "../types.ts";
+import { checkToolCallGate } from "../tool-gate.ts";
+import type { MessageChunk, ToolCallGate, ToolDefinition } from "../types.ts";
 import { buildSDKHooksFromYAML, mergeSDKHooks, type YAMLHookMatcher } from "./hooks-projection.ts";
 
 // A copy of the ambient env with ANTHROPIC_API_KEY removed. The Claude CLI/SDK
@@ -192,6 +193,11 @@ export interface ClaudeQueryFactoryOptions {
 export interface ClaudeToolProjectionContext {
   pushChunk: (chunk: MessageChunk) => void;
   contextFactory: () => ToolContext;
+  // Per-call policy gate (server-wired). When present, each MCP/skill tool call
+  // is evaluated WITH its validated args before execute and a deny returns an
+  // error tool_result. Built-in SDK tools run in the CLI subprocess and never
+  // reach this handler, so they are out of this gate's scope.
+  evaluateToolCall?: ToolCallGate;
 }
 
 export interface CreateQueryParams {
@@ -250,7 +256,12 @@ export function projectToolsForClaude(
     inputSchema: extractZodObjectShape(tool.inputSchema),
     handler: async (rawArgs: unknown, _extra: unknown): Promise<ClaudeCallToolResult> => {
       const ctx = projection.contextFactory();
-      const { content, isError } = await runClaudeToolHandler(tool, rawArgs, ctx);
+      const { content, isError } = await runClaudeToolHandler(
+        tool,
+        rawArgs,
+        ctx,
+        projection.evaluateToolCall,
+      );
       return isError
         ? { content: [{ type: "text", text: content }], isError: true }
         : { content: [{ type: "text", text: content }] };
@@ -273,6 +284,7 @@ async function runClaudeToolHandler(
   tool: ToolDefinition,
   rawArgs: unknown,
   ctxIn: ToolContext,
+  gate?: ToolCallGate,
 ): Promise<{ content: string; isError: boolean }> {
   // tool_result chunks from the skill are captured here but NOT forwarded —
   // the SDK emits the canonical block via the next user message (which
@@ -296,6 +308,12 @@ async function runClaudeToolHandler(
   if (!parsed.success) {
     const message = `Invalid input for tool '${tool.name}': ${parsed.error.message}`;
     return { content: message, isError: true };
+  }
+
+  // Per-call policy gate, after validation so a policy sees normalized args.
+  const gateResult = await checkToolCallGate(gate, tool.name, parsed.data);
+  if (gateResult.denied) {
+    return { content: gateResult.message, isError: true };
   }
 
   try {

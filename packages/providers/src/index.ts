@@ -123,6 +123,7 @@ export type {
   ProviderInfo,
   ProviderRegistration,
   SendQueryOptions,
+  ToolCallGate,
   ToolDefinition,
 } from "./types.ts";
 export { WORKFLOW_CAPABILITIES, WorkflowProvider } from "./workflow/provider.ts";

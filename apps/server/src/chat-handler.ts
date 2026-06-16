@@ -519,7 +519,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       gatedTools = (
         await deps.policyEngine.projectTools(allTools, {
           surface: "chat",
-          provider: provider.getType(),
+          provider: message.providerId,
         })
       ).allowed;
     } catch (err) {
@@ -527,6 +527,16 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       console.warn(`[chat] policy gate threw: ${msg}`);
     }
   }
+
+  // Per-call args-aware gate for this turn — the same engine, bound to the chat
+  // surface (no rib scope). The provider runs it inside its tool handler before
+  // each call; a tool cleared into `gatedTools` above can still be denied here on
+  // the strength of its args. Absent engine → no per-call gating (passthrough).
+  const engine = deps.policyEngine;
+  const evaluateToolCall = engine
+    ? (call: { tool: string; args?: unknown }) =>
+        engine.evaluateToolCall(call, { surface: "chat", provider: message.providerId })
+    : undefined;
 
   try {
     for await (const chunk of provider.sendQuery(message.prompt, cwd, resumeSessionId, {
@@ -541,6 +551,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         ? { reasoningEffort: message.reasoningEffort }
         : {}),
       ...(gatedTools.length > 0 ? { tools: gatedTools } : {}),
+      ...(evaluateToolCall !== undefined ? { evaluateToolCall } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     })) {
       // Usage is handled BEFORE the abort check — providers deliver it after

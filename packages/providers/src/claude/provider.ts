@@ -148,6 +148,9 @@ export class ClaudeProvider implements IAgentProvider {
         emit: pushChunk,
         abortSignal: options?.abortSignal ?? controller.signal,
       }),
+      ...(options?.evaluateToolCall !== undefined
+        ? { evaluateToolCall: options.evaluateToolCall }
+        : {}),
     };
 
     let handle: ClaudeQueryHandle;
