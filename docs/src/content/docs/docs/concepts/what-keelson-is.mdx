@@ -1,0 +1,79 @@
+---
+title: What Keelson is, and is not
+description: A one-page read for an evaluator, naming what the harness does, the non-goals it deliberately leaves uncovered, and how much of the alpha is real today.
+sidebar:
+  order: 0.5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Before the mental model, the positioning. Keelson is a local, single-user agent
+harness: it wraps a coding agent with persistent state, deterministic workflows,
+and a typed extension contract, and it runs entirely on your machine. The
+built-in Chat, Workflows, and Memory surfaces work on their own with just a
+provider; ribs extend the harness, they do not enable it.
+
+This page is the fastest way to decide whether Keelson fits before you read on.
+
+## What Keelson is
+
+- **A local agent harness.** One server on your laptop owns the state, the
+  providers, and the browser UI. Nothing round-trips through a hosted service.
+- **A workflow runner.** Deterministic YAML DAGs make repeatable, agent-adjacent
+  work reproducible, with agent, shell, and control nodes in one graph.
+- **A rib host.** Capabilities install as `@keelson/rib-*` packages, discovered
+  at boot. A rib adds tools, workflows, and whole surfaces without forking the
+  harness.
+- **A local state manager.** Conversations, runs, node outputs, and governed
+  memory live in SQLite; secrets live in your OS keychain.
+- **An MCP tool surface.** The same tool registry chat and workflows use is
+  reachable by external agents over the Model Context Protocol.
+
+## What Keelson is not
+
+- **Not a hosted platform or multi-user SaaS.** It is single-user and local by
+  design. There is no control plane to sign in to.
+- **Not a plugin sandbox.** The rib boundary enforces namespaces and scoped
+  credentials, not isolation. A rib runs in-process with the same access to your
+  machine as any dependency you install.
+- **Not a general CI system.** Workflows are agent-adjacent automation for one
+  operator, not a build farm or a hosted pipeline runner.
+- **Not an infrastructure or fleet controller.** Keelson manages one local
+  server, not clusters or remote machines.
+- **Not a replacement for provider auth or sandboxing.** Each provider keeps its
+  own credentials and execution model; Keelson routes to them, it does not
+  reimplement them.
+- **Not a resumable job engine.** Runs are durable as records, not as processes:
+  a paused run is held by the running server, and a restart fails a stale run
+  rather than faking a resume.
+
+## How much is real today
+
+Keelson is alpha. The table is the honest status of the areas an evaluator most
+often asks about; the [learnings](../../design/learnings/) page carries the full
+detail behind each one.
+
+| Area | Status | What it means for you |
+| --- | --- | --- |
+| Local server, Chat, Workflows, Memory | Works | The standalone harness is usable with a single provider. |
+| Offline trial | Stub only | The `stub` provider needs no keys: good for wiring, not real tool use. |
+| Workflow resume | Records persist, processes do not | Do not restart the server while a run waits on approval if you expect to resume it. |
+| Rib boundary | Namespaces and credentials only | Not isolation; choose rib sources the way you choose any dependency. |
+| MCP endpoint | Read-only, loopback, tokenless by default | Opt in to expose state-changing tools or to require a token. |
+| Console redaction | Wired, not active | Treat console output as unredacted for now. |
+
+<Aside type="caution" title="The boundary is not a sandbox">
+The single most important non-goal: installing a rib runs someone else's package
+inside the harness, with your machine's access. The namespace and credential
+rules prevent collisions and cross-rib reads, not a malicious or buggy rib.
+</Aside>
+
+## Related
+
+- [Architecture](../architecture/): what the harness owns and how it wires
+  together at boot.
+- [The rib model](../the-rib-model/): why capabilities are packages and the
+  boundary the harness enforces.
+- [Learnings](../../design/learnings/): the candid, detailed status of the alpha.
+- [Your first run](../../tutorials/first-run/): prove the harness works with no
+  credentials.

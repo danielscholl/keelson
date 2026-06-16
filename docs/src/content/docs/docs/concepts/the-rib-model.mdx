@@ -44,7 +44,7 @@ the boot log. A broken rib costs you that rib, never the harness.
 
 The contract is one interface, and every hook on it is optional. A rib
 implements the subset it needs, and each hook lands its contribution in a
-specific place in the harness. The figure shows the full set of destinations:
+specific place in the harness. The figure shows the main destinations:
 
 <figure>
   <img
@@ -64,13 +64,16 @@ specific place in the harness. The figure shows the full set of destinations:
 | `composeBundle` | A snapshot composer under the rib's key namespace. The browser renders the published data as live boards. |
 | `views`, `surfaces` | Static declarations of how those snapshots appear, up to a full top-level tab in the browser. |
 | `contributeWorkflows` | Workflow definitions merged into the catalog at activation, optionally bound so a run's output republishes a snapshot key. |
+| `contributePolicies` | Governance policies merged into the harness policy engine at activation, evaluated at each turn's hook points. |
 | `onAction` | A handler for inbound actions over the loopback API, so a board's buttons can reach the rib. |
+| `listAgents`, `resolveAgent`, `listCommands`, `invokeCommand`, `completeCommand` | Named chat agents and slash commands the rib adds to the chat composer. |
 | `authStatus` | A credential probe surfaced in the rib inventory, so the harness can report whether the rib's external system is reachable. |
 | `dispose` | Teardown. The harness awaits it at shutdown, before the database closes. |
 
-The pattern across all seven: a rib contributes **data and declarations**,
-and the harness owns the machinery. A rib never renders UI, never opens its
-own port, and never touches the database.
+The chat composer is a further destination the figure leaves out: the agents
+and commands hooks feed it. The pattern holds across all of them, though: a rib
+contributes **data and declarations**, and the harness owns the machinery. A rib
+never renders UI, never opens its own port, and never touches the database.
 
 ## The boundary is enforced, not requested
 

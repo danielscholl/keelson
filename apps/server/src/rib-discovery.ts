@@ -14,7 +14,7 @@ export interface DiscoverRibsOptions {
   root?: string;
 }
 
-const HOOK_FIELDS = [
+export const HOOK_FIELDS = [
   "registerTools",
   "composeBundle",
   "dispose",
@@ -29,7 +29,7 @@ const HOOK_FIELDS = [
   "completeCommand",
 ] as const;
 
-const ARRAY_FIELDS = ["views", "surfaces"] as const;
+export const ARRAY_FIELDS = ["views", "surfaces"] as const;
 
 export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Record<string, Rib>> {
   const root = opts.root ?? join(process.cwd(), "node_modules", "@keelson");
