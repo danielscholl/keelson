@@ -211,6 +211,48 @@ describe("makePromptHandler", () => {
     expect(toolNames).toContain("repo_get_state");
   });
 
+  test("projectTools is the final global gate — it drops a tool after node resolution", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "kube_delete_cluster" }, { name: "repo_get_state" }],
+      // No handler-level denylist (the engine owns it); the injected gate drops one.
+      denylist: [],
+      projectTools: async (candidates) =>
+        candidates.filter((t) => t.name !== "kube_delete_cluster"),
+    });
+    await handler.handle(stubNode, buildCtx());
+    const toolNames = (calls[0]!.options?.tools ?? []).map((t) => t.name);
+    expect(toolNames).not.toContain("kube_delete_cluster");
+    expect(toolNames).toContain("repo_get_state");
+  });
+
+  test("a throwing projectTools gate fails open — node-resolved tools still pass through", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    // Track invocation so the test proves the gate was actually CALLED and its
+    // throw was caught — not merely that the tool survived (which the no-gate
+    // path would also satisfy).
+    let gateCalled = false;
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "repo_get_state" }],
+      denylist: [],
+      projectTools: async () => {
+        gateCalled = true;
+        throw new Error("gate fault");
+      },
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(gateCalled).toBe(true);
+    expect(result.status).toBe("succeeded");
+    const toolNames = (calls[0]!.options?.tools ?? []).map((t) => t.name);
+    expect(toolNames).toContain("repo_get_state");
+  });
+
   test("node.denied_tools unions with the global denylist for MCP filtering and forwards as disallowedTools", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],

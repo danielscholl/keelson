@@ -15,6 +15,7 @@ export * from "./chat.ts";
 export * from "./commands.ts";
 export * from "./description.ts";
 export * from "./memory.ts";
+export * from "./policy.ts";
 export * from "./projects.ts";
 export * from "./rib.ts";
 export * from "./snapshots.ts";

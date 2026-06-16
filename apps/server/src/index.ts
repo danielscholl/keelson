@@ -22,6 +22,7 @@ import { cors } from "hono/cors";
 import pkg from "../package.json" with { type: "json" };
 import { agentsRoutes } from "./agents-handler.ts";
 import {
+  bootstrapPolicyEngine,
   bootstrapPromptHandler,
   bootstrapProviders,
   bootstrapRibs,
@@ -40,6 +41,7 @@ import { createDynamicRegionStore } from "./dynamic-region-store.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
+import type { PolicyEngine } from "./policy-engine.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
 import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
@@ -196,12 +198,17 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // credential reader scoped to its own keys.
   const credentialStore = createKeyringStore();
 
+  // Late-bound: assigned from the ribs' contributed policies AFTER bootstrapRibs
+  // returns. The rib-agent-turn seam (constructed inside bootstrapRibs) reads it
+  // lazily through this getter at turn time, by which point it's set.
+  let policyEngine: PolicyEngine | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
     dynamicRegionStore,
     getRibCredential: (ribId, serviceId) =>
       createRibCredentialAccessor(credentialStore, ribId)(serviceId),
+    getPolicyEngine: () => policyEngine,
   });
   // Register rib-contributed tools into the shared registry so the chat agent,
   // /api/tools, and workflow prompt nodes all pick them up via getRegisteredTools.
@@ -209,6 +216,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // Narrow rib-contributed workflow definitions and collect the run-path bindings
   // that republish a bound run's structured output to the rib's snapshot key.
   const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);
+  // Unified governance: operator denylist floor + rib-contributed policies. The
+  // three turn seams (chat, workflow prompt nodes, rib agent turns) gate their
+  // projected tools through this one engine.
+  policyEngine = bootstrapPolicyEngine({ ribPolicies: ribs.policies });
 
   const PORT = config.port ?? Number(process.env.PORT ?? 7878);
   const HOSTNAME = "127.0.0.1";
@@ -271,6 +282,17 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // a workflow prompt node only sees a rib tool it explicitly `allowed_tools`.
   const promptHandler = bootstrapPromptHandler({
     defaultOffTools: ribs.tools.map((t) => t.name),
+    // Final global gate for workflow prompt nodes — the engine owns the operator
+    // denylist + rib policies here, so the handler's own floor stands down.
+    projectTools: (candidates, provider) =>
+      policyEngine
+        ? policyEngine
+            .projectTools(candidates, {
+              surface: "workflow",
+              ...(provider !== undefined ? { provider } : {}),
+            })
+            .then((r) => r.allowed)
+        : Promise.resolve(candidates),
   });
 
   // Shared handler options so the HTTP routes and the in-process WorkflowController
@@ -491,6 +513,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     workflowTools,
     workflowCatalog,
     workflowAuthoringTools,
+    ...(policyEngine ? { policyEngine } : {}),
   });
   const workflowRunHandlers = workflowRunWebSocketHandlers({
     subscribers: workflowSubscribers,

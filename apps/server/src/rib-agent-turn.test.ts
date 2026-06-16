@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { IAgentProvider, SendQueryOptions } from "@keelson/providers";
 import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
+import { createPolicyEngine } from "./policy-engine.ts";
 import { type MakeRibAgentTurnDeps, makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { applyRibs } from "./ribs.ts";
 
@@ -83,6 +84,7 @@ function makeRun(
     // inject their own.
     getRegisteredTools: deps.getRegisteredTools ?? (() => []),
     ...(deps.denylist !== undefined ? { denylist: deps.denylist } : {}),
+    ...(deps.getPolicyEngine !== undefined ? { getPolicyEngine: deps.getPolicyEngine } : {}),
   });
 }
 
@@ -323,6 +325,96 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens"]);
   });
 
+  it("gates projected tools through the policy engine — a rib policy DENY drops the tool", async () => {
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "chamber",
+          policy: {
+            id: "no-genesis",
+            on: [{ phase: "tool_call" }],
+            evaluate: (e) =>
+              e.phase === "tool_call" && e.tool === "chamber_emit_genesis"
+                ? { outcome: "deny", reason: "genesis is gated" }
+                : { outcome: "allow" },
+          },
+        },
+      ],
+    });
+    const lens = fakeTool("chamber_emit_lens");
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }, { name: "chamber_emit_genesis" }] },
+      {
+        getRegisteredTools: () => [lens, fakeTool("chamber_emit_genesis")],
+        getPolicyEngine: () => engine,
+      },
+    );
+    // Only the policy-allowed tool is projected; the denied one is dropped.
+    expect(opts?.tools).toEqual([lens]);
+    // The full catalog is still forwarded so the provider recognizes both names.
+    expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens", "chamber_emit_genesis"]);
+  });
+
+  it("rides the rib id into the policy event", async () => {
+    let seenRibId: string | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "chamber",
+          policy: {
+            id: "record-rib",
+            on: [{ phase: "tool_call" }],
+            evaluate: (e) => {
+              if (e.phase === "tool_call") seenRibId = e.ribId;
+              return { outcome: "allow" };
+            },
+          },
+        },
+      ],
+    });
+    await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getPolicyEngine: () => engine,
+      },
+    );
+    expect(seenRibId).toBe("chamber");
+  });
+
+  it("the engine's denylist builtin matches the no-engine denylist behavior (parity)", async () => {
+    const engine = createPolicyEngine({ denylist: ["chamber_emit_lens"] });
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getPolicyEngine: () => engine,
+      },
+    );
+    // Same outcome as the local-denylist path: allow-listed but never projected.
+    expect(opts?.allowedTools).toEqual(["chamber_emit_lens"]);
+    expect(opts?.tools).toBeUndefined();
+    expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens"]);
+  });
+
+  it("fails open to the denylist floor (not the whole turn) when the policy gate throws", async () => {
+    const throwingEngine = {
+      projectTools: async () => {
+        throw new Error("engine boom");
+      },
+    } as unknown as ReturnType<typeof createPolicyEngine>;
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getPolicyEngine: () => throwingEngine,
+      },
+    );
+    // The turn still produced options (no throw escaped), and the tool survived
+    // via the local denylist fallback (empty denylist here → not dropped).
+    expect(opts?.tools?.map((t) => t.name)).toEqual(["chamber_emit_lens"]);
+  });
+
   it("passes an explicit allow-list through verbatim", async () => {
     const opts = await optionsFor({ prompt: "hi", allowedTools: ["Bash(git:*)", "Read"] });
     expect(opts?.allowedTools).toEqual(["Bash(git:*)", "Read"]);
@@ -398,5 +490,57 @@ describe("applyRibs wiring", () => {
       },
     });
     expect(captured?.runAgentTurn).toBeUndefined();
+  });
+
+  const fakeExecCtx = {
+    getExec: () => ({
+      runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+      runText: async () => ({ ok: true as const, data: "" }),
+    }),
+  };
+
+  it("collects a rib's contributed policies, tagged with the rib id, and drops malformed ones", () => {
+    const goodPolicy = {
+      id: "no-genesis",
+      evaluate: () => ({ outcome: "allow" as const }),
+    };
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      // One valid policy + two malformed ones (no evaluate; a non-array `on`)
+      // that must be skipped — the bad `on` is rejected here so it never reaches
+      // the engine's matches() to throw.
+      contributePolicies: () =>
+        [
+          goodPolicy,
+          { id: "broken" } as unknown as typeof goodPolicy,
+          { id: "bad-on", on: "tool_call", evaluate: () => ({ outcome: "allow" as const }) },
+        ] as unknown as ReturnType<NonNullable<Rib["contributePolicies"]>>,
+    };
+    const result = applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: fakeExecCtx,
+    });
+    expect(result.policies).toHaveLength(1);
+    expect(result.policies[0]?.ribId).toBe("chamber");
+    expect(result.policies[0]?.policy.id).toBe("no-genesis");
+  });
+
+  it("ignores a contributePolicies that returns a non-array instead of throwing", () => {
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      contributePolicies: () =>
+        ({ id: "oops", evaluate: () => ({ outcome: "allow" }) }) as unknown as ReturnType<
+          NonNullable<Rib["contributePolicies"]>
+        >,
+    };
+    const result = applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: fakeExecCtx,
+    });
+    expect(result.policies).toEqual([]);
   });
 });

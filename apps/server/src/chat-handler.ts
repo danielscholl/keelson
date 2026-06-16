@@ -37,6 +37,7 @@ import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import { createNoteProjectTool } from "./note-project-tool.ts";
+import type { PolicyEngine } from "./policy-engine.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import type { ProjectsStore } from "./projects-store.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
@@ -248,6 +249,9 @@ export interface ChatWebSocketDeps {
   // save) — built per turn closing over the conversation's resolved project so
   // workflow_save can only write that project's .keelson/workflows.
   workflowAuthoringTools?: (project: { id: string; rootPath: string } | null) => ToolDefinition[];
+  // Unified policy engine. When set, the turn's tool set is gated through it
+  // before reaching the provider (operator denylist + rib policies).
+  policyEngine?: PolicyEngine;
 }
 
 export function chatWebSocketHandlers(
@@ -284,6 +288,7 @@ export function chatWebSocketHandlers(
         ...(deps.workflowAuthoringTools !== undefined
           ? { workflowAuthoringTools: deps.workflowAuthoringTools }
           : {}),
+        ...(deps.policyEngine !== undefined ? { policyEngine: deps.policyEngine } : {}),
       });
     },
     close(ws) {
@@ -310,6 +315,8 @@ export interface ChatDeps {
   workflowCatalog?: { list(scope?: { projectId?: string }): readonly WorkflowSummaryLike[] };
   // Per-request authoring tools factory; see ChatWebSocketDeps.
   workflowAuthoringTools?: (project: { id: string; rootPath: string } | null) => ToolDefinition[];
+  // Unified policy engine; gates the turn's tool set when set. See ChatWebSocketDeps.
+  policyEngine?: PolicyEngine;
 }
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
@@ -501,6 +508,26 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       : {}),
   });
 
+  // Final tool gate: the unified policy engine (operator denylist + rib
+  // policies). The chat agent has no rib scope, so no ribId rides the event.
+  // Absent engine → passthrough (the pre-policy behavior). A gate fault keeps
+  // the turn's tools (fail open) and warns rather than failing the chat turn,
+  // matching the workflow prompt gate.
+  let gatedTools = allTools;
+  if (deps.policyEngine) {
+    try {
+      gatedTools = (
+        await deps.policyEngine.projectTools(allTools, {
+          surface: "chat",
+          provider: provider.getType(),
+        })
+      ).allowed;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[chat] policy gate threw: ${msg}`);
+    }
+  }
+
   try {
     for await (const chunk of provider.sendQuery(message.prompt, cwd, resumeSessionId, {
       model: message.model ?? conv.model,
@@ -513,7 +540,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       ...(message.reasoningEffort !== undefined
         ? { reasoningEffort: message.reasoningEffort }
         : {}),
-      ...(allTools.length > 0 ? { tools: allTools } : {}),
+      ...(gatedTools.length > 0 ? { tools: gatedTools } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     })) {
       // Usage is handled BEFORE the abort check — providers deliver it after

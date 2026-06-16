@@ -19,6 +19,7 @@ const HOOK_FIELDS = [
   "composeBundle",
   "dispose",
   "contributeWorkflows",
+  "contributePolicies",
   "onAction",
   "authStatus",
   "listAgents",
