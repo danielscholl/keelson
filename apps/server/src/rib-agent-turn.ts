@@ -263,7 +263,9 @@ async function toolOptions(
     // rib's policies); otherwise fall back to the local denylist floor. A gate
     // fault falls back to the denylist floor (not the whole turn) — this seam's
     // contract is to never throw, mirroring the workflow prompt gate.
-    const denylisted = (): ToolDefinition[] => matched.filter((t) => !deps.denied.has(t.name));
+    // The requested tools that survive the local denylist floor — used as the
+    // no-engine / gate-fault fallback.
+    const withoutDenied = (): ToolDefinition[] => matched.filter((t) => !deps.denied.has(t.name));
     const engine = deps.getPolicyEngine?.();
     let projected: ToolDefinition[];
     if (engine) {
@@ -278,10 +280,10 @@ async function toolOptions(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[rib-agent-turn] policy gate threw for rib '${meta.ribId}': ${msg}`);
-        projected = denylisted();
+        projected = withoutDenied();
       }
     } else {
-      projected = denylisted();
+      projected = withoutDenied();
     }
     if (projected.length > 0) out.tools = [...projected];
     // Forward the FULL catalog whenever any rib tool was requested — even if the
