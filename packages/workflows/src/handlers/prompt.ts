@@ -77,6 +77,14 @@ export interface PromptHandlerSendOptions {
       }>
     >
   >;
+  // Per-call tool gate forwarded to the provider (structural mirror of
+  // @keelson/providers `ToolCallGate`). The provider invokes it inside its
+  // custom-tool handler before each tool runs; a deny short-circuits the call.
+  // The effective provider id is already bound, so this takes only the call.
+  evaluateToolCall?: (call: {
+    tool: string;
+    args?: unknown;
+  }) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 }
 
 export interface PromptHandlerLifecycle {
@@ -93,6 +101,16 @@ export type PromptToolGate = (
   candidates: readonly { name: string; [k: string]: unknown }[],
   provider?: string,
 ) => Promise<readonly { name: string; [k: string]: unknown }[]>;
+
+// Per-call tool gate the harness backs with the unified policy engine. `provider`
+// is the node's effective provider id (best-effort, undefined when the workflow
+// relies on the default) so a provider-scoped policy can match; the handler binds
+// it before handing the per-call thunk to the provider. Exported so the
+// composition root and the handler share one signature rather than re-spelling it.
+export type PromptToolCallGate = (
+  call: { tool: string; args?: unknown },
+  provider?: string,
+) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 
 export interface MakePromptHandlerOptions {
   /**
@@ -121,6 +139,14 @@ export interface MakePromptHandlerOptions {
    * no-engine path). Must only drop tools, never add them.
    */
   projectTools?: PromptToolGate;
+  /**
+   * Per-call, args-aware tool gate forwarded to the provider. Complements
+   * `projectTools` (which gates by name at projection time): this runs the same
+   * policy stack for each individual call WITH its args, so a tool cleared into
+   * the projection can still be denied on the strength of a specific call.
+   * Absent → no per-call gating (standalone / no-engine path).
+   */
+  evaluateToolCall?: PromptToolCallGate;
   /** Per-node timeout in milliseconds. Defaults to 10 minutes. */
   timeoutMs?: number;
   /** Memory hook seam. Default is no-ops; reserved for the future memory layer. */
@@ -316,6 +342,14 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         }
       }
 
+      // Bind the node's effective provider id so the provider gets a thunk that
+      // takes only the call. The provider invokes it per tool call (with args);
+      // a deny short-circuits that call inside the provider's handler.
+      const perCallGate = opts.evaluateToolCall;
+      const boundToolCallGate = perCallGate
+        ? (call: { tool: string; args?: unknown }) => perCallGate(call, effectiveProviderId)
+        : undefined;
+
       let assistantText = "";
       let providerError: string | null = null;
       // Set when any tool the turn invoked returned an error result; consulted
@@ -385,6 +419,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             ...(nodeAllowed !== undefined ? { allowedTools: nodeAllowed } : {}),
             ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
             ...(nodeHooks !== undefined ? { hooks: nodeHooks } : {}),
+            ...(boundToolCallGate !== undefined ? { evaluateToolCall: boundToolCallGate } : {}),
             // Forward the UNFILTERED catalog so the claude provider
             // can detect MCP names even when one was filtered out
             // by the global denylist.

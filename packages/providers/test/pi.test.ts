@@ -763,6 +763,41 @@ describe("projectToolsForPi", () => {
     expect(projected?.parameters).toEqual({ type: "object", properties: {} });
   });
 
+  test("a per-call gate deny throws before the tool executes (pi → error result)", async () => {
+    let executed = false;
+    const tool = makeTool({
+      execute: async () => {
+        executed = true;
+      },
+    });
+    const [projected] = projectToolsForPi([tool], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+      evaluateToolCall: async () => ({ outcome: "deny", reason: "nope" }),
+    });
+    if (!projected) throw new Error("narrow");
+    await expect(projected.execute("t1", { value: "x" }, noSignal)).rejects.toThrow(
+      "Tool 'echo_tool' denied by policy: nope",
+    );
+    expect(executed).toBe(false);
+  });
+
+  test("a per-call gate allow runs the tool and receives the validated args", async () => {
+    let seenArgs: unknown;
+    const [projected] = projectToolsForPi([makeTool()], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+      evaluateToolCall: async (call) => {
+        seenArgs = call.args;
+        return { outcome: "allow" };
+      },
+    });
+    if (!projected) throw new Error("narrow");
+    const result = await projected.execute("t1", { value: "hi" }, noSignal);
+    expect(result.content).toEqual([{ type: "text", text: "echo: hi" }]);
+    expect(seenArgs).toEqual({ value: "hi" });
+  });
+
   test("the pi-supplied signal reaches the tool's context", async () => {
     const abort = new AbortController();
     let seen: AbortSignal | undefined;

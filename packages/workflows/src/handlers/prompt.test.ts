@@ -229,6 +229,41 @@ describe("makePromptHandler", () => {
     expect(toolNames).toContain("repo_get_state");
   });
 
+  test("evaluateToolCall is bound to the node's provider and forwarded to the provider", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    let seenProvider: string | undefined | "unset" = "unset";
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "repo_get_state" }],
+      evaluateToolCall: async (_call, prov) => {
+        seenProvider = prov;
+        return { outcome: "deny", reason: "blocked" };
+      },
+    });
+    await handler.handle(stubNode, buildCtx({ workflowProvider: "claude" }));
+    const gate = calls[0]?.options?.evaluateToolCall;
+    if (!gate) throw new Error("expected evaluateToolCall to be forwarded to the provider");
+    // The provider receives a thunk taking only the call — the provider id is
+    // already bound, so routing it reaches the harness gate with that id baked in.
+    const decision = await gate({ tool: "repo_get_state", args: { x: 1 } });
+    expect(decision).toEqual({ outcome: "deny", reason: "blocked" });
+    expect(seenProvider).toBe("claude");
+  });
+
+  test("no evaluateToolCall opt → the provider receives no per-call gate", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "repo_get_state" }],
+    });
+    await handler.handle(stubNode, buildCtx());
+    expect(calls[0]?.options?.evaluateToolCall).toBeUndefined();
+  });
+
   test("a throwing projectTools gate fails open — node-resolved tools still pass through", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],

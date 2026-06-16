@@ -145,6 +145,9 @@ export class CopilotProvider implements IAgentProvider {
         // ToolContext (avoiding contract widening).
         ...(toolCallId ? {} : {}),
       }),
+      ...(options?.evaluateToolCall !== undefined
+        ? { evaluateToolCall: options.evaluateToolCall }
+        : {}),
     };
 
     const abortListener = () => {

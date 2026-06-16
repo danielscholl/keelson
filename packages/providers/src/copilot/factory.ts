@@ -11,8 +11,9 @@
 // native binary (docs/architecture.md §4 provider rules).
 
 import type { ToolContext } from "@keelson/shared";
+import { checkToolCallGate } from "../tool-gate.ts";
 import { deriveToolParametersJsonSchema } from "../tool-params.ts";
-import type { MessageChunk, ModelInfo, ToolDefinition } from "../types.ts";
+import type { MessageChunk, ModelInfo, ToolCallGate, ToolDefinition } from "../types.ts";
 
 // Structural — captures only what the provider drives. Keeps this file off a
 // typeof-import on the SDK so tests can pass any compatible shape.
@@ -181,6 +182,11 @@ export interface CopilotClientFactoryOptions {
 export interface CopilotToolProjectionContext {
   pushChunk: (chunk: MessageChunk) => void;
   contextFactory: (toolCallId: string) => ToolContext;
+  // Per-call policy gate (server-wired). When present, each projected tool call
+  // is evaluated WITH its validated args before execute and a deny emits an
+  // error tool_result. Built-in capabilities (read / write / shell / …) gate
+  // separately via the permission handler, so they are out of this gate's scope.
+  evaluateToolCall?: ToolCallGate;
 }
 
 // Projects our streaming ToolDefinitions into the SDK's "handler returns
@@ -201,7 +207,7 @@ export function projectToolsForCopilot(
     skipPermission: true,
     handler: async (args: unknown, invocation: { toolCallId: string }): Promise<string> => {
       const ctx = projection.contextFactory(invocation.toolCallId);
-      return runToolHandler(tool, args, invocation.toolCallId, ctx);
+      return runToolHandler(tool, args, invocation.toolCallId, ctx, projection.evaluateToolCall);
     },
   }));
 }
@@ -211,6 +217,7 @@ async function runToolHandler(
   rawArgs: unknown,
   toolCallId: string,
   ctxIn: ToolContext,
+  gate?: ToolCallGate,
 ): Promise<string> {
   // Skills emit tool_result with a placeholder toolUseId; we rewrite to the
   // SDK's id (same one tool.execution_start carries) so the UI pairs rows.
@@ -244,6 +251,18 @@ async function runToolHandler(
       isError: true,
     });
     return message;
+  }
+
+  // Per-call policy gate, after validation so a policy sees normalized args.
+  const gateResult = await checkToolCallGate(gate, tool.name, parsed.data);
+  if (gateResult.denied) {
+    ctxIn.emit({
+      type: "tool_result",
+      toolUseId: toolCallId,
+      content: gateResult.message,
+      isError: true,
+    });
+    return gateResult.message;
   }
 
   try {

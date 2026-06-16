@@ -30,6 +30,20 @@ export interface MCPServerConfig {
   type?: "stdio";
 }
 
+// Per-call, args-aware tool-call gate. The server binds {surface, ribId,
+// provider} and hands each provider a thunk it invokes inside its custom-tool
+// handler (Claude / Copilot / pi) BEFORE the tool runs; a `deny` short-circuits
+// with an error tool_result instead of executing. Providers that project no
+// keelson tools (codex) never call it, and built-in SDK tools — which run
+// outside our handler — are out of scope. The decision is @keelson/shared's
+// PolicyDecision narrowed to the allow/deny the engine emits here (`ask`
+// degrades to `deny` until the approval round-trip lands), so providers never
+// have to handle an `ask`.
+export type ToolCallGate = (call: {
+  tool: string;
+  args?: unknown;
+}) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
+
 export interface SendQueryOptions {
   model?: string;
   abortSignal?: AbortSignal;
@@ -78,6 +92,8 @@ export interface SendQueryOptions {
       timeout?: number;
     }>
   >;
+  // See ToolCallGate. Absent → no per-call gating (back-compat passthrough).
+  evaluateToolCall?: ToolCallGate;
 }
 
 export interface IAgentProvider {

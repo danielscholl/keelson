@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import type { ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
+import {
+  type CopilotToolProjectionContext,
+  projectToolsForCopilot,
+} from "../src/copilot/factory.ts";
 import type {
   CopilotClientLike,
   CopilotModelInfo,
@@ -1726,5 +1731,86 @@ describe("CopilotProvider — token usage (chat/workflow usage feedback)", () =>
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
 
     expect(chunks.filter((c) => c.type === "usage")).toHaveLength(0);
+  });
+});
+
+describe("projectToolsForCopilot — per-call policy gate", () => {
+  type CopilotToolDef = {
+    handler: (args: unknown, invocation: { toolCallId: string }) => Promise<string>;
+  };
+
+  const echoTool = (execute?: ToolDefinition["execute"]): ToolDefinition =>
+    ({
+      name: "echo",
+      description: "Echo the input",
+      inputSchema: z.object({ value: z.string() }),
+      execute:
+        execute ??
+        (async (input, ctx) => {
+          ctx.emit({
+            type: "tool_result",
+            toolUseId: "",
+            content: `echo:${(input as { value: string }).value}`,
+          });
+        }),
+    }) as ToolDefinition;
+
+  const projection = (
+    emitted: MessageChunk[],
+    gate?: CopilotToolProjectionContext["evaluateToolCall"],
+  ): CopilotToolProjectionContext => ({
+    pushChunk: (c) => emitted.push(c),
+    contextFactory: () => ({
+      cwd: "/tmp",
+      emit: (c) => emitted.push(c),
+      abortSignal: new AbortController().signal,
+    }),
+    ...(gate ? { evaluateToolCall: gate } : {}),
+  });
+
+  it("emits an error tool_result and skips execute when the gate denies", async () => {
+    let executed = false;
+    const emitted: MessageChunk[] = [];
+    const tool = echoTool(async () => {
+      executed = true;
+    });
+    const [def] = projectToolsForCopilot(
+      [tool],
+      projection(emitted, async () => ({ outcome: "deny", reason: "no writes" })),
+    ) as CopilotToolDef[];
+    if (!def) throw new Error("narrow");
+    const ret = await def.handler({ value: "x" }, { toolCallId: "tc1" });
+    expect(ret).toBe("Tool 'echo' denied by policy: no writes");
+    expect(executed).toBe(false);
+    expect(emitted.find((c) => c.type === "tool_result")).toMatchObject({
+      type: "tool_result",
+      toolUseId: "tc1",
+      isError: true,
+      content: "Tool 'echo' denied by policy: no writes",
+    });
+  });
+
+  it("runs the tool when the gate allows, receiving the validated args", async () => {
+    let seenArgs: unknown;
+    const emitted: MessageChunk[] = [];
+    const [def] = projectToolsForCopilot(
+      [echoTool()],
+      projection(emitted, async (call) => {
+        seenArgs = call.args;
+        return { outcome: "allow" };
+      }),
+    ) as CopilotToolDef[];
+    if (!def) throw new Error("narrow");
+    const ret = await def.handler({ value: "hi" }, { toolCallId: "tc1" });
+    expect(ret).toBe("echo:hi");
+    expect(seenArgs).toEqual({ value: "hi" });
+  });
+
+  it("runs the tool when no gate is wired (back-compat)", async () => {
+    const emitted: MessageChunk[] = [];
+    const [def] = projectToolsForCopilot([echoTool()], projection(emitted)) as CopilotToolDef[];
+    if (!def) throw new Error("narrow");
+    const ret = await def.handler({ value: "hi" }, { toolCallId: "tc1" });
+    expect(ret).toBe("echo:hi");
   });
 });
