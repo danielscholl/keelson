@@ -154,6 +154,54 @@
         line-height: 1.7;
       }
 
+      /* "where to start": a job-to-be-done router into the docs */
+      .paths {
+        margin: 0 0 30px;
+      }
+      .paths-title {
+        margin: 0 0 18px;
+        color: var(--keel);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+      .paths-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(220px, 1fr));
+        gap: 12px;
+      }
+      .path-card {
+        display: block;
+        padding: 18px 20px;
+        border: 1px solid rgba(30, 58, 95, 0.26);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.55);
+        text-decoration: none;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      .path-card:hover {
+        border-color: var(--brass);
+        background: rgba(255, 255, 255, 0.85);
+      }
+      .path-k {
+        display: block;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--brass-ink);
+      }
+      .path-v {
+        display: block;
+        margin-top: 7px;
+        color: var(--keel);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
       /* engineering title block, bottom-right of the sheet */
       .titleblock {
         display: grid;
@@ -184,10 +232,12 @@
       @media (max-width: 1180px) {
         .landing-hero { grid-template-columns: 1fr; }
         .features { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+        .paths-grid { grid-template-columns: repeat(2, 1fr); }
       }
       @media (max-width: 760px) {
         .nav { display: none; }
         .features { grid-template-columns: 1fr; }
+        .paths-grid { grid-template-columns: 1fr; }
         .titleblock { grid-template-columns: 1fr 1fr; }
       }
     </style>
@@ -312,6 +362,36 @@
             <h2>Providers</h2>
             <p>Copilot, Claude, Codex, Pi. Swappable, no lock-in.</p>
           </article>
+        </section>
+
+        <section id="paths" class="paths" aria-label="Where to start">
+          <h2 class="paths-title">Where to start</h2>
+          <div class="paths-grid">
+            <a class="path-card" href="docs/concepts/what-keelson-is/">
+              <span class="path-k">Evaluate</span>
+              <span class="path-v">See what Keelson is, and what it is not.</span>
+            </a>
+            <a class="path-card" href="docs/tutorials/first-run/">
+              <span class="path-k">Try it, no keys</span>
+              <span class="path-v">Run the harness with the offline stub provider.</span>
+            </a>
+            <a class="path-card" href="docs/tutorials/run-a-workflow/">
+              <span class="path-k">Automate a chore</span>
+              <span class="path-v">Turn repeatable work into a deterministic workflow.</span>
+            </a>
+            <a class="path-card" href="docs/tutorials/install-a-rib/">
+              <span class="path-k">Add a capability</span>
+              <span class="path-v">Install a rib and light up a new surface.</span>
+            </a>
+            <a class="path-card" href="docs/tutorials/build-your-first-rib/">
+              <span class="path-k">Build a rib</span>
+              <span class="path-v">Ship a capability as a package, not a fork.</span>
+            </a>
+            <a class="path-card" href="docs/reference/cli/">
+              <span class="path-k">Script against it</span>
+              <span class="path-v">Drive the CLI and HTTP API with stable contracts.</span>
+            </a>
+          </div>
         </section>
 
       </main>

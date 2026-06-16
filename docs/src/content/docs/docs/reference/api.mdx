@@ -52,6 +52,22 @@ as a versioned public contract.
 
 See [The Rib contract](../rib-contract/#wire-shapes) for the rib wire shapes.
 
+## Agents and commands
+
+Ribs contribute named chat agents and slash commands to the composer. These
+endpoints back them; a rib with no `listAgents` or `listCommands` hook simply
+contributes nothing here.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/agents` | Named chat agents ribs offer. Returns `ListAgentsResponse` (`{ agents: AgentRef[] }`), each a reusable turn template. |
+| `POST` | `/api/agents/:ribId/:slug/resolve` | Resolve one agent slug to an `OpenChatSeed` (system prompt, name, optional model). 404 on an unknown rib or slug. |
+| `GET` | `/api/commands` | The rib slash commands the composer shows. Deduped by name across ribs; first registered wins. |
+| `GET` | `/api/commands/:ribId/:name/complete` | Argument type-ahead. Returns the full candidate set for an empty `prefix`. |
+| `POST` | `/api/commands/:ribId/:name/invoke` | Invoke a command. Returns the closed effect the surface performs (open an agent, run a workflow, or show a message). Loopback origin-gated. |
+
+See [The Rib contract](../rib-contract/#hooks) for the hooks behind these.
+
 ## Providers
 
 | Method | Path | Purpose |
@@ -67,7 +83,7 @@ See [Providers](../providers/) for the capability shape.
 | --- | --- | --- |
 | `GET` | `/api/snapshots` | The index of registered snapshot keys. |
 | `GET` | `/api/snapshots/:key` | The latest cached frame for a key (a `SnapshotFrame`). |
-| `WS` | `/api/snapshots/:key/ws` | Subscribe to a key: the latest frame on connect, then a `snapshot_update` on every recompose. |
+| `WS` | `/api/snapshots/:key/ws` | Subscribe to a key: a `snapshot_update` on every recompose. No frame is sent on connect, so `GET /api/snapshots/:key` first to hydrate, then subscribe. |
 
 See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
 
@@ -140,14 +156,16 @@ database and the API only know that one exists.
 
 ## WebSocket streams
 
-Three resources stream over WebSocket, all under the same base URL. Each sends
-the current state on connect, then incremental frames.
+Three resources stream over WebSocket, all under the same base URL. The chat and
+run streams replay current state on connect, then send incremental frames; the
+snapshot stream does not replay, so hydrate it with `GET /api/snapshots/:key`
+first.
 
 | Stream | Carries |
 | --- | --- |
 | `/api/chat/ws` | A chat turn: `MessageChunk`s until a terminal `done`. |
 | `/api/workflows/runs/:runId/ws` | Run events: node start, output, settle, and the approval-pause frame. |
-| `/api/snapshots/:key/ws` | The cached frame on connect, then a `snapshot_update` per recompose. |
+| `/api/snapshots/:key/ws` | A `snapshot_update` per recompose. No on-connect replay; `GET` the key to hydrate first. |
 
 ## Related
 
