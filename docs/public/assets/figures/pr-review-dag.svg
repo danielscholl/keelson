@@ -1,5 +1,5 @@
 <svg viewBox="0 0 1360 470" xmlns="http://www.w3.org/2000/svg" role="img"
-     aria-label="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash), which feeds classify (prompt). classify fans out to four review lanes: code-review always, and error-handling, test-coverage, and docs-impact each gated by a when condition (dashed). All four converge on synthesize (prompt) under a one_success join, which feeds post-comment (bash).">
+     aria-label="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash), which feeds classify (prompt). classify fans out to four read-only review lanes, all gated by a when condition: code-review's gate fires for any code change (solid edge), and error-handling, test-coverage, and docs-impact are selective (dashed edges). All four converge on synthesize (prompt) under a one_success join, which feeds post-comment (bash).">
   <defs>
     <style>
       .lbl  { font-family: "Cascadia Code","SF Mono",ui-monospace,Menlo,monospace; }
@@ -93,7 +93,7 @@
 
   <!-- legend -->
   <line x1="70" y1="430" x2="104" y2="430" stroke="#1e3a5f" stroke-width="1.6" marker-end="url(#arrow)"/>
-  <text class="lbl navy"  x="112" y="434" font-size="10.5">always runs</text>
+  <text class="lbl navy"  x="112" y="434" font-size="10.5">when: gate fires for any code change</text>
   <line x1="70" y1="450" x2="104" y2="450" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-slate)"/>
-  <text class="lbl slate" x="112" y="454" font-size="10.5">runs only when the classifier selects the lane (when:)</text>
+  <text class="lbl slate" x="112" y="454" font-size="10.5">when: gate fires only when the lane is relevant</text>
 </svg>

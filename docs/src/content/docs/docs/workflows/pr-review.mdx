@@ -44,12 +44,13 @@ on one report.
 <figure>
   <img
     src={`${import.meta.env.BASE_URL}assets/figures/pr-review-dag.svg`}
-    alt="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash); scope feeds classify (prompt). classify fans out to four review lanes (code-review, error-handling, test-coverage, docs-impact), three of them behind a dashed when-gate. All four lanes converge on synthesize (prompt) under a one_success join, which feeds post-comment (bash)."
+    alt="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash); scope feeds classify (prompt). classify fans out to four read-only review lanes (code-review, error-handling, test-coverage, docs-impact), all four behind a when-gate: code-review's fires for any code change (solid edge), the other three are selective (dashed edges). All four lanes converge on synthesize (prompt) under a one_success join, which feeds post-comment (bash)."
   />
   <figcaption>
     Figure 1. The pr-review DAG. The classifier fans out to four read-only
-    lanes; three are gated by a <code>when:</code> condition, so a trivial PR
-    runs fewer. <code>synthesize</code> joins on <code>one_success</code>, so it
+    lanes, each behind a <code>when:</code> gate. Code-review's gate fires for
+    any code change while the other three are selective, so a trivial PR runs
+    fewer. <code>synthesize</code> joins on <code>one_success</code>, so it
     proceeds even when lanes were skipped or one failed.
   </figcaption>
 </figure>
