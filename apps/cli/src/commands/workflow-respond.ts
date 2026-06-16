@@ -2,8 +2,8 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
-import { HttpError, isServerDownError, resumeRun } from "../http/workflow-client.ts";
+import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
+import { HttpError, isServerDownError, resolveRunRef, resumeRun } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
 import { probeServer } from "../server-probe.ts";
 
@@ -44,12 +44,20 @@ export async function runWorkflowRespond(
   }
 
   try {
-    await resumeRun(baseUrl, runId, {
+    const resolved = await resolveRunRef(baseUrl, runId);
+    if ("error" in resolved) {
+      emit(
+        { error: resolved.error, code: resolved.ambiguous ? "AMBIGUOUS_RUN_ID" : "NOT_FOUND" },
+        { json: opts.json },
+      );
+      process.exit(resolved.ambiguous ? EXIT_BAD_ARGS : EXIT_NOT_FOUND);
+    }
+    await resumeRun(baseUrl, resolved.runId, {
       nodeId,
       text,
       ...(opts.pauseId !== undefined ? { pauseId: opts.pauseId } : {}),
     });
-    emit({ data: { resumed: true, runId, nodeId } }, { json: opts.json });
+    emit({ data: { resumed: true, runId: resolved.runId, nodeId } }, { json: opts.json });
     process.exit(EXIT_OK);
   } catch (err) {
     if (err instanceof HttpError && err.status === 404) {
