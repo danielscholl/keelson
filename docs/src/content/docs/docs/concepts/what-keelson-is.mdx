@@ -1,6 +1,6 @@
 ---
 title: What Keelson is, and is not
-description: A one-page read for an evaluator, naming what the harness does, the non-goals it deliberately leaves uncovered, and how much of the alpha is real today.
+description: A one-page read for an evaluator, naming what the harness does, the non-goals it deliberately leaves uncovered, and how mature it is today.
 sidebar:
   order: 0.5
 ---
@@ -47,10 +47,11 @@ This page is the fastest way to decide whether Keelson fits before you read on.
   a paused run is held by the running server, and a restart fails a stale run
   rather than faking a resume.
 
-## How much is real today
+## Maturity and limits
 
-Keelson is alpha. The table is the honest status of the areas an evaluator most
-often asks about; the [learnings](../../design/learnings/) page carries the full
+Keelson is beta: the core works day to day, with a few edges still being
+finished. The table is the honest status of the areas an evaluator most often
+asks about; the [learnings](../../design/learnings/) page carries the full
 detail behind each one.
 
 | Area | Status | What it means for you |
@@ -74,6 +75,6 @@ rules prevent collisions and cross-rib reads, not a malicious or buggy rib.
   together at boot.
 - [The rib model](../the-rib-model/): why capabilities are packages and the
   boundary the harness enforces.
-- [Learnings](../../design/learnings/): the candid, detailed status of the alpha.
+- [Learnings](../../design/learnings/): the candid, detailed status of the beta.
 - [Your first run](../../tutorials/first-run/): prove the harness works with no
   credentials.

@@ -121,12 +121,22 @@
       }
 
       .feature-card {
+        display: block;
         min-height: 196px;
         padding: 24px 18px;
         border: 1px solid rgba(30, 58, 95, 0.26);
         border-radius: 4px;
         background: rgba(255, 255, 255, 0.55);
         text-align: center;
+        color: inherit;
+        text-decoration: none;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      .feature-card:hover {
+        border-color: var(--brass);
+        background: rgba(255, 255, 255, 0.85);
       }
 
       .feature-icon {
@@ -276,7 +286,7 @@
               <a class="button button-primary" href="docs/">Read the Docs</a>
               <a class="button" href="https://github.com/danielscholl/keelson">View on GitHub</a>
             </div>
-            <p class="platform-note">Apache 2.0 &middot; Alpha &middot; runs locally on Bun</p>
+            <p class="platform-note">Apache 2.0 &middot; Beta &middot; runs locally on Bun</p>
           </div>
 
           <figure class="viewport" aria-label="Keelson architecture, drawn as a hull">
@@ -289,7 +299,7 @@
         </section>
 
         <section id="features" class="features" aria-label="Keelson features">
-          <article class="feature-card">
+          <a class="feature-card" href="docs/concepts/chat/">
             <div class="feature-icon">
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M7 5 H23 a2 2 0 0 1 2 2 V16 a2 2 0 0 1 -2 2 H12 l-4 4 v-4 H7 a2 2 0 0 1 -2 -2 V7 a2 2 0 0 1 2 -2 Z"/>
@@ -299,8 +309,8 @@
             </div>
             <h2>Chat</h2>
             <p>Talk to the agent with every rib tool on tap.</p>
-          </article>
-          <article class="feature-card">
+          </a>
+          <a class="feature-card" href="docs/concepts/workflows/">
             <div class="feature-icon">
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="7" cy="15" r="2.8"/>
@@ -312,8 +322,8 @@
             </div>
             <h2>Workflows</h2>
             <p>Deterministic runs as readable YAML.</p>
-          </article>
-          <article class="feature-card">
+          </a>
+          <a class="feature-card" href="docs/concepts/memory-and-state/">
             <div class="feature-icon">
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M15 9 C12.2 7.4 8.6 7.1 5.5 8 V21.4 C8.6 20.5 12.2 20.8 15 22.4"/>
@@ -325,8 +335,8 @@
             </div>
             <h2>Memory</h2>
             <p>Persistent, searchable, and governed.</p>
-          </article>
-          <article class="feature-card">
+          </a>
+          <a class="feature-card" href="docs/concepts/the-rib-model/">
             <div class="feature-icon">
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M6 25 V11 C6 8 8 6 11 6 H19 C22 6 24 8 24 11 V25"/>
@@ -337,8 +347,8 @@
             </div>
             <h2>Ribs</h2>
             <p>Capabilities ship as packages, not forks.</p>
-          </article>
-          <article class="feature-card">
+          </a>
+          <a class="feature-card" href="docs/concepts/snapshots-and-surfaces/">
             <div class="feature-icon">
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="5" y="6" width="20" height="18" rx="2"/>
@@ -349,8 +359,8 @@
             </div>
             <h2>Surfaces</h2>
             <p>Ribs emit JSON; the app renders live boards.</p>
-          </article>
-          <article class="feature-card">
+          </a>
+          <a class="feature-card" href="docs/concepts/providers/">
             <div class="feature-icon">
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M6 11 H22"/>
@@ -361,7 +371,7 @@
             </div>
             <h2>Providers</h2>
             <p>Copilot, Claude, Codex, Pi. Swappable, no lock-in.</p>
-          </article>
+          </a>
         </section>
 
         <section id="paths" class="paths" aria-label="Where to start">
@@ -407,7 +417,7 @@
         </div>
         <div class="tb-cell">
           <div class="tb-k">Status</div>
-          <div class="tb-v">Alpha</div>
+          <div class="tb-v">Beta</div>
         </div>
         <div class="tb-cell">
           <div class="tb-k">License</div>

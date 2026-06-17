@@ -1,0 +1,89 @@
+---
+title: Providers
+description: One interface, several coding-agent SDKs behind it, chosen per turn and per node, with no lock-in.
+sidebar:
+  order: 5.5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A provider is the coding agent itself, the component that actually runs a turn
+and decides what to say or call. Keelson does not implement an agent of its own.
+It adapts existing ones, Copilot and Claude and others, behind a single
+interface, so that everything else (chat, workflow `prompt` nodes, a rib's agent
+turn) depends on the interface and never on which agent is behind it. That
+indirection is the point: you can change the agent without changing the harness,
+and a credential-free stub can stand in wherever a real one would run.
+
+## One interface
+
+Every provider implements the same small contract, `IAgentProvider`:
+
+| Method | Job |
+| --- | --- |
+| `sendQuery` | Run one turn and stream it back as message chunks: text, tool calls, results. The async stream is how chat and workflows render progress live. |
+| `getCapabilities` | Declare what this provider supports: its models, and the optional features the harness may ask for. |
+| `listModels` | List the models available right now. It must never throw; on any failure it falls back to the declared list, so a model picker never empties out. |
+| `getType` | Report the provider's id. |
+
+The contract is deliberately narrow. It carries no SDK types and no
+provider-specific concepts, so adding a new agent means writing one adapter, not
+touching the harness.
+
+## What ships
+
+Keelson ships five providers. Which ones load is your choice; by default only
+Copilot does, and the rest are opt-in through configuration.
+
+| Provider | What it is | Credentials |
+| --- | --- | --- |
+| Copilot | GitHub Copilot's coding agent. The default. | Copilot subscription, in your keychain. |
+| Claude | Anthropic's Claude Agent SDK. | Anthropic API key, in your keychain. |
+| Codex | OpenAI's Codex agent. | Self-managed by the Codex tooling. |
+| Pi | A multi-vendor community agent. | Self-managed by Pi. |
+| stub | An offline echo provider: no model, no tool calls, deterministic output. | None. |
+
+The stub is why you can try the harness, run a workflow, and exercise the CLI's
+server-down fallback with no keys at all. It is for verification, not for real
+work: it echoes rather than reasons.
+
+## Chosen per turn, and per node
+
+Provider selection happens at two grains, one for each engine:
+
+- **In chat**, every message names its provider and model. The picker preselects
+  your configured default, and you can switch on the next turn.
+- **In workflows**, each `prompt` node can pin its own `provider:` and `model:`,
+  so one DAG can route planning to one agent and review to another. The operator
+  floor `KEELSON_WORKFLOW_PROVIDER` overrides that for every node when it is set.
+
+Credentials never travel with the selection. Each provider reads its own secret
+from the operating system keychain under the `keelson` service, and the API
+reports only whether a credential exists, never its value.
+
+## Capabilities vary, and the harness says so
+
+The providers are swappable, not identical. They expose different models, and
+they honor different optional features: Claude consumes a thinking toggle,
+Copilot consumes a reasoning-effort level on its reasoning models, and some
+per-node controls like `hooks` are honored fully by only one of them. Rather
+than pretend the differences away, the harness surfaces them. `getCapabilities`
+declares what each one supports, and the [workflow loader](../workflows/) warns
+at load time when a file leans on a feature the chosen provider will not honor,
+so a capability gap reads as a warning instead of a silent no-op.
+
+<Aside type="note" title="Grounding the tile">
+The landing says "Copilot, Claude, Codex, Pi. Swappable, no lock-in." The swap
+is real because all four sit behind one interface and are chosen per turn or per
+node. The no-lock-in is structural: the harness holds no dependency on any single
+agent, and a fifth could join as one more adapter.
+</Aside>
+
+## Where to go next
+
+- The [providers reference](../../reference/providers/) is the full matrix: every
+  provider, its capability flags, and where each is chosen.
+- [Configuration](../../guides/configuration/) shows how to load providers and set
+  the chat default, with a config file or environment variables.
+- [Chat](../chat/) and [Workflows](../workflows/) are the two engines that run
+  turns through a provider.

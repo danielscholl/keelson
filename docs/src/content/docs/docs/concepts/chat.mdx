@@ -1,0 +1,90 @@
+---
+title: Chat
+description: The live half of the harness, one agent loop with the tools ribs give it, the provider you pick, and the governance that shapes every turn.
+sidebar:
+  order: 1.5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Chat is the live half of the harness. You talk to a coding agent in a
+conversation, and every turn the agent decides what happens next: answer, call
+a tool, read a file, propose a change. That open-endedness is the point, and it
+is the exact complement of a [workflow](../workflows/), where a YAML file fixes
+what runs. The two share one agent and one tool registry; chat leaves the
+control flow with the model, a workflow takes it away.
+
+A bare agent SDK already gives you a chat loop. What the harness adds around it
+is the rest of this page: a system prompt built from your own state, a tool set
+drawn from installed ribs, a provider you choose per turn, and a governance
+layer that gates every tool call. None of it changes the model; all of it shapes
+the turn.
+
+## A turn, end to end
+
+Each message you send runs the same sequence on the server:
+
+| Step | What happens |
+| --- | --- |
+| Resolve the provider | The message names a provider and model; the server looks it up in the registry and constructs it. An unknown provider is rejected before the turn starts. |
+| Assemble the system prompt | Four sources compose in a fixed order: the project notebook, memory recall, a conversation seed, and workflow guidance. Nothing else is added silently. |
+| Project the tools | The registered tools, the built-in workflow tools plus whatever ribs have added, are filtered by policy into the set this turn may see. |
+| Stream the turn | The provider runs the turn and streams chunks back over the WebSocket, text, tool calls, and results, as they happen. |
+| Gate each tool call | Before any projected tool executes, it passes an args-aware policy check; a denied call returns an error result instead of running. |
+| Persist | The conversation and its messages are saved to SQLite, and the provider session id is recorded so the next turn can continue the same thread. |
+
+The system prompt's four sources are the subject of
+[Memory and state](../memory-and-state/#what-the-agent-actually-sees); the short
+version is that everything the agent knows across turns arrives through one of
+them, and three of the four are files or rows you can read.
+
+## The agent starts empty
+
+Keelson ships no domain tools. Out of the box the agent can hold a conversation
+and run the built-in workflow tools (start a workflow, check a run), and nothing
+more. Every other capability, from reading a cluster to opening an issue to
+querying a dataset, reaches the agent because a [rib](../the-rib-model/)
+registered it. A rib's `registerTools` puts its tools in the shared registry,
+and from that moment they are on tap in chat with no further wiring, the same
+tools a workflow `prompt` node opts into by name.
+
+<Aside type="note" title="Grounding the tile">
+The landing says chat puts "every rib tool on tap." That is literal: the tool
+set a turn sees is the registered tools minus what policy filters out. Install a
+rib and its tools appear on the next turn; remove it and they are gone. The
+harness supplies the loop, ribs supply the reach.
+</Aside>
+
+## One conversation, one provider
+
+A conversation records which provider it runs on and, when the provider supports
+it, the backend session id for that thread. You can change the provider on the
+next message; the picker just preselects your configured default. Switching
+providers starts a fresh session rather than resuming the old one, because a
+session id from one agent means nothing to another.
+
+Session resume is what lets a provider keep multi-turn context server-side
+instead of replaying the whole transcript every turn. It holds for the life of
+the server process: a restart does not resume a mid-conversation provider
+session, though the conversation and its messages stay durable in the store
+either way.
+
+## Bounded the same way everywhere
+
+Chat, workflow `prompt` nodes, and a rib's own agent turns are the three places
+an agent runs, and they pass through one governance layer. For chat that means
+two checks. Policy first decides which tools are even visible this turn (the
+projection), then re-checks each individual call against its arguments before it
+runs (the gate). Above both sits the operator's tool denylist, a floor no turn
+can rise over. The allow-or-deny decision is the same engine a workflow uses, so
+a tool you have forbidden is forbidden everywhere, not just on one surface.
+
+## Where to go next
+
+- [Workflows](../workflows/) is the deterministic complement: the same agent and
+  tools, with the control flow moved into a file.
+- [The rib model](../the-rib-model/) is where chat's tools come from, and how a
+  rib registers them.
+- [Providers](../providers/) is the swappable agent behind every turn.
+- [Memory and state](../memory-and-state/) details the system prompt's four
+  sources and what the store keeps.

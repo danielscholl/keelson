@@ -30,7 +30,7 @@ onto Starlight.
 - Engineering-honest, practitioner to practitioner. Keelson is a harness for
   builders, not a consumer app. Say true things plainly. No marketing register,
   no quantified hype ("90% faster"), no "Generated with" footers.
-- **Alpha-honest.** Keelson is alpha. Claim only what genuinely ships. Do not
+- **Ship-honest.** Keelson is beta. Claim only what genuinely ships. Do not
   tout capabilities that are dormant or partial. Specifically keep out of
   headline copy: the console redaction pipeline (wired but inactive), durable
   cross-restart resume (resume is process-lifetime only), and a full offline
@@ -180,7 +180,7 @@ metaphor land together:
 ## Feature tiles
 
 Six single-word tiles in one row, grounded in capabilities that genuinely ship
-(the alpha-honesty rule applies hardest here). The three built-in surfaces lead:
+(the ship-honesty rule applies hardest here). The three built-in surfaces lead:
 
 | Tile | Line |
 |---|---|
@@ -283,7 +283,7 @@ satisfy items 4 to 8.
   says plainly what keelson is.
 - **Six evidence-grounded tiles.** Chosen from a capability scan of the codebase,
   rated for distinctiveness and honesty. The three surfaces (Chat, Workflows,
-  Memory) lead; nothing on the tiles oversells the alpha.
+  Memory) lead; nothing on the tiles oversells what ships.
 - **Wide container, capped measure.** 1320 / 1480 px containers with a 72ch prose
   measure, the documentation standard, so the page feels substantial without long
   unreadable lines.
