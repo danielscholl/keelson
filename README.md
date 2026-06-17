@@ -1,7 +1,7 @@
 # Keelson
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)
+![Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)
 [![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh/)
 
 **The backbone for your coding agent.**

@@ -30,9 +30,12 @@ which is which.
   browser app are keelson's two surfaces. Specifically, a *rib surface* is a
   browser tab a rib declares as a layout of regions. Pages say "rib surface"
   when the narrow sense matters.
+- **chat**: the conversational surface. One agent loop where the model decides
+  each turn, drawing on tools that installed ribs registered and a provider you
+  pick per turn. See [Chat](../chat/).
 - **provider**: a coding-agent SDK behind the one `IAgentProvider` interface:
   Copilot, Claude, Codex, Pi, or the stub. Swappable per chat turn and per
-  workflow node. See [Providers](../../reference/providers/).
+  workflow node. See [Providers](../providers/).
 - **stub provider**: the offline echo provider. No credentials, no tool
   calls, deterministic output; exists so every loop can be verified without
   keys.

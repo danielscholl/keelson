@@ -1,13 +1,13 @@
 ---
 title: Learnings
-description: What the design got right, what is still partial in this alpha, and what we would tell the next builder.
+description: What the design got right, what is still partial in this beta, and what we would tell the next builder.
 sidebar:
   order: 2
 ---
 
 import { Aside } from "@astrojs/starlight/components";
 
-Keelson is alpha. The [decisions](../decisions/) list the bets this system rests
+Keelson is beta. The [decisions](../decisions/) list the bets this system rests
 on; this is where they paid off, where the implementation is still behind the
 design, and what we would tell someone building on it. It is the narrative the
 source-comment policy keeps out of the code.
@@ -45,7 +45,7 @@ We would rather name the gaps than let the headline copy imply they are closed.
 | Tool projection | Copilot, Claude, and Pi receive the harness tool registry; Codex does not (it acts agentically inside its own sandbox). Pi takes the registry as custom tools but keeps its own built-in tools off. |
 | The `html` canvas kind | Declared in the schema and reserved, unrendered until an iframe-origin sandboxing pass lands. |
 
-<Aside type="caution" title="Alpha means alpha">
+<Aside type="caution" title="Known edges, not bugs">
 None of the above is a bug to file; each is a known edge of the current
 implementation. They are listed so an operator's trust decisions match the code,
 not the ambition.
