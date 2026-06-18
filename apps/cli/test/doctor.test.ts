@@ -347,6 +347,11 @@ describe("runDoctor exit-code rollup", () => {
         workflowsDir: "/tmp/fake-wf",
         discoverWorkflows: () => ({ workflows: [], errors: [], warnings: [] }),
       },
+      // Server-down keeps the ribs check a deterministic skip (no real network
+      // probe), so the rollup counts stay stable.
+      ribs: {
+        probeServer: async () => null,
+      },
     };
   }
 
