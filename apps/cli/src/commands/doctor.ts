@@ -4,6 +4,7 @@
 
 import { type AuthDeps, runAuthCheck } from "../checks/auth.ts";
 import { type DbDeps, runDbCheck } from "../checks/db.ts";
+import { type RibsDeps, runRibsCheck } from "../checks/ribs.ts";
 import { runServerCheck, type ServerDeps } from "../checks/server.ts";
 import { runToolchainCheck, type ToolchainDeps } from "../checks/toolchain.ts";
 import { type CategoryResult, type DoctorReport, tally } from "../checks/types.ts";
@@ -17,6 +18,7 @@ export interface DoctorDeps {
   db?: DbDeps;
   auth?: AuthDeps;
   workflows?: WorkflowsDeps;
+  ribs?: RibsDeps;
 }
 
 export interface DoctorOptions {
@@ -35,6 +37,7 @@ export async function buildDoctorReport(
     runDbCheck(deps.db),
     runAuthCheck(deps.auth),
     runWorkflowsCheck(deps.workflows),
+    runRibsCheck(deps.ribs),
   ]);
   return { categories, summary: tally(categories), strict };
 }

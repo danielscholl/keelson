@@ -79,11 +79,18 @@ function ActionItemButton({ item }: { item: ActionItem }) {
   const dispatch = async (collected?: Record<string, string>) => {
     if (!ctx || pending) return;
     setPending(true);
+    setError(null);
     try {
       const payload = mergePayload(item.payload, collected);
-      await ctx.run(payload !== undefined ? { type: item.type, payload } : { type: item.type });
-      setOpen(false);
-      setValues({});
+      const result = await ctx.run(
+        payload !== undefined ? { type: item.type, payload } : { type: item.type },
+      );
+      if (result.ok) {
+        setOpen(false);
+        setValues({});
+      } else {
+        setError(result.error);
+      }
     } finally {
       setPending(false);
     }
