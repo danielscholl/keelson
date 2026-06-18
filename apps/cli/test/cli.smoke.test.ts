@@ -2,12 +2,21 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+
+// Port 1 is privileged and never bound; the probe is always refused so the
+// in-process path runs deterministically — even when a real server is up.
+const deadServerUrl = "http://127.0.0.1:1";
+
+// Assigned in beforeAll; isolates spawns from the developer's real ~/.keelson.
+let isolatedHome: string;
 
 interface RunResult {
   stdout: string;
@@ -23,7 +32,14 @@ async function runCli(
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
-    env: spawnEnv(envOverrides),
+    // Isolate from the real home and any running server (see the let block);
+    // per-test overrides still win — they are spread last.
+    env: spawnEnv({
+      KEELSON_HOME: isolatedHome,
+      KEELSON_WORKSPACE: join(isolatedHome, "workspace"),
+      KEELSON_SERVER_URL: deadServerUrl,
+      ...envOverrides,
+    }),
   });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -32,6 +48,14 @@ async function runCli(
   ]);
   return { stdout, stderr, exitCode };
 }
+
+beforeAll(() => {
+  isolatedHome = mkdtempSync(join(tmpdir(), "keelson-cli-smoke-"));
+});
+
+afterAll(() => {
+  rmSync(isolatedHome, { recursive: true, force: true });
+});
 
 describe("keelson CLI smoke", () => {
   test("version --json emits a parseable success envelope", async () => {

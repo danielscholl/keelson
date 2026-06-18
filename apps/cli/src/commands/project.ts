@@ -7,7 +7,7 @@ import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } fro
 import { createProject, deleteProject, listProjects } from "../http/projects-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
-import { DEFAULT_SERVER_BASE_URL } from "../server-probe.ts";
+import { defaultServerBaseUrl } from "../server-probe.ts";
 
 interface BaseOptions {
   json: boolean;
@@ -18,7 +18,7 @@ interface BaseOptions {
 // the actual HTTP call surface "connection refused" via `isServerDownError`,
 // which is the same signal at fewer round-trips.
 function effectiveBaseUrl(opts: BaseOptions): string {
-  return opts.baseUrl ?? DEFAULT_SERVER_BASE_URL;
+  return opts.baseUrl ?? defaultServerBaseUrl();
 }
 
 function noServer(opts: BaseOptions): never {

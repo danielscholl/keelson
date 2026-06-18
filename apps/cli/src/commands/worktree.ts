@@ -11,7 +11,7 @@ import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listProjects } from "../http/projects-client.ts";
 import { isServerDownError, listPersistedWorktreePaths } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
-import { DEFAULT_SERVER_BASE_URL } from "../server-probe.ts";
+import { defaultServerBaseUrl } from "../server-probe.ts";
 
 export interface WorktreePruneOptions {
   json: boolean;
@@ -193,7 +193,7 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
 }
 
 export async function runWorktreePrune(opts: WorktreePruneOptions): Promise<never> {
-  const baseUrl = opts.baseUrl ?? DEFAULT_SERVER_BASE_URL;
+  const baseUrl = opts.baseUrl ?? defaultServerBaseUrl();
   let candidates: PruneCandidate[];
   try {
     candidates = await collectCandidates(baseUrl);

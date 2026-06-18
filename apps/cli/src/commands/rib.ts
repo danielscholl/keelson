@@ -9,7 +9,7 @@ import { ensureHome, installedRibIds, resolveKeelsonHome } from "../home.ts";
 import { listRibs } from "../http/ribs-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
-import { DEFAULT_SERVER_BASE_URL, probeServer } from "../server-probe.ts";
+import { defaultServerBaseUrl, probeServer } from "../server-probe.ts";
 
 interface BaseOptions {
   json: boolean;
@@ -43,7 +43,7 @@ async function runBunPm(args: string[], home: string, quiet: boolean): Promise<n
 // Skip probeServer: the actual GET surfaces "connection refused" via
 // isServerDownError at fewer round-trips (mirrors the project commands).
 function effectiveBaseUrl(opts: BaseOptions): string {
-  return opts.baseUrl ?? DEFAULT_SERVER_BASE_URL;
+  return opts.baseUrl ?? defaultServerBaseUrl();
 }
 
 function noServer(opts: BaseOptions): never {

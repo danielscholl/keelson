@@ -30,29 +30,65 @@ function fakeRunText(
   return async (cmd: string): Promise<ExecResult<string>> => table[cmd] ?? fallback;
 }
 
+// A non-bare bash path keeps the toolchain bash check "ok" on every platform —
+// the Windows WSL-shim warning only triggers for a bare `bash`.
+const BASH_CMD = "/opt/keelson/bash";
+const bashOkResolver = () => ({ cmd: BASH_CMD, pathDirs: [] as string[] });
+
 describe("toolchain check", () => {
-  test("bun resolves → ok", async () => {
+  test("bun + bash resolve → ok", async () => {
     const result = await runToolchainCheck({
       runText: fakeRunText({
         bun: execOk("1.2.21"),
+        [BASH_CMD]: execOk("GNU bash, version 5.2.21"),
       }),
+      resolveBash: bashOkResolver,
     });
     expect(result.category).toBe("toolchain");
-    expect(result.checks).toHaveLength(1);
-    expect(result.checks[0]?.status).toBe("ok");
-    expect(result.checks[0]?.detail).toBe("1.2.21");
+    expect(result.checks).toHaveLength(2);
+    const bun = result.checks.find((c) => c.name.startsWith("bun"));
+    const bash = result.checks.find((c) => c.name.startsWith("bash"));
+    expect(bun?.status).toBe("ok");
+    expect(bun?.detail).toBe("1.2.21");
+    expect(bash?.status).toBe("ok");
+    expect(bash?.detail).toBe("GNU bash, version 5.2.21");
   });
 
   test("bun missing → warn with install hint", async () => {
     const result = await runToolchainCheck({
       runText: fakeRunText({
         bun: execFail("bun not found"),
+        [BASH_CMD]: execOk("GNU bash, version 5.2.21"),
       }),
+      resolveBash: bashOkResolver,
     });
     const bun = result.checks.find((c) => c.name.startsWith("bun"));
     expect(bun?.status).toBe("warn");
     expect(bun?.hint).toContain("Bun");
   });
+
+  test("bash missing → warn with KEELSON_BASH hint", async () => {
+    const result = await runToolchainCheck({
+      runText: fakeRunText({ bun: execOk("1.2.21") }, execFail("bash not found")),
+      resolveBash: bashOkResolver,
+    });
+    const bash = result.checks.find((c) => c.name.startsWith("bash"));
+    expect(bash?.status).toBe("warn");
+    expect(bash?.hint).toContain("KEELSON_BASH");
+  });
+
+  test.skipIf(process.platform !== "win32")(
+    "windows bare PATH bash → warn (WSL shim)",
+    async () => {
+      const result = await runToolchainCheck({
+        runText: fakeRunText({ bun: execOk("1.2.21"), bash: execOk("GNU bash, version 5.2") }),
+        resolveBash: () => ({ cmd: "bash", pathDirs: [] }),
+      });
+      const bash = result.checks.find((c) => c.name.startsWith("bash"));
+      expect(bash?.status).toBe("warn");
+      expect(bash?.detail).toContain("WSL");
+    },
+  );
 });
 
 describe("server check", () => {
@@ -325,7 +361,11 @@ describe("runDoctor exit-code rollup", () => {
   function allOkDeps() {
     return {
       toolchain: {
-        runText: fakeRunText({ bun: execOk("1.2.21") }),
+        runText: fakeRunText({
+          bun: execOk("1.2.21"),
+          [BASH_CMD]: execOk("GNU bash, version 5.2.21"),
+        }),
+        resolveBash: bashOkResolver,
       },
       server: {
         probeServer: async () => ({
@@ -367,7 +407,11 @@ describe("runDoctor exit-code rollup", () => {
   test("warn-only → exit 0 normally, exit 1 with --strict", async () => {
     const deps = allOkDeps();
     deps.toolchain = {
-      runText: fakeRunText({ bun: execFail("bun not found") }),
+      runText: fakeRunText({
+        bun: execFail("bun not found"),
+        [BASH_CMD]: execOk("GNU bash, version 5.2.21"),
+      }),
+      resolveBash: bashOkResolver,
     };
     const loose = await buildDoctorReport(false, deps);
     expect(loose.summary.warn).toBe(1);
