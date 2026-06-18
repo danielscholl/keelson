@@ -80,7 +80,11 @@ self-managed auth works.
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and
 > Keelson auto-discovers its `bash.exe` (`KEELSON_BASH` overrides). The `prompt`,
-> `command`, and `script` node types have no such requirement.
+> `command`, and `script` node types have no such requirement. `keelson doctor`
+> reports whether a usable bash was found. Note that the bundled `pr-review`,
+> `plan-act-evaluate`, `fix-issue`, and `adversarial-build` workflows also call
+> tools Git Bash does not ship — `git`, `gh`, `jq`, and `pkill` — so install those
+> separately to run them; the `smoke-test` workflow needs only Git Bash.
 
 ## Add ribs
 

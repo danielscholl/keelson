@@ -81,6 +81,7 @@ export {
   makeScriptHandler,
   scriptHandler,
 } from "./handlers/script.ts";
+export { type ResolvedBash, resolveBash } from "./handlers/shell.ts";
 export {
   type DiscoveryResult,
   type DiscoveryRoot,
