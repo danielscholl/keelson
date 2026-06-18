@@ -49,14 +49,19 @@ function firstLine(text: string): string {
 // a warning, not a failure. On Windows the bare PATH `bash` is usually the WSL
 // launcher (resolveBash only falls back to it when no Git Bash is found), and it
 // runs in a separate filesystem namespace where the Windows cwd and the
-// KEELSON_* paths a workflow projects don't resolve.
+// KEELSON_* paths a workflow relies on don't resolve.
 async function runBashCheck(exec: RunText, resolve: () => ResolvedBash): Promise<CheckResult> {
   const name = "bash (workflow shell)";
   const onWindows = process.platform === "win32";
   const hint = onWindows
     ? "powers `bash`/`loop` nodes — install Git for Windows (https://git-scm.com/download/win) or set KEELSON_BASH"
     : "powers `bash`/`loop` nodes — install bash or set KEELSON_BASH";
-  const resolved = resolve();
+  let resolved: ResolvedBash;
+  try {
+    resolved = resolve();
+  } catch (err) {
+    return { name, status: "warn", detail: err instanceof Error ? err.message : String(err), hint };
+  }
   const r = await exec(resolved.cmd, ["--version"], { timeoutMs: 3000 });
   if (!r.ok) {
     return { name, status: "warn", detail: r.error, hint };

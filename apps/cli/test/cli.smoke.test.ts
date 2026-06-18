@@ -11,13 +11,12 @@ import { spawnEnv } from "./spawn-env.ts";
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
-// Assigned in beforeAll. An isolated home keeps these spawns off the
-// developer's real ~/.keelson; deadServerUrl is a port that was free a moment
-// ago and is never rebound, so the server probe is refused and the in-process
-// path runs deterministically — even when a real keelson server is up on the
-// default URL.
+// Port 1 is privileged and never bound; the probe is always refused so the
+// in-process path runs deterministically — even when a real server is up.
+const deadServerUrl = "http://127.0.0.1:1";
+
+// Assigned in beforeAll; isolates spawns from the developer's real ~/.keelson.
 let isolatedHome: string;
-let deadServerUrl: string;
 
 interface RunResult {
   stdout: string;
@@ -52,12 +51,6 @@ async function runCli(
 
 beforeAll(() => {
   isolatedHome = mkdtempSync(join(tmpdir(), "keelson-cli-smoke-"));
-  // Reserve an ephemeral port, then release it: nothing rebinds it during the
-  // run, so the CLI's server probe gets connection-refused and the in-process
-  // path is taken deterministically.
-  const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
-  deadServerUrl = `http://127.0.0.1:${probe.port}`;
-  probe.stop(true);
 });
 
 afterAll(() => {

@@ -723,7 +723,17 @@ export async function run(rawArgv: readonly string[]): Promise<void> {
   try {
     await program.parseAsync(argv as string[]);
   } catch (err) {
-    if (!isCommanderError(err)) throw err;
+    if (!isCommanderError(err)) {
+      // Non-commander errors (e.g. bad KEELSON_SERVER_URL) get a clean message
+      // and a non-zero exit rather than an unhandled-rejection stack trace.
+      const message = err instanceof Error ? err.message : String(err);
+      if (wantsJson) {
+        emit({ error: message, code: "FAIL" }, { json: true });
+      } else {
+        process.stderr.write(`error: ${message}\n`);
+      }
+      process.exit(EXIT_FAIL);
+    }
     const code = err.code ?? "UNKNOWN";
     // Help / version paths: commander suppresses output in JSON mode, so emit
     // a structured envelope instead of exiting silently — the CLI's --json

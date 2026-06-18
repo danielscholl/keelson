@@ -10,9 +10,25 @@ export const DEFAULT_PROBE_TIMEOUT_MS = 250;
 // can target a server on a non-default host/port without repeating `--base-url`
 // on every command; unset leaves the default unchanged. Deliberately not keyed
 // off `PORT` — that var is commonly set for unrelated reasons and would
-// misdirect the client probe.
+// misdirect the client probe. An invalid override throws so the misconfiguration
+// surfaces immediately rather than silently appearing as "server down".
 export function defaultServerBaseUrl(): string {
-  return process.env.KEELSON_SERVER_URL?.trim() || DEFAULT_SERVER_BASE_URL;
+  const override = process.env.KEELSON_SERVER_URL?.trim();
+  if (!override) return DEFAULT_SERVER_BASE_URL;
+  let parsed: URL;
+  try {
+    parsed = new URL(override);
+  } catch {
+    throw new Error(
+      `KEELSON_SERVER_URL is not a valid URL: "${override}" (expected e.g. http://127.0.0.1:7878)`,
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `KEELSON_SERVER_URL is not a valid URL: "${override}" (expected e.g. http://127.0.0.1:7878)`,
+    );
+  }
+  return override;
 }
 
 export interface ServerInfo {

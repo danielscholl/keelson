@@ -2,9 +2,15 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { DEFAULT_PROBE_TIMEOUT_MS, probeServer, type ServerInfo } from "../src/server-probe.ts";
+import {
+  DEFAULT_PROBE_TIMEOUT_MS,
+  DEFAULT_SERVER_BASE_URL,
+  defaultServerBaseUrl,
+  probeServer,
+  type ServerInfo,
+} from "../src/server-probe.ts";
 
 const TEST_SCHEMA_VERSION = "2.7";
 
@@ -26,6 +32,44 @@ const liveBaseUrl = `http://${server.hostname}:${server.port}`;
 
 afterAll(() => {
   server.stop(true);
+});
+
+describe("defaultServerBaseUrl", () => {
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env.KEELSON_SERVER_URL;
+  });
+
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.KEELSON_SERVER_URL;
+    } else {
+      process.env.KEELSON_SERVER_URL = saved;
+    }
+  });
+
+  test("returns the default when KEELSON_SERVER_URL is unset", () => {
+    delete process.env.KEELSON_SERVER_URL;
+    expect(defaultServerBaseUrl()).toBe(DEFAULT_SERVER_BASE_URL);
+  });
+
+  test("returns the default when KEELSON_SERVER_URL is an empty string", () => {
+    process.env.KEELSON_SERVER_URL = "";
+    expect(defaultServerBaseUrl()).toBe(DEFAULT_SERVER_BASE_URL);
+  });
+
+  test("returns a valid override as-is", () => {
+    process.env.KEELSON_SERVER_URL = "http://192.168.1.50:7878";
+    expect(defaultServerBaseUrl()).toBe("http://192.168.1.50:7878");
+  });
+
+  test("throws a descriptive error for an invalid override", () => {
+    process.env.KEELSON_SERVER_URL = "localhost:7878";
+    expect(() => defaultServerBaseUrl()).toThrow(
+      'KEELSON_SERVER_URL is not a valid URL: "localhost:7878"',
+    );
+  });
 });
 
 describe("probeServer", () => {
