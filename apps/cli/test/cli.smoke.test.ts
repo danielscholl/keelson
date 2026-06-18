@@ -2,12 +2,22 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+
+// Assigned in beforeAll. An isolated home keeps these spawns off the
+// developer's real ~/.keelson; deadServerUrl is a port that was free a moment
+// ago and is never rebound, so the server probe is refused and the in-process
+// path runs deterministically — even when a real keelson server is up on the
+// default URL.
+let isolatedHome: string;
+let deadServerUrl: string;
 
 interface RunResult {
   stdout: string;
@@ -23,7 +33,14 @@ async function runCli(
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
-    env: spawnEnv(envOverrides),
+    // Isolate from the real home and any running server (see the let block);
+    // per-test overrides still win — they are spread last.
+    env: spawnEnv({
+      KEELSON_HOME: isolatedHome,
+      KEELSON_WORKSPACE: join(isolatedHome, "workspace"),
+      KEELSON_SERVER_URL: deadServerUrl,
+      ...envOverrides,
+    }),
   });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -32,6 +49,20 @@ async function runCli(
   ]);
   return { stdout, stderr, exitCode };
 }
+
+beforeAll(() => {
+  isolatedHome = mkdtempSync(join(tmpdir(), "keelson-cli-smoke-"));
+  // Reserve an ephemeral port, then release it: nothing rebinds it during the
+  // run, so the CLI's server probe gets connection-refused and the in-process
+  // path is taken deterministically.
+  const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
+  deadServerUrl = `http://127.0.0.1:${probe.port}`;
+  probe.stop(true);
+});
+
+afterAll(() => {
+  rmSync(isolatedHome, { recursive: true, force: true });
+});
 
 describe("keelson CLI smoke", () => {
   test("version --json emits a parseable success envelope", async () => {

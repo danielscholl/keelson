@@ -5,6 +5,16 @@
 export const DEFAULT_SERVER_BASE_URL = "http://127.0.0.1:7878";
 export const DEFAULT_PROBE_TIMEOUT_MS = 250;
 
+// The base URL CLI commands probe when none is passed explicitly via
+// `--base-url`. `KEELSON_SERVER_URL` overrides the loopback default so the CLI
+// can target a server on a non-default host/port without repeating `--base-url`
+// on every command; unset leaves the default unchanged. Deliberately not keyed
+// off `PORT` — that var is commonly set for unrelated reasons and would
+// misdirect the client probe.
+export function defaultServerBaseUrl(): string {
+  return process.env.KEELSON_SERVER_URL?.trim() || DEFAULT_SERVER_BASE_URL;
+}
+
 export interface ServerInfo {
   baseUrl: string;
   name: string;
@@ -39,7 +49,7 @@ function parseHealth(baseUrl: string, payload: HealthPayload): ServerInfo | null
 }
 
 export async function probeServer(opts: ProbeOptions = {}): Promise<ServerInfo | null> {
-  const rawBaseUrl = opts.baseUrl ?? DEFAULT_SERVER_BASE_URL;
+  const rawBaseUrl = opts.baseUrl ?? defaultServerBaseUrl();
   // Strip trailing slashes so callers can pass `http://host:port` or
   // `http://host:port/` interchangeably without producing `//api/health`
   // (which Hono won't match).
