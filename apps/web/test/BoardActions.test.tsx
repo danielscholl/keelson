@@ -214,6 +214,47 @@ describe("board actions with input fields", () => {
     expect(calls).toHaveLength(0);
     expect(screen.getByText("Topic is required")).toBeDefined();
   });
+
+  test("a failed submit keeps the form open, preserves input, and shows the error inline", async () => {
+    const run = async (): Promise<RibActionResult> => ({ ok: false, error: "boom" });
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={fieldsBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start room" }));
+    const input = container.querySelector(".cvb-action-field-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "ship the rib" } });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+
+    await waitFor(() =>
+      expect(container.querySelector(".cvb-action-form-error")?.textContent).toBe("boom"),
+    );
+    // The form stays open with the typed value intact so the user can retry.
+    expect(container.querySelector(".cvb-action-form")).not.toBeNull();
+    expect((container.querySelector(".cvb-action-field-input") as HTMLInputElement).value).toBe(
+      "ship the rib",
+    );
+  });
+
+  test("a successful submit closes the form and clears the input", async () => {
+    const run = async (): Promise<RibActionResult> => ({ ok: true });
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={fieldsBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start room" }));
+    fireEvent.change(container.querySelector(".cvb-action-field-input") as HTMLInputElement, {
+      target: { value: "ship the rib" },
+    });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+
+    await waitFor(() => expect(container.querySelector(".cvb-action-form")).toBeNull());
+    // Reopening starts from a cleared input — success reset the collected values.
+    fireEvent.click(screen.getByRole("button", { name: "Start room" }));
+    expect((container.querySelector(".cvb-action-field-input") as HTMLInputElement).value).toBe("");
+  });
 });
 
 describe("copy-on-reveal field", () => {
