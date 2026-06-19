@@ -23,19 +23,26 @@ export function ensureHome(home: string = resolveKeelsonHome()): string {
   return home;
 }
 
-// The @keelson scope directory used for installed-rib listing. This follows the
-// same installed-vs-dev fallback as server discovery.
+// The @keelson scope directory for home-local package mutations.
 export function homeRibsDir(home: string = resolveKeelsonHome()): string {
-  return resolveRibsRoot(home);
+  return join(home, "node_modules", "@keelson");
 }
 
-// Ids of installed rib-* packages under the home, inferred from directory names
-// (rib-osdu → osdu). Sorted; empty when nothing is installed yet.
-export function installedRibIds(home: string = resolveKeelsonHome()): string[] {
-  const dir = homeRibsDir(home);
+function ribIdsFromDir(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((name) => name.startsWith("rib-"))
     .map((name) => name.slice("rib-".length))
     .sort();
+}
+
+// Ids of rib-* packages installed in <home>/node_modules/@keelson only.
+export function installedRibIds(home: string = resolveKeelsonHome()): string[] {
+  return ribIdsFromDir(homeRibsDir(home));
+}
+
+// Read-only installed listing, matching server discovery's home→workspace
+// fallback for checkout-style development.
+export function listedRibIds(home: string = resolveKeelsonHome()): string[] {
+  return ribIdsFromDir(resolveRibsRoot(home));
 }
