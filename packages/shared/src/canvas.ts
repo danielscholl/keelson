@@ -176,6 +176,22 @@ const canvasActionFieldSchema = z
   .strict();
 export type CanvasActionField = z.infer<typeof canvasActionFieldSchema>;
 
+const canvasActionConfirmSchema = z
+  .object({
+    // Irreversible actions can require a typed subject before confirm enables.
+    irreversible: z.boolean().optional(),
+    subject: z.string().min(1).optional(),
+    label: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+    body: z.string().min(1).optional(),
+    confirmLabel: z.string().min(1).optional(),
+    cancelLabel: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((c) => !c.irreversible || c.subject !== undefined, {
+    message: "irreversible confirms require a subject",
+  });
+
 // An action button a board offers; clicking dispatches `type` to the owning
 // rib's onAction, resolved from the board's snapshot-key namespace. `type` is a
 // rib-defined verb the base never enumerates (mirrors ribActionSchema).
@@ -202,6 +218,9 @@ const canvasActionItemSchema = z
         message: "action field names must be unique",
       })
       .optional(),
+    // Confirmation presentation metadata. `destructive` still marks dangerous
+    // actions; this only controls whether the confirm dialog is simple or typed.
+    confirm: canvasActionConfirmSchema.optional(),
   })
   .strict();
 
@@ -281,6 +300,7 @@ const cardsSectionSchema = z
           href: z.string().optional(),
           bar: z.object({ value: z.number(), total: z.number() }).strict().optional(),
           fields: z.array(canvasFieldSchema).optional(),
+          actions: z.array(canvasActionItemSchema).optional(),
           footnote: z.string().optional(),
           // A labelled annotation line under the card body (dashed rule), e.g.
           // `why flagged: stale-61d` — the label is dimmed, the text muted.
