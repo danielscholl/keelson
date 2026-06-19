@@ -10,9 +10,11 @@ import { Aside } from "@astrojs/starlight/components";
 `fix-issue` takes a GitHub issue from a number to a draft pull request: it
 fetches and classifies the issue, plans, **pauses for a human to approve the
 plan**, implements, validates against the repository's own checks, self-fixes
-failures, opens a draft PR, then reviews its own diff and fixes what it finds.
-It is the catalog's most complete pipeline, and the clearest example of putting
-a human gate in front of irreversible work.
+failures, opens a draft PR, then runs a **multi-lens review loop** — independent
+reviewers for correctness, conventions, and coverage feed a triage judge that
+keeps only real defects, which a fixer applies and a re-review confirms. It is
+the catalog's most complete pipeline, and the clearest example of putting a
+human gate in front of irreversible work.
 
 It assumes nothing about your stack. The implement step discovers how *this*
 project checks itself by reading its docs and build config, writes those
@@ -67,8 +69,8 @@ broken checks).
 | Fetch & classify | `extract-issue` | prompt | Parses the issue number from `$ARGUMENTS`, or searches `gh issue list` for the best match. |
 | | `fetch-issue` | bash | `gh issue view` to JSON, stashes the number in the scratch dir. |
 | | `classify` | prompt | Typed JSON: `issue_type` (bug, feature, …), a title, and reasoning. |
-| Plan | `investigate` | prompt | **`when: issue_type == 'bug'`**: root-cause analysis into `plan.md`. |
-| | `plan` | prompt | **`when: issue_type != 'bug'`**: an implementation plan into the *same* `plan.md`. |
+| Plan | `investigate` | prompt | **`when: issue_type == 'bug'`**, **`model: claude-opus-4.8`**: root-cause analysis into `plan.md`. |
+| | `plan` | prompt | **`when: issue_type != 'bug'`**, **`model: claude-opus-4.8`**: an implementation plan into the *same* `plan.md`. |
 | | `plan-ready` | bash | Funnel (`trigger_rule: one_success`): asserts `plan.md` exists and has tasks, then prints it. |
 | Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. |
 | Implement | `implement` | prompt | Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
@@ -76,9 +78,13 @@ broken checks).
 | | `fix-validation` | prompt | If it failed, fixes only what broke and commits; if it passed, stops. |
 | | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
 | Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, captures the PR number and URL. |
-| Self-review | `self-review` | prompt | Reviews `git diff main...HEAD` against the conventions, lists findings. Does not edit. |
-| | `self-fix` | prompt | Applies the CRITICAL and HIGH findings, commits, and pushes. |
-| Re-validate | `post-fix-validate` | bash | Re-runs the checks after self-fix (exits 0) so the report shows the *real* status. |
+| Review loop | `review-correctness` | prompt | One of three **independent, parallel** reviewers — hunts correctness defects in `git diff main...HEAD`. Does not edit. |
+| | `review-conventions` | prompt | Independent reviewer: checks the diff against `CLAUDE.md` / `CONTRIBUTING.md` (comment policy, conventions). |
+| | `review-coverage` | prompt | Independent reviewer: flags new behavior left untested, and tests authored but never wired in. |
+| | `triage` | prompt | **`model: claude-opus-4.8`**, typed JSON: de-dupes the findings, keeps only CRITICAL/HIGH at ≥80 confidence, drops false positives. |
+| | `apply-fixes` | prompt | Applies only the triaged must-fix issues, commits, pushes. No-ops when triage is clean. |
+| | `re-review` | prompt | Closes the loop: confirms each must-fix is resolved with no new defect; fixes any straggler. |
+| Re-validate | `post-fix-validate` | bash | Re-runs the full checks after the review loop (exits 0) so the report shows the *real* status. |
 | Report | `report` | prompt | The operator summary: issue, branch, PR, what changed, the true validation status. |
 
 ### The parts worth a second look
@@ -110,8 +116,21 @@ workflow carries no assumption about the stack, which is what makes it portable.
 
 **Operational guardrails live in the prompts.** The implement and fix prompts
 forbid `git add -A` (stage by name) and forbid committing anything under
-`$ARTIFACTS_DIR`, so scratch files never leak into the PR. These are the kind of
-hard-won rules a generic "implement the plan" prompt omits.
+`$ARTIFACTS_DIR`, so scratch files never leak into the PR. They also commit each
+task's code *and its tests together, immediately* — never carrying uncommitted
+work forward, where a timeout would erase it. These are the kind of hard-won
+rules a generic "implement the plan" prompt omits.
+
+**Review is a panel, not a self-check.** Phase 7 does not ask one agent to grade
+its own homework. Three independent reviewers — correctness, conventions, and
+coverage — run in parallel (they share a DAG layer, so the panel costs about one
+review's wall-clock), and a `triage` judge keeps only high-confidence
+CRITICAL/HIGH findings, dropping the false positives a lone self-review acts on.
+`apply-fixes` fixes exactly those, and `re-review` confirms the loop closed. The
+reasoning nodes (`investigate`, `plan`, `triage`) are pinned to
+`claude-opus-4.8` rather than `auto`: their judgment drives the run, and pinning
+also makes the model deterministic — Copilot never reports which model `auto`
+actually resolved, so an `auto` node's model is unobservable.
 
 ## Patterns it demonstrates
 
@@ -126,9 +145,12 @@ hard-won rules a generic "implement the plan" prompt omits.
 - **Change the bar.** The whole validation story is `verify.sh`. To enforce
   extra checks (coverage, a security scan), have `implement` add them to that
   script; every gate picks them up.
-- **Drop the self-review tail.** Phases 7 and 8 (`self-review`, `self-fix`,
-  `post-fix-validate`) are optional polish. Cut them and `create-pr` becomes the
-  last step for a leaner run.
+- **Tune the review loop.** Phase 7's panel (`review-correctness`,
+  `review-conventions`, `review-coverage`, `triage`, `apply-fixes`, `re-review`)
+  is the run's quality tail. Collapse it to a single reviewer plus `apply-fixes`
+  for a cheaper run, or drop it so `create-pr` is the last step. Spend *more* by
+  pinning the review lenses to a stronger model too, or change the pinned
+  `claude-opus-4.8` to whatever your Copilot account exposes.
 - **Swap the gate for autonomy.** Remove `approve-plan` (and point `implement`
   at `plan-ready`) for an unattended run, at the cost of the safety interlock.
   Keep the gate for anything that pushes to a shared remote.
