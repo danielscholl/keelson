@@ -190,7 +190,7 @@ export function buildProgram(): Command {
 
   workflow
     .command("list")
-    .description("list workflows discovered under .keelson/workflows/")
+    .description("list workflows from the server catalog or local discovery")
     .option("--dir <path>", "workflows directory to read (default: the keelson home catalog)")
     .action(async function listAction(this: Command, listOpts: { dir?: string }) {
       const { json } = globalOpts(this);
