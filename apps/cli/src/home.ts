@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveKeelsonHome } from "@keelson/shared/paths";
+import { resolveKeelsonHome, resolveRibsRoot } from "@keelson/shared/paths";
 
 export { resolveKeelsonHome };
 
@@ -23,19 +23,26 @@ export function ensureHome(home: string = resolveKeelsonHome()): string {
   return home;
 }
 
-// The home's @keelson scope directory — where `bun add` lands rib packages and
-// where the server's discovery scans for rib-*.
+// The @keelson scope directory for home-local package mutations.
 export function homeRibsDir(home: string = resolveKeelsonHome()): string {
   return join(home, "node_modules", "@keelson");
 }
 
-// Ids of installed rib-* packages under the home, inferred from directory names
-// (rib-osdu → osdu). Sorted; empty when nothing is installed yet.
-export function installedRibIds(home: string = resolveKeelsonHome()): string[] {
-  const dir = homeRibsDir(home);
+function ribIdsFromDir(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((name) => name.startsWith("rib-"))
     .map((name) => name.slice("rib-".length))
     .sort();
+}
+
+// Ids of rib-* packages installed in <home>/node_modules/@keelson only.
+export function installedRibIds(home: string = resolveKeelsonHome()): string[] {
+  return ribIdsFromDir(homeRibsDir(home));
+}
+
+// Read-only installed listing, matching server discovery's home→workspace
+// fallback for checkout-style development.
+export function listedRibIds(home: string = resolveKeelsonHome()): string[] {
+  return ribIdsFromDir(resolveRibsRoot(home));
 }

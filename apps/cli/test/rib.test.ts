@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnEnv } from "./spawn-env.ts";
@@ -179,5 +179,30 @@ describe("keelson rib (home lifecycle)", () => {
     const env = JSON.parse(stdout.trim());
     expect(env.ok).toBe(false);
     expect(env.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("keelson rib (dev home fallback)", () => {
+  let root: string;
+  let home: string;
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "keelson-rib-dev-home-"));
+    home = join(root, ".keelson");
+    mkdirSync(join(root, "node_modules", "@keelson", "rib-faketest"), { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("list --installed finds ribs in parent workspace node_modules", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "rib", "list", "--installed"], {
+      KEELSON_HOME: home,
+    });
+    expect(exitCode).toBe(0);
+    const env = JSON.parse(stdout.trim());
+    expect(env.data.source).toBe("installed");
+    expect(env.data.ribs.map((r: { id: string }) => r.id)).toContain("faketest");
   });
 });
