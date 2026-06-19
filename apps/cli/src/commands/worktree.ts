@@ -13,6 +13,21 @@ import { isServerDownError, listPersistedWorktreePaths } from "../http/workflow-
 import { emit } from "../output.ts";
 import { defaultServerBaseUrl } from "../server-probe.ts";
 
+// Canonical form for path comparison only (never display): realpath resolves
+// 8.3 short names + symlinks, then normalize separators and (Windows only) case.
+// Without it, a worktree git lists and the same dir we walk compare unequal on
+// Windows, mis-classifying tracked worktrees as orphans that prune would rm.
+function canonicalForCompare(p: string): string {
+  let resolved = p;
+  try {
+    resolved = realpathSync(p);
+  } catch {
+    // path may not exist; canonicalize the raw form
+  }
+  const slashed = resolved.replaceAll("\\", "/");
+  return process.platform === "win32" ? slashed.toLowerCase() : slashed;
+}
+
 export interface WorktreePruneOptions {
   json: boolean;
   baseUrl?: string;
@@ -38,13 +53,7 @@ async function buildLiveByPath(repoPath: string): Promise<Map<string, string | n
   const liveByPath = new Map<string, string | null>();
   if (!(await isGitRepo(repoPath))) return liveByPath;
   for (const entry of await listWorktrees(repoPath)) {
-    let resolved = entry.path;
-    try {
-      resolved = realpathSync(entry.path);
-    } catch {
-      // path may not exist; keep as-is
-    }
-    liveByPath.set(resolved, entry.branch);
+    liveByPath.set(canonicalForCompare(entry.path), entry.branch);
   }
   return liveByPath;
 }
@@ -61,12 +70,7 @@ async function classifyWorktreeDir(args: {
   } catch {
     return null;
   }
-  let resolvedPath = path;
-  try {
-    resolvedPath = realpathSync(path);
-  } catch {
-    // path may not exist yet; keep as-is
-  }
+  const resolvedPath = canonicalForCompare(path);
   // The `.git` pointer is authoritative: it reflects which repo actually
   // owns this worktree, which matters when a repo-local placement under a
   // project rootPath was created from a nested repo. Fall back to the
@@ -81,13 +85,7 @@ async function classifyWorktreeDir(args: {
     (await isGitRepo(effectiveRepoPath))
   ) {
     for (const entry of await listWorktrees(effectiveRepoPath)) {
-      let resolvedEntry = entry.path;
-      try {
-        resolvedEntry = realpathSync(entry.path);
-      } catch {
-        // keep as-is
-      }
-      if (resolvedEntry === resolvedPath) {
+      if (canonicalForCompare(entry.path) === resolvedPath) {
         branch = entry.branch;
         trackedKnown = true;
         break;
@@ -126,12 +124,7 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
   }
   const seenPaths = new Set<string>();
   const recordPath = (p: string): boolean => {
-    let canonical = p;
-    try {
-      canonical = realpathSync(p);
-    } catch {
-      // keep as-is
-    }
+    const canonical = canonicalForCompare(p);
     if (seenPaths.has(canonical)) return false;
     seenPaths.add(canonical);
     return true;
@@ -149,13 +142,7 @@ async function collectCandidates(baseUrl: string): Promise<PruneCandidate[]> {
     for (const leaf of readdirSync(repoLocalRoot)) {
       const path = join(repoLocalRoot, leaf);
       if (!recordPath(path)) continue;
-      let resolvedPath = path;
-      try {
-        resolvedPath = realpathSync(path);
-      } catch {
-        // keep as-is
-      }
-      const isLive = liveByPath.has(resolvedPath);
+      const isLive = liveByPath.has(canonicalForCompare(path));
       const recovered = repoPathFromWorktree(path);
       if (!isLive && recovered === null) continue;
       const c = await classifyWorktreeDir({
