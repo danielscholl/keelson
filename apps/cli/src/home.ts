@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveKeelsonHome } from "@keelson/shared/paths";
+import { resolveKeelsonHome, resolveRibsRoot } from "@keelson/shared/paths";
 
 export { resolveKeelsonHome };
 
@@ -23,10 +23,10 @@ export function ensureHome(home: string = resolveKeelsonHome()): string {
   return home;
 }
 
-// The home's @keelson scope directory — where `bun add` lands rib packages and
-// where the server's discovery scans for rib-*.
+// The @keelson scope directory used for installed-rib listing. This follows the
+// same installed-vs-dev fallback as server discovery.
 export function homeRibsDir(home: string = resolveKeelsonHome()): string {
-  return join(home, "node_modules", "@keelson");
+  return resolveRibsRoot(home);
 }
 
 // Ids of installed rib-* packages under the home, inferred from directory names
