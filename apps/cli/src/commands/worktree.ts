@@ -14,9 +14,10 @@ import { emit } from "../output.ts";
 import { defaultServerBaseUrl } from "../server-probe.ts";
 
 // Canonical form for path comparison only (never display): realpath resolves
-// 8.3 short names + symlinks, then normalize separators and (Windows only) case.
-// Without it, a worktree git lists and the same dir we walk compare unequal on
-// Windows, mis-classifying tracked worktrees as orphans that prune would rm.
+// symlinks, then we normalize separators and (Windows only) case. Without it, a
+// worktree git lists and the same dir we walk can compare unequal on Windows
+// (slash direction, drive-letter case), mis-classifying tracked worktrees as
+// orphans that prune would rm.
 function canonicalForCompare(p: string): string {
   let resolved = p;
   try {

@@ -19,7 +19,11 @@ async function runCli(
     stderr: "pipe",
     ...(env ? { env: spawnEnv(env) } : {}),
   });
-  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  const [stdout, , exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
   return { stdout, exitCode };
 }
 
