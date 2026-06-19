@@ -75,7 +75,16 @@ describe("workflow list (server-backed)", () => {
           return Response.json({ ok: true, name: "keelson", schema_version: "2.7" });
         }
         if (pathname === "/api/workflows") {
-          return Response.json({ workflows, discoveryNotices: [] });
+          return Response.json({
+            workflows,
+            discoveryNotices: [
+              {
+                level: "warning",
+                filename: "fixtures/workflows/smoke-test.yaml",
+                message: "ignored capability",
+              },
+            ],
+          });
         }
         return new Response("not found", { status: 404 });
       },
@@ -98,5 +107,64 @@ describe("workflow list (server-backed)", () => {
     expect(listed.map((w) => w.name)).toContain("smoke-test");
     expect(listed.map((w) => w.name)).toContain("local-only");
     expect(listed.find((w) => w.name === "smoke-test")?.source).toBe("rib");
+    expect(listed.find((w) => w.name === "local-only")?.source).toBe("global");
+    expect(envelope.data.notices).toHaveLength(1);
+    expect(envelope.data.notices[0].message).toContain("ignored");
+  });
+
+  test("fails when the server catalog request returns an error", async () => {
+    const failingServer = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        const { pathname } = new URL(req.url);
+        if (pathname === "/api/health") {
+          return Response.json({ ok: true, name: "keelson", schema_version: "2.7" });
+        }
+        if (pathname === "/api/workflows") {
+          return new Response("boom", { status: 500 });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      const { stdout, exitCode } = await runCli(["--json", "workflow", "list"], {
+        KEELSON_SERVER_URL: `http://${failingServer.hostname}:${failingServer.port}`,
+      });
+      expect(exitCode).toBe(1);
+      const envelope = JSON.parse(stdout.trim());
+      expect(envelope.ok).toBe(false);
+      expect(envelope.code).toBe("WORKFLOW_LIST_FAILED");
+    } finally {
+      failingServer.stop(true);
+    }
+  });
+
+  test("falls back to local discovery if the catalog disappears after the probe", async () => {
+    let server: ReturnType<typeof Bun.serve>;
+    server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        const { pathname } = new URL(req.url);
+        if (pathname === "/api/health") {
+          const response = Response.json({ ok: true, name: "keelson", schema_version: "2.7" });
+          server.stop(true);
+          return response;
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      const { stdout, exitCode } = await runCli(["--json", "workflow", "list"], {
+        KEELSON_SERVER_URL: `http://${server.hostname}:${server.port}`,
+      });
+      expect(exitCode).toBe(0);
+      const envelope = JSON.parse(stdout.trim());
+      expect(envelope.ok).toBe(true);
+      expect(envelope.data.workflows.length).toBeGreaterThan(0);
+    } finally {
+      server.stop(true);
+    }
   });
 });

@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import type { WorkflowDiscoveryNotice } from "@keelson/shared";
 import { discoverWorkflows, type WorkflowWithSource } from "@keelson/workflows";
 
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
@@ -33,6 +34,18 @@ function toLocalEntries(workflows: readonly WorkflowWithSource[]): WorkflowListE
   }));
 }
 
+function normalizeServerSource(kind: string): string {
+  switch (kind) {
+    case "local":
+      return "global";
+    case "project":
+    case "rib":
+      return kind;
+    default:
+      return kind;
+  }
+}
+
 function toServerEntries(
   workflows: readonly {
     name: string;
@@ -45,8 +58,19 @@ function toServerEntries(
     name: w.name,
     description: w.description,
     nodeCount: w.nodeCount,
-    source: w.source?.kind ?? "server",
+    source: normalizeServerSource(w.source?.kind ?? "server"),
   }));
+}
+
+function emitWorkflowList(
+  data: {
+    workflows: WorkflowListEntry[];
+    errors: readonly unknown[];
+    notices?: readonly WorkflowDiscoveryNotice[];
+  },
+  json: boolean,
+): void {
+  emit({ data }, { json });
 }
 
 export async function runWorkflowList(opts: WorkflowListOptions): Promise<never> {
@@ -59,9 +83,13 @@ export async function runWorkflowList(opts: WorkflowListOptions): Promise<never>
     if (server) {
       try {
         const response = await listWorkflows(server.baseUrl);
-        emit(
-          { data: { workflows: toServerEntries(response.workflows), errors: [] } },
-          { json: opts.json },
+        emitWorkflowList(
+          {
+            workflows: toServerEntries(response.workflows),
+            errors: [],
+            notices: response.discoveryNotices,
+          },
+          opts.json,
         );
         process.exit(EXIT_OK);
       } catch (err) {
@@ -89,6 +117,6 @@ export async function runWorkflowList(opts: WorkflowListOptions): Promise<never>
 
   const entries = toLocalEntries(result.workflows);
 
-  emit({ data: { workflows: entries, errors: result.errors } }, { json: opts.json });
+  emitWorkflowList({ workflows: entries, errors: result.errors }, opts.json);
   process.exit(EXIT_OK);
 }
