@@ -1,6 +1,7 @@
 import type { CanvasBoardView, CanvasTone, RibAction } from "@keelson/shared";
 import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
+import { ConfirmModal, type ConfirmModalMode } from "../ConfirmModal.tsx";
 import { useBoardActions } from "./BoardActionContext.tsx";
 import { TableView } from "./TableView.tsx";
 
@@ -75,6 +76,22 @@ function ActionItemButton({ item }: { item: ActionItem }) {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmValues, setConfirmValues] = useState<Record<string, string> | undefined>(undefined);
+
+  const confirmMode: ConfirmModalMode =
+    item.confirm?.irreversible && item.confirm.subject
+      ? {
+          kind: "typed",
+          expectedValue: item.confirm.subject,
+          label: item.confirm.label ?? `Type ${item.confirm.subject} to confirm`,
+        }
+      : { kind: "simple" };
+
+  const confirmTitle = item.confirm?.title ?? item.label;
+  const confirmBody =
+    item.confirm?.body ??
+    `Are you sure you want to ${item.label.charAt(0).toLowerCase()}${item.label.slice(1)}?`;
 
   const dispatch = async (collected?: Record<string, string>) => {
     if (!ctx || pending) return;
@@ -96,6 +113,15 @@ function ActionItemButton({ item }: { item: ActionItem }) {
     }
   };
 
+  const requestDispatch = (collected?: Record<string, string>) => {
+    if (!item.destructive) {
+      void dispatch(collected);
+      return;
+    }
+    setConfirmValues(collected);
+    setConfirmOpen(true);
+  };
+
   const onButtonClick = () => {
     if (!ctx || pending) return;
     if (hasFields) {
@@ -103,8 +129,7 @@ function ActionItemButton({ item }: { item: ActionItem }) {
       setOpen((o) => !o);
       return;
     }
-    if (item.destructive && !window.confirm(`${item.label}?`)) return;
-    void dispatch();
+    requestDispatch();
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -114,8 +139,7 @@ function ActionItemButton({ item }: { item: ActionItem }) {
       setError(`${missing.label} is required`);
       return;
     }
-    if (item.destructive && !window.confirm(`${item.label}?`)) return;
-    void dispatch(values);
+    requestDispatch(values);
   };
 
   return (
@@ -176,6 +200,20 @@ function ActionItemButton({ item }: { item: ActionItem }) {
           </div>
         </form>
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title={confirmTitle}
+        body={confirmBody}
+        mode={confirmMode}
+        confirmLabel={item.confirm?.confirmLabel ?? item.label}
+        cancelLabel={item.confirm?.cancelLabel}
+        danger
+        onConfirm={() => {
+          setConfirmOpen(false);
+          void dispatch(confirmValues);
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }

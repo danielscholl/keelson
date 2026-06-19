@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { CanvasBoardView, RibAction, RibActionResult } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BoardActionProvider } from "../src/components/Canvas/BoardActionContext.tsx";
 import { BoardView } from "../src/components/Canvas/BoardView.tsx";
 
@@ -20,11 +20,6 @@ function actionsBoard(
     sections: [{ kind: "actions", items }],
   } as CanvasBoardView;
 }
-
-const realConfirm = globalThis.confirm;
-afterEach(() => {
-  globalThis.confirm = realConfirm;
-});
 
 describe("board actions", () => {
   test("renders a button per item and dispatches its type via run on click", async () => {
@@ -78,7 +73,7 @@ describe("board actions", () => {
     expect(button.querySelector(".cvb-action-glyph")?.textContent).toBe("↻");
   });
 
-  test("a destructive action confirms before dispatching", async () => {
+  test("a destructive action routes through ConfirmModal before dispatching", async () => {
     const calls: RibAction[] = [];
     const run = async (a: RibAction): Promise<RibActionResult> => {
       calls.push(a);
@@ -86,18 +81,19 @@ describe("board actions", () => {
     };
     const view = actionsBoard([{ type: "delete", label: "Delete", destructive: true }]);
 
-    globalThis.confirm = () => false;
     render(
       <BoardActionProvider run={run} reveal={okReveal}>
         <BoardView view={view} />
       </BoardActionProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    await Promise.resolve();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(dialog.querySelector(".confirm-modal-cancel") as HTMLButtonElement);
     expect(calls).toHaveLength(0);
 
-    globalThis.confirm = () => true;
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirmDialog = screen.getByRole("dialog");
+    fireEvent.click(within(confirmDialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(calls).toEqual([{ type: "delete" }]));
   });
 
