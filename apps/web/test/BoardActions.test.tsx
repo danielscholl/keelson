@@ -97,6 +97,54 @@ describe("board actions", () => {
     await waitFor(() => expect(calls).toEqual([{ type: "delete" }]));
   });
 
+  test("typed confirmation keeps confirm disabled until the subject matches exactly", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "retire",
+              label: "Retire",
+              destructive: true,
+              confirm: {
+                irreversible: true,
+                subject: "cluster-a",
+                label: "Type cluster name",
+                confirmLabel: "Retire",
+              },
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retire" }));
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Retire" });
+    const input = within(dialog).getByRole("textbox", { name: "Type cluster name" });
+
+    expect(confirm).toHaveProperty("disabled", true);
+    fireEvent.change(input, { target: { value: "cluster-b" } });
+    expect(confirm).toHaveProperty("disabled", true);
+    fireEvent.change(input, { target: { value: "cluster-a" } });
+    expect(confirm).toHaveProperty("disabled", false);
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(calls).toEqual([{ type: "retire" }]));
+  });
+
   test("buttons render disabled when no provider is in scope", () => {
     render(<BoardView view={actionsBoard([{ type: "reconcile", label: "Reconcile" }])} />);
     expect(screen.getByRole("button", { name: "Reconcile" })).toHaveProperty("disabled", true);
@@ -400,5 +448,42 @@ describe("board layout primitives", () => {
     const { container } = render(<BoardView view={view} />);
     const pill = container.querySelector('.cvb-header-status[data-tone="ok"]');
     expect(pill?.textContent).toBe("✓ Healthy");
+  });
+
+  test("card destructive actions are available from the overflow menu with keyboard open", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "PostgreSQL",
+              actions: [{ type: "delete", label: "Delete", destructive: true }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "PostgreSQL actions" });
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    const menu = screen.getByRole("menu", { name: "PostgreSQL destructive actions" });
+    const item = within(menu).getByRole("menuitem", { name: "Delete" });
+    fireEvent.click(item);
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(calls).toEqual([{ type: "delete" }]));
   });
 });
