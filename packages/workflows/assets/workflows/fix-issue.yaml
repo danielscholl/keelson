@@ -471,9 +471,10 @@ nodes:
   # things. Instead, three INDEPENDENT lenses review in parallel (they share a
   # DAG layer, so this costs ~one review's wall-clock), a triage judge keeps only
   # high-confidence real defects (dropping false positives), a fixer applies just
-  # those, and a re-review closes the loop. To spend more on review quality, pin
-  # the review/triage nodes to a stronger model with a per-node `model:` (left on
-  # the workflow default here for portability).
+  # those, and a re-review closes the loop. The `triage` judge is pinned to
+  # `claude-opus-4.8` (it is the decision gate); the three lenses stay on the
+  # workflow default — pin them too with a per-node `model:` to spend more on
+  # review quality.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: review-correctness
