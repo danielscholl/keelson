@@ -3601,6 +3601,7 @@ textarea.cvb-action-field-input {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  position: relative;
 }
 .cvb-card-dot {
   width: 9px;
@@ -3631,6 +3632,75 @@ textarea.cvb-action-field-input {
   overflow-wrap: anywhere;
   flex: 1 1 auto;
   min-width: 0;
+}
+.cvb-card-overflow {
+  position: relative;
+  margin-left: auto;
+}
+.cvb-card-overflow-trigger {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.cvb-card-overflow-trigger:hover,
+.cvb-card-overflow-trigger:focus-visible,
+.cvb-card-overflow.is-open .cvb-card-overflow-trigger {
+  opacity: 1;
+  background: color-mix(in srgb, var(--bg-soft) 70%, transparent);
+  border-color: var(--border);
+}
+.cvb-card:hover .cvb-card-overflow-trigger,
+.cvb-card:focus-within .cvb-card-overflow-trigger {
+  opacity: 1;
+}
+.cvb-card-overflow-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 3;
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 78%, transparent);
+}
+.cvb-card-overflow-item {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--danger);
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cvb-card-overflow-item:hover,
+.cvb-card-overflow-item:focus-visible {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  outline: none;
+}
+.cvb-card-overflow-item:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+@media (hover: none), (pointer: coarse) {
+  .cvb-card-overflow-trigger {
+    opacity: 1;
+  }
 }
 /* A linked card title carries an open-in-new-tab affordance without changing
    the DOM text (so the title stays the accessible link name). */
