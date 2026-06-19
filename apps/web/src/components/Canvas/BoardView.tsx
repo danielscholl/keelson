@@ -295,6 +295,7 @@ function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; action
 
   const triggerAction = (item: ActionItem) => {
     if (item.destructive) {
+      setOpen(false);
       setConfirming(item);
       return;
     }
@@ -427,7 +428,10 @@ function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; action
           setConfirming(null);
           void runAction(confirming);
         }}
-        onCancel={() => setConfirming(null)}
+        onCancel={() => {
+          setConfirming(null);
+          triggerRef.current?.focus();
+        }}
       />
     </div>
   );
