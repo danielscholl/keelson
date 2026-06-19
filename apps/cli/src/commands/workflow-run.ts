@@ -20,6 +20,7 @@ import { probeServer } from "../server-probe.ts";
 export interface WorkflowRunOptions {
   json: boolean;
   inputs: string[];
+  arguments?: string;
   // commander encodes `--watch` and `--no-watch` into the same `watch`
   // field — `true`, `false`, or `undefined` for "not specified". The
   // resolver below treats `undefined` as "auto from TTY".
@@ -304,6 +305,12 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
   let inputs: Record<string, string>;
   try {
     inputs = parseInputs(opts.inputs);
+    if (opts.arguments !== undefined) {
+      if (Object.hasOwn(inputs, "ARGUMENTS")) {
+        throw new Error("conflicting ARGUMENTS: use either --arguments or --inputs ARGUMENTS=...");
+      }
+      inputs.ARGUMENTS = opts.arguments;
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Malformed `--inputs` is a usage error — exit 2, not 1, so scripts
