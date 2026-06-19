@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnEnv } from "./spawn-env.ts";
@@ -50,7 +50,10 @@ async function setupFixture(): Promise<{
   baseUrl: string;
   server: ReturnType<typeof Bun.serve>;
 }> {
-  const sandbox = mkdtempSync(join(tmpdir(), "keelson-worktree-prune-"));
+  // realpath so the project rootPath matches git's canonical view — on Windows
+  // CI tmpdir() is an 8.3 short path (C:\Users\RUNNER~1\...) while git stores
+  // the long form, which would otherwise mis-classify tracked worktrees.
+  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "keelson-worktree-prune-")));
   const repoRoot = join(sandbox, "repo");
   const orphanPath = join(sandbox, "orphan");
   mkdirSync(repoRoot, { recursive: true });
