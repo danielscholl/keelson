@@ -406,6 +406,53 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("board");
   });
 
+  it("parses destructive action confirm metadata and enforces typed-confirm requirements", () => {
+    const ok = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "retire",
+              label: "Retire chamber",
+              destructive: true,
+              confirm: {
+                irreversible: true,
+                subject: "cluster-a",
+                label: "Type cluster name",
+                title: "Retire chamber",
+                body: "This cannot be undone.",
+                confirmLabel: "Retire",
+                cancelLabel: "Cancel",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(ok.view).toBe("board");
+
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "retire",
+                label: "Retire chamber",
+                destructive: true,
+                confirm: { irreversible: true },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("parses a board header with a toned status pill", () => {
     const v = canvasViewSchema.parse({
       view: "board",
@@ -494,6 +541,41 @@ describe("canvasViewSchema", () => {
       ],
     });
     expect(v.view).toBe("board");
+  });
+
+  it("parses card-attached actions and rejects unknown keys on nested actions", () => {
+    const ok = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "PostgreSQL",
+              actions: [{ type: "delete", label: "Delete", destructive: true }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(ok.view).toBe("board");
+
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "cards",
+            items: [
+              {
+                title: "PostgreSQL",
+                actions: [{ type: "delete", label: "Delete", confirm: { subject: "x", bogus: 1 } }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   it("parses boxed rows and boxed cards sections", () => {

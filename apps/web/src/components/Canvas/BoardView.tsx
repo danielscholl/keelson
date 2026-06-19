@@ -1,6 +1,14 @@
 import type { CanvasBoardView, CanvasTone, RibAction } from "@keelson/shared";
-import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
+import {
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
+import { ConfirmModal, type ConfirmModalMode } from "../ConfirmModal.tsx";
 import { useBoardActions } from "./BoardActionContext.tsx";
 import { TableView } from "./TableView.tsx";
 
@@ -64,6 +72,28 @@ function mergePayload(staticPayload: unknown, collected?: Record<string, string>
   return { ...(isPlainObject(staticPayload) ? staticPayload : {}), ...collected };
 }
 
+function actionConfirmMode(item: ActionItem): ConfirmModalMode {
+  if (item.confirm?.irreversible && item.confirm.subject) {
+    return {
+      kind: "typed",
+      expectedValue: item.confirm.subject,
+      label: item.confirm.label ?? `Type ${item.confirm.subject} to confirm`,
+    };
+  }
+  return { kind: "simple" };
+}
+
+function actionConfirmTitle(item: ActionItem): string {
+  return item.confirm?.title ?? item.label;
+}
+
+function actionConfirmBody(item: ActionItem): string {
+  return (
+    item.confirm?.body ??
+    `Are you sure you want to ${item.label.charAt(0).toLowerCase()}${item.label.slice(1)}?`
+  );
+}
+
 // One action button. With no `fields` it dispatches on click (confirming first
 // when destructive). With `fields` it toggles an inline form and dispatches the
 // collected values on submit, so a payload-carrying action can gather its input.
@@ -75,6 +105,8 @@ function ActionItemButton({ item }: { item: ActionItem }) {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmValues, setConfirmValues] = useState<Record<string, string> | undefined>(undefined);
 
   const dispatch = async (collected?: Record<string, string>) => {
     if (!ctx || pending) return;
@@ -96,6 +128,15 @@ function ActionItemButton({ item }: { item: ActionItem }) {
     }
   };
 
+  const requestDispatch = (collected?: Record<string, string>) => {
+    if (!item.destructive) {
+      void dispatch(collected);
+      return;
+    }
+    setConfirmValues(collected);
+    setConfirmOpen(true);
+  };
+
   const onButtonClick = () => {
     if (!ctx || pending) return;
     if (hasFields) {
@@ -103,8 +144,7 @@ function ActionItemButton({ item }: { item: ActionItem }) {
       setOpen((o) => !o);
       return;
     }
-    if (item.destructive && !window.confirm(`${item.label}?`)) return;
-    void dispatch();
+    requestDispatch();
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -114,8 +154,7 @@ function ActionItemButton({ item }: { item: ActionItem }) {
       setError(`${missing.label} is required`);
       return;
     }
-    if (item.destructive && !window.confirm(`${item.label}?`)) return;
-    void dispatch(values);
+    requestDispatch(values);
   };
 
   return (
@@ -176,6 +215,224 @@ function ActionItemButton({ item }: { item: ActionItem }) {
           </div>
         </form>
       )}
+      <ConfirmModal
+        open={confirmOpen}
+        title={actionConfirmTitle(item)}
+        body={actionConfirmBody(item)}
+        mode={actionConfirmMode(item)}
+        confirmLabel={item.confirm?.confirmLabel ?? item.label}
+        cancelLabel={item.confirm?.cancelLabel}
+        danger
+        onConfirm={() => {
+          setConfirmOpen(false);
+          void dispatch(confirmValues);
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </div>
+  );
+}
+
+function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; actions: ActionItem[] }) {
+  const ctx = useBoardActions();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [pending, setPending] = useState(false);
+  const [confirming, setConfirming] = useState<ActionItem | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (
+        menuRef.current?.contains(target) ||
+        triggerRef.current?.contains(target) ||
+        !(target instanceof Element)
+      ) {
+        return;
+      }
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const target = itemRefs.current[activeIndex];
+    target?.focus();
+  }, [open, activeIndex]);
+
+  useEffect(
+    () => () => {
+      if (longPressRef.current) clearTimeout(longPressRef.current);
+    },
+    [],
+  );
+
+  const runAction = async (item: ActionItem) => {
+    if (!ctx || pending) return;
+    setPending(true);
+    try {
+      const payload = mergePayload(item.payload);
+      const result = await ctx.run(
+        payload !== undefined ? { type: item.type, payload } : { type: item.type },
+      );
+      if (result.ok) setOpen(false);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const triggerAction = (item: ActionItem) => {
+    if (item.destructive) {
+      setOpen(false);
+      setConfirming(item);
+      return;
+    }
+    void runAction(item);
+  };
+
+  const onMenuKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!open) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => (i + 1) % actions.length);
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => (i - 1 + actions.length) % actions.length);
+      return;
+    }
+    if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIndex(0);
+      return;
+    }
+    if (e.key === "End") {
+      e.preventDefault();
+      setActiveIndex(actions.length - 1);
+    }
+  };
+
+  const scheduleLongPress = (pointerType: string) => {
+    if (pointerType !== "touch" && pointerType !== "pen") return;
+    if (longPressRef.current) clearTimeout(longPressRef.current);
+    longPressRef.current = setTimeout(() => {
+      setOpen(true);
+      setActiveIndex(0);
+    }, 450);
+  };
+
+  const clearLongPress = () => {
+    if (!longPressRef.current) return;
+    clearTimeout(longPressRef.current);
+    longPressRef.current = null;
+  };
+
+  if (actions.length === 0) return null;
+  const fallbackAction = actions[0]!;
+  const actionKey = makeKeyer();
+
+  return (
+    <div className={`cvb-card-overflow${open ? " is-open" : ""}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="cvb-card-overflow-trigger"
+        aria-label={`${cardTitle} actions`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={!ctx || pending}
+        onClick={() => {
+          setOpen((v) => !v);
+          setActiveIndex(0);
+        }}
+        onPointerDown={(e) => scheduleLongPress(e.pointerType)}
+        onPointerUp={clearLongPress}
+        onPointerCancel={clearLongPress}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setOpen(true);
+          setActiveIndex(0);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen(true);
+            setActiveIndex(0);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          className="cvb-card-overflow-menu"
+          onKeyDown={onMenuKeyDown}
+          aria-label={`${cardTitle} destructive actions`}
+        >
+          {actions.map((action, index) => (
+            <button
+              key={actionKey(action.type)}
+              ref={(el) => {
+                itemRefs.current[index] = el;
+              }}
+              type="button"
+              role="menuitem"
+              className="cvb-card-overflow-item"
+              tabIndex={index === activeIndex ? 0 : -1}
+              disabled={pending}
+              onMouseEnter={() => setActiveIndex(index)}
+              onFocus={() => setActiveIndex(index)}
+              onClick={() => triggerAction(action)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <ConfirmModal
+        open={confirming !== null}
+        title={actionConfirmTitle(confirming ?? fallbackAction)}
+        body={actionConfirmBody(confirming ?? fallbackAction)}
+        mode={actionConfirmMode(confirming ?? fallbackAction)}
+        confirmLabel={
+          (confirming ?? fallbackAction).confirm?.confirmLabel ??
+          (confirming ?? fallbackAction).label
+        }
+        cancelLabel={(confirming ?? fallbackAction).confirm?.cancelLabel}
+        danger
+        onConfirm={() => {
+          if (!confirming) return;
+          setConfirming(null);
+          void runAction(confirming);
+        }}
+        onCancel={() => {
+          setConfirming(null);
+          triggerRef.current?.focus();
+        }}
+      />
     </div>
   );
 }
@@ -353,6 +610,13 @@ function Section({ section }: { section: BoardSection }) {
                       {c.pill.label}
                     </span>
                   )}
+                  {(() => {
+                    const destructiveActions =
+                      c.actions?.filter((action) => action.destructive) ?? [];
+                    return destructiveActions.length > 0 ? (
+                      <CardOverflowActions cardTitle={c.title} actions={destructiveActions} />
+                    ) : null;
+                  })()}
                 </div>
                 {c.bar && (
                   <div className="cvb-bar-track cvb-card-bar">
