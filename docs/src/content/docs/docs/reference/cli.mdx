@@ -81,13 +81,16 @@ straight at `http://127.0.0.1:7878/api/mcp` and skips the bridge. See
 
 | Option | Effect |
 | --- | --- |
-| `--inputs <k=v>` | A workflow input; repeat to set several. |
+| `--arguments <text>` | Primary free-form workflow arguments input. Arrives as `inputs.ARGUMENTS` (`$ARGUMENTS` in workflow bodies). |
+| `--inputs <k=v>` | Named workflow input; repeat to set several. Legacy `ARGUMENTS` fallback is `--inputs ARGUMENTS=...`. |
 | `--watch` / `--no-watch` | Stream node events, or emit one envelope at completion. Watch is the default on a TTY. |
 | `--provider <id>` | Provider for in-process runs (default `stub`). |
 | `--project <name>` | Run against a named project; the server resolves its root path. |
 | `--working-dir <path>` | Override the working directory directly. |
 | `--worktree` / `--no-worktree` | Force or forbid a git-worktree isolated run, overriding the workflow default. |
 | `--base-url <url>` | An explicit server URL, skipping the probe. |
+
+Use `--arguments` for free-form text and reserve `--inputs` for named key-value inputs.
 
 `workflow respond` takes `--pause-id <id>`, the per-pause token from the
 `approval_awaiting` frame, to disambiguate retries against interactive loops.
