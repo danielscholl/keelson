@@ -2,18 +2,10 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import type { WorkflowFrame } from "@keelson/shared";
+import type { ListWorkflowsResponse, WorkflowFrame } from "@keelson/shared";
 import { normalizeBase, originHeader } from "./base.ts";
 
-export interface WorkflowSummary {
-  name: string;
-  description: string;
-  nodeCount: number;
-}
-
-export interface ListWorkflowsResponse {
-  workflows: WorkflowSummary[];
-}
+export type { ListWorkflowsResponse, WorkflowSummary } from "@keelson/shared";
 
 export interface StartRunResponse {
   runId: string;
