@@ -178,8 +178,10 @@ describe("keelson project", () => {
       expect(env.ok).toBe(true);
       expect(env.data.project).toMatchObject({ id: "p9", name: "work" });
       expect(fake.requests.creates).toHaveLength(1);
-      expect(isAbsolute(fake.requests.creates[0].rootPath)).toBe(true);
-      expect(fake.requests.creates[0].rootPath).toBe(resolve(process.cwd(), relativePath));
+      const createReq = fake.requests.creates[0];
+      if (!createReq) throw new Error("expected one project create request");
+      expect(isAbsolute(createReq.rootPath)).toBe(true);
+      expect(createReq.rootPath).toBe(resolve(process.cwd(), relativePath));
     } finally {
       fake.stop();
     }
