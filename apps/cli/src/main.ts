@@ -221,6 +221,7 @@ export function buildProgram(): Command {
       (value: string, prev: string[]) => (prev ? [...prev, value] : [value]),
       [] as string[],
     )
+    .option("--arguments <text>", "free-form workflow ARGUMENTS value")
     .option("--watch", "stream node events (default when stdout is a TTY)")
     .option("--no-watch", "skip streaming; emit a single envelope at completion")
     .option("--provider <id>", "provider id for in-process runs (default: stub)")
@@ -234,6 +235,7 @@ export function buildProgram(): Command {
       name: string,
       runOpts: {
         inputs: string[];
+        arguments?: string;
         watch?: boolean;
         provider?: string;
         baseUrl?: string;
@@ -246,6 +248,7 @@ export function buildProgram(): Command {
       await runWorkflowRun(name, {
         json,
         inputs: runOpts.inputs,
+        arguments: runOpts.arguments,
         watch: runOpts.watch,
         provider: runOpts.provider,
         baseUrl: runOpts.baseUrl,
