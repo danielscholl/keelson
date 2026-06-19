@@ -3,13 +3,14 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+const FIXTURES = resolve(import.meta.dir, "fixtures");
 
 // Port 1 is privileged and never bound; the probe is always refused so the
 // in-process path runs deterministically — even when a real server is up.
@@ -51,6 +52,20 @@ async function runCli(
 
 beforeAll(() => {
   isolatedHome = mkdtempSync(join(tmpdir(), "keelson-cli-smoke-"));
+  const workflowsDir = join(isolatedHome, "workflows");
+  mkdirSync(workflowsDir, { recursive: true });
+  copyFileSync(join(FIXTURES, "smoke-bash.yaml"), join(workflowsDir, "smoke-bash.yaml"));
+  writeFileSync(
+    join(workflowsDir, "smoke-arguments.yaml"),
+    [
+      "name: smoke-arguments",
+      'description: "echoes ARGUMENTS for CLI smoke tests"',
+      "nodes:",
+      "  - id: emit",
+      '    bash: echo "args=$KEELSON_ARGUMENTS"',
+      "",
+    ].join("\n"),
+  );
 });
 
 afterAll(() => {
@@ -414,6 +429,87 @@ describe("keelson CLI smoke", () => {
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(false);
     expect(envelope.code).toBe("NO_SERVER");
+  });
+
+  test("workflow run help lists --arguments in JSON mode", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "workflow", "help", "run"]);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(true);
+    const flags = (envelope.data.options as Array<{ flags: string }>).map((o) => o.flags);
+    expect(flags).toContain("--arguments <text>");
+  });
+
+  test("workflow run --arguments maps to ARGUMENTS input", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "workflow",
+      "run",
+      "smoke-arguments",
+      "--watch",
+      "--arguments",
+      "Moneypenny",
+    ]);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.status).toBe("succeeded");
+    const logs = (envelope.data.events as Array<{ type: string; event?: { line?: string } }>)
+      .filter((event) => event.type === "node_event")
+      .map((event) => event.event?.line ?? "");
+    expect(logs).toContain("args=Moneypenny");
+  });
+
+  test("workflow run --inputs ARGUMENTS=... remains supported", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "workflow",
+      "run",
+      "smoke-arguments",
+      "--watch",
+      "--inputs",
+      "ARGUMENTS=legacy-path",
+    ]);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(true);
+    const logs = (envelope.data.events as Array<{ type: string; event?: { line?: string } }>)
+      .filter((event) => event.type === "node_event")
+      .map((event) => event.event?.line ?? "");
+    expect(logs).toContain("args=legacy-path");
+  });
+
+  test("workflow run still accepts non-ARGUMENTS --inputs values", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "workflow",
+      "run",
+      "smoke-bash",
+      "--inputs",
+      "TEST_NAME=legacy",
+    ]);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.status).toBe("succeeded");
+  });
+
+  test("workflow run rejects duplicate ARGUMENTS sources", async () => {
+    const { stdout, exitCode } = await runCli([
+      "--json",
+      "workflow",
+      "run",
+      "smoke-arguments",
+      "--arguments",
+      "alpha",
+      "--inputs",
+      "ARGUMENTS=beta",
+    ]);
+    expect(exitCode).toBe(2);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.code).toBe("BAD_INPUTS");
+    expect(envelope.error).toContain("conflicting ARGUMENTS");
   });
 
   test("workflow run --project requires the server (named projects live in the catalog)", async () => {
