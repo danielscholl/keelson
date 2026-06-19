@@ -182,6 +182,113 @@ describe("keelson rib (home lifecycle)", () => {
   });
 });
 
+describe("keelson rib (restart hint)", () => {
+  let server: ReturnType<typeof Bun.serve>;
+  let baseUrl: string;
+  let ribSrc: string;
+
+  beforeAll(() => {
+    server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        if (new URL(req.url).pathname === "/api/health") {
+          return Response.json({ ok: true, name: "keelson", schema_version: "2.7" });
+        }
+        return Response.json({ error: "not found" }, { status: 404 });
+      },
+    });
+    baseUrl = `http://${server.hostname}:${server.port}`;
+    ribSrc = mkdtempSync(join(tmpdir(), "keelson-rib-fake-restart-"));
+    writeFileSync(
+      join(ribSrc, "package.json"),
+      JSON.stringify({ name: "@keelson/rib-faketest", version: "0.0.0", main: "./index.ts" }),
+    );
+    writeFileSync(join(ribSrc, "index.ts"), "export default { id: 'faketest' };\n");
+  });
+
+  afterAll(() => {
+    server.stop(true);
+    rmSync(ribSrc, { recursive: true, force: true });
+  });
+
+  test("rib add --json reports restartRequired when server is live", async () => {
+    const home = join(mkdtempSync(join(tmpdir(), "keelson-rib-home-restart-json-add-")), "keelson");
+    try {
+      const { stdout, exitCode } = await runCli(
+        ["--json", "rib", "add", ribSrc, "--base-url", baseUrl],
+        { KEELSON_HOME: home },
+      );
+      expect(exitCode).toBe(0);
+      const env = JSON.parse(stdout.trim());
+      expect(env.ok).toBe(true);
+      expect(env.data.restartRequired).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("rib add in human mode prints the restart hint", async () => {
+    const home = join(mkdtempSync(join(tmpdir(), "keelson-rib-home-restart-human-add-")), "keelson");
+    try {
+      const { stdout, exitCode } = await runCli(["rib", "add", ribSrc, "--base-url", baseUrl], {
+        KEELSON_HOME: home,
+      });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("restart the server");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("rib remove --json reports restartRequired when server is live", async () => {
+    const home = join(
+      mkdtempSync(join(tmpdir(), "keelson-rib-home-restart-json-remove-")),
+      "keelson",
+    );
+    try {
+      const add = await runCli(["--json", "rib", "add", ribSrc, "--base-url", baseUrl], {
+        KEELSON_HOME: home,
+      });
+      expect(add.exitCode).toBe(0);
+      const { stdout, exitCode } = await runCli(
+        ["--json", "rib", "remove", "faketest", "--base-url", baseUrl],
+        { KEELSON_HOME: home },
+      );
+      expect(exitCode).toBe(0);
+      const env = JSON.parse(stdout.trim());
+      expect(env.ok).toBe(true);
+      expect(env.data.removed).toBe("faketest");
+      expect(env.data.restartRequired).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("rib remove in human mode prints the restart hint", async () => {
+    const home = join(
+      mkdtempSync(join(tmpdir(), "keelson-rib-home-restart-human-remove-")),
+      "keelson",
+    );
+    try {
+      const add = await runCli(["--json", "rib", "add", ribSrc, "--base-url", baseUrl], {
+        KEELSON_HOME: home,
+      });
+      expect(add.exitCode).toBe(0);
+      const { stdout, exitCode } = await runCli(
+        ["rib", "remove", "faketest", "--base-url", baseUrl],
+        {
+          KEELSON_HOME: home,
+        },
+      );
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("restart the server");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("keelson rib (dev home fallback)", () => {
   let root: string;
   let home: string;
