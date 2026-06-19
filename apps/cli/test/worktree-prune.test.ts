@@ -3,9 +3,9 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnEnv } from "./spawn-env.ts";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
@@ -23,7 +23,7 @@ async function runCli(
   return { stdout, exitCode };
 }
 
-async function runGit(args: readonly string[], cwd: string): Promise<void> {
+async function runGit(args: readonly string[], cwd: string): Promise<string> {
   const proc = Bun.spawn(["git", ...args], {
     cwd,
     stdout: "pipe",
@@ -39,6 +39,7 @@ async function runGit(args: readonly string[], cwd: string): Promise<void> {
       `git ${args.join(" ")} failed (${exitCode}): ${stderr.trim() || stdout.trim()}`,
     );
   }
+  return stdout.trim();
 }
 
 async function setupFixture(): Promise<{
@@ -50,22 +51,23 @@ async function setupFixture(): Promise<{
   baseUrl: string;
   server: ReturnType<typeof Bun.serve>;
 }> {
-  // realpath so the project rootPath matches git's canonical view — on Windows
-  // CI tmpdir() is an 8.3 short path (C:\Users\RUNNER~1\...) while git stores
-  // the long form, which would otherwise mis-classify tracked worktrees.
-  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), "keelson-worktree-prune-")));
-  const repoRoot = join(sandbox, "repo");
-  const orphanPath = join(sandbox, "orphan");
-  mkdirSync(repoRoot, { recursive: true });
-  mkdirSync(orphanPath, { recursive: true });
-
-  await runGit(["init"], repoRoot);
+  const sandbox = mkdtempSync(join(tmpdir(), "keelson-worktree-prune-"));
+  const repoRootRaw = join(sandbox, "repo");
+  mkdirSync(repoRootRaw, { recursive: true });
+  await runGit(["init"], repoRootRaw);
+  // Canonical repo root straight from git. On Windows CI, tmpdir() is an 8.3
+  // short path (C:\Users\RUNNER~1\...) that realpath won't expand, but git
+  // records the long form — derive every path the CLI sees from git's view, or
+  // tracked worktrees mis-classify as orphans (and prune would delete them).
+  const repoRoot = await runGit(["rev-parse", "--show-toplevel"], repoRootRaw);
   await runGit(["config", "user.email", "keelson@example.com"], repoRoot);
   await runGit(["config", "user.name", "Keelson"], repoRoot);
   writeFileSync(join(repoRoot, "README.md"), "repo\n");
   await runGit(["add", "README.md"], repoRoot);
   await runGit(["commit", "-m", "init"], repoRoot);
 
+  const orphanPath = join(dirname(repoRoot), "orphan");
+  mkdirSync(orphanPath, { recursive: true });
   mkdirSync(join(repoRoot, ".worktrees"), { recursive: true });
   const managedPath = join(repoRoot, ".worktrees", "managed");
   const userPath = join(repoRoot, ".worktrees", "keep");
