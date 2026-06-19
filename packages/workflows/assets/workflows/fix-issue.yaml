@@ -16,14 +16,22 @@ description: |
   Does: Fetches the issue, classifies it, investigates / plans, pauses for human
         approval of the plan, implements the change, validates against the
         project's OWN checks (discovered from its docs/config — works in any
-        repo), self-fixes failures, pushes the branch, creates a draft PR, runs
-        a self-review pass, applies the review's findings, and reports back.
+        repo), self-fixes failures, pushes the branch, creates a draft PR, runs a
+        multi-lens review loop (independent correctness / conventions / coverage
+        reviewers → triage → fix → re-review), and reports back.
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
-# Model `auto` lets Copilot route each node and keeps this bundled workflow
-# portable — a hard-pinned id fails on accounts that don't expose it. Pin a
-# specific available id here or per-node for determinism. Resolution order is
-# node.model → workflow.model → provider.defaultModel.
+# Model `auto` (the workflow default) lets Copilot route each node and keeps most
+# of this workflow portable. The high-leverage REASONING nodes — investigate,
+# plan, and triage — are pinned to `claude-opus-4.8` instead: their judgment
+# drives the whole run, and pinning also makes the model DETERMINISTIC. Copilot
+# never reports which concrete model `auto` resolved (only the `pi` provider emits
+# the resolved-model chunk), so an `auto` node's actual model is unobservable —
+# pinning is the only way to know what ran. This is an account-dependent id: it
+# must appear in the account's live Copilot list (GET /api/providers/copilot/
+# models). If it isn't available, swap it for another frontier id (e.g. `gpt-5.5`)
+# or drop the node's `model:` back to `auto`. Resolution order: node.model →
+# workflow.model → provider.defaultModel.
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
@@ -104,6 +112,7 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.issue_type == 'bug'"
     context: fresh
+    model: claude-opus-4.8
     prompt: |
       You are investigating a bug. Produce a precise root-cause analysis the
       implementation phase can act on.
@@ -162,6 +171,7 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.issue_type != 'bug'"
     context: fresh
+    model: claude-opus-4.8
     prompt: |
       You are creating an implementation plan from a non-bug GitHub issue.
 
@@ -270,7 +280,10 @@ nodes:
   - id: implement
     depends_on: [approve-plan]
     context: fresh
-    idle_timeout: 600000
+    # Large changes run many edit+check cycles; a tight cap kills a run mid-task
+    # and loses uncommitted work. Generous here; the per-task checks stay scoped
+    # (below) so this budget is for real work, not full-suite thrash.
+    idle_timeout: 1800000
     prompt: |
       You are implementing the plan in `$ARTIFACTS_DIR/plan.md`.
 
@@ -284,9 +297,12 @@ nodes:
         good" / "ship it", edit `$ARTIFACTS_DIR/plan.md` to incorporate it
         BEFORE writing code, and note the changes at the top of the file.
       - Follow the plan task-by-task. Don't introduce extra scope.
-      - Read each file before editing it. After each change, run the project's
-        own checks via `bash $ARTIFACTS_DIR/verify.sh` (you write that script in
-        step 1) and fix breaks immediately.
+      - Read each file before editing it. After each task, run the NARROWEST
+        check that covers your change (the touched workspace/package's type-check
+        + tests — e.g. `bun --filter <pkg> test`, `cargo test -p <crate>`,
+        `pytest path/`), NOT the full `verify.sh`. The dedicated validate node
+        runs the full gate once; running the whole suite after every task is what
+        makes large changes time out.
       - **Never** `git add -A` / `git add .` / `git add -u`. Stage files by name.
       - **Never** commit anything under `$ARTIFACTS_DIR`, scratch files
         (`*.scratch.md`, `*.tmp.md`), or PR-body drafts at the repo root.
@@ -308,9 +324,15 @@ nodes:
          Otherwise stay on the current branch.
       3. For each `### Task N:` in the plan:
          a. Read the target file.
-         b. Make the edit.
-         c. `bash $ARTIFACTS_DIR/verify.sh` — fix breaks immediately.
-         d. Commit with a conventional message: `git add <files>; git commit -m "..."`.
+         b. Make the edit. Authoring a task's tests is part of THAT task — write
+            them now, not as a deferred final step.
+         c. Run the narrowest check covering the change (above) — fix breaks
+            immediately.
+         d. Commit the task's code AND its tests together, staged by name, with a
+            conventional message: `git add <files>; git commit -m "..."`. Commit
+            NOW, before starting the next task — never carry uncommitted work
+            forward, since a timeout or a later node will not preserve an unstaged
+            working tree.
       4. After all tasks: append a section to `$ARTIFACTS_DIR/plan.md` summarizing
          what was done, what was skipped, and any deviations.
 
@@ -322,7 +344,7 @@ nodes:
 
   - id: validate
     depends_on: [implement]
-    timeout: 600000
+    timeout: 1200000
     bash: |
       # Runs the project's OWN checks, which the implement node discovered and
       # recorded to verify.sh. Always exits 0 so fix-validation can read the
@@ -378,7 +400,7 @@ nodes:
 
   - id: revalidate
     depends_on: [fix-validation]
-    timeout: 600000
+    timeout: 1200000
     bash: |
       # Hard gate: exits non-zero (failing the node, skipping create-pr) if the
       # project's own checks don't pass — or if no verify.sh was ever recorded,
@@ -444,78 +466,186 @@ nodes:
          If not, `gh pr edit <num> --base main`.
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 7: SELF-REVIEW + SELF-FIX
+  # PHASE 7: REVIEW LOOP — panel → triage → fix → re-review
+  # A single self-review is the same model grading its own homework and misses
+  # things. Instead, three INDEPENDENT lenses review in parallel (they share a
+  # DAG layer, so this costs ~one review's wall-clock), a triage judge keeps only
+  # high-confidence real defects (dropping false positives), a fixer applies just
+  # those, and a re-review closes the loop. To spend more on review quality, pin
+  # the review/triage nodes to a stronger model with a per-node `model:` (left on
+  # the workflow default here for portability).
   # ─────────────────────────────────────────────────────────────────────────
 
-  - id: self-review
+  - id: review-correctness
     depends_on: [create-pr]
     context: fresh
     prompt: |
-      You are a senior reviewer doing a code-review pass against `main` on the
-      branch you just opened a PR for.
+      You are one of three INDEPENDENT reviewers of the branch that was just
+      opened as a PR. Your lens is CORRECTNESS only.
 
-      ## Instructions
+      1. `git diff main...HEAD --stat`, then `git diff main...HEAD` for the full change.
+      2. Hunt for real defects ONLY: logic bugs, broken/missing error handling,
+         unhandled null/edge cases, off-by-one, race conditions, regressions in
+         the changed call paths, and any destructive or irreversible operation
+         that isn't guarded.
+      3. Do NOT review style, naming, comments, or test coverage — other
+         reviewers own those. Ignore pre-existing issues on lines this PR did not
+         touch, and anything a type-checker / linter / CI already catches.
 
-      1. `git diff main...HEAD --stat` to see scope, then `git diff main...HEAD`
-         for full review.
-      2. Check the change against the project's conventions (whichever of
-         `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md` exist).
-      3. Look for: correctness bugs, missing error handling, missing tests for
-         new branches, comments that violate the repo's terse-comment rule,
-         and docs that should have been updated for new public surfaces.
-      4. Output findings as a numbered list. Each finding:
-         - `path:line` location
-         - severity: CRITICAL / HIGH / MEDIUM / LOW
-         - one-sentence problem statement
-         - suggested fix
+      Output a numbered list; each finding: `path:line` · severity
+      CRITICAL/HIGH/MEDIUM/LOW · one-sentence problem · suggested fix. If you find
+      nothing real, output exactly "No correctness issues found." Do NOT edit files.
 
-      Do NOT edit files in this step — the next node applies fixes.
-
-  - id: self-fix
-    depends_on: [self-review]
+  - id: review-conventions
+    depends_on: [create-pr]
     context: fresh
     prompt: |
-      Apply the CRITICAL and HIGH findings from the review below. Skip MEDIUM
-      and LOW unless they're trivial one-liners.
+      You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
 
-      ## Findings
+      1. Read the change: `git diff main...HEAD`.
+      2. Read whichever project guides exist (`CLAUDE.md`, `AGENTS.md`,
+         `CONTRIBUTING.md`) and check the diff against them — especially the
+         comment policy (no PR-narration / what-just-changed / code-restating
+         comments), commit-message conventions, and any architectural boundary
+         rule (e.g. layering, public-API surface).
+      3. Only flag a rule the guide ACTUALLY states, and quote it. Ignore
+         correctness and test coverage — other reviewers own those. Ignore
+         pre-existing issues on unchanged lines.
 
-      $self-review.output
+      Output a numbered list; each finding: `path:line` · severity · the rule it
+      violates (quoted) · suggested fix. If none, output exactly "No convention
+      issues found." Do NOT edit files.
+
+  - id: review-coverage
+    depends_on: [create-pr]
+    context: fresh
+    prompt: |
+      You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
+
+      1. Read the change: `git diff main...HEAD`, and learn the project's test
+         layout and conventions.
+      2. For each new or changed branch of behavior, ask whether it is actually
+         tested. Flag NEW logic with no test, and ESPECIALLY tests that were
+         authored but never wired in or committed (a described case the diff
+         doesn't actually assert, or a test file that exists but nothing runs).
+      3. Only expect coverage the project's own conventions would — do not demand
+         tests a repo without a suite couldn't have. Ignore correctness and style.
+
+      Output a numbered list; each finding: the untested `path`/behavior ·
+      severity · the specific test to add. If coverage is adequate, output exactly
+      "Coverage adequate." Do NOT edit files.
+
+  - id: triage
+    depends_on: [review-correctness, review-conventions, review-coverage]
+    trigger_rule: one_success
+    context: fresh
+    model: claude-opus-4.8
+    output_format:
+      type: object
+      required: [ship_ready, summary, must_fix]
+      properties:
+        ship_ready: { type: boolean }
+        summary: { type: string }
+        must_fix:
+          type: array
+          items:
+            type: object
+            required: [location, severity, problem, fix]
+            properties:
+              location: { type: string }
+              severity: { type: string, enum: [CRITICAL, HIGH] }
+              problem: { type: string }
+              fix: { type: string }
+    prompt: |
+      You are the review triage judge. Three independent reviewers produced the
+      findings below (a section may be empty if that reviewer did not run).
+
+      ## Correctness
+      $review-correctness.output
+
+      ## Conventions
+      $review-conventions.output
+
+      ## Coverage
+      $review-coverage.output
+
+      De-duplicate the findings. For each, judge confidence 0-100 that it is a
+      REAL, in-scope issue — NOT a false positive, NOT pre-existing, NOT something
+      a linter/type-checker/CI already catches, NOT a pedantic nitpick. A
+      convention finding counts only if the quoted rule genuinely says it.
+
+      Keep ONLY findings that are CRITICAL or HIGH severity AND confidence >= 80;
+      put them in `must_fix`. Drop everything else as noise. Set `ship_ready` to
+      true exactly when `must_fix` is empty. `summary` is one sentence on the
+      branch's health.
+
+  - id: apply-fixes
+    depends_on: [triage]
+    context: fresh
+    prompt: |
+      Apply ONLY the confirmed must-fix issues from triage below. If the list is
+      empty, make NO changes and stop with "No confirmed issues to fix."
+
+      ## Confirmed must-fix issues
+      $triage.output
 
       ## Rules
 
-      - For each fix: read the file, make the change, run `bash $ARTIFACTS_DIR/verify.sh`.
+      - For each issue: read the file, make the change, then run the NARROWEST
+        check that covers it (the touched workspace's type-check + tests), not the
+        full suite.
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
-      - Commit with `fix: address self-review findings` (or split into multiple
-        commits if the fixes are logically distinct).
-      - If nothing needs fixing, say so and stop.
-      - After fixes: run `bash $ARTIFACTS_DIR/verify.sh` and confirm it passes.
-      - If checks pass and a commit was made, `git push`.
+      - Commit the fixes by name (`git commit -m "fix: address review findings"`,
+        or split if logically distinct) — staging alone is dropped, since the PR
+        pushes HEAD. Commit immediately; never leave fixes uncommitted.
+      - After committing, `git push`.
+
+  - id: re-review
+    depends_on: [apply-fixes]
+    context: fresh
+    prompt: |
+      A review panel flagged the issues below as must-fix, and the previous node
+      applied fixes. Verify the loop actually closed.
+
+      ## Must-fix issues
+      $triage.output
+
+      ## What the fixer reported
+      $apply-fixes.output
+
+      For each must-fix issue, inspect the current code (`git diff main...HEAD` for
+      the relevant files) and confirm it is genuinely resolved and the fix
+      introduced no new CRITICAL/HIGH defect. If any issue is still open, or a fix
+      added a new defect, fix it now: read, edit, run the narrowest covering
+      check, then `git add <files>; git commit -m "fix: complete review follow-up"; git push`.
+      Otherwise make no changes.
+
+      Output one line per issue: resolved / fixed-now / still-open(reason).
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 8: RE-VALIDATE AFTER SELF-FIX
-  # self-fix can commit + push code the pre-PR `revalidate` never saw, so re-run
-  # the project's own checks here. Exits 0 so `report` always renders; the report
-  # then surfaces this node's REAL status instead of assuming PASS.
+  # PHASE 8: RE-VALIDATE AFTER THE REVIEW LOOP
+  # apply-fixes / re-review can commit + push code the pre-PR `revalidate` never
+  # saw, so run the FULL gate (verify.sh) once here. Exits 0 so `report` always
+  # renders; the report then surfaces this node's REAL status, never assuming PASS.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: post-fix-validate
-    depends_on: [self-fix]
-    timeout: 600000
+    depends_on: [re-review]
+    timeout: 1200000
     bash: |
       VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
       if [ ! -f "$VERIFY" ]; then
         echo "VALIDATION_STATUS: FAIL — no verify.sh recorded"
         exit 0
       fi
-      echo "=== PROJECT CHECKS (after self-fix) ==="
+      echo "=== PROJECT CHECKS (after review loop) ==="
       bash -e -o pipefail "$VERIFY" 2>&1
       STATUS=$?
       if [ $STATUS -eq 0 ]; then
         echo "VALIDATION_STATUS: PASS"
       else
-        echo "VALIDATION_STATUS: FAIL — self-fix left checks broken; the pushed PR needs attention"
+        echo "VALIDATION_STATUS: FAIL — the review loop left checks broken; the pushed PR needs attention"
       fi
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -534,9 +664,9 @@ nodes:
       - Issue: $fetch-issue.output
       - Classification: $classify.output
       - Plan summary: see `$ARTIFACTS_DIR/plan.md`
-      - Validation (after self-fix): $post-fix-validate.output
-      - Self-review findings: $self-review.output
-      - Self-fix outcome: $self-fix.output
+      - Validation (after the review loop): $post-fix-validate.output
+      - Review triage (confirmed must-fix issues): $triage.output
+      - Review follow-up: $re-review.output
 
       ## Output
 
@@ -554,11 +684,12 @@ nodes:
       -- What changed --
       {2-4 bullets}
 
-      -- Validation (the project's own checks, after self-fix) --
+      -- Validation (the project's own checks, after the review loop) --
       {PASS or FAIL — read it from the post-fix-validate output above; do NOT assume PASS}
 
-      -- Self-review --
-      {one line per CRITICAL/HIGH finding, with "fixed" or "deferred"}
+      -- Review loop --
+      {one line per triaged must-fix finding, with "fixed" or "still-open"; or
+       "clean — no must-fix findings" when triage confirmed none}
 
       ===============================================================
       ```
