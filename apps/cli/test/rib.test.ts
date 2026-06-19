@@ -229,7 +229,10 @@ describe("keelson rib (restart hint)", () => {
   });
 
   test("rib add in human mode prints the restart hint", async () => {
-    const home = join(mkdtempSync(join(tmpdir(), "keelson-rib-home-restart-human-add-")), "keelson");
+    const home = join(
+      mkdtempSync(join(tmpdir(), "keelson-rib-home-restart-human-add-")),
+      "keelson",
+    );
     try {
       const { stdout, exitCode } = await runCli(["rib", "add", ribSrc, "--base-url", baseUrl], {
         KEELSON_HOME: home,
