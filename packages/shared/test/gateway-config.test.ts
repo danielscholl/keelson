@@ -106,7 +106,10 @@ describe("updateKeelsonConfigGateways", () => {
   test("refuses to overwrite a config.json that isn't valid JSON", () => {
     writeFileSync(path(), "{ not json");
     expect(() =>
-      updateKeelsonConfigGateways((g) => [...g, { name: "g", baseUrl: "http://h/v1" }], home),
+      updateKeelsonConfigGateways(
+        (g) => [...g, { name: "g", baseUrl: "http://h/v1", protocol: "openai" }],
+        home,
+      ),
     ).toThrow(/refusing to overwrite/);
     // The bad file is left untouched.
     expect(readFileSync(path(), "utf8")).toBe("{ not json");
