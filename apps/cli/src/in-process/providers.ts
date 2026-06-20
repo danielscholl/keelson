@@ -15,6 +15,7 @@ import {
   isRegisteredProvider,
   registerClaudeProvider,
   registerCodexProvider,
+  registerConfiguredGateways,
   registerCopilotProvider,
   registerPiProvider,
   registerStubProvider,
@@ -117,6 +118,14 @@ export function bootstrapCliProviders(): BootstrapResult {
       registered.push("codex");
     }
   }
+  // Configured OpenAI-compatible gateways, each registered as a provider named
+  // for the gateway, so the server-down chat/workflow path can drive them too.
+  registered.push(
+    ...registerConfiguredGateways({
+      gateways: config.gateways ?? [],
+      getApiKey: getCliCredential,
+    }),
+  );
   return { registered };
 }
 

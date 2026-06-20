@@ -2,9 +2,10 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { z } from "zod";
+import { credentialServiceIdSchema } from "./chat.ts";
 import { resolveKeelsonHome } from "./paths.ts";
 
 const CONFIG_FILE_NAME = "config.json";
@@ -69,6 +70,89 @@ const mcpSettingsSchema = z.object({
   requireToken: z.boolean().optional(),
 });
 
+// Wire flavors a gateway speaks. Only "openai" (OpenAI Chat Completions, the
+// universal IR for OpenRouter / Ollama / vLLM / Azure / LiteLLM) is implemented
+// today; the enum is single-valued so adding "anthropic" later is a
+// non-breaking widening, not a schema migration.
+export const GATEWAY_PROTOCOLS = ["openai"] as const;
+export type GatewayProtocol = (typeof GATEWAY_PROTOCOLS)[number];
+
+// Names that would shadow a registered provider id. A gateway registers under
+// its own name, so it must not collide with a built-in or the synthetic
+// non-chat 'workflow' provider.
+const RESERVED_GATEWAY_NAMES = new Set<string>([...BUILT_IN_PROVIDER_IDS, "workflow"]);
+
+// A gateway name is the provider id AND part of the keychain account
+// (`gateway-<name>`); cap at 48 so that account stays within
+// credentialServiceIdSchema's 64-char limit, and lock it to kebab-case so the
+// account is path-safe.
+export const gatewayNameSchema = z
+  .string()
+  .min(1)
+  .max(48)
+  .regex(/^[a-z][a-z0-9-]*$/, "gateway name must be lowercase kebab-case")
+  .refine((n) => !RESERVED_GATEWAY_NAMES.has(n), {
+    message: "gateway name collides with a built-in provider id",
+  });
+
+// http(s)-only; a manual refine (not z.string().url()) keeps the rule explicit
+// and stable across zod minor versions.
+const gatewayBaseUrlSchema = z.string().refine(
+  (v) => {
+    try {
+      const u = new URL(v);
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  },
+  { message: "baseUrl must be an http(s) URL (e.g. http://localhost:11434/v1)" },
+);
+
+// A configured gateway: an OpenAI-compatible endpoint reached at `baseUrl` (the
+// API key, when needed, lives in the keychain under gatewayCredentialServiceId).
+// `model` seeds the default + the picker; the live model list comes from
+// listModels() against the endpoint.
+export const gatewayConfigSchema = z
+  .object({
+    name: gatewayNameSchema,
+    baseUrl: gatewayBaseUrlSchema,
+    protocol: z.enum(GATEWAY_PROTOCOLS).default("openai"),
+    model: z.string().min(1).optional(),
+  })
+  .strict();
+export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
+
+// The keychain account a gateway's API key is stored under. Distinct from the
+// gateway name's own namespace via the `gateway-` prefix; validated so a bad
+// name can't mint an unreadable keyring entry.
+export function gatewayCredentialServiceId(name: string): string {
+  const serviceId = `gateway-${name}`;
+  return credentialServiceIdSchema.parse(serviceId);
+}
+
+// Wire shape for GET /api/gateways and the PUT response — a gateway's
+// non-secret config plus a `signedIn` bit (the API key is never returned).
+export const gatewaySummarySchema = gatewayConfigSchema.extend({ signedIn: z.boolean() }).strict();
+export type GatewaySummary = z.infer<typeof gatewaySummarySchema>;
+
+export const listGatewaysResponseSchema = z
+  .object({ gateways: z.array(gatewaySummarySchema) })
+  .strict();
+export type ListGatewaysResponse = z.infer<typeof listGatewaysResponseSchema>;
+
+// Wire shape for PUT /api/gateways/:name — upsert metadata plus an optional
+// API key (set/rotated only when present; omitted leaves the stored key as-is).
+export const upsertGatewayBodySchema = z
+  .object({
+    baseUrl: gatewayBaseUrlSchema,
+    protocol: z.enum(GATEWAY_PROTOCOLS).optional(),
+    model: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+  })
+  .strict();
+export type UpsertGatewayBody = z.infer<typeof upsertGatewayBodySchema>;
+
 const keelsonConfigSchema = z.object({
   // Per-provider enable flags, merged over DEFAULT_PROVIDER_ENABLEMENT — a
   // config need only list the providers it wants to flip.
@@ -80,6 +164,10 @@ const keelsonConfigSchema = z.object({
   claude: claudeSettingsSchema.optional(),
   codex: codexSettingsSchema.optional(),
   mcp: mcpSettingsSchema.optional(),
+  // OpenAI-compatible gateway endpoints, each registered as a provider named
+  // for the gateway. Non-secret metadata only — the API key lives in the
+  // keychain (see gatewayCredentialServiceId).
+  gateways: z.array(gatewayConfigSchema).optional(),
 });
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;
@@ -202,4 +290,57 @@ export function resolveMcpSettings(
     toolDenylist: [...new Set([...(m.toolDenylist ?? []), ...envList])],
     requireToken: env.KEELSON_MCP_REQUIRE_TOKEN === "1" ? true : m.requireToken === true,
   };
+}
+
+// Tolerant read of the gateways array from a raw config object: keep the
+// entries that still validate, drop the rest. Used by the writer so one corrupt
+// entry can't fail an otherwise-valid update.
+function readGatewayArray(raw: unknown): GatewayConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GatewayConfig[] = [];
+  for (const item of raw) {
+    const parsed = gatewayConfigSchema.safeParse(item);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out;
+}
+
+// Read-modify-write the `gateways` array in config.json, preserving every other
+// (including unknown) top-level key. `mutate` receives the current gateways and
+// returns the next set; the result is schema-validated before it lands. The
+// write is atomic (temp file + rename) and refuses to clobber a config.json
+// that exists but doesn't parse as a JSON object, so a hand-edit typo surfaces
+// as an error instead of silent data loss. Honors KEELSON_CONFIG like the reader.
+export function updateKeelsonConfigGateways(
+  mutate: (gateways: GatewayConfig[]) => GatewayConfig[],
+  home: string = resolveKeelsonHome(),
+): GatewayConfig[] {
+  const path = process.env.KEELSON_CONFIG?.trim() || join(home, CONFIG_FILE_NAME);
+  let rawObj: Record<string, unknown> = {};
+  let existing: string | undefined;
+  try {
+    existing = readFileSync(path, "utf8");
+  } catch {
+    existing = undefined;
+  }
+  if (existing !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(existing);
+    } catch (err) {
+      throw new Error(`refusing to overwrite ${path}: not valid JSON (${(err as Error).message})`);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(`refusing to overwrite ${path}: not a JSON object`);
+    }
+    rawObj = parsed as Record<string, unknown>;
+  }
+  const next = z.array(gatewayConfigSchema).parse(mutate(readGatewayArray(rawObj.gateways)));
+  if (next.length > 0) rawObj.gateways = next;
+  else delete rawObj.gateways;
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(rawObj, null, 2)}\n`, "utf8");
+  renameSync(tmp, path);
+  return next;
 }

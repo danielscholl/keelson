@@ -6,13 +6,18 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
+import { registerGatewayProvider, unregisterProvider } from "@keelson/providers";
 import {
   DEFAULT_PROJECT_NAME,
   RIBS_VERSION_SNAPSHOT_KEY,
   SCHEMA_VERSION,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
-import { loadKeelsonConfig, resolveMcpSettings } from "@keelson/shared/config";
+import {
+  gatewayCredentialServiceId,
+  loadKeelsonConfig,
+  resolveMcpSettings,
+} from "@keelson/shared/config";
 import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
 import { bundledWorkflowsDir, seedStarterAssets } from "@keelson/workflows";
@@ -38,6 +43,7 @@ import { createKeyringStore, createRibCredentialAccessor, getCredential } from "
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
 import { createDynamicRegionStore } from "./dynamic-region-store.ts";
+import { gatewaysRoutes } from "./gateways-handler.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
@@ -480,6 +486,22 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   credentialsRoutes(app, credentialStore, {
     copilotAuthProbe: bootstrap.copilotAuthProbe,
     claudeAuthProbe: bootstrap.claudeAuthProbe,
+  });
+  gatewaysRoutes(app, credentialStore, {
+    onGatewayUpserted: (gw) => {
+      // Replace any prior registration so an edit (baseUrl/model/key) takes
+      // effect on the next turn without a server restart.
+      unregisterProvider(gw.name);
+      registerGatewayProvider({
+        id: gw.name,
+        baseUrl: gw.baseUrl,
+        getApiKey: () => getCredential(gatewayCredentialServiceId(gw.name)),
+        ...(gw.model ? { model: gw.model } : {}),
+      });
+    },
+    onGatewayRemoved: (name) => {
+      unregisterProvider(name);
+    },
   });
 
   // The MCP token actually enforced, reported on the handle so serveUntilSignal

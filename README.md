@@ -77,6 +77,26 @@ which providers load and which one chat defaults to in `~/.keelson/config.json`:
 for every setting, the `KEELSON_*` variables, and how Pi's and Codex's
 self-managed auth works.
 
+### Gateways
+
+Point a provider at any **OpenAI-compatible** endpoint — OpenRouter, a local
+[Ollama](https://ollama.com/) or vLLM, Azure OpenAI, or a LiteLLM proxy — by
+adding a *gateway*. Each gateway registers as a provider named for it, so it
+shows up in the model picker like any built-in:
+
+```bash
+keelson gateway add ollama http://localhost:11434/v1 --model qwen3
+keelson gateway add openrouter https://openrouter.ai/api/v1 --model openai/gpt-4o --key sk-...
+keelson gateway list
+keelson gateway remove ollama
+```
+
+The base URL and default model live in `~/.keelson/config.json`; the API key —
+when the endpoint needs one (a local Ollama doesn't) — goes in your OS keychain,
+never the config file. `--key` also reads `KEELSON_GATEWAY_KEY` so it stays out
+of shell history. The same operations are available over the API at
+`/api/gateways`.
+
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and
 > Keelson auto-discovers its `bash.exe` (`KEELSON_BASH` overrides). The `prompt`,

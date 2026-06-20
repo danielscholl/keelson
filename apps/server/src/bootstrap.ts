@@ -16,6 +16,7 @@ import {
   isRegisteredProvider,
   registerClaudeProvider,
   registerCodexProvider,
+  registerConfiguredGateways,
   registerCopilotProvider,
   registerPiProvider,
   registerStubProvider,
@@ -141,6 +142,13 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
         break;
     }
   }
+  // Configured OpenAI-compatible gateways, each registered as a provider named
+  // for the gateway. Registered before defaultProvider resolution so a gateway
+  // can be the configured default, after the built-ins so it can't shadow one.
+  registerConfiguredGateways({
+    gateways: config.gateways ?? [],
+    getApiKey: options.getCredential,
+  });
   // Always-on, non-chat provider that backs workflow-linked conversations.
   // Registered AFTER the selectable providers so it sits at the end of
   // getProviderInfoList() and isn't picked as a chat default.

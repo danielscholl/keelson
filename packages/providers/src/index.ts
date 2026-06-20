@@ -84,6 +84,13 @@ export {
   registerCopilotProvider,
 } from "./copilot/registration.ts";
 export { UnknownProviderError } from "./errors.ts";
+export { GatewayProvider, type GatewayProviderOptions } from "./gateway/provider.ts";
+export {
+  type ConfiguredGateway,
+  type RegisterGatewayProviderOptions,
+  registerConfiguredGateways,
+  registerGatewayProvider,
+} from "./gateway/registration.ts";
 export type { PiRawEvent } from "./pi/event-bridge.ts";
 export { mapPiEvent } from "./pi/event-bridge.ts";
 export type {
@@ -111,6 +118,7 @@ export {
   getRegistration,
   isRegisteredProvider,
   registerProvider,
+  unregisterProvider,
 } from "./registry.ts";
 export { StubProvider } from "./stub/provider.ts";
 export { registerStubProvider } from "./stub/registration.ts";
