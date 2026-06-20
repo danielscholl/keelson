@@ -298,7 +298,9 @@ describe("board actions with input fields", () => {
     // Reopening starts from a cleared input — success reset the collected values.
     fireEvent.click(screen.getByRole("button", { name: "Start room" }));
     expect((container.querySelector(".cvb-action-field-input") as HTMLInputElement).value).toBe("");
-  });
+    // This render → submit → reopen flow runs ~5.2s on the Windows CI runner,
+    // marginally over Bun's 5000ms default; give it headroom so it stops flaking.
+  }, 15000);
 });
 
 describe("copy-on-reveal field", () => {
