@@ -64,6 +64,58 @@ Comments live in source long after the PR that motivated them merges. Default to
 - **PR bodies**: three sections — *What*, *Why now*, *Test plan*. Skim recent merged PRs (`gh pr list --state merged --limit 3`) for voice. No "Generated with" footers.
 - **Workflow descriptions**: bundled workflows in `packages/workflows/assets/workflows/` use the `Use when / Triggers / Does / NOT for` structured convention so the SPA workflow cards render scannably. Match that shape when adding new ones.
 
+## Working with PR Review Comments
+
+GitHub exposes review threads across two APIs; each does what the other cannot.
+
+**GraphQL — thread metadata and resolution:**
+
+```graphql
+# Fetch unresolved threads (thread id + anchor + comment bodies)
+query($owner: String!, $repo: String!, $pr: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          path
+          line
+          comments(first: 50) {
+            nodes { databaseId body author { login } }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Invoke with `gh api graphql -f query='...' -f owner=OWNER -f repo=REPO -F pr=NUMBER`.
+
+**REST — post a reply:**
+
+```sh
+gh api -X POST repos/{owner}/{repo}/pulls/comments/{commentId}/replies \
+  -f body="Reply text here"
+```
+
+`commentId` is the `databaseId` of the first comment in the thread (from the GraphQL query above).
+
+**GraphQL — resolve a thread:**
+
+```graphql
+mutation($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
+    thread { isResolved }
+  }
+}
+```
+
+Invoke with `gh api graphql -f query='...' -f threadId=THREAD_ID`.
+
+`threadId` is the opaque GraphQL `id` from `reviewThreads.nodes[].id` — not a numeric REST id. Only call `resolveReviewThread` for threads you have actually fixed; resolving a thread you only replied to is dishonest PR state.
+
 ## Documentation
 
 The docs site lives in `docs/` — a self-contained **Astro Starlight** project (not a Bun workspace; it has its own `bun install` and lockfile). Two parts share one "blueprint" identity: a bespoke hand-authored landing in `docs/public/` and the Starlight docs tier (Markdown/MDX) under `docs/src/content/docs/`. **`docs/STYLE.md` is the authoritative style guide — read it before adding or editing any docs page.** It locks the voice, palette, components, figure conventions, widths, and the route map (landing at `/`, docs under `/docs/`). Build and preview locally with `cd docs && bun install && bun run build && bun run preview`. `.github/workflows/docs.yml` builds and deploys it to GitHub Pages. Do not introduce a second site generator or fork the palette per page.
