@@ -8,7 +8,7 @@ sidebar:
 import { Aside } from "@astrojs/starlight/components";
 import WorkflowCards from "../../../../components/WorkflowCards.astro";
 
-Keelson ships seven workflows. They are real, runnable, and the place the
+Keelson ships eight workflows. They are real, runnable, and the place the
 [authoring recipes](../guides/authoring-workflows/) show up composed: a
 three-line approval-gate recipe is one thing, the same gate sitting inside a
 sixteen-node investigate-and-implement pipeline is where the shape clicks. This
@@ -20,7 +20,7 @@ documentation.
 
 ## Where these come from
 
-The seven are **bundled** starters: they ship with the package and seed into
+The eight are **bundled** starters: they ship with the package and seed into
 your home (`<home>/workflows/`) on first run, so `keelson workflow list` shows
 them as `global` once seeded. Copy and edit one freely; the bundled original
 stays as a clean fallback. See [scopes](../reference/workflow-nodes/#scopes) for
@@ -34,9 +34,9 @@ keelson workflow run fix-issue --inputs ARGUMENTS="42"
 ```
 
 <Aside type="note" title="What the Copilot workflows need">
-Six of the seven set `provider: copilot` and `model: auto`, so they need a
+Seven of the eight set `provider: copilot` and `model: auto`, so they need a
 GitHub Copilot subscription registered. The GitHub-facing ones (`fix-issue`,
-`pr-review`, `plan-act-evaluate`) also drive the `gh` CLI, so it must be
+`pr-review`, `plan-act-evaluate`, `resolve-comments`) also drive the `gh` CLI, so it must be
 installed and authenticated. The approval and interactive workflows pause for a
 human, which needs a running server (`keelson start`). `smoke-test` is the
 exception: it runs provider-free on the stub, with no credentials.
@@ -44,11 +44,11 @@ exception: it runs provider-free on the stub, with no credentials.
 
 ## Ship code
 
-The delivery flagships: an issue taken to a draft PR, a scoped PR review, and a
-plan-first lifecycle. Each composes gates, loops, and branches into a real
-pipeline, and each has a full walkthrough.
+The delivery flagships: an issue taken to a draft PR, a scoped PR review, a
+plan-first lifecycle, and a PR review thread resolver. Each composes gates,
+loops, and branches into a real pipeline, and each has a full walkthrough.
 
-<WorkflowCards names={["fix-issue", "pr-review", "plan-act-evaluate"]} />
+<WorkflowCards names={["fix-issue", "pr-review", "plan-act-evaluate", "resolve-comments"]} />
 
 ## Plan and shape
 
