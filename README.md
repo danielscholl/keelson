@@ -105,9 +105,10 @@ decision from a rib policy or a builtin. The pause surfaces over the snapshot WS
 accept lets the call proceed, reject (or a 5-minute timeout) denies it.
 
 Set `KEELSON_ASK_ON_SHELL=1` to enable the `ask_on_shell` builtin, which asks
-before any keelson tool call whose name denotes a shell or file-mutating action
-(provider *built-in* Bash/Edit/Write are gated by each SDK's own permission
-prompt, not this gate). Resolve pending approvals from the CLI:
+before a shell or file-mutating action — both keelson tool calls and the Copilot
+agent's own built-in shell/write capabilities (Copilot routes its built-in
+permission requests through the policy engine; Claude built-in gating is a
+follow-up). Resolve pending approvals from the CLI:
 
 ```bash
 keelson approval list

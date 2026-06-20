@@ -868,6 +868,26 @@ describe("CopilotProvider — per-node tool rails + hooks", () => {
     expect(sdk.lastSessionConfig()!.onPermissionRequest).toBe(sdk.approveAll);
   });
 
+  it("routes built-in capabilities through the policy engine when evaluateToolCall is set", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    const calls: string[] = [];
+    const evaluateToolCall = async (call: { tool: string; args?: unknown }) => {
+      calls.push(call.tool);
+      return call.tool === "Bash"
+        ? { outcome: "deny" as const, reason: "approval rejected: confirm shell" }
+        : { outcome: "allow" as const };
+    };
+    await drain(makeProvider(sdk).sendQuery("hi", "/tmp", undefined, { evaluateToolCall }));
+    const cfg = sdk.lastSessionConfig()!;
+    // No rails, but the engine gate is installed — built-ins now flow through it.
+    expect(cfg.onPermissionRequest).not.toBe(sdk.approveAll);
+    const gate = cfg.onPermissionRequest as (req: unknown, inv: unknown) => Promise<unknown>;
+    // shell → engine deny → reject; read → engine allow → approveAll (mock "permit").
+    expect(decisionKind(await gate({ kind: "shell" }, { sessionId: "s" }))).toBe("reject");
+    expect(decisionKind(await gate({ kind: "read" }, { sessionId: "s" }))).toBe("permit");
+    expect(calls).toEqual(["Bash", "Read"]);
+  });
+
   it("projects PreToolUse / PostToolUse hooks into the session config", async () => {
     const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
     await drain(

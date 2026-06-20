@@ -91,6 +91,29 @@ export function toolKind(name: string): CopilotPermissionKind | undefined {
   return NAME_TO_KIND[name.toLowerCase()];
 }
 
+// Representative Claude-canonical tool name per capability kind — the name the
+// policy engine evaluates when the SDK asks to use a BUILT-IN capability, so a
+// name-based policy (operator denylist, `ask_on_shell`, a rib policy) governs
+// built-ins the same way it governs MCP tool calls. The permission request only
+// carries a coarse `kind` (every write-capable built-in reports "write"), so one
+// name per kind is the right granularity — matching the rail above.
+const KIND_TO_TOOL_NAME: Readonly<Record<CopilotPermissionKind, string>> = {
+  read: "Read",
+  write: "Write",
+  shell: "Bash",
+  url: "WebFetch",
+  memory: "Memory",
+  // Non-capability kinds never reach the engine (they bypass GATED_KINDS), but a
+  // total map keeps this exhaustive and type-checked against the kind union.
+  mcp: "mcp",
+  "custom-tool": "custom-tool",
+  hook: "hook",
+};
+
+export function capabilityToolName(kind: CopilotPermissionKind): string {
+  return KIND_TO_TOOL_NAME[kind];
+}
+
 // Resolve the capability kind of an actual tool invocation, refining the static
 // map with the call's args for multi-mode tools. Copilot's `str_replace_editor`
 // is read (`command: "view"`) or write (every other command) depending on args;
