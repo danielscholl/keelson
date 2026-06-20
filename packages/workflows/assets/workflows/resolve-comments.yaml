@@ -1,0 +1,456 @@
+# Closes the find→fix→resolve loop for a PR's unresolved review threads.
+# Companion to pr-review (which only reads) and fix-issue (which fixes an issue
+# from scratch): this workflow fetches threads, triages them, fixes actionable
+# ones in a worktree, and then posts replies and resolves threads — but ONLY the
+# ones it actually fixed. A thread it did not fix gets a reply but stays open.
+#
+# GraphQL gives thread `id`/`isResolved`/`path`/`line` that REST omits; REST
+# gives comment bodies and the `/replies` write endpoint; only GraphQL
+# `resolveReviewThread` flips a thread to resolved. Both layers are used here.
+#
+# Honesty invariant: `results.json` records `action: "fixed"` or
+# `action: "replied-only"` per thread. The reply-resolve node only calls
+# `resolveReviewThread` where `action == "fixed"` — never resolves a thread
+# it didn't touch in the worktree.
+
+name: resolve-comments
+provider: copilot
+model: auto
+description: |
+  Use when: User wants to fetch, triage, fix, and resolve a PR's unresolved
+            review threads end-to-end.
+  Triggers: "resolve comments", "address review comments", "fix pr comments",
+            "resolve threads on #123", "address reviewer feedback".
+  Does: Fetches unresolved review threads via GraphQL → triages each
+        (actionable-code-change / question / wontfix / already-addressed) →
+        pauses for human approval → fixes actionable threads in a worktree
+        (commit per thread/group, verify.sh gate) → posts a reply on every
+        thread → resolves ONLY the fixed ones → reports back.
+  NOT for: Reviewing a PR without fixing anything (use pr-review).
+           Fixing a GitHub issue from scratch (use fix-issue).
+           Threads already resolved.
+
+worktree:
+  enabled: true
+
+nodes:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 1: SCOPE — resolve PR number, fetch unresolved threads
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: extract-pr
+    model: auto
+    prompt: |
+      Find the GitHub PR number for this request.
+
+      Request: $ARGUMENTS
+
+      Rules:
+      - If the message contains an explicit PR number ("#42", "PR 42", "42"),
+        extract it.
+      - If the message is ambiguous, return the literal string CURRENT — the
+        next node will resolve it from the current branch.
+
+      CRITICAL: Output ONLY the bare integer, or the literal CURRENT. No quotes,
+      no markdown, no explanation.
+
+  - id: fetch-threads
+    depends_on: [extract-pr]
+    bash: |
+      set -euo pipefail
+
+      RAW=$(printf '%s' "$KEELSON_NODE_extract_pr_OUTPUT" | tr -d "'\"\`\n " )
+      if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
+        PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
+      else
+        PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
+      fi
+
+      if [ -z "$PR_NUM" ]; then
+        echo "Could not resolve a PR number — pass one like 'resolve comments on 42' or run from a PR branch." >&2
+        exit 1
+      fi
+
+      echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
+
+      REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+      OWNER=$(echo "$REPO" | cut -d/ -f1)
+      REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
+
+      # GraphQL gives thread id + isResolved + anchor; REST gives full comment bodies.
+      # Page through reviewThreads (100 per page covers most PRs; add cursor loop if needed).
+      gh api graphql -f query='
+        query($owner: String!, $repo: String!, $pr: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                  path
+                  line
+                  comments(first: 50) {
+                    nodes {
+                      databaseId
+                      body
+                      author { login }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ' -f owner="$OWNER" -f repo="$REPO_NAME" -F pr="$PR_NUM" \
+        > "$KEELSON_ARTIFACTS_DIR/raw-threads.json"
+
+      # Normalize: one entry per unresolved thread.
+      jq --arg owner "$OWNER" --arg repo "$REPO_NAME" --arg pr "$PR_NUM" '
+        .data.repository.pullRequest.reviewThreads.nodes
+        | map(select(.isResolved == false))
+        | map({
+            threadId: .id,
+            path: .path,
+            line: (.line // null),
+            commentId: (.comments.nodes[0].databaseId // null),
+            body: ([.comments.nodes[].body] | join("\n\n---\n\n")),
+            author: (.comments.nodes[0].author.login // "unknown"),
+            replyCount: ((.comments.nodes | length) - 1)
+          })
+      ' "$KEELSON_ARTIFACTS_DIR/raw-threads.json" > "$KEELSON_ARTIFACTS_DIR/threads.json"
+
+      COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/threads.json")
+      echo "Unresolved threads: $COUNT"
+
+      if [ "$COUNT" -eq 0 ]; then
+        echo "ZERO_THREADS=true"
+        echo "No unresolved review threads found on PR #${PR_NUM}."
+      else
+        echo "ZERO_THREADS=false"
+        jq '.' "$KEELSON_ARTIFACTS_DIR/threads.json"
+      fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 2: TRIAGE — classify each thread's actionability
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: triage
+    depends_on: [fetch-threads]
+    context: fresh
+    # Triage is the judgment gate; pin to a frontier model for reliable decisions.
+    model: claude-opus-4.8
+    output_format:
+      type: object
+      required: [threads]
+      properties:
+        threads:
+          type: array
+          items:
+            type: object
+            required: [threadId, path, decision, reasoning, reply_hint]
+            properties:
+              threadId: { type: string }
+              path: { type: string }
+              line: { type: ["integer", "null"] }
+              decision:
+                type: string
+                enum:
+                  [
+                    actionable-code-change,
+                    question,
+                    wontfix,
+                    already-addressed,
+                  ]
+              reasoning: { type: string }
+              reply_hint: { type: string }
+    prompt: |
+      You are triaging unresolved PR review threads. Read the threads below and
+      classify each one.
+
+      ## Threads
+
+      $fetch-threads.output
+
+      Full thread data is in `$ARTIFACTS_DIR/threads.json`.
+
+      ## Decision enum
+
+      | Decision | When to use |
+      |----------|-------------|
+      | actionable-code-change | Reviewer is asking for a code change we should make. |
+      | question | Reviewer is asking a question; a reply explaining the decision is enough. |
+      | wontfix | We disagree or the change is out of scope; we'll explain why. |
+      | already-addressed | The concern was already fixed in a later commit or is moot. |
+
+      ## Output
+
+      For each thread, fill `threadId`, `path`, `line` (null if absent),
+      `decision`, `reasoning` (one sentence), and `reply_hint` (the gist of
+      what to reply — the fix node and reply node both use this).
+
+      Write the triage JSON to `$ARTIFACTS_DIR/triage.json` and print it.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 3: HUMAN APPROVAL GATE
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: approve
+    depends_on: [triage]
+    approval:
+      message: |
+        Review the triage below before any branch mutation.
+        Approve to continue, or reply with adjustments.
+
+        $ARTIFACTS_DIR/triage.json
+      capture_response: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 4: FIX — implement actionable threads in the worktree
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: fix
+    depends_on: [approve]
+    context: fresh
+    idle_timeout: 1800000
+    prompt: |
+      You are fixing actionable PR review threads. Read the triage, apply each
+      `actionable-code-change` fix in the worktree, and record results.
+
+      ## Approval feedback
+
+      $approve.output
+
+      ## Triage
+
+      $triage.output
+
+      Full triage data: `$ARTIFACTS_DIR/triage.json`
+      Thread data:      `$ARTIFACTS_DIR/threads.json`
+
+      ## Setup — verify.sh
+
+      First, discover this project's checks and write them to
+      `$ARTIFACTS_DIR/verify.sh` with `set -euo pipefail` at the top so the
+      FIRST failing check aborts. Read whichever of `CLAUDE.md`, `AGENTS.md`,
+      `CONTRIBUTING.md`, `README.md`, plus `package.json` scripts exist.
+      This script is the gate before push.
+
+      ## Rules
+
+      - Apply operator adjustments from the approval feedback before writing code.
+      - Process only threads with `decision == "actionable-code-change"`.
+      - Anchor each fix to its `path` and `line` from triage, and the comment
+        `body` from threads.json. Read the file before editing.
+      - Run the NARROWEST check covering the change after each fix (the touched
+        workspace's type-check + tests), NOT the full `verify.sh`.
+      - **Never** `git add -A` / `git add .` / `git add -u`. Stage files by name.
+      - **Never** commit anything under `$ARTIFACTS_DIR`.
+      - Commit per thread or per logical group with a conventional message.
+      - For non-actionable threads (`question` / `wontfix` / `already-addressed`),
+        no code change — just note the reply in results.
+
+      ## Results file
+
+      After processing ALL threads (including non-actionable ones), write
+      `$ARTIFACTS_DIR/results.json` — a JSON array, one entry per thread:
+
+      ```json
+      [
+        {
+          "threadId": "<graphql thread id>",
+          "commentId": <database id for replies>,
+          "action": "fixed",
+          "commit": "<sha or null>",
+          "reply": "<the reply text to post>"
+        },
+        {
+          "threadId": "...",
+          "commentId": ...,
+          "action": "replied-only",
+          "commit": null,
+          "reply": "..."
+        }
+      ]
+      ```
+
+      `action` is `"fixed"` ONLY when an actual code change was committed for
+      that thread. Everything else is `"replied-only"`.
+
+      Print a summary when done.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 5: VALIDATE — run verify.sh, let fix-validation repair, hard gate
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: validate
+    depends_on: [fix]
+    timeout: 1200000
+    bash: |
+      # Always exits 0 so fix-validation can read the output and decide.
+      VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
+      if [ ! -f "$VERIFY" ]; then
+        echo "No verify.sh recorded by the fix step — cannot verify the change."
+        echo "VALIDATION_STATUS: FAIL"
+        exit 0
+      fi
+
+      echo "=== PROJECT CHECKS ==="
+      bash -e -o pipefail "$VERIFY" 2>&1
+      STATUS=$?
+
+      echo ""
+      if [ $STATUS -eq 0 ]; then
+        echo "VALIDATION_STATUS: PASS"
+      else
+        echo "VALIDATION_STATUS: FAIL"
+      fi
+
+  - id: fix-validation
+    depends_on: [validate]
+    context: fresh
+    prompt: |
+      Review the validation output below.
+
+      ## Validation
+
+      $validate.output
+
+      ## Instructions
+
+      - If the output ends with `VALIDATION_STATUS: PASS`, respond with
+        "All checks passed — no fixes needed." and stop.
+      - If it failed because no `verify.sh` was recorded, discover this
+        project's verify commands now (read `CLAUDE.md` / `AGENTS.md` /
+        `CONTRIBUTING.md` / `README.md` and its build config), write them to
+        `$ARTIFACTS_DIR/verify.sh`, and run it.
+      - Otherwise, fix ONLY what is broken. Do not add scope.
+      - Stage edited files by name. Never `git add -A`. Never commit anything
+        under `$ARTIFACTS_DIR`.
+      - After each fix, re-run `bash $ARTIFACTS_DIR/verify.sh` to confirm.
+      - COMMIT the fixes before handing off:
+        `git add <files>; git commit -m "fix: address validation failures"`.
+
+  - id: revalidate
+    depends_on: [fix-validation]
+    timeout: 1200000
+    bash: |
+      # Hard gate: exits non-zero (failing the node, skipping push) if checks
+      # don't pass or no verify.sh was ever recorded.
+      VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
+      if [ ! -f "$VERIFY" ]; then
+        echo "VALIDATION_STATUS: FAIL — no verify.sh recorded; refusing to push unverified changes"
+        exit 1
+      fi
+
+      echo "=== PROJECT CHECKS ==="
+      bash -e -o pipefail "$VERIFY" 2>&1
+      STATUS=$?
+
+      if [ $STATUS -ne 0 ]; then
+        echo "VALIDATION_STATUS: FAIL — refusing to push with broken checks"
+        exit 1
+      fi
+      echo "VALIDATION_STATUS: PASS"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 6: PUSH
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: push
+    depends_on: [revalidate]
+    bash: |
+      set -euo pipefail
+      # The threads live on an existing PR branch — push to the existing upstream.
+      git push
+      echo "Pushed worktree branch to origin."
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 7: REPLY + RESOLVE
+  # Post a reply on every thread; resolve only those with action == "fixed".
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: reply-resolve
+    depends_on: [push]
+    context: fresh
+    prompt: |
+      Post replies and resolve threads according to `$ARTIFACTS_DIR/results.json`.
+
+      ## Invariant
+
+      - Post a reply on EVERY thread (fixed and replied-only alike).
+      - Call `resolveReviewThread` ONLY for threads where `action == "fixed"`.
+      - Never resolve a `replied-only` thread, even if the reply sounds conclusive.
+
+      ## Steps
+
+      1. Read `$ARTIFACTS_DIR/results.json` and `$ARTIFACTS_DIR/.pr-number`.
+      2. Determine the repo: `gh repo view --json nameWithOwner -q '.nameWithOwner'`
+      3. For each entry in results.json:
+         a. Post a reply via REST:
+            ```
+            gh api -X POST \
+              repos/{owner}/{repo}/pulls/comments/{commentId}/replies \
+              -f body="{reply text}"
+            ```
+         b. If `action == "fixed"`, resolve via GraphQL:
+            ```
+            gh api graphql -f query='
+              mutation($threadId: ID!) {
+                resolveReviewThread(input: {threadId: $threadId}) {
+                  thread { isResolved }
+                }
+              }
+            ' -f threadId="{threadId}"
+            ```
+      4. Write `$ARTIFACTS_DIR/outcome.json`:
+         ```json
+         { "replied": [...threadIds], "resolved": [...threadIds], "left_open": [...threadIds] }
+         ```
+      5. Print a summary: how many replied, how many resolved, how many left open.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 8: REPORT
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: report
+    depends_on: [reply-resolve]
+    context: fresh
+    model: auto
+    prompt: |
+      Produce a final summary of the resolve-comments run.
+
+      ## Inputs
+
+      - PR number: `$ARTIFACTS_DIR/.pr-number`
+      - Triage: `$ARTIFACTS_DIR/triage.json`
+      - Results: `$ARTIFACTS_DIR/results.json`
+      - Outcome: `$ARTIFACTS_DIR/outcome.json`
+      - Validation status: read `$ARTIFACTS_DIR/verify.sh` — if it exists,
+        run `bash -e -o pipefail "$ARTIFACTS_DIR/verify.sh" 2>&1` to confirm
+        the final state; never assume PASS.
+
+      ## Output format
+
+      ```
+      ## resolve-comments — PR #<N>
+
+      ### Per thread
+
+      | Thread | File | Decision | Action | Commit |
+      |--------|------|----------|--------|--------|
+      | <id short> | path:line | actionable-code-change | resolved | <sha> |
+      | <id short> | path:line | question | replied-only | — |
+      …
+
+      ### Summary
+
+      - Resolved (fixed): N
+      - Replied only:     N
+      - Left open:        N
+
+      ### Validation
+
+      PASS / FAIL — <one line from verify.sh output>
+      ```
+
+      Print this report and also write it to `$ARTIFACTS_DIR/report.md`.
