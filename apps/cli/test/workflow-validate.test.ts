@@ -70,3 +70,50 @@ describe("workflow validate (parseWorkflow fixture coverage)", () => {
     expect(result.error).not.toBeNull();
   });
 });
+
+describe("pr-review workflow node graph", () => {
+  const WORKFLOWS = resolve(
+    import.meta.dir,
+    "..",
+    "..",
+    "..",
+    "packages",
+    "workflows",
+    "assets",
+    "workflows",
+  );
+
+  test("pr-review parses without error", () => {
+    const filename = `${WORKFLOWS}/pr-review.yaml`;
+    const content = readFileSync(filename, "utf-8");
+    const result = parseWorkflow(content, filename);
+    expect(result.error).toBeNull();
+    expect(result.workflow).not.toBeNull();
+  });
+
+  test("pr-review contains triage, build-review, and post-review nodes", () => {
+    const filename = `${WORKFLOWS}/pr-review.yaml`;
+    const content = readFileSync(filename, "utf-8");
+    const result = parseWorkflow(content, filename);
+    const ids = result.workflow?.nodes.map((n) => n.id) ?? [];
+    expect(ids).toContain("triage");
+    expect(ids).toContain("build-review");
+    expect(ids).toContain("post-review");
+  });
+
+  test("triage node is pinned to claude-opus-4.8", () => {
+    const filename = `${WORKFLOWS}/pr-review.yaml`;
+    const content = readFileSync(filename, "utf-8");
+    const result = parseWorkflow(content, filename);
+    const triage = result.workflow?.nodes.find((n) => n.id === "triage");
+    expect(triage?.model).toBe("claude-opus-4.8");
+  });
+
+  test("no node uses gh pr comment; post-review references /reviews", () => {
+    const filename = `${WORKFLOWS}/pr-review.yaml`;
+    const content = readFileSync(filename, "utf-8");
+    // These invariants hold at the raw YAML level.
+    expect(content).not.toContain("gh pr comment");
+    expect(content).toContain("/reviews");
+  });
+});
