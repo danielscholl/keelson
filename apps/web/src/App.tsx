@@ -1,5 +1,6 @@
 import type { RibSurfaceDescriptor } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ApprovalsDock } from "./components/ApprovalsDock.tsx";
 import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
 import { RibsProvider, useRibsContext } from "./components/RibsProvider.tsx";
 import { ToastHost } from "./components/Toast.tsx";
@@ -143,6 +144,8 @@ function AppInner() {
           onOpenSeededChat={handleExplore}
         />
       )}
+      {/* App-level: a policy ASK can pause a turn on any surface. */}
+      <ApprovalsDock />
     </div>
   );
 }
