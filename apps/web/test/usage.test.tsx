@@ -6,7 +6,12 @@ import { describe, expect, test } from "bun:test";
 import { render, screen } from "@testing-library/react";
 import { UsageChip } from "../src/components/Chat/UsageChip.tsx";
 import { UsagePopover } from "../src/components/Chat/UsagePopover.tsx";
-import { contextFillLevel, contextPercent, formatTokens } from "../src/lib/formatTokens.ts";
+import {
+  contextFillLevel,
+  contextPercent,
+  formatTokens,
+  sumTokenSpend,
+} from "../src/lib/formatTokens.ts";
 
 describe("formatTokens", () => {
   test("formats across magnitudes", () => {
@@ -22,6 +27,25 @@ describe("formatTokens", () => {
   test("degrades garbage to 0", () => {
     expect(formatTokens(-5)).toBe("0");
     expect(formatTokens(Number.NaN)).toBe("0");
+  });
+});
+
+describe("sumTokenSpend", () => {
+  test("sums input/output across reporting nodes, skipping non-reporters", () => {
+    expect(
+      sumTokenSpend([
+        { inputTokens: 14_000, outputTokens: 34 },
+        undefined,
+        { inputTokens: 865_000, outputTokens: 7800 },
+        null,
+      ]),
+    ).toEqual({ inputTokens: 879_000, outputTokens: 7834 });
+  });
+
+  test("returns null when nothing was spent — never a fabricated 0", () => {
+    expect(sumTokenSpend([])).toBeNull();
+    expect(sumTokenSpend([undefined, null])).toBeNull();
+    expect(sumTokenSpend([{ inputTokens: 0, outputTokens: 0 }])).toBeNull();
   });
 });
 

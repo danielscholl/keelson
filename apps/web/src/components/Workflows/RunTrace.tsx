@@ -228,6 +228,11 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
         </button>
         <span>{schema.id}</span>
         {chip && <span className={`node-type ${chip.className}`}>{chip.label}</span>}
+        {schema.model && (
+          <span className="node-model" title={`Model: ${schema.model}`}>
+            {schema.model}
+          </span>
+        )}
         {status === "running" && (
           <span className="typing-dots" role="img" aria-label="streaming">
             <span />

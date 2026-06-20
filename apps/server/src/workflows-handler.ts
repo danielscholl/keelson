@@ -165,6 +165,13 @@ function nodeTypeOf(node: DagNode): string {
   return "unknown";
 }
 
+// Node types whose own `model` this layer can resolve: prompt and command (a
+// command node synthesizes a prompt from the node, carrying its model). Loop is
+// intentionally excluded — the schema transform drops a loop node's `model`
+// (dag-node.ts builds loop nodes without the AI fields), so its effective model
+// isn't derivable here. bash / script / approval / cancel never call a model.
+const MODEL_NODE_TYPES: ReadonlySet<string> = new Set(["prompt", "command"]);
+
 function workflowToSummary(
   workflow: WorkflowDefinition,
   catalog: WorkflowCatalog,
@@ -226,13 +233,23 @@ function workflowToDetail(workflow: WorkflowDefinition) {
   return {
     name: workflow.name,
     description: workflow.description,
-    nodes: workflow.nodes.map((n) => ({
-      id: n.id,
-      type: nodeTypeOf(n),
-      ...(n.depends_on ? { dependsOn: n.depends_on } : {}),
-      ...(n.when ? { when: n.when } : {}),
-      ...(n.trigger_rule ? { triggerRule: n.trigger_rule } : {}),
-    })),
+    nodes: workflow.nodes.map((n) => {
+      const type = nodeTypeOf(n);
+      // Resolve the node's own `model` over the workflow default, treating an
+      // empty string as unset so it still falls back. The provider default
+      // isn't known at this layer, so omit rather than guess.
+      const ownModel = n.model && n.model.length > 0 ? n.model : undefined;
+      const defaultModel = workflow.model && workflow.model.length > 0 ? workflow.model : undefined;
+      const model = MODEL_NODE_TYPES.has(type) ? (ownModel ?? defaultModel) : undefined;
+      return {
+        id: n.id,
+        type,
+        ...(n.depends_on ? { dependsOn: n.depends_on } : {}),
+        ...(n.when ? { when: n.when } : {}),
+        ...(n.trigger_rule ? { triggerRule: n.trigger_rule } : {}),
+        ...(model ? { model } : {}),
+      };
+    }),
     ...(workflow.worktree
       ? {
           worktree: {
