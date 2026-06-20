@@ -408,8 +408,10 @@ nodes:
       VERDICT=$(jq -r '.verdict' "$TRIAGE_JSON")
       SUMMARY=$(jq -r '.summary' "$TRIAGE_JSON")
 
-      # Compute a content hash over the canonicalized findings array.
-      HASH=$(jq -c '.findings | sort_by(.path, .line)' "$TRIAGE_JSON" | (sha256sum 2>/dev/null || shasum -a 256) | awk '{print $1}')
+      # Hash the STABLE finding identity (path/line/severity) only — not the
+      # LLM-generated confidence/what/why/fix prose, which varies run to run and
+      # would make the idempotency marker never match on a re-review.
+      HASH=$(jq -cS '[.findings[] | {path, line, severity}] | sort_by(.path, .line, .severity)' "$TRIAGE_JSON" | (sha256sum 2>/dev/null || shasum -a 256) | awk '{print $1}')
 
       # Partition findings into anchored comments and fallback bullets.
       COMMENTS='[]'
