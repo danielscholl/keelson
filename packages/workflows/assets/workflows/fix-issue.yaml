@@ -672,6 +672,12 @@ nodes:
         echo "CI_STATUS: UNKNOWN — no .pr-number recorded; cannot watch CI"
         exit 0
       fi
+      # No checks at all (no CI configured, or runs gated behind approval) means
+      # there is nothing to gate on — never call that a pass.
+      if [ "$(gh pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
+        echo "CI_STATUS: UNKNOWN — no CI checks present for PR #$PR_NUM; nothing to gate on"
+        exit 0
+      fi
       echo "Watching CI for PR #$PR_NUM ..."
       if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-1.txt" 2>&1; then
         cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
@@ -779,10 +785,20 @@ nodes:
         echo "PR_STATE: UNKNOWN — no .pr-number recorded; cannot finalize"
         exit 0
       fi
+      # Never promote a PR we couldn't actually gate: zero checks means no CI.
+      if [ "$(gh pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
+        echo "PR_STATE: DRAFT — no CI checks present; nothing to gate on, left a draft"
+        exit 0
+      fi
       echo "Final CI check for PR #$PR_NUM ..."
       if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-final.txt" 2>&1; then
-        gh pr ready "$PR_NUM"
-        echo "PR_STATE: READY — CI green; marked ready for review"
+        # Gate the READY claim on the promotion actually succeeding — a failed
+        # `gh pr ready` must not be reported as success.
+        if gh pr ready "$PR_NUM"; then
+          echo "PR_STATE: READY — CI green; marked ready for review"
+        else
+          echo "PR_STATE: DRAFT — CI green but 'gh pr ready' failed; left a draft"
+        fi
         exit 0
       fi
       echo "=== Final CI still red ==="
