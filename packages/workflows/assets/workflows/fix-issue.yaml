@@ -650,11 +650,168 @@ nodes:
       fi
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 9: REPORT
+  # PHASE 9: CI GATE + MARK READY
+  # The pushed PR runs the project's REAL CI (every OS, not just the local box).
+  # Wait for it, rerun failed jobs ONCE to rule out flakes, fix only failures
+  # THIS PR caused, then promote the draft to "Ready for review" exactly when CI
+  # is green. Unrelated/flaky red leaves the PR a draft for a human — auto-fixing
+  # someone else's failing test to force green would be worse than failing loud.
+  # Bot reviews fire on "ready" and arrive asynchronously, so addressing them is
+  # delegated to the resolve-comments workflow, not blocked on here.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: await-ci
+    depends_on: [post-fix-validate]
+    timeout: 1500000
+    bash: |
+      # Reads the PR number create-pr recorded; rerun-once shakes out flakes
+      # before we trust a red. Always exits 0 so triage and report still run.
+      set -uo pipefail
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
+      if [ -z "$PR_NUM" ]; then
+        echo "CI_STATUS: UNKNOWN — no .pr-number recorded; cannot watch CI"
+        exit 0
+      fi
+      # No checks at all (no CI configured, or runs gated behind approval) means
+      # there is nothing to gate on — never call that a pass.
+      if [ "$(gh pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
+        echo "CI_STATUS: UNKNOWN — no CI checks present for PR #$PR_NUM; nothing to gate on"
+        exit 0
+      fi
+      echo "Watching CI for PR #$PR_NUM ..."
+      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-1.txt" 2>&1; then
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
+        echo "CI_STATUS: PASS"
+        exit 0
+      fi
+      echo "=== CI failed on first pass ==="
+      cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
+      echo "Rerunning failed jobs once to rule out flakes ..."
+      HEAD_SHA=$(git rev-parse HEAD)
+      gh run list --branch "$(git branch --show-current)" --limit 20 \
+        --json databaseId,headSha,conclusion \
+        -q ".[] | select(.headSha==\"$HEAD_SHA\" and .conclusion==\"failure\") | .databaseId" \
+        | while read -r RID; do [ -n "$RID" ] && gh run rerun "$RID" --failed || true; done
+      sleep 20
+      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-2.txt" 2>&1; then
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-2.txt"
+        echo "CI_STATUS: PASS"
+        exit 0
+      fi
+      echo "=== CI still failing after one rerun ==="
+      cat "$KEELSON_ARTIFACTS_DIR/.ci-2.txt"
+      echo "CI_STATUS: FAIL"
+      exit 0
+
+  - id: triage-ci
+    depends_on: [await-ci]
+    context: fresh
+    model: claude-opus-4.8
+    output_format:
+      type: object
+      required: [ci_status, actionable, summary]
+      properties:
+        ci_status:
+          type: string
+          enum: [pass, fail, unknown]
+        actionable:
+          type: array
+          items:
+            type: object
+            required: [check, why, fix]
+            properties:
+              check: { type: string }
+              file: { type: string }
+              why: { type: string }
+              fix: { type: string }
+        summary: { type: string }
+    prompt: |
+      You are the CI triage judge for the PR this run just pushed.
+
+      ## CI result
+      $await-ci.output
+
+      ## Instructions
+
+      - If the CI result ends with `CI_STATUS: PASS`, set `ci_status` to "pass",
+        `actionable` to [], and stop — nothing to triage.
+      - If it ends with `CI_STATUS: UNKNOWN`, set `ci_status` to "unknown" and
+        `actionable` to [].
+      - Otherwise CI failed. For EACH failed check, read its failing logs
+        (`gh run view <run-id> --log-failed`, or open the URLs in the CI output)
+        and this PR's diff (`git diff main...HEAD`). Classify each:
+        - ACTIONABLE: caused by code THIS PR changed, or a direct consequence of
+          it. Add it to `actionable` with the `file` and the `fix`.
+        - UNRELATED: a pre-existing failure, an infra/flake (timeouts, network),
+          or a failure in files this PR did not touch. Do NOT add it, and NEVER
+          propose editing an unrelated test to force green.
+      - Be conservative: a test in a workspace this PR did not modify is UNRELATED
+        unless the diff plausibly affects it.
+      - Set `ci_status` to "fail"; `summary` is one sentence on what failed.
+
+  - id: fix-ci
+    depends_on: [triage-ci]
+    context: fresh
+    idle_timeout: 1800000
+    prompt: |
+      Fix ONLY the actionable CI failures in the triage below. If `actionable`
+      is empty, make NO changes and stop with "No actionable CI failures."
+
+      ## CI triage
+      $triage-ci.output
+
+      ## Rules
+
+      - You are on the PR's head branch — commit directly onto it; do NOT create
+        a new branch, and do NOT touch unrelated or pre-existing failures.
+      - For each actionable failure: read the file, make the change, then run the
+        NARROWEST check that covers it (the touched workspace's type-check +
+        tests), not the full suite.
+      - Stage edited files by name. Never `git add -A`. Never commit anything
+        under `$ARTIFACTS_DIR`.
+      - Commit (`git commit -m "fix: address CI failure"`, split if logically
+        distinct) and then `git push` — staging alone is dropped.
+
+  - id: finalize-pr
+    depends_on: [fix-ci]
+    timeout: 1500000
+    bash: |
+      # Authoritative gate: re-watch CI (this waits for any fix-ci push to settle)
+      # and flip the draft to "Ready for review" ONLY when every check passes. A
+      # red or unknown result stays a draft. Always exits 0 so report renders.
+      set -uo pipefail
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
+      if [ -z "$PR_NUM" ]; then
+        echo "PR_STATE: UNKNOWN — no .pr-number recorded; cannot finalize"
+        exit 0
+      fi
+      # Never promote a PR we couldn't actually gate: zero checks means no CI.
+      if [ "$(gh pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
+        echo "PR_STATE: DRAFT — no CI checks present; nothing to gate on, left a draft"
+        exit 0
+      fi
+      echo "Final CI check for PR #$PR_NUM ..."
+      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-final.txt" 2>&1; then
+        # Gate the READY claim on the promotion actually succeeding — a failed
+        # `gh pr ready` must not be reported as success.
+        if gh pr ready "$PR_NUM"; then
+          echo "PR_STATE: READY — CI green; marked ready for review"
+        else
+          echo "PR_STATE: DRAFT — CI green but 'gh pr ready' failed; left a draft"
+        fi
+        exit 0
+      fi
+      echo "=== Final CI still red ==="
+      tail -n 20 "$KEELSON_ARTIFACTS_DIR/.ci-final.txt"
+      echo "PR_STATE: DRAFT — CI not green; left as a draft for a human"
+      exit 0
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 10: REPORT
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: report
-    depends_on: [post-fix-validate]
+    depends_on: [finalize-pr]
     model: auto
     context: fresh
     prompt: |
@@ -668,6 +825,8 @@ nodes:
       - Validation (after the review loop): $post-fix-validate.output
       - Review triage (confirmed must-fix issues): $triage.output
       - Review follow-up: $re-review.output
+      - CI triage: $triage-ci.output
+      - CI + PR state (authoritative): $finalize-pr.output
 
       ## Output
 
@@ -691,6 +850,11 @@ nodes:
       -- Review loop --
       {one line per triaged must-fix finding, with "fixed" or "still-open"; or
        "clean — no must-fix findings" when triage confirmed none}
+
+      -- CI & PR state --
+      {READY or DRAFT — read it from the finalize-pr output above; if DRAFT, name
+       the failing check and say whether it was unrelated/flaky. If any review
+       threads still need handling, suggest: resolve-comments #{number}}
 
       ===============================================================
       ```
