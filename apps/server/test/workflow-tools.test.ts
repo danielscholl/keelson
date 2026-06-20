@@ -483,6 +483,37 @@ nodes:
     expect(result.isError).toBe(true);
     expect(result.content).toContain("unknown project");
   });
+
+  test("controller honors explicit project selection over workingDir inference", async () => {
+    const rig = makeScopedRig();
+    const parentRoot = rig.projectRoot;
+    const childRoot = join(parentRoot, "child");
+    mkdirSync(join(childRoot, ".keelson", "workflows"), { recursive: true });
+    writeFileSync(
+      join(parentRoot, ".keelson", "workflows", "dupe.yaml"),
+      `name: dupe\ndescription: parent version\nnodes:\n  - id: parent-step\n    bash: echo parent\n`,
+    );
+    writeFileSync(
+      join(childRoot, ".keelson", "workflows", "dupe.yaml"),
+      `name: dupe\ndescription: child version\nnodes:\n  - id: child-step\n    bash: echo child\n`,
+    );
+    const parent = rig.projectsStore.getByName("scoped");
+    if (!parent) throw new Error("missing parent project");
+    const child = rig.projectsStore.create({ name: "nested", rootPath: childRoot });
+
+    const started = rig.controller.startRun({
+      name: "dupe",
+      inputs: {},
+      workingDir: childRoot,
+      project: { id: parent.id, rootPath: parent.rootPath },
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) throw new Error("run did not start");
+    const detail = await waitForRun(rig.controller, started.runId);
+    expect(detail.nodes[0]!.nodeId).toBe("parent-step");
+    expect(detail.projectId).toBe(parent.id);
+    expect(detail.projectId).not.toBe(child.id);
+  });
 });
 
 describe("scheduled-run scope (review fix)", () => {

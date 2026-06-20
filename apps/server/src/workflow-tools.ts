@@ -321,6 +321,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         name,
         inputs: { ARGUMENTS: parsed.data.arguments ?? "" },
         workingDir: project?.rootPath ?? ctx.cwd,
+        ...(project ? { project: { id: project.id, rootPath: project.rootPath } } : {}),
       });
       if (!started.ok) {
         emitResult(ctx, `Could not start workflow "${name}": ${started.message}`, true);
