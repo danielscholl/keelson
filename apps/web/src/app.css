@@ -4424,6 +4424,83 @@ a.cvb-card-title::after {
   cursor: not-allowed;
 }
 
+/* App-level policy ASK dock: stacks pending-approval cards bottom-right, above
+   surface content (mirrors the toast host's anchor). See ApprovalsDock.tsx. */
+.approvals-dock {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 360px;
+}
+
+.approvals-card {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-popover);
+}
+
+.approvals-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.approvals-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.approvals-card-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.approvals-card-reason {
+  margin: 6px 0 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg);
+}
+
+.approvals-dock .btn {
+  background: var(--card-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.approvals-dock .btn:hover {
+  border-color: var(--accent);
+}
+
+.approvals-dock .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.approvals-dock .btn.primary:hover {
+  filter: brightness(1.1);
+}
+
+.approvals-dock .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .canvas-drawer-note {
   font-size: 13px;
   color: var(--muted);

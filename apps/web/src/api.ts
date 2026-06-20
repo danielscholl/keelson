@@ -1,5 +1,6 @@
 import {
   type AgentRef,
+  type ApprovalDecision,
   type BulkDeleteRunsBody,
   bulkDeleteRunsResponseSchema,
   type ClaudeCliStatus,
@@ -469,6 +470,18 @@ export async function getSnapshot(key: string): Promise<SnapshotFetch> {
     throw new Error(`/api/snapshots/${key} ${res.status}: ${detail}`);
   }
   return { kind: "frame", frame: snapshotFrameSchema.parse(await res.json()) };
+}
+
+// Resolve a pending policy ASK approval. 404 (already resolved / timed out) is
+// surfaced as an error the dock swallows — a stale resolve shouldn't toast.
+export async function resolveApproval(id: string, decision: ApprovalDecision): Promise<void> {
+  await apiRequest<void>(`/api/approvals/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision }),
+    responseBody: "void",
+    label: `/api/approvals/${id}`,
+  });
 }
 
 // 404 is treated as "already done / unknown" — surface no error so the UI
