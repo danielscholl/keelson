@@ -1530,6 +1530,19 @@ nodes:
 });
 
 // ---------------------------------------------------------------------------
+// bundled workflow schema-parse tests
+// ---------------------------------------------------------------------------
+
+describe("loadBundled — resolve-comments schema validation", () => {
+  test("parses without error and has expected shape", () => {
+    const workflow = loadBundled("resolve-comments");
+    expect(workflow.name).toBe("resolve-comments");
+    expect(workflow.worktree?.enabled).toBe(true);
+    expect(Object.keys(workflow.nodes).length).toBeGreaterThanOrEqual(11);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // smoke-test (every CI-compatible node type)
 // ---------------------------------------------------------------------------
 
