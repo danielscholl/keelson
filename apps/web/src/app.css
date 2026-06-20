@@ -4435,6 +4435,11 @@ a.cvb-card-title::after {
   flex-direction: column;
   gap: 10px;
   max-width: 360px;
+  /* Cap to the viewport (minus the 16px top/bottom anchors) and scroll, so a
+     pile-up of pending approvals can't push older cards off-screen and out of
+     reach. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 
 .approvals-card {
