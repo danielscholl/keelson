@@ -110,7 +110,7 @@ nodes:
         > "$KEELSON_ARTIFACTS_DIR/raw-threads.json"
 
       # Normalize: one entry per unresolved thread.
-      jq --arg owner "$OWNER" --arg repo "$REPO_NAME" --arg pr "$PR_NUM" '
+      jq '
         .data.repository.pullRequest.reviewThreads.nodes
         | map(select(.isResolved == false))
         | map({

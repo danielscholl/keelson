@@ -15,7 +15,7 @@ addresses for fresh issues, without conflating the three jobs.
 
 `pr-review` reads a PR and posts a comment. `fix-issue` implements a GitHub
 issue from scratch. `resolve-comments` does neither: it picks up an existing PR
-already in review, answers each reviewer thread, and resolves the resolved ones
+already in review, answers each reviewer thread, and resolves the ones it fixed,
 with evidence.
 
 ## Invoke it
@@ -42,9 +42,10 @@ own and have push access to. The approval gate pauses before any code lands.
 
 ## The shape
 
-The run is eight phases. Two `bash` nodes handle deterministic GitHub I/O
-(fetch threads, push, reply/resolve); the judgment nodes are agent `prompt`
-steps; one `approval` node is the human gate before any mutation.
+The run is eight phases. Four `bash` nodes handle deterministic GitHub I/O and
+the verify.sh gate (fetch-threads, validate, revalidate, push); the judgment
+nodes — triage, fix, reply-resolve, report — are agent `prompt` steps; one
+`approval` node is the human gate before any mutation.
 
 | Node | Kind | What it does |
 | --- | --- | --- |

@@ -1538,7 +1538,7 @@ describe("loadBundled — resolve-comments schema validation", () => {
     const workflow = loadBundled("resolve-comments");
     expect(workflow.name).toBe("resolve-comments");
     expect(workflow.worktree?.enabled).toBe(true);
-    expect(Object.keys(workflow.nodes).length).toBeGreaterThanOrEqual(11);
+    expect(workflow.nodes.length).toBeGreaterThanOrEqual(11);
   });
 });
 
