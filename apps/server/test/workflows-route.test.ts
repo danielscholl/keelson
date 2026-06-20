@@ -242,7 +242,7 @@ nodes:
     expect(nodes.find((n) => n.id === "summarize")?.dependsOn).toEqual(["collect"]);
   });
 
-  test("GET /api/workflows/:name resolves each AI node's effective model", async () => {
+  test("GET /api/workflows/:name resolves prompt and command node models", async () => {
     writeWorkflow(
       "pinned.yaml",
       `name: pinned
@@ -258,6 +258,10 @@ nodes:
     depends_on: [fetch]
     model: claude-opus-4.8
     prompt: reason about $fetch.output
+  - id: blank
+    depends_on: [fetch]
+    model: ""
+    prompt: blank model $fetch.output
   - id: expand
     depends_on: [fetch]
     model: gpt-5.5
@@ -277,13 +281,15 @@ nodes:
       workflow: { nodes: Array<{ id: string; type: string; model?: string }> };
     };
     const nodes = body.workflow.nodes;
-    // prompt and command nodes honor their own pinned model; an unpinned prompt
-    // and a loop node (whose iterations can't carry a node-level model) inherit
-    // the workflow default; a bash node runs no model, so it carries none.
+    // A prompt or command node carries its effective model: a pinned node keeps
+    // its own; an unpinned node — or one with an empty `model:` — inherits the
+    // workflow default. A bash node runs no model, and a loop node's model isn't
+    // preserved by the schema transform, so both carry none.
     expect(nodes.find((n) => n.id === "reason")?.model).toBe("claude-opus-4.8");
     expect(nodes.find((n) => n.id === "expand")?.model).toBe("gpt-5.5");
     expect(nodes.find((n) => n.id === "route")?.model).toBe("auto");
-    expect(nodes.find((n) => n.id === "iterate")?.model).toBe("auto");
+    expect(nodes.find((n) => n.id === "blank")?.model).toBe("auto");
+    expect(nodes.find((n) => n.id === "iterate")?.model).toBeUndefined();
     expect(nodes.find((n) => n.id === "fetch")?.model).toBeUndefined();
   });
 

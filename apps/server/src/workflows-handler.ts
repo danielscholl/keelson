@@ -165,11 +165,12 @@ function nodeTypeOf(node: DagNode): string {
   return "unknown";
 }
 
-// Node types that run a model. prompt and command nodes resolve the node's own
-// `model` (command synthesizes a prompt from the node); a loop's iterations run
-// a model too, resolved from the workflow default. bash / script / approval /
-// cancel never call one.
-const MODEL_NODE_TYPES: ReadonlySet<string> = new Set(["prompt", "command", "loop"]);
+// Node types whose own `model` this layer can resolve: prompt and command (a
+// command node synthesizes a prompt from the node, carrying its model). Loop is
+// intentionally excluded — the schema transform drops a loop node's `model`
+// (dag-node.ts builds loop nodes without the AI fields), so its effective model
+// isn't derivable here. bash / script / approval / cancel never call a model.
+const MODEL_NODE_TYPES: ReadonlySet<string> = new Set(["prompt", "command"]);
 
 function workflowToSummary(
   workflow: WorkflowDefinition,
@@ -234,11 +235,12 @@ function workflowToDetail(workflow: WorkflowDefinition) {
     description: workflow.description,
     nodes: workflow.nodes.map((n) => {
       const type = nodeTypeOf(n);
-      // Attribute a model only to the node types that run one (see
-      // MODEL_NODE_TYPES). Resolve the node's own `model` over the workflow
-      // default; the provider default isn't known at this layer, so omit
-      // rather than guess.
-      const model = MODEL_NODE_TYPES.has(type) ? (n.model ?? workflow.model) : undefined;
+      // Resolve the node's own `model` over the workflow default, treating an
+      // empty string as unset so it still falls back. The provider default
+      // isn't known at this layer, so omit rather than guess.
+      const ownModel = n.model && n.model.length > 0 ? n.model : undefined;
+      const defaultModel = workflow.model && workflow.model.length > 0 ? workflow.model : undefined;
+      const model = MODEL_NODE_TYPES.has(type) ? (ownModel ?? defaultModel) : undefined;
       return {
         id: n.id,
         type,
