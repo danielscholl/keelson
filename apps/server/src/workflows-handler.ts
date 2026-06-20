@@ -623,7 +623,7 @@ interface StartRunCoreParams {
   inputs: Record<string, string>;
   workingDir: string;
   projectId: string | null;
-  resolvedProject: Project | null;
+  resolvedProject: Pick<Project, "id" | "rootPath"> | null;
   isolationOn: boolean;
   branchTemplate: string | undefined;
   // Trigger provenance for the run row. Omitted → 'manual'. The owning rib id
@@ -867,6 +867,10 @@ export interface WorkflowController {
     name: string;
     inputs: Record<string, string>;
     workingDir: string;
+    // Explicit project selection for chat-callers that resolved a project by id/name.
+    // When provided, this pins workflow-definition scope and run tagging to that
+    // project instead of re-deriving from workingDir.
+    project?: Pick<Project, "id" | "rootPath">;
     isolation?: IsolationOverride;
     // Defaults to 'manual'. The heartbeat passes 'scheduled' so producer runs
     // stay out of the default feed and get retention-pruned.
@@ -908,7 +912,7 @@ export function createWorkflowController(
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
   return {
-    startRun({ name, inputs, workingDir: rawWorkingDir, isolation, origin }) {
+    startRun({ name, inputs, workingDir: rawWorkingDir, project, isolation, origin }) {
       try {
         if (!statSync(rawWorkingDir).isDirectory()) {
           return { ok: false, message: `workingDir is not a directory: ${rawWorkingDir}` };
@@ -917,12 +921,15 @@ export function createWorkflowController(
         return { ok: false, message: `workingDir does not exist: ${rawWorkingDir}` };
       }
       const workingDir = canonicalPath(rawWorkingDir);
+      const selectedProject =
+        project !== undefined ? { ...project, rootPath: canonicalPath(project.rootPath) } : null;
       // Project resolution precedes the lookup so a workingDir inside a
       // registered project sees that project's workflows (shadowing global).
       // Scheduled producer runs are the exception: they must always resolve
       // the rib's own definition (snapshot bindings are object-identity-keyed,
       // so a project shadow would run uselessly and never publish).
-      const resolvedProject = projectsStore?.findByPathPrefix(workingDir) ?? null;
+      const resolvedProject =
+        selectedProject ?? projectsStore?.findByPathPrefix(workingDir) ?? null;
       const projectId = resolvedProject?.id ?? null;
       const scope = origin === "scheduled" || projectId === null ? undefined : { projectId };
       const workflow = catalog.get(name, scope);

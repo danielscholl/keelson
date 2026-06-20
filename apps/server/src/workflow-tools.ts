@@ -14,6 +14,7 @@
 // through the tool results so the model can carry them across chat turns.
 
 import {
+  type Project,
   parseWorkflowDescription,
   resumeWorkflowRunBodySchema,
   type ToolContext,
@@ -34,7 +35,7 @@ export interface CreateWorkflowChatToolsDeps {
   // ctx.cwd (chat sets it to the project root) so catalog reads see that
   // project's workflows shadowing global. The controller re-derives the same
   // scope from workingDir, keeping list- and run-resolution in agreement.
-  projectsStore?: Pick<ProjectsStore, "findByPathPrefix">;
+  projectsStore?: Pick<ProjectsStore, "findByPathPrefix" | "get" | "getByName">;
   // Soft cap on how long workflow_run / workflow_respond block waiting for the
   // run to pause or finish before returning a "still running" result. Tunable
   // for tests; the chat default gives a plan/approval node time to reach its
@@ -110,6 +111,7 @@ function describeState(
   controller: WorkflowController,
   runId: string,
   state: WatchResult,
+  workingDir: string,
 ): { content: string; isError: boolean } {
   switch (state.kind) {
     case "paused": {
@@ -132,9 +134,14 @@ function describeState(
       const detail = controller.getRun(runId);
       const nodeView = detail ? truncate(renderNodes(detail), TERMINAL_OUTPUT_CAP) : "";
       const verb = state.status === "succeeded" ? "completed successfully" : state.status;
+      const hint =
+        detail && state.status === "failed" && hasRepoMissingFailure(detail)
+          ? `\n\n${repoMissingHint(workingDir)}`
+          : "";
       const content = [
         `Workflow run ${runId} ${verb}.`,
         nodeView ? `\nRun output:\n${nodeView}` : "",
+        hint,
       ]
         .filter((line) => line !== "")
         .join("\n");
@@ -160,6 +167,7 @@ const listInputSchema = z.object({
 const runInputSchema = z.object({
   name: z.string().min(1),
   arguments: z.string().optional(),
+  project: z.string().min(1).optional(),
 });
 
 // Reuse the HTTP resume body schema (nodeId + text ≤ 16 KiB + optional pauseId)
@@ -172,6 +180,41 @@ const respondInputSchema = resumeWorkflowRunBodySchema.extend({
 const statusInputSchema = z.object({
   runId: z.string().optional(),
 });
+
+const REPO_MISSING_HINT_RE = /(?:failed to run git|not a git repository)/i;
+
+function resolveProjectSelection(
+  projectsStore: Pick<ProjectsStore, "get" | "getByName"> | undefined,
+  selector: string,
+): { ok: true; project: Project } | { ok: false; message: string } {
+  const projectId = selector.trim();
+  if (projectId.length === 0) {
+    return { ok: false, message: "invalid project selector: empty" };
+  }
+  const byId = projectsStore?.get(projectId);
+  const byName = projectsStore?.getByName(projectId);
+  if (byId && byName && byId.id !== byName.id) {
+    return {
+      ok: false,
+      message: `project selector "${selector}" is ambiguous; use project id "${byId.id}" or exact name "${byName.name}"`,
+    };
+  }
+  if (byId) return { ok: true, project: byId };
+  if (byName) return { ok: true, project: byName };
+  return {
+    ok: false,
+    message: `unknown project "${selector}". Use a registered project id or exact project name.`,
+  };
+}
+
+function hasRepoMissingFailure(detail: WorkflowRunDetail): boolean {
+  if (detail.error !== null && REPO_MISSING_HINT_RE.test(detail.error)) return true;
+  return detail.nodes.some((node) => node.error !== null && REPO_MISSING_HINT_RE.test(node.error));
+}
+
+function repoMissingHint(workingDir: string): string {
+  return `Hint: workflow ran in cwd "${workingDir}", which is not a git repository. For repo-scoped workflows, call workflow_run with project="<registered project id or exact name>".`;
+}
 
 export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): ToolDefinition[] {
   const { controller, catalog } = deps;
@@ -231,7 +274,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowRun: ToolDefinition = {
     name: "workflow_run",
     description:
-      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
+      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). Optional `project` targets a registered project by id or exact name. Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
     inputSchema: runInputSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -241,7 +284,17 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const requested = parsed.data.name;
-      const names = catalog.list(scopeFor(ctx)).map((w) => w.name);
+      let project: Project | undefined;
+      if (parsed.data.project !== undefined) {
+        const selectedProject = resolveProjectSelection(deps.projectsStore, parsed.data.project);
+        if (!selectedProject.ok) {
+          emitResult(ctx, selectedProject.message, true);
+          return;
+        }
+        project = selectedProject.project;
+      }
+      const scope = project ? { projectId: project.id } : scopeFor(ctx);
+      const names = catalog.list(scope).map((w) => w.name);
       const resolution = resolveWorkflowName(requested, names);
       if (resolution.kind === "none") {
         const avail =
@@ -267,7 +320,8 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
       const started = controller.startRun({
         name,
         inputs: { ARGUMENTS: parsed.data.arguments ?? "" },
-        workingDir: ctx.cwd,
+        workingDir: project?.rootPath ?? ctx.cwd,
+        ...(project ? { project: { id: project.id, rootPath: project.rootPath } } : {}),
       });
       if (!started.ok) {
         emitResult(ctx, `Could not start workflow "${name}": ${started.message}`, true);
@@ -279,7 +333,12 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         signal: ctx.abortSignal,
         deadlineMs: watchDeadlineMs,
       });
-      const { content, isError } = describeState(controller, started.runId, state);
+      const { content, isError } = describeState(
+        controller,
+        started.runId,
+        state,
+        project?.rootPath ?? ctx.cwd,
+      );
       emitResult(ctx, content, isError);
     },
   };
@@ -317,7 +376,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         signal: ctx.abortSignal,
         deadlineMs: watchDeadlineMs,
       });
-      const { content, isError } = describeState(controller, runId, state);
+      const { content, isError } = describeState(controller, runId, state, ctx.cwd);
       emitResult(ctx, content, isError);
     },
   };

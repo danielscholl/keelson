@@ -73,6 +73,27 @@ describe("createKeelsonMcpServer", () => {
     expect(t?.annotations?.destructiveHint).toBe(true);
   });
 
+  test("workflow_run extra tool advertises an optional project selector", async () => {
+    const extra: ToolDefinition = {
+      name: "workflow_run",
+      description: "run workflow",
+      inputSchema: z.object({
+        name: z.string(),
+        arguments: z.string().optional(),
+        project: z.string().min(1).optional(),
+      }),
+      state_changing: true,
+      execute: async (_input, ctx) => {
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "started" });
+      },
+    };
+    const client = await connect({ exposeStateChanging: true, extraTools: [extra] });
+    const t = (await client.listTools()).tools.find((x) => x.name === "workflow_run");
+    expect(t).toBeDefined();
+    expect(t?.inputSchema.type).toBe("object");
+    expect((t?.inputSchema.properties as Record<string, unknown>).project).toBeDefined();
+  });
+
   test("denylisted tools are hidden and not callable", async () => {
     readTool("osdu_read", "rows");
     const client = await connect({ toolDenylist: ["osdu_read"] });
