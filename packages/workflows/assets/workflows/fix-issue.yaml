@@ -825,6 +825,9 @@ nodes:
       - Validation (after the review loop): $post-fix-validate.output
       - Review triage (confirmed must-fix issues): $triage.output
       - Review follow-up: $re-review.output
+      - PR (from create-pr): $create-pr.output
+      - PR identifiers (canonical): read `$ARTIFACTS_DIR/.pr-url` and
+        `$ARTIFACTS_DIR/.pr-number` if present.
       - CI triage: $triage-ci.output
       - CI + PR state (authoritative): $finalize-pr.output
 
@@ -839,7 +842,8 @@ nodes:
       Issue:   #{number} — {title}
       Type:    {bug | feature | ...}
       Branch:  {branch name}
-      PR:      {url, or "none — already existed"}
+      PR:      {the .pr-url file contents, or the URL from $create-pr.output;
+                print "none" only if both .pr-url and .pr-number are absent}
 
       -- What changed --
       {2-4 bullets}
