@@ -11,9 +11,23 @@
 // permission requests. Custom/rib tools are projected with `skipPermission`, so
 // they never reach this handler — only built-in capabilities (read / write /
 // shell / url / memory) do, which is exactly the surface the rail must govern.
+//
+// When an `evaluateToolCall` gate is wired, those same built-in capabilities are
+// ALSO run through the unified policy engine (mapped to a canonical tool name):
+// a deny — including a rejected/timed-out ASK — becomes a reject, while an allow
+// still defers to the SDK's own consent prompt, so policy gating and user
+// consent stay independent. The handler stays synchronous when no gate is wired
+// (the rail-only path) and returns a promise only when it must await the engine.
 
+import { checkToolCallGate } from "../tool-gate.ts";
+import type { ToolCallGate } from "../types.ts";
 import type { CopilotPermissionHandler } from "./factory.ts";
-import { type CopilotPermissionKind, GATED_KINDS, toolKind } from "./tool-names.ts";
+import {
+  type CopilotPermissionKind,
+  capabilityToolName,
+  GATED_KINDS,
+  toolKind,
+} from "./tool-names.ts";
 
 export interface PermissionGateOptions {
   // The SDK's always-permit handler — delegated to for anything the rail allows.
@@ -23,6 +37,9 @@ export interface PermissionGateOptions {
   allowedTools?: readonly string[];
   // Node `denied_tools`. The capability kinds these map to are always denied.
   disallowedTools?: readonly string[];
+  // The unified policy engine's per-call gate. When set, a built-in capability
+  // that clears the rail is evaluated by name through the engine before it runs.
+  evaluateToolCall?: ToolCallGate;
 }
 
 function readKind(request: unknown): string | undefined {
@@ -45,7 +62,7 @@ function gatedKindsOf(names: readonly string[]): Set<CopilotPermissionKind> {
 }
 
 export function buildPermissionGate(opts: PermissionGateOptions): CopilotPermissionHandler {
-  const { approveAll, allowedTools, disallowedTools } = opts;
+  const { approveAll, allowedTools, disallowedTools, evaluateToolCall } = opts;
   const allowedKinds = allowedTools === undefined ? undefined : gatedKindsOf(allowedTools);
   const deniedKinds = disallowedTools === undefined ? undefined : gatedKindsOf(disallowedTools);
 
@@ -66,6 +83,30 @@ export function buildPermissionGate(opts: PermissionGateOptions): CopilotPermiss
         feedback: `'${capKind}' tools are not in this workflow node's allow-list.`,
       };
     }
+    // The capability cleared the rail; let the policy engine have its say. Async
+    // only on this branch (the engine call) so the rail-only path stays sync.
+    if (evaluateToolCall) {
+      return gateCapability(evaluateToolCall, capKind, request, invocation, approveAll);
+    }
     return approveAll(request, invocation);
   };
+}
+
+// Run one built-in capability through the policy engine by its canonical tool
+// name. A deny (incl. a rejected/timed-out/aborted ASK, which the engine returns
+// as a clean deny) rejects the SDK request with the policy's reason; an allow
+// defers to the SDK's own consent prompt. A thrown gate fails OPEN to preserve
+// the turn — matching checkToolCallGate's posture on the custom-tool path.
+async function gateCapability(
+  gate: ToolCallGate,
+  capKind: CopilotPermissionKind,
+  request: unknown,
+  invocation: unknown,
+  approveAll: CopilotPermissionHandler,
+): Promise<unknown> {
+  const result = await checkToolCallGate(gate, capabilityToolName(capKind), undefined);
+  if (result.denied) {
+    return { kind: "reject", feedback: result.message };
+  }
+  return approveAll(request, invocation);
 }

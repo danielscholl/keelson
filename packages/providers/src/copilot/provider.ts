@@ -435,14 +435,23 @@ function buildSessionConfig(
   }
   // Per-node `allowed_tools` / `denied_tools` gate the SDK's BUILT-IN tools
   // (custom/rib tools are already filtered upstream). The permission handler
-  // only sees a coarse capability `kind`, so the rail is enforced there; with
-  // no rails set we pass the bare approveAll through unchanged.
-  if (options?.allowedTools !== undefined || options?.disallowedTools !== undefined) {
+  // only sees a coarse capability `kind`, so the rail is enforced there. The
+  // policy engine's per-call gate ALSO governs built-in capabilities, so install
+  // the gate whenever a rail OR an evaluateToolCall is present; with neither, the
+  // bare approveAll passes through unchanged.
+  if (
+    options?.allowedTools !== undefined ||
+    options?.disallowedTools !== undefined ||
+    options?.evaluateToolCall !== undefined
+  ) {
     config.onPermissionRequest = buildPermissionGate({
       approveAll: permissionHandler,
       ...(options.allowedTools !== undefined ? { allowedTools: options.allowedTools } : {}),
       ...(options.disallowedTools !== undefined
         ? { disallowedTools: options.disallowedTools }
+        : {}),
+      ...(options.evaluateToolCall !== undefined
+        ? { evaluateToolCall: options.evaluateToolCall }
         : {}),
     });
   }

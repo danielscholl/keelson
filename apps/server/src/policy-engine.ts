@@ -105,10 +105,11 @@ function makeDenylistPolicy(denylist: readonly string[]): Policy {
   };
 }
 
-// Keelson TOOL CALLS whose names denote a shell or file-mutating action. This
-// gate governs MCP/rib/workflow tool calls by name — provider BUILT-IN
-// capabilities (Copilot's permission gate, Claude's allow/deny lists) are gated
-// elsewhere and not yet routed through here; that wiring is a follow-up.
+// Tool names that denote a shell or file-mutating action. These match keelson
+// MCP/rib/workflow tool calls AND the canonical names Copilot's built-in
+// capabilities map to (shell→Bash, write→Write) — Copilot routes its built-in
+// permission requests through this engine, so `ask_on_shell` gates the agent's
+// own shell/file writes too. Claude built-in gating is the remaining follow-up.
 const ASK_ON_SHELL_TOOLS = new Set([
   "Bash",
   "Edit",
