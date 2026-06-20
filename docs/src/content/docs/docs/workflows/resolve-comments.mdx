@@ -49,8 +49,8 @@ steps; one `approval` node is the human gate before any mutation.
 | Node | Kind | What it does |
 | --- | --- | --- |
 | `extract-pr` | prompt | Parses the PR number out of `$ARGUMENTS`, or emits `CURRENT` for the next node to resolve. |
-| `fetch-threads` | bash | Resolves the PR number, pages the `reviewThreads` GraphQL query, filters `isResolved == false`, and writes `threads.json` (one entry per unresolved thread with `threadId`, `path`, `line`, `commentId`, and concatenated `body`). |
-| `triage` | prompt | Classifies each thread as `actionable-code-change`, `question`, `wontfix`, or `already-addressed`. Pinned to `claude-opus-4.8` for reliable judgment. Writes `triage.json`. |
+| `fetch-threads` | bash | Resolves the PR number, checks out the PR's head branch in the worktree, pages the `reviewThreads` GraphQL query, filters `isResolved == false`, and writes `threads.json` (one entry per unresolved thread with `threadId`, `path`, `line`, `commentId`, and concatenated `body`). |
+| `triage` | prompt | Reads the cited code on the PR branch and classifies each thread as `actionable-code-change`, `question`, `wontfix`, `already-addressed`, or `invalid` (a finding the code disproves). Pinned to `claude-opus-4.8` for reliable judgment. Writes `triage.json`. |
 | `approve` | approval | Shows the triage; pauses for human review before any branch mutation. Captures operator adjustments. |
 | `fix` | prompt | Reads triage, applies each `actionable-code-change` fix anchored to `path:line`, runs the narrowest covering check per fix, commits by name (never `git add -A`), and writes `results.json` with `action: "fixed"` or `"replied-only"` per thread. |
 | `validate` | bash | Runs `verify.sh` (discovered by the fix step). Always exits 0 so `fix-validation` can read the output. |
@@ -63,8 +63,8 @@ steps; one `approval` node is the human gate before any mutation.
 <Aside type="note" title="Honesty invariant">
 `reply-resolve` consults `results.json` for every resolution decision. A thread
 is resolved if and only if its entry carries `action: "fixed"` — meaning an
-actual code commit landed for it. A `question`, `wontfix`, or
-`already-addressed` thread gets a reply but stays open. The model cannot
+actual code commit landed for it. A `question`, `wontfix`, `already-addressed`,
+or `invalid` thread gets a reply but stays open. The model cannot
 override this: the data drives the mutation, not the reply text.
 </Aside>
 

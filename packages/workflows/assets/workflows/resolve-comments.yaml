@@ -73,6 +73,11 @@ nodes:
 
       echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
 
+      # The fix/push phases mutate the PR's OWN head branch, but the worktree
+      # starts on the run's base branch — without this checkout, commits land on
+      # the base branch and `git push` targets the wrong ref.
+      gh pr checkout "$PR_NUM"
+
       REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
       OWNER=$(echo "$REPO" | cut -d/ -f1)
       REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
@@ -160,6 +165,7 @@ nodes:
                     question,
                     wontfix,
                     already-addressed,
+                    invalid,
                   ]
               reasoning: { type: string }
               reply_hint: { type: string }
@@ -177,10 +183,21 @@ nodes:
 
       | Decision | When to use |
       |----------|-------------|
-      | actionable-code-change | Reviewer is asking for a code change we should make. |
+      | actionable-code-change | Reviewer is asking for a real code change we should make. |
       | question | Reviewer is asking a question; a reply explaining the decision is enough. |
       | wontfix | We disagree or the change is out of scope; we'll explain why. |
       | already-addressed | The concern was already fixed in a later commit or is moot. |
+      | invalid | The finding is factually wrong; we'll reply with evidence and change nothing. |
+
+      ## Verify before you classify
+
+      The worktree is on the PR's head branch — read the actual code at each
+      thread's `path:line` before deciding. Reviewers, ESPECIALLY bots
+      (CodeRabbit, Codex), post confident findings the code contradicts. If a
+      claim is wrong, classify it `invalid`, put the disproving evidence in
+      `reasoning` / `reply_hint`, and never change code to satisfy it. Only label
+      a thread `actionable-code-change` once you have confirmed the problem is
+      real in the current code.
 
       ## Output
 
@@ -237,6 +254,8 @@ nodes:
 
       ## Rules
 
+      - You are already on the PR's head branch — commit directly onto it; do
+        NOT create a new branch.
       - Apply operator adjustments from the approval feedback before writing code.
       - Process only threads with `decision == "actionable-code-change"`.
       - Anchor each fix to its `path` and `line` from triage, and the comment
@@ -246,8 +265,9 @@ nodes:
       - **Never** `git add -A` / `git add .` / `git add -u`. Stage files by name.
       - **Never** commit anything under `$ARTIFACTS_DIR`.
       - Commit per thread or per logical group with a conventional message.
-      - For non-actionable threads (`question` / `wontfix` / `already-addressed`),
-        no code change — just note the reply in results.
+      - For non-actionable threads (`question` / `wontfix` / `already-addressed`
+        / `invalid`), make no code change — just note the reply in results; for
+        `invalid`, the reply carries the disproving evidence.
 
       ## Results file
 
@@ -386,10 +406,11 @@ nodes:
       1. Read `$ARTIFACTS_DIR/results.json` and `$ARTIFACTS_DIR/.pr-number`.
       2. Determine the repo: `gh repo view --json nameWithOwner -q '.nameWithOwner'`
       3. For each entry in results.json:
-         a. Post a reply via REST:
+         a. Post a reply via REST — the path MUST include the PR number; the
+            pull-number-less form (`pulls/comments/...`) 404s:
             ```
             gh api -X POST \
-              repos/{owner}/{repo}/pulls/comments/{commentId}/replies \
+              repos/{owner}/{repo}/pulls/{prNumber}/comments/{commentId}/replies \
               -f body="{reply text}"
             ```
          b. If `action == "fixed"`, resolve via GraphQL:

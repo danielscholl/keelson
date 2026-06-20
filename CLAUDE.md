@@ -96,7 +96,7 @@ Invoke with `gh api graphql -f query='...' -f owner=OWNER -f repo=REPO -F pr=NUM
 **REST — post a reply:**
 
 ```sh
-gh api -X POST repos/{owner}/{repo}/pulls/comments/{commentId}/replies \
+gh api -X POST repos/{owner}/{repo}/pulls/{pr-number}/comments/{commentId}/replies \
   -f body="Reply text here"
 ```
 
