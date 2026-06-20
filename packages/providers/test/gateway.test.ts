@@ -99,22 +99,32 @@ describe("GatewayProvider.sendQuery", () => {
       baseUrl: "http://h/v1",
       getApiKey: noKey,
       model: "m",
+      fetchImpl: fn,
     });
-    await collect(
-      new GatewayProvider({
-        id: "g",
-        baseUrl: "http://h/v1",
-        getApiKey: noKey,
-        model: "m",
-        fetchImpl: fn,
-      }).sendQuery("hi", "/tmp", undefined, { systemPrompt: "be brief" }),
-    );
-    void p;
+    await collect(p.sendQuery("hi", "/tmp", undefined, { systemPrompt: "be brief" }));
     const body = JSON.parse(String(calls[0]?.init?.body));
     expect(body.messages).toEqual([
       { role: "system", content: "be brief" },
       { role: "user", content: "hi" },
     ]);
+  });
+
+  it("concatenates multi-line data: fields within one SSE event", async () => {
+    // One JSON object split across two `data:` lines (joined with \n by the
+    // client, per the SSE spec) followed by the [DONE] sentinel.
+    const body = 'data: {"choices":[\ndata: {"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n';
+    const { fn } = mockFetch(
+      () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    );
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "http://h/v1",
+      getApiKey: noKey,
+      model: "m",
+      fetchImpl: fn,
+    });
+    const chunks = await collect(p.sendQuery("q", "/tmp"));
+    expect(chunks).toEqual([{ type: "text", content: "hi" }, { type: "done" }]);
   });
 
   it("maps reasoning_content to a thinking chunk", async () => {

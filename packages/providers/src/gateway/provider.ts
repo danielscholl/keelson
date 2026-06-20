@@ -56,6 +56,53 @@ function nonNegInt(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
 }
 
+// Collect an SSE event's `data:` fields into one payload. Per the SSE spec a
+// single event may carry multiple `data:` lines that the client concatenates
+// with `\n` before processing — so a gateway that frames one JSON across lines
+// parses correctly instead of each fragment being dropped. Returns null when
+// the event has no data field (a comment / id / event-type-only block).
+function sseDataPayload(rawEvent: string): string | null {
+  const dataLines: string[] = [];
+  for (const rawLine of rawEvent.split(/\r?\n/)) {
+    if (!rawLine.startsWith("data:")) continue;
+    // Strip the field name and the one optional leading space after the colon.
+    dataLines.push(rawLine.slice("data:".length).replace(/^ /, ""));
+  }
+  return dataLines.length > 0 ? dataLines.join("\n") : null;
+}
+
+type ParsedSseEvent = {
+  chunks: MessageChunk[];
+  usage?: { inputTokens: number; outputTokens: number };
+};
+
+// Parse one event payload's JSON into message chunks. A non-JSON payload yields
+// nothing (a partial/garbled frame is skipped, never fatal to the turn).
+function parseSseData(payload: string): ParsedSseEvent {
+  let event: OpenAiStreamEvent;
+  try {
+    event = JSON.parse(payload) as OpenAiStreamEvent;
+  } catch {
+    return { chunks: [] };
+  }
+  const chunks: MessageChunk[] = [];
+  const delta = event.choices?.[0]?.delta;
+  if (delta) {
+    if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+      chunks.push({ type: "thinking", content: delta.reasoning_content });
+    }
+    if (typeof delta.content === "string" && delta.content.length > 0) {
+      chunks.push({ type: "text", content: delta.content });
+    }
+  }
+  const inp = nonNegInt(event.usage?.prompt_tokens);
+  const out = nonNegInt(event.usage?.completion_tokens);
+  if (inp !== undefined && out !== undefined) {
+    return { chunks, usage: { inputTokens: inp, outputTokens: out } };
+  }
+  return { chunks };
+}
+
 async function bodyTail(res: Response): Promise<string> {
   try {
     return (await res.text()).trim().slice(0, 500);
@@ -152,7 +199,14 @@ export class GatewayProvider implements IAgentProvider {
           accept: "text/event-stream",
           ...(key ? { authorization: `Bearer ${key}` } : {}),
         },
-        body: JSON.stringify({ model, messages, stream: true }),
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          // Ask the endpoint to emit a final usage-bearing chunk; gateways that
+          // don't support it ignore the field, and parseSseData stays tolerant.
+          stream_options: { include_usage: true },
+        }),
         ...(options?.abortSignal ? { signal: options.abortSignal } : {}),
       });
     } catch (err) {
@@ -174,6 +228,9 @@ export class GatewayProvider implements IAgentProvider {
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
+    // Events are separated by a blank line (\n\n or \r\n\r\n); split on that so
+    // multi-line `data:` events are reassembled rather than parsed per-fragment.
+    const boundary = /\r?\n\r?\n/;
     let buffer = "";
     let usage: { inputTokens: number; outputTokens: number } | undefined;
     let finished = false;
@@ -183,37 +240,28 @@ export class GatewayProvider implements IAgentProvider {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         for (;;) {
-          const nl = buffer.indexOf("\n");
-          if (nl === -1) break;
-          const line = buffer.slice(0, nl).replace(/\r$/, "");
-          buffer = buffer.slice(nl + 1);
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice("data:".length).trim();
-          if (payload.length === 0) continue;
+          const match = boundary.exec(buffer);
+          if (!match) break;
+          const rawEvent = buffer.slice(0, match.index);
+          buffer = buffer.slice(match.index + match[0].length);
+          const payload = sseDataPayload(rawEvent);
+          if (payload === null) continue;
           if (payload === "[DONE]") {
             finished = true;
             break;
           }
-          let event: OpenAiStreamEvent;
-          try {
-            event = JSON.parse(payload) as OpenAiStreamEvent;
-          } catch {
-            // A partial/garbled SSE frame: skip it rather than abort the turn.
-            continue;
-          }
-          const delta = event.choices?.[0]?.delta;
-          if (delta) {
-            if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
-              yield { type: "thinking", content: delta.reasoning_content };
-            }
-            if (typeof delta.content === "string" && delta.content.length > 0) {
-              yield { type: "text", content: delta.content };
-            }
-          }
-          const inp = nonNegInt(event.usage?.prompt_tokens);
-          const out = nonNegInt(event.usage?.completion_tokens);
-          if (inp !== undefined && out !== undefined)
-            usage = { inputTokens: inp, outputTokens: out };
+          const parsed = parseSseData(payload);
+          for (const chunk of parsed.chunks) yield chunk;
+          if (parsed.usage) usage = parsed.usage;
+        }
+      }
+      // Flush a final event that arrived without a trailing blank line.
+      if (!finished) {
+        const payload = sseDataPayload(buffer);
+        if (payload !== null && payload !== "[DONE]") {
+          const parsed = parseSseData(payload);
+          for (const chunk of parsed.chunks) yield chunk;
+          if (parsed.usage) usage = parsed.usage;
         }
       }
     } catch (err) {

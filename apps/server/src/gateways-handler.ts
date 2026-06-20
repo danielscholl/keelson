@@ -41,6 +41,20 @@ export function gatewaysRoutes(app: Hono, store: CredentialStore, deps: Gateways
   const home = deps.home;
   const loadGateways = (): GatewayConfig[] => loadKeelsonConfig(home).gateways ?? [];
 
+  // Serialize mutations so two concurrent PUT/DELETE calls can't interleave the
+  // config write, keychain I/O, and registry update and leave them out of sync.
+  // Each task runs after the previous settles; a task's failure never poisons
+  // the chain for the next.
+  let mutations: Promise<unknown> = Promise.resolve();
+  function serialize<T>(task: () => Promise<T>): Promise<T> {
+    const run = mutations.then(task, task);
+    mutations = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   // CSRF guard on the mutating routes, mirroring credentialsRoutes: a present
   // Origin must be loopback; a missing Origin is a non-browser caller (curl /
   // CLI on loopback) that already has shell access to the keychain.
@@ -79,18 +93,19 @@ export function gatewaysRoutes(app: Hono, store: CredentialStore, deps: Gateways
       protocol: bodyParsed.data.protocol ?? "openai",
       ...(bodyParsed.data.model ? { model: bodyParsed.data.model } : {}),
     };
+    const apiKey = bodyParsed.data.apiKey;
     try {
-      updateKeelsonConfigGateways(
-        (gateways) => [...gateways.filter((g) => g.name !== name), gateway],
-        home,
-      );
-      if (bodyParsed.data.apiKey) {
-        await store.set(gatewayCredentialServiceId(name), bodyParsed.data.apiKey);
-      }
+      await serialize(async () => {
+        updateKeelsonConfigGateways(
+          (gateways) => [...gateways.filter((g) => g.name !== name), gateway],
+          home,
+        );
+        if (apiKey) await store.set(gatewayCredentialServiceId(name), apiKey);
+        deps.onGatewayUpserted(gateway);
+      });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
-    deps.onGatewayUpserted(gateway);
     return c.json(await summarize(store, gateway));
   });
 
@@ -101,12 +116,14 @@ export function gatewaysRoutes(app: Hono, store: CredentialStore, deps: Gateways
     }
     const name = nameParsed.data;
     try {
-      updateKeelsonConfigGateways((gateways) => gateways.filter((g) => g.name !== name), home);
-      await store.delete(gatewayCredentialServiceId(name));
+      await serialize(async () => {
+        updateKeelsonConfigGateways((gateways) => gateways.filter((g) => g.name !== name), home);
+        await store.delete(gatewayCredentialServiceId(name));
+        deps.onGatewayRemoved(name);
+      });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
-    deps.onGatewayRemoved(name);
     // Idempotent — same 204 whether or not the gateway existed.
     return c.body(null, 204);
   });
