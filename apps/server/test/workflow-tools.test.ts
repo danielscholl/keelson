@@ -260,6 +260,32 @@ nodes:
     expect(result.content).toContain("No workflows are available");
   });
 
+  test("workflow_run appends a repo-missing hint on git failures", async () => {
+    writeWorkflow(
+      "git-check.yaml",
+      `name: git-check
+description: |
+  Use when: verifying repository state
+nodes:
+  - id: check
+    bash: git rev-parse --is-inside-work-tree
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "git-check" }, ctx);
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain(`cwd "${cwd}"`);
+    expect(result.content).toContain(
+      'workflow_run with project="<registered project id or exact name>"',
+    );
+  });
+
   test("workflow_run pauses on approval, carries ids, and workflow_respond resumes", async () => {
     writeWorkflow("pa.yaml", APPROVAL_WF);
     const { tools, cwd, dispose } = makeRig();
@@ -425,6 +451,37 @@ nodes:
     const result = lastToolResult(outside.chunks);
     expect(result.isError).toBe(true);
     expect(result.content).not.toContain("project-sentinel-456");
+  });
+
+  test("workflow_run can target a project from a non-repo cwd", async () => {
+    const rig = makeScopedRig();
+    const outsideCwd = join(tmpDir, "outside");
+    mkdirSync(outsideCwd, { recursive: true });
+
+    const outside = makeCtx(outsideCwd);
+    await toolByName(rig.tools, "workflow_run").execute(
+      { name: "proj-flow", project: "scoped" },
+      outside.ctx,
+    );
+    const result = lastToolResult(outside.chunks);
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("completed successfully");
+    expect(result.content).toContain("project-sentinel-456");
+  });
+
+  test("workflow_run rejects an unknown project selector", async () => {
+    const rig = makeScopedRig();
+    const outsideCwd = join(tmpDir, "outside");
+    mkdirSync(outsideCwd, { recursive: true });
+
+    const outside = makeCtx(outsideCwd);
+    await toolByName(rig.tools, "workflow_run").execute(
+      { name: "proj-flow", project: "missing" },
+      outside.ctx,
+    );
+    const result = lastToolResult(outside.chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("unknown project");
   });
 });
 
