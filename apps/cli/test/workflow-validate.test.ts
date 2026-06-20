@@ -116,4 +116,50 @@ describe("pr-review workflow node graph", () => {
     expect(content).not.toContain("gh pr comment");
     expect(content).toContain("/reviews");
   });
+
+  function buildReviewBash(): string {
+    const filename = `${WORKFLOWS}/pr-review.yaml`;
+    const content = readFileSync(filename, "utf-8");
+    const node = parseWorkflow(content, filename).workflow?.nodes.find(
+      (n) => n.id === "build-review",
+    );
+    return (node as { bash?: string } | undefined)?.bash ?? "";
+  }
+
+  test("build-review awk avoids the gawk-only 3-arg match()", () => {
+    const bash = buildReviewBash();
+    // `match(str, /re/, arr)` is a GNU-awk extension; BSD awk (macOS) and mawk
+    // (Ubuntu CI) reject it, which would fail the node and skip the review post.
+    expect(bash).not.toMatch(/match\s*\([^)]*,[^)]*,[^)]*\)/);
+    expect(bash).toContain("split($3");
+  });
+
+  test("build-review awk anchors added and context lines on a real diff", async () => {
+    const program = buildReviewBash().match(/awk '([\s\S]*?)'\s*"\$DIFF"/)?.[1];
+    expect(program).toBeTruthy();
+
+    const fixture = [
+      "diff --git a/foo.ts b/foo.ts",
+      "index 111..222 100644",
+      "--- a/foo.ts",
+      "+++ b/foo.ts",
+      "@@ -10,3 +10,4 @@ function x() {",
+      "   const a = 1;",
+      "+  const b = 2;",
+      "   return a;",
+      " }",
+      "",
+    ].join("\n");
+
+    const proc = Bun.spawn(["awk", program as string], {
+      stdin: new TextEncoder().encode(fixture),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    expect(code).toBe(0);
+    const lines = out.trim().split("\n");
+    expect(lines).toContain("foo.ts\t11"); // added line
+    expect(lines).toContain("foo.ts\t10"); // context line, now anchorable
+  });
 });

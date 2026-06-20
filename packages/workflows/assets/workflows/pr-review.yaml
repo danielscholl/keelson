@@ -395,16 +395,14 @@ nodes:
 
       printf '%s' "$KEELSON_NODE_triage_OUTPUT" > "$TRIAGE_JSON"
 
-      # Build anchorable set: path<TAB>newline for every RIGHT-side line in diff.
+      # Build anchorable set: path<TAB>newline for every RIGHT-side line in the
+      # diff (added AND context). Parse the hunk header by field-splitting, not a
+      # 3-arg match() — that form is gawk-only and errors on BSD awk / mawk.
       awk '
         /^\+\+\+ b\// { file = substr($0, 7); next }
-        /^@@ / {
-          match($0, /\+([0-9]+)/, a)
-          new_line = a[1] - 1
-          next
-        }
+        /^@@ / { split($3, p, ","); new_line = substr(p[1], 2) - 1; next }
         /^\+/ && file != "" { new_line++; print file "\t" new_line; next }
-        /^[^-]/ && file != "" { new_line++; next }
+        /^ / && file != "" { new_line++; print file "\t" new_line; next }
       ' "$DIFF" > "$ARTIFACTS/anchorable.txt"
 
       VERDICT=$(jq -r '.verdict' "$TRIAGE_JSON")
@@ -452,8 +450,8 @@ nodes:
         > "$PAYLOAD"
 
       ANCHORED=$(jq '.comments | length' "$PAYLOAD")
-      FALLBACK_COUNT=$(jq '.findings | length' "$TRIAGE_JSON") 2>/dev/null || FALLBACK_COUNT=0
-      echo "Payload built: ${ANCHORED} anchored comment(s), verdict=${VERDICT}, hash=${HASH}"
+      TOTAL=$(jq '.findings | length' "$TRIAGE_JSON")
+      echo "Payload built: ${ANCHORED}/${TOTAL} finding(s) anchored inline, verdict=${VERDICT}, hash=${HASH}"
       echo "Payload written to: $PAYLOAD"
 
   # ─────────────────────────────────────────────────────────────────────────
