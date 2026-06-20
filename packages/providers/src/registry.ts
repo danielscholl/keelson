@@ -52,6 +52,13 @@ export function isRegisteredProvider(id: string): boolean {
   return registry.has(id);
 }
 
+// Remove a registration so it can be replaced (gateways are added/edited at
+// runtime). Returns false when nothing was registered under `id`. Built-in
+// providers are registered once at boot and never unregistered through this.
+export function unregisterProvider(id: string): boolean {
+  return registry.delete(id);
+}
+
 /** @internal Test-only — clears the registry. Not for production use. */
 export function clearRegistry(): void {
   registry.clear();

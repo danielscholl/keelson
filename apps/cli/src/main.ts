@@ -14,6 +14,7 @@ import pkg from "../package.json" with { type: "json" };
 
 import { runChatEntry } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
+import { runGatewayAdd, runGatewayList, runGatewayRemove } from "./commands/gateway.ts";
 import { runMcpBridge } from "./commands/mcp.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
@@ -413,6 +414,62 @@ export function buildProgram(): Command {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", showOpts.baseUrl);
       await runRibShow(id, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  const gateway = program
+    .command("gateway")
+    .description(
+      "gateway operations (list, add, remove) — OpenAI-compatible endpoints (OpenRouter, Ollama, vLLM, Azure)",
+    );
+
+  gateway
+    .command("list")
+    .description("list configured gateways and whether each has a stored key (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function gatewayListAction(this: Command, listOpts: { baseUrl?: string }) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", listOpts.baseUrl);
+      await runGatewayList({ json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  gateway
+    .command("add <name> <url>")
+    .description(
+      "add or update a gateway (url is the OpenAI base, e.g. http://localhost:11434/v1) (server-required)",
+    )
+    .option("--model <model>", "default model id served by this gateway")
+    .option("--key <apiKey>", "API key (or set KEELSON_GATEWAY_KEY); omit for keyless gateways")
+    .option("--protocol <protocol>", "wire protocol (openai)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function gatewayAddAction(
+      this: Command,
+      name: string,
+      url: string,
+      addOpts: { model?: string; key?: string; protocol?: string; baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", addOpts.baseUrl);
+      await runGatewayAdd(name, url, {
+        json,
+        ...(addOpts.model ? { model: addOpts.model } : {}),
+        ...(addOpts.key ? { key: addOpts.key } : {}),
+        ...(addOpts.protocol ? { protocol: addOpts.protocol } : {}),
+        ...(baseUrl ? { baseUrl } : {}),
+      });
+    });
+
+  gateway
+    .command("remove <name>")
+    .description("remove a gateway and delete its stored key (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function gatewayRemoveAction(
+      this: Command,
+      name: string,
+      removeOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
+      await runGatewayRemove(name, { json, ...(baseUrl ? { baseUrl } : {}) });
     });
 
   const worktree = program
