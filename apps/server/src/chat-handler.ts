@@ -535,7 +535,13 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   const engine = deps.policyEngine;
   const evaluateToolCall = engine
     ? (call: { tool: string; args?: unknown }) =>
-        engine.evaluateToolCall(call, { surface: "chat", provider: message.providerId })
+        engine.evaluateToolCall(call, {
+          surface: "chat",
+          provider: message.providerId,
+          // A user Stop aborts the turn; cancel any pending ASK so it denies and
+          // the call unwinds rather than hanging on a prompt nobody will answer.
+          signal: deps.abortSignal,
+        })
     : undefined;
 
   try {

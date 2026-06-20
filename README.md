@@ -97,6 +97,23 @@ never the config file. `--key` also reads `KEELSON_GATEWAY_KEY` so it stays out
 of shell history. The same operations are available over the API at
 `/api/gateways`.
 
+### Approvals (policy ASK)
+
+Keelson's policy engine can pause a tool call for human approval — an `ask`
+decision from a rib policy or a builtin. The pause surfaces over the snapshot WS
+(`keelson:policy:approvals`) and resolves over the API at `/api/approvals`;
+accept lets the call proceed, reject (or a 5-minute timeout) denies it.
+
+Set `KEELSON_ASK_ON_SHELL=1` to enable the `ask_on_shell` builtin, which asks
+before any keelson tool call whose name denotes a shell or file-mutating action
+(provider *built-in* Bash/Edit/Write are gated by each SDK's own permission
+prompt, not this gate). Resolve pending approvals from the CLI:
+
+```bash
+keelson approval list
+keelson approval resolve <id> accept   # or: reject
+```
+
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and
 > Keelson auto-discovers its `bash.exe` (`KEELSON_BASH` overrides). The `prompt`,

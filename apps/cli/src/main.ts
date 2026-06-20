@@ -11,7 +11,7 @@ import { keelsonPaths } from "@keelson/shared/paths";
 import { seedStarterAssets } from "@keelson/workflows";
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
-
+import { runApprovalList, runApprovalResolve } from "./commands/approval.ts";
 import { runChatEntry } from "./commands/chat.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runGatewayAdd, runGatewayList, runGatewayRemove } from "./commands/gateway.ts";
@@ -470,6 +470,37 @@ export function buildProgram(): Command {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
       await runGatewayRemove(name, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  const approval = program
+    .command("approval")
+    .description(
+      "approval operations (list, resolve) — resolve a policy ASK gate (server-required)",
+    );
+
+  approval
+    .command("list")
+    .description("list pending approvals awaiting a decision (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function approvalListAction(this: Command, listOpts: { baseUrl?: string }) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", listOpts.baseUrl);
+      await runApprovalList({ json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  approval
+    .command("resolve <id> <decision>")
+    .description("resolve a pending approval; decision is 'accept' or 'reject' (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function approvalResolveAction(
+      this: Command,
+      id: string,
+      decision: string,
+      resolveOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", resolveOpts.baseUrl);
+      await runApprovalResolve(id, decision, { json, ...(baseUrl ? { baseUrl } : {}) });
     });
 
   const worktree = program

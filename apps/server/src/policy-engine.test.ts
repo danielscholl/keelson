@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { describe, expect, it } from "bun:test";
-import type { Policy } from "@keelson/shared";
+import type { ApprovalRequest, Policy } from "@keelson/shared";
 import { createPolicyEngine } from "./policy-engine.ts";
 
 // Candidate tools are matched by name only; the engine never touches other fields.
@@ -307,5 +307,171 @@ describe("createPolicyEngine — evaluateToolCall", () => {
     });
     const decision = await engine.evaluateToolCall({ tool: "rm", args: {} }, chat);
     expect(decision.outcome).toBe("deny");
+  });
+});
+
+describe("createPolicyEngine — ASK approval round-trip", () => {
+  const askPolicy: Policy = {
+    id: "ask",
+    on: [{ phase: "tool_call" }],
+    evaluate: () => ({ outcome: "ask", reason: "confirm" }),
+  };
+  const accept = async (): Promise<"accept"> => "accept";
+
+  it("lets an ASK tool through projection when an approval channel is wired", async () => {
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: askPolicy }],
+      requestApproval: accept,
+    });
+    const { allowed, denied } = await engine.projectTools(tools("bash"), chat);
+    // Survives projection so the per-call seam can ask; nothing denied here.
+    expect(allowed.map((t) => t.name)).toEqual(["bash"]);
+    expect(denied).toEqual([]);
+  });
+
+  it("per-call accept resolves to allow", async () => {
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: askPolicy }],
+      requestApproval: accept,
+    });
+    expect(await engine.evaluateToolCall({ tool: "bash" }, chat)).toEqual({ outcome: "allow" });
+  });
+
+  it("per-call reject resolves to deny", async () => {
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: askPolicy }],
+      requestApproval: async () => "reject",
+    });
+    const d = await engine.evaluateToolCall({ tool: "bash" }, chat);
+    expect(d.outcome).toBe("deny");
+    expect((d as { reason: string }).reason).toContain("approval rejected");
+  });
+
+  it("per-call: a throwing approval channel fails closed (deny), never open", async () => {
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: askPolicy }],
+      requestApproval: async () => {
+        throw new Error("channel down");
+      },
+    });
+    const d = await engine.evaluateToolCall({ tool: "bash" }, chat);
+    expect(d.outcome).toBe("deny");
+    expect((d as { reason: string }).reason).toContain("approval unavailable");
+  });
+
+  it("hands the channel a redacted request (no args) plus the abort signal", async () => {
+    let seenReq: ApprovalRequest | undefined;
+    let seenSignal: AbortSignal | undefined;
+    const onLens: Policy = {
+      id: "ask",
+      on: [{ phase: "tool_call", tool: "lens" }],
+      evaluate: () => ({ outcome: "ask", reason: "confirm lens" }),
+    };
+    const ac = new AbortController();
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "chamber", policy: onLens }],
+      requestApproval: async (req, signal) => {
+        seenReq = req;
+        seenSignal = signal;
+        return "accept";
+      },
+    });
+    await engine.evaluateToolCall(
+      { tool: "lens", args: { topic: "secret" } },
+      { surface: "rib", ribId: "chamber", provider: "claude", signal: ac.signal },
+    );
+    expect(seenReq).toEqual({
+      surface: "rib",
+      policyId: "rib:chamber:ask",
+      reason: "confirm lens",
+      tool: "lens",
+      ribId: "chamber",
+      provider: "claude",
+    });
+    expect(seenReq).not.toHaveProperty("args");
+    expect(seenSignal).toBe(ac.signal);
+  });
+});
+
+describe("createPolicyEngine — ask_on_shell builtin", () => {
+  const accept = async (): Promise<"accept"> => "accept";
+
+  it("is off by default: a shell tool is allowed without asking", async () => {
+    let asked = false;
+    const engine = createPolicyEngine({
+      requestApproval: async () => {
+        asked = true;
+        return "accept";
+      },
+    });
+    expect(await engine.evaluateToolCall({ tool: "Bash" }, chat)).toEqual({ outcome: "allow" });
+    expect(asked).toBe(false);
+  });
+
+  it("asks before a shell/file tool call when enabled, allowing on accept", async () => {
+    const engine = createPolicyEngine({ askOnShell: true, requestApproval: accept });
+    expect(await engine.evaluateToolCall({ tool: "Bash" }, chat)).toEqual({ outcome: "allow" });
+    expect(await engine.evaluateToolCall({ tool: "shell_exec" }, chat)).toEqual({
+      outcome: "allow",
+    });
+  });
+
+  it("denies a shell tool call when the human rejects", async () => {
+    const engine = createPolicyEngine({ askOnShell: true, requestApproval: async () => "reject" });
+    expect((await engine.evaluateToolCall({ tool: "Write" }, chat)).outcome).toBe("deny");
+  });
+
+  it("does not ask for a non-shell tool", async () => {
+    let asked = false;
+    const engine = createPolicyEngine({
+      askOnShell: true,
+      requestApproval: async () => {
+        asked = true;
+        return "accept";
+      },
+    });
+    expect(await engine.evaluateToolCall({ tool: "read_docs" }, chat)).toEqual({
+      outcome: "allow",
+    });
+    expect(asked).toBe(false);
+  });
+
+  it("the operator denylist beats ask_on_shell — denied, not asked", async () => {
+    let asked = false;
+    const engine = createPolicyEngine({
+      askOnShell: true,
+      denylist: ["Bash"],
+      requestApproval: async () => {
+        asked = true;
+        return "accept";
+      },
+    });
+    const d = await engine.evaluateToolCall({ tool: "Bash" }, chat);
+    expect(d).toEqual({ outcome: "deny", reason: "denylisted by operator floor" });
+    expect(asked).toBe(false);
+  });
+
+  it("a later rib deny still wins after an ask_on_shell accept (first-deny-wins)", async () => {
+    const denyBash: Policy = {
+      id: "no-bash",
+      on: [{ phase: "tool_call", tool: "Bash" }],
+      evaluate: () => ({ outcome: "deny", reason: "bash is gated" }),
+    };
+    const engine = createPolicyEngine({
+      askOnShell: true,
+      ribPolicies: [{ ribId: "r", policy: denyBash }],
+      requestApproval: accept,
+    });
+    expect(await engine.evaluateToolCall({ tool: "Bash" }, chat)).toEqual({
+      outcome: "deny",
+      reason: "bash is gated",
+    });
+  });
+
+  it("without an approval channel, an enabled ask_on_shell degrades to deny", async () => {
+    const engine = createPolicyEngine({ askOnShell: true });
+    const d = await engine.evaluateToolCall({ tool: "Bash" }, chat);
+    expect(d.outcome).toBe("deny");
+    expect((d as { reason: string }).reason).toContain("requires approval (deferred)");
   });
 });

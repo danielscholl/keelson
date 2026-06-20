@@ -24,6 +24,8 @@ import {
 } from "@keelson/providers";
 import type {
   AgentSummary,
+  ApprovalDecision,
+  ApprovalRequest,
   CommandCompletion,
   CommandInvokeResult,
   OpenChatSeed,
@@ -673,10 +675,15 @@ function toDiscoveryNotice(w: WorkflowLoadWarning): WorkflowDiscoveryNotice {
 
 // Construct the unified policy engine: the operator denylist floor
 // (DEFAULT_TOOL_DENYLIST + KEELSON_WORKFLOW_TOOL_DENYLIST) folded into the
-// `tool_denylist` builtin, plus the ribs' contributed policies. Built at the
-// composition root AFTER bootstrapRibs so rib-declared policies are known.
+// `tool_denylist` builtin, the opt-in `ask_on_shell` builtin (KEELSON_ASK_ON_SHELL=1),
+// plus the ribs' contributed policies. Built at the composition root AFTER
+// bootstrapRibs so rib-declared policies are known; `requestApproval` is the
+// ApprovalRegistry's open-a-pause callback that lights up the ASK round-trip.
 export function bootstrapPolicyEngine(
-  opts: { ribPolicies?: readonly RibPolicyContribution[] } = {},
+  opts: {
+    ribPolicies?: readonly RibPolicyContribution[];
+    requestApproval?: (req: ApprovalRequest, signal?: AbortSignal) => Promise<ApprovalDecision>;
+  } = {},
 ): PolicyEngine {
   return createPolicyEngine({
     // parseToolDenylist returns DEFAULT_TOOL_DENYLIST only when the env var is
@@ -688,7 +695,9 @@ export function bootstrapPolicyEngine(
       ...DEFAULT_TOOL_DENYLIST,
       ...parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
     ],
+    askOnShell: process.env.KEELSON_ASK_ON_SHELL === "1",
     ...(opts.ribPolicies ? { ribPolicies: opts.ribPolicies } : {}),
+    ...(opts.requestApproval ? { requestApproval: opts.requestApproval } : {}),
   });
 }
 

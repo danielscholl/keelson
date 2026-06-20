@@ -6,6 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import { z } from "zod";
+
 /**
  * Policy — Keelson's unified governance contract.
  *
@@ -19,14 +21,18 @@
  * This file is the CONTRACT only — types, no engine. The engine that composes
  * and evaluates the policy stack lives in the server (apps/server), mirroring
  * the split between `ToolDefinition` (here) and the tool registry
- * (`@keelson/skills`). Kept as pure TS types because Phase 1 decisions are
- * produced in-process, never deserialized over the wire.
+ * (`@keelson/skills`). Decisions are produced in-process; the only thing that
+ * crosses the wire is the redacted `PendingApprovalView` an `ask` surfaces for
+ * a human to resolve, so that — and only that — carries a zod schema.
  *
- * Phase 1 honors only the `tool_call` phase, and only at PROJECTION time (which
- * tools are offered to the model, by name — no call arguments yet, so `args` is
- * undefined). An `ask` decision has no round-trip channel at projection time and
- * degrades to a deny-with-reason there; the other phases are declared for the
- * per-call and request/response hooks that later phases wire in.
+ * The `tool_call` phase is honored at two seams: PROJECTION time (which tools
+ * are offered to the model, by name — no call arguments, so `args` is
+ * undefined) and PER-CALL (one call with its validated `args`). At projection an
+ * `ask` lets the tool through so it can be asked for when actually called; the
+ * per-call seam runs the round-trip (pause → accept→allow, reject/timeout→deny).
+ * With no approval channel wired, an `ask` degrades to deny-with-reason at both
+ * seams. The other phases are declared for the request/response hooks later
+ * phases wire in.
  */
 
 // Which turn surface triggered evaluation. Lets a policy scope itself (e.g.
@@ -41,8 +47,9 @@ export type PolicyDecision =
   // The agent receives `reason` as a tool error (or the tool is dropped from the
   // projection in Phase 1).
   | { outcome: "deny"; reason: string }
-  // Pause for human approval: accept -> allow, else -> deny. No round-trip exists
-  // at projection time, so Phase 1 treats this as deny-with-reason.
+  // Pause for human approval: accept -> allow, else (reject/timeout/abort) ->
+  // deny. Resolved per-call through the approval round-trip; with no channel
+  // wired it degrades to deny-with-reason.
   | { outcome: "ask"; reason: string };
 
 export type PolicyEvent =
@@ -69,3 +76,48 @@ export interface Policy {
   on?: { phase: PolicyEvent["phase"]; tool?: string }[];
   evaluate(event: PolicyEvent, ctx: PolicyContext): PolicyDecision | Promise<PolicyDecision>;
 }
+
+// ── ASK approval round-trip ──────────────────────────────────────────────────
+// An `ask` outcome pauses the turn until a human accepts or rejects. The engine
+// opens a pending approval through an injected channel; the server's registry
+// surfaces it over the snapshot WS (POLICY_APPROVALS_SNAPSHOT_KEY) and resolves
+// it from POST /api/approvals/:id.
+
+export type ApprovalDecision = "accept" | "reject";
+export const approvalDecisionSchema = z.enum(["accept", "reject"]);
+
+// What an `ask` carries to the approval channel — enough for a human to judge
+// the call without exposing tool args (which can hold secrets). The engine fills
+// this from the matching event + context; the registry stamps it into a view.
+export interface ApprovalRequest {
+  surface: PolicySurface;
+  // The deciding policy's namespaced engine id (e.g. `builtin:ask_on_shell`).
+  policyId: string;
+  reason: string;
+  tool?: string;
+  ribId?: string;
+  provider?: string;
+}
+
+// The pending approval as published over the snapshot WS and returned by
+// GET /api/approvals — the request plus the registry's id and open timestamp.
+// Deliberately omits tool `args`: the snapshot is broadcast to every subscriber.
+export const pendingApprovalViewSchema = z
+  .object({
+    id: z.string().min(1),
+    surface: z.enum(["chat", "workflow", "rib"]),
+    policyId: z.string().min(1),
+    reason: z.string(),
+    tool: z.string().optional(),
+    ribId: z.string().optional(),
+    provider: z.string().optional(),
+    createdAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+export type PendingApprovalView = z.infer<typeof pendingApprovalViewSchema>;
+
+// Snapshot payload: the list of currently-open approvals, newest last.
+export const policyApprovalsSnapshotSchema = z.array(pendingApprovalViewSchema);
+export type PolicyApprovalsSnapshot = z.infer<typeof policyApprovalsSnapshotSchema>;
+
+export const POLICY_APPROVALS_SNAPSHOT_KEY = "keelson:policy:approvals";
