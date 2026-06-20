@@ -5,24 +5,28 @@
 #
 # Read-only by harness rail: every review lane sets
 # `allowed_tools: [Read, Glob, Grep]` and the only intended PR-mutating step
-# is the final `gh pr comment`. Both providers enforce this — claude gates by
-# tool name, copilot (the pin below) gates the underlying capability through
-# its permission handler, so the model's built-in write/shell tools are denied
-# mid-review regardless of provider.
+# is the final `gh api …/reviews` call. Both providers enforce this — claude
+# gates by tool name, copilot (the pin below) gates the underlying capability
+# through its permission handler, so the model's built-in write/shell tools
+# are denied mid-review regardless of provider. An opus triage gate
+# de-dupes findings and drops confidence < 80 / false-positive / LOW before
+# the review is assembled and posted as line-anchored inline comments.
 
 name: pr-review
 provider: copilot
 model: auto
 description: |
   Use when: User wants a smart, scoped code review of an existing GitHub PR
-            that adapts to the PR's complexity and posts the synthesis as a
-            PR comment.
+            that adapts to the PR's complexity and posts the synthesis as
+            line-anchored inline review comments via the GitHub Reviews API.
   Triggers: "review pr", "review #123", "smart pr review", "review this pr",
             "code review pr".
   Does: Fetches PR scope -> classifies complexity and which review lanes are
         relevant -> runs only those lanes (code review always, plus error
         handling / test coverage / docs impact when applicable) ->
-        synthesizes findings -> posts the synthesis as a PR comment.
+        runs an opus triage gate to de-dupe and filter noise ->
+        posts findings as a GitHub PR review with line-anchored inline
+        comments and suggestion blocks.
   NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
 
 # Model `auto` lets Copilot route each node and keeps this bundled workflow
@@ -182,6 +186,8 @@ nodes:
   # PHASE 3: REVIEW LANES (conditional, parallel)
   # Each lane reads `$ARTIFACTS_DIR/diff.patch` directly so they don't
   # collide on the same prompt context.
+  # Each finding must include: path:line, severity, confidence (0-100),
+  # what, why, fix — so the triage gate has all inputs it needs.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: code-review
@@ -208,7 +214,7 @@ nodes:
       ## Output
 
       Markdown list. Each finding:
-      - `path:line` — `severity` (CRITICAL | HIGH | MEDIUM | LOW)
+      - `path:line` — `severity` (CRITICAL | HIGH | MEDIUM | LOW) — `confidence` (0-100)
       - **What**: one sentence
       - **Why it matters**: one sentence
       - **Suggested fix**: one or two lines, code where useful
@@ -236,7 +242,7 @@ nodes:
 
       ## Output
 
-      Same finding shape as the code review (path:line, severity, what, why, fix).
+      Same finding shape as the code review (path:line, severity, confidence (0-100), what, why, fix).
       If the diff has no new error paths worth flagging, say so in one line.
 
   - id: test-coverage
@@ -263,7 +269,7 @@ nodes:
 
       ## Output
 
-      Same finding shape (path:line, severity, what, why, fix). Tag missing
+      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). Tag missing
       tests with severity HIGH if the new code can branch on bad input or
       external state; MEDIUM otherwise.
 
@@ -291,71 +297,196 @@ nodes:
 
       ## Output
 
-      Same finding shape (path:line, severity, what, why, fix). Skip if the
+      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). Skip if the
       diff has no user-facing surface change.
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 4: SYNTHESIZE
-  # Pull every lane that ran into one operator-readable report.
-  # `trigger_rule: one_success` so we proceed even if a conditional lane was
-  # skipped or one lane failed.
+  # PHASE 4: TRIAGE
+  # Opus judge de-dupes lane findings, scores confidence, and emits a
+  # structured findings[] array. Drops LOW, confidence < 80, false positives,
+  # and pre-existing issues. `trigger_rule: one_success` so we proceed even
+  # if a conditional lane was skipped or one lane failed.
   # ─────────────────────────────────────────────────────────────────────────
 
-  - id: synthesize
+  - id: triage
     depends_on: [code-review, error-handling, test-coverage, docs-impact]
     trigger_rule: one_success
     context: fresh
+    model: claude-opus-4.8
+    output_format:
+      type: object
+      required: [verdict, summary, findings]
+      properties:
+        verdict:
+          type: string
+          enum: ["READY TO MERGE", "NEEDS NITS", "NEEDS FIXES"]
+        summary: { type: string }
+        findings:
+          type: array
+          items:
+            type: object
+            required: [path, line, severity, confidence, what, why, fix]
+            properties:
+              path: { type: string }
+              line: { type: integer }
+              severity:
+                type: string
+                enum: [CRITICAL, HIGH, MEDIUM]
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
     prompt: |
-      Synthesize the review lanes into a single PR-comment-ready report.
+      You are the PR review triage judge. Four independent lanes produced findings
+      (a section may be empty if that lane was skipped).
 
-      ## Inputs
+      ## Scope summary
+      $scope.output
 
-      - Scope: $scope.output
-      - Classification: $classify.output
+      ## Code review findings
+      $code-review.output
 
-      - Code review: $code-review.output
-      - Error handling: $error-handling.output
-      - Test coverage: $test-coverage.output
-      - Docs impact: $docs-impact.output
+      ## Error handling findings
+      $error-handling.output
 
-      ## Output
+      ## Test coverage findings
+      $test-coverage.output
 
-      Markdown — this is what gets posted as the PR comment. Shape:
+      ## Docs impact findings
+      $docs-impact.output
 
-      ```markdown
-      ## Smart PR review — $classify.output.complexity
+      De-duplicate the findings. For each unique finding, score confidence 0-100
+      that it is a REAL, in-scope issue — NOT a false positive, NOT pre-existing,
+      NOT something a linter/type-checker/CI already catches, NOT a pedantic
+      nitpick.
 
-      $classify.output.reasoning
+      Keep ONLY CRITICAL/HIGH/MEDIUM AND confidence >= 80. Drop everything else
+      as noise, including all LOW-severity findings. For each kept finding emit:
+      - path: the file path exactly as it appears in the diff
+      - line: the line number on the RIGHT (new) side of the diff
+      - severity: CRITICAL | HIGH | MEDIUM
+      - confidence: integer 0-100
+      - what: one sentence describing the problem
+      - why: one sentence on the impact
+      - fix: the exact corrected code snippet (one or two lines) to suggest
 
-      ### Findings
+      Set verdict from the highest severity in findings:
+      - CRITICAL or HIGH present → "NEEDS FIXES"
+      - only MEDIUM present → "NEEDS NITS"
+      - no findings (empty list) → "READY TO MERGE"
 
-      <For each CRITICAL/HIGH/MEDIUM finding from the lanes above, one bullet:>
-      - **severity** — `path:line` — what / fix
-
-      <Group LOW into a collapsed list at the end if there are more than 3.>
-
-      ### Verdict
-
-      <One of: READY TO MERGE | NEEDS NITS | NEEDS FIXES — pick based on the
-       highest severity finding.>
-      ```
-
-      Save this report to `$ARTIFACTS_DIR/review.md` AND print it.
+      summary is one sentence on the PR's overall health.
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 5: POST COMMENT
+  # PHASE 5: BUILD REVIEW PAYLOAD
+  # Pure offline step: anchor findings to diff lines, build the GitHub
+  # Reviews API payload. No network calls.
   # ─────────────────────────────────────────────────────────────────────────
 
-  - id: post-comment
-    depends_on: [synthesize]
+  - id: build-review
+    depends_on: [triage]
     bash: |
       set -euo pipefail
-      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number")
-      REPORT="$KEELSON_ARTIFACTS_DIR/review.md"
-      if [ ! -f "$REPORT" ]; then
-        echo "ERROR: synthesize did not write $REPORT" >&2
-        exit 1
+
+      ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
+      TRIAGE_JSON="$ARTIFACTS/triage.json"
+      DIFF="$ARTIFACTS/diff.patch"
+      PAYLOAD="$ARTIFACTS/payload.json"
+
+      printf '%s' "$KEELSON_NODE_triage_OUTPUT" > "$TRIAGE_JSON"
+
+      # Build anchorable set: path<TAB>newline for every RIGHT-side line in diff.
+      awk '
+        /^\+\+\+ b\// { file = substr($0, 7); next }
+        /^@@ / {
+          match($0, /\+([0-9]+)/, a)
+          new_line = a[1] - 1
+          next
+        }
+        /^\+/ && file != "" { new_line++; print file "\t" new_line; next }
+        /^[^-]/ && file != "" { new_line++; next }
+      ' "$DIFF" > "$ARTIFACTS/anchorable.txt"
+
+      VERDICT=$(jq -r '.verdict' "$TRIAGE_JSON")
+      SUMMARY=$(jq -r '.summary' "$TRIAGE_JSON")
+
+      # Compute a content hash over the canonicalized findings array.
+      HASH=$(jq -c '.findings | sort_by(.path, .line)' "$TRIAGE_JSON" | sha256sum | awk '{print $1}')
+
+      # Partition findings into anchored comments and fallback bullets.
+      COMMENTS='[]'
+      FALLBACK=''
+
+      while IFS= read -r finding; do
+        PATH_F=$(printf '%s' "$finding" | jq -r '.path')
+        LINE_F=$(printf '%s' "$finding" | jq -r '.line')
+        SEV=$(printf '%s' "$finding" | jq -r '.severity')
+        WHAT=$(printf '%s' "$finding" | jq -r '.what')
+        WHY=$(printf '%s' "$finding" | jq -r '.why')
+        FIX=$(printf '%s' "$finding" | jq -r '.fix')
+
+        if grep -qF "${PATH_F}"$'\t'"${LINE_F}" "$ARTIFACTS/anchorable.txt" 2>/dev/null; then
+          BODY=$(printf '**%s** — %s\n\n%s\n\n```suggestion\n%s\n```' "$SEV" "$WHAT" "$WHY" "$FIX")
+          COMMENT=$(jq -n \
+            --arg p "$PATH_F" \
+            --argjson l "$LINE_F" \
+            --arg b "$BODY" \
+            '{path:$p, line:$l, side:"RIGHT", body:$b}')
+          COMMENTS=$(printf '%s' "$COMMENTS" | jq ". + [$COMMENT]")
+        else
+          FALLBACK="${FALLBACK}"$'\n'"- **${SEV}** \`${PATH_F}\` — ${WHAT}"
+        fi
+      done < <(jq -c '.findings[]' "$TRIAGE_JSON" 2>/dev/null || true)
+
+      # Assemble review body.
+      BODY="## Smart PR Review\n\n**Verdict: ${VERDICT}**\n\n${SUMMARY}"
+      if [ -n "$FALLBACK" ]; then
+        BODY="${BODY}\n\n### Findings not anchorable to the diff\n${FALLBACK}"
       fi
-      gh pr comment "$PR_NUM" --body-file "$REPORT"
+      BODY="${BODY}\n\n<!-- keelson:pr-review:${HASH} -->"
+
+      jq -n \
+        --arg body "$(printf '%b' "$BODY")" \
+        --argjson comments "$COMMENTS" \
+        '{event:"COMMENT", body:$body, comments:$comments}' \
+        > "$PAYLOAD"
+
+      ANCHORED=$(jq '.comments | length' "$PAYLOAD")
+      FALLBACK_COUNT=$(jq '.findings | length' "$TRIAGE_JSON") 2>/dev/null || FALLBACK_COUNT=0
+      echo "Payload built: ${ANCHORED} anchored comment(s), verdict=${VERDICT}, hash=${HASH}"
+      echo "Payload written to: $PAYLOAD"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PHASE 6: POST REVIEW (idempotent)
+  # Checks for an existing review with the same content-hash marker before
+  # posting, so re-runs don't pile up duplicate reviews.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  - id: post-review
+    depends_on: [build-review]
+    bash: |
+      set -euo pipefail
+
+      ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
+      PR_NUM=$(cat "$ARTIFACTS/.pr-number")
+      PAYLOAD="$ARTIFACTS/payload.json"
+
+      REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+
+      # Extract the content hash from the payload body for idempotency check.
+      HASH=$(grep -oE 'keelson:pr-review:[a-f0-9]+' "$PAYLOAD" | head -1 | cut -d: -f3 || true)
+
+      if [ -n "$HASH" ]; then
+        EXISTING=$(gh api "repos/${REPO}/pulls/${PR_NUM}/reviews" --jq '.[].body' 2>/dev/null || true)
+        if printf '%s' "$EXISTING" | grep -qF "keelson:pr-review:${HASH}"; then
+          echo "No change since last review — skipping (hash=${HASH})"
+          gh pr view "$PR_NUM" --json url -q '.url'
+          exit 0
+        fi
+      fi
+
+      gh api -X POST "repos/${REPO}/pulls/${PR_NUM}/reviews" \
+        --input "$PAYLOAD"
+
       echo "Posted review on PR #${PR_NUM}"
       gh pr view "$PR_NUM" --json url -q '.url'
