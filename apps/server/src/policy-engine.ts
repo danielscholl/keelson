@@ -7,6 +7,8 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type {
+  ApprovalDecision,
+  ApprovalRequest,
   Policy,
   PolicyContext,
   PolicyDecision,
@@ -27,6 +29,15 @@ export interface PolicyEngineOptions {
   denylist?: readonly string[];
   // Rib-declared policies, collected at activation (see Rib.contributePolicies).
   ribPolicies?: readonly RibPolicyContribution[];
+  // Opt-in `ask_on_shell` builtin: ASK before any keelson tool call whose name
+  // denotes a shell or file-mutating action. Off by default (an unprompted
+  // floor would surprise). Operator-toggled via KEELSON_ASK_ON_SHELL.
+  askOnShell?: boolean;
+  // The approval round-trip an `ask` decision rides. When wired, a per-call
+  // `ask` pauses here until this resolves accept/reject; when absent, `ask`
+  // degrades to deny-with-reason (the pre-Phase-3 behavior). Injected by the
+  // composition root from the server's ApprovalRegistry.
+  requestApproval?: (req: ApprovalRequest, signal?: AbortSignal) => Promise<ApprovalDecision>;
 }
 
 export interface ToolProjection<T> {
@@ -36,17 +47,19 @@ export interface ToolProjection<T> {
   readonly denied: readonly { tool: string; reason: string }[];
 }
 
-// The per-call decision the engine emits: allow, or deny-with-reason. `ask` has
-// no approval round-trip yet (Phase 3), so the engine normalizes it to deny
-// here — callers never see an `ask` and so never have to handle one.
+// The per-call decision the engine emits: allow, or deny-with-reason. An `ask`
+// is resolved INSIDE the engine via the approval round-trip (accept→allow,
+// reject/timeout→deny) — callers never see an `ask` and so never have to handle
+// one. Providers' ToolCallGate mirrors this allow/deny shape.
 export type ToolCallDecision = { outcome: "allow" } | { outcome: "deny"; reason: string };
 
 export interface PolicyEngine {
   // Projection-time tool gate: evaluate a synthetic `tool_call` event per
   // candidate (no args yet) and drop any whose first matching policy returns
-  // deny — or ask, which has no round-trip at projection time and degrades to
-  // a deny-with-reason. Order: builtin floor first, then rib-declared;
-  // first-deny-wins so a future session tier prepends without reordering.
+  // deny. An `ask` lets the tool THROUGH projection (so the per-call seam can
+  // ask when it's actually called) when an approval channel is wired, and
+  // degrades to deny-with-reason when none is. Order: builtin floor first, then
+  // rib-declared; first-deny-wins so a future session tier prepends.
   projectTools<T extends { name: string }>(
     candidates: readonly T[],
     base: { surface: PolicySurface; ribId?: string; provider?: string },
@@ -55,10 +68,12 @@ export interface PolicyEngine {
   // projectTools, but for ONE call with its (validated) args. Providers invoke
   // it inside their custom-tool handler before the tool executes; a `deny`
   // short-circuits the call. Tools cleared at projection can still be denied
-  // here on the strength of their args — the whole point of the per-call gate.
+  // here on the strength of their args. An `ask` pauses for human approval via
+  // the round-trip (accept→allow, reject/timeout→deny). `signal` cancels a
+  // pending approval when the turn is torn down (→ deny).
   evaluateToolCall(
     call: { tool: string; args?: unknown },
-    base: { surface: PolicySurface; ribId?: string; provider?: string },
+    base: { surface: PolicySurface; ribId?: string; provider?: string; signal?: AbortSignal },
   ): Promise<ToolCallDecision>;
 }
 
@@ -90,16 +105,59 @@ function makeDenylistPolicy(denylist: readonly string[]): Policy {
   };
 }
 
+// Keelson TOOL CALLS whose names denote a shell or file-mutating action. This
+// gate governs MCP/rib/workflow tool calls by name — provider BUILT-IN
+// capabilities (Copilot's permission gate, Claude's allow/deny lists) are gated
+// elsewhere and not yet routed through here; that wiring is a follow-up.
+const ASK_ON_SHELL_TOOLS = new Set([
+  "Bash",
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+  "shell",
+  "shell_exec",
+  "exec",
+  "run_shell",
+]);
+
+// Opt-in `ask_on_shell` builtin — ASK before any tool call whose name is in the
+// shell/file-mutating set above. Returns `ask`, which the engine resolves via
+// the approval round-trip (or degrades to deny when no channel is wired).
+function makeAskOnShellPolicy(): Policy {
+  return {
+    id: "builtin:ask_on_shell",
+    on: [{ phase: "tool_call" }],
+    evaluate(event): PolicyDecision {
+      if (event.phase === "tool_call" && ASK_ON_SHELL_TOOLS.has(event.tool)) {
+        return { outcome: "ask", reason: `'${event.tool}' runs shell or file-mutating actions` };
+      }
+      return { outcome: "allow" };
+    },
+  };
+}
+
+// How an `ask` outcome is resolved for this seam. Returns "allow" to KEEP
+// evaluating the stack (the policy approved or — at projection — deferred to the
+// per-call seam) and `{ deny }` to short-circuit. Lets projection and per-call
+// interpret `ask` differently without forking the stack walk.
+type AskResolver = (ask: {
+  policyId: string;
+  reason: string;
+  tool?: string;
+}) => Promise<"allow" | { deny: string }>;
+
 // Run the ordered policy stack against one event; first-deny-wins. Returns
 // `allow` when no matching policy denies, else `deny` with the deciding
-// policy's reason (an `ask` is degraded here — no round-trip exists yet).
-// Shared by projectTools (per candidate, no args) and evaluateToolCall (one
-// call, with args) so the precedence, ask-degradation, and fail-open-per-policy
-// behavior can't drift between the projection and per-call seams.
+// policy's reason. An `ask` is handed to `onAsk` (the seam decides whether to
+// round-trip, defer, or degrade). Shared by projectTools (per candidate, no
+// args) and evaluateToolCall (one call, with args) so precedence and
+// fail-open-per-policy behavior can't drift between the two seams.
 async function evaluateStack(
   ordered: readonly { id: string; policy: Policy }[],
   event: PolicyEvent,
   ctx: PolicyContext,
+  onAsk: AskResolver,
 ): Promise<ToolCallDecision> {
   // tool_call events carry the tool name; other phases label by phase.
   const label = event.phase === "tool_call" ? event.tool : event.phase;
@@ -131,14 +189,18 @@ async function evaluateStack(
         };
       }
       if (outcome === "ask") {
-        // No approval round-trip yet — degrade to deny so the call is withheld.
-        // Warn because an author's ASK silently becoming a deny is surprising
-        // until Phase 3 wires the real pause.
         const why = typeof reason === "string" && reason.length > 0 ? reason : "approval required";
-        console.warn(
-          `[policy] '${entry.id}' asked for approval on '${label}'; withheld (no approval round-trip yet)`,
-        );
-        return { outcome: "deny", reason: `requires approval (deferred): ${why}` };
+        const resolved = await onAsk({
+          policyId: entry.id,
+          reason: why,
+          ...(event.phase === "tool_call" ? { tool: event.tool } : {}),
+        });
+        // `{ deny }` short-circuits; "allow" means accepted (or, at projection,
+        // deferred to the per-call seam) so a LATER policy can still deny.
+        if (resolved !== "allow") {
+          return { outcome: "deny", reason: resolved.deny };
+        }
+        continue;
       }
       if (outcome !== "allow") {
         // An unrecognized/malformed outcome is treated as allow (like a throw)
@@ -158,15 +220,56 @@ async function evaluateStack(
 }
 
 export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine {
-  // Builtin floor first, then rib-declared — first-deny-wins. Rib ids are
-  // namespaced so two ribs' identically-named policies stay distinguishable.
+  const requestApproval = opts.requestApproval;
+  // Builtin floor first, then the opt-in ask_on_shell builtin, then rib-declared
+  // — first-deny-wins. A denylisted shell tool is therefore denied (not asked),
+  // and a rib policy can still deny a call ask_on_shell would have allowed. Rib
+  // ids are namespaced so two ribs' identically-named policies stay distinct.
   const ordered: { id: string; policy: Policy }[] = [
     { id: "builtin:tool_denylist", policy: makeDenylistPolicy(opts.denylist ?? []) },
+    ...(opts.askOnShell ? [{ id: "builtin:ask_on_shell", policy: makeAskOnShellPolicy() }] : []),
     ...(opts.ribPolicies ?? []).map((c) => ({
       id: `rib:${c.ribId}:${c.policy.id}`,
       policy: c.policy,
     })),
   ];
+
+  // Projection seam: an `ask` lets the tool through (so the per-call seam can
+  // ask when it's actually called) when a channel is wired; otherwise it
+  // degrades to deny-with-reason — prompting once per offered tool would be
+  // wrong, and a tool dropped here could never be asked for per-call.
+  const projectionAsk: AskResolver = async ({ reason }) =>
+    requestApproval ? "allow" : { deny: `requires approval (deferred): ${reason}` };
+
+  // Per-call seam: run the real round-trip. accept→allow, reject/timeout/abort→
+  // deny; with no channel wired, degrade to deny-with-reason. A throwing channel
+  // fails closed (deny), never open.
+  const perCallAsk =
+    (base: {
+      surface: PolicySurface;
+      ribId?: string;
+      provider?: string;
+      signal?: AbortSignal;
+    }): AskResolver =>
+    async ({ policyId, reason, tool }) => {
+      if (!requestApproval) return { deny: `requires approval (deferred): ${reason}` };
+      try {
+        const req: ApprovalRequest = {
+          surface: base.surface,
+          policyId,
+          reason,
+          ...(tool !== undefined ? { tool } : {}),
+          ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
+          ...(base.provider !== undefined ? { provider: base.provider } : {}),
+        };
+        const decision = await requestApproval(req, base.signal);
+        return decision === "accept" ? "allow" : { deny: `approval rejected: ${reason}` };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[policy] approval channel threw for '${policyId}': ${msg}`);
+        return { deny: `approval unavailable: ${reason}` };
+      }
+    };
 
   const makeCtx = (base: { surface: PolicySurface; ribId?: string }): PolicyContext => ({
     surface: base.surface,
@@ -191,7 +294,12 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
       const allowed: (typeof candidates)[number][] = [];
       const denied: { tool: string; reason: string }[] = [];
       for (const candidate of candidates) {
-        const decision = await evaluateStack(ordered, toolCallEvent(candidate.name, base), ctx);
+        const decision = await evaluateStack(
+          ordered,
+          toolCallEvent(candidate.name, base),
+          ctx,
+          projectionAsk,
+        );
         if (decision.outcome === "deny") {
           denied.push({ tool: candidate.name, reason: decision.reason });
         } else {
@@ -202,7 +310,12 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
     },
 
     async evaluateToolCall(call, base) {
-      return evaluateStack(ordered, toolCallEvent(call.tool, base, call.args), makeCtx(base));
+      return evaluateStack(
+        ordered,
+        toolCallEvent(call.tool, base, call.args),
+        makeCtx(base),
+        perCallAsk(base),
+      );
     },
   };
 }

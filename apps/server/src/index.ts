@@ -9,6 +9,8 @@ import { extname, join, resolve, sep } from "node:path";
 import { registerGatewayProvider, unregisterProvider } from "@keelson/providers";
 import {
   DEFAULT_PROJECT_NAME,
+  POLICY_APPROVALS_SNAPSHOT_KEY,
+  policyApprovalsSnapshotSchema,
   RIBS_VERSION_SNAPSHOT_KEY,
   SCHEMA_VERSION,
   WIRE_PROTOCOL_VERSION,
@@ -26,6 +28,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import pkg from "../package.json" with { type: "json" };
 import { agentsRoutes } from "./agents-handler.ts";
+import { createApprovalRegistry } from "./approval-registry.ts";
+import { approvalsRoutes } from "./approvals-handler.ts";
 import {
   bootstrapPolicyEngine,
   bootstrapPromptHandler,
@@ -200,6 +204,18 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   }));
   void snapshotManager.recompose(RIBS_VERSION_SNAPSHOT_KEY);
 
+  // The ASK approval round-trip: a policy `ask` opens a pause here; the snapshot
+  // key republishes the open set (redacted) so the SPA/CLI can render and resolve
+  // it via POST /api/approvals/:id. Created before the policy engine so its
+  // `request` callback can be wired in as the engine's approval channel.
+  const approvals = createApprovalRegistry({
+    onChange: () => void snapshotManager.recompose(POLICY_APPROVALS_SNAPSHOT_KEY),
+  });
+  snapshotManager.register(POLICY_APPROVALS_SNAPSHOT_KEY, () => approvals.list(), {
+    validate: (d) => policyApprovalsSnapshotSchema.parse(d),
+  });
+  void snapshotManager.recompose(POLICY_APPROVALS_SNAPSHOT_KEY);
+
   // Keyring store is needed before ribs so each rib gets a namespaced, read-only
   // credential reader scoped to its own keys.
   const credentialStore = createKeyringStore();
@@ -224,8 +240,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);
   // Unified governance: operator denylist floor + rib-contributed policies. The
   // three turn seams (chat, workflow prompt nodes, rib agent turns) gate their
-  // projected tools through this one engine.
-  policyEngine = bootstrapPolicyEngine({ ribPolicies: ribs.policies });
+  // projected tools through this one engine; an `ask` rides the approval registry.
+  policyEngine = bootstrapPolicyEngine({
+    ribPolicies: ribs.policies,
+    requestApproval: approvals.request,
+  });
 
   const PORT = config.port ?? Number(process.env.PORT ?? 7878);
   const HOSTNAME = "127.0.0.1";
@@ -402,6 +421,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         console.warn(`[keelson] MCP transport teardown during shutdown failed: ${msg}`);
       }
     }
+    // Reject any open ASK approvals so a paused turn denies and unwinds rather
+    // than hanging on a pause nobody will resolve once the server is down.
+    approvals.clear();
     await ribs.disposeAll();
     await snapshotManager.dispose();
     db.close();
@@ -503,6 +525,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       unregisterProvider(name);
     },
   });
+  approvalsRoutes(app, { registry: approvals });
 
   // The MCP token actually enforced, reported on the handle so serveUntilSignal
   // persists exactly it (single source of truth for the requireToken decision).
