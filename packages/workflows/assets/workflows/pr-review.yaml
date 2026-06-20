@@ -411,7 +411,7 @@ nodes:
       SUMMARY=$(jq -r '.summary' "$TRIAGE_JSON")
 
       # Compute a content hash over the canonicalized findings array.
-      HASH=$(jq -c '.findings | sort_by(.path, .line)' "$TRIAGE_JSON" | sha256sum | awk '{print $1}')
+      HASH=$(jq -c '.findings | sort_by(.path, .line)' "$TRIAGE_JSON" | (sha256sum 2>/dev/null || shasum -a 256) | awk '{print $1}')
 
       # Partition findings into anchored comments and fallback bullets.
       COMMENTS='[]'
@@ -425,7 +425,7 @@ nodes:
         WHY=$(printf '%s' "$finding" | jq -r '.why')
         FIX=$(printf '%s' "$finding" | jq -r '.fix')
 
-        if grep -qF "${PATH_F}"$'\t'"${LINE_F}" "$ARTIFACTS/anchorable.txt" 2>/dev/null; then
+        if grep -qxF "${PATH_F}"$'\t'"${LINE_F}" "$ARTIFACTS/anchorable.txt" 2>/dev/null; then
           BODY=$(printf '**%s** — %s\n\n%s\n\n```suggestion\n%s\n```' "$SEV" "$WHAT" "$WHY" "$FIX")
           COMMENT=$(jq -n \
             --arg p "$PATH_F" \
