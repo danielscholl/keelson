@@ -242,6 +242,51 @@ nodes:
     expect(nodes.find((n) => n.id === "summarize")?.dependsOn).toEqual(["collect"]);
   });
 
+  test("GET /api/workflows/:name resolves each AI node's effective model", async () => {
+    writeWorkflow(
+      "pinned.yaml",
+      `name: pinned
+description: model resolution
+model: auto
+nodes:
+  - id: fetch
+    bash: echo data
+  - id: route
+    depends_on: [fetch]
+    prompt: route $fetch.output
+  - id: reason
+    depends_on: [fetch]
+    model: claude-opus-4.8
+    prompt: reason about $fetch.output
+  - id: expand
+    depends_on: [fetch]
+    model: gpt-5.5
+    command: summarize
+  - id: iterate
+    depends_on: [fetch]
+    loop:
+      prompt: keep refining $fetch.output
+      until: DONE
+      max_iterations: 3
+`,
+    );
+    const { app } = makeRig();
+    const res = await app.fetch(new Request("http://test/api/workflows/pinned"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      workflow: { nodes: Array<{ id: string; type: string; model?: string }> };
+    };
+    const nodes = body.workflow.nodes;
+    // prompt and command nodes honor their own pinned model; an unpinned prompt
+    // and a loop node (whose iterations can't carry a node-level model) inherit
+    // the workflow default; a bash node runs no model, so it carries none.
+    expect(nodes.find((n) => n.id === "reason")?.model).toBe("claude-opus-4.8");
+    expect(nodes.find((n) => n.id === "expand")?.model).toBe("gpt-5.5");
+    expect(nodes.find((n) => n.id === "route")?.model).toBe("auto");
+    expect(nodes.find((n) => n.id === "iterate")?.model).toBe("auto");
+    expect(nodes.find((n) => n.id === "fetch")?.model).toBeUndefined();
+  });
+
   test("GET /api/workflows/:name returns 404 for unknown workflow", async () => {
     const { app } = makeRig();
     const res = await app.fetch(new Request("http://test/api/workflows/nope"));

@@ -7713,6 +7713,15 @@ a.cvb-card-title::after {
 .trace-head .node-type.prompt   { color: var(--cyan);    background: color-mix(in srgb, var(--cyan) 16%, transparent); }
 .trace-head .node-type.approval { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 16%, transparent); }
 .trace-head .node-type.generic  { color: var(--muted);   background: var(--bg-soft); }
+/* Per-node configured model — a quiet metadata pill next to the type chip, so
+   the louder colored node-type still reads first. */
+.trace-head .node-model {
+  font-family: ui-monospace, monospace; font-size: 9px; font-weight: 600;
+  padding: 1px 5px; border-radius: 3px;
+  color: var(--muted); background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  letter-spacing: 0.02em; white-space: nowrap;
+}
 .trace-body { margin-top: 8px; color: var(--muted); }
 .trace-body p { margin: 0 0 6px; }
 .trace-body p:last-child { margin-bottom: 0; }

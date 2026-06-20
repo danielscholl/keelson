@@ -41,3 +41,19 @@ export function contextFillLevel(pct: number): "ok" | "warn" | "hot" {
 export function hasSpend(usage: { inputTokens: number; outputTokens: number }): boolean {
   return usage.inputTokens + usage.outputTokens > 0;
 }
+
+// Run-level rollup: sum input/output spend across every reporting node. Returns
+// null when nothing was spent so the caller renders nothing rather than a
+// fabricated "0" — the same gate `hasSpend` applies per node.
+export function sumTokenSpend(
+  usages: Iterable<{ inputTokens: number; outputTokens: number } | undefined | null>,
+): { inputTokens: number; outputTokens: number } | null {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const u of usages) {
+    if (!u) continue;
+    inputTokens += u.inputTokens;
+    outputTokens += u.outputTokens;
+  }
+  return hasSpend({ inputTokens, outputTokens }) ? { inputTokens, outputTokens } : null;
+}

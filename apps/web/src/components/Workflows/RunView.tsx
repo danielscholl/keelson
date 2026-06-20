@@ -2,7 +2,7 @@ import type { Project, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
-import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
+import { formatTokens, sumTokenSpend } from "../../lib/formatTokens.ts";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
 import { DagGraph } from "./DagGraph.tsx";
@@ -124,17 +124,8 @@ export function RunView({
 
   // Run-level rollup: sum across reporting nodes. Volume, not fill — no
   // percentage gauge here (a run total has no meaningful window to fill).
-  const runUsage = useMemo(() => {
-    let inputTokens = 0;
-    let outputTokens = 0;
-    for (const v of Object.values(nodes)) {
-      if (!v.usage) continue;
-      inputTokens += v.usage.inputTokens;
-      outputTokens += v.usage.outputTokens;
-    }
-    // Zero total → render nothing, not "↑ 0 ↓ 0" (context-only reporters).
-    return hasSpend({ inputTokens, outputTokens }) ? { inputTokens, outputTokens } : null;
-  }, [nodes]);
+  const runUsage = useMemo(() => sumTokenSpend(Object.values(nodes).map((v) => v.usage)), [nodes]);
+  const runTotalTokens = runUsage ? runUsage.inputTokens + runUsage.outputTokens : 0;
 
   const handleCancel = async () => {
     try {
@@ -195,9 +186,9 @@ export function RunView({
               {runUsage && (
                 <span
                   className="run-usage"
-                  title={`Total tokens across nodes: ${runUsage.inputTokens} in, ${runUsage.outputTokens} out`}
+                  title={`${runTotalTokens} tokens total across nodes · ${runUsage.inputTokens} in · ${runUsage.outputTokens} out`}
                 >
-                  ↑ {formatTokens(runUsage.inputTokens)} ↓ {formatTokens(runUsage.outputTokens)}
+                  Σ {formatTokens(runTotalTokens)}
                 </span>
               )}
               {isRunning && (

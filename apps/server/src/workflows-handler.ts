@@ -165,6 +165,12 @@ function nodeTypeOf(node: DagNode): string {
   return "unknown";
 }
 
+// Node types that run a model. prompt and command nodes resolve the node's own
+// `model` (command synthesizes a prompt from the node); a loop's iterations run
+// a model too, resolved from the workflow default. bash / script / approval /
+// cancel never call one.
+const MODEL_NODE_TYPES: ReadonlySet<string> = new Set(["prompt", "command", "loop"]);
+
 function workflowToSummary(
   workflow: WorkflowDefinition,
   catalog: WorkflowCatalog,
@@ -226,13 +232,22 @@ function workflowToDetail(workflow: WorkflowDefinition) {
   return {
     name: workflow.name,
     description: workflow.description,
-    nodes: workflow.nodes.map((n) => ({
-      id: n.id,
-      type: nodeTypeOf(n),
-      ...(n.depends_on ? { dependsOn: n.depends_on } : {}),
-      ...(n.when ? { when: n.when } : {}),
-      ...(n.trigger_rule ? { triggerRule: n.trigger_rule } : {}),
-    })),
+    nodes: workflow.nodes.map((n) => {
+      const type = nodeTypeOf(n);
+      // Attribute a model only to the node types that run one (see
+      // MODEL_NODE_TYPES). Resolve the node's own `model` over the workflow
+      // default; the provider default isn't known at this layer, so omit
+      // rather than guess.
+      const model = MODEL_NODE_TYPES.has(type) ? (n.model ?? workflow.model) : undefined;
+      return {
+        id: n.id,
+        type,
+        ...(n.depends_on ? { dependsOn: n.depends_on } : {}),
+        ...(n.when ? { when: n.when } : {}),
+        ...(n.trigger_rule ? { triggerRule: n.trigger_rule } : {}),
+        ...(model ? { model } : {}),
+      };
+    }),
     ...(workflow.worktree
       ? {
           worktree: {

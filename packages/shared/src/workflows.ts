@@ -59,6 +59,12 @@ export const workflowNodeSummarySchema = z
     dependsOn: z.array(z.string()).optional(),
     when: z.string().optional(),
     triggerRule: z.string().optional(),
+    // Effective configured model for the AI node types (prompt / command /
+    // loop) — the node's own `model` or the workflow default. Present so the
+    // run trace can show which model each node runs on; for Copilot `auto` this
+    // is the only signal, since the provider never reports back which concrete
+    // model it resolved.
+    model: z.string().optional(),
   })
   .strict();
 export type WorkflowNodeSummary = z.infer<typeof workflowNodeSummarySchema>;
