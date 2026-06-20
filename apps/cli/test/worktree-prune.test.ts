@@ -52,6 +52,7 @@ async function setupFixture(): Promise<{
   managedPath: string;
   userPath: string;
   orphanPath: string;
+  persistedPaths: string[];
   baseUrl: string;
   server: ReturnType<typeof Bun.serve>;
 }> {
@@ -79,6 +80,7 @@ async function setupFixture(): Promise<{
   await runGit(["worktree", "add", "-b", "feature/keep", userPath], repoRoot);
 
   writeFileSync(join(orphanPath, ".git"), "gitdir: /nowhere/.git/worktrees/orphan\n");
+  const persistedPaths = [orphanPath];
 
   const server = Bun.serve({
     port: 0,
@@ -91,7 +93,7 @@ async function setupFixture(): Promise<{
         });
       }
       if (pathname === "/api/workflows/worktree-paths") {
-        return Response.json({ paths: [orphanPath] });
+        return Response.json({ paths: persistedPaths });
       }
       if (pathname === "/api/health") {
         return Response.json({ ok: true, name: "keelson", schema_version: "2.7" });
@@ -106,6 +108,7 @@ async function setupFixture(): Promise<{
     managedPath,
     userPath,
     orphanPath,
+    persistedPaths,
     baseUrl: `http://${server.hostname}:${server.port}`,
     server,
   };
@@ -231,6 +234,96 @@ describe("keelson worktree prune", () => {
       expect(existsSync(fixture.managedPath)).toBe(false);
       expect(existsSync(fixture.userPath)).toBe(true);
       expect(existsSync(fixture.orphanPath)).toBe(false);
+    } finally {
+      cleanupFixture(fixture);
+    }
+  });
+
+  test("force prune falls back to rmSync when git worktree remove fails", async () => {
+    const fixture = await setupFixture();
+    try {
+      writeFileSync(join(fixture.repoRoot, ".git", "worktrees", "managed", "locked"), "locked\n");
+      const { stdout, exitCode } = await runCli([
+        "--json",
+        "worktree",
+        "prune",
+        "--force",
+        "--base-url",
+        fixture.baseUrl,
+      ]);
+
+      expect([0, 1]).toContain(exitCode);
+      const env = JSON.parse(stdout.trim()) as {
+        ok: boolean;
+        data: {
+          removed: string[];
+          failed: Array<{ path: string; error: string }>;
+        };
+      };
+      expect(env.ok).toBe(true);
+      expect(env.data.removed).toEqual(expect.arrayContaining([fixture.managedPath]));
+      if (env.data.failed.length > 0) {
+        expect(env.data.failed).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              path: fixture.managedPath,
+              error: expect.stringContaining("git worktree remove failed"),
+            }),
+          ]),
+        );
+      }
+      expect(existsSync(fixture.managedPath)).toBe(false);
+    } finally {
+      cleanupFixture(fixture);
+    }
+  });
+
+  test("classifies orphan-no-repo and removes it without --force", async () => {
+    const fixture = await setupFixture();
+    const orphanNoRepoPath = join(fixture.sandbox, "orphan-no-repo");
+    try {
+      mkdirSync(orphanNoRepoPath, { recursive: true });
+      fixture.persistedPaths.push(orphanNoRepoPath);
+
+      const dryRun = await runCli([
+        "--json",
+        "worktree",
+        "prune",
+        "--dry-run",
+        "--base-url",
+        fixture.baseUrl,
+      ]);
+      expect(dryRun.exitCode).toBe(0);
+      const dryRunEnv = JSON.parse(dryRun.stdout.trim()) as {
+        ok: boolean;
+        data: {
+          candidates: Array<{ path: string; branch: string | null; reason: string }>;
+        };
+      };
+      expect(dryRunEnv.ok).toBe(true);
+      expect(dryRunEnv.data.candidates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: orphanNoRepoPath,
+            branch: null,
+            reason: "orphan-no-repo",
+          }),
+        ]),
+      );
+
+      const prune = await runCli(["--json", "worktree", "prune", "--base-url", fixture.baseUrl]);
+      expect(prune.exitCode).toBe(0);
+      const pruneEnv = JSON.parse(prune.stdout.trim()) as {
+        ok: boolean;
+        data: {
+          removed: string[];
+          failed: Array<{ path: string; error: string }>;
+        };
+      };
+      expect(pruneEnv.ok).toBe(true);
+      expect(pruneEnv.data.removed).toEqual(expect.arrayContaining([orphanNoRepoPath]));
+      expect(pruneEnv.data.failed).toHaveLength(0);
+      expect(existsSync(orphanNoRepoPath)).toBe(false);
     } finally {
       cleanupFixture(fixture);
     }
