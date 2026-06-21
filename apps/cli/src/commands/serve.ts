@@ -9,6 +9,7 @@ import { serveUntilSignal } from "@keelson/server";
 import { ensureSpawnPath } from "@keelson/shared/exec";
 import {
   clearServerState,
+  isLoopbackUrl,
   isPidAlive,
   readServerState,
   type ServerState,
@@ -84,7 +85,7 @@ async function probeKnown(
   state: ServerState | null,
   timeoutMs: number,
 ): Promise<ServerInfo | null> {
-  if (state) {
+  if (state && isLoopbackUrl(state.url)) {
     const found = await probeServer({ baseUrl: state.url, timeoutMs });
     if (found) return found;
   }
@@ -213,6 +214,7 @@ async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
 }
 
 async function requestGracefulShutdown(state: ServerState): Promise<boolean> {
+  if (!isLoopbackUrl(state.url)) return false;
   try {
     const res = await fetch(`${state.url}/api/server/shutdown`, {
       method: "POST",

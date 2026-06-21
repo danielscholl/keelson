@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   clearServerState,
+  isLoopbackUrl,
   isPidAlive,
   readServerState,
   type ServerState,
@@ -91,6 +92,28 @@ describe("server-state", () => {
     writeServerState({ ...STATE, pid: 99 }, home);
     expect(readServerState(home)?.pid).toBe(99);
     expect(readFileSync(serverStatePath(home), "utf8")).toContain('"pid": 99');
+  });
+
+  it("isLoopbackUrl accepts loopback hosts only", () => {
+    for (const url of [
+      "http://127.0.0.1:7878",
+      "http://localhost:7878",
+      "https://127.0.0.1",
+      "http://[::1]:7878",
+    ]) {
+      expect(isLoopbackUrl(url)).toBe(true);
+    }
+    for (const url of [
+      "http://10.0.0.5:7878",
+      "http://example.com/api/mcp",
+      "http://169.254.169.254/",
+      "ftp://127.0.0.1",
+      "file:///etc/passwd",
+      "not a url",
+      "",
+    ]) {
+      expect(isLoopbackUrl(url)).toBe(false);
+    }
   });
 
   it("isPidAlive is true for this process and false for a long-dead pid", () => {
