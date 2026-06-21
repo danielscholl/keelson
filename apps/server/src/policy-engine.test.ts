@@ -949,6 +949,14 @@ describe("createPolicyEngine — evaluateToolResult", () => {
     expect(engine.resultPhaseActive).toBe(false);
   });
 
+  it("a ReDoS-prone redact pattern (catastrophic backtracking) disables the builtin", () => {
+    // Nested quantifiers — safe-regex2 rejects star-height > 1.
+    const engine = createPolicyEngine({ redactPattern: "(a+)+$" });
+    expect(engine.resultPhaseActive).toBe(false);
+    // A linear pattern with a single quantifier stays enabled.
+    expect(createPolicyEngine({ redactPattern: "sk-[a-z0-9]+" }).resultPhaseActive).toBe(true);
+  });
+
   it("hands the policy the result and surface/rib context", async () => {
     let seen: Record<string, unknown> | undefined;
     const recorder: Policy = {

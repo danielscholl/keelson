@@ -17,6 +17,7 @@ import type {
   PolicySurface,
   SessionUsage,
 } from "@keelson/shared";
+import safeRegex from "safe-regex2";
 
 // A rib-contributed policy tagged with the rib that supplied it, so the engine
 // can namespace its id and a denial can be traced back to its owner.
@@ -445,7 +446,19 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
     const raw = opts.redactPattern;
     if (raw === undefined || raw.length === 0) return undefined;
     try {
-      return { id: "builtin:redact", policy: makeRedactPolicy(new RegExp(raw, "g")) };
+      const compiled = new RegExp(raw, "g");
+      // The builtin runs this against tool/response text an external system can
+      // influence (a tool's fetched output, a model's reply), so a pattern with
+      // catastrophic backtracking (ReDoS) could block the event loop. Reject it
+      // up front — fail safe by disabling redaction with a warning, exactly like
+      // an invalid pattern, rather than wedging the server later.
+      if (!safeRegex(compiled)) {
+        console.warn(
+          "[policy] redact pattern risks catastrophic backtracking (ReDoS); redaction disabled",
+        );
+        return undefined;
+      }
+      return { id: "builtin:redact", policy: makeRedactPolicy(compiled) };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[policy] invalid redact pattern; redaction disabled: ${msg}`);

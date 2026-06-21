@@ -133,6 +133,22 @@ value) leaves each builtin off.
 KEELSON_TURN_BUDGET=40 KEELSON_COST_BUDGET=2000000 keelson start
 ```
 
+### Redaction (policy REDACT)
+
+`KEELSON_REDACT_PATTERN=<regex>` enables the opt-in `redact` builtin: every match
+of the pattern is replaced with `[REDACTED]` in a tool's result *before the model
+consumes it* and in a workflow `prompt` node's output *before it flows to a
+dependent node*. Use it to scrub secrets a tool might surface (e.g.
+`sk-[A-Za-z0-9]{20,}` for API keys; alternation `(foo|bar)` covers several).
+
+```bash
+KEELSON_REDACT_PATTERN='sk-[A-Za-z0-9]{20,}' keelson start
+```
+
+Unset or blank leaves the builtin off. An invalid pattern — or one that risks
+catastrophic backtracking (ReDoS) on adversarial tool output — is reported and
+ignored, so a bad value disables redaction rather than wedging the server.
+
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and
 > Keelson auto-discovers its `bash.exe` (`KEELSON_BASH` overrides). The `prompt`,
