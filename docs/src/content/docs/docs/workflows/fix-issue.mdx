@@ -10,11 +10,13 @@ import { Aside } from "@astrojs/starlight/components";
 `fix-issue` takes a GitHub issue from a number to a draft pull request: it
 fetches and classifies the issue, plans, **pauses for a human to approve the
 plan**, implements, validates against the repository's own checks, self-fixes
-failures, opens a draft PR, then runs a **multi-lens review loop** — independent
-reviewers for correctness, conventions, and coverage feed a triage judge that
-keeps only real defects, which a fixer applies and a re-review confirms. It is
-the catalog's most complete pipeline, and the clearest example of putting a
-human gate in front of irreversible work.
+failures, opens a draft PR, then runs a **multi-lens review loop** where
+independent reviewers for correctness, conventions, and coverage feed a triage
+judge that keeps only real defects, which a fixer applies and a re-review
+confirms. Finally it **watches the pushed PR's CI** and promotes the draft to
+ready for review the moment the checks go green. It is the catalog's most
+complete pipeline, and the clearest example of putting a human gate in front of
+irreversible work.
 
 It assumes nothing about your stack. The implement step discovers how *this*
 project checks itself by reading its docs and build config, writes those
@@ -43,22 +45,24 @@ can send changes back instead of approving.
 
 ## The shape
 
-Nine phases, top to bottom. The spine is mostly linear, with two structures
+Ten phases, top to bottom. The spine is mostly linear, with three structures
 worth naming: a **branch** early (a bug is investigated, anything else is
-planned, both writing one file), and a **self-correction** sequence after
+planned, both writing one file), a **self-correction** sequence after
 implementation (validate, fix, then a hard gate that refuses to open a PR over
-broken checks).
+broken checks), and a **CI gate** at the end that promotes the draft to ready
+only when the pushed PR's checks pass.
 
 <figure>
   <img
     src={`${import.meta.env.BASE_URL}assets/figures/fix-issue-dag.svg`}
-    alt="The fix-issue pipeline, top to bottom, enclosed in a dashed frame labeled isolated git worktree. Stages: fetch and classify; a branch where investigate (when bug) and plan (when not bug) both feed plan-ready; an approval gate shown in brass; implement; a validate, fix, revalidate self-correction group ending in a hard gate; create draft PR; self-review and self-fix; re-validate and report."
+    alt="The fix-issue pipeline, top to bottom, enclosed in a dashed frame labeled isolated git worktree. Stages: fetch and classify; a branch where investigate (when bug) and plan (when not bug) both feed plan-ready; an approval gate shown in brass; implement; a validate, fix, revalidate self-correction group ending in a hard gate; create draft PR; the review loop; post-fix-validate; a CI gate and mark-ready phase (await-ci, triage-ci, fix-ci, finalize-pr); and report."
   />
   <figcaption>
     Figure 1. The fix-issue pipeline. The whole run executes in an isolated
     worktree (dashed frame). The brass node is the human approval gate; nothing
     downstream of it runs until the plan is approved. The hard gate after
-    self-correction fails the run rather than open a PR over broken checks.
+    self-correction fails the run rather than open a PR over broken checks, and
+    the closing CI gate marks the PR ready only when the pushed checks pass.
   </figcaption>
 </figure>
 
@@ -85,7 +89,11 @@ broken checks).
 | | `apply-fixes` | prompt | Applies only the triaged must-fix issues, commits, pushes. No-ops when triage is clean. |
 | | `re-review` | prompt | Closes the loop: confirms each must-fix is resolved with no new defect; fixes any straggler. |
 | Re-validate | `post-fix-validate` | bash | Re-runs the full checks after the review loop (exits 0) so the report shows the *real* status. |
-| Report | `report` | prompt | The operator summary: issue, branch, PR, what changed, the true validation status. |
+| CI gate | `await-ci` | bash | Watches the pushed PR's CI; reruns failed jobs **once** to shake out flakes. **Exits 0** so the run continues whether CI passed or not. |
+| | `triage-ci` | prompt | **`model: claude-opus-4.8`**, typed JSON: classifies each CI failure as *actionable* (caused by this PR) or *unrelated/flaky*. |
+| | `fix-ci` | prompt | Fixes only the actionable failures on the PR branch and pushes. No-ops when triage finds none. |
+| | `finalize-pr` | bash | Re-checks CI and runs `gh pr ready` to promote the draft **only when every check is green**; a red or check-less PR stays a draft. |
+| Report | `report` | prompt | The operator summary: issue, branch, PR, what changed, the validation status, and the final CI and PR state. |
 
 ### The parts worth a second look
 
@@ -132,6 +140,16 @@ reasoning nodes (`investigate`, `plan`, `triage`) are pinned to
 also makes the model deterministic — Copilot never reports which model `auto`
 actually resolved, so an `auto` node's model is unobservable.
 
+**The CI gate fixes only its own mess.** Once the PR is pushed, its real CI
+runs on every target the project covers, not just the local box. `await-ci`
+watches it and reruns failed jobs once to rule out a flake; `triage-ci` then
+classifies each failure as caused by *this* PR or pre-existing/flaky. `fix-ci`
+touches only the actionable ones. Auto-editing someone else's failing test to
+force green would be worse than failing loud, so an unrelated red leaves the PR a
+draft for a human. `finalize-pr` promotes the draft to ready with `gh pr ready`
+only when every check passes, and never claims ready if the promotion itself
+fails.
+
 ## Patterns it demonstrates
 
 - **[Approval gate](../../guides/authoring-workflows/#approval-gate)**: `approve-plan` with `capture_response`, sitting between plan and implementation.
@@ -154,6 +172,10 @@ actually resolved, so an `auto` node's model is unobservable.
 - **Swap the gate for autonomy.** Remove `approve-plan` (and point `implement`
   at `plan-ready`) for an unattended run, at the cost of the safety interlock.
   Keep the gate for anything that pushes to a shared remote.
+- **Drop the CI gate.** To stop at a draft PR without waiting on CI, remove the
+  `await-ci`, `triage-ci`, `fix-ci`, and `finalize-pr` phase and let `report`
+  depend on `post-fix-validate`. Keep it when you want the PR promoted to ready
+  automatically on green.
 
 ## Related
 

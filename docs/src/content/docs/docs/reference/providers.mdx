@@ -103,6 +103,27 @@ there is nothing in the keelson keychain for them; `keelson doctor` reports
 whether each found a credential.
 </Aside>
 
+## Gateway providers
+
+Beyond the five built-ins, any **OpenAI-compatible** endpoint can be registered
+as a provider at runtime. A gateway (OpenRouter, a local Ollama or vLLM, Azure
+OpenAI, a LiteLLM proxy) is added with `keelson gateway add` and shows up in the
+picker under its own name, so the model picker treats it like a built-in.
+
+| Trait | Gateway provider |
+| --- | --- |
+| id | the gateway name (lowercase kebab-case, cannot shadow a built-in id) |
+| Resume | no |
+| Stream | yes |
+| Tool projection | no (`tools: false`; OpenAI function-calling is not wired yet) |
+| Protocol | `openai` (Chat Completions) only today |
+| Auth | OS keychain under `gateway-<name>`, or keyless for a local endpoint |
+
+`listModels` probes the endpoint's `/models`, falling back to the gateway's
+configured model if that call fails, so the picker is never empty for a gateway
+with a model set. Configure one in the [Gateways](../../guides/configuration/#gateways)
+section of the configuration guide.
+
 ## Where a provider is chosen
 
 | Scope | Mechanism |

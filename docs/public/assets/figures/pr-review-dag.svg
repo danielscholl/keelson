@@ -1,5 +1,5 @@
 <svg viewBox="0 0 1360 470" xmlns="http://www.w3.org/2000/svg" role="img"
-     aria-label="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash), which feeds classify (prompt). classify fans out to four read-only review lanes, all gated by a when condition: code-review's gate fires for any code change (solid edge), and error-handling, test-coverage, and docs-impact are selective (dashed edges). All four converge on synthesize (prompt) under a one_success join, which feeds post-comment (bash).">
+     aria-label="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash), which feeds classify (prompt). classify fans out to four read-only review lanes, all gated by a when condition: code-review's gate fires for any code change (solid edge), and error-handling, test-coverage, and docs-impact are selective (dashed edges). All four converge on triage, an opus judge, under a one_success join, which feeds build and post-review (bash) that posts line-anchored inline comments.">
   <defs>
     <style>
       .lbl  { font-family: "Cascadia Code","SF Mono",ui-monospace,Menlo,monospace; }
@@ -58,15 +58,15 @@
   <text class="lbl navy"  x="812" y="369" font-size="13" text-anchor="middle">docs-impact</text>
   <text class="lbl slate" x="812" y="383" font-size="10" text-anchor="middle">prompt · read-only</text>
 
-  <!-- synthesize -->
+  <!-- triage (opus judge / one_success join) -->
   <rect x="965" y="209" width="150" height="52" rx="4" fill="#2f6fb0" fill-opacity="0.06" stroke="#2f6fb0" stroke-width="1.8"/>
-  <text class="lbl navy"  x="1040" y="237" font-size="13" text-anchor="middle">synthesize</text>
-  <text class="lbl slate" x="1040" y="252" font-size="10" text-anchor="middle">prompt · join</text>
+  <text class="lbl navy"  x="1040" y="237" font-size="13" text-anchor="middle">triage</text>
+  <text class="lbl slate" x="1040" y="252" font-size="10" text-anchor="middle">prompt · opus gate</text>
 
-  <!-- post-comment -->
+  <!-- build & post review -->
   <rect x="1175" y="209" width="150" height="52" rx="4" fill="#2f6fb0" fill-opacity="0.06" stroke="#2f6fb0" stroke-width="1.8"/>
-  <text class="lbl navy"  x="1250" y="240" font-size="13" text-anchor="middle">post-comment</text>
-  <text class="lbl slate" x="1250" y="255" font-size="10" text-anchor="middle">bash</text>
+  <text class="lbl navy"  x="1250" y="237" font-size="12" text-anchor="middle">build · post review</text>
+  <text class="lbl slate" x="1250" y="252" font-size="10" text-anchor="middle">bash · inline comments</text>
 
   <!-- spine edges -->
   <line x1="44"  y1="235" x2="66"  y2="235" stroke="#1e3a5f" stroke-width="1.6" marker-end="url(#arrow)"/>

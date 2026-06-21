@@ -37,6 +37,7 @@ so a typo never blocks startup.
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
+| `gateways` | array | OpenAI-compatible endpoints registered as providers. Managed with `keelson gateway`, not by hand. See [Gateways](#gateways). |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, `codex`, and `stub` (the
 offline echo provider). Out of the box, **only copilot loads; stub, claude, pi,
@@ -171,6 +172,52 @@ Codex resumes conversations across turns (it persists threads under
 in chat as tool and thinking rows. Leave the model unset to use your `~/.codex`
 default, or pick a `gpt-5.x` model in the picker.
 
+## Gateways
+
+A gateway points keelson at any **OpenAI-compatible** endpoint (OpenRouter, a
+local [Ollama](https://ollama.com/) or vLLM, Azure OpenAI, or a LiteLLM proxy)
+and registers it as a provider named for the gateway. It then shows up in the
+model picker like any built-in. Manage gateways with the CLI, which writes the
+config and stores the key for you:
+
+```bash
+keelson gateway add ollama http://localhost:11434/v1 --model qwen3
+keelson gateway add openrouter https://openrouter.ai/api/v1 --model openai/gpt-4o --key sk-...
+keelson gateway list
+keelson gateway remove ollama
+```
+
+The base URL and default model persist to `config.json` under `gateways`; the API
+key, when the endpoint needs one, goes to your OS keychain, never the config file.
+A local Ollama needs no key, so omit `--key` for a keyless endpoint. `--key` also
+reads `KEELSON_GATEWAY_KEY`, so the key stays out of shell history. The same
+operations are available over the API at `/api/gateways`.
+
+```jsonc
+// ~/.keelson/config.json (written by `keelson gateway add`)
+{
+  "gateways": [
+    { "name": "ollama", "baseUrl": "http://localhost:11434/v1", "protocol": "openai", "model": "qwen3" }
+  ]
+}
+```
+
+A gateway name must be lowercase kebab-case and cannot shadow a built-in provider
+id (`copilot`, `claude`, `pi`, `codex`, `stub`). The only wire protocol today is
+`openai`. Gateway turns stream, but keelson does not yet project its tool registry
+into them (`tools: false`) and they do not resume a session, so each turn is
+fresh and tool-less. See the [provider reference](../../reference/providers/#gateway-providers)
+for where gateways sit in the matrix.
+
+## Governance
+
+The policy engine gates tool calls. Three opt-in builtins cover the common cases:
+`KEELSON_ASK_ON_SHELL=1` pauses for approval before a shell or file-mutating call,
+`KEELSON_TURN_BUDGET` / `KEELSON_COST_BUDGET` cap a session's spend, and
+`KEELSON_REDACT_PATTERN` scrubs secrets from tool output. Each is one environment
+variable; the [Governance guide](../governance/) covers what they do and how to
+resolve an approval.
+
 ## MCP gateway
 
 The server exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io)
@@ -213,6 +260,11 @@ the matching config value when set.
 | `KEELSON_PROVIDERS` | unset | Exact list of providers to load. Overrides the config file. |
 | `KEELSON_WORKFLOW_PROVIDER` | first real provider | Provider that backs workflow `prompt` nodes. |
 | `KEELSON_WORKFLOW_TOOL_DENYLIST` | unset | Operator floor: tool names no workflow `prompt` node may use, subtracted on top of whatever a node allows. |
+| `KEELSON_ASK_ON_SHELL` | unset | Set to `1` to pause for human approval before any shell or file-mutating call. See [Governance](../governance/#approvals). |
+| `KEELSON_TURN_BUDGET` | unset | Positive integer: cap a session's model-calling turns. A downgrade gate, not a wall. See [Budgets](../governance/#budgets). |
+| `KEELSON_COST_BUDGET` | unset | Positive integer: cap a session's accumulated input+output tokens. Same downgrade-gate behavior. |
+| `KEELSON_REDACT_PATTERN` | unset | Regex whose matches become `[REDACTED]` in tool results and workflow node output. See [Redaction](../governance/#redaction). |
+| `KEELSON_GATEWAY_KEY` | unset | API key `keelson gateway add` reads when `--key` is omitted, so it stays out of shell history. See [Gateways](#gateways). |
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
 | `KEELSON_MCP_DISABLED` | unset | Set to `1` to not mount `/api/mcp`. Overrides `mcp.enabled`. |
