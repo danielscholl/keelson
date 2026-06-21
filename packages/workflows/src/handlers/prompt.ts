@@ -105,11 +105,14 @@ export type PromptToolGate = (
 // Per-call tool gate the harness backs with the unified policy engine. `provider`
 // is the node's effective provider id (best-effort, undefined when the workflow
 // relies on the default) so a provider-scoped policy can match; the handler binds
-// it before handing the per-call thunk to the provider. Exported so the
+// it before handing the per-call thunk to the provider. `signal` is the node's
+// teardown signal (run cancel / node timeout): a pending `ask` cancels with the
+// run instead of hanging on the engine's approval timeout. Exported so the
 // composition root and the handler share one signature rather than re-spelling it.
 export type PromptToolCallGate = (
   call: { tool: string; args?: unknown },
   provider?: string,
+  signal?: AbortSignal,
 ) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 
 // Request-phase gate run once before the node opens its provider session. The
@@ -360,12 +363,13 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         }
       }
 
-      // Bind the node's effective provider id so the provider gets a thunk that
-      // takes only the call. The provider invokes it per tool call (with args);
-      // a deny short-circuits that call inside the provider's handler.
+      // Bind the node's effective provider id + teardown signal so the provider
+      // gets a thunk that takes only the call. `handlerExit` fires on run cancel or
+      // node timeout — the same signal the provider stream rides.
       const perCallGate = opts.evaluateToolCall;
       const boundToolCallGate = perCallGate
-        ? (call: { tool: string; args?: unknown }) => perCallGate(call, effectiveProviderId)
+        ? (call: { tool: string; args?: unknown }) =>
+            perCallGate(call, effectiveProviderId, handlerExit.signal)
         : undefined;
 
       let assistantText = "";

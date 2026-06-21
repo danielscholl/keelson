@@ -466,6 +466,39 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(seenSurface).toBe("rib");
   });
 
+  it("threads the turn's teardown signal into the per-call gate so a pending ASK cancels on abort", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    // A recording engine that captures the `base` the seam hands evaluateToolCall.
+    // The real round-trip (signal → cancel pending ASK → deny) is covered by
+    // approval-roundtrip.test.ts; here we only prove the rib seam forwards it.
+    const recordingEngine = {
+      projectTools: async (candidates: readonly { name: string }[]) => ({
+        allowed: [...candidates],
+        denied: [],
+      }),
+      evaluateToolCall: async (_call: unknown, base: { signal?: AbortSignal }) => {
+        capturedSignal = base.signal;
+        return { outcome: "allow" as const };
+      },
+      evaluateRequest: async () => ({ outcome: "allow" as const }),
+      requestPhaseActive: false,
+    } as unknown as ReturnType<typeof createPolicyEngine>;
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getPolicyEngine: () => recordingEngine,
+      },
+    );
+    const gate = opts?.evaluateToolCall;
+    if (!gate) throw new Error("expected a per-call gate to be wired");
+    await gate({ tool: "chamber_emit_lens" });
+    // The gate carries the SAME signal the provider stream rides (caller abort +
+    // timeout), so the engine can cancel a pending approval when the turn tears down.
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal).toBe(opts?.abortSignal);
+  });
+
   it("wires no per-call gate for a text-only turn (no keelson tools to govern)", async () => {
     const engine = createPolicyEngine();
     const opts = await optionsFor({ prompt: "hi" }, { getPolicyEngine: () => engine });
