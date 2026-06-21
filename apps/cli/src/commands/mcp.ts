@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { readServerState } from "@keelson/shared/server-state";
+import { isLoopbackUrl, readServerState } from "@keelson/shared/server-state";
 import { EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
 import { probeServer, type ServerInfo } from "../server-probe.ts";
@@ -30,7 +30,7 @@ export async function runMcpBridge(opts: McpBridgeOptions = {}): Promise<void> {
     probe = await probeServer({ baseUrl: opts.baseUrl });
   } else {
     const state = readServerState(resolveKeelsonHome());
-    probe = state ? await probeServer({ baseUrl: state.url }) : null;
+    probe = state && isLoopbackUrl(state.url) ? await probeServer({ baseUrl: state.url }) : null;
     if (probe) {
       token = state?.mcpToken;
     } else {

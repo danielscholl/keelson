@@ -28,6 +28,25 @@ export function serverStatePath(home: string = resolveKeelsonHome()): string {
   return join(home, "server.json");
 }
 
+// The server binds loopback only (apps/server hard-codes 127.0.0.1), so a URL
+// recorded in server.json must resolve to a loopback host. CLI commands run this
+// guard before using the recorded URL as a fetch target, so a tampered or stale
+// server.json can't redirect a request — or the MCP token paired with it — to an
+// off-box host.
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export function isLoopbackUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  // WHATWG URL returns IPv6 hostnames bracketed (e.g. "[::1]"); strip them.
+  return LOOPBACK_HOSTS.has(parsed.hostname.replace(/^\[|\]$/g, ""));
+}
+
 export function writeServerState(state: ServerState, home: string = resolveKeelsonHome()): void {
   const path = serverStatePath(home);
   writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`);
