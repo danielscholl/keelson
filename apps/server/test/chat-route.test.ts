@@ -843,6 +843,8 @@ describe("handleChatRequest dispatch", () => {
       expect(errorFrame.event.code).toBe("POLICY_DENIED");
       expect(errorFrame.event.message).toContain("turn budget");
     }
+    // …and a terminal done frame, so a client closing on `done` doesn't hang.
+    expect(sent.some((f) => f.event.type === "done")).toBe(true);
   });
 
   test("the chat turn forwards a per-call gate scoped to the chat surface", async () => {

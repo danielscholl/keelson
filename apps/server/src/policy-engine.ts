@@ -365,9 +365,14 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
       }
     };
 
-  const makeCtx = (base: { surface: PolicySurface; ribId?: string }): PolicyContext => ({
+  const makeCtx = (base: {
+    surface: PolicySurface;
+    ribId?: string;
+    provider?: string;
+  }): PolicyContext => ({
     surface: base.surface,
     ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
+    ...(base.provider !== undefined ? { provider: base.provider } : {}),
   });
 
   const toolCallEvent = (
@@ -416,9 +421,7 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
 
     async evaluateRequest(base) {
       const ctx: PolicyContext = {
-        surface: base.surface,
-        ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
-        ...(base.provider !== undefined ? { provider: base.provider } : {}),
+        ...makeCtx(base),
         ...(base.model !== undefined ? { model: base.model } : {}),
         ...(base.usage !== undefined ? { usage: base.usage } : {}),
       };

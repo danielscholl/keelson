@@ -565,6 +565,9 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     if (decision.outcome === "deny") {
       if (deps.abortSignal.aborted) return;
       deps.send(errorFrame(conversationId, decision.reason, "POLICY_DENIED"));
+      // Terminate the turn like every other error early-return — a client that
+      // closes on `done` would otherwise hang waiting for a stream that never ran.
+      deps.send(doneFrame(conversationId));
       return;
     }
   }

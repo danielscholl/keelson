@@ -194,6 +194,23 @@ describe("createPolicyEngine — projectTools", () => {
     await engine.projectTools(tools("a"), { surface: "rib", ribId: "chamber" });
     expect(seen).toEqual({ surface: "rib", ribId: "chamber" });
   });
+
+  it("threads provider onto the tool_call context, not just the event", async () => {
+    let seen: { surface: string; provider?: string } | undefined;
+    const recorder: Policy = {
+      id: "recorder",
+      evaluate: (_e, ctx) => {
+        seen = {
+          surface: ctx.surface,
+          ...(ctx.provider !== undefined ? { provider: ctx.provider } : {}),
+        };
+        return { outcome: "allow" };
+      },
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy: recorder }] });
+    await engine.evaluateToolCall({ tool: "a" }, { surface: "chat", provider: "claude" });
+    expect(seen).toEqual({ surface: "chat", provider: "claude" });
+  });
 });
 
 describe("createPolicyEngine — evaluateToolCall", () => {
