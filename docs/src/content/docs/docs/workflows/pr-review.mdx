@@ -1,6 +1,6 @@
 ---
 title: pr-review
-description: A scoped, adaptive PR review that classifies complexity, runs only the relevant lanes, and posts the synthesis as a single comment.
+description: A scoped, adaptive PR review that classifies complexity, runs only the relevant lanes, and posts line-anchored inline comments behind an opus triage gate.
 sidebar:
   order: 2
 ---
@@ -8,15 +8,17 @@ sidebar:
 import { Aside } from "@astrojs/starlight/components";
 
 `pr-review` reads a GitHub pull request, decides how much review it warrants,
-runs only the lanes that apply, and posts one synthesized comment. It is
-read-only by construction: every lane is capped to `Read`, `Glob`, and `Grep`,
-and the single step that touches the PR is the final `gh pr comment`. To fix an
+runs only the lanes that apply, then posts its findings as a **GitHub review with
+line-anchored inline comments and suggestion blocks**. It is read-only over the
+code by construction: every lane is capped to `Read`, `Glob`, and `Grep`, and the
+only step that touches the PR is the final `gh api …/reviews` call. To fix an
 issue rather than review one, reach for [fix-issue](../fix-issue/); `pr-review`
 never mutates the branch it reads.
 
 It is the catalog's clearest case of **classify, then fan out**: one node
 decides which lanes are worth running, the lanes run in parallel behind a
-`when:` gate, and a synthesis node joins whatever ran.
+`when:` gate, and an opus **triage judge** de-dupes whatever ran into the
+findings worth posting.
 
 ## Invoke it
 
@@ -30,28 +32,31 @@ It needs the `gh` CLI authenticated against the repo and a Copilot subscription
 pushes code, so it needs no approval gate and no running server.
 
 <Aside type="tip" title="Safe to run on any open PR">
-Every lane is read-only and the only write is the final comment, so `pr-review`
+Every lane is read-only and the only write is the posted review, so `pr-review`
 cannot change the PR it reviews. Point it at anything open.
 </Aside>
 
 ## The shape
 
-The run is five phases. Two deterministic `bash` nodes bookend it: `scope`
-gathers the diff up front, `post-comment` publishes at the end. In between, an
-agent classifier decides the work and a fan of agent lanes does it, converging
-on one report.
+The run is five phases. Deterministic `bash` nodes bookend it: `scope` gathers
+the diff up front, then a `build-review` / `post-review` pair anchors the
+findings to diff lines and publishes the review at the end. In between, an agent
+classifier decides the work, a fan of agent lanes does it, and a `triage` judge
+distills the lanes into the findings worth posting.
 
 <figure>
   <img
     src={`${import.meta.env.BASE_URL}assets/figures/pr-review-dag.svg`}
-    alt="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash); scope feeds classify (prompt). classify fans out to four read-only review lanes (code-review, error-handling, test-coverage, docs-impact), all four behind a when-gate: code-review's fires for any code change (solid edge), the other three are selective (dashed edges). All four lanes converge on synthesize (prompt) under a one_success join, which feeds post-comment (bash)."
+    alt="The pr-review DAG, left to right. extract-pr (prompt) feeds scope (bash); scope feeds classify (prompt). classify fans out to four read-only review lanes (code-review, error-handling, test-coverage, docs-impact), all four behind a when-gate: code-review's fires for any code change (solid edge), the other three are selective (dashed edges). All four lanes converge on triage (an opus judge) under a one_success join, which feeds build-review then post-review (both bash), posting line-anchored inline comments."
   />
   <figcaption>
     Figure 1. The pr-review DAG. The classifier fans out to four read-only
     lanes, each behind a <code>when:</code> gate. Code-review's gate fires for
     any code change while the other three are selective, so a trivial PR runs
-    fewer. <code>synthesize</code> joins on <code>one_success</code>, so it
-    proceeds even when lanes were skipped or one failed.
+    fewer. The <code>triage</code> judge joins on <code>one_success</code>, so it
+    proceeds even when lanes were skipped or one failed, then
+    <code>build-review</code> anchors its findings to diff lines and
+    <code>post-review</code> publishes them as inline comments.
   </figcaption>
 </figure>
 
@@ -66,8 +71,9 @@ on one report.
 | `error-handling` | prompt | Audits new and changed failure paths. Gated on the classifier. |
 | `test-coverage` | prompt | Checks that changed source has matching test changes. Gated on the classifier. |
 | `docs-impact` | prompt | Flags user-facing changes (flags, env vars, APIs) with no doc update. Gated on the classifier. |
-| `synthesize` | prompt | Merges every lane that ran into one comment-ready report and saves `review.md`. |
-| `post-comment` | bash | Posts `review.md` to the PR with `gh pr comment`. |
+| `triage` | prompt | **`model: claude-opus-4.8`**, the `one_success` join: de-dupes the lanes, keeps only CRITICAL/HIGH/MEDIUM at ≥80 confidence, and emits a `verdict` (READY TO MERGE / NEEDS NITS / NEEDS FIXES) with typed `findings`. |
+| `build-review` | bash | Offline: anchors each finding to a line on the diff's new side and builds the GitHub Reviews API payload with `suggestion` blocks. No network. |
+| `post-review` | bash | Posts the payload via `gh api …/reviews` as line-anchored inline comments. |
 
 ### The parts worth a second look
 
@@ -88,21 +94,31 @@ drives a `when:`.
 the reviewers can read the tree but cannot write, run shell, or touch the
 network. On Copilot that gate is enforced at the capability layer, so the
 model's built-in write and shell tools are denied mid-review regardless of what
-it tries. The only write in the whole run is the final `gh pr comment`.
+it tries. The only write in the whole run is the final posted review.
+
+**A triage gate stands between the lanes and the PR.** The lanes are
+deliberately noisy; an opus `triage` judge then de-dupes their findings, scores
+each for confidence that it is a real, in-scope issue, and keeps only
+CRITICAL/HIGH/MEDIUM findings at 80% confidence or higher. Everything less
+certain is dropped as noise, and every LOW-severity finding is dropped outright.
+Only what survives is anchored to a diff line and posted, so the PR author sees a
+short list of high-signal inline comments rather than four lanes' worth of raw
+output. `build-review` also hashes the kept findings' stable identity into the
+review body, so a re-review does not repost the same comments.
 
 **The lanes share state through files, not prompts.** `scope` writes the diff to
 `$ARTIFACTS_DIR/diff.patch` and each lane reads that file directly, rather than
 having a huge diff substituted into four prompts. Each lane also runs
 `context: fresh`, so they do not pollute each other's reasoning.
 
-**The join tolerates absence.** `synthesize` depends on all four lanes but sets
+**The join tolerates absence.** `triage` depends on all four lanes but sets
 `trigger_rule: one_success`, so a skipped lane (its `when:` was false) or a
-single failed lane does not strand the report. Whatever ran gets synthesized.
+single failed lane does not strand the review. Whatever ran gets triaged.
 
 ## Patterns it demonstrates
 
 - **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: `classify` emits the labels; the lanes gate on them with `when:`.
-- **[Fan-out and fan-in](../../guides/authoring-workflows/#fan-out-and-fan-in)**: four lanes in parallel, joined by `synthesize`.
+- **[Fan-out and fan-in](../../guides/authoring-workflows/#fan-out-and-fan-in)**: four lanes in parallel, joined by `triage`.
 - **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: the read-only `allowed_tools` rail on every lane.
 - **Artifacts as the shared channel**: `bash` nodes stage files in `$ARTIFACTS_DIR` that agent nodes read, keeping large diffs out of prompt substitution.
 
@@ -110,11 +126,12 @@ single failed lane does not strand the report. Whatever ran gets synthesized.
 
 - **Add a lane.** A new review angle is four small edits: a flag on the
   classifier's `output_format`, a rule in the classifier prompt, a gated lane
-  node, and a line in `synthesize`'s inputs.
+  node, and a section feeding `triage`'s prompt.
 - **Change the rail.** Widen `allowed_tools` if a lane needs to run a linter, or
-  keep it read-only and let `synthesize` recommend commands instead.
-- **Repoint the output.** Swap the final `gh pr comment` for a different sink (a
-  file, a different command) without touching the review logic.
+  keep it read-only and let `triage` recommend commands instead.
+- **Repoint the output.** Swap the `post-review` step's `gh api …/reviews` call
+  for a different sink (a single summary comment, a file) without touching the
+  classify, lane, or triage logic.
 
 ## Related
 

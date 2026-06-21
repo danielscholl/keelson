@@ -176,10 +176,11 @@ function makeDenylistPolicy(denylist: readonly string[]): Policy {
 }
 
 // Tool names that denote a shell or file-mutating action. These match keelson
-// MCP/rib/workflow tool calls AND the canonical names Copilot's built-in
-// capabilities map to (shell→Bash, write→Write) — Copilot routes its built-in
-// permission requests through this engine, so `ask_on_shell` gates the agent's
-// own shell/file writes too. Claude built-in gating is the remaining follow-up.
+// MCP/rib/workflow tool calls AND the canonical names a provider's built-in
+// capabilities map to (shell→Bash, write→Write). Copilot routes its built-in
+// permission requests through this engine, and the claude provider's PreToolUse
+// hook calls the same gate, so `ask_on_shell` gates the agent's own shell/file
+// writes whichever provider runs the turn.
 const ASK_ON_SHELL_TOOLS = new Set([
   "Bash",
   "Edit",

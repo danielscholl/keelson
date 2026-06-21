@@ -1,0 +1,153 @@
+---
+title: Governance
+description: Gate tool calls with approvals, cap a session's spend with budgets, and scrub secrets with redaction, all through one opt-in policy engine.
+sidebar:
+  order: 3
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Every tool call in keelson, whether a rib tool, a workflow `prompt` node, or the
+agent's own built-in shell and file edits, passes through one **policy engine**.
+The engine is a single ordered stack: an operator floor of builtins plus any
+policies the installed ribs contribute. It runs on all three turn paths (chat, a
+workflow `prompt` node, and a rib agent turn), so a rule you set holds wherever a
+tool runs.
+
+Out of the box the engine only enforces the operator tool denylist. Approvals,
+budgets, and redaction are **opt-in builtins**, each enabled by one environment
+variable. This guide turns them on; the [rib contract](../../reference/rib-contract/)
+covers contributing a policy from a rib.
+
+## The decision model
+
+A policy returns one of three decisions for an event. The stack is walked in
+order and the first `deny` wins, so any policy can veto a call a later one would
+allow.
+
+| Decision | Effect |
+|---|---|
+| `allow` | No opinion, the call proceeds. On a tool result or a node's output, an `allow` that carries replacement text substitutes it: this is how [redaction](#redaction) works. |
+| `deny` | Short-circuits. The agent receives the reason as a tool error, or the tool is dropped from the set offered to the model. |
+| `ask` | Pauses for a human. Accept becomes `allow`, reject or a timeout becomes `deny`. With no approval channel wired, an `ask` degrades to `deny`. |
+
+The engine evaluates at several points in a turn: when the tool set is projected
+to the model, before a specific call runs (with its arguments), once before a
+turn starts (carrying the running token and turn usage, which backs budgets),
+after a tool result returns but before the model reads it, and on a workflow
+node's assembled output before it flows downstream. A builtin only adds cost at a
+phase some policy actually reads, so an unused phase is free.
+
+## Approvals
+
+Set `KEELSON_ASK_ON_SHELL=1` to enable the `ask_on_shell` builtin. It pauses for
+human approval before any shell or file-mutating call: keelson's own
+`Bash`, `Edit`, `Write`, `MultiEdit`, and `NotebookEdit` tools, and the canonical
+shell tools a rib might register.
+
+This covers the agent's **own** built-in capabilities too, not just keelson
+tools. Copilot routes its built-in shell and write permission requests through
+the engine, and Claude's built-in `Bash` / `Edit` / `Write` now route through it
+as well, so an `ask_on_shell` prompt fires whether the write came from a keelson
+tool or the agent reaching for its own.
+
+```bash
+KEELSON_ASK_ON_SHELL=1 keelson start
+```
+
+### Resolving an approval
+
+A pending approval surfaces two ways. In the app it appears as an in-chat prompt,
+published over the snapshot WebSocket on the `keelson:policy:approvals` key. From
+the CLI, list and resolve them:
+
+```bash
+keelson approval list
+keelson approval resolve <id> accept   # or: reject
+```
+
+Accept lets the call proceed (later policies still apply); reject denies it with a
+reason. An approval that no one answers within **five minutes** auto-rejects, so a
+forgotten prompt fails closed rather than hanging the turn. When more than one
+policy asks about the same call, the engine coalesces them into a single prompt.
+
+<Aside type="caution" title="Approvals need a running server">
+The pause is held by the server's approval registry and resolved over
+`/api/approvals`. A server-down in-process run has no channel to ask on, so an
+`ask` there degrades to a denial. Run [the server](../operating-the-server/)
+when a workflow or chat may hit an approval gate.
+</Aside>
+
+## Budgets
+
+Two builtins cap a session's spend, where a session is one chat conversation or
+one workflow run. `KEELSON_TURN_BUDGET=<n>` limits model-calling turns;
+`KEELSON_COST_BUDGET=<tokens>` limits accumulated input plus output tokens. Both
+check once before each turn. Leaving a variable unset, blank, or non-positive
+leaves that builtin off.
+
+```bash
+KEELSON_TURN_BUDGET=40 KEELSON_COST_BUDGET=2000000 keelson start
+```
+
+They are a **downgrade gate, not a hard wall**. Once the ceiling is reached, a
+turn is denied only while it runs on an expensive model: a premium cost tier, or
+a metered per-token login. A turn on a cheaper or flat-rate subscription model
+keeps going. The denial message tells you to switch models. So the budget pushes
+spend off your metered model rather than killing the session outright. A model
+keelson cannot price is treated as expensive, failing closed.
+
+## Redaction
+
+Set `KEELSON_REDACT_PATTERN=<regex>` to enable the `redact` builtin. Every match
+of the pattern is replaced with `[REDACTED]` in a tool's result before the model
+consumes it, and in a workflow `prompt` node's output before it flows to a
+dependent node. Use it to scrub a secret a tool might surface.
+
+```bash
+KEELSON_REDACT_PATTERN='sk-[A-Za-z0-9]{20,}' keelson start
+```
+
+Alternation covers several patterns at once, for example `(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36})`.
+A blank or unset value leaves the builtin off. A pattern that is invalid, or one
+that risks catastrophic backtracking (ReDoS) against adversarial tool output, is
+reported and ignored, so a bad value disables redaction rather than wedging the
+server.
+
+<Aside type="note" title="What redaction does not cover">
+Redaction gates what the model and downstream nodes consume. It does not retract
+text a chat turn has already streamed to the screen, and it does not reach inside
+the agent's own built-in tools, which run outside keelson's result handler. Treat
+it as a guard on tool output, not a console scrubber.
+</Aside>
+
+## The operator denylist
+
+`KEELSON_WORKFLOW_TOOL_DENYLIST` is the always-on floor: a comma-separated list
+of tool names no workflow `prompt` node may use, subtracted on top of whatever a
+node's own `allowed_tools` permits. It is the one governance control active
+without opt-in, and it cannot be overridden by a node or a rib.
+
+```bash
+KEELSON_WORKFLOW_TOOL_DENYLIST=Bash,Write keelson start
+```
+
+## Policies from ribs
+
+A rib contributes policies through its `contributePolicies` hook. The harness
+collects them at boot and appends them to the same ordered stack, after the
+builtins, namespaced as `rib:<id>:<policy>`. They share every semantic above:
+the three decisions, first-deny-wins, the ASK round-trip, and the coalescing of
+duplicate prompts. A malformed policy is dropped with a warning rather than
+crashing the boot. See [`contributePolicies`](../../reference/rib-contract/) in
+the contract for the shape.
+
+## Related
+
+- [Configuration](../configuration/): every `KEELSON_*` variable, including the
+  governance ones, in one table.
+- [The CLI](../../reference/cli/): the `keelson approval` command group.
+- [The rib contract](../../reference/rib-contract/): contributing a policy from a
+  rib with `contributePolicies`.
+- [Operating the server](../operating-the-server/): the running server the
+  approval round-trip needs.

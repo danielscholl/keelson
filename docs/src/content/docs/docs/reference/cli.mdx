@@ -96,6 +96,18 @@ Use `--arguments` for free-form text and reserve `--inputs` for named key-value 
 `approval_awaiting` frame, to disambiguate retries against interactive loops.
 `workflow status` takes `--workflow <name>` to filter to one workflow's runs.
 
+## Approvals
+
+| Command | Does |
+| --- | --- |
+| `keelson approval list` | List the policy ASK approvals currently waiting for a decision. Server-required. |
+| `keelson approval resolve <id> accept` | Resolve one pending approval; pass `reject` to deny it. Server-required. |
+
+These resolve the [policy engine's](../../guides/governance/) `ask` gates (for
+example the `ask_on_shell` builtin), distinct from a workflow `approval` node,
+which is resolved with `workflow respond`. An unanswered approval auto-rejects
+after five minutes. The id comes from `approval list` or the in-app prompt.
+
 ## Ribs
 
 | Command | Does |
@@ -116,6 +128,17 @@ server is running. Most other rib commands talk to the running server and report
 | `keelson project list` | List registered projects. Server-required. |
 | `keelson project add <name> <rootPath>` | Register a project pointing at a local directory. Server-required. |
 | `keelson project remove <nameOrId>` | Remove a project by name or id. Server-required. |
+
+## Gateways
+
+| Command | Does |
+| --- | --- |
+| `keelson gateway list` | List configured OpenAI-compatible gateways and whether each has a stored key. Server-required. |
+| `keelson gateway add <name> <url>` | Register a gateway as a provider. `--model <id>` sets its default model; `--key <key>` (or `KEELSON_GATEWAY_KEY`) stores the key in the keychain; `--protocol <p>` defaults to `openai`. |
+| `keelson gateway remove <name>` | Remove a gateway and delete its stored key. Server-required. |
+
+A gateway registers as a provider named for it, so it appears in the model picker
+like a built-in. See [Gateways](../../guides/configuration/#gateways).
 
 ## Chat
 
