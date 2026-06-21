@@ -7,11 +7,14 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 // Projects per-node YAML hook matchers (workflowNodeHooksSchema shape) into
-// the Claude Agent SDK's hook protocol. Provider-private — only the claude
-// path consumes the projected shape, so this module never touches
-// `@keelson/workflows` or `@anthropic-ai/claude-agent-sdk` directly.
-// Structural types keep the dep graph clean and let tests pass any compatible
-// shape without runtime coupling.
+// the Claude Agent SDK's hook protocol, and builds the built-in policy-gate
+// PreToolUse hook. Provider-private — only the claude path consumes the
+// projected shape, so this module never touches `@keelson/workflows` or
+// `@anthropic-ai/claude-agent-sdk` directly. Structural types keep the dep
+// graph clean and let tests pass any compatible shape without runtime coupling.
+
+import { checkToolCallGate } from "../tool-gate.ts";
+import type { ToolCallGate } from "../types.ts";
 
 // Structural mirror of `WorkflowHookMatcher` from
 // packages/workflows/src/schema/hooks.ts. Loose `unknown` typing on `response`
@@ -82,4 +85,56 @@ export function mergeSDKHooks(
     out[event] = [...a, ...b];
   }
   return out;
+}
+
+// Built-in capability gate as a PreToolUse hook — the seam where the policy
+// engine reaches Claude's own Bash/Edit/Write/Read, which run in the CLI
+// subprocess and bypass `runClaudeToolHandler`. PreToolUse fires under
+// `bypassPermissions` (the SDK's `canUseTool` does not), which is what makes
+// this work; `mcp__*` names are skipped because the tool handler already gates
+// them and double-gating would double-ASK.
+export function buildBuiltinToolGateHooks(gate: ToolCallGate): SDKHooksMap {
+  return {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input: unknown): Promise<unknown> => {
+            const toolName = readToolName(input);
+            if (toolName === undefined) {
+              // A PreToolUse payload with no readable tool_name shouldn't happen.
+              // Fail open (don't wedge every turn) but warn so the gap is visible
+              // rather than a silent bypass — matching checkToolCallGate's posture.
+              console.warn("[policy] claude PreToolUse hook: missing tool_name; allowing");
+              return {};
+            }
+            // mcp__* names are gated in runClaudeToolHandler — skip to avoid double-ASK.
+            if (toolName.startsWith("mcp__")) return {};
+            const result = await checkToolCallGate(gate, toolName, readToolInput(input));
+            if (result.denied) {
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
+                  permissionDecisionReason: result.message,
+                },
+              };
+            }
+            return {};
+          },
+        ],
+      },
+    ],
+  };
+}
+
+// SDK PreToolUse payload carries `tool_name` (string) and `tool_input` (object).
+function readToolName(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const name = (input as Record<string, unknown>).tool_name;
+  return typeof name === "string" && name.length > 0 ? name : undefined;
+}
+
+function readToolInput(input: unknown): unknown {
+  if (!input || typeof input !== "object") return undefined;
+  return (input as Record<string, unknown>).tool_input;
 }

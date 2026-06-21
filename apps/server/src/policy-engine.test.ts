@@ -410,6 +410,73 @@ describe("createPolicyEngine — ASK approval round-trip", () => {
   });
 });
 
+describe("createPolicyEngine — ASK dedup (multiple asks on one event)", () => {
+  const ribAsk = (id: string, reason: string): Policy => ({
+    id,
+    on: [{ phase: "tool_call" }],
+    evaluate: () => ({ outcome: "ask", reason }),
+  });
+
+  it("coalesces ask_on_shell + a rib ASK on one call into a single prompt", async () => {
+    let prompts = 0;
+    const engine = createPolicyEngine({
+      askOnShell: true,
+      ribPolicies: [{ ribId: "chamber", policy: ribAsk("ask", "rib also wants to confirm") }],
+      requestApproval: async () => {
+        prompts++;
+        return "accept";
+      },
+    });
+    // Both ask_on_shell and the rib policy return `ask` for Bash, but first-ask-
+    // wins coalesces them so the human is prompted once, not twice.
+    expect(await engine.evaluateToolCall({ tool: "Bash" }, chat)).toEqual({ outcome: "allow" });
+    expect(prompts).toBe(1);
+  });
+
+  it("denies on the first reject without prompting the second asking policy", async () => {
+    let prompts = 0;
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        { ribId: "r", policy: ribAsk("ask-a", "A") },
+        { ribId: "r", policy: ribAsk("ask-b", "B") },
+      ],
+      requestApproval: async () => {
+        prompts++;
+        return "reject";
+      },
+    });
+    const d = await engine.evaluateToolCall({ tool: "bash" }, chat);
+    expect(d.outcome).toBe("deny");
+    expect(prompts).toBe(1);
+  });
+
+  it("a later DENY still wins after an earlier ASK was approved", async () => {
+    let prompts = 0;
+    const denyAfter: Policy = {
+      id: "deny",
+      on: [{ phase: "tool_call" }],
+      evaluate: (e) =>
+        e.phase === "tool_call" && e.tool === "bash"
+          ? { outcome: "deny", reason: "blocked downstream" }
+          : { outcome: "allow" },
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        { ribId: "r", policy: ribAsk("ask-a", "A") },
+        { ribId: "r", policy: denyAfter },
+      ],
+      requestApproval: async () => {
+        prompts++;
+        return "accept";
+      },
+    });
+    // Dedup suppresses a redundant ASK prompt, never a later DENY.
+    const d = await engine.evaluateToolCall({ tool: "bash" }, chat);
+    expect(d).toEqual({ outcome: "deny", reason: "blocked downstream" });
+    expect(prompts).toBe(1);
+  });
+});
+
 describe("createPolicyEngine — ask_on_shell builtin", () => {
   const accept = async (): Promise<"accept"> => "accept";
 

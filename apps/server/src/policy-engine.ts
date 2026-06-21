@@ -240,6 +240,11 @@ async function evaluateStack(
 ): Promise<ToolCallDecision> {
   // tool_call events carry the tool name; other phases label by phase.
   const label = event.phase === "tool_call" ? event.tool : event.phase;
+  // ASK dedup (first-ask-wins): once one policy's ask is approved for THIS
+  // event, a later policy's ask is coalesced into that single decision instead
+  // of opening a second prompt for the same call. A reject still short-circuits
+  // below, so this only suppresses redundant prompts on the accept path.
+  let askApproved = false;
   for (const entry of ordered) {
     // `matches`, `evaluate`, AND the decision dispatch all live inside the try:
     // a rib's `on` matcher or evaluate body can throw, and a single bad policy
@@ -268,6 +273,8 @@ async function evaluateStack(
         };
       }
       if (outcome === "ask") {
+        // Already approved by an earlier ask on this event — don't re-prompt.
+        if (askApproved) continue;
         const why = typeof reason === "string" && reason.length > 0 ? reason : "approval required";
         const resolved = await onAsk({
           policyId: entry.id,
@@ -279,6 +286,7 @@ async function evaluateStack(
         if (resolved !== "allow") {
           return { outcome: "deny", reason: resolved.deny };
         }
+        askApproved = true;
         continue;
       }
       if (outcome !== "allow") {
