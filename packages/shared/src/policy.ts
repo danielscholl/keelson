@@ -109,6 +109,10 @@ export interface Policy {
 // opens a pending approval through an injected channel; the server's registry
 // surfaces it over the snapshot WS (POLICY_APPROVALS_SNAPSHOT_KEY) and resolves
 // it from POST /api/approvals/:id.
+//
+// When more than one policy returns `ask` for a single event, the engine
+// coalesces them into ONE prompt (first-ask-wins): the first accepted ask
+// clears the call and later asks are not re-prompted; any reject denies.
 
 export type ApprovalDecision = "accept" | "reject";
 export const approvalDecisionSchema = z.enum(["accept", "reject"]);

@@ -10,7 +10,11 @@
 // @ts-ignore
 import { describe, expect, it } from "bun:test";
 
-import { buildSDKHooksFromYAML, mergeSDKHooks } from "../../src/claude/hooks-projection.ts";
+import {
+  buildBuiltinToolGateHooks,
+  buildSDKHooksFromYAML,
+  mergeSDKHooks,
+} from "../../src/claude/hooks-projection.ts";
 
 describe("buildSDKHooksFromYAML", () => {
   it("projects a single YAML matcher into one SDK matcher whose hook returns the canned response", async () => {
@@ -88,8 +92,8 @@ describe("mergeSDKHooks", () => {
     expect(merged).toBeDefined();
     expect(merged!.PreToolUse).toHaveLength(2);
     expect(merged!.PostToolUse).toHaveLength(1);
-    // Order is load-bearing — user hooks (first arg) observe before built-in
-    // capture hooks (second arg, none today). The SDK runs them in order.
+    // Order is load-bearing — the first arg's matchers come before the second
+    // arg's. The SDK runs them in order.
     expect(merged!.PreToolUse![0]!.matcher).toBe("Bash");
   });
 
@@ -100,5 +104,91 @@ describe("mergeSDKHooks", () => {
 
   it("returns undefined when both inputs are undefined", () => {
     expect(mergeSDKHooks(undefined, undefined)).toBeUndefined();
+  });
+
+  it("places the built-in policy gate before user hooks (gate first, user second)", () => {
+    const user = buildSDKHooksFromYAML({
+      PreToolUse: [{ matcher: "Bash", response: { tag: "user" } }],
+    });
+    const gate = buildBuiltinToolGateHooks(async () => ({ outcome: "allow" }));
+    // Factory order: gate first so its deny is authoritative over a user "allow".
+    const merged = mergeSDKHooks(gate, user)!;
+    expect(merged.PreToolUse).toHaveLength(2);
+    expect(merged.PreToolUse![0]!.matcher).toBeUndefined(); // gate is matcher-less, runs first
+    expect(merged.PreToolUse![1]!.matcher).toBe("Bash"); // user matcher second
+  });
+});
+
+describe("buildBuiltinToolGateHooks", () => {
+  // A gate that records what reached it and denies one named tool, so a test can
+  // assert both the deny projection and the mcp__/no-name skips (gate not called).
+  const recordingGate = (denyTool?: string) => {
+    const calls: { tool: string; args?: unknown }[] = [];
+    const gate = async (call: { tool: string; args?: unknown }) => {
+      calls.push(call);
+      return denyTool !== undefined && call.tool === denyTool
+        ? { outcome: "deny" as const, reason: `${call.tool} blocked` }
+        : { outcome: "allow" as const };
+    };
+    return { gate, calls };
+  };
+
+  const fire = (hooks: ReturnType<typeof buildBuiltinToolGateHooks>, input: unknown) =>
+    hooks.PreToolUse![0]!.hooks[0]!(input);
+
+  it("registers one matcher-less PreToolUse hook (fires for every tool)", () => {
+    const { gate } = recordingGate();
+    const hooks = buildBuiltinToolGateHooks(gate);
+    expect(Object.keys(hooks)).toEqual(["PreToolUse"]);
+    expect(hooks.PreToolUse).toHaveLength(1);
+    expect(hooks.PreToolUse![0]!.matcher).toBeUndefined();
+  });
+
+  it("returns a PreToolUse deny carrying the gate's message when the gate denies", async () => {
+    const { gate } = recordingGate("Bash");
+    const result = await fire(buildBuiltinToolGateHooks(gate), {
+      tool_name: "Bash",
+      tool_input: { command: "rm -rf /" },
+    });
+    expect(result).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining("Bash blocked"),
+      },
+    });
+  });
+
+  it("returns {} (no opinion → proceed) when the gate allows", async () => {
+    const { gate } = recordingGate("Bash");
+    expect(
+      await fire(buildBuiltinToolGateHooks(gate), { tool_name: "Read", tool_input: {} }),
+    ).toEqual({});
+  });
+
+  it("passes the SDK tool_input through to the gate as args", async () => {
+    const { gate, calls } = recordingGate();
+    await fire(buildBuiltinToolGateHooks(gate), {
+      tool_name: "Write",
+      tool_input: { path: "/etc/x", content: "y" },
+    });
+    expect(calls).toEqual([{ tool: "Write", args: { path: "/etc/x", content: "y" } }]);
+  });
+
+  it("skips mcp__* names without calling the gate (gated in the tool handler instead)", async () => {
+    const { gate, calls } = recordingGate("mcp__keelson__osdu_list");
+    const result = await fire(buildBuiltinToolGateHooks(gate), {
+      tool_name: "mcp__keelson__osdu_list",
+      tool_input: {},
+    });
+    expect(result).toEqual({});
+    expect(calls).toEqual([]);
+  });
+
+  it("proceeds without calling the gate when the payload carries no tool_name", async () => {
+    const { gate, calls } = recordingGate("Bash");
+    expect(await fire(buildBuiltinToolGateHooks(gate), {})).toEqual({});
+    expect(await fire(buildBuiltinToolGateHooks(gate), null)).toEqual({});
+    expect(calls).toEqual([]);
   });
 });

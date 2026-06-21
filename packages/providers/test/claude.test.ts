@@ -1539,6 +1539,69 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
     expect(options.hooks).toBeUndefined();
   });
 
+  it("wires the built-in policy gate as a PreToolUse hook (no keelson tools needed)", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    const seen: string[] = [];
+    const gate = async (call: { tool: string; args?: unknown }) => {
+      seen.push(call.tool);
+      return call.tool === "Bash"
+        ? { outcome: "deny" as const, reason: "shell blocked by policy" }
+        : { outcome: "allow" as const };
+    };
+    // No `tools` — the gate must reach a PreToolUse hook so the agent's OWN
+    // built-in Bash/Edit/Write route through the engine under bypassPermissions.
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { evaluateToolCall: gate }));
+    const sdkHooks = sdk.lastOptions()!.hooks as Record<
+      string,
+      Array<{ matcher?: string; hooks: Array<(input: unknown) => Promise<unknown>> }>
+    >;
+    expect(sdkHooks).toBeDefined();
+    const pre = sdkHooks.PreToolUse![0]!;
+    expect(await pre.hooks[0]!({ tool_name: "Bash", tool_input: { command: "ls" } })).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: expect.stringContaining("shell blocked by policy"),
+      },
+    });
+    expect(await pre.hooks[0]!({ tool_name: "Read", tool_input: {} })).toEqual({});
+    // MCP/skill calls are gated in the tool handler, not here — the hook skips them.
+    expect(await pre.hooks[0]!({ tool_name: "mcp__keelson__x", tool_input: {} })).toEqual({});
+    expect(seen).toEqual(["Bash", "Read"]);
+  });
+
+  it("runs the built-in policy gate before user PreToolUse hooks (gate first, user second)", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        evaluateToolCall: async () => ({ outcome: "allow" as const }),
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Bash",
+              response: {
+                hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" },
+              },
+            },
+          ],
+        },
+      }),
+    );
+    // Gate first so its deny is enforced before a user "allow" could pre-approve.
+    const sdkHooks = sdk.lastOptions()!.hooks as Record<string, Array<{ matcher?: string }>>;
+    expect(sdkHooks.PreToolUse).toHaveLength(2);
+    expect(sdkHooks.PreToolUse![0]!.matcher).toBeUndefined(); // built-in gate (matcher-less)
+    expect(sdkHooks.PreToolUse![1]!.matcher).toBe("Bash"); // user hook
+  });
+
   it("omits allowedTools / disallowedTools when not provided", async () => {
     const sdk = makeMockSdk({ scenario: pushSuccess });
     const provider = new ClaudeProvider({

@@ -14,7 +14,12 @@ import type { ToolContext } from "@keelson/shared";
 import { ensureSpawnPath } from "@keelson/shared/exec";
 import { checkToolCallGate } from "../tool-gate.ts";
 import type { MessageChunk, ToolCallGate, ToolDefinition } from "../types.ts";
-import { buildSDKHooksFromYAML, mergeSDKHooks, type YAMLHookMatcher } from "./hooks-projection.ts";
+import {
+  buildBuiltinToolGateHooks,
+  buildSDKHooksFromYAML,
+  mergeSDKHooks,
+  type YAMLHookMatcher,
+} from "./hooks-projection.ts";
 
 // A copy of the ambient env with ANTHROPIC_API_KEY removed. The Claude CLI/SDK
 // prefers an explicit ANTHROPIC_API_KEY over its stored OAuth login, so stripping
@@ -215,6 +220,12 @@ export interface CreateQueryParams {
   thinking?: boolean;
   tools?: ToolDefinition[];
   toolProjection?: ClaudeToolProjectionContext;
+  // Per-call policy gate for the agent's OWN built-in tools (Bash/Edit/Write/…).
+  // Wired into a built-in PreToolUse hook so those calls — which run in the CLI
+  // subprocess and bypass `runClaudeToolHandler` — still route through the policy
+  // engine. Separate from `toolProjection.evaluateToolCall` (which gates MCP/skill
+  // calls) so built-in gating works on a turn that offers no keelson tools.
+  evaluateToolCall?: ToolCallGate;
   // SDK-level allow / deny lists by tool name (built-ins + MCP). Forwarded
   // verbatim to ClaudeQueryOptions; the SDK enforces the gate.
   allowedTools?: string[];
@@ -488,17 +499,26 @@ export class ClaudeQueryFactory {
     if (params.disallowedTools !== undefined) {
       options.disallowedTools = expandToolNamesForClaudeSdk(params.disallowedTools);
     }
-    // Project per-node YAML hooks → SDK matcher shape. mergeSDKHooks is the
-    // forward-compat seam for built-in capture hooks (none today — passing
-    // undefined keeps user hooks unmerged).
-    if (params.hooks !== undefined) {
-      const userHooks = buildSDKHooksFromYAML(
-        params.hooks as Readonly<Record<string, YAMLHookMatcher[] | undefined>>,
-      );
-      const merged = mergeSDKHooks(userHooks, undefined);
-      if (merged !== undefined && Object.keys(merged).length > 0) {
-        options.hooks = merged;
-      }
+    // Project per-node YAML hooks → SDK matcher shape, plus the built-in
+    // policy-gate PreToolUse hook (when a per-call gate is wired) so the agent's
+    // own Bash/Edit/Write route through the engine. The gate runs FIRST so its
+    // `deny` is enforced before any user hook can pre-approve the call — a
+    // workflow author's `permissionDecision: "allow"` must not opt a tool out of
+    // operator policy. On allow the gate returns no opinion, so it never
+    // pre-empts a user hook's own deny.
+    const userHooks =
+      params.hooks !== undefined
+        ? buildSDKHooksFromYAML(
+            params.hooks as Readonly<Record<string, YAMLHookMatcher[] | undefined>>,
+          )
+        : undefined;
+    const builtinHooks =
+      params.evaluateToolCall !== undefined
+        ? buildBuiltinToolGateHooks(params.evaluateToolCall)
+        : undefined;
+    const merged = mergeSDKHooks(builtinHooks, userHooks);
+    if (merged !== undefined && Object.keys(merged).length > 0) {
+      options.hooks = merged;
     }
     // Tool path stays a no-op when the SDK doesn't expose createSdkMcpServer
     // (e.g. structural mocks in tests without explicit wiring).

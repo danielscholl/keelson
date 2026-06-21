@@ -245,6 +245,7 @@ async function toolOptions(
   signal?: AbortSignal,
 ): Promise<Partial<SendQueryOptions>> {
   const out: Partial<SendQueryOptions> = {};
+  const engine = deps.getPolicyEngine?.();
 
   let allowedTools: string[] | undefined;
   if (req.allowedTools !== undefined) {
@@ -269,7 +270,6 @@ async function toolOptions(
     // The requested tools that survive the local denylist floor — used as the
     // no-engine / gate-fault fallback.
     const withoutDenied = (): ToolDefinition[] => matched.filter((t) => !deps.denied.has(t.name));
-    const engine = deps.getPolicyEngine?.();
     let projected: ToolDefinition[];
     if (engine) {
       try {
@@ -289,25 +289,30 @@ async function toolOptions(
       projected = withoutDenied();
     }
     if (projected.length > 0) out.tools = [...projected];
-    // Per-call args-aware gate: when the engine is wired and this turn actually
-    // offers keelson tools, bind it to this rib's scope so the provider can deny
-    // an individual call on its args — a tool cleared into the projection above
-    // can still be denied here. Built-in tools never reach this gate.
-    if (engine && projected.length > 0) {
-      out.evaluateToolCall = (call) =>
-        engine.evaluateToolCall(call, {
-          surface: "rib",
-          ribId: meta.ribId,
-          provider: meta.providerId,
-          ...(signal !== undefined ? { signal } : {}),
-        });
-    }
     // Forward the FULL catalog whenever any rib tool was requested — even if the
     // denylist dropped every match — so the provider still recognizes a registered
     // MCP name left in `allowedTools` and doesn't mis-send it to the SDK `--tools`
     // built-in gate (which the CLI rejects, failing the whole turn). Mirrors the
     // prompt handler, which sets this unconditionally.
     if (catalog.length > 0) out.registeredMcpToolNames = catalog.map((t) => t.name);
+  }
+
+  // Per-call args-aware gate, bound to this rib's scope. Wired whenever the
+  // engine is present and the turn can actually run a gated tool — keelson tools
+  // (projected above) OR built-ins (the claude PreToolUse hook routes
+  // Bash/Edit/Write through this same gate). A text-only turn (allowedTools: [])
+  // can run neither, so it stays ungated. A tool cleared into the projection can
+  // still be denied here on its args; the thunk closes over the turn's teardown
+  // signal so a pending ASK cancels with the turn.
+  const textOnly = allowedTools !== undefined && allowedTools.length === 0;
+  if (engine && !textOnly) {
+    out.evaluateToolCall = (call) =>
+      engine.evaluateToolCall(call, {
+        surface: "rib",
+        ribId: meta.ribId,
+        provider: meta.providerId,
+        ...(signal !== undefined ? { signal } : {}),
+      });
   }
   return out;
 }

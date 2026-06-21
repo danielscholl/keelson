@@ -517,6 +517,18 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(opts?.evaluateToolCall).toBeUndefined();
   });
 
+  it("wires the per-call gate for a built-in-allowed turn so the claude hook can gate Bash/Edit", async () => {
+    const engine = createPolicyEngine();
+    const opts = await optionsFor(
+      { prompt: "hi", allowedTools: ["Bash", "Edit"] },
+      { getPolicyEngine: () => engine },
+    );
+    // No keelson tools requested, but built-ins can run — the claude provider's
+    // PreToolUse hook routes Bash/Edit/Write through this gate, so it must be wired.
+    expect(opts?.tools).toBeUndefined();
+    expect(opts?.evaluateToolCall).toBeDefined();
+  });
+
   it("passes an explicit allow-list through verbatim", async () => {
     const opts = await optionsFor({ prompt: "hi", allowedTools: ["Bash(git:*)", "Read"] });
     expect(opts?.allowedTools).toEqual(["Bash(git:*)", "Read"]);

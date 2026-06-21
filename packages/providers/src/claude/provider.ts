@@ -176,6 +176,12 @@ export class ClaudeProvider implements IAgentProvider {
           ? { registeredMcpToolNames: options.registeredMcpToolNames }
           : {}),
         ...(options?.hooks !== undefined ? { hooks: options.hooks } : {}),
+        // Forwarded independently of `tools`/`toolProjection` so the built-in
+        // PreToolUse gate covers Bash/Edit/Write even on a turn with no keelson
+        // tools (where `toolProjection` is omitted).
+        ...(options?.evaluateToolCall !== undefined
+          ? { evaluateToolCall: options.evaluateToolCall }
+          : {}),
       });
     } catch (err) {
       detachAbort();
