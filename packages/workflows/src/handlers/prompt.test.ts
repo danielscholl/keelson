@@ -291,6 +291,30 @@ describe("makePromptHandler", () => {
     expect(seenProvider).toBe("claude");
   });
 
+  test("evaluateToolCall is threaded the node's teardown signal so a pending ASK cancels on abort", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    let seenSignal: AbortSignal | undefined;
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "repo_get_state" }],
+      evaluateToolCall: async (_call, _prov, signal) => {
+        seenSignal = signal;
+        return { outcome: "allow" };
+      },
+    });
+    await handler.handle(stubNode, buildCtx());
+    const gate = calls[0]?.options?.evaluateToolCall;
+    if (!gate) throw new Error("expected evaluateToolCall to be forwarded to the provider");
+    await gate({ tool: "repo_get_state", args: { x: 1 } });
+    // The bound gate carries the SAME signal the provider stream rides — the
+    // handler's run-cancel + node-timeout teardown signal — so an engine `ask`
+    // cancels with the turn instead of hanging on the approval timeout.
+    expect(seenSignal).toBeInstanceOf(AbortSignal);
+    expect(seenSignal).toBe(calls[0]?.options?.abortSignal);
+  });
+
   test("no evaluateToolCall opt → the provider receives no per-call gate", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],

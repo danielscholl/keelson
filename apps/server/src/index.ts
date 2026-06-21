@@ -327,11 +327,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // Per-call args-aware gate for the same nodes — runs the policy stack again
     // for each individual tool call with its args (a tool cleared into the
     // projection above can still be denied here on the strength of its args).
-    evaluateToolCall: (call, provider) =>
+    // Forward the node's teardown signal so a pending `ask` cancels with the run.
+    evaluateToolCall: (call, provider, signal) =>
       policyEngine
         ? policyEngine.evaluateToolCall(call, {
             surface: "workflow",
             ...(provider !== undefined ? { provider } : {}),
+            ...(signal !== undefined ? { signal } : {}),
           })
         : Promise.resolve({ outcome: "allow" as const }),
     // Request-phase budget gate for prompt nodes: before a node opens its
