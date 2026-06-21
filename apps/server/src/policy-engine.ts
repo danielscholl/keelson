@@ -44,6 +44,12 @@ export interface PolicyEngineOptions {
   // session, same downgrade-gate semantics as `turnBudget`. Operator-set via
   // KEELSON_COST_BUDGET.
   costBudget?: number;
+  // Opt-in `redact` builtin: a regex whose matches are replaced with [REDACTED]
+  // in every `tool_result` and `response` text before the model (or a downstream
+  // workflow node) consumes it. Off by default — an unset/blank/invalid pattern
+  // leaves it off. Operator-set via KEELSON_REDACT_PATTERN. This is the concrete
+  // consumer that exercises the `tool_result` / `response` phases end-to-end.
+  redactPattern?: string;
   // The approval round-trip an `ask` decision rides. When wired, a per-call
   // `ask` pauses here until this resolves accept/reject; when absent, `ask`
   // degrades to deny-with-reason (the pre-Phase-3 behavior). Injected by the
@@ -63,6 +69,16 @@ export interface ToolProjection<T> {
 // reject/timeout→deny) — callers never see an `ask` and so never have to handle
 // one. Providers' ToolCallGate mirrors this allow/deny shape.
 export type ToolCallDecision = { outcome: "allow" } | { outcome: "deny"; reason: string };
+
+// The per-result/response decision the engine emits. Like ToolCallDecision but
+// an allow can carry a string `data` SUBSTITUTION — the redacted text that
+// replaces the result/response the model (or a downstream node) sees. An `ask`
+// is resolved INSIDE the engine (degraded to deny — a result that already ran
+// has no round-trip), so callers never see one. Providers' ToolResultGate
+// mirrors this shape.
+export type ResultDecision =
+  | { outcome: "allow"; data?: string }
+  | { outcome: "deny"; reason: string };
 
 export interface PolicyEngine {
   // Projection-time tool gate: evaluate a synthetic `tool_call` event per
@@ -104,6 +120,31 @@ export interface PolicyEngine {
   // request gate — and the model-tier / usage lookups it needs — entirely when
   // nothing would consult them.
   readonly requestPhaseActive: boolean;
+  // Result-phase gate: evaluate the stack against ONE tool result, after the
+  // tool ran but before the result returns to the model. Walks the same ordered
+  // stack with first-deny-wins, but an `allow` carrying a string `data`
+  // substitutes the result and FEEDS the substituted text to later policies (a
+  // redaction pipeline). Providers invoke it inside their custom-tool handler.
+  evaluateToolResult(
+    call: { tool: string; result: unknown },
+    base: { surface: PolicySurface; ribId?: string; provider?: string },
+  ): Promise<ResultDecision>;
+  // Response-phase gate: same stack walk as evaluateToolResult, for a turn's
+  // complete buffered response text (today the workflow `prompt` node output). A
+  // deny fails the consumer; a string-`data` allow substitutes the text.
+  evaluateResponse(base: {
+    surface: PolicySurface;
+    ribId?: string;
+    provider?: string;
+    text: string;
+  }): Promise<ResultDecision>;
+  // True when at least one policy can match a `tool_result` event. Lets a seam
+  // skip wiring the per-result gate into the provider when nothing consumes it.
+  readonly resultPhaseActive: boolean;
+  // True when at least one policy can match a `response` event. Lets a seam skip
+  // the response gate (and assembling/buffering text for it) when nothing reads
+  // the phase.
+  readonly responsePhaseActive: boolean;
 }
 
 // Does a policy's `on` matcher select this event? An absent matcher means the
@@ -216,6 +257,30 @@ function makeCostBudgetPolicy(maxTokens: number): Policy {
   };
 }
 
+// Opt-in `redact` builtin — replaces every match of `pattern` with [REDACTED]
+// in a `tool_result` / `response` text and returns it as an allow-with-`data`
+// substitution. The concrete consumer of the result/response phases: it proves
+// the `PolicyDecision.data` substitution path end-to-end. `pattern` must carry
+// the global flag so `.replace` redacts all matches (createPolicyEngine compiles
+// it that way). A non-string result (or no match) is a no-op allow.
+function makeRedactPolicy(pattern: RegExp): Policy {
+  return {
+    id: "builtin:redact",
+    on: [{ phase: "tool_result" }, { phase: "response" }],
+    evaluate(event): PolicyDecision {
+      let text: string | undefined;
+      if (event.phase === "tool_result") {
+        text = typeof event.result === "string" ? event.result : undefined;
+      } else if (event.phase === "response") {
+        text = event.text;
+      }
+      if (text === undefined) return { outcome: "allow" };
+      const redacted = text.replace(pattern, "[REDACTED]");
+      return redacted === text ? { outcome: "allow" } : { outcome: "allow", data: redacted };
+    },
+  };
+}
+
 // How an `ask` outcome is resolved for this seam. Returns "allow" to KEEP
 // evaluating the stack (the policy approved or — at projection — deferred to the
 // per-call seam) and `{ deny }` to short-circuit. Lets projection and per-call
@@ -306,12 +371,95 @@ async function evaluateStack(
   return { outcome: "allow" };
 }
 
+// Run the ordered stack against a result/response event, CHAINING string `data`
+// substitutions: each policy sees the (possibly already-redacted) text from the
+// prior one, and the final accumulated text is returned as the substitution.
+// First-deny-wins short-circuits; an `ask` degrades to deny (a result/response
+// that already ran has no approval round-trip). Per-policy try/catch containment
+// matches evaluateStack — a single throwing policy contributes no opinion.
+async function evaluateResultStack(
+  ordered: readonly { id: string; policy: Policy }[],
+  makeEvent: (text: string) => PolicyEvent,
+  originalText: string,
+  ctx: PolicyContext,
+): Promise<ResultDecision> {
+  let current = originalText;
+  for (const entry of ordered) {
+    const event = makeEvent(current);
+    const label = event.phase;
+    try {
+      if (!matches(entry.policy, event)) continue;
+      const decision = (await entry.policy.evaluate(event, ctx)) as
+        | { outcome?: unknown; reason?: unknown; data?: unknown }
+        | null
+        | undefined;
+      const outcome = decision?.outcome;
+      const reason = decision?.reason;
+      if (outcome === "deny") {
+        return {
+          outcome: "deny",
+          reason: typeof reason === "string" && reason.length > 0 ? reason : "withheld",
+        };
+      }
+      if (outcome === "ask") {
+        // No round-trip for a result/response that already ran — fail closed.
+        return {
+          outcome: "deny",
+          reason:
+            typeof reason === "string" && reason.length > 0
+              ? reason
+              : "approval is not supported for this phase",
+        };
+      }
+      if (outcome === "allow") {
+        // Substitute only on a string `data`; feed it to later policies so
+        // redactions compose. A non-string `data` is ignored (warned) — it can't
+        // replace text the model reads, so the text passes through unchanged.
+        if (decision?.data !== undefined && typeof decision.data !== "string") {
+          console.warn(
+            `[policy] '${entry.id}' returned a non-string substitution for '${label}'; ignoring`,
+          );
+        } else if (typeof decision?.data === "string") {
+          current = decision.data;
+        }
+        continue;
+      }
+      // An unrecognized/malformed/missing outcome is treated as allow (like a
+      // throw) but warned, so it isn't a silent fail-open — matching evaluateStack.
+      console.warn(
+        `[policy] '${entry.id}' returned an unrecognized decision for '${label}'; treating as allow`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[policy] '${entry.id}' threw evaluating '${label}': ${msg}`);
+    }
+  }
+  return current === originalText ? { outcome: "allow" } : { outcome: "allow", data: current };
+}
+
 export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine {
   const requestApproval = opts.requestApproval;
+  // Compile the opt-in `redact` builtin's pattern with the global flag (so
+  // `.replace` redacts every match). A blank or invalid pattern leaves the
+  // builtin off rather than crashing boot — a typo'd KEELSON_REDACT_PATTERN
+  // shouldn't take the server down.
+  const redactBuiltin: { id: string; policy: Policy } | undefined = (() => {
+    const raw = opts.redactPattern;
+    if (raw === undefined || raw.length === 0) return undefined;
+    try {
+      return { id: "builtin:redact", policy: makeRedactPolicy(new RegExp(raw, "g")) };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[policy] invalid redact pattern; redaction disabled: ${msg}`);
+      return undefined;
+    }
+  })();
   // Builtin floor first, then the opt-in ask_on_shell builtin, then rib-declared
   // — first-deny-wins. A denylisted shell tool is therefore denied (not asked),
   // and a rib policy can still deny a call ask_on_shell would have allowed. Rib
-  // ids are namespaced so two ribs' identically-named policies stay distinct.
+  // ids are namespaced so two ribs' identically-named policies stay distinct. The
+  // redact builtin matches only the result/response phases, so its position
+  // among the tool_call builtins is immaterial.
   const ordered: { id: string; policy: Policy }[] = [
     { id: "builtin:tool_denylist", policy: makeDenylistPolicy(opts.denylist ?? []) },
     ...(opts.askOnShell ? [{ id: "builtin:ask_on_shell", policy: makeAskOnShellPolicy() }] : []),
@@ -321,20 +469,26 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
     ...(opts.costBudget && opts.costBudget > 0
       ? [{ id: "builtin:cost_budget", policy: makeCostBudgetPolicy(opts.costBudget) }]
       : []),
+    ...(redactBuiltin ? [redactBuiltin] : []),
     ...(opts.ribPolicies ?? []).map((c) => ({
       id: `rib:${c.ribId}:${c.policy.id}`,
       policy: c.policy,
     })),
   ];
 
-  // A policy can match a `request` event if it self-selects (no `on`) or lists
-  // the phase. Precomputed so a seam can skip its usage/model gathering when the
-  // stack holds nothing that would read them.
-  const requestPhaseActive = ordered.some(
-    ({ policy }) =>
-      policy.on === undefined ||
-      (Array.isArray(policy.on) && policy.on.some((m) => m?.phase === "request")),
-  );
+  // A policy can match a phase if it self-selects (no `on`) or lists that phase.
+  // Precomputed per phase so a seam can skip its work — request usage/model
+  // lookups, wiring the per-result provider gate, buffering response text — when
+  // the stack holds nothing that would read the phase.
+  const phaseActive = (phase: PolicyEvent["phase"]): boolean =>
+    ordered.some(
+      ({ policy }) =>
+        policy.on === undefined ||
+        (Array.isArray(policy.on) && policy.on.some((m) => m?.phase === phase)),
+    );
+  const requestPhaseActive = phaseActive("request");
+  const resultPhaseActive = phaseActive("tool_result");
+  const responsePhaseActive = phaseActive("response");
 
   // Projection seam: an `ask` lets the tool through (so the per-call seam can
   // ask when it's actually called) when a channel is wired; otherwise it
@@ -426,6 +580,8 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
     },
 
     requestPhaseActive,
+    resultPhaseActive,
+    responsePhaseActive,
 
     async evaluateRequest(base) {
       const ctx: PolicyContext = {
@@ -438,6 +594,24 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
         { phase: "request", prompt: base.prompt ?? "" },
         ctx,
         perCallAsk(base),
+      );
+    },
+
+    async evaluateToolResult(call, base) {
+      return evaluateResultStack(
+        ordered,
+        (text) => ({ phase: "tool_result", tool: call.tool, result: text }),
+        typeof call.result === "string" ? call.result : String(call.result),
+        makeCtx(base),
+      );
+    },
+
+    async evaluateResponse(base) {
+      return evaluateResultStack(
+        ordered,
+        (text) => ({ phase: "response", text }),
+        base.text,
+        makeCtx(base),
       );
     },
   };

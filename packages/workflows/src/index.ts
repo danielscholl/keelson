@@ -74,8 +74,10 @@ export {
   type PromptHandlerProvider,
   type PromptHandlerSendOptions,
   type PromptRequestGate,
+  type PromptResponseGate,
   type PromptToolCallGate,
   type PromptToolGate,
+  type PromptToolResultGate,
 } from "./handlers/prompt.ts";
 export {
   type MakeScriptHandlerOptions,

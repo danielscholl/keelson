@@ -151,6 +151,9 @@ export class ClaudeProvider implements IAgentProvider {
       ...(options?.evaluateToolCall !== undefined
         ? { evaluateToolCall: options.evaluateToolCall }
         : {}),
+      ...(options?.evaluateToolResult !== undefined
+        ? { evaluateToolResult: options.evaluateToolResult }
+        : {}),
     };
 
     let handle: ClaudeQueryHandle;

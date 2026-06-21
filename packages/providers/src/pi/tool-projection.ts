@@ -3,9 +3,9 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { ToolContext } from "@keelson/shared";
-import { checkToolCallGate } from "../tool-gate.ts";
+import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
 import { deriveToolParametersJsonSchema } from "../tool-params.ts";
-import type { MessageChunk, ToolCallGate, ToolDefinition } from "../types.ts";
+import type { MessageChunk, ToolCallGate, ToolDefinition, ToolResultGate } from "../types.ts";
 
 // Structural slice of pi's extension ToolDefinition that the projection
 // produces; the factory casts it at the SDK boundary. `parameters` is a plain
@@ -42,6 +42,10 @@ export interface PiToolProjectionContext {
   // converts that into an error tool result). pi's own built-ins are disabled,
   // so the projected keelson tools are the whole surface this gate governs.
   evaluateToolCall?: ToolCallGate;
+  // Per-result policy gate (server-wired). When present, the captured output is
+  // evaluated AFTER execute and before it returns to pi — a deny throws (an
+  // error tool result), an allow+data substitutes the returned text.
+  evaluateToolResult?: ToolResultGate;
 }
 
 // Projects our streaming ToolDefinitions into pi's "execute returns result"
@@ -97,10 +101,19 @@ export function projectToolsForPi(
         throw new Error(gateResult.message);
       }
       await tool.execute(parsed.data, ctx);
-      if (resultIsError) {
-        throw new Error(resultContent ?? `tool '${tool.name}' failed`);
+      // Per-result policy gate on the captured output before it returns to pi. A
+      // deny (or a skill-emitted error) throws — pi turns the throw into an error
+      // tool result; an allow+data substitutes the returned text.
+      const gated = await applyToolResultGate(
+        projection.evaluateToolResult,
+        tool.name,
+        resultContent ?? "",
+        resultIsError,
+      );
+      if (gated.isError) {
+        throw new Error(gated.content || `tool '${tool.name}' failed`);
       }
-      return { content: [{ type: "text", text: resultContent ?? "" }], details: undefined };
+      return { content: [{ type: "text", text: gated.content }], details: undefined };
     },
   }));
 }

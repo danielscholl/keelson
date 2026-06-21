@@ -545,6 +545,16 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         })
     : undefined;
 
+  // Per-result gate for this turn — runs the policy stack's `tool_result` phase
+  // on each keelson tool's output before the model consumes it (deny → withheld,
+  // allow+data → redacted). Wired only when a policy actually reads the phase, so
+  // the default no-redaction path adds no per-result evaluation.
+  const evaluateToolResult =
+    engine?.resultPhaseActive === true
+      ? (call: { tool: string; result: unknown }) =>
+          engine.evaluateToolResult(call, { surface: "chat", provider: message.providerId })
+      : undefined;
+
   // Request-phase budget gate: when a budget builtin (or a request-phase rib
   // policy) is active, check the session's accumulated spend before spending
   // another turn. A deny ends the turn with the policy's reason instead of
@@ -586,6 +596,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         : {}),
       ...(gatedTools.length > 0 ? { tools: gatedTools } : {}),
       ...(evaluateToolCall !== undefined ? { evaluateToolCall } : {}),
+      ...(evaluateToolResult !== undefined ? { evaluateToolResult } : {}),
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     })) {
       // Usage is handled BEFORE the abort check — providers deliver it after

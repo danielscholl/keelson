@@ -85,6 +85,13 @@ export interface PromptHandlerSendOptions {
     tool: string;
     args?: unknown;
   }) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
+  // Per-result tool-result gate forwarded to the provider (structural mirror of
+  // @keelson/providers `ToolResultGate`). The provider invokes it after each
+  // tool runs; a deny replaces the result, an allow+`data` substitutes it.
+  evaluateToolResult?: (call: {
+    tool: string;
+    result: unknown;
+  }) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
 }
 
 export interface PromptHandlerLifecycle {
@@ -114,6 +121,26 @@ export type PromptToolCallGate = (
   provider?: string,
   signal?: AbortSignal,
 ) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
+
+// Per-result tool-result gate forwarded to the provider (structural mirror of
+// @keelson/providers `ToolResultGate`). The provider invokes it inside its
+// custom-tool handler after each tool runs; a deny replaces the model-facing
+// result, an allow+`data` substitutes it. `provider` is the node's effective
+// provider id (bound before the per-result thunk reaches the provider).
+export type PromptToolResultGate = (
+  call: { tool: string; result: unknown },
+  provider?: string,
+) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
+
+// Response-phase gate run once on the node's COMPLETE assembled text, after the
+// turn finishes but before the text becomes the node output (propagates to
+// dependent nodes / persists). A deny fails the node with the reason; an
+// allow+`data` substitutes the output text. `provider` is the node's effective
+// provider id. Backed by the unified policy engine's `response` phase.
+export type PromptResponseGate = (
+  text: string,
+  provider?: string,
+) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
 
 // Request-phase gate run once before the node opens its provider session. The
 // harness backs it with the unified policy engine's budget builtins (deny when
@@ -162,6 +189,19 @@ export interface MakePromptHandlerOptions {
    * Absent → no per-call gating (standalone / no-engine path).
    */
   evaluateToolCall?: PromptToolCallGate;
+  /**
+   * Per-result, args-aware tool-result gate forwarded to the provider. Runs the
+   * policy stack's `tool_result` phase on each tool's output before it returns
+   * to the model. Absent → no per-result gating (standalone / no-engine path,
+   * or no policy consumes the phase).
+   */
+  evaluateToolResult?: PromptToolResultGate;
+  /**
+   * Response-phase gate run on the node's complete assembled text before it
+   * becomes the node output. A deny fails the node; an allow+`data` substitutes
+   * the output. Absent → the assembled text becomes the output unchanged.
+   */
+  evaluateResponse?: PromptResponseGate;
   /**
    * Request-phase gate run before the provider session opens. Backed by the
    * unified policy engine's budget builtins. A deny fails the node with the
@@ -371,6 +411,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         ? (call: { tool: string; args?: unknown }) =>
             perCallGate(call, effectiveProviderId, handlerExit.signal)
         : undefined;
+      const perResultGate = opts.evaluateToolResult;
+      const boundToolResultGate = perResultGate
+        ? (call: { tool: string; result: unknown }) => perResultGate(call, effectiveProviderId)
+        : undefined;
 
       let assistantText = "";
       let providerError: string | null = null;
@@ -458,6 +502,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
             ...(nodeHooks !== undefined ? { hooks: nodeHooks } : {}),
             ...(boundToolCallGate !== undefined ? { evaluateToolCall: boundToolCallGate } : {}),
+            ...(boundToolResultGate !== undefined
+              ? { evaluateToolResult: boundToolResultGate }
+              : {}),
             // Forward the UNFILTERED catalog so the claude provider
             // can detect MCP names even when one was filtered out
             // by the global denylist.
@@ -547,6 +594,32 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // Detach: attach a noop catch so the pending promise (if any) can
       // settle quietly without an unhandled-rejection warning.
       consumePromise.then(undefined, () => undefined);
+
+      // Response-phase policy gate on the COMPLETE assembled text — only on a
+      // clean turn (a cancelled / timed-out / errored / tool-errored turn has no
+      // complete response to govern and routes to a failed NodeResult below).
+      // Runs before assistantText becomes the node output: a deny fails the node
+      // (via providerError), an allow+data substitutes the output. Fail open on a
+      // gate fault — a response-gate bug must not take the node down.
+      if (
+        opts.evaluateResponse &&
+        !cancelled &&
+        !timedOut &&
+        providerError === null &&
+        !(failOnToolError && toolErrored)
+      ) {
+        try {
+          const decision = await opts.evaluateResponse(assistantText, effectiveProviderId);
+          if (decision.outcome === "deny") {
+            providerError = decision.reason;
+          } else if (typeof decision.data === "string") {
+            assistantText = decision.data;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[workflows] response gate threw for node '${ctx.nodeId}': ${msg}`);
+        }
+      }
 
       let result: NodeResult;
       if (cancelled) {

@@ -314,6 +314,17 @@ async function toolOptions(
         ...(signal !== undefined ? { signal } : {}),
       });
   }
+  // Per-result gate, same rib scope — runs the `tool_result` phase on each rib
+  // tool's output before the model consumes it. Wired only when a policy reads
+  // the phase and the turn can run a gated tool (a text-only turn runs none).
+  if (engine?.resultPhaseActive && !textOnly) {
+    out.evaluateToolResult = (call) =>
+      engine.evaluateToolResult(call, {
+        surface: "rib",
+        ribId: meta.ribId,
+        provider: meta.providerId,
+      });
+  }
   return out;
 }
 

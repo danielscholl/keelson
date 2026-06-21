@@ -336,6 +336,29 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
             ...(signal !== undefined ? { signal } : {}),
           })
         : Promise.resolve({ outcome: "allow" as const }),
+    // Per-result gate for prompt nodes — runs the `tool_result` phase on each
+    // tool's output before the model consumes it. Wired only when a policy reads
+    // the phase, so the default path runs no per-result evaluation.
+    evaluateToolResult:
+      policyEngine?.resultPhaseActive === true
+        ? (call, provider) =>
+            policyEngine.evaluateToolResult(call, {
+              surface: "workflow",
+              ...(provider !== undefined ? { provider } : {}),
+            })
+        : undefined,
+    // Response gate — runs the `response` phase on the node's complete output
+    // before it propagates downstream / persists. Wired only when a policy reads
+    // the phase. A deny fails the node; an allow+data substitutes the output.
+    evaluateResponse:
+      policyEngine?.responsePhaseActive === true
+        ? (text, provider) =>
+            policyEngine.evaluateResponse({
+              surface: "workflow",
+              text,
+              ...(provider !== undefined ? { provider } : {}),
+            })
+        : undefined,
     // Request-phase budget gate for prompt nodes: before a node opens its
     // provider session, check the run's accumulated spend against the budget
     // builtins. Skipped (no usage/model lookups) when no policy reads the

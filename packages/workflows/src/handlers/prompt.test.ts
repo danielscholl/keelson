@@ -327,6 +327,119 @@ describe("makePromptHandler", () => {
     expect(calls[0]?.options?.evaluateToolCall).toBeUndefined();
   });
 
+  test("evaluateToolResult is bound to the node's provider and forwarded to the provider", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    let seenProvider: string | undefined | "unset" = "unset";
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "repo_get_state" }],
+      evaluateToolResult: async (_call, prov) => {
+        seenProvider = prov;
+        return { outcome: "allow", data: "redacted" };
+      },
+    });
+    await handler.handle(stubNode, buildCtx({ workflowProvider: "claude" }));
+    const gate = calls[0]?.options?.evaluateToolResult;
+    if (!gate) throw new Error("expected evaluateToolResult to be forwarded to the provider");
+    const decision = await gate({ tool: "repo_get_state", result: "raw" });
+    expect(decision).toEqual({ outcome: "allow", data: "redacted" });
+    expect(seenProvider).toBe("claude");
+  });
+
+  test("no evaluateToolResult opt → the provider receives no per-result gate", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    await handler.handle(stubNode, buildCtx());
+    expect(calls[0]?.options?.evaluateToolResult).toBeUndefined();
+  });
+
+  test("evaluateResponse substitution rewrites the node's output text", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "text", content: "the secret is " },
+        { type: "text", content: "hunter2" },
+        { type: "done" },
+      ],
+    });
+    let seenText: string | undefined;
+    let seenProvider: string | undefined;
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      evaluateResponse: async (text, prov) => {
+        seenText = text;
+        seenProvider = prov;
+        return { outcome: "allow", data: text.replace("hunter2", "[REDACTED]") };
+      },
+    });
+    const result = await handler.handle(stubNode, buildCtx({ workflowProvider: "claude" }));
+    expect(result.status).toBe("succeeded");
+    expect(result.output.kind === "text" ? result.output.text : "").toBe(
+      "the secret is [REDACTED]",
+    );
+    // The gate saw the FULL assembled text and the node's effective provider.
+    expect(seenText).toBe("the secret is hunter2");
+    expect(seenProvider).toBe("claude");
+  });
+
+  test("evaluateResponse deny fails the node with the policy's reason", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "forbidden output" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      evaluateResponse: async () => ({ outcome: "deny", reason: "response blocked by policy" }),
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("response blocked by policy");
+  });
+
+  test("evaluateResponse is NOT consulted when the turn already failed", async () => {
+    let called = false;
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "partial" }, { type: "done" }],
+      throwAt: 0,
+      throwError: new Error("provider exploded"),
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      evaluateResponse: async () => {
+        called = true;
+        return { outcome: "allow" };
+      },
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("failed");
+    // A failed turn has no complete response to govern — the gate is skipped.
+    expect(called).toBe(false);
+  });
+
+  test("a throwing evaluateResponse fails open — the node keeps its output", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "kept" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      evaluateResponse: async () => {
+        throw new Error("gate fault");
+      },
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("kept");
+  });
+
   test("a throwing projectTools gate fails open — node-resolved tools still pass through", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],

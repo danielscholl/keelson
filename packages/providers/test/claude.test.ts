@@ -2052,6 +2052,7 @@ describe("projectToolsForClaude — per-call policy gate", () => {
 
   const projection = (
     gate?: ClaudeToolProjectionContext["evaluateToolCall"],
+    resultGate?: ClaudeToolProjectionContext["evaluateToolResult"],
   ): ClaudeToolProjectionContext => ({
     pushChunk: () => {},
     contextFactory: () => ({
@@ -2060,6 +2061,7 @@ describe("projectToolsForClaude — per-call policy gate", () => {
       abortSignal: new AbortController().signal,
     }),
     ...(gate ? { evaluateToolCall: gate } : {}),
+    ...(resultGate ? { evaluateToolResult: resultGate } : {}),
   });
 
   it("returns an error tool_result and skips execute when the gate denies", async () => {
@@ -2098,6 +2100,45 @@ describe("projectToolsForClaude — per-call policy gate", () => {
     const [def] = projectToolsForClaude([echoTool()], projection());
     if (!def) throw new Error("narrow");
     const result = await def.handler({ value: "hi" }, {});
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("a result-gate substitution rewrites the result the SDK hands the model", async () => {
+    let seen: unknown;
+    const [def] = projectToolsForClaude(
+      [echoTool()],
+      projection(undefined, async (r) => {
+        seen = r.result;
+        return { outcome: "allow", data: "echo:[REDACTED]" };
+      }),
+    );
+    if (!def) throw new Error("narrow");
+    const result = await def.handler({ value: "hi" }, {});
+    // The SDK feeds this returned content to the model AND echoes it to the UI.
+    expect(result.content[0]?.text).toBe("echo:[REDACTED]");
+    expect(result.isError).toBeUndefined();
+    expect(seen).toBe("echo:hi");
+  });
+
+  it("a result-gate deny replaces the result with the reason, marked as an error", async () => {
+    const [def] = projectToolsForClaude(
+      [echoTool()],
+      projection(undefined, async () => ({ outcome: "deny", reason: "leaked a secret" })),
+    );
+    if (!def) throw new Error("narrow");
+    const result = await def.handler({ value: "hi" }, {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toBe("Tool 'echo' result withheld by policy: leaked a secret");
+  });
+
+  it("a plain result-gate allow leaves the tool output untouched", async () => {
+    const [def] = projectToolsForClaude(
+      [echoTool()],
+      projection(undefined, async () => ({ outcome: "allow" })),
+    );
+    if (!def) throw new Error("narrow");
+    const result = await def.handler({ value: "hi" }, {});
+    expect(result.content[0]?.text).toBe("echo:hi");
     expect(result.isError).toBeUndefined();
   });
 });
