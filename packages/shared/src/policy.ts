@@ -58,12 +58,39 @@ export type PolicyEvent =
   | { phase: "request"; prompt: string }
   | { phase: "response"; text: string };
 
-// Per-evaluation context handed to every policy alongside the event. Minimal in
-// Phase 1; later phases extend it (session id, accumulated turn usage, abort
-// signal) without changing the `evaluate` signature.
+// The cost signal a budget policy reads to apply downgrade-gate semantics: at
+// the ceiling, deny only while on an expensive model. A subset of `ModelInfo`
+// (chat.ts), restated here so the policy contract doesn't depend on the chat
+// module.
+export interface ModelCostHint {
+  readonly costTier?: "free" | "low" | "mid" | "high";
+  readonly billing?: "metered" | "subscription";
+}
+
+// Accumulated spend for the current session (a chat conversation or a workflow
+// run), summed by the seam from persisted per-turn usage so a budget policy can
+// gate on cumulative cost without the engine reaching into a store.
+export interface SessionUsage {
+  // input + output tokens across the session so far.
+  readonly totalTokens: number;
+  // Model-calling turns/nodes completed in the session so far.
+  readonly turns: number;
+}
+
+// Per-evaluation context handed to every policy alongside the event. The
+// `tool_call` seams populate only `surface`/`ribId`/`provider`; the `request`
+// seam additionally carries `model` and `usage` so a budget policy can gate
+// cumulative spend. `evaluate`'s signature stays fixed across phases.
 export interface PolicyContext {
   readonly surface: PolicySurface;
   readonly ribId?: string;
+  // The provider id backing the turn under evaluation, when known.
+  readonly provider?: string;
+  // The model about to run, reduced to its cost signal — present at the
+  // `request` seam for downgrade-gate budget policies.
+  readonly model?: ModelCostHint;
+  // Accumulated session spend — present at the `request` seam for budget gating.
+  readonly usage?: SessionUsage;
 }
 
 export interface Policy {

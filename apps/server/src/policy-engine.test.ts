@@ -194,6 +194,23 @@ describe("createPolicyEngine — projectTools", () => {
     await engine.projectTools(tools("a"), { surface: "rib", ribId: "chamber" });
     expect(seen).toEqual({ surface: "rib", ribId: "chamber" });
   });
+
+  it("threads provider onto the tool_call context, not just the event", async () => {
+    let seen: { surface: string; provider?: string } | undefined;
+    const recorder: Policy = {
+      id: "recorder",
+      evaluate: (_e, ctx) => {
+        seen = {
+          surface: ctx.surface,
+          ...(ctx.provider !== undefined ? { provider: ctx.provider } : {}),
+        };
+        return { outcome: "allow" };
+      },
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy: recorder }] });
+    await engine.evaluateToolCall({ tool: "a" }, { surface: "chat", provider: "claude" });
+    expect(seen).toEqual({ surface: "chat", provider: "claude" });
+  });
 });
 
 describe("createPolicyEngine — evaluateToolCall", () => {
@@ -473,5 +490,203 @@ describe("createPolicyEngine — ask_on_shell builtin", () => {
     const d = await engine.evaluateToolCall({ tool: "Bash" }, chat);
     expect(d.outcome).toBe("deny");
     expect((d as { reason: string }).reason).toContain("requires approval (deferred)");
+  });
+});
+
+describe("createPolicyEngine — requestPhaseActive", () => {
+  it("is false with no budget builtins and no request-phase policy", () => {
+    expect(createPolicyEngine().requestPhaseActive).toBe(false);
+    expect(createPolicyEngine({ askOnShell: true, denylist: ["x"] }).requestPhaseActive).toBe(
+      false,
+    );
+  });
+
+  it("is true when a budget builtin is enabled", () => {
+    expect(createPolicyEngine({ turnBudget: 5 }).requestPhaseActive).toBe(true);
+    expect(createPolicyEngine({ costBudget: 1000 }).requestPhaseActive).toBe(true);
+  });
+
+  it("is true when a rib policy self-selects (no `on` matcher)", () => {
+    const selfSelect: Policy = { id: "s", evaluate: () => ({ outcome: "allow" }) };
+    expect(
+      createPolicyEngine({ ribPolicies: [{ ribId: "r", policy: selfSelect }] }).requestPhaseActive,
+    ).toBe(true);
+  });
+
+  it("a tool_call-only rib policy does not activate the request phase", () => {
+    const toolOnly: Policy = {
+      id: "t",
+      on: [{ phase: "tool_call" }],
+      evaluate: () => ({ outcome: "allow" }),
+    };
+    expect(
+      createPolicyEngine({ ribPolicies: [{ ribId: "r", policy: toolOnly }] }).requestPhaseActive,
+    ).toBe(false);
+  });
+});
+
+describe("createPolicyEngine — turn_budget builtin", () => {
+  const expensive = { costTier: "high" as const };
+
+  it("allows a turn under the ceiling regardless of model", async () => {
+    const engine = createPolicyEngine({ turnBudget: 5 });
+    const d = await engine.evaluateRequest({
+      surface: "chat",
+      model: expensive,
+      usage: { totalTokens: 9_999, turns: 4 },
+    });
+    expect(d).toEqual({ outcome: "allow" });
+  });
+
+  it("denies at the ceiling on an expensive model, naming the downgrade", async () => {
+    const engine = createPolicyEngine({ turnBudget: 5 });
+    const d = await engine.evaluateRequest({
+      surface: "chat",
+      model: expensive,
+      usage: { totalTokens: 0, turns: 5 },
+    });
+    expect(d.outcome).toBe("deny");
+    expect((d as { reason: string }).reason).toContain("turn budget of 5");
+    expect((d as { reason: string }).reason).toContain("cheaper model");
+  });
+
+  it("allows at the ceiling on a cheap model (the downgrade target)", async () => {
+    const engine = createPolicyEngine({ turnBudget: 5 });
+    for (const model of [{ costTier: "low" as const }, { billing: "subscription" as const }]) {
+      const d = await engine.evaluateRequest({
+        surface: "chat",
+        model,
+        usage: { totalTokens: 0, turns: 12 },
+      });
+      expect(d).toEqual({ outcome: "allow" });
+    }
+  });
+
+  it("denies at the ceiling on a metered (real-money) model even at a low tier", async () => {
+    const engine = createPolicyEngine({ turnBudget: 5 });
+    const d = await engine.evaluateRequest({
+      surface: "chat",
+      model: { costTier: "low", billing: "metered" },
+      usage: { totalTokens: 0, turns: 5 },
+    });
+    expect(d.outcome).toBe("deny");
+  });
+
+  it("fails closed at the ceiling when the model is unknown (deny)", async () => {
+    const engine = createPolicyEngine({ turnBudget: 5 });
+    const d = await engine.evaluateRequest({
+      surface: "chat",
+      usage: { totalTokens: 0, turns: 5 },
+    });
+    expect(d.outcome).toBe("deny");
+  });
+
+  it("treats absent usage as zero turns (allow)", async () => {
+    const engine = createPolicyEngine({ turnBudget: 1 });
+    expect(await engine.evaluateRequest({ surface: "chat", model: expensive })).toEqual({
+      outcome: "allow",
+    });
+  });
+
+  it("a zero or negative budget leaves the builtin off (no request gate)", () => {
+    expect(createPolicyEngine({ turnBudget: 0 }).requestPhaseActive).toBe(false);
+    expect(createPolicyEngine({ turnBudget: -3 }).requestPhaseActive).toBe(false);
+  });
+});
+
+describe("createPolicyEngine — cost_budget builtin", () => {
+  const expensive = { costTier: "high" as const };
+
+  it("allows under the token ceiling and denies at it on an expensive model", async () => {
+    const engine = createPolicyEngine({ costBudget: 100_000 });
+    expect(
+      await engine.evaluateRequest({
+        surface: "chat",
+        model: expensive,
+        usage: { totalTokens: 99_999, turns: 0 },
+      }),
+    ).toEqual({ outcome: "allow" });
+    const d = await engine.evaluateRequest({
+      surface: "chat",
+      model: expensive,
+      usage: { totalTokens: 100_000, turns: 0 },
+    });
+    expect(d.outcome).toBe("deny");
+    expect((d as { reason: string }).reason).toContain("token budget of 100000");
+  });
+
+  it("allows at the token ceiling on a cheap model", async () => {
+    const engine = createPolicyEngine({ costBudget: 100_000 });
+    expect(
+      await engine.evaluateRequest({
+        surface: "chat",
+        model: { costTier: "free" },
+        usage: { totalTokens: 500_000, turns: 0 },
+      }),
+    ).toEqual({ outcome: "allow" });
+  });
+
+  it("both budgets together: turn ceiling denies even when tokens are under budget", async () => {
+    const engine = createPolicyEngine({ turnBudget: 3, costBudget: 1_000_000 });
+    const d = await engine.evaluateRequest({
+      surface: "chat",
+      model: expensive,
+      usage: { totalTokens: 10, turns: 3 },
+    });
+    expect(d.outcome).toBe("deny");
+    expect((d as { reason: string }).reason).toContain("turn budget");
+  });
+});
+
+describe("createPolicyEngine — evaluateRequest seam", () => {
+  it("allows by default when no request-phase policy is configured", async () => {
+    const engine = createPolicyEngine();
+    expect(await engine.evaluateRequest({ surface: "chat" })).toEqual({ outcome: "allow" });
+  });
+
+  it("surfaces surface/provider/model/usage on the policy context", async () => {
+    let seen: Record<string, unknown> | undefined;
+    const recorder: Policy = {
+      id: "recorder",
+      on: [{ phase: "request" }],
+      evaluate: (_e, ctx) => {
+        seen = {
+          surface: ctx.surface,
+          provider: ctx.provider,
+          model: ctx.model,
+          usage: ctx.usage,
+        };
+        return { outcome: "allow" };
+      },
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "chamber", policy: recorder }] });
+    await engine.evaluateRequest({
+      surface: "rib",
+      ribId: "chamber",
+      provider: "claude",
+      model: { costTier: "high" },
+      usage: { totalTokens: 42, turns: 2 },
+    });
+    expect(seen).toEqual({
+      surface: "rib",
+      provider: "claude",
+      model: { costTier: "high" },
+      usage: { totalTokens: 42, turns: 2 },
+    });
+  });
+
+  it("a request-phase rib ASK rides the approval round-trip (accept → allow)", async () => {
+    const ask: Policy = {
+      id: "confirm",
+      on: [{ phase: "request" }],
+      evaluate: () => ({ outcome: "ask", reason: "confirm this turn" }),
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: ask }],
+      requestApproval: async () => "accept",
+    });
+    expect(await engine.evaluateRequest({ surface: "rib", ribId: "r" })).toEqual({
+      outcome: "allow",
+    });
   });
 });

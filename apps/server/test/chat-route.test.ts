@@ -790,6 +790,63 @@ describe("handleChatRequest dispatch", () => {
     clearToolRegistry();
   });
 
+  test("a turn over the budget on an expensive model is denied before the provider runs", async () => {
+    const spyId = "spy-budget-deny";
+    let sendQueryCalled = false;
+    const capabilities: ProviderCapabilities = {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      models: ["expensive-model"],
+      defaultModel: "expensive-model",
+    };
+    registerProvider({
+      id: spyId,
+      displayName: "Budget spy",
+      builtIn: false,
+      capabilities,
+      factory: () => ({
+        getType: () => "spy",
+        getCapabilities: () => capabilities,
+        listModels: async () => [{ id: "expensive-model", costTier: "high" }],
+        async *sendQuery(): AsyncGenerator<MessageChunk> {
+          sendQueryCalled = true;
+          yield* [];
+        },
+      }),
+    });
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: spyId, model: "expensive-model" });
+    // A prior assistant turn puts the session at the 1-turn ceiling.
+    store.appendMessage(conv.id, {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: "earlier reply",
+      usage: { inputTokens: 10, outputTokens: 5 },
+      createdAt: new Date().toISOString(),
+    });
+
+    const sent: ChatFrame[] = [];
+    await handleChatRequest(makeFrame(conv.id, spyId, "again"), {
+      send: (f) => sent.push(f),
+      store,
+      abortSignal: new AbortController().signal,
+      policyEngine: createPolicyEngine({ turnBudget: 1 }),
+    });
+
+    // The provider is never opened; the turn ends with a POLICY_DENIED error.
+    expect(sendQueryCalled).toBe(false);
+    const errorFrame = sent.find((f) => f.event.type === "error");
+    expect(errorFrame).toBeDefined();
+    if (errorFrame?.event.type === "error") {
+      expect(errorFrame.event.code).toBe("POLICY_DENIED");
+      expect(errorFrame.event.message).toContain("turn budget");
+    }
+    // …and a terminal done frame, so a client closing on `done` doesn't hang.
+    expect(sent.some((f) => f.event.type === "done")).toBe(true);
+  });
+
   test("the chat turn forwards a per-call gate scoped to the chat surface", async () => {
     clearToolRegistry();
     // Cleared into the projection (no args ⇒ allowed), then gated per-call on args.

@@ -9,11 +9,13 @@
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ModelCostHint,
   Policy,
   PolicyContext,
   PolicyDecision,
   PolicyEvent,
   PolicySurface,
+  SessionUsage,
 } from "@keelson/shared";
 
 // A rib-contributed policy tagged with the rib that supplied it, so the engine
@@ -33,6 +35,15 @@ export interface PolicyEngineOptions {
   // denotes a shell or file-mutating action. Off by default (an unprompted
   // floor would surprise). Operator-toggled via KEELSON_ASK_ON_SHELL.
   askOnShell?: boolean;
+  // Opt-in `turn_budget` builtin: cap model-calling turns per session. A
+  // positive ceiling enables it; at the ceiling it denies a turn only while on
+  // an expensive model (downgrade-gate, see `isExpensiveModel`). Operator-set
+  // via KEELSON_TURN_BUDGET.
+  turnBudget?: number;
+  // Opt-in `cost_budget` builtin: cap accumulated input+output tokens per
+  // session, same downgrade-gate semantics as `turnBudget`. Operator-set via
+  // KEELSON_COST_BUDGET.
+  costBudget?: number;
   // The approval round-trip an `ask` decision rides. When wired, a per-call
   // `ask` pauses here until this resolves accept/reject; when absent, `ask`
   // degrades to deny-with-reason (the pre-Phase-3 behavior). Injected by the
@@ -75,6 +86,24 @@ export interface PolicyEngine {
     call: { tool: string; args?: unknown },
     base: { surface: PolicySurface; ribId?: string; provider?: string; signal?: AbortSignal },
   ): Promise<ToolCallDecision>;
+  // Request-phase gate: evaluate the stack once before a turn runs, carrying the
+  // session's accumulated `usage` and the about-to-run `model`. Backs the budget
+  // builtins (deny when over a ceiling on an expensive model). A rib request-phase
+  // policy that returns `ask` rides the same round-trip as the per-call seam.
+  evaluateRequest(base: {
+    surface: PolicySurface;
+    ribId?: string;
+    provider?: string;
+    model?: ModelCostHint;
+    usage?: SessionUsage;
+    prompt?: string;
+    signal?: AbortSignal;
+  }): Promise<ToolCallDecision>;
+  // True when at least one policy in the stack can match a `request` event (a
+  // budget builtin, or a self-selecting rib policy). Lets a seam skip the
+  // request gate — and the model-tier / usage lookups it needs — entirely when
+  // nothing would consult them.
+  readonly requestPhaseActive: boolean;
 }
 
 // Does a policy's `on` matcher select this event? An absent matcher means the
@@ -134,6 +163,55 @@ function makeAskOnShellPolicy(): Policy {
         return { outcome: "ask", reason: `'${event.tool}' runs shell or file-mutating actions` };
       }
       return { outcome: "allow" };
+    },
+  };
+}
+
+// Is the about-to-run model expensive enough that a reached budget should deny?
+// The downgrade-gate's whole point is to push spend onto a cheaper model, not to
+// kill the session — so a flat-rate subscription login (no marginal token cost)
+// is the safe fallback we never gate, while a premium tier or a metered (real
+// per-token money) login is. An unknown model fails closed: honor the cap.
+function isExpensiveModel(model: ModelCostHint | undefined): boolean {
+  if (model?.billing === "subscription") return false;
+  if (model?.costTier === "mid" || model?.costTier === "high") return true;
+  if (model?.billing === "metered") return true;
+  if (model?.costTier === "free" || model?.costTier === "low") return false;
+  return true;
+}
+
+// Opt-in budget builtins — request-phase policies that deny a turn once the
+// session's accumulated turns/tokens reach the ceiling, but ONLY while on an
+// expensive model (so the user can keep going by switching to a cheaper one).
+// Under the ceiling, or on a cheap/subscription model, they're a no-op.
+function makeTurnBudgetPolicy(maxTurns: number): Policy {
+  return {
+    id: "builtin:turn_budget",
+    on: [{ phase: "request" }],
+    evaluate(event, ctx): PolicyDecision {
+      if (event.phase !== "request") return { outcome: "allow" };
+      if ((ctx.usage?.turns ?? 0) < maxTurns) return { outcome: "allow" };
+      if (!isExpensiveModel(ctx.model)) return { outcome: "allow" };
+      return {
+        outcome: "deny",
+        reason: `session turn budget of ${maxTurns} reached; switch to a cheaper model to continue`,
+      };
+    },
+  };
+}
+
+function makeCostBudgetPolicy(maxTokens: number): Policy {
+  return {
+    id: "builtin:cost_budget",
+    on: [{ phase: "request" }],
+    evaluate(event, ctx): PolicyDecision {
+      if (event.phase !== "request") return { outcome: "allow" };
+      if ((ctx.usage?.totalTokens ?? 0) < maxTokens) return { outcome: "allow" };
+      if (!isExpensiveModel(ctx.model)) return { outcome: "allow" };
+      return {
+        outcome: "deny",
+        reason: `session token budget of ${maxTokens} reached; switch to a cheaper model to continue`,
+      };
     },
   };
 }
@@ -229,11 +307,26 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
   const ordered: { id: string; policy: Policy }[] = [
     { id: "builtin:tool_denylist", policy: makeDenylistPolicy(opts.denylist ?? []) },
     ...(opts.askOnShell ? [{ id: "builtin:ask_on_shell", policy: makeAskOnShellPolicy() }] : []),
+    ...(opts.turnBudget && opts.turnBudget > 0
+      ? [{ id: "builtin:turn_budget", policy: makeTurnBudgetPolicy(opts.turnBudget) }]
+      : []),
+    ...(opts.costBudget && opts.costBudget > 0
+      ? [{ id: "builtin:cost_budget", policy: makeCostBudgetPolicy(opts.costBudget) }]
+      : []),
     ...(opts.ribPolicies ?? []).map((c) => ({
       id: `rib:${c.ribId}:${c.policy.id}`,
       policy: c.policy,
     })),
   ];
+
+  // A policy can match a `request` event if it self-selects (no `on`) or lists
+  // the phase. Precomputed so a seam can skip its usage/model gathering when the
+  // stack holds nothing that would read them.
+  const requestPhaseActive = ordered.some(
+    ({ policy }) =>
+      policy.on === undefined ||
+      (Array.isArray(policy.on) && policy.on.some((m) => m?.phase === "request")),
+  );
 
   // Projection seam: an `ask` lets the tool through (so the per-call seam can
   // ask when it's actually called) when a channel is wired; otherwise it
@@ -272,9 +365,14 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
       }
     };
 
-  const makeCtx = (base: { surface: PolicySurface; ribId?: string }): PolicyContext => ({
+  const makeCtx = (base: {
+    surface: PolicySurface;
+    ribId?: string;
+    provider?: string;
+  }): PolicyContext => ({
     surface: base.surface,
     ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
+    ...(base.provider !== undefined ? { provider: base.provider } : {}),
   });
 
   const toolCallEvent = (
@@ -315,6 +413,22 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
         ordered,
         toolCallEvent(call.tool, base, call.args),
         makeCtx(base),
+        perCallAsk(base),
+      );
+    },
+
+    requestPhaseActive,
+
+    async evaluateRequest(base) {
+      const ctx: PolicyContext = {
+        ...makeCtx(base),
+        ...(base.model !== undefined ? { model: base.model } : {}),
+        ...(base.usage !== undefined ? { usage: base.usage } : {}),
+      };
+      return evaluateStack(
+        ordered,
+        { phase: "request", prompt: base.prompt ?? "" },
+        ctx,
         perCallAsk(base),
       );
     },

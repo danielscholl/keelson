@@ -73,6 +73,7 @@ export {
   type PromptHandlerLifecycle,
   type PromptHandlerProvider,
   type PromptHandlerSendOptions,
+  type PromptRequestGate,
   type PromptToolCallGate,
   type PromptToolGate,
 } from "./handlers/prompt.ts";

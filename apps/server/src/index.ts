@@ -6,7 +6,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
-import { registerGatewayProvider, unregisterProvider } from "@keelson/providers";
+import {
+  getAgentProvider,
+  isRegisteredProvider,
+  registerGatewayProvider,
+  unregisterProvider,
+} from "@keelson/providers";
 import {
   DEFAULT_PROJECT_NAME,
   POLICY_APPROVALS_SNAPSHOT_KEY,
@@ -51,6 +56,7 @@ import { gatewaysRoutes } from "./gateways-handler.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore } from "./memory-store.ts";
+import { resolveModelCostHint } from "./model-cost-hint.ts";
 import type { PolicyEngine } from "./policy-engine.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
 import { createProjectNotebookStore } from "./project-notebook-store.ts";
@@ -328,6 +334,25 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
             ...(provider !== undefined ? { provider } : {}),
           })
         : Promise.resolve({ outcome: "allow" as const }),
+    // Request-phase budget gate for prompt nodes: before a node opens its
+    // provider session, check the run's accumulated spend against the budget
+    // builtins. Skipped (no usage/model lookups) when no policy reads the
+    // request phase, so the default no-budget path stays free.
+    requestGate: async ({ runId }, model, provider) => {
+      const engine = policyEngine;
+      if (!engine?.requestPhaseActive) return { outcome: "allow" as const };
+      const usage = workflowStore.getRunUsageTotals(runId);
+      const hint =
+        provider !== undefined && isRegisteredProvider(provider)
+          ? await resolveModelCostHint(getAgentProvider(provider), model)
+          : undefined;
+      return engine.evaluateRequest({
+        surface: "workflow",
+        ...(provider !== undefined ? { provider } : {}),
+        ...(hint !== undefined ? { model: hint } : {}),
+        usage,
+      });
+    },
   });
 
   // Shared handler options so the HTTP routes and the in-process WorkflowController

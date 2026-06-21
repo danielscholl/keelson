@@ -115,6 +115,24 @@ keelson approval list
 keelson approval resolve <id> accept   # or: reject
 ```
 
+### Budgets (policy DENY)
+
+Cap a session's spend with two opt-in builtins. `KEELSON_TURN_BUDGET=<n>` limits
+model-calling turns; `KEELSON_COST_BUDGET=<tokens>` limits accumulated
+input+output tokens. A "session" is a chat conversation or a workflow run; both
+gate before each turn.
+
+They're a **downgrade gate, not a wall**: once the ceiling is reached, a turn is
+denied *only while it runs on an expensive model* (a premium cost tier or a
+metered, per-token login), with the message telling you to switch. A turn on a
+cheaper or flat-rate subscription model keeps going — so the budget pushes spend
+off your metered model rather than killing the session. Unset (or a non-positive
+value) leaves each builtin off.
+
+```bash
+KEELSON_TURN_BUDGET=40 KEELSON_COST_BUDGET=2000000 keelson start
+```
+
 > **Windows note.** The `bash` workflow node (and `loop` `until_bash`) need a
 > POSIX shell — install [Git for Windows](https://git-scm.com/download/win) and
 > Keelson auto-discovers its `bash.exe` (`KEELSON_BASH` overrides). The `prompt`,

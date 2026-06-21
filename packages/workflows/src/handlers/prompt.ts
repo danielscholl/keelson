@@ -112,6 +112,18 @@ export type PromptToolCallGate = (
   provider?: string,
 ) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 
+// Request-phase gate run once before the node opens its provider session. The
+// harness backs it with the unified policy engine's budget builtins (deny when
+// the run's accumulated spend has reached a ceiling on an expensive model). The
+// node's effective `model` / `provider` ride along so the gate can resolve the
+// model's cost tier; a deny fails the node with the policy's reason. Absent →
+// the node always runs (standalone / no-engine path).
+export type PromptRequestGate = (
+  ctx: { runId: string; nodeId: string },
+  model?: string,
+  provider?: string,
+) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
+
 export interface MakePromptHandlerOptions {
   /**
    * Resolves the provider to use for this node. Called once per invocation
@@ -147,6 +159,12 @@ export interface MakePromptHandlerOptions {
    * Absent → no per-call gating (standalone / no-engine path).
    */
   evaluateToolCall?: PromptToolCallGate;
+  /**
+   * Request-phase gate run before the provider session opens. Backed by the
+   * unified policy engine's budget builtins. A deny fails the node with the
+   * policy's reason; absent → the node always runs.
+   */
+  requestGate?: PromptRequestGate;
   /** Per-node timeout in milliseconds. Defaults to 10 minutes. */
   timeoutMs?: number;
   /** Memory hook seam. Default is no-ops; reserved for the future memory layer. */
@@ -409,6 +427,22 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             const defaultModel = provider.getCapabilities?.().defaultModel;
             if (typeof defaultModel === "string" && defaultModel.length > 0) {
               model = defaultModel;
+            }
+          }
+          // Request-phase budget gate (after model resolution so the gate can
+          // read the effective model's cost tier). A deny fails the node with
+          // the policy's reason — no provider session is opened. Routed through
+          // providerError so the existing terminal-state logic builds the failed
+          // NodeResult; returning here skips the stream entirely.
+          if (opts.requestGate) {
+            const decision = await opts.requestGate(
+              { runId: ctx.runId, nodeId: ctx.nodeId },
+              model,
+              effectiveProviderId,
+            );
+            if (decision.outcome === "deny") {
+              providerError = decision.reason;
+              return;
             }
           }
           const stream = provider.sendQuery(promptBody, ctx.cwd, undefined, {

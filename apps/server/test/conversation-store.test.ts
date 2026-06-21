@@ -66,6 +66,30 @@ describe("SQLite ConversationStore", () => {
     db.close();
   });
 
+  test("getUsageTotals sums assistant-turn tokens and counts assistant turns", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createConversationStore(db);
+    const conv = store.create({ providerId: "stub" });
+    expect(store.getUsageTotals(conv.id)).toEqual({ totalTokens: 0, turns: 0 });
+
+    store.appendMessage(conv.id, makeMessage({ role: "user", content: "hi" }));
+    store.appendMessage(conv.id, {
+      ...makeMessage({ role: "assistant", content: "a" }),
+      usage: { inputTokens: 100, outputTokens: 40 },
+    });
+    store.appendMessage(conv.id, {
+      ...makeMessage({ role: "assistant", content: "b" }),
+      usage: { inputTokens: 200, outputTokens: 60 },
+    });
+    // An assistant turn that recorded no usage still counts as a turn; the user
+    // message never does.
+    store.appendMessage(conv.id, makeMessage({ role: "assistant", content: "c" }));
+
+    expect(store.getUsageTotals(conv.id)).toEqual({ totalTokens: 400, turns: 3 });
+
+    db.close();
+  });
+
   test("list preserves insertion order when createdAt ties", () => {
     const db = openDatabase({ path: dbPath });
     const store = createConversationStore(db);

@@ -132,6 +132,45 @@ describe("makePromptHandler", () => {
     expect(result.output.kind === "text" ? result.output.text : "").toBe("Hello world");
   });
 
+  test("requestGate deny fails the node before opening a provider session", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "should not run" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      requestGate: async () => ({
+        outcome: "deny",
+        reason: "session token budget reached; switch to a cheaper model to continue",
+      }),
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("token budget");
+    // The provider session is never opened on a deny.
+    expect(calls).toHaveLength(0);
+  });
+
+  test("requestGate allow runs the node and receives the resolved model + provider", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
+    let seen: { runId: string; model?: string; provider?: string } | undefined;
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      requestGate: async (ctx, model, prov) => {
+        seen = { runId: ctx.runId, model, provider: prov };
+        return { outcome: "allow" };
+      },
+    });
+    const node = { id: "n1", prompt: "", model: "claude-sonnet-4-6" } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx({ workflowProvider: "claude" }));
+    expect(result.status).toBe("succeeded");
+    expect(calls).toHaveLength(1);
+    expect(seen).toEqual({ runId: "test-run", model: "claude-sonnet-4-6", provider: "claude" });
+  });
+
   test("emits node_chunk events for every non-done chunk", async () => {
     const chunks = [
       { type: "text", content: "a" },

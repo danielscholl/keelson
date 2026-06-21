@@ -36,6 +36,7 @@ import { buildChatSystemPrompt, type WorkflowSummaryLike } from "./chat-prompt.t
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import { resolveModelCostHint } from "./model-cost-hint.ts";
 import { createNoteProjectTool } from "./note-project-tool.ts";
 import type { PolicyEngine } from "./policy-engine.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
@@ -543,6 +544,33 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
           signal: deps.abortSignal,
         })
     : undefined;
+
+  // Request-phase budget gate: when a budget builtin (or a request-phase rib
+  // policy) is active, check the session's accumulated spend before spending
+  // another turn. A deny ends the turn with the policy's reason instead of
+  // calling the provider — the downgrade-gate reason tells the user to switch
+  // models. Skipped (along with the listModels/usage lookups) when nothing reads
+  // the request phase, so the default no-budget path pays nothing.
+  if (engine?.requestPhaseActive) {
+    const usage = deps.store.getUsageTotals(conversationId);
+    const model = await resolveModelCostHint(provider, message.model ?? conv.model);
+    const decision = await engine.evaluateRequest({
+      surface: "chat",
+      provider: message.providerId,
+      ...(model !== undefined ? { model } : {}),
+      usage,
+      prompt: message.prompt,
+      signal: deps.abortSignal,
+    });
+    if (decision.outcome === "deny") {
+      if (deps.abortSignal.aborted) return;
+      deps.send(errorFrame(conversationId, decision.reason, "POLICY_DENIED"));
+      // Terminate the turn like every other error early-return — a client that
+      // closes on `done` would otherwise hang waiting for a stream that never ran.
+      deps.send(doneFrame(conversationId));
+      return;
+    }
+  }
 
   try {
     for await (const chunk of provider.sendQuery(message.prompt, cwd, resumeSessionId, {
