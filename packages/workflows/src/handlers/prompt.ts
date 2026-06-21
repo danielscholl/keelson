@@ -595,23 +595,23 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // settle quietly without an unhandled-rejection warning.
       consumePromise.then(undefined, () => undefined);
 
-      // Response-phase policy gate on the COMPLETE assembled text — only on a
-      // clean turn (a cancelled / timed-out / errored / tool-errored turn has no
-      // complete response to govern and routes to a failed NodeResult below).
-      // Runs before assistantText becomes the node output: a deny fails the node
-      // (via providerError), an allow+data substitutes the output. Fail open on a
-      // gate fault — a response-gate bug must not take the node down.
-      if (
-        opts.evaluateResponse &&
-        !cancelled &&
-        !timedOut &&
-        providerError === null &&
-        !(failOnToolError && toolErrored)
-      ) {
+      // Response-phase policy gate on the COMPLETE assembled text. Runs whenever
+      // the turn produced a full response (skipped only on cancel / timeout /
+      // provider error, where there's no complete text) — INCLUDING a
+      // tool-errored turn, whose model reply is still recorded as the failed
+      // node's output. Governs that output (the value `$nodeId.output` resolves
+      // to downstream, and the recorded output), not the already-streamed
+      // transcript. A deny fails the node; an allow+data substitutes. Fail open
+      // on a gate fault — a response-gate bug must not take the node down.
+      if (opts.evaluateResponse && !cancelled && !timedOut && providerError === null) {
         try {
           const decision = await opts.evaluateResponse(assistantText, effectiveProviderId);
           if (decision.outcome === "deny") {
             providerError = decision.reason;
+            // Drop the forbidden text — the failed NodeResult below records it as
+            // `output.text`, so keeping it would leak what the deny meant to
+            // block. The reason rides `error`, not the output.
+            assistantText = "";
           } else if (typeof decision.data === "string") {
             assistantText = decision.data;
           }

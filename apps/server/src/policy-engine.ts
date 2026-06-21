@@ -47,8 +47,7 @@ export interface PolicyEngineOptions {
   // Opt-in `redact` builtin: a regex whose matches are replaced with [REDACTED]
   // in every `tool_result` and `response` text before the model (or a downstream
   // workflow node) consumes it. Off by default — an unset/blank/invalid pattern
-  // leaves it off. Operator-set via KEELSON_REDACT_PATTERN. This is the concrete
-  // consumer that exercises the `tool_result` / `response` phases end-to-end.
+  // leaves it off. Operator-set via KEELSON_REDACT_PATTERN.
   redactPattern?: string;
   // The approval round-trip an `ask` decision rides. When wired, a per-call
   // `ask` pauses here until this resolves accept/reject; when absent, `ask`
@@ -259,10 +258,9 @@ function makeCostBudgetPolicy(maxTokens: number): Policy {
 
 // Opt-in `redact` builtin — replaces every match of `pattern` with [REDACTED]
 // in a `tool_result` / `response` text and returns it as an allow-with-`data`
-// substitution. The concrete consumer of the result/response phases: it proves
-// the `PolicyDecision.data` substitution path end-to-end. `pattern` must carry
-// the global flag so `.replace` redacts all matches (createPolicyEngine compiles
-// it that way). A non-string result (or no match) is a no-op allow.
+// substitution. `pattern` must carry the global flag so `.replace` redacts all
+// matches (createPolicyEngine compiles it that way). A non-string result (or no
+// match) is a no-op allow.
 function makeRedactPolicy(pattern: RegExp): Policy {
   return {
     id: "builtin:redact",

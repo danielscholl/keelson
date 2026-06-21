@@ -348,7 +348,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
             })
         : undefined,
     // Response gate — runs the `response` phase on the node's complete output
-    // before it propagates downstream / persists. Wired only when a policy reads
+    // before it propagates to dependent nodes. Wired only when a policy reads
     // the phase. A deny fails the node; an allow+data substitutes the output.
     evaluateResponse:
       policyEngine?.responsePhaseActive === true

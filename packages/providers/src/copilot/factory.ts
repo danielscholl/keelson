@@ -237,9 +237,9 @@ async function runToolHandler(
   gate?: ToolCallGate,
   resultGate?: ToolResultGate,
 ): Promise<string> {
-  // Skills emit tool_result with a placeholder toolUseId; we capture it here and
-  // emit the (id-rewritten, policy-gated) chunk once after the result gate runs,
-  // so the UI echo matches exactly what the model is handed.
+  // Capture the skill's tool_result (placeholder toolUseId) and emit the
+  // id-rewritten, policy-gated chunk after the result gate — so the UI echo
+  // matches exactly what the model is handed.
   let resultContent: string | null = null;
   let resultIsError = false;
   const ctx: ToolContext = {

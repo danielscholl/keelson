@@ -43,11 +43,13 @@ import { z } from "zod";
  *
  * The `response` phase is evaluated where the full turn text is BUFFERED before
  * it becomes a downstream source of truth — today the workflow `prompt` node's
- * assembled output, before it propagates to dependent nodes and persists.
- * `deny` fails the node; an `allow` with string `data` substitutes the output.
- * The chat and rib streaming seams deliberately do NOT wire `response`: there
- * the text reaches the human as it streams, so a whole-text verdict can neither
- * retract it nor enforce anything.
+ * assembled output. It governs the node's OUTPUT: the value `$nodeId.output`
+ * resolves to in dependent nodes, and the recorded output. `deny` fails the
+ * node; an `allow` with string `data` substitutes that output. It does NOT
+ * retract the node's already-streamed transcript — like the chat and rib
+ * streaming seams (where the text reaches the human as it streams), a whole-text
+ * verdict can't claw back what already streamed; those seams wire no `response`
+ * gate at all.
  *
  * An `ask` on `tool_result` / `response` has no round-trip (the work already
  * ran) and degrades to deny-with-reason.

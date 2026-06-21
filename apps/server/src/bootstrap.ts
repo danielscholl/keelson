@@ -708,10 +708,6 @@ export function bootstrapPolicyEngine(
       return costBudget !== undefined ? { costBudget } : {};
     })(),
     ...(() => {
-      // KEELSON_REDACT_PATTERN — a regex whose matches are replaced with
-      // [REDACTED] in tool results / responses. Unset or blank leaves the
-      // `redact` builtin off; an invalid pattern is reported and ignored inside
-      // the engine.
       const redactPattern = process.env.KEELSON_REDACT_PATTERN?.trim();
       return redactPattern ? { redactPattern } : {};
     })(),

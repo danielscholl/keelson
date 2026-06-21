@@ -440,6 +440,34 @@ describe("makePromptHandler", () => {
     expect(result.output.kind === "text" ? result.output.text : "").toBe("kept");
   });
 
+  test("evaluateResponse still redacts the output of a tool-errored (fail_on_tool_error) node", async () => {
+    // The model produced a complete reply, but a tool errored → the node fails.
+    // The reply is still recorded as the failed node's output, so the response
+    // gate must run and redact it rather than leak the secret.
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "text", content: "the secret is hunter2" },
+        { type: "tool_result", toolUseId: "t1", content: "boom", isError: true },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      evaluateResponse: async (text) => ({
+        outcome: "allow",
+        data: text.replace("hunter2", "[REDACTED]"),
+      }),
+    });
+    const node = { id: "n1", prompt: "", fail_on_tool_error: true } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx());
+    // Fails on the tool error, but its recorded output is redacted (no leak).
+    expect(result.status).toBe("failed");
+    expect(result.output.kind === "text" ? result.output.text : "").toBe(
+      "the secret is [REDACTED]",
+    );
+  });
+
   test("a throwing projectTools gate fails open — node-resolved tools still pass through", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "" }, { type: "done" }],
