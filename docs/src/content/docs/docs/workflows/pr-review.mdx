@@ -98,9 +98,10 @@ it tries. The only write in the whole run is the final posted review.
 
 **A triage gate stands between the lanes and the PR.** The lanes are
 deliberately noisy; an opus `triage` judge then de-dupes their findings, scores
-each for confidence that it is a real, in-scope issue, and drops everything below
-CRITICAL/HIGH/MEDIUM at 80% confidence (all LOW-severity findings included). Only
-what survives is anchored to a diff line and posted, so the PR author sees a
+each for confidence that it is a real, in-scope issue, and keeps only
+CRITICAL/HIGH/MEDIUM findings at 80% confidence or higher. Everything less
+certain is dropped as noise, and every LOW-severity finding is dropped outright.
+Only what survives is anchored to a diff line and posted, so the PR author sees a
 short list of high-signal inline comments rather than four lanes' worth of raw
 output. `build-review` also hashes the kept findings' stable identity into the
 review body, so a re-review does not repost the same comments.
