@@ -31,8 +31,28 @@ import { z } from "zod";
  * `ask` lets the tool through so it can be asked for when actually called; the
  * per-call seam runs the round-trip (pause → accept→allow, reject/timeout→deny).
  * With no approval channel wired, an `ask` degrades to deny-with-reason at both
- * seams. The other phases are declared for the request/response hooks later
- * phases wire in.
+ * seams.
+ *
+ * The `tool_result` phase is evaluated PROVIDER-SIDE, after a keelson tool's
+ * `execute` returns but before the result reaches the model — inside each
+ * provider's custom-tool handler (Claude / Copilot / pi). It gates what the
+ * model actually consumes, not the UI echo. `deny` replaces the result with the
+ * reason; an `allow` carrying a string `data` substitutes that text for the
+ * result (redaction). Built-in SDK tools (the agent's own Bash/Edit/Write) run
+ * outside this handler and are out of scope here.
+ *
+ * The `response` phase is evaluated where the full turn text is BUFFERED before
+ * it becomes a downstream source of truth — today the workflow `prompt` node's
+ * assembled output. It governs the node's OUTPUT: the value `$nodeId.output`
+ * resolves to in dependent nodes, and the recorded output. `deny` fails the
+ * node; an `allow` with string `data` substitutes that output. It does NOT
+ * retract the node's already-streamed transcript — like the chat and rib
+ * streaming seams (where the text reaches the human as it streams), a whole-text
+ * verdict can't claw back what already streamed; those seams wire no `response`
+ * gate at all.
+ *
+ * An `ask` on `tool_result` / `response` has no round-trip (the work already
+ * ran) and degrades to deny-with-reason.
  */
 
 // Which turn surface triggered evaluation. Lets a policy scope itself (e.g.
@@ -40,9 +60,13 @@ import { z } from "zod";
 export type PolicySurface = "chat" | "workflow" | "rib";
 
 export type PolicyDecision =
-  // `data` is reserved for a future content-substitution/redaction outcome; an
-  // allow today means "no opinion" — it never silences a provider's own consent
-  // prompt, so policy gating and user consent stay independent.
+  // On `tool_result` / `response`, an allow carrying a string `data` SUBSTITUTES
+  // that text for the result/response the model (or a downstream node) sees —
+  // the redaction outcome. On `tool_call`, allow means "no opinion" (`data` is
+  // ignored): it never silences a provider's own consent prompt, so policy
+  // gating and user consent stay independent. `data` stays `unknown` so a future
+  // structured phase can substitute non-text payloads; the text phases apply it
+  // only when it's a string.
   | { outcome: "allow"; data?: unknown }
   // The agent receives `reason` as a tool error (or the tool is dropped from the
   // projection in Phase 1).

@@ -12,8 +12,8 @@
 
 import type { ToolContext } from "@keelson/shared";
 import { ensureSpawnPath } from "@keelson/shared/exec";
-import { checkToolCallGate } from "../tool-gate.ts";
-import type { MessageChunk, ToolCallGate, ToolDefinition } from "../types.ts";
+import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
+import type { MessageChunk, ToolCallGate, ToolDefinition, ToolResultGate } from "../types.ts";
 import {
   buildBuiltinToolGateHooks,
   buildSDKHooksFromYAML,
@@ -203,6 +203,10 @@ export interface ClaudeToolProjectionContext {
   // error tool_result. Built-in SDK tools run in the CLI subprocess and never
   // reach this handler, so they are out of this gate's scope.
   evaluateToolCall?: ToolCallGate;
+  // Per-result policy gate (server-wired). When present, each MCP/skill tool's
+  // captured output is evaluated AFTER execute and before it returns to the
+  // model — a deny replaces it with the reason, an allow+data substitutes it.
+  evaluateToolResult?: ToolResultGate;
 }
 
 export interface CreateQueryParams {
@@ -272,6 +276,7 @@ export function projectToolsForClaude(
         rawArgs,
         ctx,
         projection.evaluateToolCall,
+        projection.evaluateToolResult,
       );
       return isError
         ? { content: [{ type: "text", text: content }], isError: true }
@@ -296,6 +301,7 @@ async function runClaudeToolHandler(
   rawArgs: unknown,
   ctxIn: ToolContext,
   gate?: ToolCallGate,
+  resultGate?: ToolResultGate,
 ): Promise<{ content: string; isError: boolean }> {
   // tool_result chunks from the skill are captured here but NOT forwarded —
   // the SDK emits the canonical block via the next user message (which
@@ -334,10 +340,10 @@ async function runClaudeToolHandler(
     return { content: message, isError: true };
   }
 
-  if (resultContent === null) {
-    return { content: "", isError: false };
-  }
-  return { content: resultContent, isError: resultIsError };
+  // Per-result policy gate, on the captured output before it returns to the SDK
+  // (which feeds it to the model AND echoes it back as the UI's tool_result), so
+  // a deny/redaction reaches both. An execute that emitted no result yields "".
+  return applyToolResultGate(resultGate, tool.name, resultContent ?? "", resultIsError);
 }
 
 // Shells out to `claude auth status --json` because the SDK doesn't expose a

@@ -757,3 +757,277 @@ describe("createPolicyEngine — evaluateRequest seam", () => {
     });
   });
 });
+
+describe("createPolicyEngine — result/response phase activity flags", () => {
+  it("are false with only tool_call / request builtins", () => {
+    const engine = createPolicyEngine({ denylist: ["x"], turnBudget: 5 });
+    expect(engine.resultPhaseActive).toBe(false);
+    expect(engine.responsePhaseActive).toBe(false);
+  });
+
+  it("the redact builtin activates BOTH the result and response phases", () => {
+    const engine = createPolicyEngine({ redactPattern: "secret" });
+    expect(engine.resultPhaseActive).toBe(true);
+    expect(engine.responsePhaseActive).toBe(true);
+  });
+
+  it("a tool_result-only rib policy activates only the result phase", () => {
+    const policy: Policy = {
+      id: "redactor",
+      on: [{ phase: "tool_result" }],
+      evaluate: () => ({ outcome: "allow" }),
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy }] });
+    expect(engine.resultPhaseActive).toBe(true);
+    expect(engine.responsePhaseActive).toBe(false);
+  });
+
+  it("a self-selecting rib policy (no `on`) activates every phase", () => {
+    const policy: Policy = { id: "all", evaluate: () => ({ outcome: "allow" }) };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy }] });
+    expect(engine.resultPhaseActive).toBe(true);
+    expect(engine.responsePhaseActive).toBe(true);
+  });
+});
+
+describe("createPolicyEngine — evaluateToolResult", () => {
+  it("allows an unmatched result through unchanged (no substitution)", async () => {
+    const engine = createPolicyEngine({ redactPattern: "secret" });
+    expect(await engine.evaluateToolResult({ tool: "fetch", result: "all clear" }, chat)).toEqual({
+      outcome: "allow",
+    });
+  });
+
+  it("redacts a matching result via the builtin, returning the substituted data", async () => {
+    const engine = createPolicyEngine({ redactPattern: "sk-[a-z0-9]+" });
+    const d = await engine.evaluateToolResult(
+      { tool: "fetch", result: "token is sk-abc123 ok" },
+      chat,
+    );
+    expect(d).toEqual({ outcome: "allow", data: "token is [REDACTED] ok" });
+  });
+
+  it("redacts EVERY match (the pattern is compiled global)", async () => {
+    const engine = createPolicyEngine({ redactPattern: "secret" });
+    const d = await engine.evaluateToolResult(
+      { tool: "fetch", result: "secret then secret" },
+      chat,
+    );
+    expect(d).toEqual({ outcome: "allow", data: "[REDACTED] then [REDACTED]" });
+  });
+
+  it("a rib policy can DENY a result, short-circuiting with its reason", async () => {
+    const policy: Policy = {
+      id: "block-pii",
+      on: [{ phase: "tool_result" }],
+      evaluate: (e) =>
+        e.phase === "tool_result" && String(e.result).includes("ssn")
+          ? { outcome: "deny", reason: "result contains PII" }
+          : { outcome: "allow" },
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy }] });
+    expect(
+      await engine.evaluateToolResult(
+        { tool: "fetch", result: "ssn 000" },
+        {
+          surface: "rib",
+          ribId: "r",
+        },
+      ),
+    ).toEqual({ outcome: "deny", reason: "result contains PII" });
+  });
+
+  it("CHAINS substitutions: a later policy sees the earlier policy's redaction", async () => {
+    const first: Policy = {
+      id: "a",
+      on: [{ phase: "tool_result" }],
+      evaluate: (e) =>
+        e.phase === "tool_result"
+          ? { outcome: "allow", data: String(e.result).replace("alpha", "A") }
+          : { outcome: "allow" },
+    };
+    const second: Policy = {
+      id: "b",
+      on: [{ phase: "tool_result" }],
+      // Proves chaining: it only finds "A bravo" if `first` already ran.
+      evaluate: (e) =>
+        e.phase === "tool_result" && e.result === "A bravo"
+          ? { outcome: "allow", data: "A B" }
+          : { outcome: "allow" },
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        { ribId: "r", policy: first },
+        { ribId: "r", policy: second },
+      ],
+    });
+    expect(await engine.evaluateToolResult({ tool: "t", result: "alpha bravo" }, chat)).toEqual({
+      outcome: "allow",
+      data: "A B",
+    });
+  });
+
+  it("first-DENY-wins beats a later substitution", async () => {
+    const deny: Policy = {
+      id: "deny",
+      on: [{ phase: "tool_result" }],
+      evaluate: () => ({ outcome: "deny", reason: "no" }),
+    };
+    const redact: Policy = {
+      id: "redact",
+      on: [{ phase: "tool_result" }],
+      evaluate: () => ({ outcome: "allow", data: "redacted" }),
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        { ribId: "r", policy: deny },
+        { ribId: "r", policy: redact },
+      ],
+    });
+    expect(await engine.evaluateToolResult({ tool: "t", result: "x" }, chat)).toEqual({
+      outcome: "deny",
+      reason: "no",
+    });
+  });
+
+  it("degrades an ASK on a result to deny (a result that already ran has no round-trip)", async () => {
+    const ask: Policy = {
+      id: "ask",
+      on: [{ phase: "tool_result" }],
+      evaluate: () => ({ outcome: "ask", reason: "confirm exposure" }),
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: ask }],
+      requestApproval: async () => "accept",
+    });
+    expect(await engine.evaluateToolResult({ tool: "t", result: "x" }, chat)).toEqual({
+      outcome: "deny",
+      reason: "confirm exposure",
+    });
+  });
+
+  it("fails closed per-policy: a throwing result policy is a no-op, never a crash", async () => {
+    const boom: Policy = {
+      id: "boom",
+      on: [{ phase: "tool_result" }],
+      evaluate: () => {
+        throw new Error("kaboom");
+      },
+    };
+    const redact: Policy = {
+      id: "redact",
+      on: [{ phase: "tool_result" }],
+      evaluate: () => ({ outcome: "allow", data: "clean" }),
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        { ribId: "r", policy: boom },
+        { ribId: "r", policy: redact },
+      ],
+    });
+    // boom contributes no opinion; redact still applies.
+    expect(await engine.evaluateToolResult({ tool: "t", result: "dirty" }, chat)).toEqual({
+      outcome: "allow",
+      data: "clean",
+    });
+  });
+
+  it("ignores a non-string substitution, passing the text through", async () => {
+    const policy: Policy = {
+      id: "bad",
+      on: [{ phase: "tool_result" }],
+      evaluate: () => ({ outcome: "allow", data: { not: "a string" } }) as never,
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy }] });
+    expect(await engine.evaluateToolResult({ tool: "t", result: "keep me" }, chat)).toEqual({
+      outcome: "allow",
+    });
+  });
+
+  it("an invalid redact pattern disables the builtin rather than crashing construction", () => {
+    const engine = createPolicyEngine({ redactPattern: "(" });
+    expect(engine.resultPhaseActive).toBe(false);
+  });
+
+  it("a ReDoS-prone redact pattern (catastrophic backtracking) disables the builtin", () => {
+    // Nested quantifiers — safe-regex2 rejects star-height > 1.
+    const engine = createPolicyEngine({ redactPattern: "(a+)+$" });
+    expect(engine.resultPhaseActive).toBe(false);
+    // A linear pattern with a single quantifier stays enabled.
+    expect(createPolicyEngine({ redactPattern: "sk-[a-z0-9]+" }).resultPhaseActive).toBe(true);
+  });
+
+  it("hands the policy the result and surface/rib context", async () => {
+    let seen: Record<string, unknown> | undefined;
+    const recorder: Policy = {
+      id: "rec",
+      on: [{ phase: "tool_result" }],
+      evaluate: (e, ctx) => {
+        seen = {
+          phase: e.phase,
+          result: e.phase === "tool_result" ? e.result : undefined,
+          surface: ctx.surface,
+          ribId: ctx.ribId,
+        };
+        return { outcome: "allow" };
+      },
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "chamber", policy: recorder }] });
+    await engine.evaluateToolResult(
+      { tool: "t", result: "payload" },
+      {
+        surface: "rib",
+        ribId: "chamber",
+      },
+    );
+    expect(seen).toEqual({
+      phase: "tool_result",
+      result: "payload",
+      surface: "rib",
+      ribId: "chamber",
+    });
+  });
+});
+
+describe("createPolicyEngine — evaluateResponse", () => {
+  it("allows an unmatched response unchanged", async () => {
+    const engine = createPolicyEngine({ redactPattern: "secret" });
+    expect(await engine.evaluateResponse({ surface: "workflow", text: "all done" })).toEqual({
+      outcome: "allow",
+    });
+  });
+
+  it("redacts a matching response via the builtin", async () => {
+    const engine = createPolicyEngine({ redactPattern: "secret" });
+    expect(
+      await engine.evaluateResponse({ surface: "workflow", text: "the secret is out" }),
+    ).toEqual({ outcome: "allow", data: "the [REDACTED] is out" });
+  });
+
+  it("a rib policy can deny a response", async () => {
+    const policy: Policy = {
+      id: "guard",
+      on: [{ phase: "response" }],
+      evaluate: (e) =>
+        e.phase === "response" && e.text.includes("forbidden")
+          ? { outcome: "deny", reason: "response blocked" }
+          : { outcome: "allow" },
+    };
+    const engine = createPolicyEngine({ ribPolicies: [{ ribId: "r", policy }] });
+    expect(
+      await engine.evaluateResponse({ surface: "workflow", text: "a forbidden thing" }),
+    ).toEqual({ outcome: "deny", reason: "response blocked" });
+  });
+
+  it("the redact builtin governs BOTH phases from one engine", async () => {
+    const engine = createPolicyEngine({ redactPattern: "hunter2" });
+    expect(await engine.evaluateToolResult({ tool: "t", result: "pw=hunter2" }, chat)).toEqual({
+      outcome: "allow",
+      data: "pw=[REDACTED]",
+    });
+    expect(await engine.evaluateResponse({ surface: "chat", text: "pw=hunter2" })).toEqual({
+      outcome: "allow",
+      data: "pw=[REDACTED]",
+    });
+  });
+});

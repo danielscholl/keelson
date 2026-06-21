@@ -798,6 +798,46 @@ describe("projectToolsForPi", () => {
     expect(seenArgs).toEqual({ value: "hi" });
   });
 
+  test("a result gate substitution rewrites what the model receives (not just the UI echo)", async () => {
+    let seenResult: unknown;
+    const [projected] = projectToolsForPi([makeTool()], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+      evaluateToolResult: async (r) => {
+        seenResult = r.result;
+        return { outcome: "allow", data: "echo: [REDACTED]" };
+      },
+    });
+    if (!projected) throw new Error("narrow");
+    const result = await projected.execute("t1", { value: "hi" }, noSignal);
+    expect(result.content).toEqual([{ type: "text", text: "echo: [REDACTED]" }]);
+    // The gate saw the tool's real output before it was rewritten.
+    expect(seenResult).toBe("echo: hi");
+  });
+
+  test("a result gate deny throws (pi → error result) with the withheld reason", async () => {
+    const [projected] = projectToolsForPi([makeTool()], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+      evaluateToolResult: async () => ({ outcome: "deny", reason: "leaked a key" }),
+    });
+    if (!projected) throw new Error("narrow");
+    await expect(projected.execute("t1", { value: "hi" }, noSignal)).rejects.toThrow(
+      "Tool 'echo_tool' result withheld by policy: leaked a key",
+    );
+  });
+
+  test("a plain result-gate allow leaves the output untouched", async () => {
+    const [projected] = projectToolsForPi([makeTool()], {
+      cwd: "/tmp",
+      pushChunk: () => {},
+      evaluateToolResult: async () => ({ outcome: "allow" }),
+    });
+    if (!projected) throw new Error("narrow");
+    const result = await projected.execute("t1", { value: "hi" }, noSignal);
+    expect(result.content).toEqual([{ type: "text", text: "echo: hi" }]);
+  });
+
   test("the pi-supplied signal reaches the tool's context", async () => {
     const abort = new AbortController();
     let seen: AbortSignal | undefined;

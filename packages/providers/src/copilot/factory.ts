@@ -11,9 +11,15 @@
 // native binary (docs/architecture.md §4 provider rules).
 
 import type { ToolContext } from "@keelson/shared";
-import { checkToolCallGate } from "../tool-gate.ts";
+import { applyToolResultGate, checkToolCallGate } from "../tool-gate.ts";
 import { deriveToolParametersJsonSchema } from "../tool-params.ts";
-import type { MessageChunk, ModelInfo, ToolCallGate, ToolDefinition } from "../types.ts";
+import type {
+  MessageChunk,
+  ModelInfo,
+  ToolCallGate,
+  ToolDefinition,
+  ToolResultGate,
+} from "../types.ts";
 
 // Structural — captures only what the provider drives. Keeps this file off a
 // typeof-import on the SDK so tests can pass any compatible shape.
@@ -187,6 +193,10 @@ export interface CopilotToolProjectionContext {
   // error tool_result. Built-in capabilities (read / write / shell / …) gate
   // separately via the permission handler, so they are out of this gate's scope.
   evaluateToolCall?: ToolCallGate;
+  // Per-result policy gate (server-wired). When present, the captured output is
+  // evaluated AFTER execute and before it returns to the model (and is echoed to
+  // the UI) — a deny replaces it with the reason, an allow+data substitutes it.
+  evaluateToolResult?: ToolResultGate;
 }
 
 // Projects our streaming ToolDefinitions into the SDK's "handler returns
@@ -207,7 +217,14 @@ export function projectToolsForCopilot(
     skipPermission: true,
     handler: async (args: unknown, invocation: { toolCallId: string }): Promise<string> => {
       const ctx = projection.contextFactory(invocation.toolCallId);
-      return runToolHandler(tool, args, invocation.toolCallId, ctx, projection.evaluateToolCall);
+      return runToolHandler(
+        tool,
+        args,
+        invocation.toolCallId,
+        ctx,
+        projection.evaluateToolCall,
+        projection.evaluateToolResult,
+      );
     },
   }));
 }
@@ -218,9 +235,11 @@ async function runToolHandler(
   toolCallId: string,
   ctxIn: ToolContext,
   gate?: ToolCallGate,
+  resultGate?: ToolResultGate,
 ): Promise<string> {
-  // Skills emit tool_result with a placeholder toolUseId; we rewrite to the
-  // SDK's id (same one tool.execution_start carries) so the UI pairs rows.
+  // Capture the skill's tool_result (placeholder toolUseId) and emit the
+  // id-rewritten, policy-gated chunk after the result gate — so the UI echo
+  // matches exactly what the model is handed.
   let resultContent: string | null = null;
   let resultIsError = false;
   const ctx: ToolContext = {
@@ -228,11 +247,6 @@ async function runToolHandler(
     abortSignal: ctxIn.abortSignal,
     emit: (chunk) => {
       if (chunk.type === "tool_result") {
-        const rewritten: MessageChunk = {
-          ...chunk,
-          toolUseId: toolCallId,
-        };
-        ctxIn.emit(rewritten);
         resultContent = chunk.content;
         if (chunk.isError) resultIsError = true;
         return;
@@ -278,17 +292,22 @@ async function runToolHandler(
     return message;
   }
 
-  if (resultContent === null) {
-    // Empty success so the SDK's reasoning loop has something to consume.
-    ctxIn.emit({
-      type: "tool_result",
-      toolUseId: toolCallId,
-      content: "",
-    });
-    return "";
-  }
-
-  return resultIsError ? `Error: ${resultContent}` : resultContent;
+  // Per-result policy gate on the captured output (an execute that emitted no
+  // result yields ""), then emit the gated tool_result once — the UI and the
+  // model see the same gated text. A deny/redaction reaches both here.
+  const gated = await applyToolResultGate(
+    resultGate,
+    tool.name,
+    resultContent ?? "",
+    resultIsError,
+  );
+  ctxIn.emit({
+    type: "tool_result",
+    toolUseId: toolCallId,
+    content: gated.content,
+    ...(gated.isError ? { isError: true } : {}),
+  });
+  return gated.isError ? `Error: ${gated.content}` : gated.content;
 }
 
 export class CopilotClientFactory {

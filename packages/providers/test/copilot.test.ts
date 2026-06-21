@@ -1778,6 +1778,7 @@ describe("projectToolsForCopilot — per-call policy gate", () => {
   const projection = (
     emitted: MessageChunk[],
     gate?: CopilotToolProjectionContext["evaluateToolCall"],
+    resultGate?: CopilotToolProjectionContext["evaluateToolResult"],
   ): CopilotToolProjectionContext => ({
     pushChunk: (c) => emitted.push(c),
     contextFactory: () => ({
@@ -1786,6 +1787,7 @@ describe("projectToolsForCopilot — per-call policy gate", () => {
       abortSignal: new AbortController().signal,
     }),
     ...(gate ? { evaluateToolCall: gate } : {}),
+    ...(resultGate ? { evaluateToolResult: resultGate } : {}),
   });
 
   it("emits an error tool_result and skips execute when the gate denies", async () => {
@@ -1831,6 +1833,60 @@ describe("projectToolsForCopilot — per-call policy gate", () => {
     const [def] = projectToolsForCopilot([echoTool()], projection(emitted)) as CopilotToolDef[];
     if (!def) throw new Error("narrow");
     const ret = await def.handler({ value: "hi" }, { toolCallId: "tc1" });
+    expect(ret).toBe("echo:hi");
+  });
+
+  it("a result-gate substitution rewrites the model return AND the UI tool_result echo", async () => {
+    const emitted: MessageChunk[] = [];
+    const [def] = projectToolsForCopilot(
+      [echoTool()],
+      projection(emitted, undefined, async () => ({ outcome: "allow", data: "echo:[REDACTED]" })),
+    ) as CopilotToolDef[];
+    if (!def) throw new Error("narrow");
+    const ret = await def.handler({ value: "hi" }, { toolCallId: "tc1" });
+    // Model-facing return is the redacted text.
+    expect(ret).toBe("echo:[REDACTED]");
+    // The single emitted tool_result (UI echo) matches exactly — the emit is
+    // deferred until after the gate, so UI and model never diverge.
+    const results = emitted.filter((c) => c.type === "tool_result");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      type: "tool_result",
+      toolUseId: "tc1",
+      content: "echo:[REDACTED]",
+    });
+  });
+
+  it("a result-gate deny withholds the result from the model and the UI", async () => {
+    const emitted: MessageChunk[] = [];
+    const [def] = projectToolsForCopilot(
+      [echoTool()],
+      projection(emitted, undefined, async () => ({ outcome: "deny", reason: "secret leaked" })),
+    ) as CopilotToolDef[];
+    if (!def) throw new Error("narrow");
+    const ret = await def.handler({ value: "hi" }, { toolCallId: "tc1" });
+    expect(ret).toBe("Error: Tool 'echo' result withheld by policy: secret leaked");
+    expect(emitted.find((c) => c.type === "tool_result")).toMatchObject({
+      type: "tool_result",
+      toolUseId: "tc1",
+      isError: true,
+      content: "Tool 'echo' result withheld by policy: secret leaked",
+    });
+  });
+
+  it("the result gate sees the real tool output before rewriting it", async () => {
+    const emitted: MessageChunk[] = [];
+    let seen: unknown;
+    const [def] = projectToolsForCopilot(
+      [echoTool()],
+      projection(emitted, undefined, async (r) => {
+        seen = r.result;
+        return { outcome: "allow" };
+      }),
+    ) as CopilotToolDef[];
+    if (!def) throw new Error("narrow");
+    const ret = await def.handler({ value: "hi" }, { toolCallId: "tc1" });
+    expect(seen).toBe("echo:hi");
     expect(ret).toBe("echo:hi");
   });
 });

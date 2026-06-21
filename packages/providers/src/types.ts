@@ -44,6 +44,21 @@ export type ToolCallGate = (call: {
   args?: unknown;
 }) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 
+// Per-result tool-result gate. The server binds {surface, ribId, provider} and
+// hands each provider a thunk it invokes inside its custom-tool handler AFTER
+// `execute` returns but BEFORE the result reaches the model. A `deny` replaces
+// the model-facing result with the reason; an `allow` carrying a string `data`
+// substitutes that text (redaction). Built-in SDK tools run outside the handler
+// and are out of scope, like ToolCallGate. The decision is @keelson/shared's
+// PolicyDecision narrowed to what the result phase emits — `data` is the
+// already-stringified substitution (the engine drops non-string substitutions),
+// and an `ask` has degraded to `deny` (no round-trip for a result that already
+// ran), so providers never have to handle one.
+export type ToolResultGate = (result: {
+  tool: string;
+  result: unknown;
+}) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
+
 export interface SendQueryOptions {
   model?: string;
   abortSignal?: AbortSignal;
@@ -94,6 +109,10 @@ export interface SendQueryOptions {
   >;
   // See ToolCallGate. Absent → no per-call gating (back-compat passthrough).
   evaluateToolCall?: ToolCallGate;
+  // See ToolResultGate. Absent → tool results pass through unchanged. Wired by
+  // the server only when a policy actually consumes the `tool_result` phase, so
+  // the default path runs no per-result evaluation.
+  evaluateToolResult?: ToolResultGate;
 }
 
 export interface IAgentProvider {

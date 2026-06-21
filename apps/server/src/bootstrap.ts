@@ -59,8 +59,10 @@ import {
   type NodeHandler,
   type PromptHandlerProvider,
   type PromptRequestGate,
+  type PromptResponseGate,
   type PromptToolCallGate,
   type PromptToolGate,
+  type PromptToolResultGate,
   validateWorkflowInvariants,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
@@ -705,6 +707,10 @@ export function bootstrapPolicyEngine(
       const costBudget = parsePositiveIntEnv(process.env.KEELSON_COST_BUDGET);
       return costBudget !== undefined ? { costBudget } : {};
     })(),
+    ...(() => {
+      const redactPattern = process.env.KEELSON_REDACT_PATTERN?.trim();
+      return redactPattern ? { redactPattern } : {};
+    })(),
     ...(opts.ribPolicies ? { ribPolicies: opts.ribPolicies } : {}),
     ...(opts.requestApproval ? { requestApproval: opts.requestApproval } : {}),
   });
@@ -734,6 +740,8 @@ export function bootstrapPromptHandler(
     defaultOffTools?: readonly string[];
     projectTools?: PromptToolGate;
     evaluateToolCall?: PromptToolCallGate;
+    evaluateToolResult?: PromptToolResultGate;
+    evaluateResponse?: PromptResponseGate;
     requestGate?: PromptRequestGate;
   } = {},
 ): NodeHandler | undefined {
@@ -824,6 +832,8 @@ export function bootstrapPromptHandler(
     ...(opts.defaultOffTools ? { defaultOffTools: opts.defaultOffTools } : {}),
     ...(opts.projectTools ? { projectTools: opts.projectTools } : {}),
     ...(opts.evaluateToolCall ? { evaluateToolCall: opts.evaluateToolCall } : {}),
+    ...(opts.evaluateToolResult ? { evaluateToolResult: opts.evaluateToolResult } : {}),
+    ...(opts.evaluateResponse ? { evaluateResponse: opts.evaluateResponse } : {}),
     ...(opts.requestGate ? { requestGate: opts.requestGate } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
