@@ -8,6 +8,7 @@ import { type ActiveTab, type SurfaceTab, TopBar } from "./components/TopBar.tsx
 import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
 import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
+import { useSchemaVersionGate } from "./hooks/useSchemaVersionGate.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import type { ChatSeed } from "./lib/exploreSeed.ts";
 import { Chat } from "./views/Chat.tsx";
@@ -28,6 +29,7 @@ export function App() {
 }
 
 function AppInner() {
+  useSchemaVersionGate();
   const { settings, setTheme } = useSettings();
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
   // A run started from chat (`/workflow run`) — switches to the Workflows tab

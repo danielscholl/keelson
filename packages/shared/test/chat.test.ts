@@ -7,10 +7,12 @@ import {
   coerceTokenUsage,
   contentBlockSchema,
   conversationSchema,
+  isSchemaVersionCompatible,
   messageChunkSchema,
   messageSchema,
   modelInfoSchema,
   parsePersistedTokenUsage,
+  SCHEMA_VERSION,
   tokenUsageSchema,
   WIRE_PROTOCOL_VERSION,
 } from "../src/chat.ts";
@@ -18,6 +20,20 @@ import {
 describe("WIRE_PROTOCOL_VERSION", () => {
   it("is 1.0", () => {
     expect(WIRE_PROTOCOL_VERSION).toBe("1.0");
+  });
+});
+
+describe("isSchemaVersionCompatible", () => {
+  it("accepts a peer reporting this build's SCHEMA_VERSION", () => {
+    expect(isSchemaVersionCompatible(SCHEMA_VERSION)).toBe(true);
+  });
+
+  it("rejects any version that differs (skew breaks in either direction)", () => {
+    expect(isSchemaVersionCompatible(`${SCHEMA_VERSION}-skewed`)).toBe(false);
+  });
+
+  it("rejects an empty version — a peer too old to report one", () => {
+    expect(isSchemaVersionCompatible("")).toBe(false);
   });
 });
 

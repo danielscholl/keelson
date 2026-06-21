@@ -15,6 +15,7 @@ import {
   WorkflowNotFoundError,
 } from "../in-process/run-workflow.ts";
 import { emit } from "../output.ts";
+import { gateSchemaSkew } from "../schema-gate.ts";
 import { probeServer } from "../server-probe.ts";
 
 export interface WorkflowRunOptions {
@@ -325,6 +326,7 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
   const effectiveBase = baseUrl ?? info?.baseUrl;
 
   if (effectiveBase) {
+    await gateSchemaSkew(effectiveBase, info?.schemaVersion, opts.json);
     try {
       // When neither --project nor --working-dir is given, send process.cwd()
       // so the server's "projectId or workingDir is required" gate doesn't

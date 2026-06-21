@@ -17,6 +17,7 @@ import { listProjects } from "../http/projects-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { chatHeadless } from "../in-process/chat.ts";
 import { emit } from "../output.ts";
+import { gateSchemaSkew } from "../schema-gate.ts";
 import { probeServer } from "../server-probe.ts";
 
 export interface ChatOptions {
@@ -298,6 +299,7 @@ export async function runChatEntry(message: string | undefined, opts: ChatOption
     );
     process.exit(EXIT_NO_SERVER);
   }
+  await gateSchemaSkew(effectiveBase, info?.schemaVersion, false);
   // Dynamic import keeps the TUI dependency off the one-shot and scripted
   // paths entirely.
   const { runInteractiveChat } = await import("../interactive/run.ts");
@@ -336,6 +338,7 @@ export async function runChat(message: string, opts: ChatOptions): Promise<never
   const effectiveBase = baseUrl ?? info?.baseUrl;
 
   if (effectiveBase) {
+    await gateSchemaSkew(effectiveBase, info?.schemaVersion, opts.json);
     try {
       return await runChatViaHttp(effectiveBase, message, opts);
     } catch (err) {
