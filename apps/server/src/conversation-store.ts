@@ -43,6 +43,11 @@ export interface ConversationStore {
   setProviderSessionId(id: string, sessionId: string): void;
   update(id: string, patch: UpdateConversationPatch): Conversation | undefined;
   delete(id: string): boolean;
+  // Accumulated assistant-turn spend for one conversation: the count of
+  // assistant messages (`turns`) and the sum of their input+output tokens
+  // (`totalTokens`). Backs the request-phase budget gate without loading full
+  // message bodies.
+  getUsageTotals(id: string): { totalTokens: number; turns: number };
 }
 
 interface ConvRow {
@@ -211,6 +216,11 @@ export function createConversationStore(db: Database): ConversationStore {
   const insertMsg = db.prepare(
     "INSERT INTO messages(id, conversationId, role, content, content_parts, truncated, usage_json, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
+  // Usage rides as JSON in usage_json, so the sum is done in JS over the
+  // assistant rows rather than in SQL. Selects only the JSON column.
+  const selectAssistantUsage = db.prepare(
+    "SELECT usage_json FROM messages WHERE conversationId = ? AND role = 'assistant'",
+  );
   const touchConv = db.prepare("UPDATE conversations SET updatedAt = ? WHERE id = ?");
   const setSession = db.prepare("UPDATE conversations SET providerSessionId = ? WHERE id = ?");
   const setName = db.prepare("UPDATE conversations SET name = ?, updatedAt = ? WHERE id = ?");
@@ -304,6 +314,15 @@ export function createConversationStore(db: Database): ConversationStore {
       const result = deleteConv.run(id);
       // bun:sqlite's RunResult exposes `changes` on the result object.
       return (result.changes ?? 0) > 0;
+    },
+    getUsageTotals(id) {
+      const rows = selectAssistantUsage.all(id) as { usage_json: string | null }[];
+      let totalTokens = 0;
+      for (const row of rows) {
+        const usage = parsePersistedTokenUsage(row.usage_json);
+        if (usage !== undefined) totalTokens += usage.inputTokens + usage.outputTokens;
+      }
+      return { totalTokens, turns: rows.length };
     },
   };
 }

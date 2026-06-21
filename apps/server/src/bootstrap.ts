@@ -58,6 +58,7 @@ import {
   makePromptHandler,
   type NodeHandler,
   type PromptHandlerProvider,
+  type PromptRequestGate,
   type PromptToolCallGate,
   type PromptToolGate,
   validateWorkflowInvariants,
@@ -696,9 +697,26 @@ export function bootstrapPolicyEngine(
       ...parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST),
     ],
     askOnShell: process.env.KEELSON_ASK_ON_SHELL === "1",
+    ...(() => {
+      const turnBudget = parsePositiveIntEnv(process.env.KEELSON_TURN_BUDGET);
+      return turnBudget !== undefined ? { turnBudget } : {};
+    })(),
+    ...(() => {
+      const costBudget = parsePositiveIntEnv(process.env.KEELSON_COST_BUDGET);
+      return costBudget !== undefined ? { costBudget } : {};
+    })(),
     ...(opts.ribPolicies ? { ribPolicies: opts.ribPolicies } : {}),
     ...(opts.requestApproval ? { requestApproval: opts.requestApproval } : {}),
   });
+}
+
+// A budget env var enables its builtin only when set to a positive integer; a
+// missing, blank, zero, negative, or non-numeric value leaves the builtin off
+// (no surprise cap from a typo).
+function parsePositiveIntEnv(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw.trim());
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 // Workflow prompt-node handler. Env-gated:
@@ -716,6 +734,7 @@ export function bootstrapPromptHandler(
     defaultOffTools?: readonly string[];
     projectTools?: PromptToolGate;
     evaluateToolCall?: PromptToolCallGate;
+    requestGate?: PromptRequestGate;
   } = {},
 ): NodeHandler | undefined {
   const providers = getProviderInfoList();
@@ -805,6 +824,7 @@ export function bootstrapPromptHandler(
     ...(opts.defaultOffTools ? { defaultOffTools: opts.defaultOffTools } : {}),
     ...(opts.projectTools ? { projectTools: opts.projectTools } : {}),
     ...(opts.evaluateToolCall ? { evaluateToolCall: opts.evaluateToolCall } : {}),
+    ...(opts.requestGate ? { requestGate: opts.requestGate } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
 }

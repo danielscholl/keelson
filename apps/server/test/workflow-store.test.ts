@@ -101,6 +101,46 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.nodes[0]!.startedAt).toBe("2025-01-01T00:00:01.000Z");
   });
 
+  test("getRunUsageTotals sums tokens and counts only nodes carrying usage", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    // Empty before any node runs.
+    expect(store.getRunUsageTotals("r1")).toEqual({ totalTokens: 0, turns: 0 });
+
+    const base = {
+      runId: "r1",
+      status: "succeeded" as const,
+      outputText: "",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:01.000Z",
+      completedAt: "2025-01-01T00:00:02.000Z",
+      error: null,
+    };
+    store.upsertNodeOutput({
+      ...base,
+      nodeId: "prompt-a",
+      usage: { inputTokens: 100, outputTokens: 40 },
+    });
+    store.upsertNodeOutput({
+      ...base,
+      nodeId: "prompt-b",
+      usage: { inputTokens: 200, outputTokens: 60 },
+    });
+    // A bash node with no usage is not a model-call turn.
+    store.upsertNodeOutput({ ...base, nodeId: "bash-c", usage: null });
+
+    expect(store.getRunUsageTotals("r1")).toEqual({ totalTokens: 400, turns: 2 });
+    // Scoped to the run.
+    expect(store.getRunUsageTotals("missing")).toEqual({ totalTokens: 0, turns: 0 });
+  });
+
   test("upsertNodeOutput is idempotent on (run_id, node_id)", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

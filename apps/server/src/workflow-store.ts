@@ -88,6 +88,10 @@ export interface WorkflowStore {
   // Patches worktree_path after-the-fact (worktree creation is lazy, so the
   // path isn't known at createRun time when isolation is on).
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
+  // Accumulated model-call spend for one run: the count of node rows carrying
+  // usage (`turns`) and the sum of their input+output tokens (`totalTokens`).
+  // Backs the request-phase budget gate without loading node bodies.
+  getRunUsageTotals(runId: string): { totalTokens: number; turns: number };
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];
   // General filtered feed backing GET /api/workflows/runs and bulk delete.
@@ -254,6 +258,11 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const selectNodes = db.prepare(
     "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );
+  // Usage rides as JSON in usage_json, so the sum is done in JS over the run's
+  // node rows rather than in SQL. Selects only the JSON column.
+  const selectNodeUsage = db.prepare(
+    "SELECT usage_json FROM workflow_node_outputs WHERE run_id = ?",
+  );
   const deleteRunStmt = db.prepare("DELETE FROM workflow_runs WHERE id = ?");
   const deleteNodeStmt = db.prepare(
     "DELETE FROM workflow_node_outputs WHERE run_id = ? AND node_id = ?",
@@ -296,6 +305,19 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.error,
         input.usage !== null ? JSON.stringify(input.usage) : null,
       );
+    },
+    getRunUsageTotals(runId) {
+      const rows = selectNodeUsage.all(runId) as { usage_json: string | null }[];
+      let totalTokens = 0;
+      let turns = 0;
+      for (const row of rows) {
+        const usage = parsePersistedTokenUsage(row.usage_json);
+        if (usage !== undefined) {
+          totalTokens += usage.inputTokens + usage.outputTokens;
+          turns += 1;
+        }
+      }
+      return { totalTokens, turns };
     },
     getRun(runId) {
       const row = selectRun.get(runId) as RunRow | null;
