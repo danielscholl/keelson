@@ -21,6 +21,17 @@ export const WIRE_PROTOCOL_VERSION = "1.0" as const;
 // frames carrying it.
 export const SCHEMA_VERSION = "0.3" as const;
 
+// A peer (the server on /api/health + /api/config, or a client's bundle)
+// reports its SCHEMA_VERSION. Any difference from this build's value signals
+// additive wire skew that strict frame parsing rejects mid-stream, so both
+// clients gate on it before opening a chat/workflow stream. Equality, not
+// ordering, is the test: skew breaks in either direction — an older client
+// strict-rejects a newer server's frames, and a newer client's request frame
+// is strict-rejected by an older server.
+export function isSchemaVersionCompatible(peerSchemaVersion: string): boolean {
+  return peerSchemaVersion === SCHEMA_VERSION;
+}
+
 // Copilot reasoning tier. Sibling of `thinking` (Anthropic's boolean
 // adaptive-thinking) rather than a polymorphic merge — both providers stream
 // through the same `thinking` MessageChunk channel.
