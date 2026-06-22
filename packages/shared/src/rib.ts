@@ -141,7 +141,7 @@ export interface RibContext {
   // without a credential store still satisfy the interface.
   getCredential?: (serviceId: string) => Promise<string | undefined>;
   // Absolute path to THIS rib's private data directory under the keelson home,
-  // namespaced by rib id (`<home>/<rib-id>`); path only — the rib creates it when
+  // named `rib-<id>` (`<home>/rib-<rib-id>`); path only — the rib creates it when
   // it writes. Optional, like the accessors above, so an older harness can omit it.
   getDataDir?: () => string;
   // Run one agent turn. Optional, like the accessors above, so a rib that
