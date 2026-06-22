@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { keelsonPaths, resolveKeelsonHome, resolveRibsRoot, ribDataDir } from "../src/paths.ts";
 
 const ENV_KEYS = ["KEELSON_HOME", "KEELSON_DB", "KEELSON_WORKFLOWS_DIR"] as const;
@@ -125,7 +125,10 @@ describe("ribDataDir", () => {
   });
 
   it("defaults the home to resolveKeelsonHome (KEELSON_HOME honored)", () => {
-    process.env.KEELSON_HOME = join("/explicit", "home");
-    expect(ribDataDir("chamber")).toBe(join("/explicit", "home", "chamber"));
+    // resolve() so the expected home is drive-qualified on Windows, matching
+    // resolveKeelsonHome()'s own resolve() of KEELSON_HOME.
+    const home = resolve(join("/explicit", "home"));
+    process.env.KEELSON_HOME = home;
+    expect(ribDataDir("chamber")).toBe(join(home, "chamber"));
   });
 });
