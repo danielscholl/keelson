@@ -655,6 +655,9 @@ describe("applyRibs wiring", () => {
         }),
       },
     });
+    // getExec is always present, so capture provably happened — getDataDir being
+    // undefined is the real omission, not a never-ran registerTools.
+    expect(captured?.getExec).toBeDefined();
     expect(captured?.getDataDir).toBeUndefined();
   });
 
