@@ -41,7 +41,7 @@ const RUN_ID = "run-1";
 // Build the workflows routes with a custom ActiveRuns so the test controls the
 // per-run artifacts dir directly (the route reads activeRuns.get(id)?.artifactsDir).
 function makeRig(entry: "with-dir" | "no-dir" | "none"): { app: Hono; activeRuns: ActiveRuns } {
-  const db = openDatabase({ path: join(tmpDir, "test.db") });
+  const db = openDatabase({ path: ":memory:" });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
   const projectsStore = createProjectsStore(db);
