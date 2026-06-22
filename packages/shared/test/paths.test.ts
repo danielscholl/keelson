@@ -120,8 +120,10 @@ describe("ribDataDir", () => {
     else process.env.KEELSON_HOME = savedHome;
   });
 
-  it("namespaces a rib's data dir under the given home", () => {
-    expect(ribDataDir("chamber", "/srv/keelson-home")).toBe(join("/srv/keelson-home", "chamber"));
+  it("names a rib's data dir `rib-<id>` under the given home", () => {
+    expect(ribDataDir("chamber", "/srv/keelson-home")).toBe(
+      join("/srv/keelson-home", "rib-chamber"),
+    );
   });
 
   it("defaults the home to resolveKeelsonHome (KEELSON_HOME honored)", () => {
@@ -129,6 +131,6 @@ describe("ribDataDir", () => {
     // resolveKeelsonHome()'s own resolve() of KEELSON_HOME.
     const home = resolve(join("/explicit", "home"));
     process.env.KEELSON_HOME = home;
-    expect(ribDataDir("chamber")).toBe(join(home, "chamber"));
+    expect(ribDataDir("chamber")).toBe(join(home, "rib-chamber"));
   });
 });

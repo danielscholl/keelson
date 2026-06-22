@@ -79,7 +79,7 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 | `getExec()` | `RibExec` | Process-exec with `runJSON` / `runText`. The one accessor always present. |
 | `getSnapshotManager?()` | `SnapshotManager` | Register, recompose, and read snapshot keys. Scoped to the rib's namespace. |
 | `getCredential?(serviceId)` | `Promise<string \| undefined>` | Read-only, resolves a keychain entry under `rib_<id>_<serviceId>`. A rib cannot read another rib's secrets. |
-| `getDataDir?()` | `string` | Absolute path to the rib's private data directory under the keelson home, namespaced by rib id (`<home>/<rib-id>`). Path only — the rib creates it when it writes. |
+| `getDataDir?()` | `string` | Absolute path to the rib's private data directory under the keelson home, named `rib-<id>` (`<home>/rib-<rib-id>`). Path only — the rib creates it when it writes. |
 | `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, redaction, and credentials. |
 | `registerRegion?(surfaceId, region)` | `() => void` | Adds a snapshot-backed region to one of the rib's own surfaces at runtime, returning an unregister handle. Layout-only: the rib still registers the region's key, which must be namespaced. |
 | `getSidecar?()` | `Promise<unknown> \| unknown` | Opaque resolver; each rib narrows and casts at its own edge. |
