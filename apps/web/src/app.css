@@ -3788,6 +3788,14 @@ a.cvb-card-title::after {
   color: var(--dim);
   font-style: normal;
 }
+/* Inline card actions sit as a wrapping button row (not the stacked column the
+   base `.cvb-actions` uses) so non-destructive verbs read as on-card buttons. */
+.cvb-card-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin-top: 2px;
+}
 
 /* boxed cards — each field is an inset pill (value + copy icon), stacked, so a
    service card reads as a list of copyable credentials / addresses. */

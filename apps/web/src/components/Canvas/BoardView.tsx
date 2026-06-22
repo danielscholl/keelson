@@ -675,6 +675,16 @@ function Section({ section }: { section: BoardSection }) {
                     {c.reason.text}
                   </div>
                 )}
+                {(() => {
+                  const inline = c.actions?.filter((a) => !a.destructive) ?? [];
+                  return inline.length > 0 ? (
+                    <div className="cvb-actions cvb-card-actions">
+                      {inline.map((a) => (
+                        <ActionItemButton key={fieldKey(JSON.stringify(a))} item={a} />
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
               </div>
             );
           })}

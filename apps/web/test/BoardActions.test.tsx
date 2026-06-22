@@ -489,3 +489,152 @@ describe("board layout primitives", () => {
     await waitFor(() => expect(calls).toEqual([{ type: "delete" }]));
   });
 });
+
+describe("inline card actions", () => {
+  test("a non-destructive card action renders as an inline button that dispatches", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "Aurora",
+              actions: [{ type: "enter", label: "Enter", payload: { mind: "aurora" } }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+
+    const row = container.querySelector(".cvb-card-actions");
+    expect(row).not.toBeNull();
+    const button = within(row as HTMLElement).getByRole("button", { name: "Enter" });
+    fireEvent.click(button);
+    await waitFor(() => expect(calls).toEqual([{ type: "enter", payload: { mind: "aurora" } }]));
+  });
+
+  test("a destructive card action stays in the overflow, not an inline button", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "Aurora",
+              actions: [{ type: "delete", label: "Delete", destructive: true }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+
+    // No inline action row — the destructive verb lives only in the overflow.
+    expect(container.querySelector(".cvb-card-actions")).toBeNull();
+    const trigger = screen.getByRole("button", { name: "Aurora actions" });
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    const menu = screen.getByRole("menu", { name: "Aurora destructive actions" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(calls).toEqual([{ type: "delete" }]));
+  });
+
+  test("an inline action with fields toggles a form and dispatches collected values", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "Rooms",
+              actions: [
+                {
+                  type: "room-start",
+                  label: "Open",
+                  fields: [{ name: "topic", label: "Topic", placeholder: "What to discuss?" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+
+    const row = container.querySelector(".cvb-card-actions") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Open" }));
+    // The form opens without dispatching; filling + submitting carries the value.
+    const input = row.querySelector(".cvb-action-field-input") as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(calls).toHaveLength(0);
+    fireEvent.change(input, { target: { value: "ship the rib" } });
+    fireEvent.submit(row.querySelector(".cvb-action-form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(calls).toEqual([{ type: "room-start", payload: { topic: "ship the rib" } }]),
+    );
+  });
+
+  test("a card with both kinds renders non-destructive inline and destructive in the overflow", () => {
+    const run = async (): Promise<RibActionResult> => ({ ok: true });
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "Aurora",
+              actions: [
+                { type: "enter", label: "Enter", payload: { mind: "aurora" } },
+                { type: "retire", label: "Retire", destructive: true, payload: { mind: "aurora" } },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+
+    const row = within(container.querySelector(".cvb-card-actions") as HTMLElement);
+    expect(row.getByRole("button", { name: "Enter" })).not.toBeNull();
+    expect(row.queryByRole("button", { name: "Retire" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Aurora actions" })).not.toBeNull();
+  });
+});
