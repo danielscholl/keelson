@@ -20,7 +20,10 @@ interface CanvasOpenOptions {
   // A board action rendered in the drawer may return an open-chat directive; the
   // opener (e.g. a surface region) supplies the handler so the drawer's Enter
   // buttons behave like the inline panel's instead of silently no-op'ing.
-  onOpenChat?: (seed: OpenChatSeed) => void;
+  onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
+  // Likewise a run-workflow directive: the opener supplies the launch handler so
+  // a drawer launch button isn't swallowed with a success toast.
+  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
 }
 
 interface CanvasApi {
@@ -31,7 +34,8 @@ interface CanvasApi {
 interface CanvasState {
   doc: CanvasDocument;
   footer: ReactNode;
-  onOpenChat?: (seed: OpenChatSeed) => void;
+  onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
+  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
 }
 
 const CanvasContext = createContext<CanvasApi | null>(null);
@@ -55,7 +59,12 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CanvasState | null>(null);
   const openCanvas = useCallback(
     (doc: CanvasDocument, opts?: CanvasOpenOptions) =>
-      setState({ doc, footer: opts?.footer ?? null, onOpenChat: opts?.onOpenChat }),
+      setState({
+        doc,
+        footer: opts?.footer ?? null,
+        onOpenChat: opts?.onOpenChat,
+        onLaunchWorkflow: opts?.onLaunchWorkflow,
+      }),
     [],
   );
   const close = useCallback(() => setState(null), []);
@@ -77,6 +86,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
           doc={state.doc}
           footer={state.footer}
           {...(state.onOpenChat ? { onOpenChat: state.onOpenChat } : {})}
+          {...(state.onLaunchWorkflow ? { onLaunchWorkflow: state.onLaunchWorkflow } : {})}
           onClose={close}
         />
       )}
@@ -88,11 +98,13 @@ function CanvasDrawer({
   doc,
   footer,
   onOpenChat,
+  onLaunchWorkflow,
   onClose,
 }: {
   doc: CanvasDocument;
   footer: ReactNode;
-  onOpenChat?: (seed: OpenChatSeed) => void;
+  onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
+  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
@@ -110,7 +122,7 @@ function CanvasDrawer({
         </button>
       </header>
       <div className="canvas-drawer-body">
-        <CanvasBody doc={doc} onOpenChat={onOpenChat} />
+        <CanvasBody doc={doc} onOpenChat={onOpenChat} onLaunchWorkflow={onLaunchWorkflow} />
       </div>
       {footer && <footer className="canvas-drawer-footer">{footer}</footer>}
     </aside>
@@ -122,16 +134,25 @@ function CanvasDrawer({
 function CanvasBody({
   doc,
   onOpenChat,
+  onLaunchWorkflow,
 }: {
   doc: CanvasDocument;
-  onOpenChat?: (seed: OpenChatSeed) => void;
+  onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
+  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
 }) {
   switch (doc.kind) {
     case "markdown":
       return <MarkdownBody source={doc.source} />;
     case "view":
       // Key by source so switching sources remounts with fresh state.
-      return <ViewCanvas key={sourceKey(doc.source)} source={doc.source} onOpenChat={onOpenChat} />;
+      return (
+        <ViewCanvas
+          key={sourceKey(doc.source)}
+          source={doc.source}
+          onOpenChat={onOpenChat}
+          onLaunchWorkflow={onLaunchWorkflow}
+        />
+      );
     case "html":
       return <HtmlCanvas key={sourceKey(doc.source)} source={doc.source} />;
     default: {
@@ -147,22 +168,43 @@ function CanvasBody({
 function ViewCanvas({
   source,
   onOpenChat,
+  onLaunchWorkflow,
 }: {
   source: CanvasSource;
-  onOpenChat?: (seed: OpenChatSeed) => void;
+  onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
+  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
 }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
   const { close } = useCanvas();
-  // Opening a seeded chat navigates away (to a fresh chat); close the drawer so
-  // it doesn't linger over the conversation.
+  // Each wrapper is wired into the dispatcher only when its handler is present
+  // (the spread guard below), so the presence check here is the single source of
+  // truth — an unwired wrapper must never navigate away on a swallowed effect, so
+  // close() only fires once the handler has. close() stays synchronous (navigate
+  // away immediately), but the wrapper returns the handler's promise so the
+  // dispatcher's await still spans the launch, keeping the awaited contract
+  // uniform with the inline path.
   const onOpenChatAndClose = useCallback(
     (seed: OpenChatSeed) => {
-      onOpenChat?.(seed);
+      if (!onOpenChat) return;
+      const pending = Promise.resolve(onOpenChat(seed));
       close();
+      return pending;
     },
     [onOpenChat, close],
   );
-  const actions = useRibActionDispatch(ribId, onOpenChat ? { onOpenChat: onOpenChatAndClose } : {});
+  const onLaunchWorkflowAndClose = useCallback(
+    (workflow: string, args: Record<string, string>) => {
+      if (!onLaunchWorkflow) return;
+      const pending = Promise.resolve(onLaunchWorkflow(workflow, args));
+      close();
+      return pending;
+    },
+    [onLaunchWorkflow, close],
+  );
+  const actions = useRibActionDispatch(ribId, {
+    ...(onOpenChat ? { onOpenChat: onOpenChatAndClose } : {}),
+    ...(onLaunchWorkflow ? { onLaunchWorkflow: onLaunchWorkflowAndClose } : {}),
+  });
   if (!ribId) return <ViewBody source={source} />;
   return (
     <BoardActionProvider run={actions.run} reveal={actions.reveal}>

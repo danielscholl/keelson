@@ -1,16 +1,19 @@
 import type { RibSurfaceDescriptor } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { listProjects, startWorkflowRun } from "./api.ts";
 import { ApprovalsDock } from "./components/ApprovalsDock.tsx";
 import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
 import { RibsProvider, useRibsContext } from "./components/RibsProvider.tsx";
-import { ToastHost } from "./components/Toast.tsx";
+import { ToastHost, useToast } from "./components/Toast.tsx";
 import { type ActiveTab, type SurfaceTab, TopBar } from "./components/TopBar.tsx";
+import { useActiveProject } from "./hooks/useActiveProject.ts";
 import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
 import { usePendingMemoryCount } from "./hooks/usePendingMemoryCount.ts";
 import { useSchemaVersionGate } from "./hooks/useSchemaVersionGate.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import type { ChatSeed } from "./lib/exploreSeed.ts";
+import { launchWorkflowRun } from "./lib/launchWorkflowRun.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
 import { Surface } from "./views/Surface.tsx";
@@ -30,6 +33,7 @@ export function App() {
 
 function AppInner() {
   useSchemaVersionGate();
+  const toast = useToast();
   const { settings, setTheme } = useSettings();
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
   // A run started from chat (`/workflow run`) — switches to the Workflows tab
@@ -80,6 +84,21 @@ function AppInner() {
     setActiveTab("workflows");
   }, []);
 
+  // A board action's run-workflow directive launches through the same primitive
+  // /workflow run uses, then hands the run to the existing Workflows-tab handoff.
+  // The resolution + launch body lives in launchWorkflowRun (unit-tested); this
+  // is the thin wrapper that supplies App's real deps.
+  const { activeProjectId } = useActiveProject();
+  const handleLaunchWorkflowFromAction = useCallback(
+    (workflow: string, args: Record<string, string>) =>
+      launchWorkflowRun(
+        { activeProjectId, listProjects, startWorkflowRun, onOpened: handleOpenWorkflowRun, toast },
+        workflow,
+        args,
+      ),
+    [activeProjectId, toast, handleOpenWorkflowRun],
+  );
+
   const themePreference = settings.theme ?? "system";
   useEffect(() => {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
@@ -129,7 +148,12 @@ function AppInner() {
       {activeSurface ? (
         // Key by tab so switching surfaces remounts the tree — region collapse
         // state must not leak from one surface's layout into another's.
-        <Surface key={activeTab} descriptor={activeSurface} onExplore={handleExplore} />
+        <Surface
+          key={activeTab}
+          descriptor={activeSurface}
+          onExplore={handleExplore}
+          onLaunchWorkflow={handleLaunchWorkflowFromAction}
+        />
       ) : activeTab === "workflows" ? (
         <Workflows
           pendingRun={pendingWorkflowRun}

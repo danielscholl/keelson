@@ -231,6 +231,51 @@ describe("CanvasProvider / useCanvas", () => {
     });
   });
 
+  test("a drawer board action's run-workflow directive fires the handler and closes the drawer", async () => {
+    snapshotImpl = {
+      status: "live",
+      data: {
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "launch", label: "Launch" }] }],
+      },
+      version: 1,
+      composedAt: "2026-01-01T00:00:00Z",
+    };
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "run-workflow", workflow: "chamber-genesis", args: { topic: "nav" } },
+    });
+    const launches: Array<{ workflow: string; args: Record<string, string> }> = [];
+    function LaunchOpener() {
+      const { openCanvas } = useCanvas();
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            openCanvas(
+              { kind: "view", source: { type: "snapshot", key: "rib:demo:panel" }, title: "b" },
+              { onLaunchWorkflow: (workflow, args) => launches.push({ workflow, args }) },
+            )
+          }
+        >
+          open-launch
+        </button>
+      );
+    }
+    render(
+      <CanvasProvider>
+        <LaunchOpener />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open-launch"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Launch" }));
+    // The launch handler fires, and the drawer closes (navigate-away to Workflows).
+    await waitFor(() =>
+      expect(launches).toEqual([{ workflow: "chamber-genesis", args: { topic: "nav" } }]),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   test("a snapshot html canvas fails closed when its payload isn't a string", () => {
     snapshotImpl = {
       status: "live",

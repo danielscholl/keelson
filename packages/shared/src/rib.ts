@@ -408,11 +408,21 @@ export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
 
 // A directive a rib's onAction success MAY carry inside `data` to ask the SPA to
 // perform a client-side effect. Generic across ribs/actions; `RibActionResult.data`
-// stays `unknown` — this is an optional recognized shape, not a narrowing. Today
-// the only effect is `open-chat` (open a fresh conversation seeded with `seed`,
-// the same path the ✦ "Explore in chat" button uses).
+// stays `unknown` — this is an optional recognized shape, not a narrowing.
+// `open-chat` opens a fresh conversation seeded with `seed` (the path the ✦
+// "Explore in chat" button uses); `run-workflow` starts a catalog workflow run,
+// the same launch path the slash-command run-workflow effect takes. `workflow` is
+// an open string (the catalog name / `:name` path segment) — rib-contributed
+// names aren't known here; `args` maps onto the run API's `inputs`.
 export const ribClientEffectSchema = z.discriminatedUnion("effect", [
   z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
+  z
+    .object({
+      effect: z.literal("run-workflow"),
+      workflow: z.string().min(1),
+      args: z.record(z.string(), z.string()).optional(),
+    })
+    .strict(),
 ]);
 export type RibClientEffect = z.infer<typeof ribClientEffectSchema>;
 
