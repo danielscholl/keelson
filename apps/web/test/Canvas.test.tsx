@@ -231,6 +231,27 @@ describe("CanvasProvider / useCanvas", () => {
     });
   });
 
+  test("a snapshot html canvas fails closed when its payload isn't a string", () => {
+    snapshotImpl = {
+      status: "live",
+      data: { not: "a string" },
+      version: 1,
+      composedAt: "2026-01-01T00:00:00Z",
+    };
+    render(
+      <CanvasProvider>
+        <Opener
+          doc={{ kind: "html", source: { type: "snapshot", key: "rib:demo:panel" }, title: "h" }}
+        />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("expected text but received structured data");
+    // Structured data must never be stringified into the iframe.
+    expect(dialog.querySelector("iframe.canvas-html-frame")).toBeNull();
+  });
+
   test("inline view table renders headers and rows", () => {
     const doc: CanvasDocument = {
       kind: "view",
