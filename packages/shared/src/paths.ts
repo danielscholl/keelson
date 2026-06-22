@@ -65,3 +65,11 @@ export function resolveRibsRoot(home: string = resolveKeelsonHome()): string {
   if (existsSync(homeRibs)) return homeRibs;
   return join(dirname(home), "node_modules", "@keelson");
 }
+
+// A rib's private data tree, rooted at the keelson home (the same root as
+// keelson.db) and namespaced by rib id (e.g. <home>/chamber), so ribs don't
+// share a data directory. Backs RibContext.getDataDir. Path only; the caller
+// creates the directory when it writes.
+export function ribDataDir(ribId: string, home: string = resolveKeelsonHome()): string {
+  return join(home, ribId);
+}

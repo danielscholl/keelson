@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { keelsonPaths, resolveKeelsonHome, resolveRibsRoot } from "../src/paths.ts";
+import { keelsonPaths, resolveKeelsonHome, resolveRibsRoot, ribDataDir } from "../src/paths.ts";
 
 const ENV_KEYS = ["KEELSON_HOME", "KEELSON_DB", "KEELSON_WORKFLOWS_DIR"] as const;
 
@@ -104,5 +104,28 @@ describe("resolveRibsRoot", () => {
     const home = join(tmp, "empty-home");
     mkdirSync(home, { recursive: true });
     expect(resolveRibsRoot(home)).toBe(join(tmp, "node_modules", "@keelson"));
+  });
+});
+
+describe("ribDataDir", () => {
+  let savedHome: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env.KEELSON_HOME;
+    delete process.env.KEELSON_HOME;
+  });
+
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.KEELSON_HOME;
+    else process.env.KEELSON_HOME = savedHome;
+  });
+
+  it("namespaces a rib's data dir under the given home", () => {
+    expect(ribDataDir("chamber", "/srv/keelson-home")).toBe(join("/srv/keelson-home", "chamber"));
+  });
+
+  it("defaults the home to resolveKeelsonHome (KEELSON_HOME honored)", () => {
+    process.env.KEELSON_HOME = join("/explicit", "home");
+    expect(ribDataDir("chamber")).toBe(join("/explicit", "home", "chamber"));
   });
 });

@@ -606,6 +606,58 @@ describe("applyRibs wiring", () => {
     expect(captured?.runAgentTurn).toBeUndefined();
   });
 
+  it("exposes getDataDir on the rib context, resolving the rib's namespaced data dir", () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    let seenRibId = "";
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+      getRibDataDir: (ribId) => {
+        seenRibId = ribId;
+        return `/home/${ribId}`;
+      },
+    });
+    expect(captured?.getDataDir?.()).toBe("/home/chamber");
+    expect(seenRibId).toBe("chamber");
+  });
+
+  it("omits getDataDir when no resolver is supplied (fails closed for the rib)", () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+    });
+    expect(captured?.getDataDir).toBeUndefined();
+  });
+
   const fakeExecCtx = {
     getExec: () => ({
       runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),

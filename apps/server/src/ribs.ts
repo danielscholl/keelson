@@ -122,6 +122,10 @@ export interface ApplyRibsOptions {
   // Builds a rib's namespaced read-only credential reader. Optional so unit
   // tests without a credential store stay deterministic.
   readonly getRibCredential?: (ribId: string, serviceId: string) => Promise<string | undefined>;
+  // Resolves a rib's data directory (RibContext.getDataDir), rooted at the
+  // keelson home and namespaced by rib id. Optional so test rigs without a home
+  // stay deterministic — an absent resolver leaves getDataDir off the context.
+  readonly getRibDataDir?: (ribId: string) => string;
   // Runs one agent turn for a rib. NOT namespace-scoped — provider routing
   // is global; `ribId` is passed for future per-rib policy/logging. Optional so
   // test rigs without a provider/CLI stay deterministic.
@@ -245,6 +249,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.getRibCredential
         ? { getCredential: (serviceId) => opts.getRibCredential!(rib.id, serviceId) }
         : {}),
+      ...(opts.getRibDataDir ? { getDataDir: () => opts.getRibDataDir!(rib.id) } : {}),
       ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
       ...(opts.dynamicRegionStore
         ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
