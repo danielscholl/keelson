@@ -30,6 +30,7 @@ import {
   resolveAgent,
   startWorkflowRun,
 } from "../api.ts";
+import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { AuthWarning } from "../components/Chat/AuthWarning.tsx";
 import { CommandCallBlock } from "../components/Chat/CommandCallBlock.tsx";
 import { MarkdownContent } from "../components/Chat/MarkdownContent.tsx";
@@ -60,6 +61,7 @@ import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
 import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
+import { shouldOfferCanvas } from "../lib/chatCanvas.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 import { formatTokens, hasSpend } from "../lib/formatTokens.ts";
 import {
@@ -346,6 +348,7 @@ export function Chat({
 
   const conversationsList = useConversations();
   const toast = useToast();
+  const { openCanvas } = useCanvas();
   const { settings, toggleFavorite, setLastUsed, setSidebarCollapsed } = useSettings();
 
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -1945,78 +1948,105 @@ export function Chat({
                 {!hydrating && visibleMessages.length === 0 && (
                   <div className="empty-state">Send a message to start a conversation.</div>
                 )}
-                {visibleMessages.map((m) => (
-                  <div key={m.id} className={`chat-message ${m.role}`}>
-                    <span className="chat-role">{ROLE_LABEL[m.role]}</span>
-                    <div className={`chat-bubble${m.streaming ? " streaming" : ""}`}>
-                      {m.role === "assistant" ? (
-                        <>
-                          {m.thinking && m.thinking.length > 0 && (
-                            <ThinkingBlock content={m.thinking} streaming={m.streaming ?? false} />
-                          )}
-                          {m.toolCalls && m.toolCalls.length > 0 && (
-                            <ToolCallsBlock
-                              toolCalls={m.toolCalls}
-                              streaming={m.streaming ?? false}
-                            />
-                          )}
-                          <MarkdownContent source={m.content} />
-                          {m.truncated && (
-                            <div className="chat-truncated-marker">
-                              Turn stopped — partial result.
-                            </div>
-                          )}
-                        </>
-                      ) : m.role === "command" && m.commandCall ? (
-                        <CommandCallBlock
-                          commandCall={m.commandCall}
-                          onOpenRun={onOpenWorkflowRun}
-                        />
-                      ) : (
-                        m.content
-                      )}
-                    </div>
-                    {m.role === "assistant" && m.usage && !m.streaming && hasSpend(m.usage) && (
-                      <div
-                        className="chat-usage-meta"
-                        title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
-                      >
-                        ↑ {formatTokens(m.usage.inputTokens)} ↓ {formatTokens(m.usage.outputTokens)}
+                {visibleMessages.map((m) => {
+                  const offerCanvas = shouldOfferCanvas(m.role, m.content, m.streaming ?? false);
+                  // Notebook actions need a persisted server id + a conversation;
+                  // the canvas affordance is pure client text, so it's gated apart.
+                  const offerNotebook =
+                    m.role !== "system" &&
+                    m.role !== "command" &&
+                    !m.streaming &&
+                    m.content.trim().length > 0 &&
+                    conversationId !== null &&
+                    isPersistedMessageId(m.id);
+                  return (
+                    <div key={m.id} className={`chat-message ${m.role}`}>
+                      <span className="chat-role">{ROLE_LABEL[m.role]}</span>
+                      <div className={`chat-bubble${m.streaming ? " streaming" : ""}`}>
+                        {m.role === "assistant" ? (
+                          <>
+                            {m.thinking && m.thinking.length > 0 && (
+                              <ThinkingBlock
+                                content={m.thinking}
+                                streaming={m.streaming ?? false}
+                              />
+                            )}
+                            {m.toolCalls && m.toolCalls.length > 0 && (
+                              <ToolCallsBlock
+                                toolCalls={m.toolCalls}
+                                streaming={m.streaming ?? false}
+                              />
+                            )}
+                            <MarkdownContent source={m.content} />
+                            {m.truncated && (
+                              <div className="chat-truncated-marker">
+                                Turn stopped — partial result.
+                              </div>
+                            )}
+                          </>
+                        ) : m.role === "command" && m.commandCall ? (
+                          <CommandCallBlock
+                            commandCall={m.commandCall}
+                            onOpenRun={onOpenWorkflowRun}
+                          />
+                        ) : (
+                          m.content
+                        )}
                       </div>
-                    )}
-                    {/* Add-to-notebook on persisted, non-streaming, non-system
-                        messages. Gated on isPersistedMessageId so the buttons
-                        only appear once the done-frame reconcile has swapped the
-                        client-side `newId()` for the persisted UUID. */}
-                    {m.role !== "system" &&
-                      m.role !== "command" &&
-                      !m.streaming &&
-                      m.content.trim().length > 0 &&
-                      conversationId !== null &&
-                      isPersistedMessageId(m.id) && (
-                        <div className="chat-message-actions">
-                          <button
-                            type="button"
-                            className="chat-message-action"
-                            title="Append this message to the project notebook"
-                            disabled={savingNotebook}
-                            onClick={() => void appendWithUndo(m.content)}
-                          >
-                            📓 Add to notebook
-                          </button>
-                          <button
-                            type="button"
-                            className="chat-message-action"
-                            title="Edit before adding to the notebook"
-                            disabled={savingNotebook}
-                            onClick={() => setNotebookTarget(m.content)}
-                          >
-                            ✎ Edit…
-                          </button>
+                      {m.role === "assistant" && m.usage && !m.streaming && hasSpend(m.usage) && (
+                        <div
+                          className="chat-usage-meta"
+                          title={`This turn: ${m.usage.inputTokens} tokens in, ${m.usage.outputTokens} out`}
+                        >
+                          ↑ {formatTokens(m.usage.inputTokens)} ↓{" "}
+                          {formatTokens(m.usage.outputTokens)}
                         </div>
                       )}
-                  </div>
-                ))}
+                      {(offerCanvas || offerNotebook) && (
+                        <div className="chat-message-actions">
+                          {offerCanvas && (
+                            <button
+                              type="button"
+                              className="chat-message-action"
+                              title="Open this message in the canvas drawer"
+                              onClick={() =>
+                                openCanvas({
+                                  kind: "markdown",
+                                  source: { type: "inline", text: m.content },
+                                  title: "Assistant message",
+                                })
+                              }
+                            >
+                              ⤢ Open in canvas
+                            </button>
+                          )}
+                          {offerNotebook && (
+                            <>
+                              <button
+                                type="button"
+                                className="chat-message-action"
+                                title="Append this message to the project notebook"
+                                disabled={savingNotebook}
+                                onClick={() => void appendWithUndo(m.content)}
+                              >
+                                📓 Add to notebook
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-message-action"
+                                title="Edit before adding to the notebook"
+                                disabled={savingNotebook}
+                                onClick={() => setNotebookTarget(m.content)}
+                              >
+                                ✎ Edit…
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </>
             );
           })()}
