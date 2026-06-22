@@ -1,4 +1,4 @@
-import type { CanvasDocument, CanvasSource, OpenChatSeed } from "@keelson/shared";
+import type { CanvasDocument, CanvasHtmlAction, CanvasSource, OpenChatSeed } from "@keelson/shared";
 import { ribIdFromKey } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
@@ -8,6 +8,7 @@ import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { BoardActionProvider } from "./BoardActionContext.tsx";
+import { SandboxedHtml } from "./SandboxedHtml.tsx";
 import { ViewBody } from "./ViewBody.tsx";
 
 // Optional host-side extras passed when opening. `footer` is a live ReactNode
@@ -117,8 +118,7 @@ function CanvasDrawer({
 }
 
 // Closed canvas-kind registry: every CanvasKind has an explicit branch, and a
-// new kind makes this a compile error rather than a silent blank render. `html`
-// stays reserved until the iframe-origin security pass.
+// new kind makes this a compile error rather than a silent blank render.
 function CanvasBody({
   doc,
   onOpenChat,
@@ -133,11 +133,7 @@ function CanvasBody({
       // Key by source so switching sources remounts with fresh state.
       return <ViewCanvas key={sourceKey(doc.source)} source={doc.source} onOpenChat={onOpenChat} />;
     case "html":
-      return (
-        <p className="canvas-drawer-note">
-          HTML canvases aren't supported yet — pending the iframe-origin security review.
-        </p>
-      );
+      return <HtmlCanvas key={sourceKey(doc.source)} source={doc.source} />;
     default: {
       const exhaustive: never = doc.kind;
       return exhaustive;
@@ -217,7 +213,15 @@ type ArtifactState =
   | { status: "gone" }
   | { status: "error"; error: string };
 
-function ArtifactBody({ runId, path }: { runId: string; path: string }) {
+function ArtifactBody({
+  runId,
+  path,
+  render = (text) => <MarkdownContent source={text} />,
+}: {
+  runId: string;
+  path: string;
+  render?: (text: string) => ReactNode;
+}) {
   const [state, setState] = useState<ArtifactState>({ status: "loading" });
 
   useEffect(() => {
@@ -256,10 +260,16 @@ function ArtifactBody({ runId, path }: { runId: string; path: string }) {
       </p>
     );
   }
-  return <MarkdownContent source={state.text} />;
+  return render(state.text);
 }
 
-function SnapshotBody({ snapshotKey }: { snapshotKey: string }) {
+function SnapshotBody({
+  snapshotKey,
+  render = (data) => <MarkdownContent source={snapshotToMarkdown(data)} />,
+}: {
+  snapshotKey: string;
+  render?: (data: unknown) => ReactNode;
+}) {
   const snapshot = useSnapshot(snapshotKey);
   if (snapshot.status === "loading") {
     return <p className="canvas-drawer-note">Loading…</p>;
@@ -270,5 +280,64 @@ function SnapshotBody({ snapshotKey }: { snapshotKey: string }) {
   if (snapshot.status === "empty") {
     return <p className="canvas-drawer-note">Waiting for the first update…</p>;
   }
-  return <MarkdownContent source={snapshotToMarkdown(snapshot.data)} />;
+  return render(snapshot.data);
+}
+
+// A `kind: "html"` canvas: untrusted rib markup rendered in a sandboxed iframe.
+// Actions the frame posts dispatch to the rib that owns the source's snapshot key
+// (derived host-side, like ViewCanvas); inline/artifact html has no owning rib, so
+// its actions are a silent no-op rather than reaching an arbitrary one.
+function HtmlCanvas({ source }: { source: CanvasSource }) {
+  const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
+  const { run } = useRibActionDispatch(ribId);
+  const onAction = useCallback(
+    (action: CanvasHtmlAction) => {
+      if (ribId) void run({ type: action.type, payload: action.payload });
+    },
+    [ribId, run],
+  );
+  return <HtmlBody source={source} onAction={onAction} />;
+}
+
+function HtmlBody({
+  source,
+  onAction,
+}: {
+  source: CanvasSource;
+  onAction: (action: CanvasHtmlAction) => void;
+}) {
+  if (source.type === "inline") {
+    return <SandboxedHtml html={source.text} onAction={onAction} />;
+  }
+  if (source.type === "artifact") {
+    return (
+      <ArtifactBody
+        key={`${source.runId}/${source.path}`}
+        runId={source.runId}
+        path={source.path}
+        render={(text) => <SandboxedHtml html={text} onAction={onAction} />}
+      />
+    );
+  }
+  if (source.type === "snapshot") {
+    // A `kind: "html"` snapshot frame must carry an HTML string; structured data
+    // (e.g. a `view` payload published under the wrong key) fails closed to a note.
+    return (
+      <SnapshotBody
+        key={source.key}
+        snapshotKey={source.key}
+        render={(data) =>
+          typeof data === "string" ? (
+            <SandboxedHtml html={data} onAction={onAction} />
+          ) : (
+            <p className="canvas-drawer-note canvas-drawer-error">
+              This HTML canvas expected text but received structured data.
+            </p>
+          )
+        }
+      />
+    );
+  }
+  const exhaustive: never = source;
+  return exhaustive;
 }

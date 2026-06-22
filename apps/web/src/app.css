@@ -2925,6 +2925,17 @@ button.tab:focus-visible {
   padding: 22px 28px 232px;
 }
 
+/* HTML canvas: the sandboxed iframe fills the drawer width and scrolls its own
+   content, so it gets a tall floor rather than the markdown reading column. */
+.canvas-drawer-body .canvas-html-frame {
+  display: block;
+  width: 100%;
+  min-height: 70vh;
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+}
+
 /* Full-width surface, but keep the reading column comfortable and centered. */
 .canvas-drawer-body .markdown-content {
   max-width: 70ch;
