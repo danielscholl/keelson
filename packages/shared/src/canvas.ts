@@ -11,8 +11,8 @@ import { z } from "zod";
 // CanvasDocument — the contract for content opened in the canvas surface (a
 // right-side drawer in the SPA). The harness owns the surface; producers
 // (workflow trace, chat, memory, ribs) hand it a document. `markdown` and
-// `view` (see canvasViewSchema) have renderers; `html` stays reserved until
-// the iframe-origin security pass.
+// `view` (see canvasViewSchema) render directly; `html` renders untrusted markup
+// in a sandboxed iframe (see canvasHtmlActionSchema for its action back-channel).
 export const canvasKindSchema = z.enum(["markdown", "view", "html"]);
 export type CanvasKind = z.infer<typeof canvasKindSchema>;
 
@@ -39,6 +39,26 @@ export const canvasDocumentSchema = z
   })
   .strict();
 export type CanvasDocument = z.infer<typeof canvasDocumentSchema>;
+
+// Action posted from a sandboxed `html` canvas back to the host. The iframe is a
+// unique opaque origin (sandbox without allow-same-origin), so its messages
+// arrive with origin "null" — the host gates on `event.source` identity, then
+// parses through this schema before dispatch. `channel` is a fixed discriminant
+// so unrelated postMessage traffic is ignored. It deliberately carries no
+// rib/target id: an action can only reach the rib that owns the canvas's
+// snapshot key (host-derived), never one named by the untrusted frame. Frame
+// script can post without a user gesture, so a rib must render only markup it
+// authored here — never externally-controlled HTML — as the back-channel
+// dispatches straight to the rib's own action handler.
+export const CANVAS_HTML_ACTION_CHANNEL = "keelson:canvas:html:action";
+export const canvasHtmlActionSchema = z
+  .object({
+    channel: z.literal(CANVAS_HTML_ACTION_CHANNEL),
+    type: z.string().min(1),
+    payload: z.unknown().optional(),
+  })
+  .strict();
+export type CanvasHtmlAction = z.infer<typeof canvasHtmlActionSchema>;
 
 // Payload contract for a `kind: "view"` canvas. The data carries its own `view`
 // discriminant — the producer (a workflow or a rib) bakes it in; the base picks

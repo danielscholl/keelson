@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
+  CANVAS_HTML_ACTION_CHANNEL,
   canvasDocumentSchema,
+  canvasHtmlActionSchema,
   canvasKindSchema,
   canvasViewSchema,
   getRunArtifactResponseSchema,
@@ -737,5 +739,49 @@ describe("getRunArtifactResponseSchema", () => {
   it("round-trips a path + content pair", () => {
     const res = getRunArtifactResponseSchema.parse({ path: "plan.md", content: "# Plan\n" });
     expect(res).toEqual({ path: "plan.md", content: "# Plan\n" });
+  });
+});
+
+describe("canvasHtmlActionSchema", () => {
+  it("accepts a well-formed action with a payload", () => {
+    const action = canvasHtmlActionSchema.parse({
+      channel: CANVAS_HTML_ACTION_CHANNEL,
+      type: "suspend-cluster",
+      payload: { cluster: "demo" },
+    });
+    expect(action.type).toBe("suspend-cluster");
+    expect(action.payload).toEqual({ cluster: "demo" });
+  });
+
+  it("accepts an action without a payload", () => {
+    expect(
+      canvasHtmlActionSchema.safeParse({ channel: CANVAS_HTML_ACTION_CHANNEL, type: "ping" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects a foreign channel so stray postMessage traffic is ignored", () => {
+    expect(
+      canvasHtmlActionSchema.safeParse({ channel: "some-other-channel", type: "ping" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects an empty or missing type", () => {
+    expect(
+      canvasHtmlActionSchema.safeParse({ channel: CANVAS_HTML_ACTION_CHANNEL, type: "" }).success,
+    ).toBe(false);
+    expect(canvasHtmlActionSchema.safeParse({ channel: CANVAS_HTML_ACTION_CHANNEL }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects an unknown key — the frame cannot smuggle a target rib id", () => {
+    expect(
+      canvasHtmlActionSchema.safeParse({
+        channel: CANVAS_HTML_ACTION_CHANNEL,
+        type: "ping",
+        ribId: "other-rib",
+      }).success,
+    ).toBe(false);
   });
 });

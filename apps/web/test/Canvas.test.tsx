@@ -1,7 +1,12 @@
 import { describe, expect, mock, test } from "bun:test";
-import type { CanvasDocument, WorkflowNodeSummary } from "@keelson/shared";
+import {
+  CANVAS_HTML_ACTION_CHANNEL,
+  type CanvasDocument,
+  type WorkflowNodeSummary,
+} from "@keelson/shared";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
+import type { SnapshotState } from "../src/hooks/useSnapshot.ts";
 import type { NodeView } from "../src/hooks/useWorkflowRun.ts";
 
 // Render markdown as raw text so assertions don't depend on Streamdown under
@@ -15,10 +20,25 @@ let artifactImpl: (
   path: string,
 ) => Promise<{ path: string; content: string } | null> = async () => null;
 
+let postRibActionImpl: (ribId: string, action: unknown) => Promise<unknown> = async () => ({
+  ok: true,
+});
+
 mock.module("../src/api.ts", () => ({
   ...realApi,
   getRunArtifact: (runId: string, path: string) => artifactImpl(runId, path),
+  postRibAction: (ribId: string, action: unknown) => postRibActionImpl(ribId, action),
 }));
+
+// HTML-canvas snapshot source resolves through useSnapshot; default to loading so
+// only the test that sets snapshotImpl exercises a live frame.
+let snapshotImpl: SnapshotState = {
+  status: "loading",
+  data: null,
+  version: null,
+  composedAt: null,
+};
+mock.module("../src/hooks/useSnapshot.ts", () => ({ useSnapshot: () => snapshotImpl }));
 
 // Stub the graph renderer so the dispatch is testable without mounting
 // ReactFlow under happy-dom; the layout itself is covered in viewGraphLayout.test.ts.
@@ -29,6 +49,9 @@ mock.module("../src/components/Canvas/GraphView.tsx", () => ({
 }));
 
 const { CanvasProvider, useCanvas } = await import("../src/components/Canvas/CanvasHost.tsx");
+const { SandboxedHtml, composeCanvasHtmlDoc } = await import(
+  "../src/components/Canvas/SandboxedHtml.tsx"
+);
 const { RunTrace } = await import("../src/components/Workflows/RunTrace.tsx");
 const { ToolCallsBlock } = await import("../src/components/Chat/ToolCallsBlock.tsx");
 
@@ -51,6 +74,15 @@ const INLINE: CanvasDocument = {
   source: { type: "inline", text: "plain inline canvas body" },
   title: "inline-doc",
 };
+
+// Dispatch a window `message` with a forced `source` — happy-dom's MessageEvent
+// doesn't reliably preserve `source` from the init dict, and the source-identity
+// gate is exactly what these tests exercise.
+function postMessageTo(data: unknown, source: unknown) {
+  const e = new MessageEvent("message", { data });
+  Object.defineProperty(e, "source", { value: source, configurable: true });
+  window.dispatchEvent(e);
+}
 
 describe("CanvasProvider / useCanvas", () => {
   test("opens inline markdown and closes via the close button", () => {
@@ -110,14 +142,93 @@ describe("CanvasProvider / useCanvas", () => {
     expect(screen.getByRole("dialog").textContent).toContain("DOCKED FOOTER");
   });
 
-  test("the reserved html kind renders a not-yet-supported placeholder", () => {
+  test("inline html renders a sandboxed iframe (allow-scripts only) carrying CSP, bridge, and the fragment", () => {
     render(
       <CanvasProvider>
-        <Opener doc={{ kind: "html", source: { type: "inline", text: "<b>x</b>" }, title: "h" }} />
+        <Opener
+          doc={{ kind: "html", source: { type: "inline", text: "<p>hi from rib</p>" }, title: "h" }}
+        />
       </CanvasProvider>,
     );
     fireEvent.click(screen.getByText("open"));
-    expect(screen.getByRole("dialog").textContent).toContain("aren't supported yet");
+    const frame = screen.getByRole("dialog").querySelector("iframe.canvas-html-frame");
+    expect(frame).not.toBeNull();
+    // The single sandbox token IS the trust boundary — assert it exactly so a
+    // regression adding allow-same-origin (the sandbox-escape footgun) fails here.
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame?.getAttribute("referrerpolicy")).toBe("no-referrer");
+    const srcdoc = frame?.getAttribute("srcdoc") ?? "";
+    expect(srcdoc).toContain("Content-Security-Policy");
+    expect(srcdoc).toContain("connect-src 'none'");
+    expect(srcdoc).toContain("<p>hi from rib</p>");
+  });
+
+  test("composeCanvasHtmlDoc puts the CSP meta first in <head>, before the bridge, fragment in body", () => {
+    const doc = composeCanvasHtmlDoc("<button data-canvas-action='ping'>go</button>");
+    const cspAt = doc.indexOf('http-equiv="Content-Security-Policy"');
+    const bridgeAt = doc.indexOf("window.keelson");
+    const bodyAt = doc.indexOf("<body>");
+    // A meta-CSP only governs content parsed after it, so it must precede the bridge.
+    expect(doc.indexOf("<head>")).toBeGreaterThanOrEqual(0);
+    expect(cspAt).toBeGreaterThan(doc.indexOf("<head>"));
+    expect(bridgeAt).toBeGreaterThan(cspAt);
+    expect(doc).toContain("<button data-canvas-action='ping'>go</button>");
+    expect(doc.indexOf("<button")).toBeGreaterThan(bodyAt);
+  });
+
+  test("SandboxedHtml relays a valid action from its own frame and ignores impostors", () => {
+    const seen: unknown[] = [];
+    render(<SandboxedHtml html="<p>x</p>" onAction={(a) => seen.push(a)} />);
+    const frame = document.querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+    // Pin a known contentWindow so the source-identity gate is deterministic under
+    // happy-dom (which doesn't model real frame windows).
+    const win = {} as Window;
+    Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+    const valid = { channel: CANVAS_HTML_ACTION_CHANNEL, type: "ping", payload: { a: 1 } };
+
+    postMessageTo(valid, {} as Window); // wrong source → ignored
+    postMessageTo({ channel: "x", type: "ping" }, win); // wrong channel → ignored
+    postMessageTo({ channel: CANVAS_HTML_ACTION_CHANNEL, type: "" }, win); // bad schema → ignored
+    expect(seen).toEqual([]);
+
+    postMessageTo(valid, win); // right source + valid body → relayed
+    expect(seen).toEqual([valid]);
+  });
+
+  test("a snapshot-sourced html action dispatches to the rib that owns the key", async () => {
+    snapshotImpl = {
+      status: "live",
+      data: "<button data-canvas-action='suspend'>x</button>",
+      version: 1,
+      composedAt: "2026-01-01T00:00:00Z",
+    };
+    const calls: Array<{ ribId: string; action: unknown }> = [];
+    postRibActionImpl = async (ribId, action) => {
+      calls.push({ ribId, action });
+      return { ok: true };
+    };
+    render(
+      <CanvasProvider>
+        <Opener
+          doc={{ kind: "html", source: { type: "snapshot", key: "rib:demo:panel" }, title: "h" }}
+        />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const frame = screen
+      .getByRole("dialog")
+      .querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+    const win = {} as Window;
+    Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+    postMessageTo(
+      { channel: CANVAS_HTML_ACTION_CHANNEL, type: "suspend", payload: { cluster: "demo" } },
+      win,
+    );
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect(calls[0]).toEqual({
+      ribId: "demo",
+      action: { type: "suspend", payload: { cluster: "demo" } },
+    });
   });
 
   test("inline view table renders headers and rows", () => {
