@@ -25,7 +25,7 @@ import {
   loadKeelsonConfig,
   resolveMcpSettings,
 } from "@keelson/shared/config";
-import { keelsonPaths, resolveKeelsonHome } from "@keelson/shared/paths";
+import { keelsonPaths, resolveKeelsonHome, ribDataDir } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
 import { bundledWorkflowsDir, seedStarterAssets } from "@keelson/workflows";
 import type { Server } from "bun";
@@ -236,6 +236,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     dynamicRegionStore,
     getRibCredential: (ribId, serviceId) =>
       createRibCredentialAccessor(credentialStore, ribId)(serviceId),
+    getRibDataDir: (ribId) => ribDataDir(ribId, KEELSON_HOME),
     getPolicyEngine: () => policyEngine,
   });
   // Register rib-contributed tools into the shared registry so the chat agent,

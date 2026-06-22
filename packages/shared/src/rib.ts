@@ -140,6 +140,10 @@ export interface RibContext {
   // attempt to reach another rib's keys. Optional so minimal test contexts
   // without a credential store still satisfy the interface.
   getCredential?: (serviceId: string) => Promise<string | undefined>;
+  // Absolute path to THIS rib's private data directory under the keelson home,
+  // namespaced by rib id (`<home>/<rib-id>`); path only — the rib creates it when
+  // it writes. Optional, like the accessors above, so an older harness can omit it.
+  getDataDir?: () => string;
   // Run one agent turn. Optional, like the accessors above, so a rib that
   // needs rooms but finds it absent fails closed. Provider routing is global,
   // not namespace-scoped. See RibAgentTurn for the stream/result contract.

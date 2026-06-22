@@ -178,6 +178,10 @@ export interface BootstrapRibsOptions {
   // Builds a rib's namespaced read-only credential reader. Optional so unit
   // tests without a credential store stay deterministic.
   getRibCredential?: (ribId: string, serviceId: string) => Promise<string | undefined>;
+  // Resolves a rib's data directory (RibContext.getDataDir), rooted at the
+  // keelson home. The composition root passes `(id) => ribDataDir(id, home)`.
+  // Optional so applyRibs/parseRibList unit tests stay home-free.
+  getRibDataDir?: (ribId: string) => string;
   // Agent-turn factory. Defaults to the CLI-backed makeRibAgentTurn;
   // injectable so tests pass a fake instead of shelling a provider CLI.
   runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
@@ -262,6 +266,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     runAgentTurn,
     ...(snapshotManager ? { snapshotManager } : {}),
     ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
+    ...(options.getRibDataDir ? { getRibDataDir: options.getRibDataDir } : {}),
     ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
   });
   return {
