@@ -125,10 +125,16 @@ export function mergeSurfaceRegions(
   if (dynamicRegions.length === 0) return surface;
   // Clamp so a non-positive width can't spin the chunk loop forever.
   const step = width >= 1 ? Math.floor(width) : DEFAULT_REGION_ROW_WIDTH;
-  const extraRows: { columns: RibSurfaceRegion[] }[] = [];
+  const extraRows: { columns: RibSurfaceRegion[]; zoneTitle?: string }[] = [];
   for (const group of groupInOrder(dynamicRegions)) {
+    // First non-empty groupTitle in the group titles every row it forms, so a
+    // group's rows render under one zone header even when chunked across rows.
+    const zoneTitle = group.find((r) => r.groupTitle)?.groupTitle;
     for (let i = 0; i < group.length; i += step) {
-      extraRows.push({ columns: group.slice(i, i + step) });
+      extraRows.push({
+        columns: group.slice(i, i + step),
+        ...(zoneTitle ? { zoneTitle } : {}),
+      });
     }
   }
   return {

@@ -26,6 +26,7 @@ interface Region {
   workflow?: string;
   cadenceMs?: number;
   title?: string;
+  byline?: string;
   glyph?: { char: string; tone?: CanvasTone };
   collapsible?: boolean;
   collapsed?: boolean;
@@ -50,6 +51,14 @@ export function Surface({
   const { header, banner, rows, footer } = descriptor.layout;
   return (
     <div className="page surface-page">
+      {(descriptor.title || descriptor.subtitle) && (
+        <header className="surface-identity">
+          {descriptor.title && <h1 className="surface-identity-title">{descriptor.title}</h1>}
+          {descriptor.subtitle && (
+            <p className="surface-identity-subtitle">{descriptor.subtitle}</p>
+          )}
+        </header>
+      )}
       {/* Role-prefixed keys so a region remounts (re-reads its initial collapsed
           flag) if the descriptor swaps it for a different one at this slot. */}
       {header && (
@@ -68,18 +77,26 @@ export function Surface({
           onLaunchWorkflow={onLaunchWorkflow}
         />
       )}
-      {rows.map((row, rowIndex) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: surface rows are a static descriptor array (never reordered), so the index is a stable, collision-free key — region keys are unconstrained and could collide if joined.
-        <div className="surface-row" key={`row:${rowIndex}`}>
-          {row.columns.map((col) => (
-            <SurfaceRegion
-              key={col.key}
-              region={col}
-              onExplore={onExplore}
-              onLaunchWorkflow={onLaunchWorkflow}
-            />
+      {groupRowsByZone(rows).map((zone) => (
+        <section className="surface-zone" key={`zone:${zone.start}`}>
+          {zone.title && <h2 className="surface-zone-title">{zone.title}</h2>}
+          {zone.rows.map((row, rowIndex) => (
+            // Surface rows are a static descriptor array (never reordered), so the
+            // row's position is a stable, collision-free key — region keys are
+            // unconstrained and could collide if joined.
+            // biome-ignore lint/suspicious/noArrayIndexKey: see above.
+            <div className="surface-row" key={`row:${zone.start + rowIndex}`}>
+              {row.columns.map((col) => (
+                <SurfaceRegion
+                  key={col.key}
+                  region={col}
+                  onExplore={onExplore}
+                  onLaunchWorkflow={onLaunchWorkflow}
+                />
+              ))}
+            </div>
           ))}
-        </div>
+        </section>
       ))}
       {footer && (
         <SurfaceRegion
@@ -91,6 +108,26 @@ export function Surface({
       )}
     </div>
   );
+}
+
+type SurfaceRow = RibSurfaceDescriptor["layout"]["rows"][number];
+
+// Fold the flat row list into zones: a run of consecutive rows sharing a
+// `zoneTitle` renders under one heading; title-less rows each stand alone (no
+// wrapper heading), preserving the pre-zone layout for surfaces that set none.
+function groupRowsByZone(
+  rows: readonly SurfaceRow[],
+): { start: number; title?: string; rows: SurfaceRow[] }[] {
+  const zones: { start: number; title?: string; rows: SurfaceRow[] }[] = [];
+  rows.forEach((row, index) => {
+    const last = zones.at(-1);
+    if (row.zoneTitle && last?.title === row.zoneTitle) {
+      last.rows.push(row);
+      return;
+    }
+    zones.push({ start: index, rows: [row], ...(row.zoneTitle ? { title: row.zoneTitle } : {}) });
+  });
+  return zones;
 }
 
 function SurfaceRegion({
@@ -207,7 +244,10 @@ function SurfaceRegion({
         </span>
       )}
       {(region.title ?? board?.title) && (
-        <span className="surface-region-title">{region.title ?? board?.title}</span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">{region.title ?? board?.title}</span>
+          {region.byline && <span className="surface-region-byline">{region.byline}</span>}
+        </span>
       )}
       {board?.header?.status && (
         <span className="cvb-header-status" data-tone={board.header.status.tone}>

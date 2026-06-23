@@ -353,4 +353,91 @@ describe("Surface", () => {
     const btn = screen.getByRole("button", { name: "Reconcile" });
     expect(btn).toHaveProperty("disabled", false);
   });
+
+  test("renders the surface title and subtitle as a page-identity slot", () => {
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      subtitle: "3 rooms · 2 lenses",
+      layout: { rows: [] },
+    });
+    expect(container.querySelector(".surface-identity-title")?.textContent).toBe("Chamber");
+    expect(container.querySelector(".surface-identity-subtitle")?.textContent).toBe(
+      "3 rooms · 2 lenses",
+    );
+  });
+
+  test("renders a run of zoneTitle rows under one titled zone heading", () => {
+    live("rib:chamber:room-1", board("Room 1", "Members", 4));
+    live("rib:chamber:room-2", board("Room 2", "Members", 2));
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          { zoneTitle: "Rooms", columns: [{ key: "rib:chamber:room-1", title: "Room 1" }] },
+          { zoneTitle: "Rooms", columns: [{ key: "rib:chamber:room-2", title: "Room 2" }] },
+        ],
+      },
+    });
+    const zoneTitles = [...container.querySelectorAll(".surface-zone-title")].map(
+      (n) => n.textContent,
+    );
+    // One zone heading covers both same-titled rows, not one per row.
+    expect(zoneTitles).toEqual(["Rooms"]);
+    const zone = container.querySelector(".surface-zone") as HTMLElement;
+    expect(zone.querySelectorAll(".surface-row")).toHaveLength(2);
+    expect(within(zone).getByText("Room 1")).toBeDefined();
+    expect(within(zone).getByText("Room 2")).toBeDefined();
+  });
+
+  test("a titleless row stands alone with no zone heading (pre-zone layout)", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:quality" }] }] },
+    });
+    expect(container.querySelector(".surface-zone-title")).toBeNull();
+    expect(container.querySelectorAll(".surface-row")).toHaveLength(1);
+  });
+
+  test("a collapsible row-column region collapses to its head until expanded", () => {
+    live("rib:chamber:room-1", board("Room 1", "Members", 4));
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:chamber:room-1", title: "Room 1", collapsible: true, collapsed: true },
+            ],
+          },
+        ],
+      },
+    });
+    expect(screen.getByText("Room 1")).toBeDefined();
+    expect(screen.queryByText("Members")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand region" }));
+    expect(screen.getByText("Members")).toBeDefined();
+  });
+
+  test("renders a region byline beneath its title in the head", () => {
+    live("rib:chamber:room-1", board("Room 1", "Members", 4));
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [{ key: "rib:chamber:room-1", title: "Room 1", byline: "scope: navigation" }],
+          },
+        ],
+      },
+    });
+    expect(container.querySelector(".surface-region-byline")?.textContent).toBe(
+      "scope: navigation",
+    );
+  });
 });
