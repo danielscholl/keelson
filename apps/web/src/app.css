@@ -3688,6 +3688,17 @@ textarea.cvb-action-field-input {
   flex: 1 1 auto;
   min-width: 0;
 }
+/* A card-head pill is a short label (role, status). Cap and ellipsize it so a
+   verbose pill from a producer can't starve the title into a one-character
+   column (the base .cvb-pill is flex:none, which would otherwise hold full width). */
+.cvb-card-head .cvb-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cvb-card-overflow {
   position: relative;
   margin-left: auto;
