@@ -2,10 +2,11 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { createKeelsonMcpHttp, type KeelsonMcpHttp } from "@keelson/mcp";
+import { createKeelsonMcpHttp, type KeelsonMcpHttp, type McpPolicyGate } from "@keelson/mcp";
 import type { ToolDefinition } from "@keelson/shared";
 import type { McpSettings } from "@keelson/shared/config";
 import type { Hono } from "hono";
+import type { PolicyEngine } from "./policy-engine.ts";
 import { constantTimeTokenEqual } from "./token-compare.ts";
 
 // The MCP gateway lives under /api so it's excluded from the SPA static-asset
@@ -24,6 +25,22 @@ export interface McpRoutesOptions {
   token?: string;
   // Tools exposed in addition to the global registry (the workflow chat tools).
   extraTools?: readonly ToolDefinition[];
+  // Unified policy engine. When supplied, MCP-invoked tools run the same
+  // denylist / ask / redact stack as the chat and workflow surfaces instead of
+  // the static exposure filter alone.
+  policyEngine?: PolicyEngine;
+}
+
+// Adapt the host PolicyEngine to the gateway's narrow gate, binding the `mcp`
+// surface. The result phase is wired only when a policy reads it, so the default
+// path runs no per-result evaluation — matching the chat/workflow seams.
+function toMcpGate(engine: PolicyEngine): McpPolicyGate {
+  return {
+    evaluateToolCall: (call) => engine.evaluateToolCall(call, { surface: "mcp" }),
+    evaluateToolResult: engine.resultPhaseActive
+      ? (call) => engine.evaluateToolResult(call, { surface: "mcp" })
+      : async () => ({ outcome: "allow" as const }),
+  };
 }
 
 export interface McpRoutesHandle {
@@ -40,17 +57,27 @@ export function createMcpRoutes(opts: McpRoutesOptions): McpRoutesHandle {
     toolDenylist: opts.settings.toolDenylist,
     version: opts.version,
     ...(opts.extraTools !== undefined ? { extraTools: opts.extraTools } : {}),
+    ...(opts.policyEngine !== undefined ? { policyGate: toMcpGate(opts.policyEngine) } : {}),
   });
-  const gateToken = opts.settings.requireToken ? opts.token : undefined;
+  // Gate on `requireToken`, not on a non-undefined token: a routes object built
+  // with requireToken set but no (or an empty) token must reject every request,
+  // not serve unauthenticated. The expected token is "" in that case, which no
+  // presented bearer can match, so the gate fails closed.
+  const requireToken = opts.settings.requireToken === true;
+  const gateToken = opts.token ?? "";
   return {
     mount(app) {
       app.all(MCP_ROUTE_PATH, async (c) => {
-        if (gateToken !== undefined) {
+        if (requireToken) {
           // The auth scheme is case-insensitive per RFC 6750.
           const header = c.req.header("authorization") ?? "";
           const match = /^bearer\s+(.+)$/i.exec(header.trim());
           const presented = match?.[1] ?? "";
-          if (presented.length === 0 || !constantTimeTokenEqual(presented, gateToken)) {
+          if (
+            presented.length === 0 ||
+            gateToken.length === 0 ||
+            !constantTimeTokenEqual(presented, gateToken)
+          ) {
             return c.json({ error: "invalid mcp token" }, 401);
           }
         }

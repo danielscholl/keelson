@@ -547,6 +547,108 @@ describe("makeRibAgentTurn — tool rails", () => {
   });
 });
 
+describe("makeRibAgentTurn — response-phase redaction", () => {
+  // The room default is a text-only turn (no tool rails); its prose still flows
+  // through the response gate, so a secret the model echoes is scrubbed before
+  // the result text a rib persists/broadcasts is returned — the same
+  // KEELSON_REDACT_PATTERN scrub the workflow prompt surface runs.
+  function provText(text: string): IAgentProvider {
+    return fakeProvider({
+      chunks: [{ type: "text", content: text }, { type: "done" }],
+    });
+  }
+
+  it("redacts a secret in the turn's prose when the redact builtin is active", async () => {
+    const engine = createPolicyEngine({ redactPattern: "SECRET-[A-Z0-9]+" });
+    const run = makeRun(provText("here is the key SECRET-ABC123 keep it safe"), {
+      getPolicyEngine: () => engine,
+    });
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("ok");
+    expect(result.text).toBe("here is the key [REDACTED] keep it safe");
+  });
+
+  it("leaves prose untouched when no redact pattern is configured", async () => {
+    const engine = createPolicyEngine();
+    const run = makeRun(provText("SECRET-ABC123"), { getPolicyEngine: () => engine });
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.text).toBe("SECRET-ABC123");
+  });
+
+  it("a response-phase deny fails the turn and drops the forbidden text", async () => {
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "chamber",
+          policy: {
+            id: "block-leaks",
+            on: [{ phase: "response" }],
+            evaluate: (e) =>
+              e.phase === "response" && e.text.includes("SECRET")
+                ? { outcome: "deny", reason: "leak blocked" }
+                : { outcome: "allow" },
+          },
+        },
+      ],
+    });
+    const run = makeRun(provText("SECRET payload"), { getPolicyEngine: () => engine });
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("error");
+    expect(result.text).toBe("");
+    expect(result.error).toBe("leak blocked");
+  });
+
+  it("carries the rib id and rib surface into the response event", async () => {
+    let seen: { ribId?: string; surface?: string } | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "chamber",
+          policy: {
+            id: "record",
+            on: [{ phase: "response" }],
+            evaluate: (e, ctx) => {
+              if (e.phase === "response") seen = { ribId: ctx.ribId, surface: ctx.surface };
+              return { outcome: "allow" };
+            },
+          },
+        },
+      ],
+    });
+    const run = makeRun(provText("hello"), { getPolicyEngine: () => engine });
+    await run("chamber", { prompt: "hi" }).result;
+    expect(seen).toEqual({ ribId: "chamber", surface: "rib" });
+  });
+
+  it("does not run the response gate on a provider error (no clean text)", async () => {
+    let gateCalled = false;
+    const engine = createPolicyEngine({
+      ribPolicies: [
+        {
+          ribId: "chamber",
+          policy: {
+            id: "record",
+            on: [{ phase: "response" }],
+            evaluate: () => {
+              gateCalled = true;
+              return { outcome: "allow" };
+            },
+          },
+        },
+      ],
+    });
+    const run = makeRun(
+      fakeProvider({
+        chunks: [{ type: "error", message: "boom" }, { type: "done" }],
+      }),
+      { getPolicyEngine: () => engine },
+    );
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("error");
+    expect(gateCalled).toBe(false);
+  });
+});
+
 describe("applyRibs wiring", () => {
   it("exposes runAgentTurn on the rib context, bound to the rib id", async () => {
     let captured: RibContext | undefined;

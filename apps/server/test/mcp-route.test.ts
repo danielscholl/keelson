@@ -7,7 +7,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { McpSettings } from "@keelson/shared/config";
+import { Hono } from "hono";
 import { type ServerHandle, startServer } from "../src/index.ts";
+import { createMcpRoutes } from "../src/mcp-handler.ts";
 
 const MCP_TOKEN = "test-mcp-token";
 
@@ -130,5 +133,58 @@ describe("POST /api/mcp (token-gated)", () => {
       body: initializeBody,
     });
     expect(res.status).toBe(200);
+  });
+});
+
+// createMcpRoutes is an exported, reusable unit: an embedder can build it with
+// requireToken set but no token. The gate must fail CLOSED there (reject every
+// request) rather than degrading to no-auth on the misconfiguration.
+describe("createMcpRoutes fails closed on requireToken without a token", () => {
+  const settings = (requireToken: boolean): McpSettings => ({
+    enabled: true,
+    exposeStateChanging: false,
+    toolDenylist: [],
+    requireToken,
+  });
+
+  function mount(opts: { requireToken: boolean; token?: string }): Hono {
+    const app = new Hono();
+    createMcpRoutes({
+      settings: settings(opts.requireToken),
+      defaultCwd: tmpdir(),
+      version: "0.0.0",
+      ...(opts.token !== undefined ? { token: opts.token } : {}),
+    }).mount(app);
+    return app;
+  }
+
+  const post = (app: Hono, headers: Record<string, string> = {}) =>
+    app.fetch(
+      new Request("http://test/api/mcp", {
+        method: "POST",
+        headers: { ...MCP_HEADERS, ...headers },
+        body: initializeBody,
+      }),
+    );
+
+  test("requireToken with an undefined token rejects every request (401)", async () => {
+    const app = mount({ requireToken: true });
+    expect((await post(app)).status).toBe(401);
+    // Even a presented bearer can't pass — there is no token to match.
+    expect((await post(app, { authorization: "Bearer anything" })).status).toBe(401);
+  });
+
+  test("requireToken with an empty-string token rejects every request (401)", async () => {
+    const app = mount({ requireToken: true, token: "" });
+    expect((await post(app)).status).toBe(401);
+    expect((await post(app, { authorization: "Bearer anything" })).status).toBe(401);
+  });
+
+  test("the legitimate no-token-required path still serves", async () => {
+    const app = mount({ requireToken: false });
+    const res = await post(app);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result?: { serverInfo?: { name?: string } } };
+    expect(body.result?.serverInfo?.name).toBe("keelson");
   });
 });

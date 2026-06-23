@@ -56,8 +56,9 @@ import { z } from "zod";
  */
 
 // Which turn surface triggered evaluation. Lets a policy scope itself (e.g.
-// "only gate rib turns") without the engine pre-filtering by surface.
-export type PolicySurface = "chat" | "workflow" | "rib";
+// "only gate rib turns") without the engine pre-filtering by surface. `mcp` is
+// the gateway exposing tools to external MCP clients.
+export type PolicySurface = "chat" | "workflow" | "rib" | "mcp";
 
 export type PolicyDecision =
   // On `tool_result` / `response`, an allow carrying a string `data` SUBSTITUTES
@@ -160,7 +161,7 @@ export interface ApprovalRequest {
 export const pendingApprovalViewSchema = z
   .object({
     id: z.string().min(1),
-    surface: z.enum(["chat", "workflow", "rib"]),
+    surface: z.enum(["chat", "workflow", "rib", "mcp"]),
     policyId: z.string().min(1),
     reason: z.string(),
     tool: z.string().optional(),

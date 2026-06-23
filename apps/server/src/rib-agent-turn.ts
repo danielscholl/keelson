@@ -220,6 +220,33 @@ async function runTurn(
   if (providerError !== undefined) {
     return { status: "error", text: assistantText, error: providerError, providerId };
   }
+
+  // Response-phase policy gate on the COMPLETE assembled prose — the same
+  // KEELSON_REDACT_PATTERN scrub the workflow `prompt` surface runs before its
+  // output persists (prompt.ts). Without it a room turn's reply, which a rib
+  // (chamber) writes to on-disk transcripts and broadcasts over snapshot WS,
+  // escapes redaction even though rib tool results don't. Runs only on the
+  // clean-completion path (skipped above on cancel/timeout/provider error). A
+  // deny drops the text and fails the turn; an allow+data substitutes. Fail open
+  // on a gate fault — a response-gate bug must not take the turn down.
+  const engine = deps.getPolicyEngine?.();
+  if (engine?.responsePhaseActive) {
+    try {
+      const decision = await engine.evaluateResponse({
+        surface: "rib",
+        ribId,
+        provider: providerId,
+        text: assistantText,
+      });
+      if (decision.outcome === "deny") {
+        return { status: "error", text: "", error: decision.reason, providerId };
+      }
+      if (typeof decision.data === "string") assistantText = decision.data;
+    } catch (err) {
+      console.warn(`[rib-agent-turn] response gate threw for rib '${ribId}': ${errMessage(err)}`);
+    }
+  }
+
   return { status: "ok", text: assistantText, providerId };
 }
 

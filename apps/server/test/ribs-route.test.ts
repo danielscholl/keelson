@@ -371,6 +371,57 @@ describe("POST /api/ribs/:id/action", () => {
       error: "rib returned a malformed action result",
     });
   });
+
+  // An open-canvas effect names a snapshot board the SPA renders and dispatches
+  // actions to. A rib may only open its OWN board — the route mirrors the
+  // activation-time namespace gate so a rib can't make the SPA render/act on
+  // another rib's namespace.
+  function canvasRib(id: string, key: string): Rib {
+    return {
+      id,
+      displayName: id,
+      onAction: () => ({ ok: true, data: { effect: "open-canvas", key } }),
+    };
+  }
+
+  test("an open-canvas key inside the acting rib's namespace passes through", async () => {
+    const { app } = await makeRig({
+      available: { mine: canvasRib("mine", "rib:mine:board") },
+    });
+    const res = await app.fetch(post("/api/ribs/mine/action", { type: "open" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:mine:board" },
+    });
+  });
+
+  test("an open-canvas key in ANOTHER rib's namespace is rejected (500)", async () => {
+    const { app } = await makeRig({
+      available: { mine: canvasRib("mine", "rib:other:board") },
+    });
+    const res = await app.fetch(post("/api/ribs/mine/action", { type: "open" }));
+    expect(res.status).toBe(500);
+    expect((await res.json()) as { ok: boolean; error: string }).toEqual({
+      ok: false,
+      error: "open-canvas key is outside the rib namespace",
+    });
+  });
+
+  test("a non-effect success (a plain reveal string) is unaffected by the namespace gate", async () => {
+    const reveal: Rib = {
+      id: "reveal",
+      displayName: "Reveal",
+      onAction: () => ({ ok: true, data: "rib:other:looks-namespaced-but-not-an-effect" }),
+    };
+    const { app } = await makeRig({ available: { reveal } });
+    const res = await app.fetch(post("/api/ribs/reveal/action", { type: "x" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      data: "rib:other:looks-namespaced-but-not-an-effect",
+    });
+  });
 });
 
 describe("rib workflow contribution + binding", () => {

@@ -7,4 +7,9 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 export { createKeelsonMcpHttp, type KeelsonMcpHttp } from "./http.ts";
-export { createKeelsonMcpServer, type KeelsonMcpServerOptions } from "./server.ts";
+export {
+  createKeelsonMcpServer,
+  type KeelsonMcpServerOptions,
+  type McpGateDecision,
+  type McpPolicyGate,
+} from "./server.ts";
