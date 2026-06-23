@@ -150,4 +150,17 @@ describe("mergeSurfaceRegions", () => {
     const merged = mergeSurfaceRegions(surface([staticRow]), [r("a", "rooms"), r("b", "rooms")], 3);
     expect(merged.layout.rows[1]?.zoneTitle).toBeUndefined();
   });
+
+  test("a groupTitle on an ungrouped region is inert (no zoneTitle on the ungrouped row)", () => {
+    const merged = mergeSurfaceRegions(
+      surface([staticRow]),
+      [{ key: "stray", groupTitle: "Phantom" }, r("b", "rooms")],
+      3,
+    );
+    // The ungrouped 'stray' must not stamp its groupTitle onto the ungrouped row.
+    const ungroupedRow = merged.layout.rows.find((row) =>
+      row.columns.some((c) => c.key === "stray"),
+    );
+    expect(ungroupedRow?.zoneTitle).toBeUndefined();
+  });
 });
