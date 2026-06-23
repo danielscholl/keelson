@@ -22,7 +22,10 @@ interface RunResult {
   exitCode: number;
 }
 
-async function runCli(args: readonly string[]): Promise<RunResult> {
+async function runCli(
+  args: readonly string[],
+  envOverrides: Record<string, string> = {},
+): Promise<RunResult> {
   const proc = Bun.spawn(["bun", BIN, ...args], {
     cwd: REPO_ROOT,
     stdout: "pipe",
@@ -34,6 +37,7 @@ async function runCli(args: readonly string[]): Promise<RunResult> {
       KEELSON_DISABLE_SCHEDULER: "1",
       KEELSON_PROVIDERS: "stub",
       PORT: String(port),
+      ...envOverrides,
     }),
   });
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -84,6 +88,27 @@ describe("keelson start/status/stop lifecycle", () => {
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(true);
     expect(envelope.data.status).toBe("stopped");
+  }, 30_000);
+
+  test("status honors KEELSON_SERVER_URL, reaching the same server the data plane targets", async () => {
+    // The control plane must resolve its probe target the way every data-plane
+    // command does. With a server answering at KEELSON_SERVER_URL and no
+    // server.json, status used to probe PORT and report "stopped" for a server
+    // the rest of the CLI was happily talking to.
+    const foreign = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({ ok: true, name: "keelson", schema_version: "test" }),
+    });
+    const url = `http://127.0.0.1:${foreign.port}`;
+    try {
+      const { stdout, exitCode } = await runCli(["--json", "status"], { KEELSON_SERVER_URL: url });
+      expect(exitCode).toBe(0);
+      const envelope = JSON.parse(stdout.trim());
+      expect(envelope.data.status).toBe("running");
+      expect(envelope.data.url).toBe(url);
+    } finally {
+      foreign.stop(true);
+    }
   }, 30_000);
 
   test("deprecated `service`/`serve` aliases still resolve to status", async () => {

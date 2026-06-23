@@ -19,7 +19,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
-import { probeServer, type ServerInfo } from "../server-probe.ts";
+import { defaultServerBaseUrl, probeServer, type ServerInfo } from "../server-probe.ts";
 
 export interface ServeOptions {
   db?: string;
@@ -47,8 +47,17 @@ const STOP_TIMEOUT_MS = 12_000;
 const POLL_INTERVAL_MS = 250;
 const STATUS_PROBE_TIMEOUT_MS = 1_000;
 
-function defaultBaseUrl(): string {
+// Where `start` binds the server it launches: the server reads only `PORT`
+// (it never consults KEELSON_SERVER_URL), so the boot poll must watch this URL.
+function launchBaseUrl(): string {
   return `http://127.0.0.1:${Number(process.env.PORT ?? 7878)}`;
+}
+
+// Where the control-plane commands probe. `KEELSON_SERVER_URL` wins so
+// stop/status reach the same server every data-plane command targets; absent
+// it, fall back to the PORT-keyed launch URL so a `PORT`-only setup still works.
+function probeBaseUrl(): string {
+  return process.env.KEELSON_SERVER_URL?.trim() ? defaultServerBaseUrl() : launchBaseUrl();
 }
 
 function logPath(home: string): string {
@@ -89,8 +98,9 @@ async function probeKnown(
     const found = await probeServer({ baseUrl: state.url, timeoutMs });
     if (found) return found;
   }
-  if (!state || state.url !== defaultBaseUrl()) {
-    return probeServer({ baseUrl: defaultBaseUrl(), timeoutMs });
+  const fallback = probeBaseUrl();
+  if (!state || state.url !== fallback) {
+    return probeServer({ baseUrl: fallback, timeoutMs });
   }
   return null;
 }
@@ -174,7 +184,7 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
     // cadence; the longer timeout only matters once the port is bound and the
     // health route is slow to answer (loaded machine mid-bootstrap).
     const info = await probeServer({
-      baseUrl: defaultBaseUrl(),
+      baseUrl: launchBaseUrl(),
       timeoutMs: STATUS_PROBE_TIMEOUT_MS,
     });
     if (info) {

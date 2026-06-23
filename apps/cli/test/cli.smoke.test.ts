@@ -479,6 +479,22 @@ describe("keelson CLI smoke", () => {
     expect(logs).toContain("args=legacy-path");
   });
 
+  test("workflow run --no-watch in human mode still prints the run id and status", async () => {
+    // Human-mode --no-watch suppresses the stream but must not go silent: the
+    // operator needs the run id (for `workflow status` / `respond`) and outcome.
+    const { stdout, exitCode } = await runCli([
+      "workflow",
+      "run",
+      "smoke-bash",
+      "--no-watch",
+      "--inputs",
+      "TEST_NAME=cli",
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("■ succeeded");
+    expect(stdout).toMatch(/run [0-9a-f]{8}/);
+  });
+
   test("workflow run still accepts non-ARGUMENTS --inputs values", async () => {
     const { stdout, exitCode } = await runCli([
       "--json",
