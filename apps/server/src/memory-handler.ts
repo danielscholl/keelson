@@ -50,7 +50,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     }
     const parsed = recallRequestSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: parsed.error.message }, 400);
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request body" }, 400);
     }
     try {
       return c.json(memoryStore.recall(parsed.data));
@@ -71,7 +71,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     }
     const parsed = writebackRequestSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: parsed.error.message }, 400);
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request body" }, 400);
     }
     try {
       return c.json(memoryStore.writeback(parsed.data));
@@ -89,7 +89,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
     }
     const parsed = reviewActionRequestSchema.safeParse(body);
     if (!parsed.success) {
-      return c.json({ error: parsed.error.message }, 400);
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request body" }, 400);
     }
     try {
       return c.json(memoryStore.confirm(parsed.data));
@@ -116,7 +116,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
 
     const parsed = reviewListQuerySchema.safeParse(queryShape);
     if (!parsed.success) {
-      return c.json({ error: parsed.error.message }, 400);
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request body" }, 400);
     }
     try {
       return c.json(memoryStore.listPending(parsed.data));
@@ -151,7 +151,7 @@ export function memoryRoutes(app: Hono, deps: MemoryRoutesDeps): void {
 
     const parsed = memoryListQuerySchema.safeParse(queryShape);
     if (!parsed.success) {
-      return c.json({ error: parsed.error.message }, 400);
+      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid request body" }, 400);
     }
     try {
       return c.json(memoryStore.listMemories(parsed.data));

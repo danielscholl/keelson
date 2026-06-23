@@ -12,6 +12,24 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { executeToolDefinition } from "./execute.ts";
 
+// Allow/deny verdict for a gated call; a result-phase allow may carry a string
+// `data` substitution (the redacted text the client sees). Structurally matches
+// the host PolicyEngine's decisions so the server adapts its engine in directly,
+// without this leaf package importing the engine.
+export type McpGateDecision =
+  | { outcome: "allow"; data?: string }
+  | { outcome: "deny"; reason: string };
+
+// The slice of the host policy engine the gateway consults: a pre-execution
+// tool-call gate (deny short-circuits the call) and a post-execution result
+// gate (an allow+data substitutes the returned text). Injected by the host so
+// MCP-invoked tools run the same denylist / ask / redact stack chat and workflow
+// surfaces do, rather than the static exposure filter alone.
+export interface McpPolicyGate {
+  evaluateToolCall(call: { tool: string; args?: unknown }): Promise<McpGateDecision>;
+  evaluateToolResult(call: { tool: string; result: unknown }): Promise<McpGateDecision>;
+}
+
 export interface KeelsonMcpServerOptions {
   // cwd handed to every tool execution. Server-resolved (the default project
   // root); deliberately NOT a per-request param so a client can't direct
@@ -28,6 +46,10 @@ export interface KeelsonMcpServerOptions {
   // chat tools live on the chat path, not the registry, so the host injects
   // them here to reach MCP clients.
   extraTools?: readonly ToolDefinition[];
+  // Host policy gate. When wired, every tool/call is run through it before and
+  // after execution (deny → error result; result allow+data → redacted text).
+  // Absent in tests / embedders that don't supply one.
+  policyGate?: McpPolicyGate;
 }
 
 type ExposurePolicy = Pick<KeelsonMcpServerOptions, "exposeStateChanging" | "toolDenylist">;
@@ -100,11 +122,39 @@ export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
         isError: true,
       };
     }
+    // Pre-execution policy gate: the same denylist / ask / rib-policy stack the
+    // chat and workflow surfaces run, so a tool reachable over MCP can't sidestep
+    // it. A deny surfaces as an error result rather than running the tool.
+    if (opts.policyGate) {
+      const decision = await opts.policyGate.evaluateToolCall({ tool: name, args });
+      if (decision.outcome === "deny") {
+        return {
+          content: [{ type: "text" as const, text: `Tool '${name}' denied: ${decision.reason}` }],
+          isError: true,
+        };
+      }
+    }
     const res = await executeToolDefinition(tool, args, {
       cwd: opts.defaultCwd,
       abortSignal: extra.signal,
     });
-    return { content: [{ type: "text" as const, text: res.content }], isError: res.isError };
+    // Post-execution result gate: run the tool's output through the result phase
+    // (redaction) before it returns to the client, matching the chat/workflow
+    // tool_result seam. A deny withholds the output; an allow+data substitutes
+    // the redacted text. Only a successful result is gated — an error already
+    // carries no tool output to scrub.
+    let content = res.content;
+    if (opts.policyGate && !res.isError) {
+      const decision = await opts.policyGate.evaluateToolResult({ tool: name, result: content });
+      if (decision.outcome === "deny") {
+        return {
+          content: [{ type: "text" as const, text: `Tool '${name}' result withheld.` }],
+          isError: true,
+        };
+      }
+      if (typeof decision.data === "string") content = decision.data;
+    }
+    return { content: [{ type: "text" as const, text: content }], isError: res.isError };
   });
 
   return server;

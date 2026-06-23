@@ -611,6 +611,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         // exposeStateChanging is set, workflow_run/respond — both state-changing).
         extraTools: workflowTools,
         ...(config.mcpToken !== undefined ? { token: config.mcpToken } : {}),
+        // Same policy stack the chat/workflow surfaces use, so MCP-invoked tools
+        // honor the operator denylist, ask_on_shell, and redaction floor.
+        ...(policyEngine ? { policyEngine } : {}),
       });
       mcpRoutes.mount(app);
       if (mcpSettings.requireToken) enforcedMcpToken = config.mcpToken;

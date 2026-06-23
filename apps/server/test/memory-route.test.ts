@@ -118,6 +118,20 @@ describe("POST /api/memory/recall", () => {
     const res = await app.fetch(postJson("/api/memory/recall", { wrong: "shape" }));
     expect(res.status).toBe(400);
   });
+
+  test("400 body is a stable summary, not the full serialized zod issue array", async () => {
+    const res = await app.fetch(postJson("/api/memory/recall", { wrong: "shape" }));
+    expect(res.status).toBe(400);
+    const error = ((await res.json()) as { error: string }).error;
+    // The raw zod .message is a JSON array of every issue (paths, expected
+    // types, received values). A stable summary is one issue message — never the
+    // serialized array — so request-shape internals don't leak.
+    expect(error.startsWith("[")).toBe(false);
+    expect(error).not.toContain('"path"');
+    expect(error).not.toContain('"expected"');
+    expect(error).not.toContain('"received"');
+    expect(error.length).toBeGreaterThan(0);
+  });
 });
 
 describe("POST /api/memory/writeback", () => {

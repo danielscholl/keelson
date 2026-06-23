@@ -153,3 +153,61 @@ describe("createKeelsonMcpServer", () => {
     expect(res.isError).toBeFalsy();
   });
 });
+
+describe("createKeelsonMcpServer — policy gate", () => {
+  test("a tool-call deny short-circuits before the tool runs", async () => {
+    let executed = false;
+    registerTool({
+      name: "osdu_read",
+      description: "read",
+      inputSchema: z.object({}),
+      execute: async (_input, ctx) => {
+        executed = true;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "rows" });
+      },
+    });
+    const client = await connect({
+      policyGate: {
+        evaluateToolCall: async () => ({ outcome: "deny", reason: "blocked by policy" }),
+        evaluateToolResult: async () => ({ outcome: "allow" }),
+      },
+    });
+    const res = await client.callTool({ name: "osdu_read", arguments: {} });
+    expect(res.isError).toBe(true);
+    expect((res.content as Array<{ text: string }>)[0]?.text).toContain("blocked by policy");
+    expect(executed).toBe(false);
+  });
+
+  test("a result-phase allow+data substitutes (redacts) the returned text", async () => {
+    readTool("osdu_read", "token=SECRET123");
+    const client = await connect({
+      policyGate: {
+        evaluateToolCall: async () => ({ outcome: "allow" }),
+        evaluateToolResult: async ({ result }) => ({
+          outcome: "allow",
+          data: String(result).replace("SECRET123", "[REDACTED]"),
+        }),
+      },
+    });
+    const res = await client.callTool({ name: "osdu_read", arguments: {} });
+    expect(res.isError).toBeFalsy();
+    expect((res.content as Array<{ text: string }>)[0]?.text).toBe("token=[REDACTED]");
+  });
+
+  test("the gate sees the call's tool name and args", async () => {
+    readTool("osdu_read", "rows");
+    let seen: { tool: string; args?: unknown } | undefined;
+    const client = await connect({
+      policyGate: {
+        evaluateToolCall: async (call) => {
+          seen = call;
+          return { outcome: "allow" };
+        },
+        evaluateToolResult: async () => ({ outcome: "allow" }),
+      },
+    });
+    await client.callTool({ name: "osdu_read", arguments: { q: "x" } });
+    expect(seen?.tool).toBe("osdu_read");
+    expect(seen?.args).toEqual({ q: "x" });
+  });
+});

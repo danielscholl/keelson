@@ -15,6 +15,8 @@ import {
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
+  ribClientEffectSchema,
+  ribIdFromKey,
 } from "@keelson/shared";
 import type { Hono } from "hono";
 import { type DynamicRegionStore, mergeSurfaceRegions } from "./dynamic-region-store.ts";
@@ -109,6 +111,21 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
       const result = ribActionResponseSchema.safeParse(await handler(parsed.data));
       if (!result.success) {
         return c.json({ ok: false, error: "rib returned a malformed action result" }, 500);
+      }
+      // A success may carry an `open-canvas` client effect whose `key` the SPA
+      // renders as a snapshot board (and dispatches that board's actions to the
+      // rib it names). Mirror the activation-time namespace gate: a rib may only
+      // open its OWN board, so reject a key resolving to another rib before the
+      // effect leaves onAction.
+      if (result.data.ok) {
+        const effect = ribClientEffectSchema.safeParse(result.data.data);
+        if (
+          effect.success &&
+          effect.data.effect === "open-canvas" &&
+          ribIdFromKey(effect.data.key) !== id
+        ) {
+          return c.json({ ok: false, error: "open-canvas key is outside the rib namespace" }, 500);
+        }
       }
       return c.json(result.data);
     } catch (err) {
