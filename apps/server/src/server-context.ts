@@ -33,4 +33,8 @@ export interface WsData {
   // Set on snapshot upgrades so the per-key subscriber set can be looked up
   // at message/close time.
   snapshotKey?: string;
+  // Per-chat-socket in-flight guard. A turn shares this socket's abort signal
+  // and conversation row, so a second `request` frame arriving before the
+  // first settles is rejected rather than run concurrently against them.
+  chatBusy?: boolean;
 }

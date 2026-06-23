@@ -275,22 +275,38 @@ export function chatWebSocketHandlers(
         ws.close(1008, "invalid frame");
         return;
       }
-      await handleChatRequest(frame, {
-        send: (out) => sendFrame(ws, out),
-        store,
-        abortSignal: ws.data.abort.signal,
-        ...(deps.memoryStore !== undefined ? { memoryStore: deps.memoryStore } : {}),
-        ...(deps.projectsStore !== undefined ? { projectsStore: deps.projectsStore } : {}),
-        ...(deps.projectNotebookStore !== undefined
-          ? { projectNotebookStore: deps.projectNotebookStore }
-          : {}),
-        ...(deps.workflowTools !== undefined ? { workflowTools: deps.workflowTools } : {}),
-        ...(deps.workflowCatalog !== undefined ? { workflowCatalog: deps.workflowCatalog } : {}),
-        ...(deps.workflowAuthoringTools !== undefined
-          ? { workflowAuthoringTools: deps.workflowAuthoringTools }
-          : {}),
-        ...(deps.policyEngine !== undefined ? { policyEngine: deps.policyEngine } : {}),
-      });
+      // Bun re-enters this callback per inbound frame; a turn shares the socket's
+      // abort signal and conversation row, so a second request that lands before
+      // the first settles is rejected rather than raced against it.
+      if (ws.data.chatBusy) {
+        sendFrame(
+          ws,
+          errorFrame(frame.conversationId, "a chat turn is already in flight", "TURN_IN_FLIGHT"),
+        );
+        sendFrame(ws, doneFrame(frame.conversationId));
+        return;
+      }
+      ws.data.chatBusy = true;
+      try {
+        await handleChatRequest(frame, {
+          send: (out) => sendFrame(ws, out),
+          store,
+          abortSignal: ws.data.abort.signal,
+          ...(deps.memoryStore !== undefined ? { memoryStore: deps.memoryStore } : {}),
+          ...(deps.projectsStore !== undefined ? { projectsStore: deps.projectsStore } : {}),
+          ...(deps.projectNotebookStore !== undefined
+            ? { projectNotebookStore: deps.projectNotebookStore }
+            : {}),
+          ...(deps.workflowTools !== undefined ? { workflowTools: deps.workflowTools } : {}),
+          ...(deps.workflowCatalog !== undefined ? { workflowCatalog: deps.workflowCatalog } : {}),
+          ...(deps.workflowAuthoringTools !== undefined
+            ? { workflowAuthoringTools: deps.workflowAuthoringTools }
+            : {}),
+          ...(deps.policyEngine !== undefined ? { policyEngine: deps.policyEngine } : {}),
+        });
+      } finally {
+        ws.data.chatBusy = false;
+      }
     },
     close(ws) {
       ws.data.abort.abort();
