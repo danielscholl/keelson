@@ -230,6 +230,10 @@ async function runViaHttp(
       },
       { json },
     );
+  } else if (!watch) {
+    // Without the stream a human still needs the id (for `workflow status` /
+    // `respond`) and the outcome; mirror the `■ <status>` run_done line.
+    process.stdout.write(`■ ${terminalStatus} (run ${runId.slice(0, 8)})\n`);
   }
   process.exit(terminalStatus === "succeeded" ? EXIT_OK : EXIT_FAIL);
 }
@@ -281,6 +285,8 @@ async function runInProcess(
         },
         { json: true },
       );
+    } else if (!watch) {
+      process.stdout.write(`■ ${result.summary.status} (run ${result.runId.slice(0, 8)})\n`);
     }
     process.exit(result.summary.status === "succeeded" ? EXIT_OK : EXIT_FAIL);
   } catch (err) {
