@@ -2859,6 +2859,14 @@ button.tab:focus-visible {
    Non-modal (no backdrop) so the trace + approval composer stay usable.
    Wider than the credentials drawer for comfortable markdown line length.
    Reuses the credentials-slide-in / credentials-fade-in keyframes below. */
+.canvas-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 28, 0.55);
+  z-index: 1000;
+  animation: credentials-fade-in 120ms ease-out;
+}
+
 .canvas-drawer {
   position: fixed;
   top: 0;
@@ -3305,6 +3313,10 @@ button.tab:focus-visible {
   font-size: 15px;
   font-weight: 600;
   color: var(--fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .surface-region-byline {
   font-size: 11px;

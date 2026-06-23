@@ -121,6 +121,45 @@ describe("CanvasProvider / useCanvas", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  test("the drawer is a modal dialog: aria-modal, a backdrop, and initial focus on the close button", () => {
+    render(
+      <CanvasProvider>
+        <Opener doc={INLINE} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(document.querySelector(".canvas-backdrop")).not.toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close canvas" }));
+  });
+
+  test("clicking the backdrop closes the drawer", () => {
+    render(
+      <CanvasProvider>
+        <Opener doc={INLINE} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.click(document.querySelector(".canvas-backdrop") as Element);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("closing the drawer restores focus to the opener", () => {
+    render(
+      <CanvasProvider>
+        <Opener doc={INLINE} />
+      </CanvasProvider>,
+    );
+    const trigger = screen.getByText("open");
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(document.activeElement).not.toBe(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Close canvas" }));
+    expect(document.activeElement).toBe(trigger);
+  });
+
   test("renders a docked footer when one is passed to openCanvas", () => {
     function FooterOpener() {
       const { openCanvas } = useCanvas();
