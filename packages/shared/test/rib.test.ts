@@ -2,9 +2,11 @@ import { describe, expect, it } from "bun:test";
 import type { Rib, RibContext } from "../src/rib.ts";
 import {
   listRibsResponseSchema,
+  openChatSeedSchema,
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
+  ribClientEffectSchema,
   ribIdFromKey,
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
@@ -227,5 +229,82 @@ describe("rib contract backward-compatibility", () => {
     const kinds: string[] = [];
     for await (const c of turn?.stream ?? []) kinds.push(c.type);
     expect(kinds).toEqual(["text", "done"]);
+  });
+});
+
+describe("rib client effect schema", () => {
+  it("round-trips a valid open-chat effect with a full seed", () => {
+    const effect = {
+      effect: "open-chat" as const,
+      seed: {
+        systemPrompt: "You are a helpful assistant.",
+        name: "Helper",
+        openingPrompt: "Hi",
+        model: "gpt-5",
+        providerId: "openai",
+      },
+    };
+    const parsed = ribClientEffectSchema.parse(effect);
+    expect(parsed).toEqual(effect);
+    // The seed sub-schema still parses on its own after the union grew.
+    expect(openChatSeedSchema.safeParse(effect.seed).success).toBe(true);
+  });
+
+  it("round-trips a valid run-workflow effect with workflow + args", () => {
+    const effect = {
+      effect: "run-workflow" as const,
+      workflow: "chamber-genesis",
+      args: { ARGUMENTS: "describe your own", topic: "navigation" },
+    };
+    expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
+  });
+
+  it("parses a run-workflow effect with args omitted", () => {
+    const parsed = ribClientEffectSchema.parse({
+      effect: "run-workflow",
+      workflow: "chamber-genesis",
+    });
+    expect(parsed).toEqual({ effect: "run-workflow", workflow: "chamber-genesis" });
+  });
+
+  it("rejects a run-workflow effect with an empty workflow string", () => {
+    expect(ribClientEffectSchema.safeParse({ effect: "run-workflow", workflow: "" }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects a run-workflow effect with an unknown extra field", () => {
+    expect(
+      ribClientEffectSchema.safeParse({
+        effect: "run-workflow",
+        workflow: "chamber-genesis",
+        extra: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a run-workflow effect whose args is not a Record<string,string>", () => {
+    expect(
+      ribClientEffectSchema.safeParse({ effect: "run-workflow", workflow: "g", args: "x" }).success,
+    ).toBe(false);
+    expect(
+      ribClientEffectSchema.safeParse({ effect: "run-workflow", workflow: "g", args: { k: 1 } })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects an unknown effect discriminator", () => {
+    expect(
+      ribClientEffectSchema.safeParse({ effect: "open-url", url: "https://x.test" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a malformed open-chat seed after the union grew", () => {
+    expect(
+      ribClientEffectSchema.safeParse({
+        effect: "open-chat",
+        seed: { systemPrompt: "x".repeat(8001), name: "Too long" },
+      }).success,
+    ).toBe(false);
   });
 });

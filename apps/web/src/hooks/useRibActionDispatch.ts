@@ -23,12 +23,16 @@ export function useRibActionDispatch(
     onSuccess?: (action: RibAction, result: Extract<RibActionResult, { ok: true }>) => void;
     // A successful action may carry an `open-chat` directive in `data`; the host
     // wires this to its "open a seeded conversation" path (the ✦ flow).
-    onOpenChat?: (seed: OpenChatSeed) => void;
+    onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
+    // A successful action may instead carry a `run-workflow` directive; the host
+    // wires this to its workflow-launch path (the same path /workflow run uses).
+    onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
   },
 ): BoardActionApi {
   const toast = useToast();
   const onSuccess = opts?.onSuccess;
   const onOpenChat = opts?.onOpenChat;
+  const onLaunchWorkflow = opts?.onLaunchWorkflow;
 
   const run = useCallback(
     async (action: RibAction): Promise<RibActionResult> => {
@@ -44,9 +48,12 @@ export function useRibActionDispatch(
             const parsed = ribClientEffectSchema.safeParse(result.data);
             if (parsed.success && parsed.data.effect === "open-chat") {
               // Isolate the callback like onSuccess below: a throwing onOpenChat
-              // must not turn a successful action into a failure result.
+              // must not turn a successful action into a failure result. Await it
+              // so an async rejection is caught here (not an unhandled rejection)
+              // and so the caller's `run` stays pending for the whole handler,
+              // keeping its button disabled across the navigate-away round-trip.
               try {
-                onOpenChat(parsed.data.seed);
+                await Promise.resolve(onOpenChat(parsed.data.seed));
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 toast.push({ kind: "error", message: `open-chat handler failed: ${message}` });
@@ -56,6 +63,32 @@ export function useRibActionDispatch(
             // Shaped like open-chat but invalid (e.g. an oversized prompt): report
             // failure so the caller doesn't treat a dropped directive as success.
             const error = `${action.type}: invalid open-chat directive`;
+            toast.push({ kind: "error", message: error });
+            return { ok: false, error };
+          }
+          // A run-workflow directive launches a run and focuses the Workflows
+          // surface — navigation-away, so no success toast and no region reload,
+          // mirroring open-chat above.
+          if (onLaunchWorkflow && isRunWorkflowShaped(result.data)) {
+            const parsed = ribClientEffectSchema.safeParse(result.data);
+            if (parsed.success && parsed.data.effect === "run-workflow") {
+              // Isolate the callback like onOpenChat: a throwing handler must not
+              // turn a successful action into a failure result. Await it so an
+              // async rejection is caught here (not an unhandled rejection) and so
+              // the caller's `run` stays pending across the launch — which keeps
+              // the action button disabled for the whole round-trip and closes the
+              // double-launch window without a separate concurrency guard.
+              try {
+                await Promise.resolve(
+                  onLaunchWorkflow(parsed.data.workflow, parsed.data.args ?? {}),
+                );
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                toast.push({ kind: "error", message: `run-workflow handler failed: ${message}` });
+              }
+              return result;
+            }
+            const error = `${action.type}: invalid run-workflow directive`;
             toast.push({ kind: "error", message: error });
             return { ok: false, error };
           }
@@ -78,7 +111,7 @@ export function useRibActionDispatch(
         return { ok: false, error: message };
       }
     },
-    [ribId, toast, onSuccess, onOpenChat],
+    [ribId, toast, onSuccess, onOpenChat, onLaunchWorkflow],
   );
 
   // Raw: no toast, no reload. The copy button shows its own flash and the
@@ -106,5 +139,13 @@ function isOpenChatShaped(data: unknown): boolean {
     typeof data === "object" &&
     data !== null &&
     (data as { effect?: unknown }).effect === "open-chat"
+  );
+}
+
+function isRunWorkflowShaped(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { effect?: unknown }).effect === "run-workflow"
   );
 }

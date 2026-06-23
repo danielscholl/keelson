@@ -37,11 +37,15 @@ interface Region {
 export function Surface({
   descriptor,
   onExplore,
+  onLaunchWorkflow,
 }: {
   descriptor: RibSurfaceDescriptor;
   // Raised when a region's "explore in chat" control fires, carrying the seed
   // built from that region's current snapshot. App hands it to the Chat view.
   onExplore?: ExploreHandler;
+  // Raised when a board action returns a run-workflow directive; App launches
+  // the run and focuses the Workflows tab.
+  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
   return (
@@ -49,27 +53,55 @@ export function Surface({
       {/* Role-prefixed keys so a region remounts (re-reads its initial collapsed
           flag) if the descriptor swaps it for a different one at this slot. */}
       {header && (
-        <SurfaceRegion key={`header:${header.key}`} region={header} onExplore={onExplore} />
+        <SurfaceRegion
+          key={`header:${header.key}`}
+          region={header}
+          onExplore={onExplore}
+          onLaunchWorkflow={onLaunchWorkflow}
+        />
       )}
       {banner && (
-        <SurfaceRegion key={`banner:${banner.key}`} region={banner} onExplore={onExplore} />
+        <SurfaceRegion
+          key={`banner:${banner.key}`}
+          region={banner}
+          onExplore={onExplore}
+          onLaunchWorkflow={onLaunchWorkflow}
+        />
       )}
       {rows.map((row, rowIndex) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: surface rows are a static descriptor array (never reordered), so the index is a stable, collision-free key — region keys are unconstrained and could collide if joined.
         <div className="surface-row" key={`row:${rowIndex}`}>
           {row.columns.map((col) => (
-            <SurfaceRegion key={col.key} region={col} onExplore={onExplore} />
+            <SurfaceRegion
+              key={col.key}
+              region={col}
+              onExplore={onExplore}
+              onLaunchWorkflow={onLaunchWorkflow}
+            />
           ))}
         </div>
       ))}
       {footer && (
-        <SurfaceRegion key={`footer:${footer.key}`} region={footer} onExplore={onExplore} />
+        <SurfaceRegion
+          key={`footer:${footer.key}`}
+          region={footer}
+          onExplore={onExplore}
+          onLaunchWorkflow={onLaunchWorkflow}
+        />
       )}
     </div>
   );
 }
 
-function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: ExploreHandler }) {
+function SurfaceRegion({
+  region,
+  onExplore,
+  onLaunchWorkflow,
+}: {
+  region: Region;
+  onExplore?: ExploreHandler;
+  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+}) {
   const collapsible = region.collapsible ?? false;
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
   const snap = useSnapshot(region.key);
@@ -114,9 +146,11 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
   );
   // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
   // intercept an open-chat directive, no-op, and swallow the normal success path.
+  // onLaunchWorkflow follows the same only-wire-when-available rule.
   const actions = useRibActionDispatch(ribId, {
     onSuccess,
     onOpenChat: onExplore ? onOpenChat : undefined,
+    ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
   });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
@@ -130,9 +164,9 @@ function SurfaceRegion({ region, onExplore }: { region: Region; onExplore?: Expl
         source: { type: "snapshot", key: region.key },
         ...(board?.title ? { title: board.title } : {}),
       },
-      // So an Enter button clicked in the expanded drawer opens a seeded chat the
-      // same way it does inline, instead of being swallowed with a success toast.
-      { onOpenChat },
+      // So an Enter/launch button clicked in the expanded drawer behaves the same
+      // way it does inline, instead of being swallowed with a success toast.
+      { onOpenChat, ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}) },
     );
 
   // The gradient lane head: static identity (glyph + title) the rib supplies,
