@@ -22,8 +22,17 @@ export function failed(error: string, text = ""): NodeResult {
  * PromptNode for command/loop iteration. Derived from the schema's
  * `BASH_NODE_AI_FIELDS` so any new SDK field added there automatically
  * propagates — no second list to keep in sync.
+ *
+ * `idle_timeout`/`timeout` are appended rather than added to
+ * `BASH_NODE_AI_FIELDS`: that list also drives the loader's "meaningless on
+ * bash" warning, where `idle_timeout` legitimately belongs. The prompt handler
+ * does read them, so a synthesized prompt node must still inherit them.
  */
-export const AI_PASSTHROUGH_KEYS: readonly string[] = BASH_NODE_AI_FIELDS;
+export const AI_PASSTHROUGH_KEYS: readonly string[] = [
+  ...BASH_NODE_AI_FIELDS,
+  "idle_timeout",
+  "timeout",
+];
 
 /**
  * Synthesize a `PromptNode` from a source DagNode (typically a `CommandNode`
