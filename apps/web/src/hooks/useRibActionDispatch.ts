@@ -27,12 +27,17 @@ export function useRibActionDispatch(
     // A successful action may instead carry a `run-workflow` directive; the host
     // wires this to its workflow-launch path (the same path /workflow run uses).
     onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+    // A successful action may instead carry an `open-canvas` directive; the host
+    // opens that snapshot's board in the canvas drawer (the View verb). Sync: it's
+    // a setState that opens a drawer, not a paid/duplicable action — no await.
+    onOpenCanvas?: (key: string, title?: string) => void;
   },
 ): BoardActionApi {
   const toast = useToast();
   const onSuccess = opts?.onSuccess;
   const onOpenChat = opts?.onOpenChat;
   const onLaunchWorkflow = opts?.onLaunchWorkflow;
+  const onOpenCanvas = opts?.onOpenCanvas;
 
   const run = useCallback(
     async (action: RibAction): Promise<RibActionResult> => {
@@ -92,6 +97,20 @@ export function useRibActionDispatch(
             toast.push({ kind: "error", message: error });
             return { ok: false, error };
           }
+          // An open-canvas directive opens the item's snapshot board in the
+          // drawer (navigation-into-drawer) — no success toast and no reload,
+          // like the two above. onOpenCanvas is a synchronous setState, so unlike
+          // open-chat/run-workflow there's nothing to await or isolate.
+          if (onOpenCanvas && isOpenCanvasShaped(result.data)) {
+            const parsed = ribClientEffectSchema.safeParse(result.data);
+            if (parsed.success && parsed.data.effect === "open-canvas") {
+              onOpenCanvas(parsed.data.key, parsed.data.title);
+              return result;
+            }
+            const error = `${action.type}: invalid open-canvas directive`;
+            toast.push({ kind: "error", message: error });
+            return { ok: false, error };
+          }
           toast.push({ kind: "ok", message: `${action.type} ✓` });
           // Isolate the callback: a throwing onSuccess must not turn a
           // successful action into a failure result.
@@ -111,7 +130,7 @@ export function useRibActionDispatch(
         return { ok: false, error: message };
       }
     },
-    [ribId, toast, onSuccess, onOpenChat, onLaunchWorkflow],
+    [ribId, toast, onSuccess, onOpenChat, onLaunchWorkflow, onOpenCanvas],
   );
 
   // Raw: no toast, no reload. The copy button shows its own flash and the
@@ -147,5 +166,13 @@ function isRunWorkflowShaped(data: unknown): boolean {
     typeof data === "object" &&
     data !== null &&
     (data as { effect?: unknown }).effect === "run-workflow"
+  );
+}
+
+function isOpenCanvasShaped(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { effect?: unknown }).effect === "open-canvas"
   );
 }

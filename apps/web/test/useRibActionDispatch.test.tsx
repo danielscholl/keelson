@@ -32,12 +32,15 @@ const ACTION: RibAction = { type: "convene" };
 function recorders() {
   const chats: OpenChatSeed[] = [];
   const launches: Array<{ workflow: string; args: Record<string, string> }> = [];
+  const canvases: Array<{ key: string; title?: string }> = [];
   return {
     chats,
     launches,
+    canvases,
     onOpenChat: (seed: OpenChatSeed) => chats.push(seed),
     onLaunchWorkflow: (workflow: string, args: Record<string, string>) =>
       launches.push({ workflow, args }),
+    onOpenCanvas: (key: string, title?: string) => canvases.push({ key, title }),
   };
 }
 
@@ -306,6 +309,76 @@ describe("useRibActionDispatch — open-chat regressions", () => {
     const res = await runAct(result.current.run, ACTION);
     expect(res).toEqual({ ok: false, error: "convene: invalid open-chat directive" });
     expect(rec.chats).toEqual([]);
+  });
+});
+
+describe("useRibActionDispatch — open-canvas directive", () => {
+  test("opens the snapshot canvas with key + title, no success toast", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:session-7", title: "Session 7" },
+    });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onOpenCanvas: rec.onOpenCanvas }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res).toEqual({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:session-7", title: "Session 7" },
+    });
+    expect(rec.canvases).toEqual([{ key: "rib:demo:session-7", title: "Session 7" }]);
+    // Navigate-into-drawer: no success toast at all (assert identity, not glyph).
+    expect(okToastCount()).toBe(0);
+    expect(toastCount()).toBe(0);
+  });
+
+  test("passes an undefined title when title is omitted", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:session-7" },
+    });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onOpenCanvas: rec.onOpenCanvas }),
+      { wrapper },
+    );
+    await runAct(result.current.run, ACTION);
+    expect(rec.canvases).toEqual([{ key: "rib:demo:session-7", title: undefined }]);
+  });
+
+  test("a shaped-but-invalid open-canvas (empty key) returns an error result and toasts", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "" },
+    });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onOpenCanvas: rec.onOpenCanvas }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res).toEqual({ ok: false, error: "convene: invalid open-canvas directive" });
+    expect(rec.canvases).toEqual([]);
+    expect(toastText()).toContain("invalid open-canvas directive");
+  });
+
+  test("falls through to the normal success path when onOpenCanvas is absent", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:session-7" },
+    });
+    const onSuccessCalls: RibAction[] = [];
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onSuccess: (a) => onSuccessCalls.push(a) }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res.ok).toBe(true);
+    // Not intercepted: the success toast fires and onSuccess runs (not swallowed).
+    expect(toastText()).toContain("convene ✓");
+    expect(onSuccessCalls).toEqual([ACTION]);
   });
 });
 

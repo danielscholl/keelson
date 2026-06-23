@@ -276,6 +276,58 @@ describe("CanvasProvider / useCanvas", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  test("a drawer board action's open-canvas directive opens that snapshot's board in the drawer", async () => {
+    snapshotImpl = {
+      status: "live",
+      data: {
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "drill", label: "Open" }] }],
+      },
+      version: 1,
+      composedAt: "2026-01-01T00:00:00Z",
+    };
+    // The board action returns an open-canvas directive for a different snapshot.
+    // ViewCanvas sources openCanvas from context locally (no opener handler), so
+    // the drawer replaces its doc — asserted via the drawer's title swap.
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-canvas", key: "rib:demo:session-7", title: "Session 7" },
+    });
+    function DrillOpener() {
+      const { openCanvas } = useCanvas();
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            openCanvas({
+              kind: "view",
+              source: { type: "snapshot", key: "rib:demo:index" },
+              title: "Index",
+            })
+          }
+        >
+          open-index
+        </button>
+      );
+    }
+    render(
+      <CanvasProvider>
+        <DrillOpener />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open-index"));
+    expect(screen.getByRole("dialog").querySelector(".canvas-drawer-title")?.textContent).toBe(
+      "Index",
+    );
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open" }));
+    // The drawer stays open but swaps to the drilled-into snapshot's board.
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").querySelector(".canvas-drawer-title")?.textContent).toBe(
+        "Session 7",
+      ),
+    );
+  });
+
   test("a snapshot html canvas fails closed when its payload isn't a string", () => {
     snapshotImpl = {
       status: "live",

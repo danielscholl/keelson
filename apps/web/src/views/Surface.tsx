@@ -144,13 +144,26 @@ function SurfaceRegion({
       }),
     [onExplore],
   );
+  // An open-canvas directive opens that snapshot's board in the drawer — the same
+  // doc expand() builds. Pass the effect handlers into the OPENED doc's opts so a
+  // board action inside the opened canvas behaves like inline (as expand() does).
+  const onOpenCanvas = useCallback(
+    (key: string, title?: string) =>
+      openCanvas(
+        { kind: "view", source: { type: "snapshot", key }, ...(title ? { title } : {}) },
+        { onOpenChat, ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}) },
+      ),
+    [openCanvas, onOpenChat, onLaunchWorkflow],
+  );
   // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
   // intercept an open-chat directive, no-op, and swallow the normal success path.
-  // onLaunchWorkflow follows the same only-wire-when-available rule.
+  // onLaunchWorkflow follows the same only-wire-when-available rule. openCanvas is
+  // always available here, so onOpenCanvas wires unconditionally.
   const actions = useRibActionDispatch(ribId, {
     onSuccess,
     onOpenChat: onExplore ? onOpenChat : undefined,
     ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+    onOpenCanvas,
   });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;

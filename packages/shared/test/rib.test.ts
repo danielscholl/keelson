@@ -307,4 +307,51 @@ describe("rib client effect schema", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("round-trips a valid open-canvas effect with key + title", () => {
+    const effect = {
+      effect: "open-canvas" as const,
+      key: "rib:demo:session-7",
+      title: "Session 7",
+    };
+    expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
+  });
+
+  it("parses an open-canvas effect with title omitted", () => {
+    const parsed = ribClientEffectSchema.parse({
+      effect: "open-canvas",
+      key: "rib:demo:session-7",
+    });
+    expect(parsed).toEqual({ effect: "open-canvas", key: "rib:demo:session-7" });
+  });
+
+  it("rejects an open-canvas effect with an empty key", () => {
+    expect(ribClientEffectSchema.safeParse({ effect: "open-canvas", key: "" }).success).toBe(false);
+  });
+
+  it("rejects an open-canvas effect with an unknown extra field", () => {
+    expect(
+      ribClientEffectSchema.safeParse({ effect: "open-canvas", key: "rib:demo:x", extra: 1 })
+        .success,
+    ).toBe(false);
+  });
+
+  it("still rejects an unknown discriminator after the open-canvas arm was added", () => {
+    expect(
+      ribClientEffectSchema.safeParse({ effect: "open-url", url: "https://x.test" }).success,
+    ).toBe(false);
+  });
+
+  it("still parses open-chat and run-workflow after the open-canvas arm was added", () => {
+    expect(
+      ribClientEffectSchema.safeParse({
+        effect: "open-chat",
+        seed: { systemPrompt: "Be helpful.", name: "Helper" },
+      }).success,
+    ).toBe(true);
+    expect(
+      ribClientEffectSchema.safeParse({ effect: "run-workflow", workflow: "chamber-genesis" })
+        .success,
+    ).toBe(true);
+  });
 });
