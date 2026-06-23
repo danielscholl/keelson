@@ -132,10 +132,10 @@ nodes:
 
         - Play EXACTLY ONE role — the one named by `phase`. Never do another role's work.
         - Always finish by updating `state.json` as your role specifies.
-        - The completion signal `ADVERSARIAL_BUILD_DONE` is emitted ONLY by the evaluator,
-          and ONLY when it sets `status` to "complete" or "failed". If you are the
-          negotiator or generator, NEVER write that token anywhere — the loop ends the
-          instant it appears, so emitting it early skips the adversarial evaluation.
+        - The run ends only when the evaluator writes its completion tag (an XML-style
+          `<promise>…</promise>` line) AND `state.json` `status` is "complete" or "failed".
+          The negotiator and generator end their reply with `Phase set to: …` and NEVER
+          emit a `<promise>` tag — emitting one early skips the adversarial evaluation.
 
         ## FIRST: read state
 

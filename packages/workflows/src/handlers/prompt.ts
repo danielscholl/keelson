@@ -261,10 +261,29 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       } else {
         ctx.abortSignal.addEventListener("abort", onUserCancel, { once: true });
       }
-      const timer = setTimeout(() => {
+
+      // Per-node budget overrides the factory default, mirroring bash.ts.
+      // It's an IDLE timer per the authoring guide ("ms of AI-stream silence
+      // before the node fails") — resetIdleTimer re-arms it on every chunk, so
+      // a long turn that keeps producing output is bounded by silence, not
+      // wall-clock.
+      const nodeIdleTimeout = (node as { idle_timeout?: unknown }).idle_timeout;
+      const nodeTimeout = (node as { timeout?: unknown }).timeout;
+      const nodeBudget = nodeIdleTimeout ?? nodeTimeout;
+      const idleTimeoutMs =
+        typeof nodeBudget === "number" && Number.isFinite(nodeBudget) && nodeBudget > 0
+          ? nodeBudget
+          : timeoutMs;
+
+      const fireIdleTimeout = (): void => {
         timedOut = true;
         handlerExit.abort();
-      }, timeoutMs);
+      };
+      let timer = setTimeout(fireIdleTimeout, idleTimeoutMs);
+      const resetIdleTimer = (): void => {
+        clearTimeout(timer);
+        timer = setTimeout(fireIdleTimeout, idleTimeoutMs);
+      };
 
       const allTools = opts.getRegisteredTools();
 
@@ -525,6 +544,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             const next = await iterator.next();
             if (next.done) break;
             if (handlerExit.signal.aborted) break;
+            resetIdleTimer();
             // Provider chunks are typed unknown at this boundary (see
             // file header). Inspect minimally so we can compute the text
             // return value; downstream consumers do their own typed
@@ -632,7 +652,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         result = {
           status: "failed",
           output: { kind: "text", text: assistantText },
-          error: `prompt timeout after ${Math.round(timeoutMs / 1000)}s`,
+          error: `prompt idle timeout after ${Math.round(idleTimeoutMs / 1000)}s without stream activity`,
         };
       } else if (providerError !== null) {
         result = {

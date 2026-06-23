@@ -940,7 +940,7 @@ describe("makePromptHandler", () => {
     expect(result.error).toBe("aborted");
   });
 
-  test("times out — status=failed, error=prompt timeout after Ns", async () => {
+  test("times out — status=failed, error=prompt idle timeout", async () => {
     const { provider } = makeSpyProvider({
       chunks: [{ type: "text", content: "slow" }, { type: "done" }],
       chunkDelayMs: 500,
@@ -952,7 +952,48 @@ describe("makePromptHandler", () => {
     });
     const result = await handler.handle(stubNode, buildCtx());
     expect(result.status).toBe("failed");
-    expect(result.error).toMatch(/^prompt timeout after \d+s$/);
+    expect(result.error).toMatch(/^prompt idle timeout after \d+s without stream activity$/);
+  });
+
+  test("honors a per-node idle_timeout below the factory default", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "slow" }, { type: "done" }],
+      chunkDelayMs: 500,
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      // Factory default would never fire inside the test window; the per-node
+      // budget must be the one that takes effect.
+      timeoutMs: 10_000,
+    });
+    const node = { id: "n1", prompt: "", idle_timeout: 30 } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toMatch(/^prompt idle timeout after \d+s without stream activity$/);
+  });
+
+  test("per-node idle_timeout resets on each stream chunk (idle, not wall-clock)", async () => {
+    // Chunks arrive every 20ms; total wall-clock (~80ms) exceeds the 60ms
+    // budget, but no single gap does — an idle timer never fires.
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "text", content: "a" },
+        { type: "text", content: "b" },
+        { type: "text", content: "c" },
+        { type: "done" },
+      ],
+      chunkDelayMs: 20,
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      timeoutMs: 10_000,
+    });
+    const node = { id: "n1", prompt: "", idle_timeout: 60 } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("abc");
   });
 
   test("propagates provider throw as failed.error", async () => {
@@ -1157,7 +1198,7 @@ describe("makePromptHandler", () => {
     const result = await handler.handle(stubNode, buildCtx());
     const elapsedMs = Date.now() - startMs;
     expect(result.status).toBe("failed");
-    expect(result.error).toMatch(/^prompt timeout after \d+s$/);
+    expect(result.error).toMatch(/^prompt idle timeout after \d+s without stream activity$/);
     // Bounded return time: well below 5x the timeout under normal load.
     expect(elapsedMs).toBeLessThan(500);
   });
@@ -1220,7 +1261,7 @@ describe("makePromptHandler", () => {
       });
       const result = await handler.handle(stubNode, buildCtx());
       expect(result.status).toBe("failed");
-      expect(result.error).toMatch(/^prompt timeout after \d+s$/);
+      expect(result.error).toMatch(/^prompt idle timeout after \d+s without stream activity$/);
       // Yield so the iterator.return-driven rejection has time to surface.
       await new Promise((r) => setTimeout(r, 100));
       // The handler must have called return() on timeout — confirms the

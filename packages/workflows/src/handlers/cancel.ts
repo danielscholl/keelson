@@ -29,12 +29,13 @@ export function makeCancelHandler(opts: MakeCancelHandlerOptions): NodeHandler {
     type: "cancel",
     async handle(node, ctx): Promise<NodeResult> {
       // The executor's resolveBody already substituted $ARGUMENTS,
-      // $inputs.*, and $node.output[.field] in the typed cancel body.
-      // Stub tests that don't go through the executor populate node.cancel
-      // without setting ctx.resolvedBody — fall back to a one-shot
-      // substituteNodeOutputRefs over node.cancel so those still work.
+      // $inputs.*, and $node.output[.field] in the typed cancel body — so a
+      // reason that legitimately resolves to empty must be honored as-is, not
+      // re-substituted (the raw fallback only understands $node.output refs and
+      // would leave other markers literal). The fallback is for stub tests that
+      // bypass the executor and leave ctx.resolvedBody unset.
       const reason = (
-        ctx.resolvedBody && ctx.resolvedBody.length > 0
+        ctx.resolvedBody !== undefined
           ? ctx.resolvedBody
           : substituteNodeOutputRefs(
               isCancelNode(node) ? node.cancel : "",

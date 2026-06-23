@@ -19,7 +19,10 @@ function buildCtx(opts: {
     cwd: process.cwd(),
     abortSignal: new AbortController().signal,
     emit: () => undefined,
-    resolvedBody: opts.resolvedBody ?? "",
+    // The real stub path leaves resolvedBody unset (the executor never ran);
+    // model that as undefined so the handler's raw-fallback branch is what
+    // these tests exercise, not a legitimately-empty resolved reason.
+    resolvedBody: opts.resolvedBody as unknown as string,
     rawBody: opts.resolvedBody ?? "",
     workflow: {
       name: "t",
@@ -116,5 +119,21 @@ describe("makeCancelHandler", () => {
     });
     await handler.handle(node, ctx);
     expect(captured).toBe("stopped by alice for security-review");
+  });
+
+  test("honors a legitimately-empty resolvedBody instead of re-substituting node.cancel", async () => {
+    // The executor resolved the reason to empty (e.g. its $inputs.* marker was
+    // blank). The handler must NOT fall back to substituteNodeOutputRefs over
+    // the raw template, which can't resolve $inputs.* and would leave it
+    // literal.
+    let captured = "(unset)";
+    const requestCancel: RequestCancel = (_runId, reason) => {
+      captured = reason;
+    };
+    const handler = makeCancelHandler({ requestCancel });
+    const node = { id: "stop", cancel: "$inputs.reason" } as unknown as DagNode;
+    const ctx = buildCtx({ resolvedBody: "" });
+    await handler.handle(node, ctx);
+    expect(captured).toBe("");
   });
 });
