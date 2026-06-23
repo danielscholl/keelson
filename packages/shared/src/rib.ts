@@ -413,7 +413,9 @@ export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
 // "Explore in chat" button uses); `run-workflow` starts a catalog workflow run,
 // the same launch path the slash-command run-workflow effect takes. `workflow` is
 // an open string (the catalog name / `:name` path segment) — rib-contributed
-// names aren't known here; `args` maps onto the run API's `inputs`.
+// names aren't known here; `args` maps onto the run API's `inputs`. `open-canvas`
+// opens the item's snapshot board (`key`) in the canvas drawer — the View verb an
+// index card's "Open" uses.
 export const ribClientEffectSchema = z.discriminatedUnion("effect", [
   z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
   z
@@ -421,6 +423,13 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
       effect: z.literal("run-workflow"),
       workflow: z.string().min(1),
       args: z.record(z.string(), z.string()).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      effect: z.literal("open-canvas"),
+      key: z.string().min(1),
+      title: z.string().optional(),
     })
     .strict(),
 ]);

@@ -175,7 +175,7 @@ function ViewCanvas({
   onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
 }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
-  const { close } = useCanvas();
+  const { openCanvas, close } = useCanvas();
   // Each wrapper is wired into the dispatcher only when its handler is present
   // (the spread guard below), so the presence check here is the single source of
   // truth — an unwired wrapper must never navigate away on a swallowed effect, so
@@ -201,9 +201,26 @@ function ViewCanvas({
     },
     [onLaunchWorkflow, close],
   );
+  // An open-canvas directive from a board rendered IN the drawer drills into
+  // another snapshot by replacing this drawer's doc — openCanvas is context-
+  // available here, so it's sourced locally rather than threaded from the opener
+  // (the key difference from onOpenChat/onLaunchWorkflow). Pass the drawer's own
+  // effect handlers into the replacement doc's opts so its board acts like inline.
+  const onOpenCanvas = useCallback(
+    (key: string, title?: string) =>
+      openCanvas(
+        { kind: "view", source: { type: "snapshot", key }, ...(title ? { title } : {}) },
+        {
+          ...(onOpenChat ? { onOpenChat } : {}),
+          ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+        },
+      ),
+    [openCanvas, onOpenChat, onLaunchWorkflow],
+  );
   const actions = useRibActionDispatch(ribId, {
     ...(onOpenChat ? { onOpenChat: onOpenChatAndClose } : {}),
     ...(onLaunchWorkflow ? { onLaunchWorkflow: onLaunchWorkflowAndClose } : {}),
+    onOpenCanvas,
   });
   if (!ribId) return <ViewBody source={source} />;
   return (
