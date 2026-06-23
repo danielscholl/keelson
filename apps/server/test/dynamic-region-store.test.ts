@@ -124,4 +124,43 @@ describe("mergeSurfaceRegions", () => {
     const after = mergeSurfaceRegions(surface([staticRow]), [r("a"), r("b"), r("c"), r("d")], 3);
     expect(after.layout.rows[1]).toEqual(before.layout.rows[1]);
   });
+
+  test("stamps a group's first non-empty groupTitle onto every row that group forms", () => {
+    const merged = mergeSurfaceRegions(
+      surface([staticRow]),
+      [
+        { key: "r1", group: "rooms", groupTitle: "Rooms" },
+        { key: "r2", group: "rooms" },
+        { key: "r3", group: "rooms" },
+        { key: "r4", group: "rooms" },
+        { key: "l1", group: "lens", groupTitle: "Lenses" },
+      ],
+      3,
+    );
+    // Static row carries no zoneTitle; both Rooms rows do; the Lenses row does.
+    expect(merged.layout.rows.map((row) => row.zoneTitle)).toEqual([
+      undefined,
+      "Rooms",
+      "Rooms",
+      "Lenses",
+    ]);
+  });
+
+  test("leaves zoneTitle unset for a group whose regions declare no groupTitle", () => {
+    const merged = mergeSurfaceRegions(surface([staticRow]), [r("a", "rooms"), r("b", "rooms")], 3);
+    expect(merged.layout.rows[1]?.zoneTitle).toBeUndefined();
+  });
+
+  test("a groupTitle on an ungrouped region is inert (no zoneTitle on the ungrouped row)", () => {
+    const merged = mergeSurfaceRegions(
+      surface([staticRow]),
+      [{ key: "stray", groupTitle: "Phantom" }, r("b", "rooms")],
+      3,
+    );
+    // The ungrouped 'stray' must not stamp its groupTitle onto the ungrouped row.
+    const ungroupedRow = merged.layout.rows.find((row) =>
+      row.columns.some((c) => c.key === "stray"),
+    );
+    expect(ungroupedRow?.zoneTitle).toBeUndefined();
+  });
 });

@@ -225,6 +225,26 @@ describe("GET /api/ribs dynamic regions", () => {
     expect(rowsOf((await res.json()) as RibsBody, "surf")).toEqual([["rib:surf:base"]]);
   });
 
+  test("a group's zoneTitle survives the merge and the response-schema parse", async () => {
+    const captured: { register?: RibContext["registerRegion"] } = {};
+    const { app } = await makeRig({ available: { surf: surfacedRib(captured) } });
+    const register = captured.register!;
+    register("main", { key: "rib:surf:room:a", group: "rooms", groupTitle: "Rooms" });
+    register("main", { key: "rib:surf:room:b", group: "rooms" });
+
+    const res = await app.fetch(get("/api/ribs"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ribs: Array<{
+        id: string;
+        surfaces: Array<{ layout: { rows: Array<{ zoneTitle?: string }> } }>;
+      }>;
+    };
+    const rows = body.ribs.find((r) => r.id === "surf")!.surfaces[0]!.layout.rows;
+    // Static row unlabeled; the merged Rooms row carries the zone title.
+    expect(rows.map((row) => row.zoneTitle)).toEqual([undefined, "Rooms"]);
+  });
+
   test("lets a rib register a region synchronously during registerTools without crashing boot", async () => {
     // Surfaces are validated before registerTools, so a rib's declared surface ids
     // are known when it registers a default panel at activation time — this must not

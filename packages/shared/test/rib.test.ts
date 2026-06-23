@@ -189,6 +189,98 @@ describe("rib surface descriptor schema", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("round-trips an optional surface subtitle", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "chamber",
+      title: "Chamber",
+      subtitle: "3 rooms · 2 lenses",
+      layout: { rows: [] },
+    });
+    expect(s.subtitle).toBe("3 rooms · 2 lenses");
+  });
+
+  it("round-trips collapse flags + a byline on a row-column region", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              {
+                key: "rib:chamber:room-1",
+                title: "Room 1",
+                byline: "scope: navigation",
+                collapsible: true,
+                collapsed: true,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const col = s.layout.rows[0]?.columns[0];
+    expect(col?.collapsible).toBe(true);
+    expect(col?.collapsed).toBe(true);
+    expect(col?.byline).toBe("scope: navigation");
+  });
+
+  it("round-trips a region groupTitle and a row zoneTitle", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            zoneTitle: "Rooms",
+            columns: [{ key: "rib:chamber:room-1", group: "rooms", groupTitle: "Rooms" }],
+          },
+        ],
+      },
+    });
+    expect(s.layout.rows[0]?.zoneTitle).toBe("Rooms");
+    expect(s.layout.rows[0]?.columns[0]?.groupTitle).toBe("Rooms");
+  });
+
+  it("parses a surface and region that set none of the new optional fields", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:quality" }] }] },
+    });
+    expect(s.subtitle).toBeUndefined();
+    const col = s.layout.rows[0]?.columns[0];
+    expect(col?.byline).toBeUndefined();
+    expect(col?.groupTitle).toBeUndefined();
+    expect(col?.collapsible).toBeUndefined();
+    expect(s.layout.rows[0]?.zoneTitle).toBeUndefined();
+  });
+
+  it("rejects an over-long byline, subtitle, and groupTitle", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        subtitle: "x".repeat(201),
+        layout: { rows: [] },
+      }).success,
+    ).toBe(false);
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { rows: [{ columns: [{ key: "rib:x:a", byline: "x".repeat(201) }] }] },
+      }).success,
+    ).toBe(false);
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { rows: [{ columns: [{ key: "rib:x:a", groupTitle: "x".repeat(121) }] }] },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("rib contract backward-compatibility", () => {
