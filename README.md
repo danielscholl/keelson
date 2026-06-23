@@ -61,6 +61,25 @@ Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
 credentials. `keelson start --foreground` runs the server attached instead;
 `keelson stop` shuts the background server down.
 
+Prove the whole agent path end to end without any keys — stop the Quick Start
+server first, since `keelson start` is idempotent and won't swap providers under
+a server that's already up:
+
+```bash
+keelson stop                           # release the running server, if any
+KEELSON_PROVIDERS=stub keelson start   # offline echo provider, no credentials
+keelson chat "ping"                    # a streamed reply means server + provider + chat are live
+```
+
+### Where to next
+
+| Your goal | Start here |
+|---|---|
+| Work with an agent interactively | **Chat** — `keelson start`, then the Chat surface at `:7878` |
+| Repeat a multi-step task deterministically | **Workflows** — `keelson workflow run <name>` |
+| Add an external capability (tools, surfaces) | **Ribs** — `keelson rib add <source>` |
+| Expose Keelson's tools to another agent | **MCP** — point an MCP client at `/api/mcp` |
+
 By default Keelson loads only Copilot, leaving the offline `stub`, Claude, Pi
 (a multi-vendor community agent), and Codex (OpenAI's coding agent) opt-in. Pick
 which providers load and which one chat defaults to in `~/.keelson/config.json`:
