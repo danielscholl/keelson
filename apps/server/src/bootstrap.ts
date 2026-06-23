@@ -78,6 +78,9 @@ import {
 import { makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { discoverRibs } from "./rib-discovery.ts";
 import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
+// Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
+// import direction is not turned into a runtime cycle.
+import type { WorkflowController } from "./workflows-handler.ts";
 
 // A bound rib workflow ready to feed the run path: the workflow name plus the
 // callback that republishes a structured run output to the rib's snapshot key.
@@ -193,6 +196,15 @@ export interface BootstrapRibsOptions {
   // Backs RibContext.registerRegion. Owned by the composition root (it also
   // feeds the GET /api/ribs merge), so it's threaded in rather than created here.
   dynamicRegionStore?: DynamicRegionStore;
+  // Lazy resolver for the in-process WorkflowController backing
+  // RibContext.refreshWorkflow. Lazy because the controller is built AFTER
+  // bootstrapRibs returns — the getter reads the composition root's late-bound
+  // binding at refresh time, by which point boot is done.
+  getWorkflowController?: () => WorkflowController | undefined;
+  // The working dir refreshWorkflow re-runs producers with. Must equal the
+  // heartbeat scheduler's repoRoot (the keelson home) so the (name, cwd, {})
+  // de-dupe key aligns and a refresh collapses onto an in-flight heartbeat run.
+  refreshCwd?: string;
 }
 
 export interface RibBootstrap {
@@ -246,6 +258,36 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const runAgentTurn =
     options.runAgentTurn ??
     makeRibAgentTurn(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {});
+  // RibContext.refreshWorkflow resolver. Fires the EXISTING run facade with the
+  // SAME (cwd, {}) the heartbeat uses so a refresh collapses onto an in-flight
+  // heartbeat run; `origin: "scheduled"` forces scope=undefined so the rib's own
+  // bound WorkflowDefinition object resolves and ribBinding.publish is reached.
+  // Wired only when both the controller getter and the home cwd are supplied
+  // (an embedder/test rig that omits either degrades to cadence-only).
+  const getWorkflowController = options.getWorkflowController;
+  const refreshCwd = options.refreshCwd;
+  const refreshWorkflow =
+    getWorkflowController && refreshCwd !== undefined
+      ? async (_ribId: string, workflowName: string): Promise<void> => {
+          const controller = getWorkflowController();
+          if (!controller) return;
+          try {
+            const result = controller.startRun({
+              name: workflowName,
+              inputs: {},
+              workingDir: refreshCwd,
+              origin: "scheduled",
+            });
+            if (!result.ok) {
+              console.warn(
+                `[keelson] refreshWorkflow could not start '${workflowName}': ${result.message}`,
+              );
+            }
+          } catch {
+            // Fail-soft: a refresh must never surface to the rib.
+          }
+        }
+      : undefined;
   const {
     manifests,
     disposers,
@@ -268,6 +310,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
     ...(options.getRibDataDir ? { getRibDataDir: options.getRibDataDir } : {}),
     ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
+    ...(refreshWorkflow ? { refreshWorkflow } : {}),
   });
   return {
     manifests,

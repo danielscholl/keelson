@@ -208,6 +208,23 @@ describe("rib contract backward-compatibility", () => {
     expect(ctx.getCredential).toBeUndefined();
     // The agent-turn seam is optional too — a minimal context omits it (rooms fail closed).
     expect(ctx.runAgentTurn).toBeUndefined();
+    // refreshWorkflow is optional — a rib on an older harness degrades to cadence-only.
+    expect(ctx.refreshWorkflow).toBeUndefined();
+  });
+
+  it("accepts a context with the refreshWorkflow seam and resolves it", async () => {
+    let seen = "";
+    const ctx: RibContext = {
+      getExec: () => ({
+        runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+        runText: async () => ({ ok: true as const, data: "" }),
+      }),
+      refreshWorkflow: async (workflowName) => {
+        seen = workflowName;
+      },
+    };
+    await expect(ctx.refreshWorkflow?.("chamber-roster")).resolves.toBeUndefined();
+    expect(seen).toBe("chamber-roster");
   });
 
   it("accepts a context with the C1 agent-turn seam and exposes the dual-handle", async () => {

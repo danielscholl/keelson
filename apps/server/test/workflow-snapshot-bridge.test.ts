@@ -12,10 +12,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Rib, RibContext, SnapshotFrame } from "@keelson/shared";
 import type { NodeHandler } from "@keelson/workflows";
 import { Hono } from "hono";
 
-import { bootstrapWorkflows } from "../src/bootstrap.ts";
+import { bootstrapRibs, bootstrapWorkflows, prepareRibWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
@@ -23,7 +24,12 @@ import { createSnapshotManager } from "../src/snapshot-manager.ts";
 import { createSnapshotSubscribers } from "../src/snapshot-subscribers.ts";
 import { snapshotsRoutes } from "../src/snapshots-handler.ts";
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
-import { workflowsRoutes } from "../src/workflows-handler.ts";
+import {
+  createActiveRuns,
+  createWorkflowController,
+  createWorkflowSubscribers,
+  workflowsRoutes,
+} from "../src/workflows-handler.ts";
 import { rmTemp } from "./temp.ts";
 
 const ORIGIN = "http://127.0.0.1:5173";
@@ -220,5 +226,173 @@ nodes:
     const { runId } = (await startRes.json()) as { runId: string };
     await pollUntilTerminal(app, runId);
     expect(store.getRun(runId)?.status).toBe("succeeded");
+  });
+});
+
+// End-to-end guard for the silent object-identity miss (keelson#285 risk #1):
+// a real RibContext.refreshWorkflow run must land a NEW composed frame on the
+// rib-bound key through the unchanged publish->pump->recompose bridge — proving
+// `origin:"scheduled"` resolves the rib's own bound WorkflowDefinition object so
+// ribWorkflowBindings.get(workflow) hits (not a project-shadow miss that no-ops).
+describe("refreshWorkflow → bound snapshot key bridge (#285)", () => {
+  const BOUND_KEY = "rib:chamber:roster";
+  const PRODUCER = "chamber-roster";
+
+  // bootstrapRibs filters `active` by KEELSON_RIBS; clear it so the chamber rib
+  // always activates regardless of the ambient env (mirrors scheduler.test.ts's
+  // resolver suite).
+  let savedRibs: string | undefined;
+  beforeEach(() => {
+    savedRibs = process.env.KEELSON_RIBS;
+    delete process.env.KEELSON_RIBS;
+  });
+  afterEach(() => {
+    if (savedRibs === undefined) delete process.env.KEELSON_RIBS;
+    else process.env.KEELSON_RIBS = savedRibs;
+  });
+
+  // A rib contributing a snapshot-bound structured producer. The structuredHandler
+  // above stands in for the prompt node's structured output.
+  function chamberRib(): Rib {
+    return {
+      id: "chamber",
+      displayName: "Chamber",
+      contributeWorkflows: () => [
+        {
+          definition: {
+            name: PRODUCER,
+            description: "rib-contributed roster collector",
+            nodes: [{ id: "emit", prompt: "produce the roster" }],
+          },
+          bindSnapshotKey: BOUND_KEY,
+        },
+      ],
+    };
+  }
+
+  async function pollFrame(
+    manager: ReturnType<typeof createSnapshotManager>,
+    key: string,
+    timeoutMs = 2000,
+  ): Promise<SnapshotFrame> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const frame = manager.latest(key);
+      if (frame !== undefined) return frame as SnapshotFrame;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error(`bound key ${key} never received a composed frame in ${timeoutMs}ms`);
+  }
+
+  test("drives a real bound run whose structured output lands as a new composed frame", async () => {
+    const subscribers = createSnapshotSubscribers();
+    const manager = createSnapshotManager(subscribers);
+
+    // Late-bound controller, mirroring index.ts: bootstrapRibs builds the
+    // refreshWorkflow resolver from this getter + refreshCwd before the
+    // controller exists; the ref is set right after it is created below.
+    let controllerRef: ReturnType<typeof createWorkflowController> | undefined;
+    const sink: { ctx?: RibContext } = {};
+    const ribs = await bootstrapRibs({
+      available: {
+        chamber: {
+          ...chamberRib(),
+          registerTools: (ctx) => {
+            sink.ctx = ctx;
+            return [];
+          },
+        },
+      },
+      snapshotManager: manager,
+      getWorkflowController: () => controllerRef,
+      // tmpDir is a real dir so the run's statSync(cwd) check passes; the prompt
+      // node uses no paths, so the cwd is nominal.
+      refreshCwd: tmpDir,
+    });
+
+    const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);
+    const db = openDatabase({ path: join(tmpDir, "bridge.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      extra: ribWorkflows.definitions,
+      ribProvenance: ribWorkflows.provenance,
+    });
+    controllerRef = createWorkflowController(
+      {
+        catalog,
+        store,
+        conversationStore,
+        projectsStore,
+        promptHandler: structuredHandler,
+        snapshotManager: manager,
+        ribWorkflowBindings: ribWorkflows.bindings,
+      },
+      createActiveRuns(),
+      createWorkflowSubscribers(),
+    );
+
+    try {
+      expect(sink.ctx?.refreshWorkflow).toBeDefined();
+      // No frame on the bound key until the producer runs (composer is `() => latest`).
+      expect(manager.latest(BOUND_KEY)).toBeUndefined();
+
+      await sink.ctx?.refreshWorkflow?.(PRODUCER);
+
+      const frame = await pollFrame(manager, BOUND_KEY);
+      expect(frame.type).toBe("snapshot_update");
+      expect(frame.key).toBe(BOUND_KEY);
+      // v0 — the bound key was uncached pre-refresh, so this is its first compose.
+      expect(frame.version).toBe(0);
+      expect(frame.data).toEqual({ markdown: "# Live" });
+    } finally {
+      await manager.dispose();
+      db.close();
+    }
+  });
+
+  test("a refreshWorkflow run with no snapshot manager wired still completes (no crash)", async () => {
+    // No snapshotManager → applyRibs builds no publish closure → prepareRibWorkflows
+    // yields no binding → the run executes but republishes nothing, never throwing.
+    let controllerRef: ReturnType<typeof createWorkflowController> | undefined;
+    const sink: { ctx?: RibContext } = {};
+    const ribs = await bootstrapRibs({
+      available: {
+        chamber: {
+          ...chamberRib(),
+          registerTools: (ctx) => {
+            sink.ctx = ctx;
+            return [];
+          },
+        },
+      },
+      getWorkflowController: () => controllerRef,
+      refreshCwd: tmpDir,
+    });
+    const ribWorkflows = prepareRibWorkflows(ribs.workflowContributions);
+    expect(ribWorkflows.bindings.size).toBe(0);
+
+    const db = openDatabase({ path: join(tmpDir, "bridge-nomgr.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      extra: ribWorkflows.definitions,
+      ribProvenance: ribWorkflows.provenance,
+    });
+    controllerRef = createWorkflowController(
+      { catalog, store, conversationStore, projectsStore, promptHandler: structuredHandler },
+      createActiveRuns(),
+      createWorkflowSubscribers(),
+    );
+
+    try {
+      await expect(sink.ctx?.refreshWorkflow?.(PRODUCER)).resolves.toBeUndefined();
+    } finally {
+      db.close();
+    }
   });
 });

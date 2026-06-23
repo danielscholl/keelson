@@ -6,9 +6,10 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-import { describe, expect, test } from "bun:test";
-import type { RibSurfaceDescriptor, SnapshotManager } from "@keelson/shared";
+import { afterEach, describe, expect, test } from "bun:test";
+import type { Rib, RibContext, RibSurfaceDescriptor, SnapshotManager } from "@keelson/shared";
 import type { WorkflowDefinition } from "@keelson/workflows";
+import { bootstrapRibs } from "../src/bootstrap.ts";
 import type { RibManifest } from "../src/ribs.ts";
 import {
   createScheduler,
@@ -334,5 +335,133 @@ describe("createScheduler", () => {
     expect(h.setCalls()).toBe(1);
     h.scheduler.stop();
     expect(h.clearCalls()).toBe(1);
+  });
+});
+
+// The RibContext.refreshWorkflow resolver bootstrapRibs builds from a
+// getWorkflowController getter + refreshCwd. Driven through bootstrapRibs (not a
+// reconstructed standalone) so the real inline resolver, the applyRibs id-bind
+// spread, and the late-bound getter are exercised together.
+describe("bootstrapRibs refreshWorkflow resolver", () => {
+  const REFRESH_CWD = "/keelson-home";
+
+  // A rib whose registerTools captures the per-rib ctx so the test can call the
+  // wired ctx.refreshWorkflow directly.
+  function capturingRib(sink: { ctx?: RibContext }): Rib {
+    return {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        sink.ctx = ctx;
+        return [];
+      },
+    };
+  }
+
+  type StartParams = Parameters<WorkflowController["startRun"]>[0];
+
+  function recordingController(
+    impl: (p: StartParams) => ReturnType<WorkflowController["startRun"]>,
+  ) {
+    const calls: StartParams[] = [];
+    const controller = {
+      startRun: (p: StartParams) => {
+        calls.push(p);
+        return impl(p);
+      },
+    } as unknown as WorkflowController;
+    return { calls, controller };
+  }
+
+  // bootstrapRibs filters `active` by KEELSON_RIBS; clear it so the supplied rib
+  // always activates regardless of the ambient env.
+  let savedRibs: string | undefined;
+  afterEach(() => {
+    if (savedRibs === undefined) delete process.env.KEELSON_RIBS;
+    else process.env.KEELSON_RIBS = savedRibs;
+  });
+  function isolateRibsEnv() {
+    savedRibs = process.env.KEELSON_RIBS;
+    delete process.env.KEELSON_RIBS;
+  }
+
+  test("re-runs the named bound producer via controller.startRun with aligned cwd/inputs/origin", async () => {
+    isolateRibsEnv();
+    const sink: { ctx?: RibContext } = {};
+    const { calls, controller } = recordingController(({ name }) => ({
+      ok: true,
+      runId: `r-${name}`,
+      conversationId: "c",
+    }));
+    await bootstrapRibs({
+      available: { chamber: capturingRib(sink) },
+      getWorkflowController: () => controller,
+      refreshCwd: REFRESH_CWD,
+    });
+    expect(sink.ctx?.refreshWorkflow).toBeDefined();
+    await sink.ctx?.refreshWorkflow?.("chamber-roster");
+    expect(calls).toHaveLength(1);
+    // De-dupe key alignment with the heartbeat: (name, workingDir, {}) + scheduled.
+    expect(calls[0]).toMatchObject({
+      name: "chamber-roster",
+      inputs: {},
+      workingDir: REFRESH_CWD,
+      origin: "scheduled",
+    });
+  });
+
+  test("an unknown workflow name resolves without throwing and republishes nothing", async () => {
+    isolateRibsEnv();
+    const sink: { ctx?: RibContext } = {};
+    const { calls, controller } = recordingController(() => ({
+      ok: false,
+      message: "unknown workflow 'ghost'",
+    }));
+    await bootstrapRibs({
+      available: { chamber: capturingRib(sink) },
+      getWorkflowController: () => controller,
+      refreshCwd: REFRESH_CWD,
+    });
+    // Resolver ignores result.ok — a { ok:false } never throws and never republishes.
+    await expect(sink.ctx?.refreshWorkflow?.("ghost")).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a throwing controller is swallowed (fail-soft)", async () => {
+    isolateRibsEnv();
+    const sink: { ctx?: RibContext } = {};
+    const { controller } = recordingController(() => {
+      throw new Error("boom");
+    });
+    await bootstrapRibs({
+      available: { chamber: capturingRib(sink) },
+      getWorkflowController: () => controller,
+      refreshCwd: REFRESH_CWD,
+    });
+    await expect(sink.ctx?.refreshWorkflow?.("x")).resolves.toBeUndefined();
+  });
+
+  test("a null controller (boot not complete) resolves to a no-op", async () => {
+    isolateRibsEnv();
+    const sink: { ctx?: RibContext } = {};
+    let attempts = 0;
+    await bootstrapRibs({
+      available: { chamber: capturingRib(sink) },
+      getWorkflowController: () => {
+        attempts += 1;
+        return undefined;
+      },
+      refreshCwd: REFRESH_CWD,
+    });
+    await expect(sink.ctx?.refreshWorkflow?.("x")).resolves.toBeUndefined();
+    // The getter was consulted, but no startRun could be attempted.
+    expect(attempts).toBe(1);
+  });
+
+  test("omits the seam when no controller getter is supplied (older-harness degradation)", async () => {
+    isolateRibsEnv();
+    const sink: { ctx?: RibContext } = {};
+    await bootstrapRibs({ available: { chamber: capturingRib(sink) }, refreshCwd: REFRESH_CWD });
+    expect(sink.ctx?.refreshWorkflow).toBeUndefined();
   });
 });
