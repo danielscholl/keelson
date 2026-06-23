@@ -91,7 +91,7 @@ nodes:
       printf '%s\n' "$DIFF_STAT" > "$KEELSON_ARTIFACTS_DIR/changed-files.txt"
       printf '%s\n' "$DIFF_BODY" > "$KEELSON_ARTIFACTS_DIR/diff.patch"
 
-      FILE_COUNT=$(printf '%s\n' "$DIFF_STAT" | grep -c . )
+      FILE_COUNT=$(printf '%s\n' "$DIFF_STAT" | grep -c . || true)
       FILE_COUNT=${FILE_COUNT:-0}
       LINE_COUNT=$(printf '%s\n' "$DIFF_BODY" | wc -l | tr -d ' ')
 
