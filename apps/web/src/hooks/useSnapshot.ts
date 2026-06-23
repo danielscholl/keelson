@@ -9,6 +9,7 @@
 import type { SnapshotFrame } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSnapshot } from "../api.ts";
+import { freshCursor, shouldApplyFrame } from "../lib/snapshotGuard.ts";
 import { createReconnectingSnapshotWs } from "../ws.ts";
 
 export type SnapshotStatus = "loading" | "empty" | "live" | "error";
@@ -34,9 +35,11 @@ const EMPTY: SnapshotData = { status: "empty", data: null, version: null, compos
 
 // Subscribe to a server snapshot key: hydrate via GET, then live-update on each
 // WS frame, re-hydrating on every reconnect (the server has no on-connect
-// replay). A `null` key is inert. Frames are version-guarded so a duplicate or
-// out-of-order frame can't roll the view backwards. A "gone" key (the producer
-// unregistered it) stops the socket so it doesn't reconnect into a dead key.
+// replay). A `null` key is inert. Frames pass through shouldApplyFrame so a
+// duplicate or out-of-order frame can't roll the view backwards while a version
+// reset (a re-registered key restarts at 0) still re-baselines. A "gone" key
+// (the producer unregistered it) stops the socket so it doesn't reconnect into
+// a dead key.
 export function useSnapshot(key: string | null): SnapshotState {
   const [state, setState] = useState<SnapshotData>(INITIAL);
   // reload() re-runs the live subscription's hydrate without re-running the
@@ -53,13 +56,12 @@ export function useSnapshot(key: string | null): SnapshotState {
     }
     setState(INITIAL);
     let cancelled = false;
-    let seenVersion = -1;
+    const cursor = freshCursor();
     let hydrating = false;
     let handle: { close: () => void } | null = null;
 
     const applyFrame = (frame: SnapshotFrame): void => {
-      if (cancelled || frame.version < seenVersion) return;
-      seenVersion = frame.version;
+      if (cancelled || !shouldApplyFrame(cursor, frame.version)) return;
       setState({
         status: "live",
         data: frame.data,

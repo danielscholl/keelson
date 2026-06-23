@@ -1522,6 +1522,79 @@ describe("WebSocket handlers", () => {
     const parsed = chatFrameSchema.parse(JSON.parse(sent[0]));
     expect(parsed.event.type).toBe("error");
   });
+
+  test("rejects a second request while a turn is in flight on the same socket", async () => {
+    const id = "ws-serialize";
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const capabilities: ProviderCapabilities = {
+      sessionResume: false,
+      streaming: true,
+      tools: false,
+      models: ["m"],
+      defaultModel: "m",
+    };
+    if (!isRegisteredProvider(id)) {
+      registerProvider({
+        id,
+        displayName: "Gated",
+        builtIn: false,
+        capabilities,
+        factory: () => ({
+          getType: () => "gated",
+          getCapabilities: () => capabilities,
+          listModels: async () => [{ id: "m" }],
+          async *sendQuery() {
+            await gate;
+            yield { type: "text", content: "done" };
+          },
+        }),
+      });
+    }
+
+    const store = makeMemStore();
+    const conv = store.create({ providerId: id });
+    const handlers = chatWebSocketHandlers(store);
+    const sent: string[] = [];
+    const fakeWs: ServerWebSocket<WsData> = {
+      data: { abort: new AbortController() },
+      send: (msg: string) => {
+        sent.push(msg);
+        return 1;
+      },
+      close: () => {},
+    } as unknown as ServerWebSocket<WsData>;
+
+    const frame = JSON.stringify({
+      version: WIRE_PROTOCOL_VERSION,
+      conversationId: conv.id,
+      message: { type: "request", providerId: id, prompt: "hi" },
+    });
+
+    // First turn parks in the gated provider; the second lands mid-flight.
+    const first = handlers.message!(fakeWs, frame);
+    await Promise.resolve();
+    await handlers.message!(fakeWs, frame);
+
+    const rejected = sent
+      .map((m) => chatFrameSchema.parse(JSON.parse(m)))
+      .find((f) => f.event.type === "error");
+    expect(rejected?.event.type).toBe("error");
+    if (rejected?.event.type === "error") {
+      expect(rejected.event.code).toBe("TURN_IN_FLIGHT");
+    }
+
+    release?.();
+    await first;
+
+    // The re-entrant request never reached the store: one user prompt, one
+    // assistant reply — not two interleaved turns.
+    const messages = store.get(conv.id)?.messages ?? [];
+    expect(messages.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(messages.filter((m) => m.role === "assistant")).toHaveLength(1);
+  });
 });
 
 describe("WebSocket upgrade gate", () => {

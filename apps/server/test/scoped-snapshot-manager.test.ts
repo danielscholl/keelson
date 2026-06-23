@@ -72,4 +72,14 @@ describe("createScopedSnapshotManager", () => {
     expect(base.keys()).toEqual(["workflow:run:abc"]);
     expect((await base.recompose("workflow:run:abc"))?.data).toEqual({ live: true });
   });
+
+  test("register after dispose throws and never reaches the base manager", async () => {
+    const base = createSnapshotManager();
+    const scoped = createScopedSnapshotManager(base, "osdu");
+    await scoped.dispose();
+    // A late closure held by a torn-down rib must not register a fresh key.
+    expect(() => scoped.register("rib:osdu:late", () => ({}))).toThrow(/disposed/);
+    expect(base.keys()).toEqual([]);
+    expect(await scoped.recompose("rib:osdu:late")).toBeUndefined();
+  });
 });

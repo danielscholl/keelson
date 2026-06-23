@@ -37,6 +37,10 @@ export function createScopedSnapshotManager(base: SnapshotManager, ribId: string
       compose: SnapshotComposer<T>,
       opts?: { validate?: SnapshotValidator<T> },
     ): () => void {
+      // Honor the local disposed flag the same way the base manager does, so a
+      // late closure held by a torn-down rib can't register a fresh handle the
+      // already-run dispose() will never release.
+      if (disposed) throw new Error(`scoped snapshot manager for '${ribId}' is disposed`);
       const resolved = resolve(key);
       if (!owned(resolved)) {
         throw new Error(`rib '${ribId}' may only register snapshot keys under '${prefix}:*'`);
@@ -49,6 +53,7 @@ export function createScopedSnapshotManager(base: SnapshotManager, ribId: string
       return handle;
     },
     recompose<T = unknown>(key: string): Promise<SnapshotFrame<T> | undefined> {
+      if (disposed) return Promise.resolve(undefined);
       const resolved = resolve(key);
       // A rib reads only its own namespace — a guessed run-scoped or
       // foreign-rib key resolves to nothing rather than the base value.
