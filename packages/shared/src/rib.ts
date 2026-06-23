@@ -186,8 +186,8 @@ export type RibViewDescriptor = z.infer<typeof ribViewDescriptorSchema>;
 
 // A rib's primary surface: one top-level nav tab laying out region-bound boards
 // (G1 stays "one panel"; the surface owns columns/header/footer). Each region
-// `key` must live under the rib's namespace, like view keys. Only the header
-// and footer collapse — banner and row columns always render full. `workflow`,
+// `key` must live under the rib's namespace, like view keys. Header, footer,
+// and row-column regions can collapse; only the banner always renders full. `workflow`,
 // when set, is the catalog workflow a region's refresh re-runs to repopulate its
 // key (vs. a plain re-read of the cached frame). `title`/`glyph` give the region
 // a static identity (a lane name + a toned glyph chip) shown in its head even
