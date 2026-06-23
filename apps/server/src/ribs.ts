@@ -133,6 +133,10 @@ export interface ApplyRibsOptions {
   // Backs RibContext.registerRegion so a rib can add surface regions at runtime.
   // Optional so unit tests for applyRibs without a manifest store stay simple.
   readonly dynamicRegionStore?: DynamicRegionStore;
+  // Backs RibContext.refreshWorkflow; rib-id-scoped for parity/future per-rib
+  // scoping. Optional so unit-test rigs without a controller stay deterministic
+  // — absent leaves the seam off the ctx, cadence-only.
+  readonly refreshWorkflow?: (ribId: string, workflowName: string) => Promise<void>;
 }
 
 /**
@@ -253,6 +257,9 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
       ...(opts.dynamicRegionStore
         ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
+        : {}),
+      ...(opts.refreshWorkflow
+        ? { refreshWorkflow: (workflowName: string) => opts.refreshWorkflow!(rib.id, workflowName) }
         : {}),
     };
 

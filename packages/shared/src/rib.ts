@@ -156,6 +156,12 @@ export interface RibContext {
   // rib declared; `region.key` must be under `rib:<id>:*`. Optional so a rib
   // built against an older harness degrades to no dynamic regions, not a throw.
   registerRegion?: (surfaceId: string, region: RibSurfaceRegion) => () => void;
+  // Re-run THIS rib's own snapshot-bound producer workflow by name on demand;
+  // fresh structured output republishes to the bound key through the same
+  // publish->recompose bridge the cadence/heartbeat refresh uses. Resolves
+  // (never throws) for an unknown name or a failed run. Optional so a rib built
+  // against an older harness degrades to cadence-only refresh, not a throw.
+  refreshWorkflow?: (workflowName: string) => Promise<void>;
 }
 
 // The harness-owned snapshot key the SPA subscribes to as a manifest-revision

@@ -661,6 +661,92 @@ describe("applyRibs wiring", () => {
     expect(captured?.getDataDir).toBeUndefined();
   });
 
+  it("exposes refreshWorkflow on the rib context, bound to the rib id", async () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    let seenRibId = "";
+    let seenName = "";
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+      refreshWorkflow: (ribId, workflowName) => {
+        seenRibId = ribId;
+        seenName = workflowName;
+        return Promise.resolve();
+      },
+    });
+    expect(captured?.refreshWorkflow).toBeDefined();
+    await captured?.refreshWorkflow?.("chamber-roster");
+    expect(seenRibId).toBe("chamber");
+    expect(seenName).toBe("chamber-roster");
+  });
+
+  it("omits refreshWorkflow when no resolver is supplied (fails closed for an older harness)", () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+    });
+    // getExec is always present, so capture provably happened — refreshWorkflow
+    // being undefined is the cadence-only degradation, not a never-ran register.
+    expect(captured?.getExec).toBeDefined();
+    expect(captured?.refreshWorkflow).toBeUndefined();
+  });
+
+  it("refreshWorkflow on the ctx propagates a rejecting resolver (fail-soft lives at the bootstrap layer)", async () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+      // The applyRibs layer is a thin id-binding wrapper and does NOT add a
+      // try/catch — fail-soft is the bootstrap resolver's job (scheduler.test).
+      refreshWorkflow: () => Promise.reject(new Error("boom")),
+    });
+    expect(captured?.refreshWorkflow).toBeDefined();
+    await expect(captured?.refreshWorkflow?.("x")).rejects.toThrow("boom");
+  });
+
   const fakeExecCtx = {
     getExec: () => ({
       runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),

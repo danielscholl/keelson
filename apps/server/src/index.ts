@@ -82,6 +82,7 @@ import {
   createWorkflowController,
   createWorkflowSubscribers,
   handleWorkflowRunUpgrade,
+  type WorkflowController,
   type WorkflowsHandlerOptions,
   workflowRunWebSocketHandlers,
   workflowsRoutes,
@@ -230,6 +231,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // returns. The rib-agent-turn seam (constructed inside bootstrapRibs) reads it
   // lazily through this getter at turn time, by which point it's set.
   let policyEngine: PolicyEngine | undefined;
+  // Late-bound like policyEngine: the controller is created further down (after
+  // the store/catalog are up), but RibContext.refreshWorkflow needs it. The
+  // resolver reads it lazily through this ref, set right after the controller is
+  // built — by which point any rib refresh call has boot complete.
+  let workflowControllerRef: WorkflowController | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
@@ -238,6 +244,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       createRibCredentialAccessor(credentialStore, ribId)(serviceId),
     getRibDataDir: (ribId) => ribDataDir(ribId, KEELSON_HOME),
     getPolicyEngine: () => policyEngine,
+    getWorkflowController: () => workflowControllerRef,
+    // Same cwd the heartbeat scheduler uses (repoRoot below), so a rib refresh
+    // collapses onto an in-flight heartbeat run instead of racing it.
+    refreshCwd: KEELSON_HOME,
   });
   // Register rib-contributed tools into the shared registry so the chat agent,
   // /api/tools, and workflow prompt nodes all pick them up via getRegisteredTools.
@@ -405,6 +415,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     activeWorkflowRuns,
     workflowSubscribers,
   );
+  // Publish the late-bound ref the refreshWorkflow resolver reads; boot is
+  // complete here, so a rib's refresh resolves the controller, not undefined.
+  workflowControllerRef = workflowController;
   const workflowTools = createWorkflowChatTools({
     controller: workflowController,
     catalog: workflowCatalog,
