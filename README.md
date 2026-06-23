@@ -61,9 +61,12 @@ Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
 credentials. `keelson start --foreground` runs the server attached instead;
 `keelson stop` shuts the background server down.
 
-Prove the whole agent path end to end without any keys:
+Prove the whole agent path end to end without any keys — stop the Quick Start
+server first, since `keelson start` is idempotent and won't swap providers under
+a server that's already up:
 
 ```bash
+keelson stop                           # release the running server, if any
 KEELSON_PROVIDERS=stub keelson start   # offline echo provider, no credentials
 keelson chat "ping"                    # a streamed reply means server + provider + chat are live
 ```
