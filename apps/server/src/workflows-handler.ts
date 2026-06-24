@@ -1800,6 +1800,12 @@ interface ExecuteRunArgs {
   // Rib-contributed workflow bindings by name; a bound run also fans its
   // structured output to the rib's namespaced key.
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
+  // Pre-completed node outputs to seed the executor on re-entry. When set,
+  // existing worktree path should also be set for consistency.
+  completedNodeOutputs?: ReadonlyMap<string, NodeOutput>;
+  // Existing worktree path for re-entry: skip createWorktree and run in place
+  // at this path. When set, the worktree is cleaned up only on success.
+  existingWorktreePath?: string;
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
@@ -1820,6 +1826,8 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     notebook,
     snapshotManager,
     ribWorkflowBindings,
+    completedNodeOutputs,
+    existingWorktreePath,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -1835,7 +1843,22 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // this instead of re-reading from SQLite — test teardown can delete the DB
   // file between the executor returning and our cleanup running.
   let terminalStatus: WorkflowRunStatus | null = null;
-  if (isolation !== null) {
+  if (existingWorktreePath !== undefined) {
+    effectiveCwd = existingWorktreePath;
+    worktreePathForCleanup = existingWorktreePath;
+    cleanupOnSuccessOnly = true;
+    const deps = await ensureWorktreeDeps({
+      worktreePath: existingWorktreePath,
+      abortSignal: abort.signal,
+    });
+    if (deps.error !== null) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `worktree dependency install failed; continuing: ${deps.error}`,
+      });
+    }
+  } else if (isolation !== null) {
     let isRepo = false;
     let probeError: string | null = null;
     try {
@@ -2220,6 +2243,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(projectId !== undefined ? { projectId } : {}),
       ...(notebook !== undefined ? { notebook } : {}),
+      ...(completedNodeOutputs !== undefined ? { completedNodeOutputs } : {}),
       onEvent: (event) => {
         if (event.type === "run_done") terminalStatus = event.status;
         dispatchRunEvent({
