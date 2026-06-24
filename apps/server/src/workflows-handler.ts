@@ -840,6 +840,22 @@ function resumeRunCore(
 
   const completedNodeOutputs = buildResumeSeed(run.nodes);
 
+  if (!run.workingDir) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run has no working directory`,
+    };
+  }
+
+  if (!run.conversationId) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run has no associated conversation`,
+    };
+  }
+
   try {
     store.updateRunStatus({
       runId,
@@ -854,22 +870,6 @@ function resumeRunCore(
       ok: false,
       reason: "not_terminal",
       message: `failed to resume run: ${msg}`,
-    };
-  }
-
-  if (!run.workingDir) {
-    return {
-      ok: false,
-      reason: "not_terminal",
-      message: `run has no working directory`,
-    };
-  }
-
-  if (!run.conversationId) {
-    return {
-      ok: false,
-      reason: "not_terminal",
-      message: `run has no associated conversation`,
     };
   }
 
