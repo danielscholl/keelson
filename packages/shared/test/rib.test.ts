@@ -52,6 +52,15 @@ describe("rib v2 wire schemas", () => {
     expect(ribActionSchema.safeParse({ type: "" }).success).toBe(false);
   });
 
+  it("carries a host-stamped origin and defaults it absent", () => {
+    expect(ribActionSchema.parse({ type: "retire" }).origin).toBeUndefined();
+    expect(ribActionSchema.parse({ type: "lens-html", origin: "canvas-html" }).origin).toBe(
+      "canvas-html",
+    );
+    // The enum is closed: a frame can't smuggle an unknown origin past the schema.
+    expect(ribActionSchema.safeParse({ type: "x", origin: "evil" }).success).toBe(false);
+  });
+
   it("round-trips both action-result variants", () => {
     expect(ribActionResponseSchema.parse({ ok: true, data: { n: 1 } })).toEqual({
       ok: true,
