@@ -2803,3 +2803,106 @@ nodes:
     }
   });
 });
+
+describe("runWorkflow — re-entry with completedNodeOutputs", () => {
+  test("seeded upstream node's handler is NOT called, downstream node sees seeded output", async () => {
+    const wf = parseInline(`
+name: resume-test
+description: test
+nodes:
+  - id: upstream
+    bash: "echo upstream"
+  - id: downstream
+    bash: "echo $upstream.output"
+    depends_on: [upstream]
+`);
+    const upstreamOutput = "upstream-result";
+    const { handler: bash, calls } = echoHandler("bash");
+    const completedNodeOutputs = new Map<string, NodeOutput>([
+      [
+        "upstream",
+        {
+          state: "completed",
+          output: upstreamOutput,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          durationMs: 100,
+        },
+      ],
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["bash", bash]]),
+      completedNodeOutputs,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes.upstream.output).toBe(upstreamOutput);
+    expect(summary.nodes.downstream.state).toBe("completed");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].nodeId).toBe("downstream");
+    expect(calls[0].resolvedBody).toContain(upstreamOutput);
+  });
+
+  test("seeded node with downstream when: condition sees seeded output", async () => {
+    const wf = parseInline(`
+name: resume-test-when
+description: test
+nodes:
+  - id: classify
+    bash: "echo FEATURE"
+  - id: label-feature
+    bash: "label feature"
+    depends_on: [classify]
+    when: $classify.output == 'FEATURE'
+`);
+    const classifyOutput = "FEATURE";
+    const { handler: bash, calls } = echoHandler("bash");
+    const completedNodeOutputs = new Map<string, NodeOutput>([
+      [
+        "classify",
+        {
+          state: "completed",
+          output: classifyOutput,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          durationMs: 50,
+        },
+      ],
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["bash", bash]]),
+      completedNodeOutputs,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes["label-feature"].state).toBe("completed");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].nodeId).toBe("label-feature");
+  });
+
+  test("skipped seeded node is preserved", async () => {
+    const wf = parseInline(`
+name: resume-skipped
+description: test
+nodes:
+  - id: n1
+    bash: "echo n1"
+  - id: n2
+    bash: "echo n2"
+`);
+    const { handler: bash, calls } = echoHandler("bash");
+    const completedNodeOutputs = new Map<string, NodeOutput>([
+      ["n1", { state: "skipped", output: "" }],
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["bash", bash]]),
+      completedNodeOutputs,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes.n1.state).toBe("skipped");
+    expect(summary.nodes.n2.state).toBe("completed");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].nodeId).toBe("n2");
+  });
+});
