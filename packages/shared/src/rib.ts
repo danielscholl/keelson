@@ -11,6 +11,7 @@ import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
 import type { MessageChunk } from "./chat.ts";
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
 import type { Policy } from "./policy.ts";
+import type { Project } from "./projects.ts";
 import type { ToolDefinition } from "./tools.ts";
 
 /**
@@ -144,6 +145,13 @@ export interface RibContext {
   // named `rib-<id>` (`<home>/rib-<rib-id>`); path only — the rib creates it when
   // it writes. Optional, like the accessors above, so an older harness can omit it.
   getDataDir?: () => string;
+  // Read-only snapshot of the operator's Project records (each carries a validated
+  // rootPath) at call time, so a rib can offer project selection and run an agent
+  // turn with `cwd = project.rootPath` (pass it as RibAgentTurnRequest.cwd) — the
+  // same path-as-context binding chat and workflows use. This is working context,
+  // NOT a sandbox: it confines nothing; a turn can still pin any cwd. Optional so a
+  // rib built against an older harness degrades to no project selection, not a throw.
+  getProjects?: () => readonly Project[];
   // Run one agent turn. Optional, like the accessors above, so a rib that
   // needs rooms but finds it absent fails closed. Provider routing is global,
   // not namespace-scoped. See RibAgentTurn for the stream/result contract.

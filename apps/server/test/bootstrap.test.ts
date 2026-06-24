@@ -14,7 +14,7 @@ import {
   type ProviderCapabilities,
   registerProvider,
 } from "@keelson/providers";
-import type { Rib, ToolDefinition } from "@keelson/shared";
+import type { Project, Rib, ToolDefinition } from "@keelson/shared";
 import { clearRegistry, getRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
 import { z } from "zod";
@@ -327,6 +327,82 @@ describe("bootstrapRibs", () => {
     };
     await bootstrapRibs({ available: { alpha: multiSnapshotRib }, snapshotManager });
     expect(snapshotManager.keys().sort()).toEqual(["rib:alpha:partitions", "rib:alpha:users"]);
+  });
+
+  test("getProjects forwards to the rib and, like the composition root's late-bound store, reads it at call time", async () => {
+    delete process.env.KEELSON_RIBS;
+    // Mirror index.ts: `getProjects: () => projectsStoreRef?.list() ?? []`, where the
+    // store ref is assigned AFTER bootstrapRibs. So a rib reading projects
+    // synchronously in registerTools (before the store is wired) sees [], while a
+    // turn-time read sees the live list — project selection is a runtime concern.
+    let storeRef: { list: () => readonly Project[] } | undefined;
+    const projects: Project[] = [
+      {
+        id: "p1",
+        name: "alpha-app",
+        rootPath: "/repos/alpha",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    let seenAtActivation: readonly Project[] | undefined;
+    let accessor: (() => readonly Project[]) | undefined;
+    const reader: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        seenAtActivation = ctx.getProjects?.();
+        accessor = ctx.getProjects;
+        return [];
+      },
+    };
+    await bootstrapRibs({
+      available: { alpha: reader },
+      getProjects: () => storeRef?.list() ?? [],
+    });
+    expect(seenAtActivation).toEqual([]); // store not yet wired during activation
+    storeRef = { list: () => projects };
+    expect(accessor?.()).toEqual(projects); // turn-time read sees the live store
+  });
+
+  test("getProjects reflects the source at call time, not activation time", async () => {
+    delete process.env.KEELSON_RIBS;
+    // The composition root backs this with a late-bound store read, so a rib that
+    // calls it at convene/turn time (long after registerTools) must see the live
+    // list, not a snapshot frozen at activation.
+    const live: Project[] = [];
+    let accessor: (() => readonly Project[]) | undefined;
+    const reader: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        accessor = ctx.getProjects;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: reader }, getProjects: () => live });
+    expect(accessor?.()).toEqual([]);
+    live.push({
+      id: "p1",
+      name: "later",
+      rootPath: "/repos/later",
+      createdAt: "2026-01-03T00:00:00.000Z",
+    });
+    expect(accessor?.()).toEqual(live);
+  });
+
+  test("RibContext.getProjects is absent when no projects source is supplied", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasAccessor = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasAccessor = ctx.getProjects !== undefined;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: probe } });
+    expect(hasAccessor).toBe(false);
   });
 
   test("a rib registering a snapshot key outside its namespace throws at activation", async () => {

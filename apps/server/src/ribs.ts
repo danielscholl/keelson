@@ -25,6 +25,7 @@ import {
   type CommandInvokeResult,
   type OpenChatSeed,
   type Policy,
+  type Project,
   type Rib,
   type RibAction,
   type RibActionResult,
@@ -126,6 +127,10 @@ export interface ApplyRibsOptions {
   // keelson home and namespaced by rib id. Optional so test rigs without a home
   // stay deterministic — an absent resolver leaves getDataDir off the context.
   readonly getRibDataDir?: (ribId: string) => string;
+  // Backs RibContext.getProjects: a read-only list of the host's Project records
+  // the rib reads to offer project selection and pin a turn's cwd. Not rib-scoped —
+  // projects are shared. Optional so applyRibs unit tests without a store stay simple.
+  readonly getProjects?: () => readonly Project[];
   // Runs one agent turn for a rib. NOT namespace-scoped — provider routing
   // is global; `ribId` is passed for future per-rib policy/logging. Optional so
   // test rigs without a provider/CLI stay deterministic.
@@ -254,6 +259,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         ? { getCredential: (serviceId) => opts.getRibCredential!(rib.id, serviceId) }
         : {}),
       ...(opts.getRibDataDir ? { getDataDir: () => opts.getRibDataDir!(rib.id) } : {}),
+      ...(opts.getProjects ? { getProjects: opts.getProjects } : {}),
       ...(opts.runAgentTurn ? { runAgentTurn: (req) => opts.runAgentTurn!(rib.id, req) } : {}),
       ...(opts.dynamicRegionStore
         ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }

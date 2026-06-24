@@ -61,7 +61,7 @@ import type { PolicyEngine } from "./policy-engine.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
 import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
-import { createProjectsStore } from "./projects-store.ts";
+import { createProjectsStore, type ProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
 import { ribsRoutes } from "./ribs-handler.ts";
 import { createScheduler, deriveSurfaceSchedules, makeBoundKeyResolver } from "./scheduler.ts";
@@ -236,6 +236,12 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // resolver reads it lazily through this ref, set right after the controller is
   // built — by which point any rib refresh call has boot complete.
   let workflowControllerRef: WorkflowController | undefined;
+  // Late-bound like the refs above: the projects store is created further down
+  // (it needs the database), but RibContext.getProjects reads it lazily at turn
+  // time — a rib lists projects to pin a turn's cwd to a project root. A rib that
+  // (unusually) reads projects during registerTools, before the store is wired,
+  // sees an empty list: project selection is a runtime concern, not an activation one.
+  let projectsStoreRef: ProjectsStore | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
@@ -243,6 +249,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     getRibCredential: (ribId, serviceId) =>
       createRibCredentialAccessor(credentialStore, ribId)(serviceId),
     getRibDataDir: (ribId) => ribDataDir(ribId, KEELSON_HOME),
+    getProjects: () => projectsStoreRef?.list() ?? [],
     getPolicyEngine: () => policyEngine,
     getWorkflowController: () => workflowControllerRef,
     // Same cwd the heartbeat scheduler uses (repoRoot below), so a rib refresh
@@ -281,6 +288,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const workflowStore = createWorkflowStore(db);
   const memoryStore = createMemoryStore(db);
   const projectsStore = createProjectsStore(db);
+  projectsStoreRef = projectsStore;
   const projectNotebookStore = createProjectNotebookStore(db);
   migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: WORKSPACE_ROOT });
   const existingDefault = projectsStore.getByName(DEFAULT_PROJECT_NAME);
