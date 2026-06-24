@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import { RIBS_VERSION_SNAPSHOT_KEY, type RibSummary, type RibSurfaceDescriptor } from "@keelson/shared";
+import {
+  RIBS_VERSION_SNAPSHOT_KEY,
+  type RibSummary,
+  type RibSurfaceDescriptor,
+} from "@keelson/shared";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
 
