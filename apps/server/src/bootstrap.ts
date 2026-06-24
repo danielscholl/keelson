@@ -185,6 +185,10 @@ export interface BootstrapRibsOptions {
   // keelson home. The composition root passes `(id) => ribDataDir(id, home)`.
   // Optional so applyRibs/parseRibList unit tests stay home-free.
   getRibDataDir?: (ribId: string) => string;
+  // Backs RibContext.getProjects — a read-only project list for project-as-context
+  // turn cwd. The composition root passes `() => projectsStore.list()`. Optional so
+  // bootstrapRibs unit tests without a projects store stay deterministic.
+  getProjects?: () => readonly Project[];
   // Agent-turn factory. Defaults to the CLI-backed makeRibAgentTurn;
   // injectable so tests pass a fake instead of shelling a provider CLI.
   runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
@@ -309,6 +313,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(snapshotManager ? { snapshotManager } : {}),
     ...(options.getRibCredential ? { getRibCredential: options.getRibCredential } : {}),
     ...(options.getRibDataDir ? { getRibDataDir: options.getRibDataDir } : {}),
+    ...(options.getProjects ? { getProjects: options.getProjects } : {}),
     ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
   });
