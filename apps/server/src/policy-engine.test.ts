@@ -307,6 +307,34 @@ describe("createPolicyEngine — evaluateToolCall", () => {
     });
   });
 
+  it("blocks shell command path tokens that traverse outside via relative and option=value forms", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room/subdir",
+      allowedDirectories: ["/workspace/room"],
+    };
+
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "cat foo/../../../../etc/passwd" } },
+        base,
+      ),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path 'foo/../../../../etc/passwd' resolves outside the confinement root",
+    });
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "tee --output=/etc/passwd payload.txt" } },
+        base,
+      ),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+  });
+
   it("stays inert when allowedDirectories is unset", async () => {
     const engine = createPolicyEngine();
     const decision = await engine.evaluateToolCall(

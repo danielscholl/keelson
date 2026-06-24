@@ -200,13 +200,79 @@ function expandConfinedPath(input: string, cwd: string): string {
 }
 
 function looksLikeFilesystemPath(token: string): boolean {
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(token)) return false;
+  if (/^[^/\s@]+@[^/\s:]+:[^/\s]+$/.test(token)) return false;
   return (
-    isAbsolute(token) || token.startsWith("~") || token.startsWith("./") || token.startsWith("../")
+    isAbsolute(token) ||
+    token.startsWith("~") ||
+    token.startsWith("./") ||
+    token.startsWith("../") ||
+    token.includes("/") ||
+    token.includes("\\")
   );
 }
 
 function stripShellWrapping(token: string): string {
   return token.replace(/^[\s"'`([{<]+/, "").replace(/[\s"'`)\]}>,;]+$/, "");
+}
+
+function tokenizeShellCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let escaping = false;
+  for (const ch of command) {
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      continue;
+    }
+    if (ch === "\\") {
+      if (quote !== "'") {
+        escaping = true;
+        continue;
+      }
+      current += ch;
+      continue;
+    }
+    if (quote === null) {
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (/\s/.test(ch)) {
+        if (current.length > 0) {
+          tokens.push(current);
+          current = "";
+        }
+        continue;
+      }
+      current += ch;
+      continue;
+    }
+    if (ch === quote) {
+      quote = null;
+      continue;
+    }
+    current += ch;
+  }
+  if (escaping) current += "\\";
+  if (current.length > 0) tokens.push(current);
+  return tokens;
+}
+
+function collectCommandTokenPathCandidates(token: string, out: string[]): void {
+  const clean = stripShellWrapping(token);
+  if (clean.length === 0) return;
+  const eq = clean.indexOf("=");
+  if (eq > 0) {
+    const left = stripShellWrapping(clean.slice(0, eq));
+    const right = stripShellWrapping(clean.slice(eq + 1));
+    if (left.length > 0 && looksLikeFilesystemPath(left)) out.push(left);
+    if (right.length > 0 && looksLikeFilesystemPath(right)) out.push(right);
+    return;
+  }
+  if (looksLikeFilesystemPath(clean)) out.push(clean);
 }
 
 function collectPathCandidates(value: unknown, key?: string, out: string[] = []): string[] {
@@ -218,9 +284,8 @@ function collectPathCandidates(value: unknown, key?: string, out: string[] = [])
       return out;
     }
     if (key === "command") {
-      for (const token of trimmed.split(/\s+/)) {
-        const clean = stripShellWrapping(token);
-        if (clean.length > 0 && looksLikeFilesystemPath(clean)) out.push(clean);
+      for (const token of tokenizeShellCommand(trimmed)) {
+        collectCommandTokenPathCandidates(token, out);
       }
       return out;
     }
