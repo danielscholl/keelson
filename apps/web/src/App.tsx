@@ -22,11 +22,11 @@ import { Workflows } from "./views/Workflows.tsx";
 export function App() {
   return (
     <ToastHost>
-      <CanvasProvider>
-        <RibsProvider>
+      <RibsProvider>
+        <CanvasProvider>
           <AppInner />
-        </RibsProvider>
-      </CanvasProvider>
+        </CanvasProvider>
+      </RibsProvider>
     </ToastHost>
   );
 }
