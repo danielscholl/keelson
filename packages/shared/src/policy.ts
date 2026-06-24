@@ -111,6 +111,12 @@ export interface PolicyContext {
   readonly ribId?: string;
   // The provider id backing the turn under evaluation, when known.
   readonly provider?: string;
+  // The turn's working directory, used by path-scoping policies to resolve
+  // relative tool args.
+  readonly cwd?: string;
+  // Confined directories for this turn; absent or empty means the turn is
+  // unconfined.
+  readonly allowedDirectories?: readonly string[];
   // The model about to run, reduced to its cost signal — present at the
   // `request` seam for downgrade-gate budget policies.
   readonly model?: ModelCostHint;
