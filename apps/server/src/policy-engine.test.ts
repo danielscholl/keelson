@@ -7,6 +7,9 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ApprovalRequest, Policy } from "@keelson/shared";
 import { createPolicyEngine } from "./policy-engine.ts";
 
@@ -258,6 +261,159 @@ describe("createPolicyEngine — evaluateToolCall", () => {
       chat,
     );
     expect(blocked).toEqual({ outcome: "deny", reason: "writes under /etc are blocked" });
+  });
+
+  it("enforces allowedDirectories for structured path args and relative paths", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room/subdir",
+      allowedDirectories: ["/workspace/room"],
+    };
+
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "write_file", args: { path: "/workspace/room/note.txt" } },
+        base,
+      ),
+    ).resolves.toEqual({ outcome: "allow" });
+    await expect(
+      engine.evaluateToolCall({ tool: "write_file", args: { path: "./note.txt" } }, base),
+    ).resolves.toEqual({ outcome: "allow" });
+    await expect(
+      engine.evaluateToolCall({ tool: "write_file", args: { path: "../../outside.txt" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '../../outside.txt' resolves outside the confinement root",
+    });
+  });
+
+  it("treats Bash command URLs as non-paths but still blocks absolute paths outside the root", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room",
+      allowedDirectories: ["/workspace/room"],
+    };
+
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "curl https://example.com/x" } },
+        base,
+      ),
+    ).resolves.toEqual({ outcome: "allow" });
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat /etc/passwd" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+  });
+
+  it("blocks shell command path tokens that traverse outside via relative, option=value, and redirection forms", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room/subdir",
+      allowedDirectories: ["/workspace/room"],
+    };
+
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "cat foo/../../../../etc/passwd" } },
+        base,
+      ),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path 'foo/../../../../etc/passwd' resolves outside the confinement root",
+    });
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "tee --output=/etc/passwd payload.txt" } },
+        base,
+      ),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat ok.txt >/etc/passwd" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "cat ok.txt 2>/etc/passwd" } },
+        base,
+      ),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+  });
+
+  it("stays inert when allowedDirectories is unset", async () => {
+    const engine = createPolicyEngine();
+    const decision = await engine.evaluateToolCall(
+      { tool: "write_file", args: { path: "/etc/passwd" } },
+      { surface: "chat" },
+    );
+    expect(decision).toEqual({ outcome: "allow" });
+  });
+
+  it("blocks no-space and fd shell redirections that target outside the root", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room",
+      allowedDirectories: ["/workspace/room"],
+    };
+    // The bypass: with no space before `>`, the whole token parsed as one
+    // in-root relative path, so the write to /etc/passwd was allowed.
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat ok.txt>/etc/passwd" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+    for (const command of [
+      "cat ok.txt>>/etc/shadow",
+      "echo x 1>/etc/cron.d/job",
+      "id 2>/etc/hosts",
+    ]) {
+      const d = await engine.evaluateToolCall({ tool: "Bash", args: { command } }, base);
+      expect(d.outcome).toBe("deny");
+    }
+    // A no-space redirect to an in-root relative target stays allowed.
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "echo x>out.txt" } }, base),
+    ).resolves.toEqual({ outcome: "allow" });
+  });
+
+  it("denies traversal through an in-root symlink that points outside", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "confine-"));
+    try {
+      const root = join(tmp, "room");
+      const outside = join(tmp, "outside");
+      mkdirSync(root);
+      mkdirSync(outside);
+      symlinkSync(outside, join(root, "escape"));
+      const engine = createPolicyEngine();
+      const base = { surface: "chat" as const, cwd: root, allowedDirectories: [root] };
+      const escaped = await engine.evaluateToolCall(
+        { tool: "write_file", args: { path: join(root, "escape", "evil.txt") } },
+        base,
+      );
+      expect(escaped.outcome).toBe("deny");
+      const inRoot = await engine.evaluateToolCall(
+        { tool: "write_file", args: { path: join(root, "note.txt") } },
+        base,
+      );
+      expect(inRoot).toEqual({ outcome: "allow" });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("hands the policy the call's args, ribId, and provider on the event", async () => {

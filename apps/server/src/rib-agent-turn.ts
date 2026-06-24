@@ -185,7 +185,8 @@ async function runTurn(
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
     ...(req.model ? { model: req.model } : {}),
-    ...(await toolOptions(req, deps, { ribId, providerId }, controller.signal)),
+    ...(req.allowedDirectories !== undefined ? { allowedDirectories: req.allowedDirectories } : {}),
+    ...(await toolOptions(req, deps, { ribId, providerId }, cwd, controller.signal)),
   };
 
   let assistantText = "";
@@ -267,6 +268,7 @@ async function toolOptions(
   req: RibAgentTurnRequest,
   deps: ResolvedDeps,
   meta: { ribId: string; providerId: string },
+  cwd: string,
   // The turn's teardown signal (caller abort + timeout), threaded into the
   // per-call gate so a pending `ask` cancels with the turn.
   signal?: AbortSignal,
@@ -338,6 +340,10 @@ async function toolOptions(
         surface: "rib",
         ribId: meta.ribId,
         provider: meta.providerId,
+        cwd,
+        ...(req.allowedDirectories !== undefined
+          ? { allowedDirectories: req.allowedDirectories }
+          : {}),
         ...(signal !== undefined ? { signal } : {}),
       });
   }

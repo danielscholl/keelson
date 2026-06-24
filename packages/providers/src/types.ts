@@ -80,6 +80,10 @@ export interface SendQueryOptions {
   // SDK-level tool blacklist (built-ins + MCP). Applied on top of `allowedTools`
   // when both are set, matching upstream Archon's semantics.
   disallowedTools?: string[];
+  // Confinement roots — Claude maps this to `additionalDirectories` and drops
+  // `bypassPermissions`; other providers ignore it. Absent means no provider-
+  // level confinement, preserving the current passthrough behavior.
+  allowedDirectories?: readonly string[];
   // Unfiltered registered-MCP tool name set. The Claude provider needs this
   // to detect MCP names when the user lists a globally-denied tool in
   // `allowed_tools` (which the prompt handler has already removed from the

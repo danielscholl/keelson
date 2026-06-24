@@ -146,6 +146,7 @@ export interface ClaudeQueryOptions {
   // `allowedTools` below, which is the permission auto-allow list and does
   // NOT restrict the catalog under `bypassPermissions`.
   tools?: string[];
+  additionalDirectories?: readonly string[];
   // SDK permission auto-allow / -deny lists. Empty `allowedTools` array
   // means the model has no auto-approved tools; undefined leaves the SDK
   // default in place. Under `bypassPermissions`, allowedTools is a hint
@@ -222,6 +223,7 @@ export interface CreateQueryParams {
   systemPrompt?: string;
   // Boolean here, translated to SDK ThinkingConfig in createQuery.
   thinking?: boolean;
+  allowedDirectories?: readonly string[];
   tools?: ToolDefinition[];
   toolProjection?: ClaudeToolProjectionContext;
   // Per-call policy gate for the agent's OWN built-in tools (Bash/Edit/Write/…).
@@ -464,6 +466,10 @@ export class ClaudeQueryFactory {
       permissionMode: "bypassPermissions",
       abortController: params.abortController,
     };
+    if (params.allowedDirectories && params.allowedDirectories.length > 0) {
+      options.additionalDirectories = [...params.allowedDirectories];
+      options.permissionMode = "default";
+    }
     if (params.model !== undefined) options.model = params.model;
     if (params.sessionId !== undefined) options.resume = params.sessionId;
     if (params.systemPrompt !== undefined) options.systemPrompt = params.systemPrompt;

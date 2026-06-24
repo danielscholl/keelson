@@ -103,6 +103,8 @@ export interface RibAgentTurnRequest {
   abortSignal?: AbortSignal;
   timeoutMs?: number;
   cwd?: string;
+  // Confinement roots for this turn; absent means unconfined.
+  allowedDirectories?: readonly string[];
   // Accepted now, inert until provider capabilities allow session resumption.
   resumeSessionId?: string;
 }
