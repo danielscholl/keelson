@@ -27,6 +27,7 @@ import {
   type IsolationOverride,
   listWorkflowsResponseSchema,
   type MessageChunk,
+  type NodeOutputRow,
   type Project,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
@@ -63,6 +64,7 @@ import {
   makeLoopHandler,
   makeScriptHandler,
   type NodeHandler,
+  type NodeOutput,
   type NodeResult,
   type NotebookAdapter,
   type RequestCancel,
@@ -631,6 +633,30 @@ interface StartRunCoreParams {
   // bulk-delete by rib even after the rib is removed.
   origin?: WorkflowRunOrigin;
   ribId?: string | null;
+}
+
+// Seed-map builder from persisted rows: maps terminal node rows to NodeOutput
+// so the executor can re-enter from the first incomplete node. Only maps
+// success-terminal rows (succeeded → completed, skipped → skipped); failed/awaiting
+// rows are deliberately excluded so they re-run on resume.
+function buildResumeSeed(nodes: NodeOutputRow[]): Map<string, NodeOutput> {
+  const seed = new Map<string, NodeOutput>();
+  for (const node of nodes) {
+    if (node.status === "succeeded") {
+      seed.set(node.nodeId, {
+        state: "completed",
+        output: node.outputText ?? "",
+        ...(node.startedAt !== null ? { startedAt: node.startedAt } : {}),
+        ...(node.completedAt !== null ? { completedAt: node.completedAt } : {}),
+      });
+    } else if (node.status === "skipped") {
+      seed.set(node.nodeId, {
+        state: "skipped",
+        output: "",
+      });
+    }
+  }
+  return seed;
 }
 
 // Run-launch core: create the linked conversation + run row, spawn the
