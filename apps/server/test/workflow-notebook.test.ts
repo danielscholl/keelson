@@ -152,6 +152,59 @@ nodes:
     expect(sp).not.toContain("## Archive");
   });
 
+  test("a resumed run re-binds the project notebook for the re-running prompt node", async () => {
+    const { store, conversationStore, projectsStore, projectNotebookStore, project } = setup();
+    projectNotebookStore.upsert(project.id, "## Log\n- 2026-06-01: recent thing\n");
+
+    let captured: SendQueryOptions | undefined;
+    let calls = 0;
+    const spyId = registerSpy((o) => {
+      captured = o;
+      calls += 1;
+      // Fail the prompt node's first attempt so it isn't seeded and re-runs on resume.
+      if (calls === 1) throw new Error("induced first-run failure");
+    });
+    process.env.KEELSON_WORKFLOW_PROVIDER = spyId;
+
+    writeWorkflow(
+      "nb-resume.yaml",
+      `name: nb-resume
+description: resume notebook test
+nodes:
+  - id: think
+    prompt: hello
+`,
+    );
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const promptHandler = bootstrapPromptHandler();
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, projectNotebookStore, promptHandler },
+      createActiveRuns(),
+    );
+
+    const startRes = await app.fetch(postRun("nb-resume", project.id));
+    const { runId } = (await startRes.json()) as { runId: string };
+    expect(await pollUntilTerminal(app, runId)).toBe("failed");
+
+    // Clear so the assertion is unambiguously about the resume re-run.
+    captured = undefined;
+    const resumeRes = await app.fetch(
+      new Request(`http://test/api/workflows/runs/${runId}/resume-run`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(resumeRes.status).toBe(200);
+    expect(await pollUntilTerminal(app, runId)).toBe("succeeded");
+
+    const sp = captured?.systemPrompt ?? "";
+    expect(sp).toContain("## Project notebook");
+    expect(sp).toContain("recent thing");
+  });
+
   test("a display-only projectId (workingDir outside the project) neither reads nor writes the notebook", async () => {
     const { store, conversationStore, projectsStore, projectNotebookStore, project } = setup();
     projectNotebookStore.upsert(project.id, "## Gotchas\n- secret project note\n");

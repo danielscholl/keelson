@@ -218,6 +218,35 @@ export async function resumeRun(
   }
 }
 
+export async function resumeInterruptedRun(baseUrl: string, runId: string): Promise<void> {
+  const res = await fetch(
+    url(baseUrl, `/api/workflows/runs/${encodeURIComponent(runId)}/resume-run`),
+    {
+      method: "POST",
+      headers: { ...defaultHeaders(baseUrl), "content-type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  if (res.ok) return;
+  // Surface the server's structured `error` (e.g. "run is still in progress
+  // (status: paused)") instead of a generic or raw-JSON message.
+  const raw = await res.text().catch(() => "");
+  let serverError = raw;
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown };
+    if (typeof parsed.error === "string" && parsed.error.length > 0) serverError = parsed.error;
+  } catch {
+    // non-JSON body; keep the raw text as-is
+  }
+  if (res.status === 404) throw new HttpError(404, serverError || `run '${runId}' not found`);
+  if (res.status === 409)
+    throw new HttpError(409, serverError || `run is not in a resumable state`);
+  throw new HttpError(
+    res.status,
+    serverError || `POST /workflows/runs/${runId}/resume-run failed: ${res.status}`,
+  );
+}
+
 export interface AttachRunOptions {
   baseUrl: string;
   runId: string;

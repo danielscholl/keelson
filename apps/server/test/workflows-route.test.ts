@@ -9,7 +9,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
@@ -1657,6 +1657,211 @@ nodes:
       }),
     );
     await pollUntilTerminal(app, runId);
+  });
+
+  test("POST /resume-run re-executes only incomplete nodes from a terminal run", async () => {
+    const prepCountPath = join(tmpDir, "prep-count.txt");
+    const failCountPath = join(tmpDir, "fail-count.txt");
+    writeWorkflow(
+      "resume-fail.yaml",
+      `name: resume-fail
+description: upstream completes, downstream fails
+nodes:
+  - id: prepare
+    bash: |
+      n=0
+      if [ -f "${prepCountPath}" ]; then n=$(cat "${prepCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${prepCountPath}"
+      echo "prepare:$n"
+  - id: fail
+    depends_on: [prepare]
+    bash: |
+      n=0
+      if [ -f "${failCountPath}" ]; then n=$(cat "${failCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${failCountPath}"
+      echo "fail:$n"
+      exit 7
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-fail/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    const first = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string }>;
+    };
+    expect(first.status).toBe("failed");
+    expect(first.nodes.find((n) => n.nodeId === "prepare")?.status).toBe("succeeded");
+    expect(first.nodes.find((n) => n.nodeId === "fail")?.status).toBe("failed");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    expect(await resumed.json()).toEqual({ resumed: true, runId });
+
+    const second = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string }>;
+    };
+    expect(second.status).toBe("failed");
+    expect(second.nodes.find((n) => n.nodeId === "prepare")?.status).toBe("succeeded");
+    expect(second.nodes.find((n) => n.nodeId === "fail")?.status).toBe("failed");
+    expect(readFileSync(prepCountPath, "utf8").trim()).toBe("1");
+    expect(readFileSync(failCountPath, "utf8").trim()).toBe("2");
+  });
+
+  test("POST /resume-run rejects cross-origin requests (CSRF)", async () => {
+    const { app } = makeRig();
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/runs/any-run/resume-run", {
+        method: "POST",
+        headers: {
+          origin: "https://evil.example.com",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("forbidden origin");
+  });
+
+  test("POST /resume-run returns 404 for unknown run", async () => {
+    const { app } = makeRig();
+    const res = await app.fetch(
+      postRun("http://test/api/workflows/runs/no-such-run/resume-run", {}),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "unknown run 'no-such-run'" });
+  });
+
+  test("POST /resume-run returns 404 when the run's workflow is missing", async () => {
+    const { app, store } = makeRig();
+    const db = openDatabase({ path: dbPath });
+    const conv = createConversationStore(db).create({ providerId: "workflow" });
+    const now = new Date().toISOString();
+    const runId = "resume-missing-workflow";
+    store.createRun({
+      runId,
+      workflowName: "gone",
+      inputs: {},
+      startedAt: now,
+      conversationId: conv.id,
+      workingDir: tmpDir,
+    });
+    store.updateRunStatus({ runId, status: "failed", completedAt: now, error: "boom" });
+
+    const res = await app.fetch(postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "workflow 'gone' not found in catalog" });
+  });
+
+  test("POST /resume-run returns 409 when the run is already active", async () => {
+    writeWorkflow(
+      "resume-active.yaml",
+      `name: resume-active
+description: long run
+nodes:
+  - id: wait
+    bash: sleep 0.5
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-active/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+
+    const res = await app.fetch(postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: `run is already active or not in a resumable state '${runId}'`,
+    });
+    await pollUntilTerminal(app, runId);
+  });
+
+  test("POST /resume-run returns 409 for non-terminal runs", async () => {
+    const { app, store } = makeRig();
+    const db = openDatabase({ path: dbPath });
+    const conv = createConversationStore(db).create({ providerId: "workflow" });
+    const runId = "resume-non-terminal";
+    store.createRun({
+      runId,
+      workflowName: "anything",
+      inputs: {},
+      startedAt: new Date().toISOString(),
+      conversationId: conv.id,
+      workingDir: tmpDir,
+    });
+    store.updateRunStatus({ runId, status: "paused", completedAt: null, error: null });
+
+    const res = await app.fetch(postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "run is still in progress (status: paused)" });
+  });
+
+  test("POST /resume-run keeps terminal status when run metadata is incomplete", async () => {
+    writeWorkflow(
+      "resume-metadata.yaml",
+      `name: resume-metadata
+description: metadata preconditions
+nodes:
+  - id: step
+    bash: echo ok
+`,
+    );
+    const { app, store } = makeRig();
+    const db = openDatabase({ path: dbPath });
+    const conv = createConversationStore(db).create({ providerId: "workflow" });
+    const now = new Date().toISOString();
+    const runId = "resume-metadata-missing-dir";
+    store.createRun({
+      runId,
+      workflowName: "resume-metadata",
+      inputs: {},
+      startedAt: now,
+      conversationId: conv.id,
+      workingDir: tmpDir,
+    });
+    store.updateRunStatus({ runId, status: "failed", completedAt: now, error: "boom" });
+    db.query("UPDATE workflow_runs SET working_dir = NULL WHERE id = ?").run(runId);
+
+    const res = await app.fetch(postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "run has no working directory" });
+    expect(store.getRun(runId)?.status).toBe("failed");
+  });
+
+  test("POST /resume-run rejects an already-succeeded run", async () => {
+    writeWorkflow(
+      "resume-ok.yaml",
+      `name: resume-ok
+description: succeeds cleanly
+nodes:
+  - id: step
+    bash: echo ok
+`,
+    );
+    const { app, store } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-ok/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    const done = (await pollUntilTerminal(app, runId)) as { status: string };
+    expect(done.status).toBe("succeeded");
+
+    const res = await app.fetch(postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not in a resumable state");
+    // The atomic claim must not flip a succeeded run back to running.
+    expect(store.getRun(runId)?.status).toBe("succeeded");
   });
 
   test("DELETE during pause abandons the run cleanly", async () => {

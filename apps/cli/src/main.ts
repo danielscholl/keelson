@@ -22,6 +22,7 @@ import { runServe, runServeStart, runServeStatus, runServeStop } from "./command
 import { runUpdate } from "./commands/update.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRespond } from "./commands/workflow-respond.ts";
+import { runWorkflowResume } from "./commands/workflow-resume.ts";
 import { runWorkflowRun } from "./commands/workflow-run.ts";
 import { runWorkflowStatus } from "./commands/workflow-status.ts";
 import { runWorkflowValidate } from "./commands/workflow-validate.ts";
@@ -283,6 +284,25 @@ export function buildProgram(): Command {
         json,
         ...(baseUrl ? { baseUrl } : {}),
         ...(pauseId ? { pauseId } : {}),
+      });
+    });
+
+  workflow
+    .command("resume <runId>")
+    .description(
+      "resume an interrupted (cancelled/failed) run from the last completed node (server-required)",
+    )
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function resumeAction(
+      this: Command,
+      runId: string,
+      resumeOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", resumeOpts.baseUrl);
+      await runWorkflowResume(runId, {
+        json,
+        ...(baseUrl ? { baseUrl } : {}),
       });
     });
 

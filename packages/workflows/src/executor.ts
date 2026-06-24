@@ -176,6 +176,8 @@ export interface RunOptions {
   // Project-notebook handle (read + contribute). Undefined → prompt nodes inject
   // no notebook and the `notebook:` hook is a no-op.
   notebook?: NotebookAdapter;
+  // Pre-completed node outputs to seed re-entry; their handlers are skipped.
+  completedNodeOutputs?: ReadonlyMap<string, NodeOutput>;
 }
 
 export type RunStreamEvent =
@@ -443,6 +445,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     memoryTools,
     projectId,
     notebook,
+    completedNodeOutputs,
   } = opts;
   // Absorb user callback throws so a misbehaving onEvent can't kill the run
   // or leave a node without recorded state. Handles both sync throws and
@@ -470,6 +473,14 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
   const nodeOutputs = new Map<string, NodeOutput>();
   const allNodeIds = workflow.nodes.map((n) => n.id);
 
+  if (completedNodeOutputs) {
+    for (const [id, out] of completedNodeOutputs) {
+      // Only terminal-success states are valid seeds; a failed/running/awaiting
+      // seed would wrongly suppress that node's re-run on re-entry.
+      if (out.state === "completed" || out.state === "skipped") nodeOutputs.set(id, out);
+    }
+  }
+
   emit({ type: "run_started", runId, workflowName: workflow.name });
 
   let cancelled = false;
@@ -483,8 +494,9 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     // the shared nodeOutputs map mid-layer (would make handler behavior race-
     // sensitive). Merged into nodeOutputs after the layer settles.
     const layerResults = new Map<string, NodeOutput>();
+    const pending = layer.filter((node) => !nodeOutputs.has(node.id));
     await Promise.allSettled(
-      layer.map((node) =>
+      pending.map((node) =>
         runNodeOnce(node, {
           workflow,
           runId,

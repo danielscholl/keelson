@@ -27,6 +27,7 @@ import {
   type IsolationOverride,
   listWorkflowsResponseSchema,
   type MessageChunk,
+  type NodeOutputRow,
   type Project,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
@@ -63,6 +64,7 @@ import {
   makeLoopHandler,
   makeScriptHandler,
   type NodeHandler,
+  type NodeOutput,
   type NodeResult,
   type NotebookAdapter,
   type RequestCancel,
@@ -633,6 +635,60 @@ interface StartRunCoreParams {
   ribId?: string | null;
 }
 
+// Seed-map builder from persisted rows: maps terminal node rows to NodeOutput
+// so the executor can re-enter from the first incomplete node. Only maps
+// success-terminal rows (succeeded → completed, skipped → skipped); failed/awaiting
+// rows are deliberately excluded so they re-run on resume.
+function buildResumeSeed(nodes: NodeOutputRow[]): Map<string, NodeOutput> {
+  const seed = new Map<string, NodeOutput>();
+  for (const node of nodes) {
+    if (node.status === "succeeded") {
+      seed.set(node.nodeId, {
+        state: "completed",
+        output: node.outputText ?? "",
+        ...(node.startedAt !== null ? { startedAt: node.startedAt } : {}),
+        ...(node.completedAt !== null ? { completedAt: node.completedAt } : {}),
+      });
+    } else if (node.status === "skipped") {
+      seed.set(node.nodeId, {
+        state: "skipped",
+        output: "",
+      });
+    }
+  }
+  return seed;
+}
+
+// Bind a project notebook adapter (read + contribute), but only when the working
+// dir actually resolves inside the resolved project — a display-only projectId
+// with an overriding workingDir outside the project must not touch its notebook.
+// Shared by the start and resume paths so a resumed run gets the same notebook
+// the fresh run had.
+function buildNotebookAdapter(
+  projectNotebookStore: ProjectNotebookStore | undefined,
+  projectId: string | null,
+  projectRootPath: string | null,
+  workingDir: string,
+): NotebookAdapter | undefined {
+  if (
+    !projectNotebookStore ||
+    projectId === null ||
+    projectRootPath === null ||
+    !isPathInside(canonicalPath(projectRootPath), canonicalPath(workingDir))
+  ) {
+    return undefined;
+  }
+  const nbStore = projectNotebookStore;
+  const pid = projectId;
+  return {
+    read: () => {
+      const content = nbStore.get(pid)?.content;
+      return content ? formatNotebookSection(content) : undefined;
+    },
+    append: (entry, section) => ({ ok: nbStore.appendEntry(pid, entry, section).ok }),
+  };
+}
+
 // Run-launch core: create the linked conversation + run row, spawn the
 // background executor, register the active run. Both the HTTP start route and
 // the WorkflowController call this after resolving inputs / working dir, so the
@@ -649,24 +705,12 @@ function startRunCore(
     params;
   const origin: WorkflowRunOrigin = params.origin ?? "manual";
   const ribId = params.ribId ?? null;
-  // Bind the notebook (read + contribute) only when the working dir actually
-  // resolves inside the resolved project. A run started with a display-only
-  // `projectId` + an overriding `workingDir` outside that project must NOT read
-  // or write its notebook — that id is a UI pointer, not the run's context.
-  const workingDirInProject =
-    resolvedProject !== null && isPathInside(resolvedProject.rootPath, workingDir);
-  let notebook: NotebookAdapter | undefined;
-  if (projectNotebookStore && projectId !== null && workingDirInProject) {
-    const nbStore = projectNotebookStore;
-    const pid = projectId;
-    notebook = {
-      read: () => {
-        const content = nbStore.get(pid)?.content;
-        return content ? formatNotebookSection(content) : undefined;
-      },
-      append: (entry, section) => ({ ok: nbStore.appendEntry(pid, entry, section).ok }),
-    };
-  }
+  const notebook = buildNotebookAdapter(
+    projectNotebookStore,
+    projectId,
+    resolvedProject?.rootPath ?? null,
+    workingDir,
+  );
   const name = workflow.name;
   const dedupeKey = runDedupeKey(name, workingDir, inputs);
   // De-dup only non-isolated producer refreshes (rib collectors fired by the
@@ -769,6 +813,124 @@ function startRunCore(
     pruneScheduledRuns(store, conversationStore, name);
   }
   return { runId, conversationId: conversation.id };
+}
+
+export type ResumeRunResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "not_found" | "not_terminal";
+      message: string;
+    };
+
+// Resume-run core: load a terminal run, validate it's terminal (not running/paused),
+// build the seed from persisted node outputs, flip back to running, and re-enter
+// the executor. Returns a discriminated result so the HTTP route maps it to
+// appropriate status codes.
+function resumeRunCore(
+  deps: Omit<StartRunCoreDeps, "conversationStore"> & {
+    catalog: WorkflowCatalog;
+    projectsStore?: ProjectsStore;
+  },
+  runId: string,
+): ResumeRunResult {
+  const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
+  const { snapshotManager, ribWorkflowBindings, catalog } = deps;
+  const { projectsStore, projectNotebookStore } = deps;
+
+  const run = store.getRun(runId);
+  if (!run) {
+    return { ok: false, reason: "not_found", message: `unknown run '${runId}'` };
+  }
+  if (run.status === "running" || run.status === "paused") {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run is still in progress (status: ${run.status})`,
+    };
+  }
+
+  const scope = { projectId: run.projectId ?? undefined };
+  const workflow = catalog.get(run.workflowName, scope);
+  if (!workflow) {
+    return {
+      ok: false,
+      reason: "not_found",
+      message: `workflow '${run.workflowName}' not found in catalog`,
+    };
+  }
+
+  const completedNodeOutputs = buildResumeSeed(run.nodes);
+
+  if (!run.workingDir) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run has no working directory`,
+    };
+  }
+
+  if (!run.conversationId) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run has no associated conversation`,
+    };
+  }
+
+  // Atomically claim the run: one UPDATE flips failed/cancelled → running. A
+  // succeeded (or otherwise non-interrupted) run, or one a concurrent resume
+  // already claimed, loses here — only the winner launches a background run.
+  if (!store.claimRunForResume(runId)) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
+    };
+  }
+
+  // Resolve the run's project from its persisted id so the resumed run binds the
+  // same notebook adapter a fresh run would (the start path resolves it too).
+  const resumeProject = run.projectId !== null ? (projectsStore?.get(run.projectId) ?? null) : null;
+  const notebook = buildNotebookAdapter(
+    projectNotebookStore,
+    run.projectId,
+    resumeProject?.rootPath ?? null,
+    run.workingDir,
+  );
+
+  const abort = new AbortController();
+  const pendingApprovals = new Map<string, PendingApproval>();
+  const done = executeRunInBackground({
+    workflow,
+    runId,
+    inputs: run.inputs,
+    cwd: run.workingDir,
+    store,
+    abort,
+    activeRuns,
+    subscribers,
+    promptHandler,
+    pendingApprovals,
+    isolation: null,
+    ...(run.projectId !== null ? { projectId: run.projectId } : {}),
+    ...(memoryTools !== undefined ? { memoryTools } : {}),
+    ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+    ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+    ...(notebook !== undefined ? { notebook } : {}),
+    completedNodeOutputs,
+    existingWorktreePath: run.worktreePath ?? undefined,
+  });
+
+  activeRuns.register(runId, {
+    abort,
+    done,
+    pendingApprovals,
+    dedupeKey: runDedupeKey(workflow.name, run.workingDir, run.inputs),
+    conversationId: run.conversationId,
+  });
+
+  return { ok: true };
 }
 
 export type ResolveApprovalResult =
@@ -1608,6 +1770,40 @@ export function workflowsRoutes(
     }
     return c.json({ resumed: true });
   });
+
+  // Resume an interrupted (terminal) workflow run from the last completed node.
+  // This is a node-less route that re-enters a failed/cancelled run without
+  // requiring user approval.
+  app.post("/api/workflows/runs/:runId/resume-run", async (c) => {
+    if (originForbidden(c)) {
+      return c.json({ error: "forbidden origin" }, 403);
+    }
+    const runId = c.req.param("runId");
+    // Reject if the run is already active (409).
+    if (activeRuns.get(runId)) {
+      return c.json({ error: `run is already active or not in a resumable state '${runId}'` }, 409);
+    }
+    const result = resumeRunCore(
+      {
+        store,
+        activeRuns,
+        subscribers,
+        promptHandler: effectivePromptHandler,
+        memoryTools,
+        ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+        ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+        ...(projectsStore !== undefined ? { projectsStore } : {}),
+        ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
+        catalog,
+      },
+      runId,
+    );
+    if (!result.ok) {
+      const statusCode = result.reason === "not_found" ? 404 : 409;
+      return c.json({ error: result.message }, statusCode);
+    }
+    return c.json({ resumed: true, runId });
+  });
 }
 
 // Per-run WS upgrade. Mirrors handleChatUpgrade. Origin-gated so a malicious
@@ -1774,6 +1970,12 @@ interface ExecuteRunArgs {
   // Rib-contributed workflow bindings by name; a bound run also fans its
   // structured output to the rib's namespaced key.
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
+  // Pre-completed node outputs to seed the executor on re-entry. When set,
+  // existing worktree path should also be set for consistency.
+  completedNodeOutputs?: ReadonlyMap<string, NodeOutput>;
+  // Existing worktree path for re-entry: skip createWorktree and run in place
+  // at this path. When set, the worktree is cleaned up only on success.
+  existingWorktreePath?: string;
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
@@ -1794,6 +1996,8 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     notebook,
     snapshotManager,
     ribWorkflowBindings,
+    completedNodeOutputs,
+    existingWorktreePath,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -1809,7 +2013,22 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // this instead of re-reading from SQLite — test teardown can delete the DB
   // file between the executor returning and our cleanup running.
   let terminalStatus: WorkflowRunStatus | null = null;
-  if (isolation !== null) {
+  if (existingWorktreePath !== undefined) {
+    effectiveCwd = existingWorktreePath;
+    worktreePathForCleanup = existingWorktreePath;
+    cleanupOnSuccessOnly = true;
+    const deps = await ensureWorktreeDeps({
+      worktreePath: existingWorktreePath,
+      abortSignal: abort.signal,
+    });
+    if (deps.error !== null) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `worktree dependency install failed; continuing: ${deps.error}`,
+      });
+    }
+  } else if (isolation !== null) {
     let isRepo = false;
     let probeError: string | null = null;
     try {
@@ -2194,6 +2413,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(projectId !== undefined ? { projectId } : {}),
       ...(notebook !== undefined ? { notebook } : {}),
+      ...(completedNodeOutputs !== undefined ? { completedNodeOutputs } : {}),
       onEvent: (event) => {
         if (event.type === "run_done") terminalStatus = event.status;
         dispatchRunEvent({
