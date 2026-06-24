@@ -260,6 +260,59 @@ describe("createPolicyEngine — evaluateToolCall", () => {
     expect(blocked).toEqual({ outcome: "deny", reason: "writes under /etc are blocked" });
   });
 
+  it("enforces allowedDirectories for structured path args and relative paths", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room/subdir",
+      allowedDirectories: ["/workspace/room"],
+    };
+
+    await expect(
+      engine.evaluateToolCall({ tool: "write_file", args: { path: "/workspace/room/note.txt" } }, base),
+    ).resolves.toEqual({ outcome: "allow" });
+    await expect(
+      engine.evaluateToolCall({ tool: "write_file", args: { path: "./note.txt" } }, base),
+    ).resolves.toEqual({ outcome: "allow" });
+    await expect(
+      engine.evaluateToolCall({ tool: "write_file", args: { path: "../../outside.txt" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '../../outside.txt' resolves outside the confinement root",
+    });
+  });
+
+  it("treats Bash command URLs as non-paths but still blocks absolute paths outside the root", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room",
+      allowedDirectories: ["/workspace/room"],
+    };
+
+    await expect(
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "curl https://example.com/x" } },
+        base,
+      ),
+    ).resolves.toEqual({ outcome: "allow" });
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat /etc/passwd" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+  });
+
+  it("stays inert when allowedDirectories is unset", async () => {
+    const engine = createPolicyEngine();
+    const decision = await engine.evaluateToolCall(
+      { tool: "write_file", args: { path: "/etc/passwd" } },
+      { surface: "chat" },
+    );
+    expect(decision).toEqual({ outcome: "allow" });
+  });
+
   it("hands the policy the call's args, ribId, and provider on the event", async () => {
     let seen: { phase: string; tool?: string; args?: unknown; ribId?: string; provider?: string } =
       { phase: "" };

@@ -18,6 +18,9 @@ import type {
   SessionUsage,
 } from "@keelson/shared";
 import safeRegex from "safe-regex2";
+import { homedir } from "node:os";
+import { isAbsolute, resolve } from "node:path";
+import { isPathInside } from "./projects-store.ts";
 
 // A rib-contributed policy tagged with the rib that supplied it, so the engine
 // can namespace its id and a denial can be traced back to its owner.
@@ -89,7 +92,7 @@ export interface PolicyEngine {
   // rib-declared; first-deny-wins so a future session tier prepends.
   projectTools<T extends { name: string }>(
     candidates: readonly T[],
-    base: { surface: PolicySurface; ribId?: string; provider?: string },
+    base: { surface: PolicySurface; ribId?: string; provider?: string; cwd?: string; allowedDirectories?: readonly string[] },
   ): Promise<ToolProjection<T>>;
   // Per-call tool gate: the same ordered stack and first-deny-wins semantics as
   // projectTools, but for ONE call with its (validated) args. Providers invoke
@@ -100,7 +103,14 @@ export interface PolicyEngine {
   // pending approval when the turn is torn down (→ deny).
   evaluateToolCall(
     call: { tool: string; args?: unknown },
-    base: { surface: PolicySurface; ribId?: string; provider?: string; signal?: AbortSignal },
+    base: {
+      surface: PolicySurface;
+      ribId?: string;
+      provider?: string;
+      cwd?: string;
+      allowedDirectories?: readonly string[];
+      signal?: AbortSignal;
+    },
   ): Promise<ToolCallDecision>;
   // Request-phase gate: evaluate the stack once before a turn runs, carrying the
   // session's accumulated `usage` and the about-to-run `model`. Backs the budget
@@ -127,7 +137,7 @@ export interface PolicyEngine {
   // redaction pipeline). Providers invoke it inside their custom-tool handler.
   evaluateToolResult(
     call: { tool: string; result: unknown },
-    base: { surface: PolicySurface; ribId?: string; provider?: string },
+    base: { surface: PolicySurface; ribId?: string; provider?: string; cwd?: string; allowedDirectories?: readonly string[] },
   ): Promise<ResultDecision>;
   // Response-phase gate: same stack walk as evaluateToolResult, for a turn's
   // complete buffered response text (today the workflow `prompt` node output). A
@@ -136,6 +146,8 @@ export interface PolicyEngine {
     surface: PolicySurface;
     ribId?: string;
     provider?: string;
+    cwd?: string;
+    allowedDirectories?: readonly string[];
     text: string;
   }): Promise<ResultDecision>;
   // True when at least one policy can match a `tool_result` event. Lets a seam
@@ -169,6 +181,86 @@ function makeDenylistPolicy(denylist: readonly string[]): Policy {
     evaluate(event): PolicyDecision {
       if (event.phase === "tool_call" && denied.has(event.tool)) {
         return { outcome: "deny", reason: "denylisted by operator floor" };
+      }
+      return { outcome: "allow" };
+    },
+  };
+}
+
+const CONFINE_PATH_KEYS = new Set(["file_path", "path", "notebook_path"]);
+
+function expandConfinedPath(input: string, cwd: string): string {
+  const trimmed = input.trim();
+  if (trimmed === "~") return resolve(homedir());
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return resolve(homedir(), trimmed.slice(2));
+  }
+  return resolve(cwd, trimmed);
+}
+
+function looksLikeFilesystemPath(token: string): boolean {
+  return (
+    isAbsolute(token) ||
+    token.startsWith("~") ||
+    token.startsWith("./") ||
+    token.startsWith("../")
+  );
+}
+
+function stripShellWrapping(token: string): string {
+  return token.replace(/^[\s"'`([{<]+/, "").replace(/[\s"'`)\]}>,;]+$/, "");
+}
+
+function collectPathCandidates(value: unknown, key?: string, out: string[] = []): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return out;
+    if (key !== undefined && CONFINE_PATH_KEYS.has(key)) {
+      out.push(trimmed);
+      return out;
+    }
+    if (key === "command") {
+      for (const token of trimmed.split(/\s+/)) {
+        const clean = stripShellWrapping(token);
+        if (clean.length > 0 && looksLikeFilesystemPath(clean)) out.push(clean);
+      }
+      return out;
+    }
+    if (looksLikeFilesystemPath(trimmed)) out.push(trimmed);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectPathCandidates(item, undefined, out);
+    return out;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+      collectPathCandidates(childValue, childKey, out);
+    }
+  }
+  return out;
+}
+
+function makePathConfinementPolicy(): Policy {
+  return {
+    id: "builtin:path_confinement",
+    on: [{ phase: "tool_call" }],
+    evaluate(event, ctx): PolicyDecision {
+      if (event.phase !== "tool_call") return { outcome: "allow" };
+      if (!ctx.allowedDirectories || ctx.allowedDirectories.length === 0) return { outcome: "allow" };
+      if (event.args === undefined || event.args === null) return { outcome: "allow" };
+
+      const cwd = ctx.cwd ?? process.cwd();
+      const roots = ctx.allowedDirectories.map((root) => expandConfinedPath(root, cwd));
+      for (const candidate of collectPathCandidates(event.args, undefined)) {
+        const resolved = expandConfinedPath(candidate, cwd);
+        const confined = roots.some((root) => isPathInside(root, resolved));
+        if (!confined) {
+          return {
+            outcome: "deny",
+            reason: `path '${candidate}' resolves outside the confinement root`,
+          };
+        }
       }
       return { outcome: "allow" };
     },
@@ -474,6 +566,7 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
   // among the tool_call builtins is immaterial.
   const ordered: { id: string; policy: Policy }[] = [
     { id: "builtin:tool_denylist", policy: makeDenylistPolicy(opts.denylist ?? []) },
+    { id: "builtin:path_confinement", policy: makePathConfinementPolicy() },
     ...(opts.askOnShell ? [{ id: "builtin:ask_on_shell", policy: makeAskOnShellPolicy() }] : []),
     ...(opts.turnBudget && opts.turnBudget > 0
       ? [{ id: "builtin:turn_budget", policy: makeTurnBudgetPolicy(opts.turnBudget) }]
@@ -543,15 +636,19 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
     surface: PolicySurface;
     ribId?: string;
     provider?: string;
+    cwd?: string;
+    allowedDirectories?: readonly string[];
   }): PolicyContext => ({
     surface: base.surface,
     ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
     ...(base.provider !== undefined ? { provider: base.provider } : {}),
+    ...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
+    ...(base.allowedDirectories !== undefined ? { allowedDirectories: base.allowedDirectories } : {}),
   });
 
   const toolCallEvent = (
     tool: string,
-    base: { ribId?: string; provider?: string },
+    base: { ribId?: string; provider?: string; cwd?: string; allowedDirectories?: readonly string[] },
     args?: unknown,
   ): PolicyEvent => ({
     phase: "tool_call",
