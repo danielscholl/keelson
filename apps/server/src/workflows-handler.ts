@@ -797,6 +797,115 @@ function startRunCore(
   return { runId, conversationId: conversation.id };
 }
 
+export type ResumeRunResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "not_found" | "not_terminal";
+      message: string;
+    };
+
+// Resume-run core: load a terminal run, validate it's terminal (not running/paused),
+// build the seed from persisted node outputs, flip back to running, and re-enter
+// the executor. Returns a discriminated result so the HTTP route maps it to
+// appropriate status codes.
+function resumeRunCore(
+  deps: Omit<StartRunCoreDeps, "conversationStore"> & { catalog: WorkflowCatalog },
+  runId: string,
+): ResumeRunResult {
+  const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
+  const { snapshotManager, ribWorkflowBindings, catalog } = deps;
+
+  const run = store.getRun(runId);
+  if (!run) {
+    return { ok: false, reason: "not_found", message: `unknown run '${runId}'` };
+  }
+  if (run.status === "running" || run.status === "paused") {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run is still in progress (status: ${run.status})`,
+    };
+  }
+
+  const scope = { projectId: run.projectId ?? undefined };
+  const workflow = catalog.get(run.workflowName, scope);
+  if (!workflow) {
+    return {
+      ok: false,
+      reason: "not_found",
+      message: `workflow '${run.workflowName}' not found in catalog`,
+    };
+  }
+
+  const completedNodeOutputs = buildResumeSeed(run.nodes);
+
+  try {
+    store.updateRunStatus({
+      runId,
+      status: "running",
+      completedAt: null,
+      error: null,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[workflows] failed to flip ${runId} back to running: ${msg}`);
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `failed to resume run: ${msg}`,
+    };
+  }
+
+  if (!run.workingDir) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run has no working directory`,
+    };
+  }
+
+  if (!run.conversationId) {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run has no associated conversation`,
+    };
+  }
+
+  const abort = new AbortController();
+  const pendingApprovals = new Map<string, PendingApproval>();
+  const done = executeRunInBackground({
+    workflow,
+    runId,
+    inputs: run.inputs,
+    cwd: run.workingDir,
+    store,
+    abort,
+    activeRuns,
+    subscribers,
+    promptHandler,
+    pendingApprovals,
+    isolation: null,
+    ...(run.projectId !== null ? { projectId: run.projectId } : {}),
+    ...(memoryTools !== undefined ? { memoryTools } : {}),
+    ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+    ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+    completedNodeOutputs,
+    existingWorktreePath: run.worktreePath ?? undefined,
+  });
+
+  activeRuns.register(runId, {
+    abort,
+    done,
+    pendingApprovals,
+    dedupeKey: runDedupeKey(workflow.name, run.workingDir, run.inputs),
+    conversationId: run.conversationId,
+  });
+
+  return { ok: true };
+}
+
 export type ResolveApprovalResult =
   | { ok: true }
   | {
@@ -1633,6 +1742,41 @@ export function workflowsRoutes(
       return c.json({ error: result.message }, result.reason === "not_found" ? 404 : 409);
     }
     return c.json({ resumed: true });
+  });
+
+  // Resume an interrupted (terminal) workflow run from the last completed node.
+  // This is a node-less route that re-enters a failed/cancelled run without
+  // requiring user approval.
+  app.post("/api/workflows/runs/:runId/resume-run", async (c) => {
+    if (originForbidden(c)) {
+      return c.json({ error: "forbidden origin" }, 403);
+    }
+    const runId = c.req.param("runId");
+    // Reject if the run is already active (409).
+    if (activeRuns.get(runId)) {
+      return c.json(
+        { error: `run is already active or not in a resumable state '${runId}'` },
+        409,
+      );
+    }
+    const result = resumeRunCore(
+      {
+        store,
+        activeRuns,
+        subscribers,
+        promptHandler: effectivePromptHandler,
+        memoryTools,
+        ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+        ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+        catalog,
+      },
+      runId,
+    );
+    if (!result.ok) {
+      const statusCode = result.reason === "not_found" ? 404 : 409;
+      return c.json({ error: result.message }, statusCode);
+    }
+    return c.json({ resumed: true, runId });
   });
 }
 
