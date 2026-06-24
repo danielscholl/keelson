@@ -15,6 +15,7 @@ import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx
 import { BoardBody, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
@@ -143,6 +144,7 @@ function SurfaceRegion({
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
   const snap = useSnapshot(region.key);
   const { openCanvas } = useCanvas();
+  const resolveCanvasKind = useCanvasKindForKey();
   const ribId = ribIdFromKey(region.key);
 
   // The region's bound workflow re-runs on its cadence and on open while stale;
@@ -187,10 +189,14 @@ function SurfaceRegion({
   const onOpenCanvas = useCallback(
     (key: string, title?: string) =>
       openCanvas(
-        { kind: "view", source: { type: "snapshot", key }, ...(title ? { title } : {}) },
+        {
+          kind: resolveCanvasKind(key),
+          source: { type: "snapshot", key },
+          ...(title ? { title } : {}),
+        },
         { onOpenChat, ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}) },
       ),
-    [openCanvas, onOpenChat, onLaunchWorkflow],
+    [openCanvas, onOpenChat, onLaunchWorkflow, resolveCanvasKind],
   );
   // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
   // intercept an open-chat directive, no-op, and swallow the normal success path.
@@ -210,7 +216,7 @@ function SurfaceRegion({
   const expand = () =>
     openCanvas(
       {
-        kind: "view",
+        kind: resolveCanvasKind(region.key),
         source: { type: "snapshot", key: region.key },
         ...(board?.title ? { title: board.title } : {}),
       },

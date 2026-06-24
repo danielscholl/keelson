@@ -2,10 +2,11 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { RIBS_VERSION_SNAPSHOT_KEY } from "@keelson/shared";
-import { createContext, type ReactNode, useContext, useEffect, useRef } from "react";
+import { type CanvasKind, RIBS_VERSION_SNAPSHOT_KEY } from "@keelson/shared";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef } from "react";
 import { type UseRibsState, useRibs } from "../hooks/useRibs.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
+import { canvasKindForKey } from "../lib/canvasKind.ts";
 
 // Single rib-list instance shared by the TopBar surface tabs and the Ribs page,
 // so the panel's Refresh (or a visibility refetch) updates both at once — and
@@ -33,4 +34,9 @@ export function useRibsContext(): UseRibsState {
   const ctx = useContext(RibsContext);
   if (!ctx) throw new Error("useRibsContext must be used within <RibsProvider>");
   return ctx;
+}
+
+export function useCanvasKindForKey(): (key: string) => CanvasKind {
+  const ctx = useContext(RibsContext);
+  return useCallback((key: string) => canvasKindForKey(ctx?.ribs ?? [], key), [ctx?.ribs]);
 }

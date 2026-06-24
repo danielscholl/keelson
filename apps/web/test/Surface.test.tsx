@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { RibSurfaceDescriptor } from "@keelson/shared";
+import {
+  RIBS_VERSION_SNAPSHOT_KEY,
+  type RibSummary,
+  type RibSurfaceDescriptor,
+} from "@keelson/shared";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
 
@@ -46,7 +50,13 @@ mock.module("../src/hooks/useWorkflowTrigger.ts", () => ({
   }),
 }));
 
+let ribSummaries: RibSummary[] = [];
+mock.module("../src/hooks/useRibs.ts", () => ({
+  useRibs: () => ({ status: "ready", ribs: ribSummaries, error: null, refresh: () => {} }),
+}));
+
 const { CanvasProvider } = await import("../src/components/Canvas/CanvasHost.tsx");
+const { RibsProvider } = await import("../src/components/RibsProvider.tsx");
 const { Surface } = await import("../src/views/Surface.tsx");
 
 function board(title: string, statLabel: string, statValue: number) {
@@ -64,9 +74,11 @@ function live(key: string, data: unknown) {
 
 function renderSurface(descriptor: RibSurfaceDescriptor) {
   return render(
-    <CanvasProvider>
-      <Surface descriptor={descriptor} />
-    </CanvasProvider>,
+    <RibsProvider>
+      <CanvasProvider>
+        <Surface descriptor={descriptor} />
+      </CanvasProvider>
+    </RibsProvider>,
   );
 }
 
@@ -77,6 +89,7 @@ beforeEach(() => {
   triggerCalls.length = 0;
   triggerRunning = false;
   triggerError = null;
+  ribSummaries = [];
 });
 
 describe("Surface", () => {
@@ -129,11 +142,9 @@ describe("Surface", () => {
         rows: [{ columns: [{ key: "rib:demo:quality" }, { key: "rib:demo:security" }] }],
       },
     });
-    expect([...new Set(useSnapshotKeys)].sort()).toEqual([
-      "rib:demo:cluster",
-      "rib:demo:quality",
-      "rib:demo:security",
-    ]);
+    expect(
+      [...new Set(useSnapshotKeys)].filter((key) => key !== RIBS_VERSION_SNAPSHOT_KEY).sort(),
+    ).toEqual(["rib:demo:cluster", "rib:demo:quality", "rib:demo:security"]);
   });
 
   test("a collapsed collapsible region shows only its header strip until expanded", () => {
@@ -284,6 +295,55 @@ describe("Surface", () => {
     // The drawer renders the same board (via its own useSnapshot of the key).
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("Quality");
+    expect(dialog.textContent).toContain("Services");
+  });
+
+  test("Expand opens html-declared keys as html and view-declared keys as view", () => {
+    live("rib:demo:html-panel", "<p>hi from html lens</p>");
+    live("rib:demo:view-panel", board("View Panel", "Services", 23));
+    ribSummaries = [
+      {
+        id: "demo",
+        displayName: "Demo",
+        registered: [],
+        views: [
+          { key: "rib:demo:html-panel", canvasKind: "html" },
+          { key: "rib:demo:view-panel", canvasKind: "view" },
+        ],
+        surfaces: [],
+        hasOnAction: false,
+      },
+    ];
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:demo:html-panel", title: "HTML Lens" },
+              { key: "rib:demo:view-panel", title: "View Lens" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const htmlRegion = [...container.querySelectorAll(".surface-region")].find((region) =>
+      region.textContent?.includes("HTML Lens"),
+    ) as HTMLElement;
+    fireEvent.click(within(htmlRegion).getByRole("button", { name: "Expand" }));
+    let dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector("iframe.canvas-html-frame")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close canvas" }));
+
+    const viewRegion = [...container.querySelectorAll(".surface-region")].find((region) =>
+      region.textContent?.includes("View Lens"),
+    ) as HTMLElement;
+    fireEvent.click(within(viewRegion).getByRole("button", { name: "Expand" }));
+    dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector("iframe.canvas-html-frame")).toBeNull();
     expect(dialog.textContent).toContain("Services");
   });
 
