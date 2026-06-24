@@ -1838,6 +1838,32 @@ nodes:
     expect(store.getRun(runId)?.status).toBe("failed");
   });
 
+  test("POST /resume-run rejects an already-succeeded run", async () => {
+    writeWorkflow(
+      "resume-ok.yaml",
+      `name: resume-ok
+description: succeeds cleanly
+nodes:
+  - id: step
+    bash: echo ok
+`,
+    );
+    const { app, store } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-ok/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    const done = (await pollUntilTerminal(app, runId)) as { status: string };
+    expect(done.status).toBe("succeeded");
+
+    const res = await app.fetch(postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not in a resumable state");
+    // The atomic claim must not flip a succeeded run back to running.
+    expect(store.getRun(runId)?.status).toBe("succeeded");
+  });
+
   test("DELETE during pause abandons the run cleanly", async () => {
     writeWorkflow(
       "pa.yaml",

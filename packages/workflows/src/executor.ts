@@ -475,7 +475,9 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
 
   if (completedNodeOutputs) {
     for (const [id, out] of completedNodeOutputs) {
-      nodeOutputs.set(id, out);
+      // Only terminal-success states are valid seeds; a failed/running/awaiting
+      // seed would wrongly suppress that node's re-run on re-entry.
+      if (out.state === "completed" || out.state === "skipped") nodeOutputs.set(id, out);
     }
   }
 

@@ -878,20 +878,14 @@ function resumeRunCore(
     };
   }
 
-  try {
-    store.updateRunStatus({
-      runId,
-      status: "running",
-      completedAt: null,
-      error: null,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[workflows] failed to flip ${runId} back to running: ${msg}`);
+  // Atomically claim the run: one UPDATE flips failed/cancelled → running. A
+  // succeeded (or otherwise non-interrupted) run, or one a concurrent resume
+  // already claimed, loses here — only the winner launches a background run.
+  if (!store.claimRunForResume(runId)) {
     return {
       ok: false,
       reason: "not_terminal",
-      message: `failed to resume run: ${msg}`,
+      message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
     };
   }
 

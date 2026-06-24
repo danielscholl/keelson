@@ -2905,4 +2905,27 @@ nodes:
     expect(calls).toHaveLength(1);
     expect(calls[0].nodeId).toBe("n2");
   });
+
+  test("a non-terminal seeded state (running) is ignored — the node still runs", async () => {
+    const wf = parseInline(`
+name: resume-bad-seed
+description: test
+nodes:
+  - id: n1
+    bash: "echo n1"
+`);
+    const { handler: bash, calls } = echoHandler("bash");
+    // Only completed/skipped seeds suppress a node; a running/failed seed must not.
+    const completedNodeOutputs = new Map<string, NodeOutput>([
+      ["n1", { state: "running", output: "partial" }],
+    ]);
+    const summary = await runWorkflow({
+      ...baseOpts(wf),
+      handlers: new Map([["bash", bash]]),
+      completedNodeOutputs,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].nodeId).toBe("n1");
+  });
 });

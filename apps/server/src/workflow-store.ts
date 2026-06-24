@@ -78,6 +78,11 @@ export interface UpdateRunStatusInput {
 export interface WorkflowStore {
   createRun(input: CreateRunInput): void;
   updateRunStatus(input: UpdateRunStatusInput): void;
+  // Atomic compare-and-set for resume: flips a failed/cancelled run to running
+  // in one UPDATE and returns whether THIS caller won the claim. Guards the
+  // resume route against two concurrent starts and against resuming a
+  // non-interrupted (e.g. succeeded) run.
+  claimRunForResume(runId: string): boolean;
   upsertNodeOutput(input: UpsertNodeOutputInput): void;
   // Removes a node's persisted snapshot row. Used by the interactive-loop
   // resume path so the row stops reporting `awaiting` while the loop
@@ -229,6 +234,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
   );
+  const claimResume = db.prepare(
+    "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled')",
+  );
   const updateWorktreePath = db.prepare("UPDATE workflow_runs SET worktree_path = ? WHERE id = ?");
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
   const listRunsAll = db.prepare(
@@ -289,6 +297,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     },
     updateRunStatus(input) {
       updateRun.run(input.status, input.completedAt, input.error, input.runId);
+    },
+    claimRunForResume(runId) {
+      return claimResume.run(runId).changes > 0;
     },
     setRunWorktreePath(runId, worktreePath) {
       updateWorktreePath.run(worktreePath, runId);

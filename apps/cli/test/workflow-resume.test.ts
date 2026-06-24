@@ -171,6 +171,8 @@ describe("keelson workflow resume", () => {
     const env = envelope(stdout);
     expect(env.ok).toBe(false);
     expect(env.code).toBe("NOT_RESUMABLE");
+    // The server's structured error must surface, not raw JSON / a generic message.
+    expect(env.error).toContain("not resumable");
   });
 
   test("maps an unreachable server to NO_SERVER", async () => {

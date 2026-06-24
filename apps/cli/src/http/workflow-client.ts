@@ -227,21 +227,24 @@ export async function resumeInterruptedRun(baseUrl: string, runId: string): Prom
       body: JSON.stringify({}),
     },
   );
-  if (res.status === 404) throw new HttpError(404, `run '${runId}' not found`);
-  if (res.status === 409) {
-    const detail = await res.text().catch(() => "");
-    throw new HttpError(
-      409,
-      `run is already active or not in a resumable state${detail ? `: ${detail}` : ""}`,
-    );
+  if (res.ok) return;
+  // Surface the server's structured `error` (e.g. "run is still in progress
+  // (status: paused)") instead of a generic or raw-JSON message.
+  const raw = await res.text().catch(() => "");
+  let serverError = raw;
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown };
+    if (typeof parsed.error === "string" && parsed.error.length > 0) serverError = parsed.error;
+  } catch {
+    // non-JSON body; keep the raw text as-is
   }
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new HttpError(
-      res.status,
-      `POST /workflows/runs/${runId}/resume-run failed: ${res.status} ${detail}`,
-    );
-  }
+  if (res.status === 404) throw new HttpError(404, serverError || `run '${runId}' not found`);
+  if (res.status === 409)
+    throw new HttpError(409, serverError || `run is not in a resumable state`);
+  throw new HttpError(
+    res.status,
+    serverError || `POST /workflows/runs/${runId}/resume-run failed: ${res.status}`,
+  );
 }
 
 export interface AttachRunOptions {
