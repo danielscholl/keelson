@@ -340,7 +340,10 @@ describe("createPolicyEngine — evaluateToolCall", () => {
       reason: "path '/etc/passwd' resolves outside the confinement root",
     });
     await expect(
-      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat ok.txt 2>/etc/passwd" } }, base),
+      engine.evaluateToolCall(
+        { tool: "Bash", args: { command: "cat ok.txt 2>/etc/passwd" } },
+        base,
+      ),
     ).resolves.toEqual({
       outcome: "deny",
       reason: "path '/etc/passwd' resolves outside the confinement root",
