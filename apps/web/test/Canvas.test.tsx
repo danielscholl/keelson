@@ -264,9 +264,11 @@ describe("CanvasProvider / useCanvas", () => {
       win,
     );
     await waitFor(() => expect(calls.length).toBe(1));
+    // The frame-relayed action is stamped origin "canvas-html" so the owning rib
+    // can gate it; only type/payload come from the frame itself.
     expect(calls[0]).toEqual({
       ribId: "demo",
-      action: { type: "suspend", payload: { cluster: "demo" } },
+      action: { type: "suspend", payload: { cluster: "demo" }, origin: "canvas-html" },
     });
   });
 

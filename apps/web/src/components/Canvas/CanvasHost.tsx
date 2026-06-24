@@ -402,7 +402,10 @@ function HtmlCanvas({ source }: { source: CanvasSource }) {
   const { run } = useRibActionDispatch(ribId);
   const onAction = useCallback(
     (action: CanvasHtmlAction) => {
-      if (ribId) void run({ type: action.type, payload: action.payload });
+      // Stamp origin "canvas-html" so the owning rib can gate this untrusted
+      // frame-relayed verb. Only `type`/`payload` come from the frame; the frame
+      // never sees or sets `origin`, so it can't pass itself off as a board action.
+      if (ribId) void run({ type: action.type, payload: action.payload, origin: "canvas-html" });
     },
     [ribId, run],
   );

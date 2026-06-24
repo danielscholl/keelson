@@ -264,14 +264,27 @@ export const ribSurfaceDescriptorSchema = z
   .strict();
 export type RibSurfaceDescriptor = z.infer<typeof ribSurfaceDescriptorSchema>;
 
+// Where a rib action came from, stamped by the host. Absent (or "board") is a
+// trusted host-UI dispatch — a board button, a loopback API call. "canvas-html"
+// marks an action relayed from a sandboxed HTML-canvas iframe, whose markup is
+// untrusted (rib- or LLM-authored, and frame script can post on load without a
+// gesture); a rib's `onAction` should gate frame-origin verbs to a safe subset.
+// The frame cannot forge it: the host reads only `type`/`payload` off the frame
+// message and stamps `origin` itself, so a frame can never claim "board".
+export const ribActionOriginSchema = z.enum(["board", "canvas-html"]);
+export type RibActionOrigin = z.infer<typeof ribActionOriginSchema>;
+
 // Inbound action a rib receives over POST /api/ribs/:id/action. The base never
 // enumerates `type` (a rib-defined verb); `payload` stays opaque and the rib
 // narrows at its edge. The capability-token envelope + outbound dispatcher are
-// not yet wired; today this path is loopback-trusted.
+// not yet wired; today this path is loopback-trusted. `origin` is the one field
+// the host owns end-to-end (see ribActionOriginSchema) so a rib can distinguish a
+// trusted board action from an untrusted iframe back-channel action.
 export const ribActionSchema = z
   .object({
     type: z.string().min(1),
     payload: z.unknown().optional(),
+    origin: ribActionOriginSchema.optional(),
   })
   .strict();
 export type RibAction = z.infer<typeof ribActionSchema>;
