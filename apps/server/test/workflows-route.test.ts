@@ -1686,7 +1686,9 @@ nodes:
 `,
     );
     const { app } = makeRig();
-    const start = await app.fetch(postRun("http://test/api/workflows/resume-fail/runs", { inputs: {} }));
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-fail/runs", { inputs: {} }),
+    );
     const { runId } = (await start.json()) as { runId: string };
     const first = (await pollUntilTerminal(app, runId)) as {
       status: string;
@@ -1696,7 +1698,9 @@ nodes:
     expect(first.nodes.find((n) => n.nodeId === "prepare")?.status).toBe("succeeded");
     expect(first.nodes.find((n) => n.nodeId === "fail")?.status).toBe("failed");
 
-    const resumed = await app.fetch(postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}));
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
     expect(resumed.status).toBe(200);
     expect(await resumed.json()).toEqual({ resumed: true, runId });
 
@@ -1730,7 +1734,9 @@ nodes:
 
   test("POST /resume-run returns 404 for unknown run", async () => {
     const { app } = makeRig();
-    const res = await app.fetch(postRun("http://test/api/workflows/runs/no-such-run/resume-run", {}));
+    const res = await app.fetch(
+      postRun("http://test/api/workflows/runs/no-such-run/resume-run", {}),
+    );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "unknown run 'no-such-run'" });
   });
