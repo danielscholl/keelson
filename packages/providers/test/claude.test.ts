@@ -686,6 +686,24 @@ describe("ClaudeProvider — happy path stream translation", () => {
     expect(options.permissionMode).toBe("bypassPermissions");
     expect(options.cwd).toBe("/tmp");
   });
+
+  it("maps allowedDirectories to additionalDirectories and path-aware permission mode", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => undefined,
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        allowedDirectories: ["/tmp/room", "/tmp/shared"],
+      }),
+    );
+
+    const options = sdk.lastOptions()!;
+    expect(options.additionalDirectories).toEqual(["/tmp/room", "/tmp/shared"]);
+    expect(options.permissionMode).toBe("default");
+  });
 });
 
 describe("ClaudeProvider — extended thinking (F10.4)", () => {

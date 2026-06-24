@@ -168,6 +168,9 @@ export class ClaudeProvider implements IAgentProvider {
         ...(options?.model !== undefined ? { model: options.model } : {}),
         ...(options?.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
         ...(options?.thinking !== undefined ? { thinking: options.thinking } : {}),
+        ...(options?.allowedDirectories !== undefined
+          ? { allowedDirectories: options.allowedDirectories }
+          : {}),
         ...(options?.tools && options.tools.length > 0
           ? { tools: options.tools, toolProjection }
           : {}),
