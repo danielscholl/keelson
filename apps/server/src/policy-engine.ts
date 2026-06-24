@@ -20,7 +20,7 @@ import type {
   SessionUsage,
 } from "@keelson/shared";
 import safeRegex from "safe-regex2";
-import { isPathInside } from "./projects-store.ts";
+import { canonicalPath, isPathInside } from "./projects-store.ts";
 
 // A rib-contributed policy tagged with the rib that supplied it, so the engine
 // can namespace its id and a denial can be traced back to its owner.
@@ -264,11 +264,13 @@ function tokenizeShellCommand(command: string): string[] {
 function collectCommandTokenPathCandidates(token: string, out: string[]): void {
   const clean = stripShellWrapping(token);
   if (clean.length === 0) return;
-  const redirected = clean.match(/^(?:\d+)?(?:>>?|<<?)(.+)$/);
-  if (redirected) {
-    const redirectedTarget = stripShellWrapping(redirected[1]);
-    if (redirectedTarget.length > 0 && looksLikeFilesystemPath(redirectedTarget)) {
-      out.push(redirectedTarget);
+  // Split on shell redirect operators (optional fd number) so an inline no-space
+  // `ok.txt>/etc/passwd` exposes the target — anchoring to the token start let it escape.
+  const redirectSegments = clean.split(/(?:\d+)?(?:>>?|<<?)/);
+  if (redirectSegments.length > 1) {
+    for (const segment of redirectSegments) {
+      const part = stripShellWrapping(segment);
+      if (part.length > 0 && looksLikeFilesystemPath(part)) out.push(part);
     }
     return;
   }
@@ -323,9 +325,13 @@ function makePathConfinementPolicy(): Policy {
       if (event.args === undefined || event.args === null) return { outcome: "allow" };
 
       const cwd = ctx.cwd ?? process.cwd();
-      const roots = ctx.allowedDirectories.map((root) => expandConfinedPath(root, cwd));
+      // Canonicalize (realpath) both sides so a symlink inside an allowed root
+      // that points outside can't be traversed to escape confinement.
+      const roots = ctx.allowedDirectories.map((root) =>
+        canonicalPath(expandConfinedPath(root, cwd)),
+      );
       for (const candidate of collectPathCandidates(event.args, undefined)) {
-        const resolved = expandConfinedPath(candidate, cwd);
+        const resolved = canonicalPath(expandConfinedPath(candidate, cwd));
         const confined = roots.some((root) => isPathInside(root, resolved));
         if (!confined) {
           return {

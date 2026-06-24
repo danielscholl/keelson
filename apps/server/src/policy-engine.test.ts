@@ -7,6 +7,9 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ApprovalRequest, Policy } from "@keelson/shared";
 import { createPolicyEngine } from "./policy-engine.ts";
 
@@ -357,6 +360,60 @@ describe("createPolicyEngine — evaluateToolCall", () => {
       { surface: "chat" },
     );
     expect(decision).toEqual({ outcome: "allow" });
+  });
+
+  it("blocks no-space and fd shell redirections that target outside the root", async () => {
+    const engine = createPolicyEngine();
+    const base = {
+      surface: "chat" as const,
+      cwd: "/workspace/room",
+      allowedDirectories: ["/workspace/room"],
+    };
+    // The bypass: with no space before `>`, the whole token parsed as one
+    // in-root relative path, so the write to /etc/passwd was allowed.
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat ok.txt>/etc/passwd" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+    for (const command of [
+      "cat ok.txt>>/etc/shadow",
+      "echo x 1>/etc/cron.d/job",
+      "id 2>/etc/hosts",
+    ]) {
+      const d = await engine.evaluateToolCall({ tool: "Bash", args: { command } }, base);
+      expect(d.outcome).toBe("deny");
+    }
+    // A no-space redirect to an in-root relative target stays allowed.
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "echo x>out.txt" } }, base),
+    ).resolves.toEqual({ outcome: "allow" });
+  });
+
+  it("denies traversal through an in-root symlink that points outside", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "confine-"));
+    try {
+      const root = join(tmp, "room");
+      const outside = join(tmp, "outside");
+      mkdirSync(root);
+      mkdirSync(outside);
+      symlinkSync(outside, join(root, "escape"));
+      const engine = createPolicyEngine();
+      const base = { surface: "chat" as const, cwd: root, allowedDirectories: [root] };
+      const escaped = await engine.evaluateToolCall(
+        { tool: "write_file", args: { path: join(root, "escape", "evil.txt") } },
+        base,
+      );
+      expect(escaped.outcome).toBe("deny");
+      const inRoot = await engine.evaluateToolCall(
+        { tool: "write_file", args: { path: join(root, "note.txt") } },
+        base,
+      );
+      expect(inRoot).toEqual({ outcome: "allow" });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("hands the policy the call's args, ribId, and provider on the event", async () => {
