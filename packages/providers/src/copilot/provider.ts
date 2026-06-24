@@ -40,9 +40,11 @@ export const COPILOT_CAPABILITIES: ProviderCapabilities = {
   sessionResume: true,
   streaming: true,
   tools: true,
-  // Curated fallback when the live SDK.listModels() probe fails (signed out
-  // or CLI missing).
-  models: [COPILOT_DEFAULT_MODEL, "gpt-5", "gpt-4o", "claude-sonnet-4.5", "o4-mini"],
+  // Only the synthetic "auto" — GitHub rotates the live catalogue and retires
+  // concrete ids (e.g. gpt-5, which then 404s at session.create), so listing
+  // them here would advertise models that no longer exist. "auto" delegates the
+  // choice to Copilot and is always valid; the real list comes from listModels().
+  models: [COPILOT_DEFAULT_MODEL],
   defaultModel: COPILOT_DEFAULT_MODEL,
 };
 
