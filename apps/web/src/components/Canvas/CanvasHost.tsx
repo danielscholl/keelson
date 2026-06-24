@@ -6,6 +6,7 @@ import { getRunArtifact } from "../../api.ts";
 import { useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
+import { useCanvasKindForKey } from "../RibsProvider.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { BoardActionProvider } from "./BoardActionContext.tsx";
 import { SandboxedHtml } from "./SandboxedHtml.tsx";
@@ -221,6 +222,7 @@ function ViewCanvas({
 }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
   const { openCanvas, close } = useCanvas();
+  const resolveCanvasKind = useCanvasKindForKey();
   // Each wrapper is wired into the dispatcher only when its handler is present
   // (the spread guard below), so the presence check here is the single source of
   // truth — an unwired wrapper must never navigate away on a swallowed effect, so
@@ -254,13 +256,17 @@ function ViewCanvas({
   const onOpenCanvas = useCallback(
     (key: string, title?: string) =>
       openCanvas(
-        { kind: "view", source: { type: "snapshot", key }, ...(title ? { title } : {}) },
+        {
+          kind: resolveCanvasKind(key),
+          source: { type: "snapshot", key },
+          ...(title ? { title } : {}),
+        },
         {
           ...(onOpenChat ? { onOpenChat } : {}),
           ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
         },
       ),
-    [openCanvas, onOpenChat, onLaunchWorkflow],
+    [openCanvas, onOpenChat, onLaunchWorkflow, resolveCanvasKind],
   );
   const actions = useRibActionDispatch(ribId, {
     ...(onOpenChat ? { onOpenChat: onOpenChatAndClose } : {}),
