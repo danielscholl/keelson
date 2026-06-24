@@ -185,9 +185,7 @@ async function runTurn(
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
     ...(req.model ? { model: req.model } : {}),
-    ...(req.allowedDirectories !== undefined
-      ? { allowedDirectories: req.allowedDirectories }
-      : {}),
+    ...(req.allowedDirectories !== undefined ? { allowedDirectories: req.allowedDirectories } : {}),
     ...(await toolOptions(req, deps, { ribId, providerId }, cwd, controller.signal)),
   };
 

@@ -6,6 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import { homedir } from "node:os";
+import { isAbsolute, resolve } from "node:path";
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -18,8 +20,6 @@ import type {
   SessionUsage,
 } from "@keelson/shared";
 import safeRegex from "safe-regex2";
-import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
 import { isPathInside } from "./projects-store.ts";
 
 // A rib-contributed policy tagged with the rib that supplied it, so the engine
@@ -27,6 +27,14 @@ import { isPathInside } from "./projects-store.ts";
 export interface RibPolicyContribution {
   readonly ribId: string;
   readonly policy: Policy;
+}
+
+interface PolicyScopeBase {
+  surface: PolicySurface;
+  ribId?: string;
+  provider?: string;
+  cwd?: string;
+  allowedDirectories?: readonly string[];
 }
 
 export interface PolicyEngineOptions {
@@ -92,7 +100,7 @@ export interface PolicyEngine {
   // rib-declared; first-deny-wins so a future session tier prepends.
   projectTools<T extends { name: string }>(
     candidates: readonly T[],
-    base: { surface: PolicySurface; ribId?: string; provider?: string; cwd?: string; allowedDirectories?: readonly string[] },
+    base: PolicyScopeBase,
   ): Promise<ToolProjection<T>>;
   // Per-call tool gate: the same ordered stack and first-deny-wins semantics as
   // projectTools, but for ONE call with its (validated) args. Providers invoke
@@ -103,14 +111,7 @@ export interface PolicyEngine {
   // pending approval when the turn is torn down (→ deny).
   evaluateToolCall(
     call: { tool: string; args?: unknown },
-    base: {
-      surface: PolicySurface;
-      ribId?: string;
-      provider?: string;
-      cwd?: string;
-      allowedDirectories?: readonly string[];
-      signal?: AbortSignal;
-    },
+    base: PolicyScopeBase & { signal?: AbortSignal },
   ): Promise<ToolCallDecision>;
   // Request-phase gate: evaluate the stack once before a turn runs, carrying the
   // session's accumulated `usage` and the about-to-run `model`. Backs the budget
@@ -137,7 +138,7 @@ export interface PolicyEngine {
   // redaction pipeline). Providers invoke it inside their custom-tool handler.
   evaluateToolResult(
     call: { tool: string; result: unknown },
-    base: { surface: PolicySurface; ribId?: string; provider?: string; cwd?: string; allowedDirectories?: readonly string[] },
+    base: PolicyScopeBase,
   ): Promise<ResultDecision>;
   // Response-phase gate: same stack walk as evaluateToolResult, for a turn's
   // complete buffered response text (today the workflow `prompt` node output). A
@@ -200,10 +201,7 @@ function expandConfinedPath(input: string, cwd: string): string {
 
 function looksLikeFilesystemPath(token: string): boolean {
   return (
-    isAbsolute(token) ||
-    token.startsWith("~") ||
-    token.startsWith("./") ||
-    token.startsWith("../")
+    isAbsolute(token) || token.startsWith("~") || token.startsWith("./") || token.startsWith("../")
   );
 }
 
@@ -247,7 +245,8 @@ function makePathConfinementPolicy(): Policy {
     on: [{ phase: "tool_call" }],
     evaluate(event, ctx): PolicyDecision {
       if (event.phase !== "tool_call") return { outcome: "allow" };
-      if (!ctx.allowedDirectories || ctx.allowedDirectories.length === 0) return { outcome: "allow" };
+      if (!ctx.allowedDirectories || ctx.allowedDirectories.length === 0)
+        return { outcome: "allow" };
       if (event.args === undefined || event.args === null) return { outcome: "allow" };
 
       const cwd = ctx.cwd ?? process.cwd();
@@ -606,12 +605,7 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
   // deny; with no channel wired, degrade to deny-with-reason. A throwing channel
   // fails closed (deny), never open.
   const perCallAsk =
-    (base: {
-      surface: PolicySurface;
-      ribId?: string;
-      provider?: string;
-      signal?: AbortSignal;
-    }): AskResolver =>
+    (base: PolicyScopeBase & { signal?: AbortSignal }): AskResolver =>
     async ({ policyId, reason, tool }) => {
       if (!requestApproval) return { deny: `requires approval (deferred): ${reason}` };
       try {
@@ -632,23 +626,19 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
       }
     };
 
-  const makeCtx = (base: {
-    surface: PolicySurface;
-    ribId?: string;
-    provider?: string;
-    cwd?: string;
-    allowedDirectories?: readonly string[];
-  }): PolicyContext => ({
+  const makeCtx = (base: PolicyScopeBase): PolicyContext => ({
     surface: base.surface,
     ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
     ...(base.provider !== undefined ? { provider: base.provider } : {}),
     ...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
-    ...(base.allowedDirectories !== undefined ? { allowedDirectories: base.allowedDirectories } : {}),
+    ...(base.allowedDirectories !== undefined
+      ? { allowedDirectories: base.allowedDirectories }
+      : {}),
   });
 
   const toolCallEvent = (
     tool: string,
-    base: { ribId?: string; provider?: string; cwd?: string; allowedDirectories?: readonly string[] },
+    base: Omit<PolicyScopeBase, "surface">,
     args?: unknown,
   ): PolicyEvent => ({
     phase: "tool_call",

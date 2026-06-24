@@ -10,8 +10,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { IAgentProvider, SendQueryOptions } from "@keelson/providers";
 import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
-import { createPolicyEngine } from "./policy-engine.ts";
 import type { PolicyEngine } from "./policy-engine.ts";
+import { createPolicyEngine } from "./policy-engine.ts";
 import { type MakeRibAgentTurnDeps, makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { applyRibs } from "./ribs.ts";
 
@@ -501,9 +501,7 @@ describe("makeRibAgentTurn — tool rails", () => {
   });
 
   it("forwards cwd and allowedDirectories to the provider and per-call gate", async () => {
-    let capturedBase:
-      | { cwd?: string; allowedDirectories?: readonly string[] }
-      | undefined;
+    let capturedBase: { cwd?: string; allowedDirectories?: readonly string[] } | undefined;
     const recordingEngine: PolicyEngine = {
       async projectTools<T extends { name: string }>(candidates: readonly T[]) {
         return { allowed: [...candidates], denied: [] };

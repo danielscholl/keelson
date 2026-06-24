@@ -269,7 +269,10 @@ describe("createPolicyEngine — evaluateToolCall", () => {
     };
 
     await expect(
-      engine.evaluateToolCall({ tool: "write_file", args: { path: "/workspace/room/note.txt" } }, base),
+      engine.evaluateToolCall(
+        { tool: "write_file", args: { path: "/workspace/room/note.txt" } },
+        base,
+      ),
     ).resolves.toEqual({ outcome: "allow" });
     await expect(
       engine.evaluateToolCall({ tool: "write_file", args: { path: "./note.txt" } }, base),
