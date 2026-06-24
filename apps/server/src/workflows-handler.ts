@@ -1754,10 +1754,7 @@ export function workflowsRoutes(
     const runId = c.req.param("runId");
     // Reject if the run is already active (409).
     if (activeRuns.get(runId)) {
-      return c.json(
-        { error: `run is already active or not in a resumable state '${runId}'` },
-        409,
-      );
+      return c.json({ error: `run is already active or not in a resumable state '${runId}'` }, 409);
     }
     const result = resumeRunCore(
       {
