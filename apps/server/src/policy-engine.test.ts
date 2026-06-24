@@ -307,7 +307,7 @@ describe("createPolicyEngine — evaluateToolCall", () => {
     });
   });
 
-  it("blocks shell command path tokens that traverse outside via relative and option=value forms", async () => {
+  it("blocks shell command path tokens that traverse outside via relative, option=value, and redirection forms", async () => {
     const engine = createPolicyEngine();
     const base = {
       surface: "chat" as const,
@@ -329,6 +329,18 @@ describe("createPolicyEngine — evaluateToolCall", () => {
         { tool: "Bash", args: { command: "tee --output=/etc/passwd payload.txt" } },
         base,
       ),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat ok.txt >/etc/passwd" } }, base),
+    ).resolves.toEqual({
+      outcome: "deny",
+      reason: "path '/etc/passwd' resolves outside the confinement root",
+    });
+    await expect(
+      engine.evaluateToolCall({ tool: "Bash", args: { command: "cat ok.txt 2>/etc/passwd" } }, base),
     ).resolves.toEqual({
       outcome: "deny",
       reason: "path '/etc/passwd' resolves outside the confinement root",

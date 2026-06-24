@@ -264,6 +264,14 @@ function tokenizeShellCommand(command: string): string[] {
 function collectCommandTokenPathCandidates(token: string, out: string[]): void {
   const clean = stripShellWrapping(token);
   if (clean.length === 0) return;
+  const redirected = clean.match(/^(?:\d+)?(?:>>?|<<?)(.+)$/);
+  if (redirected) {
+    const redirectedTarget = stripShellWrapping(redirected[1]);
+    if (redirectedTarget.length > 0 && looksLikeFilesystemPath(redirectedTarget)) {
+      out.push(redirectedTarget);
+    }
+    return;
+  }
   const eq = clean.indexOf("=");
   if (eq > 0) {
     const left = stripShellWrapping(clean.slice(0, eq));
