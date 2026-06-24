@@ -659,6 +659,36 @@ function buildResumeSeed(nodes: NodeOutputRow[]): Map<string, NodeOutput> {
   return seed;
 }
 
+// Bind a project notebook adapter (read + contribute), but only when the working
+// dir actually resolves inside the resolved project — a display-only projectId
+// with an overriding workingDir outside the project must not touch its notebook.
+// Shared by the start and resume paths so a resumed run gets the same notebook
+// the fresh run had.
+function buildNotebookAdapter(
+  projectNotebookStore: ProjectNotebookStore | undefined,
+  projectId: string | null,
+  projectRootPath: string | null,
+  workingDir: string,
+): NotebookAdapter | undefined {
+  if (
+    !projectNotebookStore ||
+    projectId === null ||
+    projectRootPath === null ||
+    !isPathInside(canonicalPath(projectRootPath), canonicalPath(workingDir))
+  ) {
+    return undefined;
+  }
+  const nbStore = projectNotebookStore;
+  const pid = projectId;
+  return {
+    read: () => {
+      const content = nbStore.get(pid)?.content;
+      return content ? formatNotebookSection(content) : undefined;
+    },
+    append: (entry, section) => ({ ok: nbStore.appendEntry(pid, entry, section).ok }),
+  };
+}
+
 // Run-launch core: create the linked conversation + run row, spawn the
 // background executor, register the active run. Both the HTTP start route and
 // the WorkflowController call this after resolving inputs / working dir, so the
@@ -675,24 +705,12 @@ function startRunCore(
     params;
   const origin: WorkflowRunOrigin = params.origin ?? "manual";
   const ribId = params.ribId ?? null;
-  // Bind the notebook (read + contribute) only when the working dir actually
-  // resolves inside the resolved project. A run started with a display-only
-  // `projectId` + an overriding `workingDir` outside that project must NOT read
-  // or write its notebook — that id is a UI pointer, not the run's context.
-  const workingDirInProject =
-    resolvedProject !== null && isPathInside(resolvedProject.rootPath, workingDir);
-  let notebook: NotebookAdapter | undefined;
-  if (projectNotebookStore && projectId !== null && workingDirInProject) {
-    const nbStore = projectNotebookStore;
-    const pid = projectId;
-    notebook = {
-      read: () => {
-        const content = nbStore.get(pid)?.content;
-        return content ? formatNotebookSection(content) : undefined;
-      },
-      append: (entry, section) => ({ ok: nbStore.appendEntry(pid, entry, section).ok }),
-    };
-  }
+  const notebook = buildNotebookAdapter(
+    projectNotebookStore,
+    projectId,
+    resolvedProject?.rootPath ?? null,
+    workingDir,
+  );
   const name = workflow.name;
   const dedupeKey = runDedupeKey(name, workingDir, inputs);
   // De-dup only non-isolated producer refreshes (rib collectors fired by the
@@ -810,11 +828,15 @@ export type ResumeRunResult =
 // the executor. Returns a discriminated result so the HTTP route maps it to
 // appropriate status codes.
 function resumeRunCore(
-  deps: Omit<StartRunCoreDeps, "conversationStore"> & { catalog: WorkflowCatalog },
+  deps: Omit<StartRunCoreDeps, "conversationStore"> & {
+    catalog: WorkflowCatalog;
+    projectsStore?: ProjectsStore;
+  },
   runId: string,
 ): ResumeRunResult {
   const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, catalog } = deps;
+  const { projectsStore, projectNotebookStore } = deps;
 
   const run = store.getRun(runId);
   if (!run) {
@@ -873,6 +895,16 @@ function resumeRunCore(
     };
   }
 
+  // Resolve the run's project from its persisted id so the resumed run binds the
+  // same notebook adapter a fresh run would (the start path resolves it too).
+  const resumeProject = run.projectId !== null ? (projectsStore?.get(run.projectId) ?? null) : null;
+  const notebook = buildNotebookAdapter(
+    projectNotebookStore,
+    run.projectId,
+    resumeProject?.rootPath ?? null,
+    run.workingDir,
+  );
+
   const abort = new AbortController();
   const pendingApprovals = new Map<string, PendingApproval>();
   const done = executeRunInBackground({
@@ -891,6 +923,7 @@ function resumeRunCore(
     ...(memoryTools !== undefined ? { memoryTools } : {}),
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+    ...(notebook !== undefined ? { notebook } : {}),
     completedNodeOutputs,
     existingWorktreePath: run.worktreePath ?? undefined,
   });
@@ -1765,6 +1798,8 @@ export function workflowsRoutes(
         memoryTools,
         ...(snapshotManager !== undefined ? { snapshotManager } : {}),
         ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+        ...(projectsStore !== undefined ? { projectsStore } : {}),
+        ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
         catalog,
       },
       runId,
