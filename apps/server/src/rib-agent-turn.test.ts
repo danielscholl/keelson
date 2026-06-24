@@ -11,6 +11,7 @@ import type { IAgentProvider, SendQueryOptions } from "@keelson/providers";
 import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import { createPolicyEngine } from "./policy-engine.ts";
+import type { PolicyEngine } from "./policy-engine.ts";
 import { type MakeRibAgentTurnDeps, makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { applyRibs } from "./ribs.ts";
 
@@ -497,6 +498,55 @@ describe("makeRibAgentTurn — tool rails", () => {
     // timeout), so the engine can cancel a pending approval when the turn tears down.
     expect(capturedSignal).toBeInstanceOf(AbortSignal);
     expect(capturedSignal).toBe(opts?.abortSignal);
+  });
+
+  it("forwards cwd and allowedDirectories to the provider and per-call gate", async () => {
+    let capturedBase:
+      | { cwd?: string; allowedDirectories?: readonly string[] }
+      | undefined;
+    const recordingEngine: PolicyEngine = {
+      async projectTools<T extends { name: string }>(candidates: readonly T[]) {
+        return { allowed: [...candidates], denied: [] };
+      },
+      async evaluateToolCall(_call, base) {
+        capturedBase = {
+          ...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
+          ...(base.allowedDirectories !== undefined
+            ? { allowedDirectories: [...base.allowedDirectories] }
+            : {}),
+        };
+        return { outcome: "allow" };
+      },
+      async evaluateRequest() {
+        return { outcome: "allow" };
+      },
+      async evaluateToolResult() {
+        return { outcome: "allow" };
+      },
+      async evaluateResponse() {
+        return { outcome: "allow" };
+      },
+      requestPhaseActive: false,
+      resultPhaseActive: false,
+      responsePhaseActive: false,
+    };
+    const opts = await optionsFor(
+      {
+        prompt: "hi",
+        allowedTools: ["Bash"],
+        cwd: "/workspace/room",
+        allowedDirectories: ["/workspace/room"],
+      },
+      { getPolicyEngine: () => recordingEngine },
+    );
+    expect(opts?.allowedDirectories).toEqual(["/workspace/room"]);
+    const gate = opts?.evaluateToolCall;
+    if (!gate) throw new Error("expected a per-call gate to be wired");
+    await gate({ tool: "Bash", args: { command: "cat /etc/passwd" } });
+    expect(capturedBase).toEqual({
+      cwd: "/workspace/room",
+      allowedDirectories: ["/workspace/room"],
+    });
   });
 
   it("wires no per-call gate for a text-only turn (no keelson tools to govern)", async () => {
