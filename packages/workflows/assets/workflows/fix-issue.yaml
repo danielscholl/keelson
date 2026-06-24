@@ -281,6 +281,11 @@ nodes:
   - id: implement
     depends_on: [approve-plan]
     context: fresh
+    # Pinned to a strong coding model rather than the workflow default `auto`:
+    # this node does the actual edits, and pinning makes the model deterministic
+    # (Copilot never reports what `auto` resolved). Account-dependent id — must
+    # appear in the live Copilot list; swap or drop to `auto` if unavailable.
+    model: gpt-5.5
     # Large changes run many edit+check cycles; a tight cap kills a run mid-task
     # and loses uncommitted work. Generous here; the per-task checks stay scoped
     # (below) so this budget is for real work, not full-suite thrash.
