@@ -46,9 +46,12 @@ auto-promotion. Your action on each pending memory routes it:
 | Action | Effect |
 | --- | --- |
 | Confirm | Instruction-grade: eligible to be injected into future system prompts. |
-| Keep as evidence | Retained and searchable, but never auto-injected. |
+| Evidence-only | Retained and searchable, but never auto-injected as an instruction. |
 | Restrict | Held out of automatic injection. |
 | Reject | Discarded. |
+| Mark stale | Transitioned to `lifecycle:stale`: kept in the database but excluded from injection and future recall. |
+
+A sixth action, **Merge**, folds a pending memory into an existing one. It is exposed over the review API but has no button on the Memory surface.
 
 <Aside type="caution" title="Remembered is not believed">
 An agent-generated memory cannot mark itself safe to instruct future agents.

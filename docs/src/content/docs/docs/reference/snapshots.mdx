@@ -92,7 +92,7 @@ has a renderer for the declared kind or refuses politely.
 | --- | --- |
 | `markdown` | Formatted text. |
 | `view` | A typed visualization: a `table`, a `graph`, or a `board`. |
-| `html` | Reserved. Declared in the schema, unrendered until an iframe-origin sandboxing pass lands. |
+| `html` | Rib-authored markup rendered in a sandboxed iframe. The frame runs with `sandbox="allow-scripts"` (no `allow-same-origin`) and a CSP whose `connect-src 'none'` blocks script-initiated network connections (fetch, XHR, WebSocket). Frame-originated actions (posted via `keelson.action(type, payload)` or a `[data-canvas-action]` click) arrive at the rib's `onAction` stamped with `origin: "canvas-html"`, letting the rib gate untrusted verbs. |
 
 A `view` payload carries its own `view` discriminant, one of three:
 
@@ -141,7 +141,7 @@ one-level layout wrapper that nests leaf sections side by side.
 | `segments` | `items: [{ label, n, tone? }]` | A summary pulse. |
 | `bars` | `inline?`, `items: [{ label, value, total, tone?, trailing? }]` | Meters and offender lists. |
 | `table` | `columns`, `rows`, `caption?` | The same table shape as the view. |
-| `cards` | `boxed?`, `items: [{ title, titleTone?, mono?, dot?, pill?, href?, bar?, fields?, footnote?, reason? }]` | Rich item cards. |
+| `cards` | `boxed?`, `items: [{ title, titleTone?, mono?, dot?, pill?, href?, bar?, fields?, actions?, footnote?, reason? }]` | Rich item cards. A card may carry `actions: ActionItem[]` for inline per-card buttons, distinct from a standalone `actions` section. |
 | `rows` | `boxed?`, `items: [{ icon?, glyph?, chip?, text, href?, trailing? }]` | A status or feed list. |
 | `actions` | `items: ActionItem[]` | Buttons. See below. |
 | `grid` | `cells: [{ label, href?, badge: { text, tone? } }]` | A dense at-a-glance matrix. |

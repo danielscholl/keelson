@@ -75,6 +75,7 @@ straight at `http://127.0.0.1:7878/api/mcp` and skips the bridge. See
 | `keelson workflow validate [name] [--dir <path>]` | Validate one workflow or all of them, from the home catalog or an explicit directory. |
 | `keelson workflow run <name>` | Run a workflow. Server-up over HTTP, server-down in-process. |
 | `keelson workflow respond <runId> <nodeId> <text>` | Resume a paused run by replying to its approval node. Server-required. |
+| `keelson workflow resume <runId>` | Resume an interrupted (failed or cancelled) run from the last completed node. Server-required. |
 | `keelson workflow status [runId]` | Show recent runs, or one run's status. Server-required. |
 
 `workflow run` options:

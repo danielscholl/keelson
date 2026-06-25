@@ -32,8 +32,10 @@ touching the harness.
 
 ## What ships
 
-Keelson ships five providers. Which ones load is your choice; by default only
-Copilot does, and the rest are opt-in through configuration.
+Keelson ships five built-in providers, plus a gateway mechanism that registers
+any OpenAI-compatible endpoint as a named provider at runtime. Which built-in
+providers load is your choice; by default only Copilot does, and the rest are
+opt-in through configuration.
 
 | Provider | What it is | Credentials |
 | --- | --- | --- |
@@ -42,6 +44,7 @@ Copilot does, and the rest are opt-in through configuration.
 | Codex | OpenAI's Codex agent. | Self-managed by the Codex tooling. |
 | Pi | A multi-vendor community agent. | Self-managed by Pi. |
 | stub | An offline echo provider: no model, no tool calls, deterministic output. | None. |
+| Gateway | Any OpenAI-compatible Chat Completions endpoint (OpenRouter, Ollama, vLLM, Azure OpenAI, LiteLLM). Configured with `keelson gateway add`; each registered gateway appears in the picker under its own name. | Optional API key in keychain under `gateway-<name>`; keyless for local endpoints. |
 
 The stub is why you can try the harness, run a workflow, and exercise the CLI's
 server-down fallback with no keys at all. It is for verification, not for real
@@ -76,7 +79,8 @@ so a capability gap reads as a warning instead of a silent no-op.
 The landing says "Copilot, Claude, Codex, Pi. Swappable, no lock-in." The swap
 is real because all four sit behind one interface and are chosen per turn or per
 node. The no-lock-in is structural: the harness holds no dependency on any single
-agent, and a fifth could join as one more adapter.
+agent, and gateways already extend that set: any OpenAI-compatible endpoint
+registers as a named provider, so the picker is never limited to the built-ins.
 </Aside>
 
 ## Where to go next

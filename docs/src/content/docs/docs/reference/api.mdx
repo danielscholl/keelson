@@ -77,6 +77,16 @@ See [The Rib contract](../rib-contract/#hooks) for the hooks behind these.
 
 See [Providers](../providers/) for the capability shape.
 
+## Gateways
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/gateways` | List configured gateways. Returns `{ gateways: GatewaySummary[] }`: each summary includes `name`, `baseUrl`, `protocol`, `model` (optional), and `signedIn` (whether an API key is stored; the key itself is never returned). |
+| `PUT` | `/api/gateways/:name` | Upsert a gateway. Body: `{ baseUrl: string, protocol?: "openai", model?: string, apiKey?: string }`. Omitting `apiKey` leaves any stored key unchanged. Returns the `GatewaySummary` for the upserted gateway. Origin-gated (CSRF guard). |
+| `DELETE` | `/api/gateways/:name` | Remove a gateway and its stored API key. Idempotent: returns 204 whether or not the gateway existed. Origin-gated. |
+
+Gateways are OpenAI-compatible endpoints (for example, a local Ollama instance) registered as providers named for the gateway. Non-secret metadata persists to `config.json`; the API key persists to the OS keychain and is never round-tripped to the browser. See [Providers](../providers/) for the capability shape a registered gateway exposes.
+
 ## Snapshots
 
 | Method | Path | Purpose |
@@ -111,10 +121,18 @@ See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
 | `GET` | `/api/workflows/runs` | Recent runs across the catalog. |
 | `GET` | `/api/workflows/runs/:runId` | One run with its per-node outputs. |
 | `POST` | `/api/workflows/runs/:runId/resume` | Resume a paused run by replying to its approval node. |
+| `POST` | `/api/workflows/runs/:runId/resume-run` | Re-start an interrupted (failed or cancelled) run from the last successfully completed node. Distinct from the approval-pause resume above. |
 | `GET` | `/api/workflows/runs/:runId/artifact` | Read a file from a run's sandboxed artifact directory. |
 | `POST` | `/api/workflows/runs/bulk-delete` | Delete several runs at once. |
 | `GET` | `/api/workflows/worktree-paths` | The worktree directories isolated runs created. |
 | `WS` | `/api/workflows/runs/:runId/ws` | The run event stream: node start, stream, and settle, plus the approval-pause frame. |
+
+## Approvals
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/approvals` | List pending policy-ask approvals. Returns `{ approvals: Approval[] }`. Clients typically watch the `POLICY_APPROVALS_SNAPSHOT_KEY` snapshot stream instead of polling. |
+| `POST` | `/api/approvals/:id` | Resolve one pending approval. Body: `{ decision: "accept" \| "reject" }`. Returns `{ ok: true }` or 404 if the id is unknown or already resolved. Origin-gated (CSRF guard on the mutating route). |
 
 ## Memory
 

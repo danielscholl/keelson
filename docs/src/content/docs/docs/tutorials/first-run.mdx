@@ -59,8 +59,8 @@ ribs, and `keelson update` does the same from the CLI once you are set up.
 ## Read the health sweep
 
 Before starting anything, run the health sweep. `keelson doctor` probes
-the toolchain, the server, the database, credential storage, and your
-workflows in one pass:
+the toolchain, the server, the database, credential storage, your
+workflows, and installed ribs in one pass:
 
 ```sh
 keelson doctor
@@ -97,7 +97,7 @@ categories:
     checks:
       -         name: discovery
         status: ok
-        detail: 7 workflow(s) under /Users/you/.keelson/workflows
+        detail: 8 workflow(s) under /Users/you/.keelson/workflows
       -         name: parse
         status: ok
         detail: all workflows parse cleanly
@@ -113,7 +113,7 @@ strict: false
 Two checks warn, and both are expected. The `server` category cannot reach a
 server because none is running yet, and `db` has no database because the first
 `keelson start` is what creates and migrates it. Each warn carries a `hint`
-naming that exact next move. Meanwhile `workflows` already found seven files,
+naming that exact next move. Meanwhile `workflows` already found eight files,
 the starter workflows a fresh install seeds, so the catalog is usable before
 you write anything. The next two tutorials build on it.
 
@@ -140,7 +140,7 @@ KEELSON_PROVIDERS=stub keelson start --foreground
 ```
 
 ```text
-[workflows] discovered 7 workflows
+[workflows] discovered 8 workflows
 [workflows] no non-stub provider registered; prompt nodes will use 'stub' (echo-only). Set KEELSON_PROVIDERS to include copilot or claude, or pin KEELSON_WORKFLOW_PROVIDER explicitly.
 [workflows] default workflow provider is 'stub'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.
 keelson server listening on http://127.0.0.1:7878/

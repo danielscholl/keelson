@@ -285,10 +285,14 @@ cancel reasons:
 | Reference | Resolves to |
 | --- | --- |
 | `$ARGUMENTS` | The free-form text the run was started with. |
-| `$1` … `$9` | Positional words of `$ARGUMENTS`. `\$` escapes a literal `$`. |
+| `$inputs.<key>` | The workflow input named `<key>`. Available in `prompt`, `command`, `loop`, and `cancel` bodies; not substituted in `bash` or `script` bodies (use `KEELSON_INPUTS_<key>` there). |
 | `$<id>.output` | The full text output of an upstream node. The node must be an ancestor via `depends_on`. |
 | `$<id>.output.<field>` | A field of the upstream output after JSON parsing (empty string when the output is not JSON). |
 | `$ARTIFACTS_DIR` | The per-run scratch directory (in prompt text). |
+| `$memory.recall.items` | JSON array (stringified) of recalled memory rows. Requires a node-level `memory.recall:` block; resolves to `[]` when recall did not run. |
+| `$memory.recall.trace` | Trace ID string recorded for the recall query. Empty string when unavailable or when recall did not run. |
+
+`\$` escapes a literal `$` in any substitution context.
 
 Substitution is a single atomic pass: if an upstream output itself contains
 `$something.output`, that marker stays literal instead of expanding again.
@@ -299,8 +303,11 @@ variables, never spliced into the source:
 
 | Variable | Carries |
 | --- | --- |
-| `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (the id's hyphens become underscores). |
+| `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
+| `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
+| `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |
+| `ARTIFACTS_DIR` | Same path as `KEELSON_ARTIFACTS_DIR`; provided so workflows ported from Archon can use the shorter name without modification. |
 
 <Aside type="note" title="Why two channels">
 Prompt text is interpreted by a model that treats it as language; shell source

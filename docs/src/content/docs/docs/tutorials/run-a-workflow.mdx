@@ -199,12 +199,25 @@ keelson workflow list
 
 ```text
 workflows:
+  -     name: fix-issue
+    description: ...
+    nodeCount: 24
+    source: global
   -     name: hello-harness
     description: Three node kinds, one dependency, one gate. A first workflow.
     nodeCount: 4
-    path: /Users/you/.keelson/workflows/hello-harness.yaml
     source: global
+  -     name: smoke-test
+    description: ...
+    nodeCount: 9
+    source: global
+  - ...
 ```
+
+The list includes all eight bundled starters plus any workflows you have added.
+Bundled and user-authored workflows are both reported as `source: global` in
+server mode. The `path` field only appears when the server is down and the CLI
+runs discovery in-process.
 
 ## What you proved
 
