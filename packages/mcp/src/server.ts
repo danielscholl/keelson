@@ -35,8 +35,9 @@ export interface KeelsonMcpServerOptions {
   // root); deliberately NOT a per-request param so a client can't direct
   // server-side execution at an arbitrary path.
   defaultCwd: string;
-  // Expose state_changing tools (e.g. OSDU cluster suspend/reconcile). Default
-  // false — a fresh endpoint serves only read-only tools.
+  // Expose state_changing tools (e.g. OSDU cluster suspend/reconcile). Omitted is
+  // read-only at this layer — a conservative unit default; keelson's
+  // resolveMcpSettings passes `true` by default, so the live endpoint exposes them.
   exposeStateChanging?: boolean;
   // Tool names never exposed over MCP, regardless of the above.
   toolDenylist?: readonly string[];

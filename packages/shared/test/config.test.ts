@@ -198,13 +198,27 @@ describe("resolveDefaultProvider", () => {
 });
 
 describe("resolveMcpSettings", () => {
-  test("defaults: enabled, read-only, no token, no denylist", () => {
+  test("defaults: enabled, state-changing exposed, no token, no denylist", () => {
     expect(resolveMcpSettings({}, {})).toEqual({
       enabled: true,
-      exposeStateChanging: false,
+      exposeStateChanging: true,
       toolDenylist: [],
       requireToken: false,
     });
+  });
+
+  test("exposeStateChanging is the one default that config can switch off", () => {
+    expect(
+      resolveMcpSettings({ mcp: { exposeStateChanging: false } }, {}).exposeStateChanging,
+    ).toBe(false);
+  });
+
+  test("KEELSON_MCP_EXPOSE_STATE_CHANGING=0 forces read-only over a default/true config", () => {
+    const env = { KEELSON_MCP_EXPOSE_STATE_CHANGING: "0" };
+    expect(resolveMcpSettings({}, env).exposeStateChanging).toBe(false);
+    expect(
+      resolveMcpSettings({ mcp: { exposeStateChanging: true } }, env).exposeStateChanging,
+    ).toBe(false);
   });
 
   test("config values are honored", () => {

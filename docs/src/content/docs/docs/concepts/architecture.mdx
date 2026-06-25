@@ -151,7 +151,7 @@ rib can bind to it.
 
 10. **Mount the MCP gateway.** When `mcp.enabled` (the default), the server mounts
     `/api/mcp`, exposing the now-populated tool registry to external agents over
-    the Model Context Protocol, read-only by default.
+    the Model Context Protocol — state-changing tools included by default.
 
 11. **Schedule surfaces and serve.** A heartbeat scheduler keeps snapshot-backed
     regions fresh on their cadence, then Bun serves the HTTP and WebSocket routes

@@ -60,7 +60,7 @@ detail behind each one.
 | Offline trial | Stub only | The `stub` provider needs no keys: good for wiring, not real tool use. |
 | Workflow resume | Records persist, processes do not | Do not restart the server while a run waits on approval if you expect to resume it. |
 | Rib boundary | Namespaces and credentials only | Not isolation; choose rib sources the way you choose any dependency. |
-| MCP endpoint | Read-only, loopback, tokenless by default | Opt in to expose state-changing tools or to require a token. |
+| MCP endpoint | Loopback and tokenless by default, exposing state-changing tools | Restrict to read-only, or require a token, when you proxy it out or add a destructive rib. |
 | Console redaction | Wired, not active | Treat console output as unredacted for now. |
 
 <Aside type="caution" title="The boundary is not a sandbox">
