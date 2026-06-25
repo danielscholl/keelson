@@ -114,6 +114,14 @@ this one needs only those three arguments; an interactive-loop pause also takes
 `--pause-id`, the per-pause token from the run's `approval_awaiting` frame, to
 disambiguate retries.
 
+<Aside type="note" title="Two different resume commands">
+`keelson workflow respond` is for a run that is **still active** and paused at an
+approval gate: it sends the human's reply and the run continues. `keelson workflow
+resume <runId>` is for a run that has already **terminated** (failed or cancelled):
+it re-enters the executor from the last successfully completed node so finished
+work is not repeated.
+</Aside>
+
 ### Loop until done
 
 A `loop` repeats its prompt until a completion token appears, hard-bounded by
@@ -152,7 +160,9 @@ applies: `KEELSON_WORKFLOW_PROVIDER` pins the provider every `prompt` node uses.
 
 A `prompt` node's output can flow into a `bash` or `script` node, but the two
 channels keep it safe: shell nodes read upstream output from
-`KEELSON_NODE_<id>_OUTPUT` environment variables, never spliced into the source,
+`KEELSON_NODE_<id>_OUTPUT` environment variables (where hyphens and any other
+non-alphanumeric characters in the node id are replaced with underscores, e.g.
+node `fix-it` → `KEELSON_NODE_fix_it_OUTPUT`), never spliced into the source,
 so the model's text is always data and never code.
 
 ```yaml
@@ -161,6 +171,11 @@ so the model's text is always data and never code.
   - id: record
     bash: 'printf "%s\n" "$KEELSON_NODE_draft_OUTPUT" >> NOTES.md'
     depends_on: [draft]
+  - id: fix-it
+    prompt: "Fix the issue: $ARGUMENTS"
+  - id: apply-fix
+    bash: 'printf "%s\n" "$KEELSON_NODE_fix_it_OUTPUT"'
+    depends_on: [fix-it]
 ```
 
 ## Related

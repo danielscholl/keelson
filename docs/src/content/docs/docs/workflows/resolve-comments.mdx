@@ -42,10 +42,10 @@ own and have push access to. The approval gate pauses before any code lands.
 
 ## The shape
 
-The run is eight phases. Four `bash` nodes handle deterministic GitHub I/O and
-the verify.sh gate (fetch-threads, validate, revalidate, push); the judgment
-nodes — triage, fix, reply-resolve, report — are agent `prompt` steps; one
-`approval` node is the human gate before any mutation.
+The run is eleven nodes across eight phases. Four `bash` nodes handle deterministic GitHub I/O and
+the verify.sh gate (fetch-threads, validate, revalidate, push); six `prompt` nodes (extract-pr,
+triage, fix, fix-validation, reply-resolve, and report) are agent turns; one `approval` node is
+the human gate before any mutation.
 
 | Node | Kind | What it does |
 | --- | --- | --- |

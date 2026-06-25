@@ -115,7 +115,9 @@ The dashed edge is the honest one. An approval pause is held by the
 running server process, not by the database. If the server restarts while a
 run is paused or mid-flight, boot reconciliation finds the stale run and
 marks it failed rather than pretending it can continue. Runs are durable as
-records; they are not yet resumable as processes.
+records; failed and cancelled runs are resumable: the harness re-enters the
+executor from the first incomplete node, seeding completed node outputs so
+finished work is not repeated.
 
 ## Where the agency is bounded
 

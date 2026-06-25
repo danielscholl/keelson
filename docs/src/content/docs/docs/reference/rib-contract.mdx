@@ -80,8 +80,10 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 | `getSnapshotManager?()` | `SnapshotManager` | Register, recompose, and read snapshot keys. Scoped to the rib's namespace. |
 | `getCredential?(serviceId)` | `Promise<string \| undefined>` | Read-only, resolves a keychain entry under `rib_<id>_<serviceId>`. A rib cannot read another rib's secrets. |
 | `getDataDir?()` | `string` | Absolute path to the rib's private data directory under the keelson home, named `rib-<id>` (`<home>/rib-<rib-id>`). Path only — the rib creates it when it writes. |
+| `getProjects?()` | `readonly Project[]` | Read-only snapshot of the operator's project records at call time. Use to offer project selection and pass `project.rootPath` as `RibAgentTurnRequest.cwd`. Optional: a rib built against an older harness degrades to no project selection, not a throw. |
 | `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, redaction, and credentials. |
 | `registerRegion?(surfaceId, region)` | `() => void` | Adds a snapshot-backed region to one of the rib's own surfaces at runtime, returning an unregister handle. Layout-only: the rib still registers the region's key, which must be namespaced. |
+| `refreshWorkflow?(workflowName)` | `Promise<void>` | Re-runs one of the rib's own snapshot-bound producer workflows by name on demand; fresh output republishes to the bound key through the same publish→recompose bridge the cadence heartbeat uses. Resolves (never throws) for an unknown name or failed run. |
 | `getSidecar?()` | `Promise<unknown> \| unknown` | Opaque resolver; each rib narrows and casts at its own edge. |
 
 ## Hooks
@@ -110,19 +112,30 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 
 3. **`views`** are static `RibViewDescriptor`s: `{ key, canvasKind, title? }`.
    `key` must be namespaced. `canvasKind` is the closed enum `markdown` |
-   `view` | `html` (`html` is reserved and not yet rendered). The payload
-   published under `key` must satisfy the renderer for that kind; the client
-   gate fail-closes on a mismatch. Views are static metadata, so the manifest
-   is built without invoking rib code.
+   `view` | `html` (`html` renders untrusted, rib-authored markup in a
+   sandboxed iframe; the frame can post structured actions back to the host,
+   which are relayed to the owning rib's `onAction` with `origin: "canvas-html"`
+   so the rib can gate them to a safe subset). The payload published under `key`
+   must satisfy the renderer for that kind; the client gate fail-closes on a
+   mismatch. Views are static metadata, so the manifest is built without invoking
+   rib code.
 
 4. **`surfaces`** are static `RibSurfaceDescriptor`s: a top-level nav tab with a
    `layout` of an optional collapsible `header`, an optional `banner`, one or
    more `rows` of `columns`, and an optional collapsible `footer`. Only the
    header and footer collapse. Each region is `{ key, workflow?, cadenceMs?,
-   title?, glyph? }`: `key` is namespaced, `workflow` is the catalog workflow a
-   region's refresh re-runs, `cadenceMs` is the auto-refresh interval (floored
-   to 30s, run on open and on a heartbeat), and `glyph` is a `{ char, tone? }`
-   chip for the region head.
+   title?, glyph?, group?, groupTitle?, byline?, collapsible?, collapsed? }`:
+   `key` is namespaced; `workflow` is the catalog workflow a region's refresh
+   re-runs; `cadenceMs` is the auto-refresh interval (floored to 30s, run on
+   open and on a heartbeat); `glyph` is a `{ char, tone? }` chip for the region
+   head; `group` is a clustering hint used when adding regions at runtime via
+   `registerRegion`; regions sharing a `group` string are kept contiguous in the
+   surface rather than interleaved by arrival order; `groupTitle` is a section
+   heading rendered for that group's zone; `byline` is a context line shown
+   beneath the region head's title (e.g. a per-lens subject); `collapsible` and
+   `collapsed` control whether the region can be collapsed and its initial
+   collapse state (honored on header, footer, and row-column regions; banner
+   regions cannot collapse).
 
 5. **`contributeWorkflows(ctx)`** returns `RibWorkflowContribution`s merged into
    the catalog at activation: `{ definition, bindSnapshotKey?, validate? }`.
@@ -140,11 +153,16 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
    tool result, request, response) across the chat, workflow, and rib surfaces.
 
 7. **`onAction(action, ctx)`** handles inbound actions over
-   `POST /api/ribs/:id/action`. `action` is `{ type, payload? }`: `type` is a
-   rib-defined verb the base never enumerates, and `payload` stays opaque for
-   the rib to narrow. It returns `{ ok: true, data? }` or `{ ok: false, error }`.
-   This path is loopback-trusted today; the capability-token envelope is a later
-   milestone.
+   `POST /api/ribs/:id/action`. `action` is `{ type, payload?, origin? }`:
+   `type` is a rib-defined verb the base never enumerates; `payload` stays
+   opaque for the rib to narrow; `origin` is `"board" | "canvas-html"` and is
+   stamped by the host, not the caller; a sandboxed `canvas-html` iframe
+   cannot claim `"board"`. Treat absent or `"board"` as a trusted host-UI
+   dispatch; gate `canvas-html`-origin verbs to a safe subset, because iframe
+   markup and scripts are untrusted (rib- or LLM-authored, and a frame script
+   can post on load without a user gesture). It returns `{ ok: true, data? }` or
+   `{ ok: false, error }`. This path is loopback-trusted today; the
+   capability-token envelope is a later milestone.
 
 8. **`listAgents(ctx)` / `resolveAgent(slug, ctx)`** offer named chat agents,
    reusable turn templates of a system prompt plus an optional model, surfaced at

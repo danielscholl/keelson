@@ -157,7 +157,7 @@ consistent — don't re-enable it.
 
 - Ribs are the only place external systems are touched. Core (under
   `apps/server`, `apps/cli`, `apps/web`, `packages/{shared,workflows,
-  providers,skills}`) must not import from `@keelson/rib-*`.
+  providers,skills,mcp}`) must not import from `@keelson/rib-*`.
 - New tools live in a rib. Don't add tool registrations to core.
 - The `Rib` contract in `packages/shared/src/rib.ts` is a public surface —
   breaking changes need a deprecation cycle.

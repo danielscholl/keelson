@@ -77,7 +77,7 @@ the browser either has a renderer for that shape or refuses politely.
 | --- | --- |
 | `markdown` | Formatted text. |
 | `view` | A typed visualization: a `table`, a `graph` of nodes and edges, or a `board`. |
-| `html` | Reserved. Declared in the schema, unrendered until a sandboxing pass lands. |
+| `html` | Untrusted rib-supplied markup rendered in a sandboxed iframe. The host owns the document shell (a CSP with `connect-src 'none'` blocks script-initiated network connections; a bridge script is injected first). Frame script calls `keelson.action(type, payload)` to post typed actions back; the rib's handler receives them with `origin: "canvas-html"`. |
 
 The `board` is the workhorse: a dashboard composed from a fixed section
 vocabulary, stats, segments, bars, tables, cards, rows, actions, and a grid,
@@ -106,6 +106,8 @@ contract:
   region bound to a snapshot key, arranged as an optional header, a banner,
   rows of columns, and a footer. The rib declares titles and glyphs; the
   harness owns every pixel of chrome.
+
+A rib can also add regions at runtime via `ctx.registerRegion(surfaceId, region)` (where `ctx` is the `RibContext` passed to `activate`). The call appends the region to the named surface grouped by `region.group` and returns an unregister handle; the harness bumps the manifest-revision beacon so subscribed browsers re-fetch the layout without a page reload. `surfaceId` must name a surface the rib declared statically; `region.key` must be under `rib:<id>:*`. The method is optional on older harnesses. A rib should guard with `ctx.registerRegion?.(...)` so it degrades cleanly.
 
 A region can also name a **workflow**: the catalog workflow whose run
 repopulates the region's key. That single field is what makes boards

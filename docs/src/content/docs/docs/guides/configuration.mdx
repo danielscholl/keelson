@@ -255,6 +255,7 @@ the matching config value when set.
 | Variable | Default | What it controls |
 |---|---|---|
 | `KEELSON_HOME` | `~/.keelson` | The keelson home directory (db, workflows, config). |
+| `KEELSON_SERVER_URL` | `http://127.0.0.1:7878` | URL the CLI probes when no `--base-url` is given. Set this to reach a server on a non-default host or port without repeating `--base-url` on every command. Must be a valid `http` or `https` URL; an invalid value throws immediately so the misconfiguration surfaces at once rather than appearing as "server down". |
 | `KEELSON_DB` | `<home>/keelson.db` | The SQLite database file. `keelson start --db` overrides it per run. |
 | `KEELSON_CONFIG` | `<home>/config.json` | Path to the config file. |
 | `KEELSON_WORKFLOWS_DIR` | `<home>/workflows` | The global workflows directory. |

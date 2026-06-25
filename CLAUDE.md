@@ -13,7 +13,7 @@ bun dev                           # server :7878 + Vite SPA :5173 in parallel
 bun dev:server                    # server only
 bun dev:web                       # SPA only
 
-bun --filter '*' typecheck        # all 7 workspaces
+bun --filter '*' typecheck        # all 8 workspaces
 bun --filter '*' test             # all workspaces
 bun --filter @keelson/server test # one workspace
 bun test apps/server/test/memory-store.test.ts  # one file
@@ -25,7 +25,7 @@ bun apps/cli/bin/keelson.ts doctor
 bun apps/cli/bin/keelson.ts workflow run smoke-test --watch
 ```
 
-`CONTRIBUTING.md` mandates `bun run check`, `bun --filter '*' typecheck`, and `bun --filter '*' test` all green before opening a PR.
+`CONTRIBUTING.md` mandates `bun run check`, `bun --filter '*' typecheck`, `bun --filter '*' test`, and `bun --filter '*' build` all green before opening a PR.
 
 ## Architecture
 
@@ -36,7 +36,9 @@ Keelson is a **local-only agent harness**, not a hosted service. The harness is 
 - `apps/web/` — React 19 + Vite SPA (`:5173`) — Chat and Workflows surfaces. `/api` is proxied to the server.
 - `packages/shared/` — public types. The `Rib` interface (`src/rib.ts`) is the extension contract; `SnapshotManager`/`SnapshotFrame` (`src/snapshots.ts`) is the generic streaming substrate ribs plug into.
 - `packages/workflows/` — DAG executor + YAML schema. Concepts borrowed from [Archon](https://github.com/coleam00/Archon) (MIT); the loader (`src/loader.ts`) is intentionally lenient — unknown fields warn rather than hard-error. Node taxonomy: `prompt` / `bash` / `command` / `loop` / `script` / `approval` / `cancel`.
-- `packages/providers/` — pluggable coding-agent SDKs behind `IAgentProvider` (Copilot, Claude, stub).
+- `packages/providers/` — pluggable coding-agent SDKs behind `IAgentProvider` (Copilot, Claude, Codex, Pi, stub), plus gateways that register any OpenAI-compatible endpoint as a provider.
+- `packages/skills/` — bundled skills registry.
+- `packages/mcp/` — MCP server (`createKeelsonMcpServer`) exposing the tool registry over the Model Context Protocol; backs the `/api/mcp` endpoint and the `keelson mcp` stdio bridge.
 - `.keelson/` — runtime data home: `keelson.db` (SQLite), `workflows/`, `commands/`.
 
 **Rib activation is discovery-based.** No in-tree ribs ship. `bootstrapRibs()` discovers installed `@keelson/rib-*` packages from `node_modules/@keelson/` at boot (`apps/server/src/rib-discovery.ts`); `bun add @keelson/rib-osdu` is enough to wire one in. `KEELSON_RIBS=<id1>,<id2>` filters which discovered ribs activate (unset = all). Embedders can bypass discovery by handing `bootstrapRibs({ available: { id: rib } })` an explicit map — the path tests use.

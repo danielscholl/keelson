@@ -38,12 +38,11 @@ We would rather name the gaps than let the headline copy imply they are closed.
 
 | Area | Where it actually is |
 | --- | --- |
-| Cross-restart resume | Runs are durable as records, not as processes. A pause is held by the running server; a restart fails a stale run during boot reconciliation rather than faking a resume. |
+| Cross-restart resume | Automatic resume across restarts is not implemented: boot reconciliation marks stale running or paused runs as failed. User-initiated resume of a failed or cancelled run is implemented: a terminal run can be re-entered from its last completed node via `keelson workflow resume <runId>`. |
 | Redaction | The console redaction pipeline is wired but not yet active. Treat output as unredacted for now. |
 | Offline story | The server-down CLI fallback runs the `stub` provider only. The full harness needs the server up. |
 | Rib actions | The `onAction` path is loopback-trusted today; the capability-token envelope and outbound dispatcher are a later milestone. |
 | Tool projection | Copilot, Claude, and Pi receive the harness tool registry; Codex does not (it acts agentically inside its own sandbox). Pi takes the registry as custom tools but keeps its own built-in tools off. |
-| The `html` canvas kind | Declared in the schema and reserved, unrendered until an iframe-origin sandboxing pass lands. |
 
 <Aside type="caution" title="Known edges, not bugs">
 None of the above is a bug to file; each is a known edge of the current
@@ -59,7 +58,7 @@ discipline is what lets a minimal test context satisfy the same interface the
 real server implements, and it is worth more than any individual capability.
 
 **State non-goals as clearly as goals.** The boundary is not a sandbox; the
-offline story is stub-only; resume is process-lifetime. Writing these down was
+offline story is stub-only; automatic cross-restart resume is still absent (user-initiated resume of terminal runs is implemented). Writing these down was
 uncomfortable and is the single most useful thing in the docs, because the
 alternative is an operator who trusts a guarantee that does not exist.
 

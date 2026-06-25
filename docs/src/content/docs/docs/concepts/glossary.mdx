@@ -35,7 +35,7 @@ which is which.
   each turn, drawing on tools that installed ribs registered and a provider you
   pick per turn. See [Chat](../chat/).
 - **provider**: a coding-agent SDK behind the one `IAgentProvider` interface:
-  Copilot, Claude, Codex, Pi, or the stub. Swappable per chat turn and per
+  Copilot, Claude, Codex, Pi, the stub, or a configured gateway (any OpenAI-compatible endpoint). Swappable per chat turn and per
   workflow node. See [Providers](../providers/).
 - **stub provider**: the offline echo provider. No credentials, no tool
   calls, deterministic output; exists so every loop can be verified without
@@ -105,7 +105,7 @@ which is which.
   **Recompose** runs it, validates, caches, and broadcasts; composition is
   lazy and concurrent calls coalesce.
 - **canvas kind**: what a payload claims to be: `markdown` or a typed `view`
-  (`html` is reserved and unrendered). The renderer set is closed.
+  (`html` renders untrusted markup in a sandboxed iframe with an action back-channel). The renderer set is closed.
 - **board**: the workhorse view payload: a dashboard built from a fixed
   section vocabulary with semantic tones.
 - **region**: one slot in a rib surface's layout, bound to a snapshot key,

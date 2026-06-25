@@ -47,9 +47,6 @@ TypeScript.
      "type": "module",
      "main": "./src/index.ts",
      "files": ["src"],
-     "dependencies": {
-       "zod": "^4.1.8"
-     },
      "peerDependencies": {
        "@keelson/shared": "*"
      },
@@ -69,7 +66,7 @@ TypeScript.
 
    ```ts title="keelson-rib-weather/src/index.ts"
    import type { Rib, ToolDefinition } from "@keelson/shared";
-   import { z } from "zod";
+   import { z } from "@keelson/shared";
 
    const weatherTool: ToolDefinition = {
      name: "weather_now",
@@ -132,9 +129,8 @@ restartRequired: true
 added weather
 ```
 
-Two packages, because zod came along as your rib's own dependency. Restart the
-server (`keelson stop && keelson start`) so discovery runs, then inspect what
-the server actually registered:
+Restart the server (`keelson stop && keelson start`) so discovery runs, then
+inspect what the server actually registered:
 
 ```sh
 keelson rib show weather
@@ -209,6 +205,18 @@ a tool into a capability:
   top-level tab laid out in regions, with no UI code in the rib.
 - **`contributeWorkflows`** ships YAML workflows with the rib, which is how
   workflow catalogs stay empty in the harness and full in practice.
+- **`onAction`** handles `POST /api/ribs/:id/action`, the back-channel for
+  board buttons and sandboxed iframe actions; the `origin` field lets the rib
+  distinguish trusted board dispatches from untrusted iframe back-channels.
+- **`listAgents` / `resolveAgent`** contribute named chat agents surfaced at
+  `GET /api/agents`: each agent is a reusable system-prompt seed a slash
+  command or board action can open as a seeded chat.
+- **`listCommands` / `invokeCommand` / `completeCommand`** contribute slash
+  commands to the chat composer (surfaced at `GET /api/commands`);
+  `invokeCommand` is a side-effect-free resolver that returns a
+  `CommandEffect` the surface performs.
+- **`contributePolicies`** injects rib-authored policies into the harness
+  governance stack evaluated at every turn path's hook points.
 - **`authStatus`** reports the rib's credential state, and `dispose` tears
   down sockets and child processes at shutdown.
 
