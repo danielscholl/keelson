@@ -303,7 +303,7 @@ variables, never spliced into the source:
 
 | Variable | Carries |
 | --- | --- |
-| `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (the id's hyphens become underscores). |
+| `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
 | `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |
