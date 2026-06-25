@@ -188,7 +188,7 @@ export function RunView({
                   className="run-usage"
                   title={`${runTotalTokens} tokens total across nodes · ${runUsage.inputTokens} in · ${runUsage.outputTokens} out`}
                 >
-                  Σ {formatTokens(runTotalTokens)}
+                  ↑{formatTokens(runUsage.inputTokens)} ↓{formatTokens(runUsage.outputTokens)}
                 </span>
               )}
               {isRunning && (
