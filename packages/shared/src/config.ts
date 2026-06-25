@@ -59,10 +59,11 @@ const codexSettingsSchema = providerSettingsSchema.extend({
 });
 
 // MCP gateway settings. The server exposes the tool registry over MCP when
-// `enabled` (default true); only read-only tools cross unless
-// `exposeStateChanging` is set. `toolDenylist` removes tools by name;
-// `requireToken` gates the endpoint behind a bearer token recorded in
-// server.json. KEELSON_MCP_* env vars override these (see resolveMcpSettings).
+// `enabled` (default true); state-changing tools also cross by default —
+// set `exposeStateChanging: false` to restrict the endpoint to read-only tools.
+// `toolDenylist` removes tools by name; `requireToken` gates the endpoint behind
+// a bearer token recorded in server.json. KEELSON_MCP_* env vars override these
+// (see resolveMcpSettings).
 const mcpSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   exposeStateChanging: z.boolean().optional(),
@@ -285,8 +286,16 @@ export function resolveMcpSettings(
     .filter((s) => s.length > 0);
   return {
     enabled: env.KEELSON_MCP_DISABLED === "1" ? false : m.enabled !== false,
+    // Default on: the local, single-user harness exposes its registered tools —
+    // state-changing included — over the loopback endpoint. `=1` forces on and
+    // `=0` forces off, each winning over config; otherwise config decides and an
+    // unset config defaults to on (lock down with `exposeStateChanging: false`).
     exposeStateChanging:
-      env.KEELSON_MCP_EXPOSE_STATE_CHANGING === "1" ? true : m.exposeStateChanging === true,
+      env.KEELSON_MCP_EXPOSE_STATE_CHANGING === "1"
+        ? true
+        : env.KEELSON_MCP_EXPOSE_STATE_CHANGING === "0"
+          ? false
+          : m.exposeStateChanging !== false,
     toolDenylist: [...new Set([...(m.toolDenylist ?? []), ...envList])],
     requireToken: env.KEELSON_MCP_REQUIRE_TOKEN === "1" ? true : m.requireToken === true,
   };

@@ -245,8 +245,9 @@ Codex CLI) can call them. Tools run **inside** the keelson server, where each ri
 keeps its credentials and exec access — so an external agent gets a rib's real
 capabilities, not a reimplementation.
 
-By default the endpoint is open on loopback (no token) and exposes only **read-only**
-tools. Point a client at it:
+By default the endpoint is open on loopback (no token) and exposes the full tool
+registry — **including state-changing tools**. Lock it down deliberately (see below)
+before you proxy it anywhere off your machine. Point a client at it:
 
 ```jsonc
 // Claude Code / Cursor: an HTTP MCP server
@@ -268,14 +269,15 @@ Tune it in `~/.keelson/config.json` (or the matching env overrides
 `KEELSON_MCP_REQUIRE_TOKEN`, `KEELSON_MCP_DENYLIST`):
 
 ```json
-{ "mcp": { "enabled": true, "exposeStateChanging": false, "requireToken": false, "toolDenylist": [] } }
+{ "mcp": { "enabled": true, "exposeStateChanging": true, "requireToken": false, "toolDenylist": [] } }
 ```
 
-The read-only endpoint exposes `workflow_list`/`workflow_status` and a rib's read
-tools. Set `exposeStateChanging: true` to also surface state-changing tools —
-`workflow_run`/`workflow_respond` and a rib's mutation tools (e.g. OSDU cluster
-suspend), all hidden by default. `requireToken: true` gates the endpoint behind a
-bearer token recorded in `~/.keelson/server.json`.
+The endpoint exposes `workflow_list`/`workflow_status`, a rib's read tools, **and**
+state-changing tools — `workflow_run`/`workflow_respond` and a rib's mutation tools
+(e.g. OSDU cluster suspend). Set `exposeStateChanging: false` (or
+`KEELSON_MCP_EXPOSE_STATE_CHANGING=0`) to restrict it to read-only; `requireToken: true`
+gates the endpoint behind a bearer token recorded in `~/.keelson/server.json` —
+recommended once you install a rib with destructive tools.
 
 ## How it fits
 

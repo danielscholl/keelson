@@ -222,14 +222,15 @@ resolve an approval.
 
 The server exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io)
 at `/api/mcp`, so another agent can call your ribs' tools. It comes up with the
-server and is read-only and tokenless on loopback by default. The `mcp` block
-tunes it; [Using keelson over MCP](../using-mcp/) is the task guide.
+server, tokenless on loopback and exposing its full tool registry — state-changing
+tools included — by default. The `mcp` block tunes it; [Using keelson over
+MCP](../using-mcp/) is the task guide.
 
 ```jsonc
 {
   "mcp": {
     "enabled": true,
-    "exposeStateChanging": false,
+    "exposeStateChanging": true,
     "requireToken": false,
     "toolDenylist": []
   }
@@ -239,7 +240,7 @@ tunes it; [Using keelson over MCP](../using-mcp/) is the task guide.
 | Key | Type | What it does |
 |---|---|---|
 | `enabled` | boolean | Whether `/api/mcp` mounts. Default `true`. |
-| `exposeStateChanging` | boolean | Also expose state-changing tools (`workflow_run`, `workflow_respond`, a rib's mutating tools). Default `false`, so only read-only tools cross. |
+| `exposeStateChanging` | boolean | Whether state-changing tools (`workflow_run`, `workflow_respond`, a rib's mutating tools) cross. Default `true`; set `false` to restrict the endpoint to read-only tools. |
 | `requireToken` | boolean | Gate the endpoint behind the bearer token in `server.json`. Default `false` (loopback, no token). |
 | `toolDenylist` | string array | Tool names never exposed over MCP, whatever the flags above allow. |
 
@@ -268,7 +269,7 @@ the matching config value when set.
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
 | `KEELSON_MCP_DISABLED` | unset | Set to `1` to not mount `/api/mcp`. Overrides `mcp.enabled`. |
-| `KEELSON_MCP_EXPOSE_STATE_CHANGING` | unset | Set to `1` to expose state-changing tools over MCP. Overrides `mcp.exposeStateChanging`. |
+| `KEELSON_MCP_EXPOSE_STATE_CHANGING` | unset | Set to `1` to force state-changing tools on, `0` to force read-only. Overrides `mcp.exposeStateChanging` (which defaults on). |
 | `KEELSON_MCP_REQUIRE_TOKEN` | unset | Set to `1` to gate `/api/mcp` behind the `server.json` token. Overrides `mcp.requireToken`. |
 | `KEELSON_MCP_DENYLIST` | unset | Comma-separated tool names to hide over MCP. Merged with `mcp.toolDenylist`. |
 | `KEELSON_WORKSPACE` | `~/keelson` | Root for project workspaces. |

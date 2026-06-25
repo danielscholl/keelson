@@ -80,9 +80,10 @@ is up: it reports `not running` and cleans any stale state.
 
 The same server speaks the [Model Context Protocol](https://modelcontextprotocol.io)
 at `/api/mcp`, so other agents (Claude Code, Cursor, the Codex CLI) can call your
-ribs' tools. It mounts automatically with the server and exposes only read-only
-tools on loopback, with no token, by default. `keelson status` reports its URL
-when it is mounted.
+ribs' tools. It mounts automatically with the server and, on loopback with no
+token, exposes the full tool registry — state-changing tools included — by default
+(`exposeStateChanging: false` restricts it to read-only). `keelson status` reports
+its URL when it is mounted.
 
 Tune what crosses, or gate it behind a token, in the `mcp` config block. The
 [Using keelson over MCP](../using-mcp/) guide walks a client through connecting,
