@@ -1544,11 +1544,20 @@ describe("makePromptHandler", () => {
       },
       getRegisteredTools: () => [],
     });
-    const node = { id: "n1", prompt: "", provider: "not-a-real-provider" } as unknown as DagNode;
+    const node = {
+      id: "n1",
+      prompt: "",
+      provider: "not-a-real-provider",
+      model: "gpt-5",
+    } as unknown as DagNode;
     const result = await handler.handle(node, buildCtx());
     expect(result.status).toBe("failed");
     expect(result.error).toContain("not-a-real-provider");
     expect(result.error).toContain("not registered");
+    // The provider never resolved, so the failed node must NOT claim it "ran on"
+    // the requested provider/model.
+    expect(result.provider).toBeUndefined();
+    expect(result.model).toBeUndefined();
   });
 
   describe("output_format", () => {

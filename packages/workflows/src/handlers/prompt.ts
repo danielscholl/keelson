@@ -454,6 +454,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       let assistantText = "";
       let providerError: string | null = null;
+      // Set once consume() successfully resolves the provider. Gates the
+      // provenance attach below: a node that failed BECAUSE its provider
+      // couldn't be resolved (unknown `provider:` id) must not claim it "ran on"
+      // that provider/model — it never opened a session.
+      let providerResolved = false;
       // Set when any tool the turn invoked returned an error result; consulted
       // after the stream when the node opts into `fail_on_tool_error`.
       let toolErrored = false;
@@ -507,6 +512,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const consume = async (): Promise<void> => {
         try {
           const provider = opts.getProvider(effectiveProviderId);
+          providerResolved = true;
           if (model === undefined) {
             const defaultModel = provider.getCapabilities?.().defaultModel;
             if (typeof defaultModel === "string" && defaultModel.length > 0) {
@@ -716,8 +722,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // spent whatever the provider reported before the cut, and still ran on a
       // resolved provider/model worth surfacing in the trace.
       if (nodeUsage !== undefined) result.usage = nodeUsage;
-      if (recordedProviderId !== undefined) result.provider = recordedProviderId;
-      if (model !== undefined) result.model = model;
+      // Only stamp provenance when a provider was actually resolved — a node that
+      // failed on an unknown `provider:` never ran on the requested provider/model.
+      if (providerResolved) {
+        if (recordedProviderId !== undefined) result.provider = recordedProviderId;
+        if (model !== undefined) result.model = model;
+      }
 
       try {
         await lifecycle.afterNode?.({ runId: ctx.runId, nodeId: ctx.nodeId }, result);
