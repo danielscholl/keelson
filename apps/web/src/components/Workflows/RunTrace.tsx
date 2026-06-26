@@ -30,6 +30,14 @@ function formatDuration(ms?: number | null): string {
   return `${minutes}m ${seconds}s`;
 }
 
+// Runtime provenance chip label: the effective provider + model a node actually
+// ran on (from `node_done` / the persisted row). Renders provider-only or
+// model-only too; null when neither is known (non-LLM node, or pre-terminal).
+function formatProviderModel(provider?: string, model?: string): string | null {
+  if (provider && model) return `${provider} · ${model}`;
+  return provider || model || null;
+}
+
 // Maps node-type → trace-head chip className. Mirrors DagNode's same map
 // so the inline chip in the trace matches the chip in the graph view.
 function chipForType(type?: string): { className: string; label: string } | null {
@@ -139,6 +147,9 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
   }, [status]);
   const chip = chipForType(schema.type);
   const dur = formatDuration(view.durationMs);
+  // Prefer the runtime provider/model the node actually ran on; fall back to the
+  // statically declared model below when the node hasn't terminated yet.
+  const runtimeProvenance = formatProviderModel(view.provider, view.model);
   const isPromptish = schema.type === "prompt" || schema.type === "approval";
 
   // contentParts → tool calls; remaining text blocks render via markdown.
@@ -228,10 +239,16 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
         </button>
         <span>{schema.id}</span>
         {chip && <span className={`node-type ${chip.className}`}>{chip.label}</span>}
-        {schema.model && (
-          <span className="node-model" title={`Model: ${schema.model}`}>
-            {schema.model}
+        {runtimeProvenance ? (
+          <span className="node-model" title={`Ran on ${runtimeProvenance}`}>
+            {runtimeProvenance}
           </span>
+        ) : (
+          schema.model && (
+            <span className="node-model" title={`Model: ${schema.model}`}>
+              {schema.model}
+            </span>
+          )
         )}
         {status === "running" && (
           <span className="typing-dots" role="img" aria-label="streaming">

@@ -127,6 +127,19 @@ export function RunView({
   const runUsage = useMemo(() => sumTokenSpend(Object.values(nodes).map((v) => v.usage)), [nodes]);
   const runTotalTokens = runUsage ? runUsage.inputTokens + runUsage.outputTokens : 0;
 
+  // Run-level provenance chip: collapse to one `provider · model` label only
+  // when every node that reported one agrees. Nodes can pin different
+  // providers/models, so a mixed run shows nothing here (the per-node trace
+  // chips carry the detail) rather than misclaiming a single one.
+  const runProvenance = useMemo(() => {
+    const labels = new Set<string>();
+    for (const v of Object.values(nodes)) {
+      if (!v.provider && !v.model) continue;
+      labels.add(v.provider && v.model ? `${v.provider} · ${v.model}` : (v.provider ?? v.model)!);
+    }
+    return labels.size === 1 ? [...labels][0] : null;
+  }, [nodes]);
+
   const handleCancel = async () => {
     try {
       await cancel();
@@ -189,6 +202,14 @@ export function RunView({
                   title={`${runTotalTokens} tokens total across nodes · ${runUsage.inputTokens} in · ${runUsage.outputTokens} out`}
                 >
                   ↑{formatTokens(runUsage.inputTokens)} ↓{formatTokens(runUsage.outputTokens)}
+                </span>
+              )}
+              {runProvenance && (
+                <span
+                  className="run-provenance"
+                  title={`Every reporting node ran on ${runProvenance}`}
+                >
+                  {runProvenance}
                 </span>
               )}
               {isRunning && (

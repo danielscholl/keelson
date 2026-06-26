@@ -136,6 +136,11 @@ export const nodeOutputRowSchema = z
     // Provider-reported token usage for LLM-backed nodes (migration 4).
     // Defaulted so pre-migration rows and hand-built fixtures keep parsing.
     usage: tokenUsageSchema.nullable().default(null),
+    // Effective provider id / model the node ran on (migration 5; prompt +
+    // command nodes). Null for non-LLM nodes. Defaulted so pre-migration rows
+    // and hand-built fixtures keep parsing.
+    provider: z.string().nullable().default(null),
+    model: z.string().nullable().default(null),
   })
   .strict();
 export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
@@ -291,6 +296,10 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       error: z.string().nullable(),
       // Omitted (not null) when the node spent no reported tokens.
       usage: tokenUsageSchema.optional(),
+      // Effective provider id / model an LLM-backed node ran on, so a live run
+      // shows them without a reload. Omitted for non-LLM nodes.
+      provider: z.string().optional(),
+      model: z.string().optional(),
     })
     .strict(),
   z

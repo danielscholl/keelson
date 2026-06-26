@@ -2182,6 +2182,10 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           completedAt: null,
           error: null,
           usage: null,
+          // The terminal node_done write recreates the row with the resolved
+          // provider/model; the transient awaiting snapshot carries neither.
+          provider: null,
+          model: null,
         });
       } catch (err) {
         console.warn(
@@ -2299,6 +2303,10 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           completedAt: null,
           error: null,
           usage: null,
+          // The loop node's terminal node_done write carries the resolved
+          // provider/model; the per-iteration awaiting snapshot carries neither.
+          provider: null,
+          model: null,
         });
       } catch (err) {
         console.warn(
@@ -2477,6 +2485,22 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   }
 }
 
+// Re-validate a provider/model id from a node result at the trust boundary,
+// mirroring the usage coerce above: the in-tree prompt handler sets clean
+// strings, but an embedder-supplied handler could set a non-string or oversized
+// value that would fail the SPA's strict node_done frame parse and silently drop
+// the whole frame. Returns null (persist/emit nothing) for anything but a
+// non-empty string, and caps length so a pathological value can't bloat the row.
+const MAX_PROVENANCE_FIELD_LEN = 200;
+function sanitizeProvenanceField(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const trimmed = v.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.length > MAX_PROVENANCE_FIELD_LEN
+    ? trimmed.slice(0, MAX_PROVENANCE_FIELD_LEN)
+    : trimmed;
+}
+
 interface DispatchArgs {
   event: RunStreamEvent;
   runId: string;
@@ -2548,6 +2572,8 @@ function dispatchRunEvent(args: DispatchArgs): void {
       // directly, and a nonconforming value here would fail the SPA's strict
       // frame parse — silently dropping the whole node_done.
       const usage = coerceTokenUsage(event.result.usage) ?? null;
+      const provider = sanitizeProvenanceField(event.result.provider);
+      const model = sanitizeProvenanceField(event.result.model);
       store.upsertNodeOutput({
         runId,
         nodeId: event.nodeId,
@@ -2558,6 +2584,8 @@ function dispatchRunEvent(args: DispatchArgs): void {
         completedAt,
         error: event.result.error ?? null,
         usage,
+        provider,
+        model,
       });
       subscribers.broadcast(runId, {
         type: "node_done",
@@ -2565,6 +2593,8 @@ function dispatchRunEvent(args: DispatchArgs): void {
         status,
         error: event.result.error ?? null,
         ...(usage !== null ? { usage } : {}),
+        ...(provider !== null ? { provider } : {}),
+        ...(model !== null ? { model } : {}),
       });
       // Snapshot bridge: a structured node output becomes the latest frame
       // on the run-scoped snapshot key.

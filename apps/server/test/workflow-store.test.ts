@@ -101,6 +101,71 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.nodes[0]!.startedAt).toBe("2025-01-01T00:00:01.000Z");
   });
 
+  test("persists and reads back per-node provider/model (migration 5)", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+    // An LLM node carries the resolved provider + model.
+    store.upsertNodeOutput({
+      runId: "r1",
+      nodeId: "ask",
+      status: "succeeded",
+      outputText: "hi",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:01.000Z",
+      completedAt: "2025-01-01T00:00:02.000Z",
+      error: null,
+      usage: null,
+      provider: "copilot",
+      model: "auto",
+    });
+    // A bash node reports neither.
+    store.upsertNodeOutput({
+      runId: "r1",
+      nodeId: "shell",
+      status: "succeeded",
+      outputText: "",
+      contentParts: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      usage: null,
+      provider: null,
+      model: null,
+    });
+
+    const run = store.getRun("r1");
+    expect(run!.nodes[0]!.provider).toBe("copilot");
+    expect(run!.nodes[0]!.model).toBe("auto");
+    expect(run!.nodes[1]!.provider).toBeNull();
+    expect(run!.nodes[1]!.model).toBeNull();
+
+    // Re-upsert (resume / re-run) overwrites the provenance, not duplicates it.
+    store.upsertNodeOutput({
+      runId: "r1",
+      nodeId: "ask",
+      status: "succeeded",
+      outputText: "hi again",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:01.000Z",
+      completedAt: "2025-01-01T00:00:04.000Z",
+      error: null,
+      usage: null,
+      provider: "claude",
+      model: "claude-sonnet-4-6",
+    });
+    const reread = store.getRun("r1");
+    expect(reread!.nodes).toHaveLength(2);
+    expect(reread!.nodes[0]!.provider).toBe("claude");
+    expect(reread!.nodes[0]!.model).toBe("claude-sonnet-4-6");
+  });
+
   test("getRunUsageTotals sums tokens and counts only nodes carrying usage", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

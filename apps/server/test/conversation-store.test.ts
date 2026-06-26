@@ -203,7 +203,13 @@ describe("SQLite ConversationStore", () => {
     const versions = db2
       .query("SELECT version FROM schema_version ORDER BY version ASC")
       .all() as Array<{ version: number }>;
-    expect(versions).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
+    expect(versions).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+      { version: 5 },
+    ]);
     db2.close();
   });
 

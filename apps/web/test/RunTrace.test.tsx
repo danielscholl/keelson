@@ -42,4 +42,29 @@ describe("RunTrace — per-node model", () => {
     // Exactly one model pill — the bash node carries no model.
     expect(container.querySelectorAll(".node-model")).toHaveLength(1);
   });
+
+  test("runtime provider·model from the node result wins over the declared model", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt", model: "auto" }];
+    const nodes: Record<string, NodeView> = {
+      reason: node({ nodeId: "reason", type: "prompt", provider: "copilot", model: "auto" }),
+    };
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />);
+    // The runtime chip combines provider + model and reads "Ran on …".
+    expect(screen.getByText("copilot · auto")).toBeDefined();
+    expect(screen.getByTitle("Ran on copilot · auto")).toBeDefined();
+    // The static "Model: …" chip is replaced by the runtime one, not duplicated.
+    expect(screen.queryByTitle("Model: auto")).toBeNull();
+  });
+
+  test("falls back to the declared model until the node reports a runtime provider/model", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [
+      { id: "reason", type: "prompt", model: "claude-sonnet-4-6" },
+    ];
+    // Still running — no provider/model on the view yet.
+    const nodes: Record<string, NodeView> = {
+      reason: node({ nodeId: "reason", type: "prompt", status: "running" }),
+    };
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={true} />);
+    expect(screen.getByTitle("Model: claude-sonnet-4-6")).toBeDefined();
+  });
 });
