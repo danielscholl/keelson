@@ -48,6 +48,11 @@ export interface NodeView {
   // Provider-reported token usage for LLM-backed nodes. Live source: the
   // `node_done` frame; snapshot source: the persisted usage_json row.
   usage?: TokenUsage;
+  // Effective provider id / model the node ran on, for LLM-backed nodes. Live
+  // source: the `node_done` frame; snapshot source: the persisted row. Absent
+  // for non-LLM nodes and before the node terminates.
+  provider?: string;
+  model?: string;
 }
 
 export interface RunView {
@@ -219,6 +224,8 @@ function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
       logLines: hydratedLogLines,
       ...(isAwaiting && row.outputText ? { awaitingMessage: row.outputText } : {}),
       ...(row.usage !== null ? { usage: row.usage } : {}),
+      ...(row.provider !== null ? { provider: row.provider } : {}),
+      ...(row.model !== null ? { model: row.model } : {}),
     };
   }
   // awaitingNodeId is derived from the nodes map at the hook boundary;
@@ -602,6 +609,8 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     // Both sides carry the same node_done value when present; either may
     // have missed it (WS gap vs pre-write fetch), so take whichever exists.
     usage: liveSide.usage ?? snapshotSide.usage,
+    provider: liveSide.provider ?? snapshotSide.provider,
+    model: liveSide.model ?? snapshotSide.model,
   };
 }
 
@@ -696,6 +705,11 @@ function applyFrame(
             durationMs: base.startedAt ? Math.max(0, completed - base.startedAt) : undefined,
             error: frame.error,
             ...(frame.usage !== undefined ? { usage: frame.usage } : {}),
+            // node_done is authoritative for provenance: set it from the frame
+            // (absent → cleared, like `error`), so a re-run/resume that drops a
+            // node's provider/model propagates the clear without a full reload.
+            provider: frame.provider,
+            model: frame.model,
             // Approval node resolved — clear its message so the callout
             // doesn't linger after resume.
             awaitingMessage: undefined,

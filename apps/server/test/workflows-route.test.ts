@@ -940,6 +940,63 @@ nodes:
     expect(collect?.usage).toBeNull();
   });
 
+  test("prompt node provider/model persists onto the run detail; bash nodes stay null", async () => {
+    writeWorkflow(
+      "provwf.yaml",
+      `name: provwf
+description: bash + prompt with provider/model provenance
+provider: claude
+nodes:
+  - id: collect
+    bash: echo collected
+  - id: summarize
+    depends_on: [collect]
+    prompt: summarize $collect.output
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    // The provider reports a concrete resolved model via the model chunk — it
+    // must win over the requested "auto"-style hint on the persisted row.
+    const spyProvider = {
+      async *sendQuery() {
+        yield { type: "text", content: "summary" };
+        yield { type: "model", model: "claude-sonnet-4-6-20260219" };
+        yield { type: "done" };
+      },
+    };
+    const promptHandler = makePromptHandler({
+      getProvider: () => spyProvider,
+      resolveProviderId: (id: string | undefined) => id ?? "copilot",
+      getRegisteredTools: () => [],
+    });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore: createConversationStore(db),
+      defaultCwd: tmpDir,
+      promptHandler,
+    });
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/provwf/runs", { inputs: {}, workingDir: tmpDir }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; provider: string | null; model: string | null }>;
+    };
+    expect(run.status).toBe("succeeded");
+    const summarize = run.nodes.find((n) => n.nodeId === "summarize");
+    // Provider resolved from the workflow's `provider: claude`; model from the chunk.
+    expect(summarize?.provider).toBe("claude");
+    expect(summarize?.model).toBe("claude-sonnet-4-6-20260219");
+    const collect = run.nodes.find((n) => n.nodeId === "collect");
+    expect(collect?.provider).toBeNull();
+    expect(collect?.model).toBeNull();
+  });
+
   test("fail_on_tool_error fails the node when a tool errors, even on a normal text reply", async () => {
     writeWorkflow(
       "failtool.yaml",

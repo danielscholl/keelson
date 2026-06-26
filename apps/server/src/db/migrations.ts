@@ -263,6 +263,16 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    description: "workflow node provenance: effective provider + model per LLM node",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE workflow_node_outputs ADD COLUMN provider TEXT;
+        ALTER TABLE workflow_node_outputs ADD COLUMN model TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

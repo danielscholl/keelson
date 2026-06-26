@@ -131,6 +131,10 @@ export interface NodeResult {
   error?: string;
   /** Provider-reported token usage for LLM-backed nodes; absent otherwise. */
   usage?: NodeTokenUsage;
+  /** Effective provider id the node resolved to (e.g. "copilot", a gateway id) for LLM-backed nodes; absent otherwise. */
+  provider?: string;
+  /** Effective model the node ran on — the provider's resolved model when it reports one, else the requested node/workflow/default model. Absent for non-LLM nodes. */
+  model?: string;
 }
 
 export interface NodeHandler {

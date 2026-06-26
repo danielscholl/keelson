@@ -878,6 +878,10 @@ export function bootstrapPromptHandler(
   const timeoutMs = parsePromptTimeoutMs(process.env.KEELSON_WORKFLOW_PROMPT_TIMEOUT_S);
   return makePromptHandler({
     getProvider,
+    // Record the concrete provider id a node ran on: the hint (`node.provider ??
+    // workflow.provider`) resolves to `providerId` (the boot default) when unset,
+    // so a node that pins nothing still surfaces the real provider in the trace.
+    resolveProviderId: (id) => id ?? providerId,
     getRegisteredTools: () => getRegisteredTools() as unknown as readonly { name: string }[],
     denylist,
     // Rib tools are off by default in workflow prompt nodes — a node must opt in

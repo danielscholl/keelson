@@ -1176,6 +1176,126 @@ describe("makePromptHandler", () => {
     });
   });
 
+  describe("provider/model provenance on the NodeResult", () => {
+    test("records the requested model and the resolved provider id", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        // Mirrors the composition root: an unset hint resolves to the boot default.
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "claude-sonnet-4-6" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx({ workflowProvider: "claude" }));
+      expect(result.provider).toBe("claude");
+      expect(result.model).toBe("claude-sonnet-4-6");
+    });
+
+    test("resolveProviderId supplies the concrete provider id when the workflow pins nothing", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { defaultModel: "auto" },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx());
+      // Provider falls back to the boot default; model to the provider default.
+      expect(result.provider).toBe("copilot");
+      expect(result.model).toBe("auto");
+    });
+
+    test("falls back to the raw provider hint when no resolveProviderId is injected", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", provider: "claude" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.provider).toBe("claude");
+    });
+
+    test("a {type:'model'} chunk overrides the requested model (resolved-concrete wins)", async () => {
+      const events: NodeStreamEvent[] = [];
+      const { provider } = makeSpyProvider({
+        chunks: [
+          { type: "text", content: "ok" },
+          { type: "model", model: "claude-sonnet-4-6-20260219" },
+          { type: "done" },
+        ],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      // Requested "auto" (copilot-style); the provider reports the concrete model.
+      const node = { id: "n1", prompt: "", model: "auto" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx({ onEvent: (e) => events.push(e) }));
+      expect(result.model).toBe("claude-sonnet-4-6-20260219");
+      // The model chunk is intercepted (like usage), not fanned out as node_chunk.
+      const chunkTypes = events
+        .filter(
+          (e): e is Extract<NodeStreamEvent, { type: "node_chunk" }> => e.type === "node_chunk",
+        )
+        .map((e) => (e.chunk as { type?: string }).type);
+      expect(chunkTypes).not.toContain("model");
+    });
+
+    test("a blank {type:'model'} chunk does not clobber the requested model", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [
+          { type: "text", content: "ok" },
+          { type: "model", model: "   " },
+          { type: "done" },
+        ],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "gpt-5" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.model).toBe("gpt-5");
+    });
+
+    test("attaches provider/model even when the turn fails", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "error", message: "boom" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "gpt-5" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("failed");
+      expect(result.provider).toBe("copilot");
+      expect(result.model).toBe("gpt-5");
+    });
+
+    test("omits provider/model when no hint, resolver, or model resolves (standalone)", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx());
+      expect(result.provider).toBeUndefined();
+      expect(result.model).toBeUndefined();
+    });
+  });
+
   test("times out even when the provider ignores its abortSignal (hung provider)", async () => {
     // Adversarial provider: parks forever on the first `next()` and does
     // NOT observe its options.abortSignal. Mimics a misbehaving SDK whose
@@ -1424,11 +1544,20 @@ describe("makePromptHandler", () => {
       },
       getRegisteredTools: () => [],
     });
-    const node = { id: "n1", prompt: "", provider: "not-a-real-provider" } as unknown as DagNode;
+    const node = {
+      id: "n1",
+      prompt: "",
+      provider: "not-a-real-provider",
+      model: "gpt-5",
+    } as unknown as DagNode;
     const result = await handler.handle(node, buildCtx());
     expect(result.status).toBe("failed");
     expect(result.error).toContain("not-a-real-provider");
     expect(result.error).toContain("not registered");
+    // The provider never resolved, so the failed node must NOT claim it "ran on"
+    // the requested provider/model.
+    expect(result.provider).toBeUndefined();
+    expect(result.model).toBeUndefined();
   });
 
   describe("output_format", () => {

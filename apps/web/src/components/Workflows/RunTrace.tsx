@@ -2,6 +2,7 @@ import type { WorkflowNodeSummary } from "@keelson/shared";
 import { useEffect, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
@@ -139,6 +140,13 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
   }, [status]);
   const chip = chipForType(schema.type);
   const dur = formatDuration(view.durationMs);
+  // Once the node has run (has a runtime provider/model), show what it ran on,
+  // backfilling the model from the declared `schema.model` when the runtime
+  // reported none. Before then, fall through to the static declared-model chip.
+  const hasRuntimeProvenance = view.provider !== undefined || view.model !== undefined;
+  const runtimeProvenance = hasRuntimeProvenance
+    ? formatProviderModel(view.provider, view.model, schema.model)
+    : null;
   const isPromptish = schema.type === "prompt" || schema.type === "approval";
 
   // contentParts → tool calls; remaining text blocks render via markdown.
@@ -228,10 +236,16 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
         </button>
         <span>{schema.id}</span>
         {chip && <span className={`node-type ${chip.className}`}>{chip.label}</span>}
-        {schema.model && (
-          <span className="node-model" title={`Model: ${schema.model}`}>
-            {schema.model}
+        {runtimeProvenance ? (
+          <span className="node-model" title={`Ran on ${runtimeProvenance}`}>
+            {runtimeProvenance}
           </span>
+        ) : (
+          schema.model && (
+            <span className="node-model" title={`Model: ${schema.model}`}>
+              {schema.model}
+            </span>
+          )
         )}
         {status === "running" && (
           <span className="typing-dots" role="img" aria-label="streaming">

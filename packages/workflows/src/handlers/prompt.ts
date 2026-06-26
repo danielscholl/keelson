@@ -163,6 +163,16 @@ export interface MakePromptHandlerOptions {
    * provider-error path.
    */
   getProvider: (id?: string) => PromptHandlerProvider;
+  /**
+   * Resolves the effective provider id a node ran on, given the node/workflow
+   * hint (`node.provider ?? workflow.provider`, or undefined). The composition
+   * root returns `id ?? <default provider id>` so the recorded provider is the
+   * concrete registry id — including a gateway's instance id, which `getType()`
+   * can't surface — even when the workflow pins nothing. Absent → the handler
+   * records the raw hint (possibly undefined), so a standalone caller degrades
+   * gracefully rather than throwing.
+   */
+  resolveProviderId?: (id?: string) => string;
   /** Registered tool catalog. Called once per node invocation so post-boot registrations are picked up. */
   getRegisteredTools: () => readonly { name: string; [k: string]: unknown }[];
   /** Tool names to exclude. Defaults to DEFAULT_TOOL_DENYLIST when undefined; an explicit empty array allows everything. */
@@ -326,6 +336,13 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           ? workflowProviderRaw.trim()
           : undefined;
       const effectiveProviderId = nodeProvider ?? workflowProvider;
+      // The concrete provider id to record on the result: the composition root's
+      // resolver maps the hint to the registered id it actually serves (the
+      // default when the hint is undefined; a gateway's instance id, which
+      // `getType()` collapses to "gateway"). Falls back to the raw hint when no
+      // resolver is injected (standalone / test construction).
+      const recordedProviderId =
+        opts.resolveProviderId?.(effectiveProviderId) ?? effectiveProviderId;
 
       // Surface a one-off `run_warning` when the active provider
       // can't honor the per-node config we just resolved. Only claude
@@ -437,6 +454,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       let assistantText = "";
       let providerError: string | null = null;
+      // Set once consume() successfully resolves the provider. Gates the
+      // provenance attach below: a node that failed BECAUSE its provider
+      // couldn't be resolved (unknown `provider:` id) must not claim it "ran on"
+      // that provider/model — it never opened a session.
+      let providerResolved = false;
       // Set when any tool the turn invoked returned an error result; consulted
       // after the stream when the node opts into `fail_on_tool_error`.
       let toolErrored = false;
@@ -490,6 +512,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const consume = async (): Promise<void> => {
         try {
           const provider = opts.getProvider(effectiveProviderId);
+          providerResolved = true;
           if (model === undefined) {
             const defaultModel = provider.getCapabilities?.().defaultModel;
             if (typeof defaultModel === "string" && defaultModel.length > 0) {
@@ -555,6 +578,16 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             if (t === "usage") {
               const sanitized = sanitizeNodeUsage((chunk as { usage?: unknown }).usage);
               if (sanitized !== undefined) nodeUsage = sanitized;
+              continue;
+            }
+            if (t === "model") {
+              // A provider that resolves a concrete model server-side reports it
+              // through this chunk (mirrors the chat handler). Override the
+              // requested model so the recorded value is what actually ran, not
+              // the "auto"-style hint. Rides NodeResult, not the node_chunk channel.
+              // Ignore a blank report so it can't null out a real requested model.
+              const reported = (chunk as { model?: unknown }).model;
+              if (typeof reported === "string" && reported.trim().length > 0) model = reported;
               continue;
             }
             if (t === "text") {
@@ -686,8 +719,15 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         };
       }
       // Attach regardless of outcome — a failed or timed-out turn still
-      // spent whatever the provider reported before the cut.
+      // spent whatever the provider reported before the cut, and still ran on a
+      // resolved provider/model worth surfacing in the trace.
       if (nodeUsage !== undefined) result.usage = nodeUsage;
+      // Only stamp provenance when a provider was actually resolved — a node that
+      // failed on an unknown `provider:` never ran on the requested provider/model.
+      if (providerResolved) {
+        if (recordedProviderId !== undefined) result.provider = recordedProviderId;
+        if (model !== undefined) result.model = model;
+      }
 
       try {
         await lifecycle.afterNode?.({ runId: ctx.runId, nodeId: ctx.nodeId }, result);

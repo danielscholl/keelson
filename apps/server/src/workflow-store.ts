@@ -66,6 +66,10 @@ export interface UpsertNodeOutputInput {
   completedAt: string | null;
   error: string | null;
   usage: TokenUsage | null;
+  // Effective provider id / model the node ran on (prompt + command nodes).
+  // Null for non-LLM nodes and for the transient `awaiting` snapshot.
+  provider: string | null;
+  model: string | null;
 }
 
 export interface UpdateRunStatusInput {
@@ -153,6 +157,8 @@ interface NodeRow {
   completed_at: string | null;
   error: string | null;
   usage_json: string | null;
+  provider: string | null;
+  model: string | null;
 }
 
 function rowToRunSummary(row: RunRow): WorkflowRunSummary {
@@ -201,6 +207,8 @@ function rowToNodeOutput(row: NodeRow): NodeOutputRow {
     completedAt: row.completed_at,
     error: row.error,
     usage: parsePersistedTokenUsage(row.usage_json) ?? null,
+    provider: row.provider,
+    model: row.model,
   };
 }
 
@@ -249,8 +257,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "SELECT * FROM workflow_runs WHERE status = ? ORDER BY started_at DESC, rowid DESC",
   );
   const upsertNode = db.prepare(
-    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO workflow_node_outputs(run_id, node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id, node_id) DO UPDATE SET
        status = excluded.status,
        output_text = excluded.output_text,
@@ -258,13 +266,15 @@ export function createWorkflowStore(db: Database): WorkflowStore {
        started_at = excluded.started_at,
        completed_at = excluded.completed_at,
        error = excluded.error,
-       usage_json = excluded.usage_json`,
+       usage_json = excluded.usage_json,
+       provider = excluded.provider,
+       model = excluded.model`,
   );
   // rowid tiebreak preserves DAG insertion order when two nodes share a
   // completed_at millisecond — the executor runs siblings in parallel and
   // commits via the per-layer write buffer, so timestamp ties are common.
   const selectNodes = db.prepare(
-    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
+    "SELECT node_id, status, output_text, content_parts_json, started_at, completed_at, error, usage_json, provider, model FROM workflow_node_outputs WHERE run_id = ? ORDER BY rowid ASC",
   );
   // Usage rides as JSON in usage_json, so the sum is done in JS over the run's
   // node rows rather than in SQL. Selects only the JSON column.
@@ -315,6 +325,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.completedAt,
         input.error,
         input.usage !== null ? JSON.stringify(input.usage) : null,
+        input.provider,
+        input.model,
       );
     },
     getRunUsageTotals(runId) {
