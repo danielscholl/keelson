@@ -140,9 +140,13 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
   }, [status]);
   const chip = chipForType(schema.type);
   const dur = formatDuration(view.durationMs);
-  // Prefer the runtime provider/model the node actually ran on; fall back to the
-  // statically declared model below when the node hasn't terminated yet.
-  const runtimeProvenance = formatProviderModel(view.provider, view.model);
+  // Once the node has run (has a runtime provider/model), show what it ran on,
+  // backfilling the model from the declared `schema.model` when the runtime
+  // reported none. Before then, fall through to the static declared-model chip.
+  const hasRuntimeProvenance = view.provider !== undefined || view.model !== undefined;
+  const runtimeProvenance = hasRuntimeProvenance
+    ? formatProviderModel(view.provider, view.model, schema.model)
+    : null;
   const isPromptish = schema.type === "prompt" || schema.type === "approval";
 
   // contentParts → tool calls; remaining text blocks render via markdown.

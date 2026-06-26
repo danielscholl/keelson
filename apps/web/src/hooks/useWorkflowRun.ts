@@ -705,8 +705,11 @@ function applyFrame(
             durationMs: base.startedAt ? Math.max(0, completed - base.startedAt) : undefined,
             error: frame.error,
             ...(frame.usage !== undefined ? { usage: frame.usage } : {}),
-            ...(frame.provider !== undefined ? { provider: frame.provider } : {}),
-            ...(frame.model !== undefined ? { model: frame.model } : {}),
+            // node_done is authoritative for provenance: set it from the frame
+            // (absent → cleared, like `error`), so a re-run/resume that drops a
+            // node's provider/model propagates the clear without a full reload.
+            provider: frame.provider,
+            model: frame.model,
             // Approval node resolved — clear its message so the callout
             // doesn't linger after resume.
             awaitingMessage: undefined,

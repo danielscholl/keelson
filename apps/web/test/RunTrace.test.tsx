@@ -67,4 +67,16 @@ describe("RunTrace — per-node model", () => {
     render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={true} />);
     expect(screen.getByTitle("Model: claude-sonnet-4-6")).toBeDefined();
   });
+
+  test("backfills the declared model when the runtime reports a provider but no model", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt", model: "auto" }];
+    // Ran on copilot, but the provider reported no concrete model.
+    const nodes: Record<string, NodeView> = {
+      reason: node({ nodeId: "reason", type: "prompt", provider: "copilot" }),
+    };
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />);
+    // Provider from the runtime, model backfilled from the declared "auto".
+    expect(screen.getByText("copilot · auto")).toBeDefined();
+    expect(screen.getByTitle("Ran on copilot · auto")).toBeDefined();
+  });
 });

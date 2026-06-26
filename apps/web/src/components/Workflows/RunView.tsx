@@ -133,13 +133,17 @@ export function RunView({
   // providers/models, so a mixed run shows nothing here (the per-node trace
   // chips carry the detail) rather than misclaiming a single one.
   const runProvenance = useMemo(() => {
+    const declaredByNode = new Map(workflow.nodes.map((n) => [n.id, n.model]));
     const labels = new Set<string>();
-    for (const v of Object.values(nodes)) {
-      const label = formatProviderModel(v.provider, v.model);
+    for (const [id, v] of Object.entries(nodes)) {
+      // Only nodes that actually ran on a provider; backfill the model from the
+      // node's declared `model:` when the runtime reported none.
+      if (v.provider === undefined && v.model === undefined) continue;
+      const label = formatProviderModel(v.provider, v.model, declaredByNode.get(id));
       if (label !== null) labels.add(label);
     }
     return labels.size === 1 ? [...labels][0] : null;
-  }, [nodes]);
+  }, [nodes, workflow.nodes]);
 
   const handleCancel = async () => {
     try {
