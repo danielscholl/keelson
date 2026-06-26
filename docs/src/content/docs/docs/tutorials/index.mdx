@@ -1,6 +1,6 @@
 ---
 title: Tutorials
-description: A problem-first learning rail, from nothing installed to building your own rib.
+description: A problem-first learning rail, from nothing installed to a real multi-model build.
 sidebar:
   order: 0
 ---
@@ -9,46 +9,51 @@ import { LinkCard } from "@astrojs/starlight/components";
 
 The tutorials are one rail, not a menu. Each page opens with the problem the
 last one left you holding, ends at a working checkpoint, and hands off to the
-next. Every command and its output is real, and the first three pages run
-without credentials: the offline stub provider stands in wherever a real
-coding agent would, so you can verify the harness before you bring keys.
+next. Every command and its output is real, and so is the agent: the rail assumes
+a GitHub Copilot subscription, which a fresh keelson defaults to. (Driving Claude,
+Codex, or Pi instead changes nothing but the sign-in; the [configuration
+guide](../guides/configuration/) covers it.)
 
-Ride it in order. The capstone, building your own rib, is what the first two
-pages are quietly preparing you for, and the closing field exercise brings real
-models to everything you learned.
+Ride it in order. Each stop uses the harness for something real and leaves you
+ready for the next, and the closing field exercise puts all of it to work on a
+multi-model build.
 
-The whole rail is four stops, and you can ride the first three before you bring
-any credentials:
+The whole rail is five stops:
 
 <figure>
   <img
     src={`${import.meta.env.BASE_URL}assets/figures/tutorial-rail.svg`}
-    alt="The four-stop tutorial rail from nothing installed through first run, first workflow, first rib, and many models. The first three stops run on the offline stub; the fourth brings real models."
+    alt="The five-stop tutorial rail, left to right from nothing installed: 1 First run, one full chat turn; 2 Talk to the agent, three surfaces and one store; 3 First workflow, a YAML DAG executes; 4 Remember, evidence it recalls later; and 5 Real build, one app on many models."
   />
   <figcaption>
-    Figure 1. The tutorial rail. Each stop hands off to the next; the first
-    three run credential-free on the stub, and the closing field exercise brings
-    real models to everything you learned.
+    Figure 1. The tutorial rail. Each stop hands off to the next: install and
+    run, talk to the agent three ways, make a task repeatable, make it remember,
+    then put all of it to work on a real multi-model build.
   </figcaption>
 </figure>
 
 <LinkCard
   title="1. Your first run"
   href="first-run/"
-  description="Install the harness, read its health sweep, start the server, and push one chat turn through the whole loop."
+  description="Install the harness, read its health sweep, sign in to Copilot, and push one chat turn through the whole loop."
 />
 <LinkCard
-  title="2. Run your first workflow"
+  title="2. Talk to the agent"
+  href="talk-to-the-agent/"
+  description="Work the agent three ways — the browser Chat surface, the interactive terminal, and a scriptable one-shot — all backed by one persisted store."
+/>
+<LinkCard
+  title="3. Run and author a workflow"
   href="run-a-workflow/"
-  description="Author a four-node YAML DAG, let validation catch a broken reference, and watch the engine execute it."
+  description="Run the bundled smoke-test, then author a four-node YAML DAG, let validation catch a broken reference, and watch the engine execute it."
 />
 <LinkCard
-  title="3. Build your first rib"
-  href="build-your-first-rib/"
-  description="The capstone: the harness ships with no tools, so implement the contract in two files, install from a local path, and watch discovery wire your tool into the registry."
+  title="4. Make it remember"
+  href="remember-across-sessions/"
+  description="Give a project a notebook and a governed memory, then watch a fresh session recall what an earlier one learned, only after you approve it."
 />
 <LinkCard
-  title="4. One workflow, many models"
+  title="5. One workflow, many models"
   href="frontend-mix/"
   description="The field exercise: clone a template project, run a real app build that routes each phase to a different model, then swap one and compare."
 />

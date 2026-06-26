@@ -1,8 +1,8 @@
 ---
-title: Run your first workflow
-description: Author a four-node YAML workflow, let validation catch a broken reference, and watch the DAG execute.
+title: Run and author a workflow
+description: Run the bundled smoke-test, then author a four-node YAML workflow, break it to see validation catch it, and watch the DAG execute.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 import { Aside } from "@astrojs/starlight/components";
@@ -10,19 +10,84 @@ import { Aside } from "@astrojs/starlight/components";
 Chat is improvisation: good for exploration, wrong for work you need to run
 the same way every time. For repeatable work keelson has workflows, plain
 YAML files that describe a DAG of nodes the engine executes deterministically.
-In this tutorial you author one from scratch, break it on purpose to see what
-validation catches, and watch it run.
+You will run one that already ships, then author one from scratch, break it on
+purpose to see what validation catches, and watch it run.
 
 <Aside type="note" title="Before you start">
-[Your first run](../first-run/) behind you, so a server is up (or the CLI falls
-back to running in-process) and the stub provider is available. No credentials:
-this whole page runs on the stub, same as the chat turn you just pushed through.
+[Talk to the agent](../talk-to-the-agent/) behind you, so a server is up and
+Copilot is signed in. Every `prompt` node here runs a real agent turn, the same
+way the conversations you just held did.
 </Aside>
+
+## Run one that already shipped
+
+[Your first run](../first-run/) seeded eight starter workflows, the ones `doctor`
+counted, and you can run any of them before writing a line of YAML. List the
+catalog:
+
+```sh
+keelson workflow list
+```
+
+```text
+workflows:
+  -     name: smoke-test
+    description:
+Use when: User wants to verify the workflow engine end-to-end ...
+    nodeCount: 9
+    source: global
+  - ...
+```
+
+Run `smoke-test` first. It exercises every node type the engine supports on Bun
+alone, so a clean run is an end-to-end proof that the engine works on your
+machine. Run it with `--watch`:
+
+```sh
+keelson workflow run smoke-test --watch
+```
+
+```text
+◆ target: cwd=/Users/you
+▶ run 4f2a1c9e (smoke-test)
+  · prompt-node …
+  · command-node …
+  · loop-node …
+  · bash-json-node …
+  · script-bun-node …
+  ✓ bash-json-node
+    {"echoed":"no-input","timestamp":"2026-06-26T21:12:13.164Z"}
+  ✓ script-bun-node
+  ✓ prompt-node
+  ✓ command-node
+  ✓ loop-node
+  · downstream …
+  · gated …
+    downstream got: ok
+    gated-ok
+  ✓ downstream
+  ✓ gated
+  · merge …
+    merge-ok
+  ✓ merge
+  · assert …
+    PASS: all node types verified
+  ✓ assert
+■ succeeded
+```
+
+Five nodes with no dependencies start together; the rest fall in behind them as
+their inputs land. The agent nodes did real turns (`prompt-node` was asked for
+exactly `ok`, and `downstream` read that answer back through the env channel),
+and the final `assert` node checks that every upstream node produced output and
+prints `PASS`. That is a nine-node workflow shipping in the box, exercising every
+node type with no authoring. Now write your own.
 
 ## Hit the wall first
 
-[Your first run](../first-run/) seeded a few starter workflows, but not the one
-you have in mind. Try running a name that does not exist yet:
+You just ran a workflow that ships in the box. Authoring your own is the same
+catalog, one directory over: a workflow is a YAML file in `~/.keelson/workflows`,
+and the one you have in mind is not there yet. Run it and you hit the wall:
 
 ```sh
 keelson workflow run hello-harness
@@ -156,12 +221,12 @@ keelson workflow run hello-harness --watch
     {"status":"ok"}
   ✓ check
   · report …
-    the agent said: Reply with exactly the words 'engine answers' and nothing else.
+    the agent said: engine answers
   ✓ report
   · done …
     all checks passed
   ✓ done
-■ succeeded (13ms)
+■ succeeded (2.1s)
 ```
 
 Read the trace against Figure 1. `ask` and `check` started together because
@@ -169,15 +234,15 @@ neither has dependencies. `report` waited for `ask`, then read its output
 through the env channel. `done` waited for both parents, evaluated its gate
 against `check`'s JSON, and ran.
 
-One line deserves a second look: the agent "said" your prompt back. This run
-used the stub provider from the previous tutorial, and the stub echoes
-prompts instead of answering them. That is a feature here: the run is fully
-deterministic with zero credentials. Register a real provider and the same
-file, unchanged, sends `ask` to a real coding agent.
+One line deserves a second look: `report` printed the agent's answer, not your
+prompt. The `ask` node asked the model for exactly `engine answers`, and `report`
+surfaced that through the env channel, not a shared chat history. The nodes never
+share a conversation; they hand each other output, which is what makes a workflow
+a DAG and not a chat.
 
 <Aside type="note" title="Pinning the provider">
 `KEELSON_WORKFLOW_PROVIDER` pins which provider every `prompt` node uses,
-independent of what chat uses. Unset, workflows prefer the first non-stub
+independent of what chat uses. Unset, workflows prefer the first real
 provider the server registered.
 </Aside>
 
@@ -232,7 +297,7 @@ runs discovery in-process.
 | `error: no workflow named '...'` (exit `4`) | The name matches no file in `~/.keelson/workflows`. Run `keelson workflow list` to see the catalog, and check the spelling and the `.yaml` extension. |
 | A `prompt` node fails with `idle_timeout` | The agent turn produced no output for longer than the node's `idle_timeout` (30s here). Raise it on the node, or confirm a provider is registered, since an unconfigured provider can stall the turn. |
 | A `bash` node reads an empty upstream value | Dot-access like `$ask.output` is for `when:` and prompt text. A `bash` node reads upstream output from the `KEELSON_NODE_<id>_OUTPUT` env var (the id's hyphens become underscores). |
-| Every `prompt` node echoes instead of answering | Only the stub provider is registered, so it echoes. Register a real provider, or pin one with `KEELSON_WORKFLOW_PROVIDER`. |
+| A `prompt` node fails with a Copilot authentication error | Copilot is not signed in for the server running the workflow. Re-run the [first-run sign-in](../first-run/#sign-in-to-copilot); `keelson doctor` confirms it. |
 
 ## What you proved
 
@@ -241,8 +306,8 @@ Validation catches broken graphs before execution, the watch stream shows you
 the DAG executing in dependency order, and the provider is swappable without
 touching the file.
 
-So far the agent side of the harness can only echo. The capabilities that make an
-agent worth harnessing arrive as ribs: installable packages that register tools.
-None ship in the box, so the next page builds one from the two-file contract.
+A workflow runs the same way every time, but each run still starts from nothing
+it learned last time. The next page gives the harness a memory: standing context
+a run can draw on, and conclusions it can hand back to you.
 
-**Continue to** [Build your first rib](../build-your-first-rib/).
+**Continue to** [Make it remember](../remember-across-sessions/).

@@ -1,0 +1,170 @@
+---
+title: Make it remember
+description: Give a project a notebook and a governed memory, then watch a fresh session recall what an earlier one learned, only after you approve it.
+sidebar:
+  order: 4
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+Everything so far starts cold. A new chat knows nothing the last one worked out;
+a workflow run begins from zero every time. That is fine for one-off work and
+wrong for a tool you come back to. The harness can carry knowledge across
+sessions, but on a strict rule: it remembers things as **evidence**, and only you
+grant a memory the right to instruct the agent. This page wires that up and then
+proves it from a session that never saw the original fact.
+
+<Aside type="note" title="Before you start">
+A server up and Copilot signed in from [Your first run](../first-run/), and the
+earlier stops behind you. This page leans on the agent reasoning over what it
+recalls, so every turn here is a real one.
+</Aside>
+
+## Two tiers, one rule
+
+Standing context comes in two tiers, and reaching for the right one is most of
+the skill:
+
+| Tier | What it is | How it is governed |
+| --- | --- | --- |
+| **Notebook** | One markdown doc per project, injected into every chat turn for that project, in full. | The conventions you hand the agent. Always present, no ranking. |
+| **Memory** | Typed rows that accumulate: a decision, a lesson, a constraint, a failure. | Written as evidence, reviewed by you, recalled by relevance and recency. |
+
+One rule governs both: **writing a memory and trusting it are separate events,
+and only you connect them.** The notebook is the simple lever; reach for it
+first. Memory is the harder tier, for facts that pile up from runs you were not
+watching.
+
+## Bind a project
+
+Both tiers are scoped to a project, so make one. Any working directory will do:
+
+```sh
+keelson project add demo "$(pwd)"
+```
+
+From now on, chats and runs you start from here resolve to `demo`, and the
+project chip in the Chat composer says so. Scoping matters: a fact you teach
+`demo` never leaks into another project's context.
+
+## The notebook: what you tell it
+
+Open **Chat**, confirm the composer is bound to `demo`, and hand the agent a
+standing convention, the kind of thing you would otherwise repeat every session:
+
+```text
+We deploy this project only from the `release` branch, never from `main`.
+Record that as a project convention.
+```
+
+A real agent takes that as a cue to call its `note_project` tool, which appends
+the line to the project notebook. (You can also do it by hand: **Add to notebook**
+on any message captures it without waiting for the agent to decide.) Either way
+the notebook now holds that convention, and the notebook is injected into every
+future turn for `demo`, in full.
+
+Prove it the only way that counts: open a **brand-new conversation** in `demo`
+and ask a question that depends on the fact, without restating it.
+
+```text
+Which branch do we deploy from?
+```
+
+It answers `release`, from a conversation that never heard you say so. That is
+the simplest cross-session memory there is: a document the harness reads back
+into every turn.
+
+## Memory: what it learns
+
+The notebook is what you tell the agent. Memory is what the agent learns and
+proposes back to you. The richest writer is a workflow node (more on that below),
+but you can promote a chat answer too. Find a reply worth keeping, something the
+agent concluded that you want future runs to know, and use the **Remember**
+action on that message.
+
+That drafts a typed memory row. Its provenance is hard-coded to `generated`, and
+before it lands, guardrails screen it: known secret patterns are rejected, size
+is capped, and an idempotency key keeps re-runs from writing duplicates. A draft
+that survives arrives **pending**. Pending means recorded but unable to influence
+the agent. Not yet.
+
+## Review the queue
+
+Open the **Memory** surface. This is the review queue, and reviewing is a human
+step by design: there is no auto-promotion. Each pending row offers a verdict:
+
+| Action | Effect |
+| --- | --- |
+| **Confirm** | Instruction-grade: eligible to be injected into future system prompts. |
+| **Evidence-only** | Kept and searchable, but never auto-injected as an instruction. |
+| **Restrict** | Held out of automatic injection. |
+| **Reject** | Discarded. |
+| **Mark stale** | Kept in the database but excluded from injection and recall. |
+
+**Confirm** the memory you just drafted. It is now instruction-grade.
+
+<Aside type="caution" title="Remembered is not believed">
+An agent-generated memory cannot mark itself safe to instruct future agents.
+Influence is granted only by your review, and every action lands in an audit
+journal. That asymmetry is the whole point: it lets the harness accumulate
+knowledge from unattended runs without letting an unattended run teach the next
+one something wrong.
+</Aside>
+
+## Recall in a fresh session
+
+Start one more new conversation in `demo` and ask something your confirmed memory
+answers. The agent uses it. Recall is full-text search, ranked by relevance and
+weighted by recency on a thirty-day half-life, so stale facts fade rather than
+linger. It is scoped to the project and filtered by your review policy, so only
+the row you confirmed was eligible; an `evidence-only` or `pending` row would have
+stayed out.
+
+Everything the agent knows across sessions converges in the system prompt
+assembled for the turn, in a fixed order, and nothing else is slipped in:
+
+<Steps>
+
+1. The project notebook, in full.
+
+2. The memory recall section: a few approved, recent, relevant rows.
+
+3. The conversation's seed prompt, when a surface primed one.
+
+4. Workflow guidance, when workflow tools are active for the turn.
+
+</Steps>
+
+If the agent knows something it was not just told, it came through one of those
+four doors, and three of them are files or rows you can open and read.
+
+<Aside type="note" title="Memory from unattended runs">
+The chat **Remember** action is the manual path. The one that scales is a
+workflow: a `prompt` node can declare a `memory.writeback` to deposit a typed
+memory when it settles, and a `memory.recall` block to open with what earlier
+runs learned. That is how an overnight run leaves you a reviewable trail, and how
+the next run starts warm. The [workflow nodes
+reference](../../reference/workflow-nodes/) documents both blocks.
+</Aside>
+
+## Common errors
+
+| Symptom | What's happening |
+| --- | --- |
+| The new conversation ignores the confirmed memory | Recall is scoped to the project. Make sure the new chat's composer chip shows `demo`, the same project you confirmed the memory under. |
+| A drafted memory never reached the queue | A guardrail dropped it: a secret pattern, an over-cap size, or an idempotency match against an existing row. Reword and try again. |
+| The notebook fact is not applied | The notebook is per-project. Confirm the conversation is bound to `demo`, not the default project. |
+
+## What you proved
+
+A project carries two kinds of standing context: a notebook you write directly
+and govern by editing, and a memory the agent drafts and you govern by review.
+The asymmetry between writing and trusting is enforced, not advisory, so the
+harness can learn from runs you did not watch without any run promoting its own
+conclusions. A fresh session read back exactly what you approved, and nothing you
+did not.
+
+You can talk to the harness, make a task repeatable, and make it remember. One
+exercise remains: put all three to work on a real project, with real models.
+
+**Continue to** [One workflow, many models](../frontend-mix/).
