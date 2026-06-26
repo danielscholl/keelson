@@ -198,12 +198,29 @@ server's SQLite store, so if you open the Chat surface in the browser you will
 find the same session there. Swap the stub for a real provider and the exact
 same path carries a real coding agent.
 
+<Aside type="tip" title="Bring a real provider">
+Have a GitHub Copilot subscription or an Anthropic API key? Start the server with
+`KEELSON_PROVIDERS=copilot` (or `claude`) instead of `stub`, then run
+`keelson chat "hello, keelson"` with no `--provider stub` flag. The same loop now
+carries a real coding agent. The [configuration guide](../../guides/configuration/)
+covers enabling each provider and signing in.
+</Aside>
+
 <Aside type="note" title="When the server is down">
 `keelson chat` and `keelson workflow run` do not require the server. When it
 is down they fall back to in-process execution and print to stdout, which is
 why the CLI works for quick checks even before `keelson start`. Server-backed
 features like the browser UI and the rib commands need the server up.
 </Aside>
+
+## Common errors
+
+| Symptom | What's happening |
+| --- | --- |
+| `keelson: command not found` after install | `~/.local/bin` is not on your PATH. Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile and reopen the shell. The installer's last lines print the exact path to add. |
+| `keelson version` reports a version you did not install | Another `keelson` is earlier on your PATH. Run `which -a keelson`; the copy in `~/.local/bin` should be the one that resolves. |
+| `doctor` warns on the `server` and `db` checks | Expected before your first `keelson start`: both resolve once the server boots and creates the database, so neither is an error on a fresh install. |
+| `keelson chat` echoes your message back unchanged | Also expected. The stub provider echoes instead of answering; swap in a real provider (the tip above) for real replies. |
 
 ## What you proved
 
