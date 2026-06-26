@@ -190,12 +190,25 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
       // Usage summed across iterations so the loop node reports what the
       // whole loop spent, not just the final iteration.
       let loopUsage: NodeTokenUsage | undefined;
-      const withUsage = (result: NodeResult): NodeResult =>
-        loopUsage !== undefined ? { ...result, usage: loopUsage } : result;
+      // Provenance the iterations resolved to. The prompt handler stamps
+      // provider/model per iteration; without carrying them here they'd be
+      // dropped at the loop's edge, so a loop node would show no provider/model
+      // while sibling prompt/command nodes do. Last-seen wins: the model is
+      // fixed per node, but a provider that reports a concrete model only does
+      // so once a turn runs, so a later iteration can sharpen "auto" into the
+      // real id.
+      let loopProvider: string | undefined;
+      let loopModel: string | undefined;
+      const finalize = (result: NodeResult): NodeResult => ({
+        ...result,
+        ...(loopUsage !== undefined ? { usage: loopUsage } : {}),
+        ...(loopProvider !== undefined ? { provider: loopProvider } : {}),
+        ...(loopModel !== undefined ? { model: loopModel } : {}),
+      });
 
       for (let i = 1; i <= loop.max_iterations; i++) {
         if (ctx.abortSignal.aborted) {
-          return withUsage(failed(`Loop node '${node.id}': aborted`, prevOutput));
+          return finalize(failed(`Loop node '${node.id}': aborted`, prevOutput));
         }
 
         ctx.emit({
@@ -233,7 +246,9 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
 
         const result = await promptHandler.handle(synthesized, iterCtx);
         loopUsage = addNodeUsage(loopUsage, result.usage);
-        if (result.status !== "succeeded") return withUsage(result);
+        if (result.provider !== undefined) loopProvider = result.provider;
+        if (result.model !== undefined) loopModel = result.model;
+        if (result.status !== "succeeded") return finalize(result);
 
         const text =
           result.output.kind === "text" ? result.output.text : JSON.stringify(result.output.value);
@@ -242,7 +257,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
         lastStripped = stripped;
 
         if (detectCompletionSignal(text, loop.until)) {
-          return withUsage({ status: "succeeded", output: { kind: "text", text: stripped } });
+          return finalize({ status: "succeeded", output: { kind: "text", text: stripped } });
         }
 
         // Schema already enforces min(1) on until_bash, but guard at the
@@ -279,7 +294,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
             // catch it, but short-circuiting here returns a failed result
             // with the right error message instead of looping once more.
             if (probe.aborted === true || ctx.abortSignal.aborted) {
-              return withUsage(failed(`Loop node '${node.id}': aborted`, stripped));
+              return finalize(failed(`Loop node '${node.id}': aborted`, stripped));
             }
             if (probe.timedOut === true) {
               ctx.emit({
@@ -287,7 +302,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
                 line: `until_bash probe timed out (iteration ${String(i)}) — continuing`,
               });
             } else if (probe.exitCode === 0) {
-              return withUsage({ status: "succeeded", output: { kind: "text", text: stripped } });
+              return finalize({ status: "succeeded", output: { kind: "text", text: stripped } });
             }
             // Non-zero (and timeouts) keep iterating — matches Archon's
             // behavior: the probe is a hint, not a fatal check.
@@ -334,7 +349,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
             );
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
-            return withUsage({
+            return finalize({
               status: "failed",
               output: { kind: "text", text: stripped },
               error: ctx.abortSignal.aborted ? "aborted" : reason,
@@ -347,7 +362,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
 
       // Hit max_iterations without seeing `until` — SUCCESS with the last
       // iteration's stripped output (matches Archon's behavior).
-      return withUsage({ status: "succeeded", output: { kind: "text", text: lastStripped } });
+      return finalize({ status: "succeeded", output: { kind: "text", text: lastStripped } });
     },
   };
 }
