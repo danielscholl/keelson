@@ -735,6 +735,63 @@ describe("makeLoopHandler — AI passthrough", () => {
   });
 });
 
+describe("makeLoopHandler — provider/model provenance", () => {
+  test("stamps the provider/model the iterations resolved to onto the loop's terminal result", async () => {
+    const { handler: promptHandler } = makeRecorderHandler((_, i) =>
+      i === 0
+        ? {
+            status: "succeeded",
+            output: { kind: "text", text: "working" },
+            provider: "copilot",
+            model: "gpt-5",
+          }
+        : {
+            status: "succeeded",
+            output: { kind: "text", text: "<promise>DONE</promise>" },
+            provider: "copilot",
+            model: "gpt-5",
+          },
+    );
+    const handler = makeLoopHandler({ promptHandler });
+    const result = await handler.handle(loopNode({}), buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(result.provider).toBe("copilot");
+    expect(result.model).toBe("gpt-5");
+  });
+
+  test("a later iteration's resolved model wins (last-seen) on the max_iterations success path", async () => {
+    // iter 1 reports the "auto" hint; iter 2 sharpens to a concrete id, the
+    // way a provider that resolves its model server-side reports it mid-run.
+    const { handler: promptHandler } = makeRecorderHandler((_, i) => ({
+      status: "succeeded",
+      output: { kind: "text", text: "still working" },
+      provider: "copilot",
+      model: i === 0 ? "auto" : "gpt-5-mini",
+    }));
+    const handler = makeLoopHandler({ promptHandler });
+    const result = await handler.handle(loopNode({ max_iterations: 2 }), buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(result.provider).toBe("copilot");
+    expect(result.model).toBe("gpt-5-mini");
+  });
+
+  test("a failed iteration's provenance is preserved on the loop's failed result", async () => {
+    const { handler: promptHandler } = makeRecorderHandler(() => ({
+      status: "failed",
+      output: { kind: "text", text: "" },
+      error: "provider crashed",
+      provider: "copilot",
+      model: "gpt-5",
+    }));
+    const handler = makeLoopHandler({ promptHandler });
+    const result = await handler.handle(loopNode({}), buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("provider crashed");
+    expect(result.provider).toBe("copilot");
+    expect(result.model).toBe("gpt-5");
+  });
+});
+
 describe("makeLoopHandler — output_format is filtered from iteration prompts", () => {
   test("synthesized iteration node does NOT carry output_format from the loop node", async () => {
     // Forcing JSON-only replies would mask the plain-text `until` signal the
