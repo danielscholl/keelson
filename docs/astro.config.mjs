@@ -12,6 +12,11 @@ export default defineConfig({
   site: "https://danielscholl.github.io",
   base: "/keelson",
   trailingSlash: "always",
+  // Installing a rib is an operator how-to, not a tutorial rung, so it lives in
+  // the guides tier; this preserves the old tutorial URL for bookmarks and search.
+  redirects: {
+    "/docs/tutorials/install-a-rib": "/keelson/docs/guides/managing-ribs/",
+  },
   // Astro 6 dropped GFM from the MDX pipeline that Starlight uses, which silently
   // breaks Markdown tables in .mdx; re-add it on the channel the MDX integration
   // reads. (Piggybacks on the remarkPlugins deprecation Starlight already emits.)

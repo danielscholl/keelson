@@ -2,7 +2,7 @@
 title: One workflow, many models
 description: Clone the frontend-mix template, register it as a project, and run a real app build that routes each phase to a different model. Then swap a model and compare.
 sidebar:
-  order: 5
+  order: 4
 ---
 
 import { Aside } from "@astrojs/starlight/components";
@@ -15,11 +15,13 @@ field exercise does: one workflow builds a real web app, each phase routed
 to a different model class, and swapping any phase to a different model (or
 a different provider) is a one-line edit away.
 
-The first four tutorials ran on the offline stub so every checkpoint was
-free. This page is the graduation run: real models, real tokens, a real app
-in your working tree at the end. Expect a full run to take a while (it
-builds, validates, and smoke-tests an actual application) and to spend real
-model turns doing it.
+The first three tutorials ran on the offline stub so every checkpoint was free.
+This page is the graduation run: real models, real tokens, a real app in your
+working tree at the end. Budget for it. The pipeline is ten nodes, and a couple
+of them (build-ui, integrate) do genuine, long-running work, so a full run takes
+tens of minutes, not seconds, and spends real model turns the whole way. The
+fast-model phases (explore, validate, smoke) hold the cost down; the swap
+experiment at the end runs the build a second time, so it roughly doubles both.
 
 <Aside type="note" title="Prerequisites">
 A running keelson server ([Your first run](../first-run/)) with the default
@@ -86,6 +88,16 @@ From now on, any run you start from inside this directory resolves to this
 project, and the Workflows surface at `http://127.0.0.1:7878` shows
 `frontend-mix` as a card under the project's scope.
 
+<Aside type="note" title="A project remembers">
+The project you just registered also carries a notebook, markdown the harness
+injects into every chat turn for it, and a governed memory tier that accumulates
+across runs. A workflow node can draw on both: declare a `notebook` or
+`memory.recall` block and a `prompt` node opens with your conventions and prior
+decisions already in front of it. This build does not use them, but it is the seam
+where a harness that remembers begins to frame the work it does next. See
+[Memory and state](../../concepts/memory-and-state/).
+</Aside>
+
 Before running anything, validate. `workflow validate` reads the global
 catalog by default; point it at the project's directory with `--dir`:
 
@@ -135,6 +147,15 @@ This is the long part: the build-ui and integrate phases are doing genuine
 work. Watch the same run as live cards in the Workflows surface if you
 prefer; both views are the same stream. Note the run id in the header (here
 `096d8e56`); you need it to answer the gate.
+
+<Aside type="caution" title="If a phase stalls or errors">
+The heavy phases (build-ui, integrate) can run past the default 600s per-node
+budget on a slower model. Raise it by starting the server with a larger
+`KEELSON_WORKFLOW_PROMPT_TIMEOUT_S`. A node that fails with `idle_timeout` hit a
+stream that went quiet, usually the same slow-model cause. This workflow also
+shells out to `git`, and the smoke phase starts a dev server, so make sure `git`
+is on your PATH before you start.
+</Aside>
 
 When the smoke phase finishes, the run does something the earlier tutorials
 never did: it stops and waits for you.
@@ -190,6 +211,14 @@ broken": a build that typechecks, lints, and serves HTTP 200 but renders
 blank or unstyled (a Tailwind `content` glob that misses a directory does
 exactly this). Static checks pass it; only driving the running app, the
 smoke phase's whole job, catches it.
+
+One thing the pipeline never does is worth noticing before you move on: it never
+questions that plan. A single model wrote the contract every later phase trusts,
+and a straight line has nowhere to review it, so a wrong assumption gets
+implemented faithfully and validated against itself, green the whole way down.
+Catching that is a different shape of work, a panel of reviewers rather than a
+pipeline, and that kind of capability is exactly what a
+[rib](../../concepts/the-rib-model/) bolts onto the harness.
 
 The app itself is in your working tree, validated and committed. Run it:
 

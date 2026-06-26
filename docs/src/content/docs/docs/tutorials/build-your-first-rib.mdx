@@ -2,22 +2,36 @@
 title: Build your first rib
 description: Write a two-file rib against the contract, install it from a local path, and verify its tool reaches the registry.
 sidebar:
-  order: 4
+  order: 3
 ---
 
 import { Aside, FileTree, Steps } from "@astrojs/starlight/components";
 
-The previous tutorial ended at the real wall: the rib your systems need does
-not exist. This one takes it down. The `Rib` contract is a single TypeScript
-interface, every hook on it is optional, and the smallest useful rib is two
-files. You will write one that registers a tool, install it from a local
-path, and verify the tool reaches the harness's registry, all without
-publishing anything.
+Ask your chat agent about something only your systems know, the state of a
+cluster you run or the queue in your tracker, and it has nothing to say. The
+harness ships with no tools at all. That emptiness is the design, not a gap:
+capabilities live in **ribs**, separately versioned packages that register
+tools and surfaces through a typed contract. Plenty of ribs exist to install,
+but the one your systems actually need probably does not, and the whole point
+of the contract is that you never have to wait for someone else to write it.
+
+So you will write one. The `Rib` contract is a single TypeScript interface,
+every hook on it is optional, and the smallest useful rib is two files. You
+will build one that registers a tool, install it from a local path, watch
+discovery wire it in at boot, and find the tool in the harness's registry, all
+without publishing anything.
 
 The rib is deliberately modest, a `weather_now` tool that returns a canned
 answer. Wiring first: once you have watched your own tool arrive in the
 registry, swapping the canned line for a real integration is ordinary
 TypeScript.
+
+<Aside type="note" title="Before you start">
+A keelson server you can stop and start, [Bun](https://bun.sh/) on your PATH (the
+rib is a Bun package), and the earlier tutorials behind you. No credentials and no
+network: you build, install, and inspect the rib entirely on the stub. A real
+provider matters only at the very end, to watch the tool actually fire.
+</Aside>
 
 ## The shape of a rib
 
@@ -226,10 +240,10 @@ and the [reference tier](../../reference/) documents it as pages land.
 
 ## End of the rail
 
-Four tutorials ago you had nothing installed. You now run a harness you can
-health-check, write deterministic workflows against it, install capabilities
-as packages, and, when the capability you need does not exist, build it from
-a two-file contract. That is the whole keelson loop.
+Three tutorials ago you had nothing installed. You now run a harness you can
+health-check, write deterministic workflows against it, and, when the
+capability you need does not exist, build it from a two-file contract and
+watch discovery wire it in. That is the whole keelson loop.
 
 Everything so far ran on the free offline stub. One field exercise remains:
 bring real models to it, and let one workflow build a real app while you

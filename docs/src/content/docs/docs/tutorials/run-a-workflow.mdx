@@ -13,6 +13,12 @@ YAML files that describe a DAG of nodes the engine executes deterministically.
 In this tutorial you author one from scratch, break it on purpose to see what
 validation catches, and watch it run.
 
+<Aside type="note" title="Before you start">
+[Your first run](../first-run/) behind you, so a server is up (or the CLI falls
+back to running in-process) and the stub provider is available. No credentials:
+this whole page runs on the stub, same as the chat turn you just pushed through.
+</Aside>
+
 ## Hit the wall first
 
 [Your first run](../first-run/) seeded a few starter workflows, but not the one
@@ -226,7 +232,8 @@ Validation catches broken graphs before execution, the watch stream shows you
 the DAG executing in dependency order, and the provider is swappable without
 touching the file.
 
-So far the agent side of the harness can only echo. The capabilities that
-make an agent worth harnessing arrive as ribs, and that is next.
+So far the agent side of the harness can only echo. The capabilities that make an
+agent worth harnessing arrive as ribs: installable packages that register tools.
+None ship in the box, so the next page builds one from the two-file contract.
 
-**Continue to** [Install a rib](../install-a-rib/).
+**Continue to** [Build your first rib](../build-your-first-rib/).
