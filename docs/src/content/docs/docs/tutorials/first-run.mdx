@@ -9,18 +9,19 @@ import { Aside, Steps } from "@astrojs/starlight/components";
 
 You want an agent harness that keeps its state on your machine: no hosted
 service, no account, nothing leaving your laptop that you did not send. This
-tutorial takes you from nothing installed to a running server and a completed
-chat turn, and every checkpoint works without credentials.
+tutorial takes you from nothing installed to a running server, a signed-in
+coding agent, and a completed chat turn.
 
 By the end you will have keelson installed in its managed home, know how to
 read its health sweep, and have pushed one message through the whole loop:
 CLI to server to provider and back.
 
 <Aside type="note" title="Prerequisites">
-[Bun](https://bun.sh/) on your PATH, and `~/.local/bin` on your PATH. That is
-the whole list. A real coding agent needs a GitHub Copilot subscription or an
-Anthropic API key, but this tutorial deliberately uses the offline stub
-provider so you can verify the harness first and add credentials after.
+[Bun](https://bun.sh/) on your PATH, `~/.local/bin` on your PATH, and a **GitHub
+Copilot subscription**. A fresh keelson defaults to Copilot, so this rail assumes
+it; if you would rather drive Claude, Codex, or Pi, the [configuration
+guide](../../guides/configuration/) covers enabling them, and the steps below are
+otherwise identical.
 </Aside>
 
 ## Install the harness
@@ -136,24 +137,31 @@ The server owns the store, the providers, and the browser UI, all on one port.
 Start it in a terminal you can leave open:
 
 ```sh
-KEELSON_PROVIDERS=stub keelson start --foreground
+keelson start --foreground
 ```
 
 ```text
 [workflows] discovered 8 workflows
-[workflows] no non-stub provider registered; prompt nodes will use 'stub' (echo-only). Set KEELSON_PROVIDERS to include copilot or claude, or pin KEELSON_WORKFLOW_PROVIDER explicitly.
-[workflows] default workflow provider is 'stub'; per-node 'allowed_tools' / 'denied_tools' / 'hooks' are only honored by the claude provider.
 keelson server listening on http://127.0.0.1:7878/
 ```
 
-`KEELSON_PROVIDERS=stub` registers the stub provider: an offline echo that
-needs no keys. The boot log says so plainly, which is the behavior you want
-from a harness: it tells you what it is running with, not what you hoped it
-was running with.
+A fresh keelson loads Copilot by default, so there is no provider to configure.
+You just need to sign in, which is the next step.
 
 Open [http://127.0.0.1:7878](http://127.0.0.1:7878) in a browser. The server
 serves the full web UI from the same port as the API: a Chat surface, a
 Workflows surface, and a tab for each rib you install later.
+
+## Sign in to Copilot
+
+The server is up, but Copilot still needs your credential. On the Chat surface,
+use its sign-in surface to authorize GitHub Copilot; keelson stores the
+credential in your OS keychain, never in a file. (Prefer the terminal? `copilot
+auth login` authorizes the same credential.) The [providers
+reference](../../reference/providers/) documents the sign-in surface and where
+the credential lives.
+
+## Confirm the harness is healthy
 
 Now run the sweep again from a second terminal:
 
@@ -184,26 +192,24 @@ start` brought up the server and created the database in a single move.
 Push one message through the loop:
 
 ```sh
-keelson chat "hello, keelson" --provider stub
+keelson chat "In one sentence, what is keelson?"
 ```
 
 ```text
-hello, keelson
+Keelson is a local-only harness that wraps a coding agent with persistent state, deterministic YAML workflows, and a browser UI.
 ```
 
-The stub provider echoes your message back, and that echo is the point. Your
-message traveled from the CLI over HTTP to the server, through the provider
-registry, and streamed back as a real turn. The turn also landed in the
-server's SQLite store, so if you open the Chat surface in the browser you will
-find the same session there. Swap the stub for a real provider and the exact
-same path carries a real coding agent.
+That is a real answer from Copilot. Your message traveled from the CLI over HTTP
+to the server, through the provider registry to Copilot, and streamed back. The
+turn also landed in the server's SQLite store, so if you open the Chat surface in
+the browser you will find the same session there: one store behind every surface,
+which is the next tutorial.
 
-<Aside type="tip" title="Bring a real provider">
-Have a GitHub Copilot subscription or an Anthropic API key? Start the server with
-`KEELSON_PROVIDERS=copilot` (or `claude`) instead of `stub`, then run
-`keelson chat "hello, keelson"` with no `--provider stub` flag. The same loop now
-carries a real coding agent. The [configuration guide](../../guides/configuration/)
-covers enabling each provider and signing in.
+<Aside type="tip" title="A different provider">
+Copilot is the default, not the only option. Claude, Codex, and Pi each enable in
+`~/.keelson/config.json`, and a gateway points keelson at any OpenAI-compatible
+endpoint. The [configuration guide](../../guides/configuration/) covers enabling
+each one and its sign-in; nothing else in this rail changes.
 </Aside>
 
 <Aside type="note" title="When the server is down">
@@ -220,7 +226,7 @@ features like the browser UI and the rib commands need the server up.
 | `keelson: command not found` after install | `~/.local/bin` is not on your PATH. Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile and reopen the shell. The installer's last lines print the exact path to add. |
 | `keelson version` reports a version you did not install | Another `keelson` is earlier on your PATH. Run `which -a keelson`; the copy in `~/.local/bin` should be the one that resolves. |
 | `doctor` warns on the `server` and `db` checks | Expected before your first `keelson start`: both resolve once the server boots and creates the database, so neither is an error on a fresh install. |
-| `keelson chat` echoes your message back unchanged | Also expected. The stub provider echoes instead of answering; swap in a real provider (the tip above) for real replies. |
+| `keelson chat` fails with a Copilot authentication error | Copilot is not signed in yet. Complete the [sign-in step](#sign-in-to-copilot); `keelson doctor` re-checks credentials. |
 
 ## What you proved
 
@@ -235,12 +241,13 @@ features like the browser UI and the rib commands need the server up.
 3. One server on port 7878 carries the API, the WebSocket stream, and the
    browser UI.
 
-4. A chat turn flows CLI to server to provider and back, with no credentials
-   required to verify the loop.
+4. With Copilot signed in, a chat turn flows CLI to server to provider and back,
+   and lands in the store.
 
 </Steps>
 
-Your harness runs, with a handful of starter workflows already seeded. Next you
-write one of your own.
+Your harness runs, with a real agent behind it and a handful of starter workflows
+already seeded. You pushed one turn through the CLI; next you actually talk to
+the agent, three ways, and watch one store back them all.
 
-**Continue to** [Run your first workflow](../run-a-workflow/).
+**Continue to** [Talk to the agent](../talk-to-the-agent/).

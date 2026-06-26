@@ -2,7 +2,7 @@
 title: One workflow, many models
 description: Clone the frontend-mix template, register it as a project, and run a real app build that routes each phase to a different model. Then swap a model and compare.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 import { Aside } from "@astrojs/starlight/components";
@@ -15,12 +15,12 @@ field exercise does: one workflow builds a real web app, each phase routed
 to a different model class, and swapping any phase to a different model (or
 a different provider) is a one-line edit away.
 
-The first three tutorials ran on the offline stub so every checkpoint was free.
-This page is the graduation run: real models, real tokens, a real app in your
-working tree at the end. Budget for it. The pipeline is ten nodes, and a couple
-of them (build-ui, integrate) do genuine, long-running work, so a full run takes
-tens of minutes, not seconds, and spends real model turns the whole way. The
-fast-model phases (explore, validate, smoke) hold the cost down; the swap
+Until now the rail drove one coding agent. This page is the graduation run:
+several models at once, each phase routed to a different one, and a real app in
+your working tree at the end. Budget for it. The pipeline is ten nodes, and a
+couple of them (build-ui, integrate) do genuine, long-running work, so a full run
+takes tens of minutes, not seconds, and spends real model turns the whole way.
+The fast-model phases (explore, validate, smoke) hold the cost down; the swap
 experiment at the end runs the build a second time, so it roughly doubles both.
 
 <Aside type="note" title="Prerequisites">
@@ -127,7 +127,7 @@ keelson workflow run frontend-mix --watch \
 ```
 
 The watch stream shows the DAG executing in dependency order, exactly as in
-[Run your first workflow](../run-a-workflow/), except now each `✓` is a real
+[Run and author a workflow](../run-a-workflow/), except now each `✓` is a real
 model finishing a real phase:
 
 ```text

@@ -1,0 +1,188 @@
+---
+title: Talk to the agent
+description: Hold a conversation in the browser, in an interactive terminal, and from a script, and watch one persisted store back all three.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+[Your first run](../first-run/) pushed one message through the loop and got a
+real answer back. That proved the wiring; now you actually work with the agent,
+and you do it three ways: in the browser, in an interactive terminal, and from a
+one-shot command you can pipe into a script. The point of the page is what sits
+behind all three: one persisted store, so switching surface is never switching
+apps.
+
+<Aside type="note" title="Before you start">
+A server up and Copilot signed in from [Your first run](../first-run/). Every
+turn on this page is a real agent turn, so each one spends against your Copilot
+session.
+</Aside>
+
+## The browser: the Chat surface
+
+Open [http://127.0.0.1:7878](http://127.0.0.1:7878) and land on **Chat**. Ask it
+something with follow-up in it:
+
+```text
+What does keelson keep in SQLite, and what goes in the OS keychain instead?
+```
+
+You get a real answer, and then you can press on it ("why keep credentials out of
+the database?") and watch the conversation build. Every turn you send and every
+reply is a row the server wrote down.
+
+Prove that by reloading the page. The conversation is still there, because it was
+never living in the browser tab. It lives in the server's SQLite store, and the
+tab is just a window onto it. The chip in the composer shows the conversation is
+bound to a project (the default one for now; [projects arrive
+later](../remember-across-sessions/)).
+
+## The terminal: interactive chat
+
+You do not have to leave the terminal to get the same thing. Run `keelson chat`
+with **no message**:
+
+```sh
+keelson chat
+```
+
+A message runs one turn and exits; no message on a TTY opens the interactive
+chat instead. It needs the server up (it is a client onto the same store), and
+it greets you with a card:
+
+```text
+   │ │
+  ━┿━┿━  keelson chat · v0.21.0
+          copilot · gpt-4o · default
+
+  / commands · Esc interrupt · Ctrl+C exit
+
+  ribs        none installed · keelson rib add <url>
+
+  Recent
+  · What does keelson keep in SQLite…    2m ago
+```
+
+That **Recent** list is the same store again: the conversation you just held in
+the browser is sitting there to resume. A status strip under the editor tracks
+the live session, provider and model, project and branch, and a usage meter:
+
+```text
+ ◆ copilot · gpt-4o ⟩ default ⟩ 1.2k tokens
+```
+
+Type `/` to see the commands. Two are worth knowing now: `/model` switches the
+model for the rest of the session (handy when a question deserves a stronger
+model), and `/project` rebinds the chat to a different project without
+restarting. `Ctrl+C` exits.
+
+<Aside type="tip" title="The TUI and one-shots are different tools">
+`keelson chat` (interactive) needs a server and a real terminal; it ignores
+`--json` and `--project` (switch projects with `/project` inside). `keelson chat
+"a message"` (one-shot) is the scriptable path below: it runs without a TTY,
+honors `--json`, and falls back to in-process when the server is down.
+</Aside>
+
+## The script: one-shot and `--json`
+
+The same turn is a one-liner you can put in a script. A bare message streams the
+reply to your terminal; add `--json` and the CLI buffers the whole turn and emits
+a single envelope, so a downstream `jq` gets one object instead of mid-stream
+text:
+
+```sh
+keelson chat "Summarize keelson in one sentence." --json
+```
+
+```json
+{
+  "ok": true,
+  "data": {
+    "mode": "http",
+    "conversationId": "036ab5a0-2cc8-480e-bc6a-0171571a3083",
+    "providerId": "copilot",
+    "text": "Keelson is a local-only harness that wraps a coding agent with persistent state, deterministic YAML workflows, and a browser UI.",
+    "usage": { "inputTokens": 14, "outputTokens": 26, "contextTokens": 40, "contextWindow": 128000 },
+    "chunks": [
+      { "type": "text", "content": "Keelson is a local-only harness that wraps a coding agent " },
+      { "type": "text", "content": "with persistent state, deterministic YAML workflows, and a browser UI." },
+      { "type": "usage", "usage": { "inputTokens": 14, "outputTokens": 26, "contextTokens": 40, "contextWindow": 128000 } }
+    ]
+  }
+}
+```
+
+Two fields tie this scripted turn back to the other two surfaces. `mode` is
+`http`, so it ran against the server, and `conversationId` is the row it wrote,
+the same kind of row the browser and the terminal read. Open that conversation in
+the Chat surface and your scripted turn is in the history. (With the server down,
+`mode` is `in-process` and there is no `conversationId`: the CLI ran the turn
+itself and printed it, but nothing was shared.)
+
+That makes the one-shot a building block. Pipe the reply straight out:
+
+```sh
+keelson chat "Summarize keelson in one sentence." --json | jq -r '.data.text'
+```
+
+```text
+Keelson is a local-only harness that wraps a coding agent with persistent state, deterministic YAML workflows, and a browser UI.
+```
+
+And script against the exit code, not the text. Every command returns a stable
+code, so a wrapper can branch without parsing prose:
+
+| Code | Means |
+| --- | --- |
+| `0` | success |
+| `1` | the turn failed |
+| `2` | bad arguments |
+| `3` | a server was required but down |
+| `4` | not found |
+
+## One store, three ways in
+
+You just drove the same agent from three places. None of them is a different
+product; they are three clients onto one server and one SQLite store.
+
+| Surface | Reach for it when |
+| --- | --- |
+| **Chat** (browser) | exploring, reading long replies, scanning history by eye |
+| **`keelson chat`** (terminal) | you live in the shell and want `/model` or `/project` mid-session |
+| **`keelson chat "…" --json`** (script) | piping to `jq`, wiring into CI, branching on an exit code |
+
+The conversation you start in one shows up in the next. That shared store is the
+whole reason the rest of this rail works: workflows write to it, memory
+accumulates in it, and every surface reads it.
+
+## Common errors
+
+| Symptom | What's happening |
+| --- | --- |
+| `keelson chat` (no message) prints `interactive chat requires a running server` | The interactive TUI is server-only. Start it with `keelson start` (exit code `3`), then re-run. The one-shot `keelson chat "…"` works server-down via the in-process fallback. |
+| `--json requires a one-shot message` | You passed `--json` to interactive chat. `--json` only applies to `keelson chat "a message"`; interactive mode is TTY-only. |
+| `--project applies to one-shot chat` | A conversation binds to its project at creation. In interactive chat, switch with `/project <name>` instead of the flag. |
+| A turn fails with a Copilot authentication error | The credential expired or was never set. Re-run the [first-run sign-in](../first-run/#sign-in-to-copilot); `keelson doctor` confirms the provider is authenticated. |
+| A scripted turn never appears in the browser | The server was down, so the turn ran `in-process` with no `conversationId`. Start the server so all three surfaces share one store. |
+
+## What you proved
+
+<Steps>
+
+1. The Chat surface, the interactive terminal, and the one-shot CLI are three
+   clients onto one agent, not three separate apps.
+
+2. Conversations persist in the server's store, so a reload, a new terminal, or
+   a fresh script all rejoin the same history.
+
+3. `--json` turns a chat turn into a scriptable primitive: one envelope, a
+   `conversationId` that links it to the other surfaces, and a stable exit code.
+
+</Steps>
+
+Talking to the agent is improvisation, and improvisation is the wrong tool for
+work you need to run the same way every time. Next you make a task repeatable.
+
+**Continue to** [Run and author a workflow](../run-a-workflow/).
