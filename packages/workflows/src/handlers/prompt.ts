@@ -579,8 +579,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
               // through this chunk (mirrors the chat handler). Override the
               // requested model so the recorded value is what actually ran, not
               // the "auto"-style hint. Rides NodeResult, not the node_chunk channel.
+              // Ignore a blank report so it can't null out a real requested model.
               const reported = (chunk as { model?: unknown }).model;
-              if (typeof reported === "string" && reported.length > 0) model = reported;
+              if (typeof reported === "string" && reported.trim().length > 0) model = reported;
               continue;
             }
             if (t === "text") {

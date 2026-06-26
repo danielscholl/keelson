@@ -2,6 +2,7 @@ import type { WorkflowNodeSummary } from "@keelson/shared";
 import { useEffect, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
@@ -28,14 +29,6 @@ function formatDuration(ms?: number | null): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
-}
-
-// Runtime provenance chip label: the effective provider + model a node actually
-// ran on (from `node_done` / the persisted row). Renders provider-only or
-// model-only too; null when neither is known (non-LLM node, or pre-terminal).
-function formatProviderModel(provider?: string, model?: string): string | null {
-  if (provider && model) return `${provider} · ${model}`;
-  return provider || model || null;
 }
 
 // Maps node-type → trace-head chip className. Mirrors DagNode's same map

@@ -1249,6 +1249,23 @@ describe("makePromptHandler", () => {
       expect(chunkTypes).not.toContain("model");
     });
 
+    test("a blank {type:'model'} chunk does not clobber the requested model", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [
+          { type: "text", content: "ok" },
+          { type: "model", model: "   " },
+          { type: "done" },
+        ],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "gpt-5" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.model).toBe("gpt-5");
+    });
+
     test("attaches provider/model even when the turn fails", async () => {
       const { provider } = makeSpyProvider({
         chunks: [{ type: "error", message: "boom" }, { type: "done" }],

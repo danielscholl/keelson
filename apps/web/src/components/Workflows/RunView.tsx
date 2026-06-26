@@ -2,6 +2,7 @@ import type { Project, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, sumTokenSpend } from "../../lib/formatTokens.ts";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
@@ -134,8 +135,8 @@ export function RunView({
   const runProvenance = useMemo(() => {
     const labels = new Set<string>();
     for (const v of Object.values(nodes)) {
-      if (!v.provider && !v.model) continue;
-      labels.add(v.provider && v.model ? `${v.provider} · ${v.model}` : (v.provider ?? v.model)!);
+      const label = formatProviderModel(v.provider, v.model);
+      if (label !== null) labels.add(label);
     }
     return labels.size === 1 ? [...labels][0] : null;
   }, [nodes]);
