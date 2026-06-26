@@ -225,6 +225,15 @@ Bundled and user-authored workflows are both reported as `source: global` in
 server mode. The `path` field only appears when the server is down and the CLI
 runs discovery in-process.
 
+## Common errors
+
+| Symptom | What's happening |
+| --- | --- |
+| `error: no workflow named '...'` (exit `4`) | The name matches no file in `~/.keelson/workflows`. Run `keelson workflow list` to see the catalog, and check the spelling and the `.yaml` extension. |
+| A `prompt` node fails with `idle_timeout` | The agent turn produced no output for longer than the node's `idle_timeout` (30s here). Raise it on the node, or confirm a provider is registered, since an unconfigured provider can stall the turn. |
+| A `bash` node reads an empty upstream value | Dot-access like `$ask.output` is for `when:` and prompt text. A `bash` node reads upstream output from the `KEELSON_NODE_<id>_OUTPUT` env var (the id's hyphens become underscores). |
+| Every `prompt` node echoes instead of answering | Only the stub provider is registered, so it echoes. Register a real provider, or pin one with `KEELSON_WORKFLOW_PROVIDER`. |
+
 ## What you proved
 
 A workflow is a YAML file you can read in one screen: nodes, edges, gates.
