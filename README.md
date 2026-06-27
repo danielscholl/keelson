@@ -114,16 +114,14 @@ When the server is running, workflow commands route over HTTP and WebSocket. Whe
 
 ## Add capabilities with ribs
 
-Ribs are packages that Keelson discovers at boot. They can register tools, workflows, snapshots, and UI surfaces.
+Ribs are packages that Keelson discovers at boot. They can register tools, workflows, snapshots, and UI surfaces. A rib is the unit of capability: install one to teach the harness something new without forking it.
 
 ```bash
-keelson rib add https://github.com/danielscholl/keelson-rib-chamber
+keelson rib add https://github.com/you/keelson-rib-yours
 keelson stop
 keelson start
 keelson rib list
 ```
-
-The Chamber rib is a good first example. It adds persistent specialist agents called Minds, multi-agent rooms, and agent-authored lenses.
 
 Other source forms work too:
 
@@ -134,10 +132,10 @@ keelson rib add @keelson/rib-yours
 keelson rib add ./local-rib
 ```
 
-Installed ribs live under the Keelson home and activate on the next server boot. To activate only selected ribs, set `KEELSON_RIBS`:
+Installed ribs live under the Keelson home and activate on the next server boot. To activate only selected ribs, set `KEELSON_RIBS` to a comma-separated list of rib ids:
 
 ```bash
-KEELSON_RIBS=chamber keelson start
+KEELSON_RIBS=yours keelson start
 ```
 
 A rib runs inside your local harness. Install ribs from sources you trust.
@@ -212,17 +210,15 @@ There are two kinds of uninstall: remove a rib, or remove the whole harness.
 ### Remove a rib only
 
 ```bash
-keelson rib remove chamber
+keelson rib remove yours
 keelson stop
 keelson start
 ```
 
-This removes the package from the home. Some ribs keep private data under `$KEELSON_HOME/rib-<id>`. Delete that directory only when you want to discard the rib's local data.
-
-Example for Chamber:
+This removes the package from the home. Some ribs keep private data under `$KEELSON_HOME/rib-<id>`. Delete that directory only when you want to discard the rib's local data:
 
 ```bash
-rm -rf "${KEELSON_HOME:-$HOME/.keelson}/rib-chamber"
+rm -rf "${KEELSON_HOME:-$HOME/.keelson}/rib-<id>"
 ```
 
 ### Full uninstall on macOS, Linux, or WSL
