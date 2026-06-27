@@ -60,6 +60,10 @@ export class CopilotProvider implements IAgentProvider {
   private readonly factory: CopilotClientFactory;
   // Process-lifetime cache; CLI spawn for listModels costs ~1s.
   private modelListCache: Promise<ModelInfo[]> | null = null;
+  // sendQuery detaches SDK teardown (see its finally) so a turn returns without
+  // waiting out the SDK's up-to-10s runtime shutdown. The detached promise
+  // completes on its own; this set only lets dispose() await in-flight ones.
+  private readonly pendingTeardowns = new Set<Promise<void>>();
 
   constructor(options: CopilotProviderOptions) {
     this.getCredential = options.getCredential;
@@ -91,6 +95,14 @@ export class CopilotProvider implements IAgentProvider {
       return COPILOT_CAPABILITIES.models.map((id) => ({ id }));
     }
     return live;
+  }
+
+  // Awaits in-flight detached teardowns. Each turn gets a fresh provider the
+  // server then drops, so production relies on the long-lived process outliving
+  // the background teardown — this is a deterministic join for tests, not a
+  // server-shutdown hook.
+  async dispose(): Promise<void> {
+    await Promise.allSettled([...this.pendingTeardowns]);
   }
 
   async *sendQuery(
@@ -383,19 +395,28 @@ export class CopilotProvider implements IAgentProvider {
           // unsubscribe errors are non-fatal
         }
       }
-      if (session) {
-        try {
-          await session.disconnect();
-        } catch {
-          // disconnect errors during cleanup are non-fatal
-        }
-      }
-      try {
-        await client.stop();
-      } catch {
-        // stop errors during cleanup are non-fatal
-      }
+      // Detach SDK teardown from the turn. client.stop() waits on the Copilot
+      // runtime's shutdown ack up to the SDK's 10s RUNTIME_SHUTDOWN_TIMEOUT, so
+      // awaiting it here would stall the generator's return — and with it the
+      // turn's terminal `done` frame and the CLI's exit — long after the answer
+      // streamed. Run it in the background (the SDK force-kills the runtime if
+      // graceful shutdown times out); dispose() drains in-flight teardowns.
+      const teardown = settleCopilotTeardown(client);
+      this.pendingTeardowns.add(teardown);
+      void teardown.finally(() => this.pendingTeardowns.delete(teardown));
     }
+  }
+}
+
+// Best-effort SDK teardown, detached from the turn (see sendQuery's finally).
+// client.stop() disconnects this turn's session itself, so stopping the client
+// is the whole teardown. Never rejects: failure is non-fatal and the SDK
+// force-kills the runtime if its graceful shutdown times out.
+async function settleCopilotTeardown(client: CopilotClientLike): Promise<void> {
+  try {
+    await client.stop();
+  } catch {
+    // stop errors during cleanup are non-fatal
   }
 }
 
