@@ -10,16 +10,6 @@ Keelson is a local control plane for coding agents. It turns agent work from one
 
 Most agent tools are centered on a single chat, model, or editor session. Keelson is centered on the local harness around that work. It keeps state on your machine, captures repeatable tasks as workflows, and lets new capabilities attach as packages instead of forks.
 
-Use Keelson when you want to:
-
-- Turn one-off agent chats into repeatable workflows.
-- Mix agent turns with deterministic shell, script, approval, loop, and control steps.
-- Keep conversations, runs, outputs, memory, and rib data on your machine.
-- Route different providers through one local interface.
-- Add capabilities as packages instead of forking the harness.
-- Put governance around tool calls and agent turns.
-- Expose the same registered tools to other agents over MCP.
-
 ## What makes Keelson different
 
 | Capability | What it means |
@@ -68,11 +58,11 @@ keelson version
 
 The Windows installer provisions `%USERPROFILE%\.keelson`, installs `keelson.cmd` under `%LOCALAPPDATA%\keelson\bin`, and adds that bin directory to your user `PATH`.
 
-### Upgrade or repair
+### Upgrade
 
 ```bash
-keelson update
 keelson update --check
+keelson update
 ```
 
 You can also rerun the installer. Upgrades preserve installed ribs and local data.
@@ -105,7 +95,6 @@ A workflow captures repeatable agent work so it can be inspected, rerun, shared,
 
 ```bash
 keelson workflow list
-keelson workflow validate smoke-test
 keelson workflow run smoke-test --watch
 ```
 
@@ -117,8 +106,7 @@ Ribs are packages that Keelson discovers at boot. They can register tools, workf
 
 ```bash
 keelson rib add https://github.com/you/keelson-rib-yours
-keelson stop
-keelson start
+keelson restart
 keelson rib list
 ```
 
@@ -131,13 +119,7 @@ keelson rib add @keelson/rib-yours
 keelson rib add ./local-rib
 ```
 
-Installed ribs live under the Keelson home and activate on the next server boot. To activate only selected ribs, set `KEELSON_RIBS` to a comma-separated list of rib ids:
-
-```bash
-KEELSON_RIBS=yours keelson start
-```
-
-A rib runs inside your local harness. Install ribs from sources you trust.
+Installed ribs live under the Keelson home and activate on the next server boot.
 
 ## Providers and gateways
 
@@ -155,7 +137,7 @@ Enable providers in `~/.keelson/config.json`:
 }
 ```
 
-`KEELSON_PROVIDERS` overrides the file when set. For an OpenAI-compatible endpoint, add a gateway:
+For an OpenAI-compatible endpoint, add a gateway:
 
 ```bash
 keelson gateway add ollama http://localhost:11434/v1 --model qwen3
@@ -191,13 +173,12 @@ Useful commands:
 ```bash
 keelson start                    # start the local server in the background
 keelson stop                     # stop the background server
+keelson restart                  # restart the background server
 keelson status                   # report server status
-keelson doctor                   # health sweep for toolchain, server, DB, auth, and workflows
 keelson chat "hello"             # chat turn (omit the message for interactive)
+keelson workflow list            # list available workflows
 keelson workflow run <name>      # run a workflow
-keelson rib list --installed     # list installed ribs without needing the server
-keelson update --check           # check for available updates
-keelson --json workflow list     # machine-readable output for scripts
+keelson rib list                 # list installed ribs
 ```
 
 For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/) for details.
@@ -209,9 +190,8 @@ There are two kinds of uninstall: remove a rib, or remove the whole harness.
 ### Remove a rib only
 
 ```bash
-keelson rib remove yours
-keelson stop
-keelson start
+keelson rib remove <name>
+keelson restart
 ```
 
 This removes the package from the home. Some ribs keep private data under `$KEELSON_HOME/rib-<id>`. Delete that directory only when you want to discard the rib's local data:
@@ -256,8 +236,6 @@ Keelson does not store provider secrets in the home directory. Provider keys and
 
 - [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, CLI reference, and rib contract.
 - [Writing ribs](WRITING-RIBS.md): the five-minute rib authoring quickstart.
-- [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts): the full `Rib` contract.
-- [`packages/workflows/assets/workflows/`](packages/workflows/assets/workflows/): bundled starter workflows.
 - [CONTRIBUTING.md](CONTRIBUTING.md): local setup and required checks.
 - [SECURITY.md](SECURITY.md): threat model and reporting process.
 
