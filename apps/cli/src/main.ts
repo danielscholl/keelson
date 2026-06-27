@@ -28,6 +28,7 @@ import { runWorkflowStatus } from "./commands/workflow-status.ts";
 import { runWorkflowValidate } from "./commands/workflow-validate.ts";
 import { runWorktreePrune } from "./commands/worktree.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "./exit.ts";
+import { listedRibs } from "./home.ts";
 import { emit } from "./output.ts";
 
 interface GlobalOptions {
@@ -92,7 +93,9 @@ export function buildProgram(): Command {
 
   program
     .command("version")
-    .description("print CLI version, Bun runtime version, and contract schema version")
+    .description(
+      "print CLI version, Bun runtime version, contract schema version, and installed rib versions",
+    )
     .action(function versionAction(this: Command) {
       const { json } = globalOpts(this);
       emit(
@@ -102,6 +105,7 @@ export function buildProgram(): Command {
             version: pkg.version,
             bunVersion: Bun.version,
             schemaVersion: SCHEMA_VERSION,
+            ribs: listedRibs(),
           },
         },
         { json },

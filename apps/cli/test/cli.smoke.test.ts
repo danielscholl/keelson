@@ -82,6 +82,7 @@ describe("keelson CLI smoke", () => {
     expect(typeof envelope.data?.bunVersion).toBe("string");
     expect(typeof envelope.data?.schemaVersion).toBe("string");
     expect(envelope.data?.name).toBe("@keelson/cli");
+    expect(Array.isArray(envelope.data?.ribs)).toBe(true);
   });
 
   test("version prints human-readable output by default", async () => {

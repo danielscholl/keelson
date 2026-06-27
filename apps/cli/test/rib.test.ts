@@ -162,7 +162,16 @@ describe("keelson rib (home lifecycle)", () => {
     expect(exitCode).toBe(0);
     const env = JSON.parse(stdout.trim());
     expect(env.data.source).toBe("installed");
-    expect(env.data.ribs.map((r: { id: string }) => r.id)).toContain("faketest");
+    const fake = env.data.ribs.find((r: { id: string }) => r.id === "faketest");
+    expect(fake?.version).toBe("0.0.0");
+  });
+
+  test("version reports installed ribs with their package versions", async () => {
+    const { stdout, exitCode } = await runCli(["--json", "version"], { KEELSON_HOME: home });
+    expect(exitCode).toBe(0);
+    const env = JSON.parse(stdout.trim());
+    const fake = env.data.ribs.find((r: { id: string }) => r.id === "faketest");
+    expect(fake?.version).toBe("0.0.0");
   });
 
   test("remove uninstalls it", async () => {
@@ -317,6 +326,10 @@ describe("keelson rib (dev home fallback)", () => {
     expect(exitCode).toBe(0);
     const env = JSON.parse(stdout.trim());
     expect(env.data.source).toBe("installed");
-    expect(env.data.ribs.map((r: { id: string }) => r.id)).toContain("faketest");
+    const fake = env.data.ribs.find((r: { id: string }) => r.id === "faketest");
+    expect(fake).toBeDefined();
+    // The fallback dir carries no package.json, so the version reads as null
+    // rather than throwing.
+    expect(fake.version).toBeNull();
   });
 });

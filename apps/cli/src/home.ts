@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveKeelsonHome, resolveRibsRoot } from "@keelson/shared/paths";
 
@@ -45,4 +45,29 @@ export function installedRibIds(home: string = resolveKeelsonHome()): string[] {
 // fallback for checkout-style development.
 export function listedRibIds(home: string = resolveKeelsonHome()): string[] {
   return ribIdsFromDir(resolveRibsRoot(home));
+}
+
+export interface RibVersion {
+  id: string;
+  // The rib package's declared version, or null when its package.json is
+  // missing or unreadable (a bare checkout-symlinked dir need not carry one).
+  version: string | null;
+}
+
+function ribVersionFromDir(dir: string, id: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, `rib-${id}`, "package.json"), "utf8"));
+    const v = (parsed as { version?: unknown }).version;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// listedRibIds plus each rib's package.json version — the data behind
+// `keelson version` and `rib list --installed`. Reads the same workspace-fallback
+// root, so it carries versions in a checkout as well as an installed home.
+export function listedRibs(home: string = resolveKeelsonHome()): RibVersion[] {
+  const root = resolveRibsRoot(home);
+  return listedRibIds(home).map((id) => ({ id, version: ribVersionFromDir(root, id) }));
 }
