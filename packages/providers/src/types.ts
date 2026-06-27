@@ -134,6 +134,11 @@ export interface IAgentProvider {
   // MUST NEVER throw — fall back to a bare-id projection of
   // `capabilities.models` so the picker never empties out.
   listModels(): Promise<ModelInfo[]>;
+
+  // Release any process-lifetime resources (warm subprocesses, in-flight
+  // teardowns). Drained by the registry's disposeAllProviders() during server
+  // shutdown / CLI exit. Optional: stateless per-turn providers omit it.
+  dispose?(): Promise<void>;
 }
 
 export interface ProviderRegistration {

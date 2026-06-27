@@ -56,6 +56,28 @@ export function buildFriendlyCopilotError(err: unknown, hint?: string): string {
   return hint ? `Copilot error: ${raw} (${hint})` : `Copilot error: ${raw}`;
 }
 
+// Distinguishes a wedged/dead subprocess or broken transport — failures a
+// fresh respawn can plausibly clear — from auth/rate-limit/entitlement
+// failures, which respawning the same credentials would only repeat. The warm
+// client uses this to decide whether to drop and retry on a fresh subprocess.
+export function isCopilotConnectionError(err: unknown): boolean {
+  const lower = extractRawMessage(err).toLowerCase();
+  return (
+    lower.includes("not connected") ||
+    lower.includes("disconnect") ||
+    lower.includes("econnrefused") ||
+    lower.includes("econnreset") ||
+    lower.includes("etimedout") ||
+    lower.includes("epipe") ||
+    lower.includes("socket hang up") ||
+    lower.includes("socket closed") ||
+    lower.includes("broken pipe") ||
+    lower.includes("runtime shutdown") ||
+    lower.includes("process exited") ||
+    lower.includes("worker exited")
+  );
+}
+
 function extractRawMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;

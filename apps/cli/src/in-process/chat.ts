@@ -2,7 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { getAgentProvider, getProviderInfoList, UnknownProviderError } from "@keelson/providers";
+import {
+  disposeAllProviders,
+  getAgentProvider,
+  getProviderInfoList,
+  UnknownProviderError,
+} from "@keelson/providers";
 import type { MessageChunk, ReasoningEffortLevel, TokenUsage } from "@keelson/shared";
 import { coerceTokenUsage } from "@keelson/shared";
 import { getRegisteredTools } from "@keelson/skills";
@@ -74,22 +79,28 @@ export async function chatHeadless(opts: ChatHeadlessOptions): Promise<ChatHeadl
 
   let text = "";
   let usage: TokenUsage | undefined;
-  for await (const chunk of provider.sendQuery(opts.message, opts.cwd, undefined, {
-    ...(effectiveModel ? { model: effectiveModel } : {}),
-    ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
-    ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
-    ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
-    ...(tools.length > 0 ? { tools } : {}),
-    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
-  })) {
-    if (chunk.type === "usage") {
-      const coerced = coerceTokenUsage(chunk.usage);
-      if (coerced !== undefined) usage = coerced;
+  try {
+    for await (const chunk of provider.sendQuery(opts.message, opts.cwd, undefined, {
+      ...(effectiveModel ? { model: effectiveModel } : {}),
+      ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
+      ...(opts.thinking !== undefined ? { thinking: opts.thinking } : {}),
+      ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+      ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    })) {
+      if (chunk.type === "usage") {
+        const coerced = coerceTokenUsage(chunk.usage);
+        if (coerced !== undefined) usage = coerced;
+      }
+      if (opts.abortSignal?.aborted) break;
+      if (chunk.type === "text") text += chunk.content;
+      opts.onChunk?.(chunk);
+      if (chunk.type === "done") break;
     }
-    if (opts.abortSignal?.aborted) break;
-    if (chunk.type === "text") text += chunk.content;
-    opts.onChunk?.(chunk);
-    if (chunk.type === "done") break;
+  } finally {
+    // One-shot path: no server outlives this turn to drain providers, so reap
+    // any warm subprocess here before the CLI exits rather than orphaning it.
+    await disposeAllProviders();
   }
 
   return { providerId, text, ...(usage !== undefined ? { usage } : {}) };

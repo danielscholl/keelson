@@ -113,6 +113,7 @@ export {
 } from "./pi/registration.ts";
 export {
   clearRegistry,
+  disposeAllProviders,
   getAgentProvider,
   getProviderInfoList,
   getRegistration,
