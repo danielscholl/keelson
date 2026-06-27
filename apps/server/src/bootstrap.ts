@@ -38,6 +38,7 @@ import type {
   RibAuthStatus,
   RibCommandDescriptor,
   RibContext,
+  RibWorkflowRunResult,
   SnapshotManager,
   ToolDefinition,
   WorkflowDiscoveryNotice,
@@ -292,6 +293,25 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           }
         }
       : undefined;
+  // RibContext.runWorkflow resolver: hand an in-memory definition to the controller's
+  // runDefinition (which validates + runs it on the shared executor and never throws).
+  // cwd defaults to the home; a rib passes a project root to confine repo work. Wired
+  // only when the controller getter + home cwd are present (else the seam is absent).
+  const runWorkflowSeam =
+    getWorkflowController && refreshCwd !== undefined
+      ? async (
+          _ribId: string,
+          definition: unknown,
+          inputs: Record<string, string>,
+          opts?: { cwd?: string },
+        ): Promise<RibWorkflowRunResult> => {
+          const controller = getWorkflowController();
+          if (!controller) {
+            return { status: "failed", nodes: {}, error: "workflow controller unavailable" };
+          }
+          return controller.runDefinition(definition, inputs, opts?.cwd ?? refreshCwd);
+        }
+      : undefined;
   const {
     manifests,
     disposers,
@@ -316,6 +336,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(options.getProjects ? { getProjects: options.getProjects } : {}),
     ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
+    ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
   });
   return {
     manifests,

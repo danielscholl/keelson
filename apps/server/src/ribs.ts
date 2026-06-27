@@ -36,6 +36,7 @@ import {
   type RibContext,
   type RibSurfaceDescriptor,
   type RibViewDescriptor,
+  type RibWorkflowRunResult,
   ribDisplayNameSchema,
   ribIdSchema,
   ribSurfaceDescriptorSchema,
@@ -142,6 +143,16 @@ export interface ApplyRibsOptions {
   // scoping. Optional so unit-test rigs without a controller stay deterministic
   // — absent leaves the seam off the ctx, cadence-only.
   readonly refreshWorkflow?: (ribId: string, workflowName: string) => Promise<void>;
+  // Backs RibContext.runWorkflow: execute an in-memory workflow definition the rib
+  // hands in, at the given cwd (default: the home), returning the run result.
+  // Rib-id-scoped for parity/future per-rib policy. Optional so test rigs without a
+  // controller stay deterministic — absent leaves the seam off the ctx.
+  readonly runWorkflow?: (
+    ribId: string,
+    definition: unknown,
+    inputs: Record<string, string>,
+    opts?: { cwd?: string },
+  ) => Promise<RibWorkflowRunResult>;
 }
 
 /**
@@ -266,6 +277,15 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         : {}),
       ...(opts.refreshWorkflow
         ? { refreshWorkflow: (workflowName: string) => opts.refreshWorkflow!(rib.id, workflowName) }
+        : {}),
+      ...(opts.runWorkflow
+        ? {
+            runWorkflow: (
+              definition: unknown,
+              inputs?: Record<string, string>,
+              o?: { cwd?: string },
+            ) => opts.runWorkflow!(rib.id, definition, inputs ?? {}, o),
+          }
         : {}),
     };
 
