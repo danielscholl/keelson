@@ -7,6 +7,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import {
+  disposeAllProviders,
   getAgentProvider,
   isRegisteredProvider,
   registerGatewayProvider,
@@ -496,6 +497,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // Reject any open ASK approvals so a paused turn denies and unwinds rather
     // than hanging on a pause nobody will resolve once the server is down.
     approvals.clear();
+    // Stop any warm provider subprocess (Copilot's reused language-server)
+    // before the rest tears down, so shutdown reaps it rather than orphaning it.
+    try {
+      await disposeAllProviders();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] provider drain during shutdown failed: ${msg}`);
+    }
     await ribs.disposeAll();
     await snapshotManager.dispose();
     db.close();

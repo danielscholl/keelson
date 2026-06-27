@@ -20,6 +20,7 @@ import {
   CopilotClientFactory,
   CopilotProvider,
   clearRegistry,
+  disposeAllProviders,
   getAgentProvider,
   getProviderInfoList,
   isRegisteredProvider,
@@ -680,7 +681,7 @@ describe("CopilotProvider — abort", () => {
     expect(loader.count()).toBe(0);
   });
 
-  it("stops the spawned client without sending the prompt if abort fires during createClient", async () => {
+  it("keeps the spawned client warm without sending the prompt if abort fires during createClient", async () => {
     const ac = new AbortController();
     const sdk = makeMockSdk();
     const loader = {
@@ -701,11 +702,402 @@ describe("CopilotProvider — abort", () => {
       provider.sendQuery("hi", "/tmp", undefined, { abortSignal: ac.signal }),
     );
     expect(chunks).toHaveLength(0);
-    // Client was constructed and started, but the post-createClient abort
-    // gate stops the flow — no session is created, no prompt is sent.
+    // Client was constructed and started; the post-spawn abort gate stops the
+    // flow before any session is created. The warm client is kept for the next
+    // turn rather than torn down — the cold-start win, and it removes the
+    // abort-path stall the old synchronous client.stop() caused.
+    expect(sdk.lastClient()).not.toBeNull();
+    expect(sdk.lastClient()!.stopped).toBe(false);
+    expect(sdk.lastSession()).toBeNull();
+    // dispose() reaps the warm client at shutdown.
+    await provider.dispose();
+    expect(sdk.lastClient()!.stopped).toBe(true);
+  });
+});
+
+describe("CopilotProvider — warm client (issue #327)", () => {
+  const idle = (s: MockSession) => s.emit("session.idle");
+
+  it("reuses one warm client across sequential turns (no re-spawn)", async () => {
+    const sdk = makeMockSdk({
+      scenario: (s) => {
+        s.emit("assistant.message_delta", { deltaContent: "hi" });
+        s.emit("session.idle");
+      },
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await drain(provider.sendQuery("one", "/tmp"));
+    const firstClient = sdk.lastClient();
+    await drain(provider.sendQuery("two", "/tmp"));
+    // One subprocess served both turns — the cold start is paid once.
+    expect(loader.count()).toBe(1);
+    expect(sdk.lastClient()).toBe(firstClient);
+    // The client stays up between turns; only its per-turn session disconnects.
+    expect(firstClient!.stopped).toBe(false);
+    await provider.dispose();
+    expect(firstClient!.stopped).toBe(true);
+  });
+
+  it("evicts and re-spawns when the credential rotates", async () => {
+    let token = "old-token";
+    const sdk = makeMockSdk({ scenario: idle });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => token,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await drain(provider.sendQuery("one", "/tmp"));
+    expect(sdk.lastClient()!.options.gitHubToken).toBe("old-token");
+    token = "new-token";
+    await drain(provider.sendQuery("two", "/tmp"));
+    // A rotated credential must not keep serving on the stale subprocess.
+    expect(loader.count()).toBe(2);
+    expect(sdk.lastClient()!.options.gitHubToken).toBe("new-token");
+  });
+
+  it("evicts and re-spawns when the working directory changes", async () => {
+    const sdk = makeMockSdk({ scenario: idle });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await drain(provider.sendQuery("one", "/workspace/a"));
+    await drain(provider.sendQuery("two", "/workspace/b"));
+    expect(loader.count()).toBe(2);
+    expect(sdk.lastClient()!.options.cwd).toBe("/workspace/b");
+  });
+
+  it("drops the warm client after a connection-y turn failure so the next turn re-spawns", async () => {
+    let turn = 0;
+    const sdk = makeMockSdk({
+      scenario: (s) => {
+        turn += 1;
+        if (turn === 1) {
+          s.emit("session.error", { message: "socket disconnected", errorType: "network" });
+        } else {
+          s.emit("assistant.message_delta", { deltaContent: "ok" });
+          s.emit("session.idle");
+        }
+      },
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    await expect(drain(provider.sendQuery("one", "/tmp"))).rejects.toThrow();
+    const second = await drain(provider.sendQuery("two", "/tmp"));
+    // The wedged subprocess was dropped, not reused, so turn two spawns fresh.
+    expect(loader.count()).toBe(2);
+    expect(second.map((c) => (c as { content?: string }).content).join("")).toBe("ok");
+  });
+
+  it("re-spawns a fresh client mid-turn when the warm one is wedged (health-check retry)", async () => {
+    let instances = 0;
+    const stops: boolean[] = [];
+    const makeIdleSession = (): CopilotSessionLike => {
+      const handlers = new Map<string, Set<(e: unknown) => void>>();
+      return {
+        sessionId: "s",
+        async send() {
+          queueMicrotask(() => {
+            for (const h of handlers.get("session.idle") ?? [])
+              h({ type: "session.idle", data: {} });
+          });
+          return "m";
+        },
+        on(t: string, h: (e: unknown) => void) {
+          let set = handlers.get(t);
+          if (!set) {
+            set = new Set();
+            handlers.set(t, set);
+          }
+          set.add(h);
+          return () => set!.delete(h);
+        },
+        async abort() {},
+        async disconnect() {},
+        async setModel() {},
+      };
+    };
+    class FlakyClient {
+      idx: number;
+      constructor(public readonly options: Record<string, unknown>) {
+        this.idx = instances++;
+        stops[this.idx] = false;
+      }
+      async start() {}
+      async stop() {
+        stops[this.idx] = true;
+        return [];
+      }
+      async createSession() {
+        // The first (warm) client is wedged; the respawn succeeds.
+        if (this.idx === 0) throw new Error("client not connected");
+        return makeIdleSession();
+      }
+      async resumeSession() {
+        return this.createSession();
+      }
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      }
+      async listModels() {
+        return [];
+      }
+    }
+    const module = {
+      CopilotClient: FlakyClient as unknown as CopilotSdkModule["CopilotClient"],
+      approveAll: (() => ({ kind: "permit" })) as unknown as CopilotSdkModule["approveAll"],
+    };
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => module }),
+    });
+    // The turn still completes despite the warm client being wedged.
+    await drain(provider.sendQuery("hi", "/tmp"));
+    expect(instances).toBe(2);
+    // The fresh client is kept warm; the wedged one is reaped by dispose.
+    expect(stops[1]).toBe(false);
+    await provider.dispose();
+    expect(stops[0]).toBe(true);
+    expect(stops[1]).toBe(true);
+  });
+
+  it("drops both clients when the warm one and its respawn are both wedged", async () => {
+    let instances = 0;
+    const stops: boolean[] = [];
+    class DeadClient {
+      idx: number;
+      constructor(public readonly options: Record<string, unknown>) {
+        this.idx = instances++;
+        stops[this.idx] = false;
+      }
+      async start() {}
+      async stop() {
+        stops[this.idx] = true;
+        return [];
+      }
+      async createSession(): Promise<never> {
+        throw new Error("client not connected");
+      }
+      async resumeSession(): Promise<never> {
+        return this.createSession();
+      }
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      }
+      async listModels() {
+        return [];
+      }
+    }
+    const module = {
+      CopilotClient: DeadClient as unknown as CopilotSdkModule["CopilotClient"],
+      approveAll: (() => ({ kind: "permit" })) as unknown as CopilotSdkModule["approveAll"],
+    };
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => module }),
+    });
+    await expect(drain(provider.sendQuery("hi", "/tmp"))).rejects.toThrow();
+    // The warm client and its single respawn were both wedged — neither is left
+    // cached, and dispose reaps both detached stops.
+    expect(instances).toBe(2);
+    await provider.dispose();
+    expect(stops[0]).toBe(true);
+    expect(stops[1]).toBe(true);
+  });
+
+  it("stops an in-flight spawn that resolves after dispose()", async () => {
+    let releaseLoad: () => void = () => {};
+    const loadGate = new Promise<void>((r) => {
+      releaseLoad = r;
+    });
+    const sdk = makeMockSdk({ scenario: idle });
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({
+        sdkLoader: async () => {
+          await loadGate;
+          return sdk.module;
+        },
+      }),
+    });
+    // Start a turn; it parks inside the gated SDK load with the spawn in flight.
+    const turn = drain(provider.sendQuery("hi", "/tmp")).catch(() => {});
+    await new Promise((r) => setTimeout(r, 5));
+    // Dispose while the spawn is still pending, then let it resolve.
+    const disposed = provider.dispose();
+    releaseLoad();
+    await disposed;
+    await turn;
+    // The client the spawn produced was reaped, not cached onto the disposed
+    // provider.
     expect(sdk.lastClient()).not.toBeNull();
     expect(sdk.lastClient()!.stopped).toBe(true);
-    expect(sdk.lastSession()).toBeNull();
+  });
+
+  it("arms idle eviction when abort wins after the spawn", async () => {
+    const ac = new AbortController();
+    const sdk = makeMockSdk();
+    const loader = {
+      count: () => 1,
+      load: async () => {
+        ac.abort();
+        return sdk.module;
+      },
+    };
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      idleMs: 10,
+    });
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { abortSignal: ac.signal }));
+    const client = sdk.lastClient()!;
+    // Kept warm at first (not stopped on the abort path)...
+    expect(client.stopped).toBe(false);
+    // ...but bounded: the idle timer evicts the abandoned client.
+    await new Promise((r) => setTimeout(r, 40));
+    await Promise.resolve();
+    expect(client.stopped).toBe(true);
+  });
+
+  it("evicts the warm client after the idle window elapses", async () => {
+    const sdk = makeMockSdk({ scenario: idle });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      idleMs: 10,
+    });
+    await drain(provider.sendQuery("hi", "/tmp"));
+    const client = sdk.lastClient()!;
+    expect(client.stopped).toBe(false);
+    // Wait past the idle window, then let the detached stop settle.
+    await new Promise((r) => setTimeout(r, 40));
+    await Promise.resolve();
+    expect(client.stopped).toBe(true);
+  });
+
+  it("idleMs <= 0 disables warmth — every turn spawns fresh", async () => {
+    const sdk = makeMockSdk({ scenario: idle });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      idleMs: 0,
+    });
+    await drain(provider.sendQuery("one", "/tmp"));
+    await drain(provider.sendQuery("two", "/tmp"));
+    expect(loader.count()).toBe(2);
+  });
+
+  it("does not stop an in-use client when a concurrent different-cwd turn evicts it", async () => {
+    let releaseA: () => void = () => {};
+    const aGate = new Promise<void>((r) => {
+      releaseA = r;
+    });
+    let turn = 0;
+    const sdk = makeMockSdk({
+      scenario: async (s) => {
+        turn += 1;
+        if (turn === 1) {
+          s.emit("assistant.message_delta", { deltaContent: "a" });
+          await aGate;
+          s.emit("session.idle");
+        } else {
+          s.emit("session.idle");
+        }
+      },
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+
+    // Turn A streams on /a; pull its first chunk so its client is live + held.
+    const genA = provider.sendQuery("a", "/a");
+    const firstA = await genA.next();
+    expect(firstA.value!.type).toBe("text");
+    const clientA = sdk.lastClient()!;
+
+    // Turn B on a different workspace thrashes the single warm slot, evicting
+    // A's client — but A is still streaming, so its subprocess must survive.
+    await drain(provider.sendQuery("b", "/b"));
+    expect(loader.count()).toBe(2);
+    expect(clientA.stopped).toBe(false);
+
+    // A finishes; the deferred stop fires once nothing holds the client.
+    releaseA();
+    await drain(genA);
+    await provider.dispose();
+    expect(clientA.stopped).toBe(true);
+  });
+
+  it("a new turn cancels the previous turn's idle timer so it can't evict mid-stream", async () => {
+    let releaseB: () => void = () => {};
+    const bGate = new Promise<void>((r) => {
+      releaseB = r;
+    });
+    let turn = 0;
+    const sdk = makeMockSdk({
+      scenario: async (s) => {
+        turn += 1;
+        if (turn === 1) {
+          s.emit("session.idle");
+        } else {
+          s.emit("assistant.message_delta", { deltaContent: "x" });
+          await bGate;
+          s.emit("session.idle");
+        }
+      },
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      idleMs: 10,
+    });
+    // Turn one arms a 10ms idle timer on the warm client.
+    await drain(provider.sendQuery("one", "/a"));
+    const client = sdk.lastClient()!;
+    // Turn two starts immediately (cancelling that timer) and stays open longer
+    // than the idle window.
+    const gen = provider.sendQuery("two", "/a");
+    await gen.next();
+    await new Promise((r) => setTimeout(r, 30));
+    // The client wasn't evicted mid-turn, and turn two reused it (no re-spawn).
+    expect(loader.count()).toBe(1);
+    expect(client.stopped).toBe(false);
+    releaseB();
+    await drain(gen);
+  });
+});
+
+describe("disposeAllProviders (registry drain)", () => {
+  it("returns the same singleton instance across getAgentProvider calls", () => {
+    registerCopilotProvider({ getCredential: async () => undefined });
+    expect(getAgentProvider("copilot")).toBe(getAgentProvider("copilot"));
+  });
+
+  it("stops the registered copilot singleton's warm client", async () => {
+    const sdk = makeMockSdk({ scenario: (s) => s.emit("session.idle") });
+    const loader = loaderFor(sdk);
+    registerCopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+    const provider = getAgentProvider("copilot");
+    await drain(provider.sendQuery("hi", "/tmp"));
+    expect(sdk.lastClient()!.stopped).toBe(false);
+    await disposeAllProviders();
+    expect(sdk.lastClient()!.stopped).toBe(true);
   });
 });
 

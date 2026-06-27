@@ -43,10 +43,14 @@ export function registerCopilotProvider(
     clientFactory,
   };
   if (!isRegisteredProvider("copilot")) {
+    // One process-lifetime instance, not a fresh provider per turn: the warm
+    // client lives as provider state, so the instance must span turns for
+    // warmth — and the disposeAllProviders() drain — to mean anything.
+    const provider = new CopilotProvider(factoryOptions);
     registerProvider({
       id: "copilot",
       displayName: "GitHub Copilot",
-      factory: () => new CopilotProvider(factoryOptions),
+      factory: () => provider,
       capabilities: COPILOT_CAPABILITIES,
       builtIn: true,
       credentialServiceId: COPILOT_CREDENTIAL_SERVICE_ID,

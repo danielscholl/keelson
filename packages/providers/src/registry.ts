@@ -11,6 +11,13 @@ import type { IAgentProvider, ProviderInfo, ProviderRegistration } from "./types
 
 const registry = new Map<string, ProviderRegistration>();
 
+// Provider instances that expose dispose() — tracked so disposeAllProviders()
+// can drain them at shutdown. A singleton provider (Copilot's warm-client
+// holder) returns the same reference on every factory() call, so the Set
+// dedupes to one entry; stateless per-turn providers omit dispose() and are
+// never tracked, so this can't grow unbounded.
+const liveProviders = new Set<IAgentProvider>();
+
 export function registerProvider(entry: ProviderRegistration): void {
   if (registry.has(entry.id)) {
     throw new Error(`Provider '${entry.id}' is already registered`);
@@ -23,7 +30,30 @@ export function getAgentProvider(id: string): IAgentProvider {
   if (!entry) {
     throw new UnknownProviderError(id, [...registry.keys()]);
   }
-  return entry.factory();
+  const provider = entry.factory();
+  if (typeof provider.dispose === "function") {
+    liveProviders.add(provider);
+  }
+  return provider;
+}
+
+// Drain every disposable provider instance handed out by getAgentProvider.
+// Called from the server shutdown sequence and the in-process CLI exit so a
+// warm subprocess is reaped deterministically rather than orphaned. One
+// disposer throwing logs a warning and never blocks the rest.
+export async function disposeAllProviders(): Promise<void> {
+  const instances = [...liveProviders];
+  liveProviders.clear();
+  await Promise.allSettled(
+    instances.map(async (p) => {
+      try {
+        await p.dispose?.();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[keelson] provider '${p.getType()}' dispose() threw: ${msg}`);
+      }
+    }),
+  );
 }
 
 export function getRegistration(id: string): ProviderRegistration {
@@ -62,4 +92,5 @@ export function unregisterProvider(id: string): boolean {
 /** @internal Test-only — clears the registry. Not for production use. */
 export function clearRegistry(): void {
   registry.clear();
+  liveProviders.clear();
 }
