@@ -24,14 +24,29 @@ function write(line: string, stream: "stdout" | "stderr"): void {
   }
 }
 
-function renderHuman(value: unknown, indent = ""): string {
+export function renderHuman(value: unknown, indent = ""): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   if (Array.isArray(value)) {
-    return value.map((v) => `${indent}- ${renderHuman(v, `${indent}  `)}`).join("\n");
+    const childIndent = `${indent}  `;
+    return value
+      .map((v) => {
+        const rendered = renderHuman(v, childIndent);
+        // An object/array item renders multi-line already indented to childIndent;
+        // lift its first line onto the "- " marker so the item's keys align under
+        // the dash (proper YAML) instead of skewing a level to the right. Scalars
+        // have no indent and sit inline after the dash.
+        const isBlock = typeof v === "object" && v !== null;
+        const body =
+          isBlock && rendered.startsWith(childIndent)
+            ? rendered.slice(childIndent.length)
+            : rendered;
+        return `${indent}- ${body}`;
+      })
+      .join("\n");
   }
   if (typeof value === "object") {
     return Object.entries(value as Record<string, unknown>)

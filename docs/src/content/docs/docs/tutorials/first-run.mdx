@@ -67,56 +67,34 @@ workflows, and installed ribs in one pass:
 keelson doctor
 ```
 
-```text
-categories:
-  -     category: toolchain
-    checks:
-      -         name: bun --version
-        status: ok
-        detail: 1.3.13
-  -     category: server
-    checks:
-      -         name: GET /api/health
-        status: warn
-        detail: not reachable
-        hint: run `keelson start` to start the API server on http://127.0.0.1:7878
-  -     category: db
-    checks:
-      -         name: schema_version
-        status: warn
-        detail: db not found at /Users/you/.keelson/keelson.db
-        hint: run `keelson start` once to create and migrate the SQLite database
-  -     category: auth
-    checks:
-      -         name: keyring round-trip
-        status: ok
-        detail: service=keelson
-      -         name: providers
-        status: ok
-        detail: enabled=copilot; default=copilot (source: defaults)
-  -     category: workflows
-    checks:
-      -         name: discovery
-        status: ok
-        detail: 8 workflow(s) under /Users/you/.keelson/workflows
-      -         name: parse
-        status: ok
-        detail: all workflows parse cleanly
-summary:
-  ok: 5
-  warn: 2
-  fail: 0
-  skip: 0
-  total: 7
-strict: false
-```
+It runs one check per category and prints each one's status, detail, and (on a
+warn or fail) a `hint`. On a fresh install, before the first `keelson start`,
+the results read like this:
 
-Two checks warn, and both are expected. The `server` category cannot reach a
+| Category | Check | Status | What it tells you |
+|---|---|---|---|
+| toolchain | `bun --version` | ok | Bun is on your PATH (`1.3.13`). |
+| server | `GET /api/health` | warn | No server is running yet. Hint: run `keelson start`. |
+| db | `schema_version` | warn | No database yet; the first `keelson start` creates and migrates it. |
+| auth | `keyring round-trip` | ok | The OS keychain reads and writes back (`service=keelson`). |
+| auth | `providers` | ok | `copilot` is enabled and the default (`source: defaults`). |
+| workflows | `discovery` | ok | Eight starter workflows under `~/.keelson/workflows`. |
+| workflows | `parse` | ok | Every workflow parses cleanly. |
+
+It closes with a tally: **5 ok, 2 warn, 0 fail** across seven checks. (The
+terminal prints the same results as indented text; `keelson doctor --json`
+emits them as structured JSON for scripting.)
+
+Both warnings are expected on a first run. The `server` check cannot reach a
 server because none is running yet, and `db` has no database because the first
-`keelson start` is what creates and migrates it. Each warn carries a `hint`
-naming that exact next move. Meanwhile `workflows` already found eight files,
-the starter workflows a fresh install seeds, so the catalog is usable before
-you write anything. The tutorials that follow build on it.
+`keelson start` is what creates and migrates it. Each warning carries the `hint`
+naming its exact next move, and here both point at the same one: start the
+server. Meanwhile `workflows` already found the eight starter files a fresh
+install seeds, so the catalog is usable before you write anything. The
+tutorials that follow build on it.
+
+Install a rib later and a `ribs` category joins the sweep, one check per rib
+reporting whether it wired up cleanly.
 
 <Aside type="note" title="Two different version numbers">
 `schemaVersion: 0.3` (from `keelson version` and `/api/health`) is the wire and
