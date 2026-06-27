@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  disposeAllProviders,
   getAgentProvider,
   getProviderInfoList,
   isRegisteredProvider,
@@ -328,6 +329,10 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
       onEvent,
     });
   } finally {
+    // A Copilot `prompt` node leaves the language-server warm; with no server
+    // outliving this run, reap it here before the CLI exits rather than
+    // orphaning the subprocess.
+    await disposeAllProviders();
     if (cleanupWorktree !== null && runSucceeded) {
       // Force-remove on success: same semantics as the server path — the
       // worktree is ephemeral, and any intentional artifacts should have

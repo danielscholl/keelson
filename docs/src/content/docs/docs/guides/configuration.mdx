@@ -268,6 +268,7 @@ the matching config value when set.
 | `KEELSON_REDACT_PATTERN` | unset | Regex whose matches become `[REDACTED]` in tool results and workflow node output. See [Redaction](../governance/#redaction). |
 | `KEELSON_GATEWAY_KEY` | unset | API key `keelson gateway add` reads when `--key` is omitted, so it stays out of shell history. See [Gateways](#gateways). |
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
+| `KEELSON_COPILOT_WARM_IDLE_MS` | `600000` | How long the Copilot language-server subprocess stays warm between turns before it is evicted, in milliseconds. `0` or negative disables warmth (every turn spawns fresh). |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
 | `KEELSON_MCP_DISABLED` | unset | Set to `1` to not mount `/api/mcp`. Overrides `mcp.enabled`. |
 | `KEELSON_MCP_EXPOSE_STATE_CHANGING` | unset | Set to `1` to force state-changing tools on, `0` to force read-only. Overrides `mcp.exposeStateChanging` (which defaults on). |

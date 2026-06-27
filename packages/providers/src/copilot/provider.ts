@@ -92,10 +92,11 @@ interface WarmClient {
   stopRequested: boolean;
 }
 
-// To keep the warm client alive across turns it must outlive any single
-// provider instance. getAgentProvider("copilot") hands back a fresh provider
-// per turn, so the warmth must live on the long-lived registration — this
-// provider is registered as a process-lifetime singleton (registration.ts).
+// The warm client lives as instance state, so the instance must outlive a
+// single turn. registration.ts registers this provider as a process-lifetime
+// singleton (one instance returned from every getAgentProvider("copilot")
+// call) precisely so that warmth — and the disposeAllProviders() drain —
+// span turns; the default per-turn-provider shape would discard it each turn.
 export class CopilotProvider implements IAgentProvider {
   private readonly getCredential: GetCredentialFn;
   private readonly factory: CopilotClientFactory;
@@ -105,8 +106,15 @@ export class CopilotProvider implements IAgentProvider {
   // The single warm client reused across turns, or null when none is resident.
   private warm: WarmClient | null = null;
   // In-flight spawn, so concurrent first turns coalesce onto one subprocess
-  // rather than racing two into existence.
+  // rather than racing two into existence. The generation tags each spawn so a
+  // turn's finally only clears the slot it set (a concurrent spawn may have
+  // replaced it) — a numeric tag, not the promise itself, to keep the identity
+  // check out of an await-less comparison.
   private warmCreating: Promise<WarmClient> | null = null;
+  private warmCreatingGen = 0;
+  // Set once dispose() runs so an in-flight spawn that resolves afterward
+  // doesn't re-cache a client onto an already-drained provider.
+  private disposed = false;
   // Fires idleMs after the last turn to stop a possibly-stale subprocess.
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   // Detached teardowns (evicted clients, per-turn session disconnects). The SDK
@@ -153,10 +161,23 @@ export class CopilotProvider implements IAgentProvider {
   // At shutdown we stop unconditionally — any in-flight turn is being torn
   // down anyway, so we don't defer on its hold.
   async dispose(): Promise<void> {
+    this.disposed = true;
     this.cancelIdleTimer();
     const warm = this.warm;
     this.warm = null;
     if (warm) this.trackTeardown(settleCopilotTeardown(warm.client));
+    // A spawn still in flight when shutdown began would otherwise resolve and
+    // cache a started client after the drain. acquireClient's disposed guard
+    // stops it from caching; stop the resolved subprocess here so it's reaped.
+    const creating = this.warmCreating;
+    if (creating) {
+      this.trackTeardown(
+        creating.then(
+          (w) => settleCopilotTeardown(w.client),
+          () => {},
+        ),
+      );
+    }
     await Promise.allSettled([...this.pendingTeardowns]);
   }
 
@@ -178,14 +199,20 @@ export class CopilotProvider implements IAgentProvider {
       }
     }
     if (this.warm) this.evictWarm();
+    const gen = ++this.warmCreatingGen;
     const creating = this.spawnClient(token, cwd);
     this.warmCreating = creating;
     try {
       const warm = await creating;
+      // Shutdown drained while we were spawning — don't re-cache onto a
+      // disposed provider; dispose() reaps the subprocess via warmCreating.
+      if (this.disposed) {
+        throw new Error("Copilot provider is disposed");
+      }
       this.warm = warm;
       return warm;
     } finally {
-      if (this.warmCreating === creating) this.warmCreating = null;
+      if (this.warmCreatingGen === gen) this.warmCreating = null;
     }
   }
 
@@ -250,6 +277,12 @@ export class CopilotProvider implements IAgentProvider {
   // Without this, one bad subprocess would poison every subsequent turn. Auth /
   // rate-limit failures are NOT connection errors, so they surface immediately
   // rather than burning a pointless respawn.
+  //
+  // The lease is taken BEFORE the first open await so a concurrent eviction
+  // (a different-workspace turn thrashing the warm slot) defers the stop()
+  // rather than killing the subprocess mid-open. On success the returned client
+  // carries that one lease, which the caller releases; on any throw the lease
+  // is released here so nothing leaks.
   private async openSessionWithRetry(
     warm: WarmClient,
     token: string | undefined,
@@ -257,6 +290,7 @@ export class CopilotProvider implements IAgentProvider {
     resumeSessionId: string | undefined,
     buildConfig: (handler: CopilotPermissionHandler) => unknown,
   ): Promise<{ warm: WarmClient; session: CopilotSessionLike }> {
+    this.retain(warm);
     try {
       const session = await this.openSession(
         warm,
@@ -265,9 +299,15 @@ export class CopilotProvider implements IAgentProvider {
       );
       return { warm, session };
     } catch (err) {
-      if (!isCopilotConnectionError(err)) throw err;
+      if (!isCopilotConnectionError(err)) {
+        this.release(warm);
+        throw err;
+      }
+      // Hand the lease from the wedged client to a fresh respawn.
+      this.release(warm);
       this.discardClient(warm);
       const fresh = await this.acquireClient(token, cwd);
+      this.retain(fresh);
       try {
         const session = await this.openSession(
           fresh,
@@ -278,6 +318,7 @@ export class CopilotProvider implements IAgentProvider {
       } catch (retryErr) {
         // The respawn is wedged too — drop it so it isn't left cached, and let
         // the caller surface the failure.
+        this.release(fresh);
         this.discardClient(fresh);
         throw retryErr;
       }
@@ -351,8 +392,12 @@ export class CopilotProvider implements IAgentProvider {
     }
 
     // Abort raced the spawn: leave the client warm for the next turn rather
-    // than stopping it, and don't open a session or send.
-    if (options?.abortSignal?.aborted) return;
+    // than stopping it, and don't open a session or send. Arm the idle timer so
+    // a freshly spawned, then-abandoned client is still bounded by eviction.
+    if (options?.abortSignal?.aborted) {
+      this.armIdleTimer();
+      return;
+    }
 
     // A turn is starting on the warm client: cancel any pending idle eviction
     // so a timer armed by the previous turn can't fire mid-stream here.
@@ -418,20 +463,20 @@ export class CopilotProvider implements IAgentProvider {
         );
         session = opened.session;
         activeWarm = opened.warm;
+        // openSessionWithRetry returns the client holding one lease; we own it
+        // now and release it in the finally. The lease was taken before the
+        // open await, so a concurrent eviction defers the stop() rather than
+        // killing this subprocess mid-stream.
+        retained = true;
       } catch (err) {
-        // Session open failed even after the connection-respawn retry — drop
-        // the client if it was a connection fault so the next turn starts clean.
+        // Session open failed even after the connection-respawn retry — the
+        // lease is already released inside openSessionWithRetry. Drop the client
+        // if it was a connection fault so the next turn starts clean.
         connectionFailure = isCopilotConnectionError(err);
         const msg = buildFriendlyCopilotError(err);
         yield { type: "system", content: msg };
         throw err instanceof Error ? err : new Error(msg);
       }
-
-      // Hold a refcount across streaming so a concurrent eviction (idle timer,
-      // a different-workspace turn thrashing the warm slot) defers the stop()
-      // instead of killing this subprocess mid-stream.
-      this.retain(activeWarm);
-      retained = true;
 
       // Surface the session id so the handler can persist it for the next
       // turn's resume. createSession mints a new id; resumeSession echoes the

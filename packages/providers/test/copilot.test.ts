@@ -913,6 +913,60 @@ describe("CopilotProvider — warm client (issue #327)", () => {
     expect(stops[1]).toBe(true);
   });
 
+  it("stops an in-flight spawn that resolves after dispose()", async () => {
+    let releaseLoad: () => void = () => {};
+    const loadGate = new Promise<void>((r) => {
+      releaseLoad = r;
+    });
+    const sdk = makeMockSdk({ scenario: idle });
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({
+        sdkLoader: async () => {
+          await loadGate;
+          return sdk.module;
+        },
+      }),
+    });
+    // Start a turn; it parks inside the gated SDK load with the spawn in flight.
+    const turn = drain(provider.sendQuery("hi", "/tmp")).catch(() => {});
+    await new Promise((r) => setTimeout(r, 5));
+    // Dispose while the spawn is still pending, then let it resolve.
+    const disposed = provider.dispose();
+    releaseLoad();
+    await disposed;
+    await turn;
+    // The client the spawn produced was reaped, not cached onto the disposed
+    // provider.
+    expect(sdk.lastClient()).not.toBeNull();
+    expect(sdk.lastClient()!.stopped).toBe(true);
+  });
+
+  it("arms idle eviction when abort wins after the spawn", async () => {
+    const ac = new AbortController();
+    const sdk = makeMockSdk();
+    const loader = {
+      count: () => 1,
+      load: async () => {
+        ac.abort();
+        return sdk.module;
+      },
+    };
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+      idleMs: 10,
+    });
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { abortSignal: ac.signal }));
+    const client = sdk.lastClient()!;
+    // Kept warm at first (not stopped on the abort path)...
+    expect(client.stopped).toBe(false);
+    // ...but bounded: the idle timer evicts the abandoned client.
+    await new Promise((r) => setTimeout(r, 40));
+    await Promise.resolve();
+    expect(client.stopped).toBe(true);
+  });
+
   it("evicts the warm client after the idle window elapses", async () => {
     const sdk = makeMockSdk({ scenario: idle });
     const loader = loaderFor(sdk);
