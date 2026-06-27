@@ -68,11 +68,11 @@ keelson version
 
 The Windows installer provisions `%USERPROFILE%\.keelson`, installs `keelson.cmd` under `%LOCALAPPDATA%\keelson\bin`, and adds that bin directory to your user `PATH`.
 
-### Upgrade or repair
+### Upgrade
 
 ```bash
-keelson update
 keelson update --check
+keelson update
 ```
 
 You can also rerun the installer. Upgrades preserve installed ribs and local data.
@@ -105,7 +105,6 @@ A workflow captures repeatable agent work so it can be inspected, rerun, shared,
 
 ```bash
 keelson workflow list
-keelson workflow validate smoke-test
 keelson workflow run smoke-test --watch
 ```
 
@@ -117,8 +116,7 @@ Ribs are packages that Keelson discovers at boot. They can register tools, workf
 
 ```bash
 keelson rib add https://github.com/you/keelson-rib-yours
-keelson stop
-keelson start
+keelson restart
 keelson rib list
 ```
 
@@ -131,13 +129,7 @@ keelson rib add @keelson/rib-yours
 keelson rib add ./local-rib
 ```
 
-Installed ribs live under the Keelson home and activate on the next server boot. To activate only selected ribs, set `KEELSON_RIBS` to a comma-separated list of rib ids:
-
-```bash
-KEELSON_RIBS=yours keelson start
-```
-
-A rib runs inside your local harness. Install ribs from sources you trust.
+Installed ribs live under the Keelson home and activate on the next server boot.
 
 ## Providers and gateways
 
@@ -155,7 +147,7 @@ Enable providers in `~/.keelson/config.json`:
 }
 ```
 
-`KEELSON_PROVIDERS` overrides the file when set. For an OpenAI-compatible endpoint, add a gateway:
+For an OpenAI-compatible endpoint, add a gateway:
 
 ```bash
 keelson gateway add ollama http://localhost:11434/v1 --model qwen3
@@ -191,13 +183,12 @@ Useful commands:
 ```bash
 keelson start                    # start the local server in the background
 keelson stop                     # stop the background server
+keelson restart                  # restart the background server
 keelson status                   # report server status
-keelson doctor                   # health sweep for toolchain, server, DB, auth, and workflows
 keelson chat "hello"             # chat turn (omit the message for interactive)
+keelson workflow list            # list available workflows
 keelson workflow run <name>      # run a workflow
-keelson rib list --installed     # list installed ribs without needing the server
-keelson update --check           # check for available updates
-keelson --json workflow list     # machine-readable output for scripts
+keelson rib list                 # list installed ribs
 ```
 
 For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/) for details.
