@@ -190,9 +190,8 @@ There are two kinds of uninstall: remove a rib, or remove the whole harness.
 ### Remove a rib only
 
 ```bash
-keelson rib remove yours
-keelson stop
-keelson start
+keelson rib remove <name>
+keelson restart
 ```
 
 This removes the package from the home. Some ribs keep private data under `$KEELSON_HOME/rib-<id>`. Delete that directory only when you want to discard the rib's local data:
