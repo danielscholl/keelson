@@ -54,6 +54,10 @@ interface MockSdkOptions {
   createSessionError?: Error;
   sendError?: Error;
   startError?: Error;
+  // Holds client.stop() pending until resolved, so a test can observe a turn
+  // completing while SDK teardown is still in flight. Default undefined = stop
+  // resolves immediately.
+  stopGate?: Promise<unknown>;
   scenario?: (session: MockSession) => void | Promise<void>;
   // F9: drives the lightweight checkAuthStatus probe. Default is a happy
   // "user" result so existing tests don't have to opt in.
@@ -175,6 +179,7 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       this.started = true;
     }
     async stop(): Promise<unknown> {
+      if (opts.stopGate) await opts.stopGate;
       this.stopped = true;
       return [];
     }
@@ -337,7 +342,8 @@ describe("CopilotProvider — happy path stream translation", () => {
     expect(chunks.every((c) => c.type === "text")).toBe(true);
     expect(chunks.map((c) => (c as { content: string }).content).join("")).toBe("2 + 2 = 4");
     expect(sdk.lastSession()!.sent[0]!.prompt).toBe("hello");
-    expect(sdk.lastSession()!.disconnected).toBe(true);
+    // sendQuery detaches teardown; settle it before asserting cleanup ran.
+    await provider.dispose();
     expect(sdk.lastClient()!.stopped).toBe(true);
   });
 
@@ -409,7 +415,9 @@ describe("CopilotProvider — error paths", () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0]!.type).toBe("system");
     expect((chunks[0] as { content: string }).content.toLowerCase()).toContain("authentication");
-    // Client was started, so cleanup should have called stop.
+    // Client was started, so cleanup should have called stop (detached by
+    // sendQuery's finally — settle it first).
+    await provider.dispose();
     expect(sdk.lastClient()!.stopped).toBe(true);
   });
 
@@ -558,6 +566,42 @@ describe("CopilotProvider — concurrent drain (real-time streaming)", () => {
     }
     expect(thrown).toBeInstanceOf(Error);
     expect(chunks.some((c) => c.type === "error")).toBe(true);
+    await provider.dispose();
+    expect(sdk.lastClient()!.stopped).toBe(true);
+  });
+});
+
+describe("CopilotProvider — teardown is detached from the turn", () => {
+  it("returns the turn before the SDK's client.stop() settles", async () => {
+    let releaseStop: () => void = () => {};
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const sdk = makeMockSdk({
+      stopGate,
+      scenario: (session) => {
+        session.emit("assistant.message_delta", { deltaContent: "hello" });
+        session.emit("session.idle");
+      },
+    });
+    const loader = loaderFor(sdk);
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loader.load }),
+    });
+
+    // The turn must complete and surface its content even though stop() is
+    // still pending. If sendQuery awaited stop() in its finally — the hang
+    // this guards against — draining would block until the gate releases.
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    expect(chunks.map((c) => (c as { content?: string }).content).join("")).toBe("hello");
+    // stop() is gated, so the client isn't torn down yet: the turn returned
+    // ahead of teardown rather than waiting out the SDK's ~10s shutdown.
+    expect(sdk.lastClient()!.stopped).toBe(false);
+
+    // Release the gate and drain the detached teardown so it actually reaps.
+    releaseStop();
+    await provider.dispose();
     expect(sdk.lastClient()!.stopped).toBe(true);
   });
 });
