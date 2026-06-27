@@ -236,8 +236,6 @@ Keelson does not store provider secrets in the home directory. Provider keys and
 
 - [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, CLI reference, and rib contract.
 - [Writing ribs](WRITING-RIBS.md): the five-minute rib authoring quickstart.
-- [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts): the full `Rib` contract.
-- [`packages/workflows/assets/workflows/`](packages/workflows/assets/workflows/): bundled starter workflows.
 - [CONTRIBUTING.md](CONTRIBUTING.md): local setup and required checks.
 - [SECURITY.md](SECURITY.md): threat model and reporting process.
 
