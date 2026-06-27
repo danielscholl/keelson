@@ -100,6 +100,7 @@ describe("keelson CLI smoke", () => {
       "version",
       "start",
       "stop",
+      "restart",
       "status",
       "workflow",
       "chat",
@@ -171,7 +172,16 @@ describe("keelson CLI smoke", () => {
     expect(envelope.ok).toBe(true);
     expect(envelope.data.name).toBe("@keelson/cli");
     const names = (envelope.data.commands as Array<{ name: string }>).map((c) => c.name);
-    for (const expected of ["start", "stop", "status", "workflow", "chat", "doctor", "version"]) {
+    for (const expected of [
+      "start",
+      "stop",
+      "restart",
+      "status",
+      "workflow",
+      "chat",
+      "doctor",
+      "version",
+    ]) {
       expect(names).toContain(expected);
     }
   });
@@ -298,7 +308,7 @@ describe("keelson CLI smoke", () => {
   });
 
   test("start/stop/status are top-level; service/serve remain hidden aliases", async () => {
-    for (const cmd of ["start", "stop", "status"]) {
+    for (const cmd of ["start", "stop", "restart", "status"]) {
       const res = await runCli(["--json", cmd, "--help"]);
       expect(res.exitCode).toBe(0);
       expect(JSON.parse(res.stdout.trim()).data.command).toBe(cmd);

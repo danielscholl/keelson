@@ -76,6 +76,18 @@ Stop drains in-flight runs, closes the database, and exits, falling back to a
 signal only if the graceful path does not land. It is safe to run when nothing
 is up: it reports `not running` and cleans any stale state.
 
+## Restart it
+
+```sh
+keelson restart
+```
+
+Restart stops the running server (the same graceful-then-signal path as `stop`)
+and starts a fresh background server, reporting its URL. If nothing is running it
+just starts one. A stop that genuinely fails — a stale record, an unmanaged
+server holding the port — aborts the restart rather than launching a second
+server alongside it.
+
 ## The MCP endpoint
 
 The same server speaks the [Model Context Protocol](https://modelcontextprotocol.io)

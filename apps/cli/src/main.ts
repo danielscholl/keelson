@@ -18,7 +18,13 @@ import { runGatewayAdd, runGatewayList, runGatewayRemove } from "./commands/gate
 import { runMcpBridge } from "./commands/mcp.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
-import { runServe, runServeStart, runServeStatus, runServeStop } from "./commands/serve.ts";
+import {
+  runServe,
+  runServeRestart,
+  runServeStart,
+  runServeStatus,
+  runServeStop,
+} from "./commands/serve.ts";
 import { runUpdate } from "./commands/update.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRespond } from "./commands/workflow-respond.ts";
@@ -130,6 +136,16 @@ export function buildProgram(): Command {
     .action(async function stopAction(this: Command) {
       const { json } = globalOpts(this);
       await runServeStop({ json });
+    });
+
+  program
+    .command("restart")
+    .description("stop the background server (if running) and start it again")
+    .option("--db <path>", "override KEELSON_DB for this run")
+    .action(async function restartAction(this: Command) {
+      const { json } = globalOpts(this);
+      const { db } = this.opts<{ db?: string }>();
+      await runServeRestart({ db, json });
     });
 
   program

@@ -52,6 +52,7 @@ keelson --json workflow list | jq '.data.workflows[].name'
 | --- | --- |
 | `keelson start` | Start the server in the background and report its URL. `--foreground` (`-f`) runs it attached instead; `--db <path>` overrides the database. |
 | `keelson stop` | Stop the background server (graceful shutdown, kill fallback). |
+| `keelson restart` | Stop the background server (if running) and start it again. `--db <path>` overrides the database. |
 | `keelson status` | Report whether the server is running and its URL. Exit `0` up, `3` down. |
 
 The former `keelson service` group (`service start` / `stop` / `status`, alias

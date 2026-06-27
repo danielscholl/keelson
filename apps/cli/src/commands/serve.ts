@@ -18,12 +18,24 @@ import {
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
-import { emit } from "../output.ts";
+import { type EmitPayload, type ErrorPayload, emit } from "../output.ts";
 import { defaultServerBaseUrl, probeServer, type ServerInfo } from "../server-probe.ts";
 
 export interface ServeOptions {
   db?: string;
   json: boolean;
+}
+
+// The result of a control-plane action, deferred so callers (the thin command
+// wrappers, and `restart` which chains two actions) decide when to emit and
+// exit instead of each branch calling process.exit itself.
+interface Outcome {
+  payload: EmitPayload<unknown>;
+  exitCode: number;
+}
+
+function isError(payload: EmitPayload<unknown>): payload is ErrorPayload {
+  return "error" in payload && typeof payload.error === "string";
 }
 
 // Run the server in-process and block until a termination signal. serveUntilSignal
@@ -105,32 +117,30 @@ async function probeKnown(
   return null;
 }
 
-export async function runServeStart(opts: ServeOptions): Promise<void> {
+async function serveStart(opts: ServeOptions): Promise<Outcome> {
   const home = resolveKeelsonHome();
   const state = readServerState(home);
   const running = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
   if (running) {
-    emit(
-      {
+    return {
+      payload: {
         data: {
           status: "already running",
           url: running.baseUrl,
           ...(state && isPidAlive(state.pid) ? { pid: state.pid } : {}),
         },
       },
-      opts,
-    );
-    process.exit(EXIT_OK);
+      exitCode: EXIT_OK,
+    };
   }
   if (state && isPidAlive(state.pid)) {
-    emit(
-      {
+    return {
+      payload: {
         error: `a process with pid ${state.pid} is alive but not responding at ${state.url} — it may still be booting (check \`keelson status\` or ${logPath(home)}); if it is not a keelson server (stale record after a crash), delete ${serverStatePath(home)} and retry`,
         code: "UNRESPONSIVE",
       },
-      opts,
-    );
-    process.exit(EXIT_FAIL);
+      exitCode: EXIT_FAIL,
+    };
   }
 
   const log = logPath(home);
@@ -171,14 +181,13 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null) {
       const tail = logTail(log);
-      emit(
-        {
+      return {
+        payload: {
           error: `server exited during startup (code ${child.exitCode ?? child.signalCode})${tail ? `\n${tail}` : ""}`,
           code: "START_FAILED",
         },
-        opts,
-      );
-      process.exit(EXIT_FAIL);
+        exitCode: EXIT_FAIL,
+      };
     }
     // A refused connection fails instantly, so boot polling stays on the 250ms
     // cadence; the longer timeout only matters once the port is bound and the
@@ -188,8 +197,8 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
       timeoutMs: STATUS_PROBE_TIMEOUT_MS,
     });
     if (info) {
-      emit(
-        {
+      return {
+        payload: {
           data: {
             status: "running",
             url: info.baseUrl,
@@ -197,21 +206,25 @@ export async function runServeStart(opts: ServeOptions): Promise<void> {
             log,
           },
         },
-        opts,
-      );
-      process.exit(EXIT_OK);
+        exitCode: EXIT_OK,
+      };
     }
     await Bun.sleep(POLL_INTERVAL_MS);
   }
   const tail = logTail(log);
-  emit(
-    {
+  return {
+    payload: {
       error: `server did not respond within ${START_TIMEOUT_MS / 1000}s${tail ? `\n${tail}` : ""}`,
       code: "START_TIMEOUT",
     },
-    opts,
-  );
-  process.exit(EXIT_FAIL);
+    exitCode: EXIT_FAIL,
+  };
+}
+
+export async function runServeStart(opts: ServeOptions): Promise<void> {
+  const { payload, exitCode } = await serveStart(opts);
+  emit(payload, opts);
+  process.exit(exitCode);
 }
 
 async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
@@ -237,24 +250,21 @@ async function requestGracefulShutdown(state: ServerState): Promise<boolean> {
   }
 }
 
-export async function runServeStop(opts: { json: boolean }): Promise<void> {
-  const home = resolveKeelsonHome();
+async function serveStop(home: string): Promise<Outcome> {
   const state = readServerState(home);
   const running = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
 
   if (!state) {
     if (running) {
-      emit(
-        {
+      return {
+        payload: {
           error: `a server is responding at ${running.baseUrl} but ${home}/server.json does not exist — it was started from a different home (or an older keelson); stop it where it was started`,
           code: "UNMANAGED",
         },
-        opts,
-      );
-      process.exit(EXIT_FAIL);
+        exitCode: EXIT_FAIL,
+      };
     }
-    emit({ data: { status: "not running" } }, opts);
-    process.exit(EXIT_OK);
+    return { payload: { data: { status: "not running" } }, exitCode: EXIT_OK };
   }
 
   // Identity gate: the recorded pid is only trustworthy while the server it
@@ -265,19 +275,20 @@ export async function runServeStop(opts: { json: boolean }): Promise<void> {
 
   if (!respondingAtRecorded && !isPidAlive(state.pid)) {
     clearServerState(home);
-    emit({ data: { status: "not running", note: "cleaned up stale server.json" } }, opts);
-    process.exit(EXIT_OK);
+    return {
+      payload: { data: { status: "not running", note: "cleaned up stale server.json" } },
+      exitCode: EXIT_OK,
+    };
   }
 
   if (!respondingAtRecorded) {
-    emit(
-      {
+    return {
+      payload: {
         error: `a process with pid ${state.pid} is alive but nothing responds at ${state.url}; refusing to signal a possibly recycled pid — if it is a hung keelson server, kill it manually and delete ${serverStatePath(home)}`,
         code: "STALE_STATE",
       },
-      opts,
-    );
-    process.exit(EXIT_FAIL);
+      exitCode: EXIT_FAIL,
+    };
   }
 
   // Graceful first: the token-gated shutdown route drains runs and closes the
@@ -286,14 +297,13 @@ export async function runServeStop(opts: { json: boolean }): Promise<void> {
   // own and the signal fallback below is safe.
   const graceful = await requestGracefulShutdown(state);
   if (!graceful) {
-    emit(
-      {
+    return {
+      payload: {
         error: `a server responds at ${state.url} but did not accept the recorded shutdown token — it was started from a different home (or an older keelson); stop it where it was started`,
         code: "UNMANAGED",
       },
-      opts,
-    );
-    process.exit(EXIT_FAIL);
+      exitCode: EXIT_FAIL,
+    };
   }
 
   let exited = await waitForExit(state.pid, STOP_TIMEOUT_MS);
@@ -317,19 +327,47 @@ export async function runServeStop(opts: { json: boolean }): Promise<void> {
   }
 
   if (!exited) {
-    emit(
-      {
+    return {
+      payload: {
         error: `server process (pid ${state.pid}) did not exit; kill it manually`,
         code: "STOP_FAILED",
       },
-      opts,
-    );
-    process.exit(EXIT_FAIL);
+      exitCode: EXIT_FAIL,
+    };
   }
 
   clearServerState(home);
-  emit({ data: { status: "stopped", pid: state.pid } }, opts);
-  process.exit(EXIT_OK);
+  return { payload: { data: { status: "stopped", pid: state.pid } }, exitCode: EXIT_OK };
+}
+
+export async function runServeStop(opts: { json: boolean }): Promise<void> {
+  const { payload, exitCode } = await serveStop(resolveKeelsonHome());
+  emit(payload, opts);
+  process.exit(exitCode);
+}
+
+// Stop then start. A stop that genuinely failed (stale state, an unmanaged
+// server, a drain that hung) aborts the restart — we must not launch a second
+// server while a possibly-foreign one still holds the port. A stop that found
+// nothing to stop ("not running") is success and falls through to start.
+export async function runServeRestart(opts: ServeOptions): Promise<void> {
+  const stop = await serveStop(resolveKeelsonHome());
+  if (isError(stop.payload)) {
+    emit(stop.payload, opts);
+    process.exit(stop.exitCode);
+  }
+  const start = await serveStart(opts);
+  // Relabel a fresh boot as "restarted" so the human output reflects the whole
+  // operation; pass everything else (errors, an "already running" race) through.
+  const payload =
+    !isError(start.payload) &&
+    start.payload.data !== null &&
+    typeof start.payload.data === "object" &&
+    (start.payload.data as { status?: unknown }).status === "running"
+      ? { data: { ...(start.payload.data as Record<string, unknown>), status: "restarted" } }
+      : start.payload;
+  emit(payload, opts);
+  process.exit(start.exitCode);
 }
 
 export async function runServeStatus(opts: { json: boolean }): Promise<void> {

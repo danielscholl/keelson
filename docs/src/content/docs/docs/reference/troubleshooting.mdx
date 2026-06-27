@@ -97,8 +97,8 @@ depends on the provider:
 ## A rib I installed does not appear
 
 Discovery runs once, at boot. After `keelson rib add` the command reports
-`restartRequired: true`; restart the server (`keelson stop && keelson start`)
-so discovery picks the package up. If it still does not appear:
+`restartRequired: true`; restart the server (`keelson restart`) so discovery
+picks the package up. If it still does not appear:
 
 - Check `KEELSON_RIBS`. When set, it filters which discovered ribs activate;
   unset it to activate everything.
