@@ -119,8 +119,8 @@ after five minutes. The id comes from `approval list` or the in-app prompt.
 | `keelson rib show <id>` | Show one rib's tools, views, surfaces, and auth. Server-required. |
 
 `rib list --installed` reads the home directly, so it works whether or not the
-server is running. Most other rib commands talk to the running server and report
-`3` when it is down.
+server is running, and reports each installed rib's package version. Most other
+rib commands talk to the running server and report `3` when it is down.
 
 ## Projects
 
@@ -171,7 +171,7 @@ command). The options below apply to the one-shot form.
 | `keelson doctor` | Probe the toolchain, server, database, auth, and workflows. `--strict` exits non-zero on warnings too. |
 | `keelson update` | Update the harness and GitHub-sourced ribs in place. `--check` reports the available version; `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
 | `keelson worktree prune` | Remove leftover isolated-run worktrees. `--dry-run` lists candidates; `--force` also removes dirty ones. |
-| `keelson version` | Print the CLI, Bun, and schema versions. |
+| `keelson version` | Print the CLI, Bun, and schema versions, plus each installed rib's version. |
 
 <Aside type="note" title="--base-url skips the probe">
 Server-backed commands normally probe for a running server. Pass `--base-url`

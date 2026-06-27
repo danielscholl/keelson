@@ -5,7 +5,7 @@
 import { resolve } from "node:path";
 import type { RibSummary } from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
-import { ensureHome, installedRibIds, listedRibIds, resolveKeelsonHome } from "../home.ts";
+import { ensureHome, installedRibIds, listedRibs, resolveKeelsonHome } from "../home.ts";
 import { listRibs } from "../http/ribs-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
@@ -108,7 +108,7 @@ export interface RibListOptions extends BaseOptions {
 export async function runRibList(opts: RibListOptions): Promise<never> {
   if (opts.installed) {
     const home = resolveKeelsonHome();
-    const ribs = listedRibIds(home).map((id) => ({ id, displayName: id }));
+    const ribs = listedRibs(home).map(({ id, version }) => ({ id, displayName: id, version }));
     emit({ data: { ribs, source: "installed", home } }, { json: opts.json });
     process.exit(EXIT_OK);
   }
