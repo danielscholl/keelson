@@ -23,6 +23,7 @@ const ping: ToolDefinition = {
   inputSchema: z.object({ message: z.string() }),
   async execute(input, ctx) {
     const { message } = input as { message: string };
+    // toolUseId is "" here; the harness stamps the real id on the way out.
     ctx.emit({ type: "tool_result", toolUseId: "", content: `pong: ${message}` });
   },
 };
