@@ -10,16 +10,6 @@ Keelson is a local control plane for coding agents. It turns agent work from one
 
 Most agent tools are centered on a single chat, model, or editor session. Keelson is centered on the local harness around that work. It keeps state on your machine, captures repeatable tasks as workflows, and lets new capabilities attach as packages instead of forks.
 
-Use Keelson when you want to:
-
-- Turn one-off agent chats into repeatable workflows.
-- Mix agent turns with deterministic shell, script, approval, loop, and control steps.
-- Keep conversations, runs, outputs, memory, and rib data on your machine.
-- Route different providers through one local interface.
-- Add capabilities as packages instead of forking the harness.
-- Put governance around tool calls and agent turns.
-- Expose the same registered tools to other agents over MCP.
-
 ## What makes Keelson different
 
 | Capability | What it means |
