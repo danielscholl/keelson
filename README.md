@@ -1,249 +1,268 @@
 # Keelson
 
-**The backbone for your coding agent.**
-
-A single-user, local-only **harness** that wraps a coding agent — GitHub Copilot
-or Claude — with persistent state, deterministic YAML workflows, and a browser
-UI. It runs on your laptop and never round-trips through a hosted service.
-
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 ![Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)
 [![Runtime: Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh/)
 
----
+**The hull. Not the crew.**
 
-## What is a harness?
+Keelson is a local control plane for coding agents. It turns agent work from one-off chats into durable, repeatable runs: persistent state, YAML workflows with deterministic control flow, a browser UI, provider routing, governance hooks, MCP access, and a typed extension model called ribs.
 
-A harness is infrastructure. It wraps a coding agent with the plumbing the agent
-itself doesn't carry — state, workflows, policy, a UI. The harness is useful on
-its own; when you need more, you bolt on **ribs**.
+Most agent tools are centered on a single chat, model, or editor session. Keelson is centered on the local harness around that work. It keeps the work on your machine, captures repeatable work as YAML DAGs, exposes runs through a local UI and API, and lets new capabilities attach as packages instead of forks.
 
-A keelson is the beam fastened over a ship's keel — the spine the rest of the
-hull bolts onto. Keelson is the beam; ribs are the structural members that
-fasten to it.
+Use Keelson when you want to:
 
-| | Harness (Keelson) | Ribs (extensions) |
-|---|---|---|
-| Ships in-tree | Yes — the deliverable | No — none ship; install from any git URL |
-| Provides | state, workflows, providers, UI, policy | tools, surfaces, external-system integrations |
-| Who writes it | the project | anyone — `keelson-rib-<name>` |
-| When it loads | always | discovered at boot from `node_modules/@keelson/` |
+- Turn one-off agent chats into repeatable YAML workflows.
+- Mix agent turns with deterministic shell, script, approval, loop, and control steps.
+- Keep conversations, runs, outputs, memory, and rib data on your machine.
+- Route different providers through one local interface.
+- Add capabilities as packages instead of forking the harness.
+- Put governance around tool calls and agent turns.
+- Expose the same registered tools to other agents over MCP.
 
----
+## What makes Keelson different
 
-## What you get
+| Capability | What it means |
+| --- | --- |
+| Durable agent workbench | Agent chats, workflow runs, outputs, projects, and memory survive beyond a single terminal, editor, or model session. |
+| Local control plane | One server on your laptop owns the state, providers, API, WebSocket stream, MCP endpoint, and browser UI. |
+| Provider routing | Route Copilot, Claude, Codex, Pi, and OpenAI-compatible gateways through one interface. |
+| Deterministic workflows | Capture repeatable work as YAML DAGs with explicit control flow, approvals, shell/script steps, and agent turns. |
+| Persistent state | Conversations, workflow runs, outputs, projects, and memory live in SQLite. |
+| Keychain-backed secrets | Provider keys and rib credentials stay in your OS keychain, not in the home directory. |
+| Governance | Optional policies can pause, deny, or redact tool calls around every agent turn. |
+| Ribs | Install `@keelson/rib-*` packages that add tools, workflows, snapshots, and UI surfaces. |
+| MCP endpoint | External agents can call registered Keelson tools through the local MCP endpoint. |
 
-- **Local agent harness** — runs on your laptop, no hosted control plane, no round-trips.
-- **Provider abstraction** — drive Copilot, Claude, Codex, Pi, or an offline `stub` behind one interface.
-- **Deterministic workflows** — YAML DAGs for repeatable, agent-adjacent work.
-- **Persistent state** — conversations, runs, outputs, and memory in SQLite; credentials in your OS keychain.
-- **Browser UI + CLI** — work visually at `:7878` or script it from the terminal (`--json`, stable exit codes `0`–`4`).
-- **Ribs** — install capabilities from any git URL; each adds tools, workflows, and surfaces.
+## What Keelson is not
 
----
+Keelson is intentionally small in scope.
 
-## Demo
-
-A deterministic workflow exercising every node type — `prompt` / `command` /
-`loop` (agent) and `bash` / `script` (deterministic), wired as a DAG and run
-against Copilot:
-
-```text
-$ keelson workflow run smoke-test --watch
-▶ run f112c1e3 (smoke-test)
-  · prompt-node …
-  · command-node …
-  · loop-node …
-    iteration 1 of 2
-  · bash-json-node …
-  · script-bun-node …
-    {"status":"ok"}
-  ✓ bash-json-node
-  ✓ script-bun-node
-  ✓ loop-node
-  ✓ prompt-node
-  ✓ command-node
-  · downstream …
-  · gated …
-    downstream got: ok
-  ✓ gated
-  ✓ downstream
-  · merge …
-  ✓ merge
-  · assert …
-    PASS: all node types verified
-  ✓ assert
-■ succeeded (4749ms)
-```
-
----
+- It is not a hosted platform or multi-user SaaS.
+- It is not a plugin sandbox. A rib is code you choose to run on your machine.
+- It is not a general CI system or build farm.
+- It is not a replacement for provider auth, execution policies, or sandboxing.
 
 ## Install
 
-You need [Bun](https://bun.sh/) on your PATH — the harness and every rib run on it.
+### Prerequisites
 
-**macOS / Linux / WSL** — provisions `~/.keelson` and drops a `keelson` launcher in `~/.local/bin`:
+Install [Bun](https://bun.sh/) first. On macOS, Linux, and WSL, make sure `~/.local/bin` is on your `PATH`.
+
+### macOS, Linux, and WSL
 
 ```bash
 curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/install.sh | sh
+keelson version
 ```
 
-**Windows** — provisions `%USERPROFILE%\.keelson`, drops `keelson.cmd` in `%LOCALAPPDATA%\keelson\bin`, and adds it to your user `PATH`:
+The installer provisions the managed home at `~/.keelson` and drops a `keelson` launcher in `~/.local/bin`.
+
+### Windows PowerShell
 
 ```powershell
 irm https://github.com/danielscholl/keelson/releases/latest/download/install.ps1 | iex
+keelson version
 ```
 
-Re-run the installer any time to upgrade or repair — your installed ribs are
-preserved. Once installed, `keelson update` does the same in place.
+The Windows installer provisions `%USERPROFILE%\.keelson`, installs `keelson.cmd` under `%LOCALAPPDATA%\keelson\bin`, and adds that bin directory to your user `PATH`.
 
----
+### Upgrade or repair
+
+```bash
+keelson update
+keelson update --check
+```
+
+You can also rerun the installer. Upgrades preserve installed ribs and local data.
 
 ## Quick start
 
+Start the server in the background, then open the browser UI:
+
 ```bash
-keelson start                # server + web UI + WS on :7878, in the background
-open http://127.0.0.1:7878   # Chat, Workflows, and your ribs' surfaces
-keelson doctor               # health sweep: toolchain, server, DB, auth, ribs
+keelson start
+open http://127.0.0.1:7878
+keelson doctor
 ```
 
-Real agents need a Copilot subscription or an Anthropic API key. No keys? Set
-`KEELSON_PROVIDERS=stub` for an offline echo provider to try the harness without
-credentials. `keelson start --foreground` runs attached; `keelson stop` shuts the
-background server down.
+Use `keelson start --foreground` when you want the server attached to the current terminal, and `keelson stop` to shut the background server down.
 
-### Where to next
+### Chat with an agent
 
-| Your goal | Start here |
-|---|---|
-| Work with an agent interactively | **Chat** — `keelson start`, then the Chat surface at `:7878` |
-| Repeat a multi-step task deterministically | **Workflows** — `keelson workflow run <name>` |
-| Add an external capability (tools, surfaces) | **Ribs** — `keelson rib add <source>` |
-| Expose Keelson's tools to another agent | **MCP** — point an MCP client at `/api/mcp` |
+```bash
+keelson chat "summarize what this repo does"
+```
 
----
+Agent turns need a configured provider: Copilot, Claude, Codex, Pi, or an OpenAI-compatible gateway. No paid keys? Point a gateway at a local model with Ollama or vLLM (see [Providers and gateways](#providers-and-gateways)).
 
-## Providers
+### Run a workflow
 
-By default Keelson loads only Copilot, leaving the offline `stub`, Claude, Pi
-(a multi-vendor community agent), and Codex (OpenAI's coding agent) opt-in. Pick
-which providers load and which one chat defaults to in `~/.keelson/config.json`
-(`KEELSON_PROVIDERS` overrides the file when set):
+A workflow turns repeatable agent work into a YAML DAG. Use it when a task should be inspected, rerun, shared, or guarded instead of handled as a one-off chat. Workflows can mix agent turns with deterministic shell, script, approval, loop, and control steps.
+
+```bash
+keelson workflow list
+keelson workflow validate smoke-test
+keelson workflow run smoke-test --watch
+```
+
+When the server is running, workflow commands route over HTTP and WebSocket. When the server is down, `workflow run` can fall back to in-process execution.
+
+## Add capabilities with ribs
+
+Ribs are packages that Keelson discovers at boot. They can register tools, workflows, snapshots, and UI surfaces.
+
+```bash
+keelson rib add https://github.com/danielscholl/keelson-rib-chamber
+keelson stop
+keelson start
+keelson rib list
+```
+
+The Chamber rib is a good first example. It adds persistent specialist agents called Minds, multi-agent rooms, and agent-authored lenses.
+
+Other source forms work too:
+
+```bash
+keelson rib add github:you/keelson-rib-yours
+keelson rib add git@github.com:you/keelson-rib-yours.git
+keelson rib add @keelson/rib-yours
+keelson rib add ./local-rib
+```
+
+Installed ribs live under the Keelson home and activate on the next server boot. To activate only selected ribs, set `KEELSON_RIBS`:
+
+```bash
+KEELSON_RIBS=chamber keelson start
+```
+
+A rib runs inside your local harness. Install ribs from sources you trust.
+
+## Providers and gateways
+
+Enable providers in `~/.keelson/config.json`:
 
 ```json
 {
-  "providers": { "copilot": true, "claude": true, "pi": true, "codex": true },
-  "defaultProvider": "claude"
+  "providers": {
+    "copilot": true,
+    "claude": true,
+    "codex": true,
+    "pi": true
+  },
+  "defaultProvider": "copilot"
 }
 ```
 
-**Gateways** point a provider at any **OpenAI-compatible** endpoint — OpenRouter,
-a local [Ollama](https://ollama.com/) or vLLM, Azure OpenAI, a LiteLLM proxy.
-Each registers as a provider and shows up in the model picker:
+`KEELSON_PROVIDERS` overrides the file when set. For an OpenAI-compatible endpoint, add a gateway:
 
 ```bash
 keelson gateway add ollama http://localhost:11434/v1 --model qwen3
 ```
 
-See the [configuration guide](https://danielscholl.github.io/keelson/docs/guides/configuration/)
-for every `KEELSON_*` variable, gateway options, and how Pi's and Codex's
-self-managed auth works.
+## Use Keelson from other agents with MCP
 
----
+When the server is running, registered tools are available over the local MCP endpoint:
 
-## Ribs
-
-No ribs ship in-tree, and Keelson keeps no registry — anyone can publish one.
-`keelson rib add <source>` hands the source to `bun`; the server discovers
-whatever installs as an `@keelson/rib-*` package at boot:
-
-```bash
-keelson rib add https://github.com/danielscholl/keelson-rib-chamber   # multi-agent rooms + agent genesis
-keelson rib add https://github.com/danielscholl/keelson-rib-osdu      # OSDU CIMPL cluster / platform lanes
-keelson rib add github:you/keelson-rib-yours                          # or a git URL, npm name, or local path
-keelson rib list --installed
-keelson rib remove osdu                                               # by rib id
+```text
+http://127.0.0.1:7878/api/mcp
 ```
 
-A rib default-exports an object implementing the `Rib` contract — registering
-one tool is enough to reach the chat agent and workflow `prompt` nodes.
-[**Writing a rib**](WRITING-RIBS.md) is the five-minute quickstart;
-[`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) is the full contract,
-and the [ribs guide](https://danielscholl.github.io/keelson/docs/guides/managing-ribs/)
-covers install and lifecycle.
-
----
-
-## Governance
-
-Keelson's policy engine can pause, deny, or rewrite a tool call around every turn
-— for both Keelson's tools and the agent's own shell/write capabilities. Each
-builtin is opt-in:
-
-| Policy | Enable with | Effect |
-|---|---|---|
-| **Ask** | `KEELSON_ASK_ON_SHELL=1` | Pause shell / file-mutating calls for human approval (resolve over `/api/approvals` or `keelson approval resolve`). |
-| **Deny** (budget) | `KEELSON_TURN_BUDGET` / `KEELSON_COST_BUDGET` | A downgrade gate: past the ceiling, deny turns running on a metered model so spend moves off it. |
-| **Redact** | `KEELSON_REDACT_PATTERN=<regex>` | Replace matches with `[REDACTED]` before the model — or a downstream workflow node — consumes the output. |
-
-See the [governance guide](https://danielscholl.github.io/keelson/docs/guides/governance/)
-for the full policy model and how ribs contribute their own policies.
-
----
-
-## Use from other agents (MCP)
-
-The keelson server exposes every registered tool — your ribs' tools plus the
-workflow tools — over the [Model Context Protocol](https://modelcontextprotocol.io)
-at `http://127.0.0.1:7878/api/mcp`, automatically with the server. Tools run
-**inside** the keelson server, where each rib keeps its credentials and exec
-access, so an external agent gets a rib's real capabilities. Point a client at it:
+Example client configuration:
 
 ```jsonc
-// Claude Code / Cursor: an HTTP MCP server
-{ "mcpServers": { "keelson": { "type": "http", "url": "http://127.0.0.1:7878/api/mcp" } } }
+{
+  "mcpServers": {
+    "keelson": {
+      "type": "http",
+      "url": "http://127.0.0.1:7878/api/mcp"
+    }
+  }
+}
 ```
 
-The endpoint is open on loopback and exposes **state-changing tools** by default.
-`keelson mcp` is a stdio bridge for clients that only speak stdio. See the
-[MCP guide](https://danielscholl.github.io/keelson/docs/guides/using-mcp/) to
-lock it down (read-only, bearer token, denylist) before proxying it anywhere.
+The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
 
-> **Windows note.** The `bash` workflow node needs a POSIX shell — install
-> [Git for Windows](https://git-scm.com/download/win) and Keelson auto-discovers
-> its `bash.exe`. Some bundled workflows also call `gh`, `jq`, and `pkill`. See
-> [troubleshooting](https://danielscholl.github.io/keelson/docs/reference/troubleshooting/).
+## CLI reference
 
----
+Useful commands:
 
-## Documentation
+```bash
+keelson start                    # start the local server in the background
+keelson start --foreground       # run the server attached to this terminal
+keelson stop                     # stop the background server
+keelson status                   # report server status
+keelson doctor                   # health sweep for toolchain, server, DB, auth, and workflows
+keelson chat "hello"             # one-shot chat turn
+keelson workflow run <name>      # run a workflow
+keelson rib list --installed     # list installed ribs without needing the server
+keelson update --check           # check for available updates
+keelson --json workflow list     # machine-readable output for scripts
+```
 
-- **[danielscholl.github.io/keelson](https://danielscholl.github.io/keelson/)** — concepts, guides, the rib contract
-- [WRITING-RIBS.md](WRITING-RIBS.md) — five-minute rib authoring quickstart
-- [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts) — the `Rib` contract
-- [`packages/workflows/assets/workflows/`](packages/workflows/assets/workflows/) — bundled starter workflows
-- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, required checks, PR hygiene
-- [SECURITY.md](SECURITY.md) — threat model and how to report
-
----
+For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/) for details.
 
 ## Uninstall
 
+There are two kinds of uninstall: remove a rib, or remove the whole harness.
+
+### Remove a rib only
+
 ```bash
-rm -f ~/.local/bin/keelson
-rm -rf ~/.keelson
+keelson rib remove chamber
+keelson stop
+keelson start
 ```
+
+This removes the package from the home. Some ribs keep private data under `$KEELSON_HOME/rib-<id>`. Delete that directory only when you want to discard the rib's local data.
+
+Example for Chamber:
+
+```bash
+rm -rf "${KEELSON_HOME:-$HOME/.keelson}/rib-chamber"
+```
+
+### Full uninstall on macOS, Linux, or WSL
+
+```bash
+keelson stop 2>/dev/null || true
+KEELSON_HOME="${KEELSON_HOME:-$HOME/.keelson}"
+rm -f "$HOME/.local/bin/keelson"
+rm -rf "$KEELSON_HOME"
+```
+
+This removes the launcher and the managed home. The home contains your database, workflows, installed ribs, rib data directories, server record, and logs.
+
+If you added `~/.local/bin` to your shell profile only for Keelson, remove that PATH entry from `~/.zshrc`, `~/.bashrc`, or the file where you added it.
+
+### Full uninstall on Windows PowerShell
 
 ```powershell
-# Windows (also remove %LOCALAPPDATA%\keelson\bin from your user PATH)
-Remove-Item -Recurse -Force "$env:USERPROFILE\.keelson", "$env:LOCALAPPDATA\keelson\bin"
+keelson stop 2>$null
+$KeelsonHome = if ($env:KEELSON_HOME) { $env:KEELSON_HOME } else { Join-Path $HOME ".keelson" }
+Remove-Item -Force "$env:LOCALAPPDATA\keelson\bin\keelson.cmd" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $KeelsonHome, "$env:LOCALAPPDATA\keelson" -ErrorAction SilentlyContinue
+
+# Remove Keelson's bin directory from the user PATH.
+$KeelsonBin = "$env:LOCALAPPDATA\keelson\bin"
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$NewPath = ($UserPath -split ";" | Where-Object { $_ -and ($_ -ne $KeelsonBin) }) -join ";"
+[Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
 ```
 
----
+### Optional credential cleanup
+
+Keelson does not store provider secrets in the home directory. Provider keys and rib credentials live in your OS keychain under the `keelson` service. Remove those entries with Keychain Access, Windows Credential Manager, or your Linux secret store if you want a credential-clean uninstall.
+
+## Documentation
+
+- [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, CLI reference, and rib contract.
+- [Writing ribs](WRITING-RIBS.md): the five-minute rib authoring quickstart.
+- [`packages/shared/src/rib.ts`](packages/shared/src/rib.ts): the full `Rib` contract.
+- [`packages/workflows/assets/workflows/`](packages/workflows/assets/workflows/): bundled starter workflows.
+- [CONTRIBUTING.md](CONTRIBUTING.md): local setup and required checks.
+- [SECURITY.md](SECURITY.md): threat model and reporting process.
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE). The workflow engine borrows its
-schema and DAG concepts from [Archon](https://github.com/coleam00/Archon) (MIT, by
-Cole Medin) — a well-thought-out project; go support his
-[channel](https://www.youtube.com/@ColeMedin). Full attribution lives in [NOTICE](NOTICE).
+Keelson is licensed under the [Apache License 2.0](LICENSE). Third-party attribution lives in [NOTICE](NOTICE).
