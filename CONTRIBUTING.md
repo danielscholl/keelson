@@ -110,6 +110,14 @@ tests explicitly to surface schema drift:
 bun --filter @keelson/shared test
 ```
 
+If you touched `docs/`, build the site. It is not a workspace (separate install
+and lockfile), so `bun --filter '*'` does not cover it and a broken page reaches
+Pages unseen:
+
+```bash
+cd docs && bun install && bun run build
+```
+
 ## Commit messages
 
 Conventional commit format (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`,
@@ -152,6 +160,14 @@ bug (link it).
 This section is authoritative. `CLAUDE.md` mirrors it for agents, and
 `.coderabbit.yaml` disables the docstring-coverage check to keep the policy
 consistent — don't re-enable it.
+
+## Documentation
+
+The docs site lives in `docs/` — a self-contained Astro Starlight project with
+its own `bun install` and lockfile, not a Bun workspace. `docs/STYLE.md` is the
+authoritative style guide: read it before adding or editing any page, then build
+the site before opening a docs PR (see
+[Required checks](#required-checks-before-opening-a-pr)).
 
 ## Architecture rules
 
