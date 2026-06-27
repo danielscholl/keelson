@@ -197,6 +197,32 @@ describe("keelson start/status/stop lifecycle", () => {
     }
   }, 30_000);
 
+  test("restart boots the server when it is down", async () => {
+    expect(readServerState(home)).toBeNull();
+    const { stdout, exitCode } = await runCli(["--json", "restart"]);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.status).toBe("restarted");
+    expect(envelope.data.url).toBe(`http://127.0.0.1:${port}`);
+    expect(typeof envelope.data.pid).toBe("number");
+    expect(await healthUp()).toBe(true);
+  }, 60_000);
+
+  test("restart cycles a running server, leaving it up under a new pid", async () => {
+    const before = readServerState(home);
+    expect(before).not.toBeNull();
+    const { stdout, exitCode } = await runCli(["--json", "restart"]);
+    expect(exitCode).toBe(0);
+    const envelope = JSON.parse(stdout.trim());
+    expect(envelope.data.status).toBe("restarted");
+    expect(envelope.data.pid).not.toBe(before?.pid);
+    expect(await healthUp()).toBe(true);
+    // Leave a clean slate for the token/stale-state tests below.
+    await runCli(["--json", "stop"]);
+    expect(await healthUp()).toBe(false);
+  }, 60_000);
+
   test("stop refuses the signal fallback when the responding server rejects the token", async () => {
     // A server that answers health at the recorded URL but rejects the token
     // is someone else's (different home). Stop must not fall through to

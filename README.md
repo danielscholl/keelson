@@ -79,11 +79,10 @@ You can also rerun the installer. Upgrades preserve installed ribs and local dat
 
 ## Quick start
 
-Start the server in the background, then open the browser UI:
+Start the server in the background, then run a health sweep:
 
 ```bash
 keelson start
-open http://127.0.0.1:7878
 keelson doctor
 ```
 
