@@ -6,13 +6,13 @@
 
 **The hull. Not the crew.**
 
-Keelson is a local control plane for coding agents. It turns agent work from one-off chats into durable, repeatable runs: persistent state, YAML workflows with deterministic control flow, a browser UI, provider routing, governance hooks, MCP access, and a typed extension model called ribs.
+Keelson is a local control plane for coding agents. It turns agent work from one-off chats into durable, repeatable runs with persistent state, workflows with deterministic control flow, provider routing, governance hooks, and a typed extension model called ribs. The same capabilities are available from a browser UI, an interactive terminal, one-shot prompts, or MCP.
 
-Most agent tools are centered on a single chat, model, or editor session. Keelson is centered on the local harness around that work. It keeps the work on your machine, captures repeatable work as YAML DAGs, exposes runs through a local UI and API, and lets new capabilities attach as packages instead of forks.
+Most agent tools are centered on a single chat, model, or editor session. Keelson is centered on the local harness around that work. It keeps state on your machine, captures repeatable tasks as workflows, and lets new capabilities attach as packages instead of forks.
 
 Use Keelson when you want to:
 
-- Turn one-off agent chats into repeatable YAML workflows.
+- Turn one-off agent chats into repeatable workflows.
 - Mix agent turns with deterministic shell, script, approval, loop, and control steps.
 - Keep conversations, runs, outputs, memory, and rib data on your machine.
 - Route different providers through one local interface.
@@ -26,8 +26,9 @@ Use Keelson when you want to:
 | --- | --- |
 | Durable agent workbench | Agent chats, workflow runs, outputs, projects, and memory survive beyond a single terminal, editor, or model session. |
 | Local control plane | One server on your laptop owns the state, providers, API, WebSocket stream, MCP endpoint, and browser UI. |
+| One capability set, many surfaces | Reach the same tools, conversations, and runs from a browser UI, an interactive terminal, one-shot prompts, or the MCP endpoint. |
 | Provider routing | Route Copilot, Claude, Codex, Pi, and OpenAI-compatible gateways through one interface. |
-| Deterministic workflows | Capture repeatable work as YAML DAGs with explicit control flow, approvals, shell/script steps, and agent turns. |
+| Deterministic workflows | Capture repeatable work with explicit control flow, approvals, shell/script steps, and agent turns. |
 | Persistent state | Conversations, workflow runs, outputs, projects, and memory live in SQLite. |
 | Keychain-backed secrets | Provider keys and rib credentials stay in your OS keychain, not in the home directory. |
 | Governance | Optional policies can pause, deny, or redact tool calls around every agent turn. |
@@ -86,19 +87,22 @@ open http://127.0.0.1:7878
 keelson doctor
 ```
 
-Use `keelson start --foreground` when you want the server attached to the current terminal, and `keelson stop` to shut the background server down.
+Use `keelson stop` to shut the background server down.
 
 ### Chat with an agent
 
+Open an interactive session in the terminal, or fire a single prompt:
+
 ```bash
-keelson chat "summarize what this repo does"
+keelson chat                                  # interactive terminal chat
+keelson chat "summarize what this repo does"  # one-shot
 ```
 
-Agent turns need a configured provider: Copilot, Claude, Codex, Pi, or an OpenAI-compatible gateway. No paid keys? Point a gateway at a local model with Ollama or vLLM (see [Providers and gateways](#providers-and-gateways)).
+The browser UI at `http://127.0.0.1:7878` is the same chat on the same server. Agent turns need a configured provider: Copilot, Claude, Codex, Pi, or an OpenAI-compatible gateway. No paid keys? Point a gateway at a local model with Ollama or vLLM (see [Providers and gateways](#providers-and-gateways)).
 
 ### Run a workflow
 
-A workflow turns repeatable agent work into a YAML DAG. Use it when a task should be inspected, rerun, shared, or guarded instead of handled as a one-off chat. Workflows can mix agent turns with deterministic shell, script, approval, loop, and control steps.
+A workflow captures repeatable agent work so it can be inspected, rerun, shared, or guarded instead of handled as a one-off chat. Workflows mix agent turns with deterministic shell, script, approval, loop, and control steps.
 
 ```bash
 keelson workflow list
@@ -189,18 +193,17 @@ Useful commands:
 
 ```bash
 keelson start                    # start the local server in the background
-keelson start --foreground       # run the server attached to this terminal
 keelson stop                     # stop the background server
 keelson status                   # report server status
 keelson doctor                   # health sweep for toolchain, server, DB, auth, and workflows
-keelson chat "hello"             # one-shot chat turn
+keelson chat "hello"             # chat turn (omit the message for interactive)
 keelson workflow run <name>      # run a workflow
 keelson rib list --installed     # list installed ribs without needing the server
 keelson update --check           # check for available updates
 keelson --json workflow list     # machine-readable output for scripts
 ```
 
-For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/) for details.
+For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/) for details.
 
 ## Uninstall
 
