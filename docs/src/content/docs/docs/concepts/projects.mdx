@@ -1,0 +1,120 @@
+---
+title: Projects and worktrees
+description: How a project binds agent work to a repository, why chat edits in place while a workflow run can isolate, and the git-worktree model that keeps a mutating run off your working tree.
+sidebar:
+  order: 3.5
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+Agent work has to happen somewhere on disk. A **project** is keelson's name for
+that somewhere: a named pointer to a repository root that conversations and
+workflow runs attach to, so you bind work to a directory once instead of retyping
+a path every turn. This page covers what a project is, the different ways chat and
+runs attach to one, and the git-worktree isolation that lets a run change code
+without touching your working tree.
+
+## What a project is
+
+A project is a small, durable record: a **name** and a **root path** (plus an id
+and a creation time), owned by the server and stored in SQLite next to your
+conversations and runs. Nothing more. `keelson project add <name> <path>`
+registers one, and `keelson project list` and `keelson project remove` manage the
+set. A fresh home carries a `default` project, so work has somewhere to land
+before you register your own.
+
+The root path is the only thing a project asserts about the world: this directory
+is where work for this name happens. Three things hang off that binding:
+
+- **Conversations** attach to a project, so a chat turn runs with the project root
+  as its working directory.
+- **Workflow runs** resolve `--project <name>` to the root path and run there.
+- **Recall and the notebook** are scoped by project: memory recall filters to the
+  project, and the project notebook (standing markdown) is injected into every
+  chat turn for that project. See [Memory and state](../memory-and-state/).
+
+## Two ways to attach
+
+Chat and workflows both bind to a project, but they treat the working tree
+differently, and that difference is the most important thing on this page.
+
+| | Chat | Workflow run |
+| --- | --- | --- |
+| Binds to a project by | `/project <name>` in interactive chat, or `--project` on a one-shot | `--project <name>` on `keelson workflow run` |
+| When the binding is set | At conversation creation, like the provider | Per run |
+| Where it works | In place, in the project root | The project root, or an isolated git worktree |
+| Effect of changes | Edits land in your working tree directly | An isolated run lands on a branch, leaving your working tree untouched |
+
+So `/project` is a **chat** command. It binds a *new* conversation to a project,
+the same way a conversation's provider is fixed at creation. It does not move an
+existing chat between projects, and it is not how a workflow picks one: that is
+the `--project` flag.
+
+A chat agent edits the project directory **in place**. There is no isolation: when
+the model writes a file, the file changes under you, exactly as if you had edited
+it. For interactive work that is usually what you want.
+
+## Worktree isolation for runs
+
+A workflow run that mutates code is a different story. You often want the run to
+edit, build, and commit without disturbing whatever you have checked out. Keelson
+does this with a **git worktree**: a second working tree of the same repository,
+on its own branch, in its own directory.
+
+When a run is isolated, keelson:
+
+<Steps>
+
+1. **Branches.** Creates a branch named `keelson/<workflow>/<short-run-id>` from
+   the project's current checkout.
+
+2. **Checks out a worktree.** Adds a git worktree for that branch at
+   `<root>/.worktrees/<branch-leaf>/`, giving the run a full, separate copy of the
+   tree without re-cloning.
+
+3. **Installs dependencies.** For a Bun project with a lockfile it runs `bun
+   install --frozen-lockfile` in the worktree, since `node_modules` is gitignored
+   and a fresh checkout has none. Repos with no manifest or lockfile are left
+   alone.
+
+4. **Runs there.** Every node executes with the worktree as its working directory.
+   Edits, commits, and validation all happen on the branch.
+
+5. **Leaves the result on the branch.** Your project's main working tree is never
+   touched. The worktree path is recorded on the run row so you can inspect it or
+   clean it up later.
+
+</Steps>
+
+Isolation is **opt-in**, decided per run:
+
+- A workflow declares it in YAML with `worktree.enabled: true`. The bundled
+  workflows that change code (`fix-issue`, `plan-act-evaluate`, `resolve-comments`)
+  set it.
+- `--worktree` forces it on and `--no-worktree` forces it off, each overriding the
+  workflow's default.
+- With neither flag, the workflow's own default decides; a workflow that does not
+  declare isolation runs in place.
+
+Leftover worktrees, from a failed run or a project you deleted, are cleared with
+`keelson worktree prune` (`--dry-run` lists candidates, `--force` removes ones with
+uncommitted changes). [Directories](../../reference/directories/) maps where they
+live.
+
+<Aside type="note" title="Isolation is not a sandbox">
+A worktree keeps a run's changes off your working tree, not off your machine. The
+run executes with the same access any local process has, on a real branch in your
+real repository. It is a clean-checkout convenience and a guard against clobbering
+uncommitted work, not a security boundary. Chat has no isolation at all: it edits
+the project in place.
+</Aside>
+
+## Where to go next
+
+- [Chat](../chat/): the in-place agent loop a project binds.
+- [Workflows](../workflows/): the runs that can isolate into a worktree.
+- [Memory and state](../memory-and-state/): how recall and the notebook scope by
+  project.
+- The [CLI reference](../../reference/cli/) lists every `keelson project` and
+  `keelson worktree` command, and [Directories](../../reference/directories/) maps
+  the `.worktrees/` layout.

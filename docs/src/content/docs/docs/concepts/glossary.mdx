@@ -43,9 +43,14 @@ which is which.
 - **doctor**: the CLI health sweep. Each failing check carries a hint naming
   the next command.
 - **project**: a name plus a root path. Conversations and workflow runs
-  attach to one, and recall is scoped by it.
+  attach to one, recall is scoped by it, and an isolated run branches into a
+  worktree beneath it. See [Projects and worktrees](../projects/).
 - **notebook**: a project's standing markdown context, injected into every
   chat turn for that project.
+- **worktree**: a second git working tree of a project's repo, on its own
+  branch under `<root>/.worktrees/`, where an isolated workflow run makes its
+  changes so your checkout stays clean. Opt-in per run; chat never uses one.
+  See [Projects and worktrees](../projects/).
 
 ## Extensions
 
