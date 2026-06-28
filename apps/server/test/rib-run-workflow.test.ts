@@ -19,6 +19,7 @@ import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import {
+  type ActiveRuns,
   createActiveRuns,
   createWorkflowController,
   createWorkflowSubscribers,
@@ -31,7 +32,7 @@ import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 
-function makeController(): WorkflowController {
+function makeController(): { controller: WorkflowController; activeRuns: ActiveRuns } {
   const db = openDatabase({ path: join(tmpDir, "test.db") });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
@@ -39,11 +40,13 @@ function makeController(): WorkflowController {
   const wfDir = join(tmpDir, "workflows");
   mkdirSync(wfDir, { recursive: true });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
-  return createWorkflowController(
+  const activeRuns = createActiveRuns();
+  const controller = createWorkflowController(
     { catalog, store, conversationStore, projectsStore },
-    createActiveRuns(),
+    activeRuns,
     createWorkflowSubscribers(),
   );
+  return { controller, activeRuns };
 }
 
 beforeEach(() => {
@@ -55,7 +58,7 @@ afterEach(() => {
 
 describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
   test("runs an in-memory bash workflow and returns the terminal result", async () => {
-    const controller = makeController();
+    const { controller, activeRuns } = makeController();
     const res = await controller.runDefinition(
       {
         name: "verify-demo",
@@ -68,10 +71,12 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     expect(res.status).toBe("succeeded");
     expect(res.nodes.step?.state).toBe("completed");
     expect(res.nodes.step?.output).toContain("squad-ran-it");
+    // The run registers for shutdown-drain while live and deregisters on return.
+    expect(activeRuns.size()).toBe(0);
   });
 
   test("runs a two-node DAG honoring depends_on ordering", async () => {
-    const controller = makeController();
+    const { controller } = makeController();
     // `second` reads a file `first` writes — if the edge were dropped and the
     // nodes ran as independent roots, `cat` would race the write and fail.
     const marker = join(tmpDir, "ordered.txt");
@@ -94,20 +99,20 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
   });
 
   test("fails closed on a structurally-invalid definition (no run)", async () => {
-    const controller = makeController();
+    const { controller } = makeController();
     const res = await controller.runDefinition({ name: "x", nodes: [] }, {}, tmpDir);
     expect(res.status).toBe("failed");
     expect(res.error).toContain("invalid workflow");
   });
 
   test("fails closed on a non-object definition", async () => {
-    const controller = makeController();
+    const { controller } = makeController();
     const res = await controller.runDefinition("not a workflow", {}, tmpDir);
     expect(res.status).toBe("failed");
   });
 
   test("fails closed when cwd does not exist", async () => {
-    const controller = makeController();
+    const { controller } = makeController();
     const res = await controller.runDefinition(
       { name: "x", description: "d", nodes: [{ id: "a", bash: "echo hi" }] },
       {},
@@ -118,7 +123,7 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
   });
 
   test("surfaces a failed node as status failed with the node error", async () => {
-    const controller = makeController();
+    const { controller } = makeController();
     const res = await controller.runDefinition(
       {
         name: "verify-fail",
@@ -132,5 +137,20 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     expect(res.nodes.boom?.state).toBe("failed");
     expect(typeof res.nodes.boom?.error).toBe("string");
     expect(typeof res.error).toBe("string");
+  });
+
+  test("a cancel node aborts the run, yields cancelled status, and leaves no active run", async () => {
+    const { controller, activeRuns } = makeController();
+    const res = await controller.runDefinition(
+      {
+        name: "verify-cancel",
+        description: "cancels itself",
+        nodes: [{ id: "stop", cancel: "halt" }],
+      },
+      {},
+      tmpDir,
+    );
+    expect(res.status).toBe("cancelled");
+    expect(activeRuns.size()).toBe(0);
   });
 });

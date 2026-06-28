@@ -1168,6 +1168,21 @@ export function createWorkflowController(
         ["script", makeScriptHandler()],
       ]);
       const artifacts = await RunArtifactsDir.create(runId);
+      // Register in the shared run table so a server shutdown aborts an in-flight
+      // rib-run's bash/script subtree like a named run — a headless run writes no
+      // store row (a unique key keeps it out of dedupe/findActive), leaving only a
+      // live process tree to reap.
+      let settleDone: () => void = () => {};
+      const done = new Promise<void>((resolve) => {
+        settleDone = resolve;
+      });
+      activeRuns.register(runId, {
+        abort,
+        done,
+        pendingApprovals: new Map(),
+        dedupeKey: runId,
+        conversationId: "",
+      });
       try {
         const summary = await runWorkflow({
           workflow: definitionObj,
@@ -1188,7 +1203,9 @@ export function createWorkflowController(
           error: err instanceof Error ? err.message : String(err),
         };
       } finally {
+        activeRuns.delete(runId);
         await artifacts.cleanup();
+        settleDone();
       }
     },
     startRun({ name, inputs, workingDir: rawWorkingDir, project, isolation, origin }) {
