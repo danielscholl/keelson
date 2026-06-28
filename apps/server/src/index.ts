@@ -56,7 +56,7 @@ import { createDynamicRegionStore } from "./dynamic-region-store.ts";
 import { gatewaysRoutes } from "./gateways-handler.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
-import { createMemoryStore } from "./memory-store.ts";
+import { createMemoryStore, type MemoryStore } from "./memory-store.ts";
 import { resolveModelCostHint } from "./model-cost-hint.ts";
 import type { PolicyEngine } from "./policy-engine.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
@@ -243,6 +243,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // (unusually) reads projects during registerTools, before the store is wired,
   // sees an empty list: project selection is a runtime concern, not an activation one.
   let projectsStoreRef: ProjectsStore | undefined;
+  // Late-bound like the refs above: the memory store needs the database (created below),
+  // but RibContext.getMemory reads it lazily at recall/writeback time, by which point boot
+  // is done. A rib's coordinator uses it to fold prior decisions into a run and write
+  // learnings back to the governed ledger.
+  let memoryStoreRef: MemoryStore | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
@@ -253,6 +258,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     getProjects: () => projectsStoreRef?.list() ?? [],
     getPolicyEngine: () => policyEngine,
     getWorkflowController: () => workflowControllerRef,
+    getMemoryStore: () => memoryStoreRef,
     // Same cwd the heartbeat scheduler uses (repoRoot below), so a rib refresh
     // collapses onto an in-flight heartbeat run instead of racing it.
     refreshCwd: KEELSON_HOME,
@@ -288,6 +294,8 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const store = createConversationStore(db);
   const workflowStore = createWorkflowStore(db);
   const memoryStore = createMemoryStore(db);
+  // Publish to the late-bound ref so RibContext.getMemory resolves once boot completes.
+  memoryStoreRef = memoryStore;
   const projectsStore = createProjectsStore(db);
   projectsStoreRef = projectsStore;
   const projectNotebookStore = createProjectNotebookStore(db);

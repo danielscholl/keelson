@@ -14,7 +14,22 @@ import {
   type ProviderCapabilities,
   registerProvider,
 } from "@keelson/providers";
-import type { Project, Rib, ToolDefinition } from "@keelson/shared";
+import type {
+  MemoryTools,
+  Project,
+  RecallRequest,
+  RecallResponse,
+  Rib,
+  ToolDefinition,
+  WritebackRequest,
+  WritebackResponse,
+} from "@keelson/shared";
+import {
+  RECALL_REQUEST_SCHEMA_VERSION,
+  RECALL_RESPONSE_SCHEMA_VERSION,
+  WRITEBACK_REQUEST_SCHEMA_VERSION,
+  WRITEBACK_RESPONSE_SCHEMA_VERSION,
+} from "@keelson/shared";
 import { clearRegistry, getRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
 import { z } from "zod";
@@ -27,6 +42,7 @@ import {
   parseToolDenylist,
   registerRibTools,
 } from "../src/bootstrap.ts";
+import type { MemoryStore } from "../src/memory-store.ts";
 import { discoverRibs } from "../src/rib-discovery.ts";
 import { parseRibList } from "../src/ribs.ts";
 
@@ -398,6 +414,93 @@ describe("bootstrapRibs", () => {
       displayName: "alpha",
       registerTools: (ctx) => {
         hasAccessor = ctx.getProjects !== undefined;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: probe } });
+    expect(hasAccessor).toBe(false);
+  });
+
+  test("getMemory forwards recall/writeback to the store and, like getProjects, reads it at call time", async () => {
+    delete process.env.KEELSON_RIBS;
+    // Mirror index.ts: `getMemoryStore: () => memoryStoreRef`, where the store ref is
+    // assigned AFTER bootstrapRibs (it needs the db). So a turn-time recall/writeback
+    // reaches the live store; the seam re-parses the request at the adapter boundary.
+    const recallCalls: RecallRequest[] = [];
+    const writebackCalls: WritebackRequest[] = [];
+    const recallResponse: RecallResponse = {
+      schemaVersion: RECALL_RESPONSE_SCHEMA_VERSION,
+      requestId: "req-1",
+      items: [],
+      trace: { traceId: "trace-1", returned: 0 },
+    };
+    const writebackResponse: WritebackResponse = {
+      schemaVersion: WRITEBACK_RESPONSE_SCHEMA_VERSION,
+      written: [{ memoryId: "m1", idempotencyKey: "idem-1" }],
+      blocked: [],
+      deduped: [],
+    };
+    const fakeStore = {
+      recall(req: RecallRequest): RecallResponse {
+        recallCalls.push(req);
+        return recallResponse;
+      },
+      writeback(req: WritebackRequest): WritebackResponse {
+        writebackCalls.push(req);
+        return writebackResponse;
+      },
+    };
+    let storeRef: typeof fakeStore | undefined;
+    let memory: MemoryTools | undefined;
+    const reader: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        memory = ctx.getMemory?.();
+        return [];
+      },
+    };
+    await bootstrapRibs({
+      available: { alpha: reader },
+      getMemoryStore: () => storeRef as unknown as MemoryStore | undefined,
+    });
+    expect(memory).toBeDefined();
+
+    // Not wired yet during activation → a recall at this point throws (fail-soft is the
+    // rib's job). Wire the store, then a recall/writeback routes through and round-trips.
+    storeRef = fakeStore;
+    const recallReq: RecallRequest = {
+      schemaVersion: RECALL_REQUEST_SCHEMA_VERSION,
+      scope: { visibility: "project", projectId: "p1" },
+      task: { runtime: "rib:alpha" },
+      query: "team decisions and lessons",
+    };
+    expect(await memory?.recall(recallReq)).toEqual(recallResponse);
+    expect(recallCalls).toHaveLength(1);
+
+    const writebackReq: WritebackRequest = {
+      schemaVersion: WRITEBACK_REQUEST_SCHEMA_VERSION,
+      idempotencyKey: "idem-1",
+      scope: { visibility: "project", projectId: "p1" },
+      task: { runtime: "rib:alpha" },
+      memories: [
+        { type: "decision", summary: "shipped X", content: "we decided X", contentHash: "h1" },
+      ],
+    };
+    expect(await memory?.writeback(writebackReq)).toEqual(writebackResponse);
+    expect(writebackCalls).toHaveLength(1);
+    // The seam re-parses, so the store sees provenance/sourceRefs/artifacts defaulted in.
+    expect(writebackCalls[0]?.memories[0]?.provenance).toBe("generated");
+  });
+
+  test("RibContext.getMemory is absent when no memory store source is supplied", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasAccessor = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasAccessor = ctx.getMemory !== undefined;
         return [];
       },
     };

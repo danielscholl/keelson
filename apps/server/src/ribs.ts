@@ -23,6 +23,7 @@ import {
   type AgentSummary,
   type CommandCompletion,
   type CommandInvokeResult,
+  type MemoryTools,
   type OpenChatSeed,
   type Policy,
   type Project,
@@ -153,6 +154,10 @@ export interface ApplyRibsOptions {
     inputs: Record<string, string>,
     opts?: { cwd?: string },
   ) => Promise<RibWorkflowRunResult>;
+  // Backs RibContext.getMemory: a MemoryTools handle the rib uses to recall/writeback
+  // governed memory rows. Rib-id-scoped for parity/future per-rib policy. Optional so
+  // applyRibs unit tests without a memory store stay deterministic.
+  readonly getMemory?: (ribId: string) => MemoryTools;
 }
 
 /**
@@ -287,6 +292,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
             ) => opts.runWorkflow!(rib.id, definition, inputs ?? {}, o),
           }
         : {}),
+      ...(opts.getMemory ? { getMemory: () => opts.getMemory!(rib.id) } : {}),
     };
 
     const ribToolNames = collectRibTools(

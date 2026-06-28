@@ -10,6 +10,7 @@ import { z } from "zod";
 import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
 import type { MessageChunk } from "./chat.ts";
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
+import type { MemoryTools } from "./memory.ts";
 import type { Policy } from "./policy.ts";
 import type { Project } from "./projects.ts";
 import type { ToolDefinition } from "./tools.ts";
@@ -199,6 +200,15 @@ export interface RibContext {
     inputs?: Record<string, string>,
     opts?: { cwd?: string },
   ) => Promise<RibWorkflowRunResult>;
+  // Governed-memory handle: recall prior decisions/lessons/work-log rows and write new
+  // ones back to the keelson memory ledger — the same `MemoryTools` the workflow
+  // executor binds to. recall/writeback are scoped by each request's `scope` (project +
+  // visibility); the CALLER owns passing the right scope, the same way runWorkflow's
+  // caller owns trusting its definition. The server-side guardrails still hold: a rib's
+  // writeback is evidence-default and review-gated — it CANNOT mint an instruction-grade
+  // / always-inject row. Optional so a rib built against an older harness degrades to no
+  // governed memory (recall it can fold in), not a throw.
+  getMemory?: () => MemoryTools;
 }
 
 // The harness-owned snapshot key the SPA subscribes to as a manifest-revision
