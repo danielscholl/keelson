@@ -28,6 +28,7 @@ import type {
   ApprovalRequest,
   CommandCompletion,
   CommandInvokeResult,
+  MemoryTools,
   OpenChatSeed,
   Project,
   Rib,
@@ -44,6 +45,7 @@ import type {
   WorkflowDiscoveryNotice,
   WorkflowSource,
 } from "@keelson/shared";
+import { recallRequestSchema, writebackRequestSchema } from "@keelson/shared";
 import {
   BUILT_IN_PROVIDER_IDS,
   loadKeelsonConfig,
@@ -71,6 +73,7 @@ import {
   workflowDefinitionSchema,
 } from "@keelson/workflows";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
+import type { MemoryStore } from "./memory-store.ts";
 import {
   createPolicyEngine,
   type PolicyEngine,
@@ -210,6 +213,11 @@ export interface BootstrapRibsOptions {
   // heartbeat scheduler's repoRoot (the keelson home) so the (name, cwd, {})
   // de-dupe key aligns and a refresh collapses onto an in-flight heartbeat run.
   refreshCwd?: string;
+  // Lazy resolver for the MemoryStore backing RibContext.getMemory. Lazy because the
+  // store needs the db, which is created AFTER bootstrapRibs returns — the getter reads
+  // the composition root's late-bound binding at recall/writeback time, by which point
+  // boot is done. Absent leaves the getMemory seam off the ctx (no governed memory).
+  getMemoryStore?: () => MemoryStore | undefined;
 }
 
 export interface RibBootstrap {
@@ -320,6 +328,26 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           }
         }
       : undefined;
+  // RibContext.getMemory resolver: a MemoryTools handle bridging the rib to the governed
+  // memory ledger. recall/writeback re-parse with the wire schemas at this adapter
+  // boundary (matching the executor's memoryTools) before reaching the store; an absent
+  // store at call time throws so the rib's fail-soft wrapper surfaces it. Wired only when
+  // the store getter is supplied (else the seam is absent — degrades to no memory).
+  const getMemoryStore = options.getMemoryStore;
+  const getMemory = getMemoryStore
+    ? (_ribId: string): MemoryTools => ({
+        recall: async (req) => {
+          const store = getMemoryStore();
+          if (!store) throw new Error("memory store unavailable");
+          return store.recall(recallRequestSchema.parse(req));
+        },
+        writeback: async (req) => {
+          const store = getMemoryStore();
+          if (!store) throw new Error("memory store unavailable");
+          return store.writeback(writebackRequestSchema.parse(req));
+        },
+      })
+    : undefined;
   const {
     manifests,
     disposers,
@@ -345,6 +373,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
     ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
+    ...(getMemory ? { getMemory } : {}),
   });
   return {
     manifests,
