@@ -1075,14 +1075,26 @@ export interface WorkflowController {
 // returns (only id -> {state, output, error?}, dropping usage/timing).
 function summaryToRibWorkflowResult(summary: RunSummary): RibWorkflowRunResult {
   const nodes: RibWorkflowRunResult["nodes"] = {};
+  let firstNodeError: string | undefined;
   for (const [id, output] of Object.entries(summary.nodes)) {
     nodes[id] = {
       state: output.state,
       output: output.output,
       ...(output.state === "failed" ? { error: output.error } : {}),
     };
+    if (output.state === "failed" && output.error !== undefined && firstNodeError === undefined) {
+      firstNodeError = output.error;
+    }
   }
-  return { status: summary.status, nodes };
+  // Surface the first failed node's error as the run-level error so a caller
+  // reading only `result.error` on a failed run learns why (the contract).
+  return {
+    status: summary.status,
+    nodes,
+    ...(summary.status === "failed" && firstNodeError !== undefined
+      ? { error: firstNodeError }
+      : {}),
+  };
 }
 
 const DEFAULT_WATCH_DEADLINE_MS = 75_000;
@@ -1124,6 +1136,10 @@ export function createWorkflowController(
       } catch {
         return { status: "failed", nodes: {}, error: `cwd does not exist: ${cwd}` };
       }
+      // Scope memory to the project the cwd sits in, matching the named-run path
+      // (an unscoped run bleeds memory rows across targets).
+      const projectId = projectsStore?.findByPathPrefix(workingDir)?.id;
+      const runId = crypto.randomUUID();
       const abort = new AbortController();
       const handlers = new Map<string, NodeHandler>([
         ["bash", bashHandler],
@@ -1151,23 +1167,19 @@ export function createWorkflowController(
         ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
         ["script", makeScriptHandler()],
       ]);
+      const artifacts = await RunArtifactsDir.create(runId);
       try {
-        let summary: RunSummary | undefined;
-        await runWorkflow({
+        const summary = await runWorkflow({
           workflow: definitionObj,
-          runId: crypto.randomUUID(),
+          runId,
           inputs,
           handlers,
           cwd: workingDir,
           abortSignal: abort.signal,
+          ...artifacts.runWorkflowOptions(),
           ...(memoryTools !== undefined ? { memoryTools } : {}),
-          onEvent: (event) => {
-            if (event.type === "run_done") summary = event.summary;
-          },
+          ...(projectId !== undefined ? { projectId } : {}),
         });
-        if (!summary) {
-          return { status: "failed", nodes: {}, error: "workflow produced no terminal summary" };
-        }
         return summaryToRibWorkflowResult(summary);
       } catch (err) {
         return {
@@ -1175,6 +1187,8 @@ export function createWorkflowController(
           nodes: {},
           error: err instanceof Error ? err.message : String(err),
         };
+      } finally {
+        await artifacts.cleanup();
       }
     },
     startRun({ name, inputs, workingDir: rawWorkingDir, project, isolation, origin }) {

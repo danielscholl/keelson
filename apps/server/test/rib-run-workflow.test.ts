@@ -70,15 +70,18 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     expect(res.nodes.step?.output).toContain("squad-ran-it");
   });
 
-  test("runs a two-node DAG honoring needs ordering", async () => {
+  test("runs a two-node DAG honoring depends_on ordering", async () => {
     const controller = makeController();
+    // `second` reads a file `first` writes — if the edge were dropped and the
+    // nodes ran as independent roots, `cat` would race the write and fail.
+    const marker = join(tmpDir, "ordered.txt");
     const res = await controller.runDefinition(
       {
         name: "verify-chain",
         description: "two steps",
         nodes: [
-          { id: "first", bash: "echo one" },
-          { id: "second", bash: "echo two", needs: ["first"] },
+          { id: "first", bash: `printf one > ${marker}` },
+          { id: "second", bash: `cat ${marker}`, depends_on: ["first"] },
         ],
       },
       {},
@@ -87,6 +90,7 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     expect(res.status).toBe("succeeded");
     expect(res.nodes.first?.state).toBe("completed");
     expect(res.nodes.second?.state).toBe("completed");
+    expect(res.nodes.second?.output).toContain("one");
   });
 
   test("fails closed on a structurally-invalid definition (no run)", async () => {
@@ -126,5 +130,7 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     );
     expect(res.status).toBe("failed");
     expect(res.nodes.boom?.state).toBe("failed");
+    expect(typeof res.nodes.boom?.error).toBe("string");
+    expect(typeof res.error).toBe("string");
   });
 });

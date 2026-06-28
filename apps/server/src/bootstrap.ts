@@ -305,11 +305,19 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
           inputs: Record<string, string>,
           opts?: { cwd?: string },
         ): Promise<RibWorkflowRunResult> => {
-          const controller = getWorkflowController();
-          if (!controller) {
-            return { status: "failed", nodes: {}, error: "workflow controller unavailable" };
+          try {
+            const controller = getWorkflowController();
+            if (!controller) {
+              return { status: "failed", nodes: {}, error: "workflow controller unavailable" };
+            }
+            return await controller.runDefinition(definition, inputs, opts?.cwd ?? refreshCwd);
+          } catch (err) {
+            return {
+              status: "failed",
+              nodes: {},
+              error: err instanceof Error ? err.message : String(err),
+            };
           }
-          return controller.runDefinition(definition, inputs, opts?.cwd ?? refreshCwd);
         }
       : undefined;
   const {
