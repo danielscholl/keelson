@@ -127,6 +127,18 @@ export interface RibAgentTurn {
   result: Promise<RibAgentTurnResult>;
 }
 
+// The settled result of RibContext.runWorkflow — a structural mirror of the
+// executor's run summary, kept local so @keelson/shared stays free of a
+// @keelson/workflows dependency (the same rule RibWorkflowContribution.definition
+// follows). `nodes` maps each node id to its terminal state + output; `status` is
+// the run's terminal status; `error` is set when the run could not start (an invalid
+// definition) or failed outright.
+export interface RibWorkflowRunResult {
+  status: "succeeded" | "failed" | "cancelled";
+  nodes: Record<string, { state: string; output: string; error?: string }>;
+  error?: string;
+}
+
 // Dependency-injection surface the harness passes to every rib. The
 // `getSidecar` resolver intentionally returns `unknown` — each rib declares
 // its own structural narrowing and casts at the registration boundary.
@@ -172,6 +184,21 @@ export interface RibContext {
   // (never throws) for an unknown name or a failed run. Optional so a rib built
   // against an older harness degrades to cadence-only refresh, not a throw.
   refreshWorkflow?: (workflowName: string) => Promise<void>;
+  // Execute a workflow DAG the rib hands in (an in-memory definition — the same
+  // shape `contributeWorkflows` uses), with optional string `inputs`, and resolve to
+  // its terminal result. The harness validates the definition against the workflow
+  // schema and runs it on the shared executor (provider, memory, and policy gates
+  // already wired); `opts.cwd` sets the working dir (e.g. a project root), defaulting
+  // to the keelson home. `definition` stays `unknown` at the contract floor so
+  // @keelson/shared need not depend on @keelson/workflows. Resolves (never throws)
+  // for an invalid definition or a failed run — `status`/`error` carry the outcome.
+  // The CALLER owns trusting the definition: a workflow's bash/script nodes run as
+  // given. Optional so a rib built against an older harness degrades, not throws.
+  runWorkflow?: (
+    definition: unknown,
+    inputs?: Record<string, string>,
+    opts?: { cwd?: string },
+  ) => Promise<RibWorkflowRunResult>;
 }
 
 // The harness-owned snapshot key the SPA subscribes to as a manifest-revision

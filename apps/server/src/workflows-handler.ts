@@ -29,6 +29,7 @@ import {
   type MessageChunk,
   type NodeOutputRow,
   type Project,
+  type RibWorkflowRunResult,
   recallRequestSchema,
   resumeWorkflowRunBodySchema,
   type SnapshotManager,
@@ -69,10 +70,13 @@ import {
   type NotebookAdapter,
   type RequestCancel,
   type RunStreamEvent,
+  type RunSummary,
   removeWorktree,
   resolveBranchTemplate,
   runWorkflow,
+  validateWorkflowInvariants,
   type WorkflowDefinition,
+  workflowDefinitionSchema,
   worktreePathForRepoLocal,
 } from "@keelson/workflows";
 import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
@@ -1056,6 +1060,41 @@ export interface WorkflowController {
   // persisted snapshot (getRun) cannot carry. Empty for a run with no live
   // resolver (terminal, unknown, or paused-but-reconciled after restart).
   pendingApprovals(runId: string): Array<{ nodeId: string; pauseId: string; message: string }>;
+  // Execute an in-memory workflow DEFINITION (not a catalog name) and resolve to its
+  // terminal result — backs RibContext.runWorkflow. Validates the definition, assembles
+  // a headless handler map (approval fails fast — there is no UI to pause on), runs the
+  // shared executor at `cwd`, and never throws (every failure maps to a failed result).
+  runDefinition(
+    definition: unknown,
+    inputs: Record<string, string>,
+    cwd: string,
+  ): Promise<RibWorkflowRunResult>;
+}
+
+// Map the executor's RunSummary onto the @keelson/shared structural result the rib seam
+// returns (only id -> {state, output, error?}, dropping usage/timing).
+function summaryToRibWorkflowResult(summary: RunSummary): RibWorkflowRunResult {
+  const nodes: RibWorkflowRunResult["nodes"] = {};
+  let firstNodeError: string | undefined;
+  for (const [id, output] of Object.entries(summary.nodes)) {
+    nodes[id] = {
+      state: output.state,
+      output: output.output,
+      ...(output.state === "failed" ? { error: output.error } : {}),
+    };
+    if (output.state === "failed" && output.error !== undefined && firstNodeError === undefined) {
+      firstNodeError = output.error;
+    }
+  }
+  // Surface the first failed node's error as the run-level error so a caller
+  // reading only `result.error` on a failed run learns why (the contract).
+  return {
+    status: summary.status,
+    nodes,
+    ...(summary.status === "failed" && firstNodeError !== undefined
+      ? { error: firstNodeError }
+      : {}),
+  };
 }
 
 const DEFAULT_WATCH_DEADLINE_MS = 75_000;
@@ -1074,6 +1113,101 @@ export function createWorkflowController(
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
   return {
+    async runDefinition(
+      definition: unknown,
+      inputs: Record<string, string>,
+      cwd: string,
+    ): Promise<RibWorkflowRunResult> {
+      const parsed = workflowDefinitionSchema.safeParse(definition);
+      if (!parsed.success) {
+        return { status: "failed", nodes: {}, error: `invalid workflow: ${parsed.error.message}` };
+      }
+      const definitionObj = parsed.data as WorkflowDefinition;
+      const invariantError = validateWorkflowInvariants(definitionObj);
+      if (invariantError) {
+        return { status: "failed", nodes: {}, error: `invalid workflow: ${invariantError}` };
+      }
+      let workingDir: string;
+      try {
+        if (!statSync(cwd).isDirectory()) {
+          return { status: "failed", nodes: {}, error: `cwd is not a directory: ${cwd}` };
+        }
+        workingDir = canonicalPath(cwd);
+      } catch {
+        return { status: "failed", nodes: {}, error: `cwd does not exist: ${cwd}` };
+      }
+      // Scope memory to the project the cwd sits in, matching the named-run path
+      // (an unscoped run bleeds memory rows across targets).
+      const projectId = projectsStore?.findByPathPrefix(workingDir)?.id;
+      const runId = crypto.randomUUID();
+      const abort = new AbortController();
+      const handlers = new Map<string, NodeHandler>([
+        ["bash", bashHandler],
+        ["prompt", promptHandler],
+        // No UI to pause on for a rib-driven run — approval fails fast, cancel aborts.
+        [
+          "approval",
+          makeApprovalHandler({
+            awaitApproval: async (_runId, nodeId, message) => {
+              throw new Error(
+                `approval node '${nodeId}' cannot resolve in a rib-run workflow (message: "${message}")`,
+              );
+            },
+          }),
+        ],
+        [
+          "cancel",
+          makeCancelHandler({
+            requestCancel: async () => {
+              abort.abort();
+            },
+          }),
+        ],
+        ["command", makeCommandHandler({ promptHandler })],
+        ["loop", makeLoopHandler({ promptHandler, runUntilBashProbe: defaultRunUntilBashProbe })],
+        ["script", makeScriptHandler()],
+      ]);
+      const artifacts = await RunArtifactsDir.create(runId);
+      // Register in the shared run table so a server shutdown aborts an in-flight
+      // rib-run's bash/script subtree like a named run — a headless run writes no
+      // store row (a unique key keeps it out of dedupe/findActive), leaving only a
+      // live process tree to reap.
+      let settleDone: () => void = () => {};
+      const done = new Promise<void>((resolve) => {
+        settleDone = resolve;
+      });
+      activeRuns.register(runId, {
+        abort,
+        done,
+        pendingApprovals: new Map(),
+        dedupeKey: runId,
+        conversationId: "",
+      });
+      try {
+        const summary = await runWorkflow({
+          workflow: definitionObj,
+          runId,
+          inputs,
+          handlers,
+          cwd: workingDir,
+          abortSignal: abort.signal,
+          ...artifacts.runWorkflowOptions(),
+          ...(memoryTools !== undefined ? { memoryTools } : {}),
+          ...(projectId !== undefined ? { projectId } : {}),
+        });
+        return summaryToRibWorkflowResult(summary);
+      } catch (err) {
+        return {
+          status: "failed",
+          nodes: {},
+          error: err instanceof Error ? err.message : String(err),
+        };
+      } finally {
+        activeRuns.delete(runId);
+        await artifacts.cleanup();
+        settleDone();
+      }
+    },
     startRun({ name, inputs, workingDir: rawWorkingDir, project, isolation, origin }) {
       try {
         if (!statSync(rawWorkingDir).isDirectory()) {
