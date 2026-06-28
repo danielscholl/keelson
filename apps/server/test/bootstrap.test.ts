@@ -466,15 +466,19 @@ describe("bootstrapRibs", () => {
     });
     expect(memory).toBeDefined();
 
-    // Not wired yet during activation → a recall at this point throws (fail-soft is the
-    // rib's job). Wire the store, then a recall/writeback routes through and round-trips.
-    storeRef = fakeStore;
+    // Fail-closed before the store is wired: the seam throws so the rib's wrapper can
+    // fail soft. getMemoryStore() is read fresh per call, so wiring the store afterward
+    // lets the same handle route a recall/writeback through and round-trip.
     const recallReq: RecallRequest = {
       schemaVersion: RECALL_REQUEST_SCHEMA_VERSION,
       scope: { visibility: "project", projectId: "p1" },
       task: { runtime: "rib:alpha" },
       query: "team decisions and lessons",
     };
+    await expect(memory?.recall(recallReq)).rejects.toThrow("memory store unavailable");
+    expect(recallCalls).toHaveLength(0);
+
+    storeRef = fakeStore;
     expect(await memory?.recall(recallReq)).toEqual(recallResponse);
     expect(recallCalls).toHaveLength(1);
 
