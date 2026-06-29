@@ -440,21 +440,54 @@ describe("bootstrapRibs", () => {
     expect(seen).toEqual(providers);
   });
 
-  test("getProviders defaults to the live registry when no override is supplied", async () => {
+  test("getProviders defaults to the live registry and reads it at call time", async () => {
     delete process.env.KEELSON_RIBS;
-    let accessor: (() => readonly { id: string; displayName: string }[]) | undefined;
-    const reader: Rib = {
-      id: "alpha",
-      displayName: "alpha",
-      registerTools: (ctx) => {
-        accessor = ctx.getProviders;
-        return [];
-      },
+    // This block doesn't otherwise manage the provider registry, so own the state for
+    // this one test and restore it afterward.
+    clearProviderRegistry();
+    const capabilities: ProviderCapabilities = {
+      supportsTools: false,
+      supportsImages: false,
+      supportsResume: false,
+      supportsThinking: false,
+      supportsReasoningEffort: false,
     };
-    await bootstrapRibs({ available: { alpha: reader } });
-    // The seam defaults to the registry, so it is always present and returns an array.
-    expect(accessor).toBeDefined();
-    expect(Array.isArray(accessor?.())).toBe(true);
+    const fakeProvider: IAgentProvider = {
+      async *sendQuery(): AsyncGenerator<MessageChunk> {},
+    };
+    const register = (id: string, displayName: string): void =>
+      registerProvider({
+        id,
+        displayName,
+        builtIn: true,
+        capabilities,
+        factory: () => fakeProvider,
+      });
+    try {
+      register("alpha-prov", "Alpha Provider");
+      let accessor: (() => readonly { id: string; displayName: string }[]) | undefined;
+      const reader: Rib = {
+        id: "alpha",
+        displayName: "alpha",
+        registerTools: (ctx) => {
+          accessor = ctx.getProviders;
+          return [];
+        },
+      };
+      // No getProviders override → the seam defaults to the live registry.
+      await bootstrapRibs({ available: { alpha: reader } });
+      // Reflects the registry, mapped to the {id, displayName} shape — not [] or broken.
+      expect(accessor?.()).toEqual([{ id: "alpha-prov", displayName: "Alpha Provider" }]);
+      // Late-binding: a provider registered AFTER bootstrap appears on the next call,
+      // proving the default reads at call time rather than snapshotting at activation.
+      register("beta-prov", "Beta Provider");
+      expect(accessor?.()).toEqual([
+        { id: "alpha-prov", displayName: "Alpha Provider" },
+        { id: "beta-prov", displayName: "Beta Provider" },
+      ]);
+    } finally {
+      clearProviderRegistry();
+    }
   });
 
   test("getMemory forwards recall/writeback to the store and, like getProjects, reads it at call time", async () => {
