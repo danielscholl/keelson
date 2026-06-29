@@ -140,6 +140,15 @@ export interface RibWorkflowRunResult {
   error?: string;
 }
 
+// A registered provider, surfaced to a rib so it can make provider-aware choices
+// (e.g. assign a member's vendor at cast time) without a back-dep on
+// @keelson/providers. The minimal shape: the `id` a rib pins on a
+// RibAgentTurnRequest, plus a human label.
+export interface RibProviderInfo {
+  id: string;
+  displayName: string;
+}
+
 // Dependency-injection surface the harness passes to every rib. The
 // `getSidecar` resolver intentionally returns `unknown` — each rib declares
 // its own structural narrowing and casts at the registration boundary.
@@ -209,6 +218,13 @@ export interface RibContext {
   // / always-inject row. Optional so a rib built against an older harness degrades to no
   // governed memory (recall it can fold in), not a throw.
   getMemory?: () => MemoryTools;
+  // Read-only snapshot of the providers registered at call time, so a rib can make
+  // availability-aware provider choices (e.g. assign a member's vendor at cast). This
+  // only LISTS what's registered; it grants no access beyond the existing runAgentTurn
+  // path, where provider routing is global, not namespace-scoped. Optional so a rib
+  // built against an older harness degrades to no provider awareness (it can still pin
+  // a provider and let the turn resolve or fail), not a throw.
+  getProviders?: () => readonly RibProviderInfo[];
 }
 
 // The harness-owned snapshot key the SPA subscribes to as a manifest-revision

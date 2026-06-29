@@ -39,6 +39,7 @@ import type {
   RibAuthStatus,
   RibCommandDescriptor,
   RibContext,
+  RibProviderInfo,
   RibWorkflowRunResult,
   SnapshotManager,
   ToolDefinition,
@@ -218,6 +219,9 @@ export interface BootstrapRibsOptions {
   // the composition root's late-bound binding at recall/writeback time, by which point
   // boot is done. Absent leaves the getMemory seam off the ctx (no governed memory).
   getMemoryStore?: () => MemoryStore | undefined;
+  // Backs RibContext.getProviders. Defaults to the live provider registry
+  // (getProviderInfoList); tests may inject a deterministic list.
+  getProviders?: () => readonly RibProviderInfo[];
 }
 
 export interface RibBootstrap {
@@ -348,6 +352,14 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         },
       })
     : undefined;
+  // RibContext.getProviders resolver: the registered-provider list (id + label) so a
+  // rib can make availability-aware provider choices (e.g. assign a member's vendor at
+  // cast). Read-only; grants nothing beyond the existing runAgentTurn routing. Tests
+  // may override via options.getProviders.
+  const getProviders =
+    options.getProviders ??
+    ((): readonly RibProviderInfo[] =>
+      getProviderInfoList().map((p) => ({ id: p.id, displayName: p.displayName })));
   const {
     manifests,
     disposers,
@@ -374,6 +386,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
     ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
     ...(getMemory ? { getMemory } : {}),
+    getProviders,
   });
   return {
     manifests,

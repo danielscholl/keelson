@@ -421,6 +421,42 @@ describe("bootstrapRibs", () => {
     expect(hasAccessor).toBe(false);
   });
 
+  test("getProviders forwards the injected provider list to the rib ctx", async () => {
+    delete process.env.KEELSON_RIBS;
+    const providers = [
+      { id: "claude", displayName: "Claude" },
+      { id: "copilot", displayName: "Copilot" },
+    ];
+    let seen: readonly { id: string; displayName: string }[] | undefined;
+    const reader: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        seen = ctx.getProviders?.();
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: reader }, getProviders: () => providers });
+    expect(seen).toEqual(providers);
+  });
+
+  test("getProviders defaults to the live registry when no override is supplied", async () => {
+    delete process.env.KEELSON_RIBS;
+    let accessor: (() => readonly { id: string; displayName: string }[]) | undefined;
+    const reader: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        accessor = ctx.getProviders;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: reader } });
+    // The seam defaults to the registry, so it is always present and returns an array.
+    expect(accessor).toBeDefined();
+    expect(Array.isArray(accessor?.())).toBe(true);
+  });
+
   test("getMemory forwards recall/writeback to the store and, like getProjects, reads it at call time", async () => {
     delete process.env.KEELSON_RIBS;
     // Mirror index.ts: `getMemoryStore: () => memoryStoreRef`, where the store ref is
