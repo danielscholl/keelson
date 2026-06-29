@@ -145,8 +145,8 @@ export interface RibWorkflowRunResult {
 // @keelson/providers. The minimal shape: the `id` a rib pins on a
 // RibAgentTurnRequest, plus a human label.
 export interface RibProviderInfo {
-  id: string;
-  displayName: string;
+  readonly id: string;
+  readonly displayName: string;
 }
 
 // Dependency-injection surface the harness passes to every rib. The

@@ -298,7 +298,14 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
           }
         : {}),
       ...(opts.getMemory ? { getMemory: () => opts.getMemory!(rib.id) } : {}),
-      ...(opts.getProviders ? { getProviders: opts.getProviders } : {}),
+      // Normalize to the minimal {id, displayName} shape at the boundary so a richer
+      // embedder-supplied list (e.g. live ProviderInfo) can't leak control-plane fields.
+      ...(opts.getProviders
+        ? {
+            getProviders: () =>
+              opts.getProviders!().map(({ id, displayName }) => ({ id, displayName })),
+          }
+        : {}),
     };
 
     const ribToolNames = collectRibTools(
