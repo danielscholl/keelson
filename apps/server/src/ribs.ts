@@ -35,6 +35,7 @@ import {
   type RibAuthStatus,
   type RibCommandDescriptor,
   type RibContext,
+  type RibProviderInfo,
   type RibSurfaceDescriptor,
   type RibViewDescriptor,
   type RibWorkflowRunResult,
@@ -158,6 +159,10 @@ export interface ApplyRibsOptions {
   // governed memory rows. Rib-id-scoped for parity/future per-rib policy. Optional so
   // applyRibs unit tests without a memory store stay deterministic.
   readonly getMemory?: (ribId: string) => MemoryTools;
+  // Backs RibContext.getProviders: a read-only list of the registered providers, so a
+  // rib can make availability-aware provider choices. Optional so applyRibs unit tests
+  // stay deterministic without the provider registry.
+  readonly getProviders?: () => readonly RibProviderInfo[];
 }
 
 /**
@@ -293,6 +298,14 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
           }
         : {}),
       ...(opts.getMemory ? { getMemory: () => opts.getMemory!(rib.id) } : {}),
+      // Normalize to the minimal {id, displayName} shape at the boundary so a richer
+      // embedder-supplied list (e.g. live ProviderInfo) can't leak control-plane fields.
+      ...(opts.getProviders
+        ? {
+            getProviders: () =>
+              opts.getProviders!().map(({ id, displayName }) => ({ id, displayName })),
+          }
+        : {}),
     };
 
     const ribToolNames = collectRibTools(
