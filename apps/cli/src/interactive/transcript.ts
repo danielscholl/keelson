@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { type Component, Markdown, Text } from "@earendil-works/pi-tui";
-import type { MessageChunk } from "@keelson/shared";
+import { type MessageChunk, toolPresentation } from "@keelson/shared";
 import { brass, dim, italic, markdownTheme, red } from "./theme.ts";
 
 const MAX_SUMMARY_WIDTH = 100;
@@ -13,13 +13,23 @@ function oneLine(text: string, max = MAX_SUMMARY_WIDTH): string {
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
 }
 
+// Renders a tool call as a one-line, terminal-native summary: shell calls show
+// as `$ <command>`, file/search/web calls lead with their action word and the
+// salient path/pattern, and anything unrecognized falls back to the tool name
+// plus a compact arg dump. ASCII markers only — no emoji glyph that a terminal
+// might render with inconsistent emoji presentation.
 export function summarizeToolUse(toolName: string, toolInput?: Record<string, unknown>): string {
-  const args = toolInput
-    ? Object.entries(toolInput)
-        .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
-        .join(", ")
-    : "";
-  return oneLine(args.length > 0 ? `⚙ ${toolName} ${args}` : `⚙ ${toolName}`);
+  const p = toolPresentation(toolName, toolInput);
+  if (p.kind === "tool") {
+    const args = toolInput
+      ? Object.entries(toolInput)
+          .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+          .join(", ")
+      : "";
+    return oneLine(args.length > 0 ? `${p.marker} ${args}` : p.marker);
+  }
+  const head = p.primary ? `${p.marker} ${p.primary}` : p.marker;
+  return oneLine(p.description ? `${head} · ${p.description}` : head);
 }
 
 export function summarizeToolResult(content: string, isError?: boolean): string {

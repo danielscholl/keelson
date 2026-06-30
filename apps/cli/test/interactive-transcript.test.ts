@@ -37,9 +37,22 @@ function renderedText(children: readonly Renderable[]): string {
 }
 
 describe("summarizeToolUse", () => {
-  test("renders name and flattened args on one line", () => {
+  test("renders a shell call as a $-prefixed command with its description", () => {
+    const line = summarizeToolUse("powershell", {
+      command: "bun keelson.ts project list",
+      description: "List registered projects",
+    });
+    expect(line).toBe("$ bun keelson.ts project list · List registered projects");
+  });
+
+  test("renders a read call as its action word and path", () => {
     const line = summarizeToolUse("read_file", { path: "/tmp/a.txt", limit: 5 });
-    expect(line).toBe("⚙ read_file path: /tmp/a.txt, limit: 5");
+    expect(line).toBe("read /tmp/a.txt");
+  });
+
+  test("falls back to the tool name and compact args for unknown tools", () => {
+    const line = summarizeToolUse("osdu_search", { kind: "wellbore", limit: 5 });
+    expect(line).toBe("osdu_search kind: wellbore, limit: 5");
   });
 
   test("truncates long input to a bounded single line", () => {
@@ -79,8 +92,8 @@ describe("AssistantTurnView", () => {
     view.handleChunk({ type: "text", content: "after" });
     expect(surface.children).toHaveLength(4);
     const text = renderedText(surface.children);
-    expect(text.indexOf("before")).toBeLessThan(text.indexOf("⚙ bash"));
-    expect(text.indexOf("⚙ bash")).toBeLessThan(text.indexOf("→ a.txt"));
+    expect(text.indexOf("before")).toBeLessThan(text.indexOf("$ ls"));
+    expect(text.indexOf("$ ls")).toBeLessThan(text.indexOf("→ a.txt"));
     expect(text.indexOf("→ a.txt")).toBeLessThan(text.indexOf("after"));
   });
 
