@@ -5,6 +5,7 @@ import {
   type MessageChunk,
   type ToolContext,
   type ToolDefinition,
+  toolPresentation,
 } from "../src/tools.ts";
 
 describe("ToolDefinition contract", () => {
@@ -115,5 +116,66 @@ describe("inferToolFamily", () => {
     expect(inferToolFamily("noprefix")).toBe("other");
     // Leading underscore — first index is 0, falls through to `other`.
     expect(inferToolFamily("_hidden")).toBe("other");
+  });
+});
+
+describe("toolPresentation", () => {
+  it("maps cross-provider shell names to a $ marker and the command", () => {
+    for (const name of ["bash", "shell", "powershell", "pwsh"]) {
+      const p = toolPresentation(name, { command: "ls -la" });
+      expect(p.kind).toBe("shell");
+      expect(p.marker).toBe("$");
+      expect(p.primary).toBe("ls -la");
+    }
+  });
+
+  it("carries a shell description through for recognized kinds", () => {
+    const p = toolPresentation("powershell", {
+      command: "bun keelson.ts project list",
+      description: "List registered projects",
+    });
+    expect(p.description).toBe("List registered projects");
+  });
+
+  it("classifies read/edit/search/web and extracts the salient field", () => {
+    expect(toolPresentation("read_file", { path: "/a.txt" })).toMatchObject({
+      kind: "read",
+      marker: "read",
+      primary: "/a.txt",
+    });
+    expect(toolPresentation("str_replace_editor", { path: "/b.ts" })).toMatchObject({
+      kind: "edit",
+      marker: "edit",
+      primary: "/b.ts",
+    });
+    expect(toolPresentation("grep", { pattern: "foo" })).toMatchObject({
+      kind: "search",
+      marker: "search",
+      primary: "foo",
+    });
+    expect(toolPresentation("web_fetch", { url: "https://example.com" })).toMatchObject({
+      kind: "web",
+      marker: "web",
+      primary: "https://example.com",
+    });
+  });
+
+  it("is case-insensitive on the tool name (Claude's Bash, Read)", () => {
+    expect(toolPresentation("Bash", { command: "ls" }).kind).toBe("shell");
+    expect(toolPresentation("Read", { path: "/a" }).kind).toBe("read");
+  });
+
+  it("falls back to a tool kind with the raw name as marker and no description", () => {
+    const p = toolPresentation("osdu_search", { query: "wells", description: "ignored" });
+    expect(p.kind).toBe("tool");
+    expect(p.marker).toBe("osdu_search");
+    expect(p.primary).toBeUndefined();
+    expect(p.description).toBeUndefined();
+  });
+
+  it("omits primary when no known field is present", () => {
+    const p = toolPresentation("bash", { foo: "bar" });
+    expect(p.kind).toBe("shell");
+    expect(p.primary).toBeUndefined();
   });
 });

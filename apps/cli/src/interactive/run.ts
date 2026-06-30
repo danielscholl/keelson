@@ -299,7 +299,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     const onFrame = (frame: WorkflowFrame): void => {
       switch (frame.type) {
         case "node_started":
-          info(`  ⚙ ${frame.nodeId}`);
+          info(`  ▸ ${frame.nodeId}`);
           break;
         case "node_done":
           if (frame.error !== null) warn(`  ✗ ${frame.nodeId}: ${frame.error}`);
