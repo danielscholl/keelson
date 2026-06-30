@@ -18,7 +18,7 @@
     "@earendil-works/pi-coding-agent": "^0.79.1",
     "@github/copilot-sdk": "1.0.4",
     "@keelson/shared": "workspace:*",
-    "@openai/codex-sdk": "^0.141.0",
+    "@openai/codex-sdk": "^0.142.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
