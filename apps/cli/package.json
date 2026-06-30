@@ -1,6 +1,6 @@
 {
   "name": "@keelson/cli",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -12,7 +12,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "0.79.9",
+    "@earendil-works/pi-tui": "0.80.2",
     "@keelson/providers": "workspace:*",
     "@keelson/server": "workspace:*",
     "@keelson/shared": "workspace:*",
