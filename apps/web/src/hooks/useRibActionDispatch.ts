@@ -26,7 +26,13 @@ export function useRibActionDispatch(
     onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
     // A successful action may instead carry a `run-workflow` directive; the host
     // wires this to its workflow-launch path (the same path /workflow run uses).
-    onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+    // `stay` (from the directive) asks the host to launch without focusing the
+    // Workflows tab, so a run kicked off from a rib surface can be watched in place.
+    onLaunchWorkflow?: (
+      workflow: string,
+      args: Record<string, string>,
+      stay?: boolean,
+    ) => void | Promise<void>;
     // A successful action may instead carry an `open-canvas` directive; the host
     // opens that snapshot's board in the canvas drawer (the View verb). Sync: it's
     // a setState that opens a drawer, not a paid/duplicable action — no await.
@@ -85,7 +91,7 @@ export function useRibActionDispatch(
               // double-launch window without a separate concurrency guard.
               try {
                 await Promise.resolve(
-                  onLaunchWorkflow(parsed.data.workflow, parsed.data.args ?? {}),
+                  onLaunchWorkflow(parsed.data.workflow, parsed.data.args ?? {}, parsed.data.stay),
                 );
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);

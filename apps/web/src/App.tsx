@@ -1,6 +1,6 @@
 import type { RibSurfaceDescriptor } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listProjects, startWorkflowRun } from "./api.ts";
+import { getWorkflowRun, listProjects, startWorkflowRun } from "./api.ts";
 import { ApprovalsDock } from "./components/ApprovalsDock.tsx";
 import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
 import { RibsProvider, useRibsContext } from "./components/RibsProvider.tsx";
@@ -29,6 +29,36 @@ export function App() {
       </RibsProvider>
     </ToastHost>
   );
+}
+
+// Poll a run that a `stay` launch did NOT hand to the Workflows tab, so its failure
+// still reaches the operator instead of only the "started" toast. Best-effort and
+// bounded (~5 min); the run stays inspectable in the Workflows tab and its surface panel.
+async function watchStayRun(
+  name: string,
+  runId: string,
+  toast: { push: (t: { kind: "ok" | "error" | "info"; message: string }) => unknown },
+): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    let run: Awaited<ReturnType<typeof getWorkflowRun>>;
+    try {
+      run = await getWorkflowRun(runId);
+    } catch {
+      continue;
+    }
+    if (run.status === "succeeded") {
+      toast.push({ kind: "ok", message: `${name} ✓` });
+      return;
+    }
+    if (run.status === "failed" || run.status === "cancelled") {
+      toast.push({
+        kind: "error",
+        message: `${name} ${run.status}${run.error ? `: ${run.error}` : ""}`,
+      });
+      return;
+    }
+  }
 }
 
 function AppInner() {
@@ -90,9 +120,24 @@ function AppInner() {
   // is the thin wrapper that supplies App's real deps.
   const { activeProjectId } = useActiveProject();
   const handleLaunchWorkflowFromAction = useCallback(
-    (workflow: string, args: Record<string, string>) =>
+    (workflow: string, args: Record<string, string>, stay?: boolean) =>
       launchWorkflowRun(
-        { activeProjectId, listProjects, startWorkflowRun, onOpened: handleOpenWorkflowRun, toast },
+        {
+          activeProjectId,
+          listProjects,
+          startWorkflowRun,
+          // `stay` launches the run but keeps the operator on the current surface
+          // (watched in that surface's own panel) instead of focusing Workflows. A
+          // "started" toast stands in for the tab handoff, and watchStayRun then
+          // surfaces failure — otherwise a stay launch that fails would be silent.
+          onOpened: stay
+            ? (name, runId) => {
+                toast.push({ kind: "info", message: `${name} started` });
+                void watchStayRun(name, runId, toast);
+              }
+            : handleOpenWorkflowRun,
+          toast,
+        },
         workflow,
         args,
       ),

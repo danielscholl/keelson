@@ -50,6 +50,11 @@ export interface ActiveProjectState {
   projects: Project[];
   activeProject: Project | null;
   activeProjectId: string | null;
+  // The operator's EXPLICIT stored selection (localStorage), null when none is set
+  // and the active project is only a fallback. Distinguishes "the user chose this"
+  // from "we defaulted here" — a consumer that writes scope elsewhere must not treat
+  // a fallback as an explicit choice.
+  explicitProjectId: string | null;
   setActiveProject: (id: string | null) => void;
   refresh: () => Promise<void>;
   error: string | null;
@@ -164,6 +169,9 @@ export function useActiveProject(): ActiveProjectState {
     projects: list,
     activeProject,
     activeProjectId: resolvedActiveProjectId,
+    // The raw stored id (null once a stale one is cleared / when none is set), so a
+    // consumer can tell an explicit choice from a fallback-to-default.
+    explicitProjectId: activeProjectId,
     setActiveProject,
     refresh,
     error,

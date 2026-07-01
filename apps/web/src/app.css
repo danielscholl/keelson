@@ -3205,6 +3205,12 @@ button.tab:focus-visible {
 }
 .surface-identity {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.surface-identity-text {
+  display: flex;
   flex-direction: column;
   gap: 4px;
 }

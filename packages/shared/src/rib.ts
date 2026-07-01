@@ -301,6 +301,12 @@ export const ribSurfaceDescriptorSchema = z
     id: z.string().min(1),
     title: z.string().min(1),
     subtitle: z.string().min(1).max(200).optional(),
+    // Opt the surface into the host's first-class project picker: the SPA renders
+    // the shared ProjectChip in the surface header and, on select, dispatches the
+    // rib's `select-project` action with the chosen project id (or absent for the
+    // no-project/shared scope). A rib that owns per-project scope sets this instead
+    // of hand-rolling a picker board section. Absent = no host picker (default).
+    projectScoped: z.boolean().optional(),
     layout: z
       .object({
         header: surfaceRegionSchema.optional(),
@@ -525,6 +531,10 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
       effect: z.literal("run-workflow"),
       workflow: z.string().min(1),
       args: z.record(z.string(), z.string()).optional(),
+      // Launch the run but keep the operator on the current surface instead of
+      // focusing the Workflows tab — so a task kicked off from a rib surface can be
+      // watched in that surface's own live panel. Absent = focus Workflows (default).
+      stay: z.boolean().optional(),
     })
     .strict(),
   z
