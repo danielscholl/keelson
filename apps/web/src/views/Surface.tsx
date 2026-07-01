@@ -19,6 +19,7 @@ import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
+import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 import { buildExploreSeed, type ExploreHandler, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 
@@ -31,6 +32,7 @@ interface Region {
   glyph?: { char: string; tone?: CanvasTone };
   collapsible?: boolean;
   collapsed?: boolean;
+  live?: boolean;
 }
 
 // A rib's primary surface: region-bound boards laid out as header → banner →
@@ -143,6 +145,9 @@ function SurfaceRegion({
   const collapsible = region.collapsible ?? false;
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
   const snap = useSnapshot(region.key);
+  // Lights only while frames actively stream in on the key — distinct from the
+  // cadence-derived "updated Xm ago" freshness label.
+  const streaming = useStreamingPulse(snap.version, region.live ?? false);
   const { openCanvas } = useCanvas();
   const resolveCanvasKind = useCanvasKindForKey();
   const ribId = ribIdFromKey(region.key);
@@ -267,6 +272,15 @@ function SurfaceRegion({
         <Segments items={board.header.segments} />
       )}
       <span className="surface-region-spacer" />
+      {region.live && (
+        <span
+          className="surface-region-live"
+          role="img"
+          data-streaming={streaming || undefined}
+          title={streaming ? "Live — streaming now" : "Live region"}
+          aria-label={streaming ? "Live, streaming now" : "Live region, idle"}
+        />
+      )}
       {freshness.label && (
         <span
           className="surface-region-freshness"

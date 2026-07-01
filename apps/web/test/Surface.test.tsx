@@ -500,4 +500,28 @@ describe("Surface", () => {
       "scope: navigation",
     );
   });
+
+  test("a region opted into live renders a freshness pulse dot in its head", () => {
+    live("rib:squad:run", board("Run", "Rounds", 3));
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      layout: { rows: [{ columns: [{ key: "rib:squad:run", title: "Run", live: true }] }] },
+    });
+    // The dot is present (opt-in affordance) but idle — a single hydrated frame
+    // is the baseline, not a stream event, so it carries no data-streaming.
+    const dot = container.querySelector(".surface-region-live");
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute("data-streaming")).toBeNull();
+  });
+
+  test("a region without the live opt-in renders no pulse dot", () => {
+    live("rib:squad:run", board("Run", "Rounds", 3));
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      layout: { rows: [{ columns: [{ key: "rib:squad:run", title: "Run" }] }] },
+    });
+    expect(container.querySelector(".surface-region-live")).toBeNull();
+  });
 });

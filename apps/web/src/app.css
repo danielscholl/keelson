@@ -3377,6 +3377,26 @@ button.tab:focus-visible {
 .surface-region-freshness[data-tone="error"] {
   color: var(--red);
 }
+/* Opt-in live pulse dot on a region head: muted static when idle (the affordance
+   stays present), cyan pulse while streaming. Reduced-motion keeps the lit color
+   without the motion. */
+.surface-region-live {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.surface-region-live[data-streaming] {
+  background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan);
+  animation: workflow-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .surface-region-live[data-streaming] {
+    animation: none;
+  }
+}
 .surface-region-idle {
   display: flex;
   flex-direction: column;

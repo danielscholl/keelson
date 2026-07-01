@@ -285,6 +285,11 @@ export const surfaceRegionSchema = z
     // row-column regions; a banner stays full (see ribSurfaceDescriptorSchema).
     collapsible: z.boolean().optional(),
     collapsed: z.boolean().optional(),
+    // Opt-in live-streaming affordance: the region head carries a freshness dot
+    // the host pulses while frames arrive over the snapshot WS (streaming is
+    // derived from frame cadence, not a rib field) and quiets when they stop.
+    // Default off — regions that omit it render unchanged.
+    live: z.boolean().optional(),
   })
   .strict();
 export type RibSurfaceRegion = z.infer<typeof surfaceRegionSchema>;

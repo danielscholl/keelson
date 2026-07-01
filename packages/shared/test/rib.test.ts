@@ -151,6 +151,31 @@ describe("rib surface descriptor schema", () => {
     expect(s.layout.rows[0]?.columns[0]?.cadenceMs).toBe(7_200_000);
   });
 
+  it("carries an optional live flag on header, banner, and column regions", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "squad",
+      title: "Squad",
+      layout: {
+        header: { key: "rib:squad:cluster", live: true },
+        // banner uses bannerRegionSchema (an .omit of the base) — live must survive it.
+        banner: { key: "rib:squad:release", live: true },
+        rows: [{ columns: [{ key: "rib:squad:run", workflow: "squad-run", live: true }] }],
+      },
+    });
+    expect(s.layout.header?.live).toBe(true);
+    expect(s.layout.banner?.live).toBe(true);
+    expect(s.layout.rows[0]?.columns[0]?.live).toBe(true);
+  });
+
+  it("defaults live to undefined when omitted", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "squad",
+      title: "Squad",
+      layout: { rows: [{ columns: [{ key: "rib:squad:run" }] }] },
+    });
+    expect(s.layout.rows[0]?.columns[0]?.live).toBeUndefined();
+  });
+
   it("rejects a cadenceMs below the 30s floor or non-integer", () => {
     expect(
       ribSurfaceDescriptorSchema.safeParse({
