@@ -27,10 +27,6 @@ import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 import { buildExploreSeed, type ExploreHandler, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 
-// The rib scope sentinel the picker sends for "no project" — matches the squad rib's
-// DEFAULT_SCOPE_ID. The default project maps to it; every other project scopes by id.
-const NO_PROJECT_SCOPE = "default";
-
 // A run-workflow directive may ask to stay on the current surface (see the `stay`
 // field on the run-workflow client effect), so the shared callback carries it.
 type LaunchWorkflow = (
@@ -394,18 +390,22 @@ function RegionIdle({ onLoad, error }: { onLoad: () => void; error?: string | nu
 
 // The surface header's project picker for a projectScoped surface: the same
 // ProjectChip + ProjectPickerPopover the Chat and Workflows surfaces use, driven by
-// the global active project. The active project's real id is sent as the scope; the
-// rib maps its own default project to its flat scope. Syncing happens only on an
-// EXPLICIT selection — never a fallback-to-default — so viewing the surface can't
-// clobber a scope set out-of-band (e.g. via the CLI).
+// the global active project. The rib maps its own default project to its flat scope.
 function SurfaceProjectPicker({ ribId, popoverId }: { ribId: string; popoverId: string }) {
   const { projects, activeProject, activeProjectId, explicitProjectId, setActiveProject, refresh } =
     useActiveProject();
-  const scopeId = activeProject?.id ?? NO_PROJECT_SCOPE;
   useEffect(() => {
+    // Sync the rib's scope from the EXPLICIT stored selection — not the fallback-
+    // resolved active project, which would post a transient "default" before the
+    // project list hydrates and momentarily clobber the scope. Skip when there's no
+    // explicit selection, so viewing the surface never overwrites a scope set
+    // out-of-band (e.g. via the CLI).
     if (!explicitProjectId) return;
-    void postRibAction(ribId, { type: "select-project", payload: { scopeId } }).catch(() => {});
-  }, [ribId, scopeId, explicitProjectId]);
+    void postRibAction(ribId, {
+      type: "select-project",
+      payload: { scopeId: explicitProjectId },
+    }).catch(() => {});
+  }, [ribId, explicitProjectId]);
   return (
     <>
       <ProjectChip projectName={activeProject?.name ?? "default"} popoverId={popoverId} />

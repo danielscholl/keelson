@@ -14,6 +14,7 @@ import { useSchemaVersionGate } from "./hooks/useSchemaVersionGate.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import type { ChatSeed } from "./lib/exploreSeed.ts";
 import { launchWorkflowRun } from "./lib/launchWorkflowRun.ts";
+import { watchStayRun } from "./lib/watchStayRun.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
 import { Surface } from "./views/Surface.tsx";
@@ -29,36 +30,6 @@ export function App() {
       </RibsProvider>
     </ToastHost>
   );
-}
-
-// Poll a run that a `stay` launch did NOT hand to the Workflows tab, so its failure
-// still reaches the operator instead of only the "started" toast. Best-effort and
-// bounded (~5 min); the run stays inspectable in the Workflows tab and its surface panel.
-async function watchStayRun(
-  name: string,
-  runId: string,
-  toast: { push: (t: { kind: "ok" | "error" | "info"; message: string }) => unknown },
-): Promise<void> {
-  for (let i = 0; i < 200; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    let run: Awaited<ReturnType<typeof getWorkflowRun>>;
-    try {
-      run = await getWorkflowRun(runId);
-    } catch {
-      continue;
-    }
-    if (run.status === "succeeded") {
-      toast.push({ kind: "ok", message: `${name} ✓` });
-      return;
-    }
-    if (run.status === "failed" || run.status === "cancelled") {
-      toast.push({
-        kind: "error",
-        message: `${name} ${run.status}${run.error ? `: ${run.error}` : ""}`,
-      });
-      return;
-    }
-  }
 }
 
 function AppInner() {
@@ -133,7 +104,7 @@ function AppInner() {
           onOpened: stay
             ? (name, runId) => {
                 toast.push({ kind: "info", message: `${name} started` });
-                void watchStayRun(name, runId, toast);
+                void watchStayRun(name, runId, { getRun: getWorkflowRun, toast });
               }
             : handleOpenWorkflowRun,
           toast,
