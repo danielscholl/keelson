@@ -611,10 +611,13 @@ function Section({ section }: { section: BoardSection }) {
                     </span>
                   )}
                   {(() => {
-                    const destructiveActions =
-                      c.actions?.filter((action) => action.destructive) ?? [];
-                    return destructiveActions.length > 0 ? (
-                      <CardOverflowActions cardTitle={c.title} actions={destructiveActions} />
+                    // Destructive actions hide in the overflow (⋯) menu unless they
+                    // opt into `inline` — then they render as a visible, still
+                    // confirm-guarded button below, alongside the non-destructive verbs.
+                    const overflowActions =
+                      c.actions?.filter((action) => action.destructive && !action.inline) ?? [];
+                    return overflowActions.length > 0 ? (
+                      <CardOverflowActions cardTitle={c.title} actions={overflowActions} />
                     ) : null;
                   })()}
                 </div>
@@ -676,7 +679,7 @@ function Section({ section }: { section: BoardSection }) {
                   </div>
                 )}
                 {(() => {
-                  const inline = c.actions?.filter((a) => !a.destructive) ?? [];
+                  const inline = c.actions?.filter((a) => !a.destructive || a.inline) ?? [];
                   return inline.length > 0 ? (
                     <div className="cvb-actions cvb-card-actions">
                       {inline.map((a) => (

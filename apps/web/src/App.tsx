@@ -1,6 +1,6 @@
 import type { RibSurfaceDescriptor } from "@keelson/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listProjects, startWorkflowRun } from "./api.ts";
+import { getWorkflowRun, listProjects, startWorkflowRun } from "./api.ts";
 import { ApprovalsDock } from "./components/ApprovalsDock.tsx";
 import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
 import { RibsProvider, useRibsContext } from "./components/RibsProvider.tsx";
@@ -14,6 +14,7 @@ import { useSchemaVersionGate } from "./hooks/useSchemaVersionGate.ts";
 import { useSettings } from "./hooks/useSettings.ts";
 import type { ChatSeed } from "./lib/exploreSeed.ts";
 import { launchWorkflowRun } from "./lib/launchWorkflowRun.ts";
+import { watchStayRun } from "./lib/watchStayRun.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
 import { Surface } from "./views/Surface.tsx";
@@ -90,9 +91,24 @@ function AppInner() {
   // is the thin wrapper that supplies App's real deps.
   const { activeProjectId } = useActiveProject();
   const handleLaunchWorkflowFromAction = useCallback(
-    (workflow: string, args: Record<string, string>) =>
+    (workflow: string, args: Record<string, string>, stay?: boolean) =>
       launchWorkflowRun(
-        { activeProjectId, listProjects, startWorkflowRun, onOpened: handleOpenWorkflowRun, toast },
+        {
+          activeProjectId,
+          listProjects,
+          startWorkflowRun,
+          // `stay` launches the run but keeps the operator on the current surface
+          // (watched in that surface's own panel) instead of focusing Workflows. A
+          // "started" toast stands in for the tab handoff, and watchStayRun then
+          // surfaces failure — otherwise a stay launch that fails would be silent.
+          onOpened: stay
+            ? (name, runId) => {
+                toast.push({ kind: "info", message: `${name} started` });
+                void watchStayRun(name, runId, { getRun: getWorkflowRun, toast });
+              }
+            : handleOpenWorkflowRun,
+          toast,
+        },
         workflow,
         args,
       ),

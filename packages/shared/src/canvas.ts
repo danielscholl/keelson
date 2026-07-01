@@ -222,6 +222,10 @@ const canvasActionItemSchema = z
     glyph: z.string().optional(),
     tone: canvasToneSchema.optional(),
     destructive: z.boolean().optional(),
+    // A destructive card action normally hides in the card's overflow (⋯) menu; set
+    // `inline` to surface it as a visible, still-confirm-guarded button on the card
+    // instead. Inert on a non-destructive action (those always render inline).
+    inline: z.boolean().optional(),
     // Opaque rib-defined context dispatched with the action (mirrors
     // ribActionSchema's `payload`), e.g. the cluster the board was built against
     // so the rib can reject a stale action. The base never inspects it.

@@ -10,18 +10,30 @@ import {
   type RibSurfaceDescriptor,
   ribIdFromKey,
 } from "@keelson/shared";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { postRibAction } from "../api.ts";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
 import { BoardBody, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
+import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
+import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 import { buildExploreSeed, type ExploreHandler, OPENING_PROMPT } from "../lib/exploreSeed.ts";
+
+// A run-workflow directive may ask to stay on the current surface (see the `stay`
+// field on the run-workflow client effect), so the shared callback carries it.
+type LaunchWorkflow = (
+  workflow: string,
+  args: Record<string, string>,
+  stay?: boolean,
+) => void | Promise<void>;
 
 interface Region {
   key: string;
@@ -48,17 +60,31 @@ export function Surface({
   // built from that region's current snapshot. App hands it to the Chat view.
   onExplore?: ExploreHandler;
   // Raised when a board action returns a run-workflow directive; App launches
-  // the run and focuses the Workflows tab.
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  // the run and (unless `stay`) focuses the Workflows tab.
+  onLaunchWorkflow?: LaunchWorkflow;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
+  // A projectScoped surface carries the shared project chip in its header, wired to
+  // the owning rib's select-project action; derive the rib id from a region key
+  // (every region key is rib-namespaced).
+  const ribId = ribIdFromKey(
+    header?.key ?? banner?.key ?? rows[0]?.columns[0]?.key ?? footer?.key ?? "",
+  );
   return (
     <div className="page surface-page">
-      {(descriptor.title || descriptor.subtitle) && (
+      {(descriptor.title || descriptor.subtitle || descriptor.projectScoped) && (
         <header className="surface-identity">
-          {descriptor.title && <h1 className="surface-identity-title">{descriptor.title}</h1>}
-          {descriptor.subtitle && (
-            <p className="surface-identity-subtitle">{descriptor.subtitle}</p>
+          <div className="surface-identity-text">
+            {descriptor.title && <h1 className="surface-identity-title">{descriptor.title}</h1>}
+            {descriptor.subtitle && (
+              <p className="surface-identity-subtitle">{descriptor.subtitle}</p>
+            )}
+          </div>
+          {descriptor.projectScoped && ribId && (
+            <SurfaceProjectPicker
+              ribId={ribId}
+              popoverId={`surface-project-picker-${descriptor.id}`}
+            />
           )}
         </header>
       )}
@@ -140,7 +166,7 @@ function SurfaceRegion({
 }: {
   region: Region;
   onExplore?: ExploreHandler;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: LaunchWorkflow;
 }) {
   const collapsible = region.collapsible ?? false;
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
@@ -359,5 +385,41 @@ function RegionIdle({ onLoad, error }: { onLoad: () => void; error?: string | nu
         {error ? "Retry" : "Load"}
       </button>
     </div>
+  );
+}
+
+// The surface header's project picker for a projectScoped surface: the same
+// ProjectChip + ProjectPickerPopover the Chat and Workflows surfaces use, driven by
+// the global active project. The rib maps its own default project to its flat scope.
+function SurfaceProjectPicker({ ribId, popoverId }: { ribId: string; popoverId: string }) {
+  const { projects, activeProject, activeProjectId, explicitProjectId, setActiveProject, refresh } =
+    useActiveProject();
+  useEffect(() => {
+    // Sync the rib's scope from the EXPLICIT stored selection — not the fallback-
+    // resolved active project, which would post a transient "default" before the
+    // project list hydrates and momentarily clobber the scope. Skip when there's no
+    // explicit selection, so viewing the surface never overwrites a scope set
+    // out-of-band (e.g. via the CLI).
+    if (!explicitProjectId) return;
+    void postRibAction(ribId, {
+      type: "select-project",
+      payload: { scopeId: explicitProjectId },
+    }).catch(() => {});
+  }, [ribId, explicitProjectId]);
+  return (
+    <>
+      <ProjectChip projectName={activeProject?.name ?? "default"} popoverId={popoverId} />
+      <ProjectPickerPopover
+        popoverId={popoverId}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelect={setActiveProject}
+        onProjectUpdated={() => void refresh()}
+        onProjectDeleted={(deletedId) => {
+          void refresh();
+          if (activeProjectId === deletedId) setActiveProject(null);
+        }}
+      />
+    </>
   );
 }
