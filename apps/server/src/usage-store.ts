@@ -10,6 +10,8 @@ import type { Database } from "bun:sqlite";
 import type {
   UsageBreakdownRowWire,
   UsageEventRowWire,
+  UsagePulseMinuteWire,
+  UsagePulseSnapshotWire,
   UsageSeriesRowWire,
   UsageSummaryResponseWire,
 } from "@keelson/shared";
@@ -106,6 +108,10 @@ export interface UsageStore {
   series(args: UsageSeriesArgs): UsageSeriesRowWire[];
   breakdown(args?: UsageBreakdownArgs): UsageBreakdownRowWire[];
   events(filter?: UsageEventsFilter): UsageEventRowWire[];
+  // Backs USAGE_PULSE_SNAPSHOT_KEY: today's (local-day) running totals plus a
+  // zero-filled per-minute series over the trailing 60 minutes. `now` is
+  // injectable for tests; defaults to the wall clock.
+  pulse(now?: Date): UsagePulseSnapshotWire;
 }
 
 interface UsageEventRow {
@@ -204,6 +210,24 @@ interface BreakdownRow extends TotalsRow {
   model: string;
 }
 
+interface MinuteRow extends Omit<TotalsRow, "events"> {
+  minuteIso: string;
+}
+
+// Floors `d` to the start of its UTC minute, matching the strftime bucket
+// query below — a minute bucket is the same instant regardless of timezone.
+function minuteFloor(d: Date): Date {
+  const floored = new Date(d);
+  floored.setUTCSeconds(0, 0);
+  return floored;
+}
+
+// "Today" for the pulse's composedTotals is the server's LOCAL calendar day,
+// per the spec — distinct from the UTC-bucketed minuteSeries below.
+function startOfLocalDayIso(now: Date): string {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+}
+
 export function createUsageStore(db: Database): UsageStore {
   const insertEvent = db.prepare(
     `INSERT INTO usage_events(
@@ -221,6 +245,17 @@ export function createUsageStore(db: Database): UsageStore {
   );
   const totalsSince = db.prepare(
     "SELECT COUNT(*) AS events, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens FROM usage_events WHERE ts >= ?",
+  );
+  const pulseTotalsSince = db.prepare(`SELECT ${TOTALS_SELECT} FROM usage_events WHERE ts >= ?`);
+  const pulseMinuteRows = db.prepare(
+    `SELECT strftime('%Y-%m-%dT%H:%M:00.000Z', ts) AS minuteIso,
+            COALESCE(SUM(input_tokens), 0) AS inputTokens,
+            COALESCE(SUM(output_tokens), 0) AS outputTokens,
+            COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+            COALESCE(SUM(cache_write_tokens), 0) AS cacheWriteTokens
+       FROM usage_events
+      WHERE ts >= ?
+      GROUP BY minuteIso`,
   );
 
   return {
@@ -347,6 +382,32 @@ export function createUsageStore(db: Database): UsageStore {
         .query(`SELECT * FROM usage_events ${where} ORDER BY ts DESC, id DESC LIMIT ?`)
         .all(...params) as UsageEventRow[];
       return rows.map(rowToEvent) as UsageEventRowWire[];
+    },
+    pulse(now = new Date()) {
+      const composedTotals = pulseTotalsSince.get(startOfLocalDayIso(now)) as TotalsRow;
+
+      const currentMinute = minuteFloor(now);
+      const windowStart = new Date(currentMinute);
+      windowStart.setUTCMinutes(windowStart.getUTCMinutes() - 59);
+      const rows = pulseMinuteRows.all(windowStart.toISOString()) as MinuteRow[];
+      const byMinute = new Map(rows.map((row) => [row.minuteIso, row]));
+
+      const minuteSeries: UsagePulseMinuteWire[] = [];
+      const cursor = new Date(windowStart);
+      for (let i = 0; i < 60; i++) {
+        const minuteIso = cursor.toISOString();
+        const row = byMinute.get(minuteIso);
+        minuteSeries.push({
+          minuteIso,
+          inputTokens: row?.inputTokens ?? 0,
+          outputTokens: row?.outputTokens ?? 0,
+          cacheReadTokens: row?.cacheReadTokens ?? 0,
+          cacheWriteTokens: row?.cacheWriteTokens ?? 0,
+        });
+        cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
+      }
+
+      return { composedTotals, minuteSeries };
     },
   };
 }

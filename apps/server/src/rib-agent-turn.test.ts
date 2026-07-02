@@ -722,6 +722,16 @@ function fakeUsageStore() {
     series: () => [],
     breakdown: () => [],
     events: () => [],
+    pulse: () => ({
+      composedTotals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      minuteSeries: [],
+    }),
   };
   return { store, events };
 }

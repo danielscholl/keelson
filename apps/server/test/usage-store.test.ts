@@ -573,4 +573,109 @@ describe("SQLite UsageStore", () => {
       expect(limited[1].inputTokens).toBe(3);
     });
   });
+
+  describe("pulse", () => {
+    // Fixed instant so "today" and the trailing-60-minute window are
+    // deterministic regardless of when the test runs.
+    const now = new Date(2026, 5, 15, 12, 30, 0, 0);
+
+    test("minuteSeries is a zero-filled 60-length series when there are no events", () => {
+      const { minuteSeries } = store.pulse(now);
+      expect(minuteSeries).toHaveLength(60);
+      expect(minuteSeries.every((m) => m.inputTokens === 0 && m.outputTokens === 0)).toBe(true);
+      // Oldest bucket first, newest (current minute) last.
+      const first = new Date(minuteSeries[0].minuteIso);
+      const last = new Date(minuteSeries[59].minuteIso);
+      expect(last.getTime() - first.getTime()).toBe(59 * 60_000);
+    });
+
+    test("composedTotals sums only today's (local-day) events, including cache tokens", () => {
+      store.record({
+        ts: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0, 0).toISOString(),
+        source: "chat",
+        provider: "claude",
+        model: "m",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+      });
+      store.record({
+        ts: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0).toISOString(),
+        source: "workflow",
+        provider: "codex",
+        model: "m",
+        inputTokens: 3,
+        outputTokens: 7,
+      });
+      // Yesterday — must not count toward today's composedTotals.
+      store.record({
+        ts: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 0, 0).toISOString(),
+        source: "chat",
+        provider: "claude",
+        model: "m",
+        inputTokens: 100,
+        outputTokens: 100,
+      });
+      const { composedTotals } = store.pulse(now);
+      expect(composedTotals).toEqual({
+        events: 2,
+        inputTokens: 13,
+        outputTokens: 12,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+      });
+    });
+
+    test("minuteSeries buckets events into their per-minute slot and drops events outside the window", () => {
+      const inWindowMinute = new Date(now);
+      inWindowMinute.setMinutes(inWindowMinute.getMinutes() - 5, 30, 0);
+      store.record({
+        ts: inWindowMinute.toISOString(),
+        source: "chat",
+        provider: "claude",
+        model: "m",
+        inputTokens: 4,
+        outputTokens: 2,
+        cacheReadTokens: 1,
+        cacheWriteTokens: 1,
+      });
+      // A second event in the same minute — should accumulate, not overwrite.
+      const sameMinute = new Date(inWindowMinute);
+      sameMinute.setSeconds(45);
+      store.record({
+        ts: sameMinute.toISOString(),
+        source: "chat",
+        provider: "claude",
+        model: "m",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      // Older than 60 minutes back — must be excluded from minuteSeries.
+      const outOfWindow = new Date(now);
+      outOfWindow.setMinutes(outOfWindow.getMinutes() - 90);
+      store.record({
+        ts: outOfWindow.toISOString(),
+        source: "chat",
+        provider: "claude",
+        model: "m",
+        inputTokens: 999,
+        outputTokens: 999,
+      });
+
+      const { minuteSeries } = store.pulse(now);
+      const bucketIso = new Date(inWindowMinute);
+      bucketIso.setSeconds(0, 0);
+      const bucket = minuteSeries.find((m) => m.minuteIso === bucketIso.toISOString());
+      expect(bucket).toEqual({
+        minuteIso: bucketIso.toISOString(),
+        inputTokens: 5,
+        outputTokens: 3,
+        cacheReadTokens: 1,
+        cacheWriteTokens: 1,
+      });
+      const total = minuteSeries.reduce((sum, m) => sum + m.inputTokens, 0);
+      expect(total).toBe(5);
+    });
+  });
 });
