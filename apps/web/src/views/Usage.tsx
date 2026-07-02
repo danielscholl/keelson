@@ -9,6 +9,7 @@ import {
   type UsageSummaryResponseWire,
   usagePulseSnapshotSchema,
 } from "@keelson/shared";
+import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   getUsageEvents,
@@ -23,6 +24,21 @@ import { formatTokens } from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
+
+// Standard clip-rect technique: keeps the native <input type="radio"> in the
+// accessibility tree and tab order while the styled <label> carries the
+// visible toggle affordance.
+const VISUALLY_HIDDEN_STYLE: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
 
 // The series chart buckets hourly for the 24h window (24 points) and daily
 // for the wider windows (7 or 30 points) — a finer bucket than a day would
@@ -86,17 +102,17 @@ function UsageHeader({
         />
         <div className="layout-toggle" role="radiogroup" aria-label="Window">
           {WINDOWS.map((w) => (
-            // biome-ignore lint/a11y/useSemanticElements: custom-styled radio inside the parent role="radiogroup", mirroring RunView's layout toggle
-            <button
-              key={w}
-              type="button"
-              role="radio"
-              aria-checked={w === range}
-              className={`layout-toggle-btn${w === range ? " active" : ""}`}
-              onClick={() => onRangeChange(w)}
-            >
+            <label key={w} className={`layout-toggle-btn${w === range ? " active" : ""}`}>
+              <input
+                type="radio"
+                name="usage-window"
+                value={w}
+                checked={w === range}
+                onChange={() => onRangeChange(w)}
+                style={VISUALLY_HIDDEN_STYLE}
+              />
               {WINDOW_LABEL[w]}
-            </button>
+            </label>
           ))}
         </div>
       </div>
