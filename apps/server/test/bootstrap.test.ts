@@ -93,38 +93,14 @@ describe("parseCrossRibGrants", () => {
 
   test("parses caller target tool triples", () => {
     expect(entries("caller:provider:probe_tool,other_tool;caller2:target:third_tool")).toEqual([
-      [
-        "caller",
-        [
-          [
-            "provider",
-            ["other_tool", "probe_tool"],
-          ],
-        ],
-      ],
-      [
-        "caller2",
-        [
-          [
-            "target",
-            ["third_tool"],
-          ],
-        ],
-      ],
+      ["caller", [["provider", ["other_tool", "probe_tool"]]]],
+      ["caller2", [["target", ["third_tool"]]]],
     ]);
   });
 
   test("trims whitespace and ignores empty or malformed segments", () => {
     expect(entries(" caller : provider : probe_tool , ; ; bad ; a:b:c:d ")).toEqual([
-      [
-        "caller",
-        [
-          [
-            "provider",
-            ["probe_tool"],
-          ],
-        ],
-      ],
+      ["caller", [["provider", ["probe_tool"]]]],
     ]);
   });
 

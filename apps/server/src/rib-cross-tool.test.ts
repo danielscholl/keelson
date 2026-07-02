@@ -3,7 +3,13 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { CallToolResult, MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
+import type {
+  CallToolResult,
+  MessageChunk,
+  Rib,
+  RibContext,
+  ToolDefinition,
+} from "@keelson/shared";
 import { z } from "zod";
 import { bootstrapRibs } from "./bootstrap.ts";
 import type { PolicyEngine } from "./policy-engine.ts";
@@ -56,7 +62,10 @@ function providerRib(id: string, tools: readonly ToolDefinition[]): Rib {
   };
 }
 
-async function bootWithCaller(available: Record<string, Rib>, getPolicyEngine = () => policyEngine()) {
+async function bootWithCaller(
+  available: Record<string, Rib>,
+  getPolicyEngine = () => policyEngine(),
+) {
   let callTool: CapturedCallTool | undefined;
   const caller: Rib = {
     id: "caller",
