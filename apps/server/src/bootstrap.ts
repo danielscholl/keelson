@@ -335,7 +335,12 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
             if (!controller) {
               return { status: "failed", nodes: {}, error: "workflow controller unavailable" };
             }
-            return await controller.runDefinition(definition, inputs, opts?.cwd ?? refreshCwd, ribId);
+            return await controller.runDefinition(
+              definition,
+              inputs,
+              opts?.cwd ?? refreshCwd,
+              ribId,
+            );
           } catch (err) {
             return {
               status: "failed",
