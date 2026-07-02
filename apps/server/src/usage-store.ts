@@ -90,6 +90,8 @@ export interface UsageSeriesArgs {
 
 export interface UsageBreakdownArgs {
   sinceIso?: string;
+  groupBy?: UsageGroupBy;
+  splitBy?: UsageGroupBy;
 }
 
 export interface UsageEventsFilter {
@@ -206,8 +208,8 @@ interface SeriesRow extends TotalsRow {
 }
 
 interface BreakdownRow extends TotalsRow {
-  source: string;
-  model: string;
+  key: string;
+  split: string;
 }
 
 interface MinuteRow extends Omit<TotalsRow, "events"> {
@@ -338,6 +340,8 @@ export function createUsageStore(db: Database): UsageStore {
       return rows;
     },
     breakdown(args = {}) {
+      const groupColumn = GROUP_BY_COLUMN[args.groupBy ?? "source"];
+      const splitColumn = GROUP_BY_COLUMN[args.splitBy ?? "model"];
       const clauses: string[] = [];
       const params: Array<string> = [];
       if (args.sinceIso !== undefined) {
@@ -347,10 +351,12 @@ export function createUsageStore(db: Database): UsageStore {
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = db
         .query(
-          `SELECT source, model, ${TOTALS_SELECT}
+          `SELECT COALESCE(${groupColumn}, '${UNGROUPED_KEY}') AS key,
+                 COALESCE(${splitColumn}, '${UNGROUPED_KEY}') AS split,
+                 ${TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY source, model
-             ORDER BY source ASC, model ASC`,
+             GROUP BY key, split
+             ORDER BY key ASC, split ASC`,
         )
         .all(...params) as BreakdownRow[];
       return rows as UsageBreakdownRowWire[];
