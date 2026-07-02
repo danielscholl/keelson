@@ -19,6 +19,8 @@ import {
   policyApprovalsSnapshotSchema,
   RIBS_VERSION_SNAPSHOT_KEY,
   SCHEMA_VERSION,
+  USAGE_PULSE_SNAPSHOT_KEY,
+  usagePulseSnapshotSchema,
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import {
@@ -75,6 +77,8 @@ import {
   snapshotWebSocketHandlers,
 } from "./snapshots-handler.ts";
 import { constantTimeTokenEqual } from "./token-compare.ts";
+import { usageRoutes } from "./usage-handler.ts";
+import { withUsagePulseDebounce } from "./usage-pulse-debounce.ts";
 import { createUsageStore, type UsageStore } from "./usage-store.ts";
 import { createWorkflowAuthoringTools } from "./workflow-authoring-tools.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
@@ -302,7 +306,21 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const memoryStore = createMemoryStore(db);
   // Publish to the late-bound ref so RibContext.getMemory resolves once boot completes.
   memoryStoreRef = memoryStore;
-  const usageStore = createUsageStore(db);
+  const rawUsageStore = createUsageStore(db);
+  // Registered once on the base manager, mirroring RIBS_VERSION_SNAPSHOT_KEY:
+  // the live pulse widget subscribes to today's totals + trailing-60-minute
+  // series without polling GET /api/usage/summary.
+  snapshotManager.register(USAGE_PULSE_SNAPSHOT_KEY, () => rawUsageStore.pulse(), {
+    validate: (d) => usagePulseSnapshotSchema.parse(d),
+  });
+  void snapshotManager.recompose(USAGE_PULSE_SNAPSHOT_KEY);
+  // Debounced so a turn's burst of record() calls (chat/workflow/rib capture
+  // seams) coalesces into one recompose instead of a storm of snapshot
+  // broadcasts. The three capture seams keep calling record() unaware of it.
+  const usageStore = withUsagePulseDebounce(
+    rawUsageStore,
+    () => void snapshotManager.recompose(USAGE_PULSE_SNAPSHOT_KEY),
+  );
   // Publish to the late-bound ref so the default runAgentTurn seam can record
   // rib-sourced usage events once boot completes.
   usageStoreRef = usageStore;
@@ -603,6 +621,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   });
   projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
   memoryRoutes(app, { memoryStore });
+  usageRoutes(app, { store: usageStore });
   projectNotebookRoutes(app, { store: projectNotebookStore, projectsStore });
   chatRememberRoutes(app, { conversationStore: store, memoryStore });
   credentialsRoutes(app, credentialStore, {
