@@ -77,7 +77,20 @@ describe("GET /api/ribs", () => {
     expect(rib.registered).toEqual(["v2.tool"]);
     expect(rib.views).toEqual([{ key: "rib:v2:summary", canvasKind: "view", title: "V2 Summary" }]);
     expect(rib.hasOnAction).toBe(true);
+    expect(rib.acceptsIngest).toBe(false);
     expect(rib.auth).toEqual({ authenticated: true });
+  });
+
+  test("serializes acceptsIngest when a rib opts into ingest", async () => {
+    const receiver: Rib = {
+      id: "receiver",
+      displayName: "Receiver",
+      acceptsIngest: true,
+    };
+    const { app } = await makeRig({ available: { receiver } });
+    const res = await app.fetch(get("/api/ribs"));
+    const body = (await res.json()) as { ribs: Array<{ acceptsIngest: boolean }> };
+    expect(body.ribs[0]?.acceptsIngest).toBe(true);
   });
 
   test("reports unauthenticated when the credential is absent", async () => {
@@ -127,9 +140,12 @@ describe("GET /api/ribs", () => {
     const plain: Rib = { id: "plain", displayName: "Plain" };
     const { app } = await makeRig({ available: { plain } });
     const res = await app.fetch(get("/api/ribs"));
-    const body = (await res.json()) as { ribs: Array<{ auth?: unknown; hasOnAction: boolean }> };
+    const body = (await res.json()) as {
+      ribs: Array<{ auth?: unknown; hasOnAction: boolean; acceptsIngest: boolean }>;
+    };
     expect(body.ribs[0]?.auth).toBeUndefined();
     expect(body.ribs[0]?.hasOnAction).toBe(false);
+    expect(body.ribs[0]?.acceptsIngest).toBe(false);
   });
 
   test("returns an empty surfaces array for a rib that declares none", async () => {

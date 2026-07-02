@@ -73,6 +73,7 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
               : s,
           ),
           hasOnAction: m.hasOnAction,
+          acceptsIngest: m.acceptsIngest,
           ...(auth ? { auth } : {}),
         };
       }),
