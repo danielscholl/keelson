@@ -407,7 +407,7 @@ export function createUsageStore(db: Database): UsageStore {
 
       return [...byJob.entries()]
         .map(([key, totals]) => {
-          const sorted = totals.toSorted((a, b) => a - b);
+          const sorted = [...totals].sort((a, b) => a - b);
           const totalTokens = totals.reduce((sum, value) => sum + value, 0);
           const runs = totals.length;
           return {
