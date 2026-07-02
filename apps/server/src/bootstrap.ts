@@ -386,6 +386,16 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     if (!entry || entry.ribId !== targetRibId) {
       return { ok: false, error: `rib '${targetRibId}' does not own tool '${name}'` };
     }
+    // Grant check first: an ungranted call must never reach the policy engine,
+    // whose per-call ASK phase can surface an operator approval prompt for a
+    // call that would be denied regardless.
+    const granted = isCrossRibGrantAllowed(crossRibGrants, callerRibId, targetRibId, name);
+    if (!granted) {
+      return {
+        ok: false,
+        error: `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' denied`,
+      };
+    }
     const engine = options.getPolicyEngine?.();
     if (!engine) {
       return { ok: false, error: "policy engine unavailable" };
@@ -400,8 +410,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     } catch {
       allowed = false;
     }
-    const granted = isCrossRibGrantAllowed(crossRibGrants, callerRibId, targetRibId, name);
-    if (!allowed || !granted) {
+    if (!allowed) {
       return {
         ok: false,
         error: `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' denied`,
@@ -414,8 +423,8 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       abortSignal: new AbortController().signal,
     };
     try {
-      entry.def.inputSchema.parse(args);
-      await entry.def.execute(args, ctx);
+      const parsed = entry.def.inputSchema.parse(args);
+      await entry.def.execute(parsed, ctx);
       return { ok: true, chunks };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
