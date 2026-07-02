@@ -77,7 +77,22 @@ export type UsageBreakdownRowWire = z.infer<typeof usageBreakdownRowSchema>;
 export const usageBreakdownResponseSchema = z.array(usageBreakdownRowSchema);
 export type UsageBreakdownResponseWire = z.infer<typeof usageBreakdownResponseSchema>;
 
-// (d) GET /api/usage/events — a ledger tail, camelCase mirror of the
+// (d) GET /api/usage/jobs — recurring workflow/rib spend grouped by job.
+export const usageJobsRowSchema = z
+  .object({
+    key: z.string(),
+    runs: z.number().int().nonnegative(),
+    totalTokens: z.number().int().nonnegative(),
+    avgTokensPerRun: z.number().nonnegative(),
+    p95TokensPerRun: z.number().nonnegative(),
+  })
+  .strict();
+export type UsageJobsRowWire = z.infer<typeof usageJobsRowSchema>;
+
+export const usageJobsResponseSchema = z.array(usageJobsRowSchema);
+export type UsageJobsResponseWire = z.infer<typeof usageJobsResponseSchema>;
+
+// (e) GET /api/usage/events — a ledger tail, camelCase mirror of the
 // usage_events row (apps/server/src/usage-store.ts's UsageEvent). Cache
 // tokens/duration/attribution columns stay nullable: "not reported" is
 // distinct from "reported as zero" there, unlike the aggregated rows above.

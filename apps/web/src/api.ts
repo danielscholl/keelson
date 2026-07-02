@@ -59,10 +59,12 @@ import {
   type UsageBreakdownResponseWire,
   type UsageEventSourceWire,
   type UsageEventsResponseWire,
+  type UsageJobsResponseWire,
   type UsageSeriesResponseWire,
   type UsageSummaryResponseWire,
   usageBreakdownResponseSchema,
   usageEventsResponseSchema,
+  usageJobsResponseSchema,
   usageSeriesResponseSchema,
   usageSummaryResponseSchema,
   type WorkflowDetail,
@@ -685,6 +687,17 @@ export async function getUsageBreakdown(
   });
   return usageBreakdownResponseSchema.parse(
     await apiRequest<unknown>(`/api/usage/breakdown${qs}`, { label: "/api/usage/breakdown" }),
+  );
+}
+
+export interface UsageJobsQuery {
+  window?: UsageWindow;
+}
+
+export async function getUsageJobs(query: UsageJobsQuery = {}): Promise<UsageJobsResponseWire> {
+  const qs = buildUsageQuery({ window: query.window });
+  return usageJobsResponseSchema.parse(
+    await apiRequest<unknown>(`/api/usage/jobs${qs}`, { label: "/api/usage/jobs" }),
   );
 }
 

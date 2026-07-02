@@ -6,6 +6,7 @@ import {
   usageBreakdownResponseSchema,
   usageEventsResponseSchema,
   usageGroupBySchema,
+  usageJobsResponseSchema,
   usageSeriesResponseSchema,
   usageSummaryResponseSchema,
 } from "@keelson/shared";
@@ -63,6 +64,12 @@ const breakdownQuerySchema = z
     window: windowSchema,
     groupBy: groupBySchema.default("source"),
     splitBy: groupBySchema.default("model"),
+  })
+  .strict();
+
+const jobsQuerySchema = z
+  .object({
+    window: windowSchema,
   })
   .strict();
 
@@ -134,6 +141,18 @@ export function usageRoutes(app: Hono, deps: UsageRoutesDeps): void {
         splitBy: parsed.data.splitBy,
       }),
     );
+    return c.json(result);
+  });
+
+  app.get("/api/usage/jobs", (c) => {
+    const parsed = jobsQuerySchema.safeParse({
+      window: c.req.query("window"),
+    });
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.message }, 400);
+    }
+    const sinceIso = windowToSinceIso(parsed.data.window);
+    const result = usageJobsResponseSchema.parse(store.jobs({ sinceIso }));
     return c.json(result);
   });
 

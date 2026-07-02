@@ -3,7 +3,13 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { getUsageBreakdown, getUsageEvents, getUsageSeries, getUsageSummary } from "../src/api.ts";
+import {
+  getUsageBreakdown,
+  getUsageEvents,
+  getUsageJobs,
+  getUsageSeries,
+  getUsageSummary,
+} from "../src/api.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -54,15 +60,36 @@ describe("getUsageSeries", () => {
 
 describe("getUsageBreakdown", () => {
   test("parses a valid usage breakdown payload", async () => {
-    stubFetch([{ ...validTotals, source: "chat", model: "claude-sonnet-5" }]);
+    stubFetch([{ ...validTotals, key: "chat", split: "claude-sonnet-5" }]);
     const result = await getUsageBreakdown();
     expect(result).toHaveLength(1);
-    expect(result[0]?.source).toBe("chat");
+    expect(result[0]?.key).toBe("chat");
   });
 
-  test("rejects a malformed usage breakdown payload (invalid source enum)", async () => {
-    stubFetch([{ ...validTotals, source: "not-a-source", model: "claude-sonnet-5" }]);
+  test("rejects a malformed usage breakdown payload (missing split)", async () => {
+    stubFetch([{ ...validTotals, key: "chat" }]);
     await expect(getUsageBreakdown()).rejects.toThrow();
+  });
+});
+
+describe("getUsageJobs", () => {
+  test("parses a valid usage jobs payload", async () => {
+    stubFetch([
+      {
+        key: "smoke-test",
+        runs: 2,
+        totalTokens: 100,
+        avgTokensPerRun: 50,
+        p95TokensPerRun: 75,
+      },
+    ]);
+    const result = await getUsageJobs();
+    expect(result[0]?.key).toBe("smoke-test");
+  });
+
+  test("rejects a malformed usage jobs payload", async () => {
+    stubFetch([{ key: "smoke-test", runs: -1 }]);
+    await expect(getUsageJobs()).rejects.toThrow();
   });
 });
 

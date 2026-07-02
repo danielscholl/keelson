@@ -10,6 +10,7 @@ import type { Database } from "bun:sqlite";
 import type {
   UsageBreakdownRowWire,
   UsageEventRowWire,
+  UsageJobsRowWire,
   UsagePulseMinuteWire,
   UsagePulseSnapshotWire,
   UsageSeriesRowWire,
@@ -102,6 +103,10 @@ export interface UsageEventsFilter {
   sinceIso?: string;
 }
 
+export interface UsageJobsArgs {
+  sinceIso?: string;
+}
+
 export interface UsageStore {
   record(input: RecordUsageEventInput): void;
   listEvents(filter?: ListUsageEventsFilter): UsageEvent[];
@@ -109,6 +114,7 @@ export interface UsageStore {
   summary(args: UsageSummaryArgs): UsageSummaryResponseWire;
   series(args: UsageSeriesArgs): UsageSeriesRowWire[];
   breakdown(args?: UsageBreakdownArgs): UsageBreakdownRowWire[];
+  jobs(args?: UsageJobsArgs): UsageJobsRowWire[];
   events(filter?: UsageEventsFilter): UsageEventRowWire[];
   // Backs USAGE_PULSE_SNAPSHOT_KEY: today's (local-day) running totals plus a
   // zero-filled per-minute series over the trailing 60 minutes. `now` is
@@ -212,6 +218,12 @@ interface BreakdownRow extends TotalsRow {
   split: string;
 }
 
+interface JobRunTokensRow {
+  key: string;
+  runId: string;
+  totalTokens: number;
+}
+
 interface MinuteRow extends Omit<TotalsRow, "events"> {
   minuteIso: string;
 }
@@ -228,6 +240,12 @@ function minuteFloor(d: Date): Date {
 // per the spec — distinct from the UTC-bucketed minuteSeries below.
 function startOfLocalDayIso(now: Date): string {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+}
+
+function percentile(sorted: number[], pct: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.ceil((pct / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(sorted.length - 1, idx))] ?? 0;
 }
 
 export function createUsageStore(db: Database): UsageStore {
@@ -360,6 +378,47 @@ export function createUsageStore(db: Database): UsageStore {
         )
         .all(...params) as BreakdownRow[];
       return rows as UsageBreakdownRowWire[];
+    },
+    jobs(args = {}) {
+      const clauses = ["run_id IS NOT NULL"];
+      const params: Array<string> = [];
+      if (args.sinceIso !== undefined) {
+        clauses.push("ts >= ?");
+        params.push(args.sinceIso);
+      }
+      const rows = db
+        .query(
+          `SELECT COALESCE(workflow_name, rib_id, source) AS key,
+                  run_id AS runId,
+                  COALESCE(SUM(input_tokens + output_tokens), 0) AS totalTokens
+             FROM usage_events
+            WHERE ${clauses.join(" AND ")}
+            GROUP BY key, run_id
+            ORDER BY key ASC, totalTokens ASC`,
+        )
+        .all(...params) as JobRunTokensRow[];
+
+      const byJob = new Map<string, number[]>();
+      for (const row of rows) {
+        const totals = byJob.get(row.key) ?? [];
+        totals.push(row.totalTokens);
+        byJob.set(row.key, totals);
+      }
+
+      return [...byJob.entries()]
+        .map(([key, totals]) => {
+          const sorted = totals.toSorted((a, b) => a - b);
+          const totalTokens = totals.reduce((sum, value) => sum + value, 0);
+          const runs = totals.length;
+          return {
+            key,
+            runs,
+            totalTokens,
+            avgTokensPerRun: runs > 0 ? totalTokens / runs : 0,
+            p95TokensPerRun: percentile(sorted, 95),
+          };
+        })
+        .sort((a, b) => a.key.localeCompare(b.key));
     },
     events(filter = {}) {
       const clauses: string[] = [];

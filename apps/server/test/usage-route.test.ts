@@ -16,6 +16,7 @@ import { join } from "node:path";
 import {
   usageBreakdownResponseSchema,
   usageEventsResponseSchema,
+  usageJobsResponseSchema,
   usageSeriesResponseSchema,
   usageSummaryResponseSchema,
 } from "@keelson/shared";
@@ -63,6 +64,7 @@ beforeEach(() => {
     inputTokens: 3,
     outputTokens: 7,
     status: "ok",
+    runId: "run-smoke",
     workflowName: "smoke-test",
   });
   store.record({
@@ -185,6 +187,28 @@ describe("GET /api/usage/breakdown", () => {
 
   test("400 on a bad splitBy", async () => {
     const res = await app.fetch(new Request("http://test/api/usage/breakdown?splitBy=bogus"));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/usage/jobs", () => {
+  test("200 with a schema-valid recurring jobs aggregate", async () => {
+    const res = await app.fetch(new Request("http://test/api/usage/jobs?window=30d"));
+    expect(res.status).toBe(200);
+    const parsed = usageJobsResponseSchema.parse(await res.json());
+    expect(parsed).toEqual([
+      expect.objectContaining({
+        key: "smoke-test",
+        runs: 1,
+        totalTokens: 10,
+        avgTokensPerRun: 10,
+        p95TokensPerRun: 10,
+      }),
+    ]);
+  });
+
+  test("400 on a bad window", async () => {
+    const res = await app.fetch(new Request("http://test/api/usage/jobs?window=bogus"));
     expect(res.status).toBe(400);
   });
 });
