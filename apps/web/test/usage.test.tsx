@@ -2,8 +2,9 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
-import { render, screen } from "@testing-library/react";
+import { afterAll, describe, expect, mock, test } from "bun:test";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import * as realApi from "../src/api.ts";
 import { UsageChip } from "../src/components/Chat/UsageChip.tsx";
 import { UsagePopover } from "../src/components/Chat/UsagePopover.tsx";
 import {
@@ -12,6 +13,58 @@ import {
   formatTokens,
   sumTokenSpend,
 } from "../src/lib/formatTokens.ts";
+
+mock.module("../src/hooks/useSnapshot.ts", () => ({
+  useSnapshot: () => ({
+    status: "empty",
+    data: null,
+    version: null,
+    composedAt: null,
+    reload: () => {},
+  }),
+}));
+
+let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
+  totals: {
+    events: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  },
+  groups: [],
+});
+let getUsageEventsImpl: typeof realApi.getUsageEvents = async () => [];
+let getUsageSeriesImpl: typeof realApi.getUsageSeries = async () => [];
+let getUsageBreakdownImpl: typeof realApi.getUsageBreakdown = async () => [];
+let getUsageJobsImpl: typeof realApi.getUsageJobs = async () => [];
+
+mock.module("../src/api.ts", () => ({
+  ...realApi,
+  getUsageBreakdown: (...args: Parameters<typeof realApi.getUsageBreakdown>) =>
+    getUsageBreakdownImpl(...args),
+  getUsageSummary: (...args: Parameters<typeof realApi.getUsageSummary>) =>
+    getUsageSummaryImpl(...args),
+  getUsageEvents: (...args: Parameters<typeof realApi.getUsageEvents>) =>
+    getUsageEventsImpl(...args),
+  getUsageJobs: (...args: Parameters<typeof realApi.getUsageJobs>) => getUsageJobsImpl(...args),
+  getUsageSeries: (...args: Parameters<typeof realApi.getUsageSeries>) =>
+    getUsageSeriesImpl(...args),
+}));
+
+afterAll(() => {
+  getUsageSummaryImpl = realApi.getUsageSummary;
+  getUsageEventsImpl = realApi.getUsageEvents;
+  getUsageSeriesImpl = realApi.getUsageSeries;
+  getUsageBreakdownImpl = realApi.getUsageBreakdown;
+  getUsageJobsImpl = realApi.getUsageJobs;
+  mock.module("../src/api.ts", () => realApi);
+});
+
+async function renderUsagePage() {
+  const { Usage } = await import("../src/views/Usage.tsx");
+  return render(<Usage />);
+}
 
 describe("formatTokens", () => {
   test("formats across magnitudes", () => {
@@ -171,5 +224,299 @@ describe("UsageChip — fabricated-zero guard", () => {
       />,
     );
     expect(screen.getByText("50%")).toBeDefined();
+  });
+});
+
+describe("Usage page", () => {
+  test("switches between usage sub-views", async () => {
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    await waitFor(() => expect(screen.getByText("Pulse")).toBeDefined());
+    expect(screen.getByRole("radiogroup", { name: "View" })).toBeDefined();
+
+    fireEvent.click(screen.getByLabelText("Models"));
+    await waitFor(() => expect(screen.getByText("Model roster")).toBeDefined());
+    expect(screen.queryByText("Pulse")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() =>
+      expect(
+        screen.getByText("No recurring workflow or rib spend in this window yet."),
+      ).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Ledger"));
+    await waitFor(() =>
+      expect(screen.getByText("No events recorded in this window yet.")).toBeDefined(),
+    );
+  });
+
+  test("renders source to model flow from one breakdown aggregate call", async () => {
+    const calls: Parameters<typeof realApi.getUsageBreakdown>[0][] = [];
+    getUsageBreakdownImpl = async (query) => {
+      calls.push(query);
+      return [
+        {
+          key: "workflow",
+          split: "gpt-5.5",
+          events: 2,
+          inputTokens: 100,
+          outputTokens: 40,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ];
+    };
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Source to model token flow")).toBeDefined());
+    expect(screen.getByText("workflow")).toBeDefined();
+    expect(screen.getAllByText("gpt-5.5").length).toBeGreaterThan(0);
+    expect(calls).toEqual([{ window: "7d", groupBy: "source", splitBy: "model" }]);
+    getUsageBreakdownImpl = async () => [];
+  });
+
+  test("renders recurring jobs table and burn bars", async () => {
+    getUsageJobsImpl = async () => [
+      {
+        key: "smoke-test",
+        runs: 3,
+        totalTokens: 1200,
+        avgTokensPerRun: 400,
+        p95TokensPerRun: 700,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() => expect(screen.getAllByText("smoke-test").length).toBeGreaterThan(0));
+    expect(screen.getByText("Avg tokens/run")).toBeDefined();
+    expect(screen.getByLabelText("Weekly burn by job")).toBeDefined();
+    getUsageJobsImpl = async () => [];
+  });
+
+  test("renders deterministic usage signals", async () => {
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 1,
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheReadTokens: 250,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageJobsImpl = async () => [
+      {
+        key: "standing-lens",
+        runs: 5,
+        totalTokens: 1500,
+        avgTokensPerRun: 300,
+        p95TokensPerRun: 400,
+      },
+    ];
+    getUsageEventsImpl = async (query) =>
+      query.status === "error"
+        ? [
+            {
+              id: 1,
+              ts: "2026-07-01T00:00:00.000Z",
+              source: "workflow",
+              provider: "codex",
+              model: "gpt-5.5",
+              inputTokens: 100,
+              outputTokens: 50,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              durationMs: 1000,
+              status: "error",
+              conversationId: null,
+              runId: "run-1",
+              nodeId: null,
+              workflowName: "standing-lens",
+              ribId: null,
+              projectId: null,
+            },
+          ]
+        : [];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    await waitFor(() => expect(screen.getAllByText("Failure burn").length).toBeGreaterThan(0));
+    expect(screen.getByText(/top: standing-lens/)).toBeDefined();
+    expect(screen.getByText("Downshift candidate")).toBeDefined();
+    expect(screen.getByText("standing-lens")).toBeDefined();
+    expect(screen.getAllByText("25%").length).toBeGreaterThan(0);
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageJobsImpl = async () => [];
+    getUsageEventsImpl = async () => [];
+  });
+
+  test("labels auto model rows as unresolved", async () => {
+    getUsageSummaryImpl = async (query) =>
+      query.groupBy === "model"
+        ? {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [
+              {
+                key: "auto",
+                events: 1,
+                inputTokens: 10,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+              },
+            ],
+          }
+        : {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [],
+          };
+    getUsageEventsImpl = async () => [
+      {
+        id: 1,
+        ts: "2026-07-01T00:00:00.000Z",
+        source: "chat",
+        provider: "copilot",
+        model: "auto",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        durationMs: 1000,
+        status: "ok",
+        conversationId: null,
+        runId: null,
+        nodeId: null,
+        workflowName: null,
+        ribId: null,
+        projectId: null,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Models"));
+    await waitFor(() => expect(screen.getByText("auto (unresolved)")).toBeDefined());
+
+    fireEvent.click(screen.getByLabelText("Ledger"));
+    await waitFor(() => expect(screen.getByText("copilot · auto (unresolved)")).toBeDefined());
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageEventsImpl = async () => [];
+  });
+
+  test("passes active ledger filters to the events query", async () => {
+    const eventCalls: Parameters<typeof realApi.getUsageEvents>[0][] = [];
+    getUsageSummaryImpl = async (query) =>
+      query.groupBy === "model"
+        ? {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [
+              {
+                key: "auto",
+                events: 1,
+                inputTokens: 10,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+              },
+            ],
+          }
+        : {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [],
+          };
+    getUsageEventsImpl = async (query) => {
+      eventCalls.push(query);
+      return [];
+    };
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Ledger"));
+    await waitFor(() =>
+      expect(screen.getByRole("group", { name: "Ledger filters" })).toBeDefined(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "workflow" }));
+    fireEvent.click(await screen.findByRole("button", { name: "auto (unresolved)" }));
+    fireEvent.click(screen.getByRole("button", { name: "error" }));
+
+    await waitFor(() =>
+      expect(eventCalls).toContainEqual({
+        window: "7d",
+        limit: 50,
+        source: "workflow",
+        model: "auto",
+        status: "error",
+      }),
+    );
+    expect(screen.getByText("0 events")).toBeDefined();
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageEventsImpl = async () => [];
   });
 });

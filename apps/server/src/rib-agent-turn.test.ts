@@ -721,6 +721,7 @@ function fakeUsageStore() {
     }),
     series: () => [],
     breakdown: () => [],
+    jobs: () => [],
     events: () => [],
     pulse: () => ({
       composedTotals: {

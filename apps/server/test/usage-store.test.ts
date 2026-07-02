@@ -465,7 +465,7 @@ describe("SQLite UsageStore", () => {
   });
 
   describe("breakdown", () => {
-    test("returns a source x model matrix", () => {
+    test("returns a source x model matrix by default", () => {
       store.record({
         source: "chat",
         provider: "claude",
@@ -490,8 +490,8 @@ describe("SQLite UsageStore", () => {
       const rows = store.breakdown();
       expect(rows).toEqual([
         {
-          source: "chat",
-          model: "claude-haiku",
+          key: "chat",
+          split: "claude-haiku",
           events: 1,
           inputTokens: 2,
           outputTokens: 2,
@@ -499,8 +499,8 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
         },
         {
-          source: "chat",
-          model: "claude-opus",
+          key: "chat",
+          split: "claude-opus",
           events: 1,
           inputTokens: 1,
           outputTokens: 1,
@@ -508,14 +508,152 @@ describe("SQLite UsageStore", () => {
           cacheWriteTokens: 0,
         },
         {
-          source: "workflow",
-          model: "claude-opus",
+          key: "workflow",
+          split: "claude-opus",
           events: 1,
           inputTokens: 3,
           outputTokens: 3,
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         },
+      ]);
+    });
+
+    test("supports alternate splitBy dimensions and nullable coalescing", () => {
+      store.record({
+        source: "workflow",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 1,
+        outputTokens: 1,
+        workflowName: "smoke-test",
+      });
+      store.record({
+        source: "workflow",
+        provider: "copilot",
+        model: "auto",
+        inputTokens: 2,
+        outputTokens: 2,
+      });
+      const rows = store.breakdown({ groupBy: "workflow", splitBy: "provider" });
+      expect(rows).toEqual([
+        expect.objectContaining({ key: "(none)", split: "copilot", events: 1 }),
+        expect.objectContaining({ key: "smoke-test", split: "codex", events: 1 }),
+      ]);
+    });
+
+    test("respects sinceIso", () => {
+      store.record({
+        ts: "2020-01-01T00:00:00.000Z",
+        source: "chat",
+        provider: "claude",
+        model: "old",
+        inputTokens: 100,
+        outputTokens: 100,
+      });
+      store.record({
+        ts: "2030-01-01T00:00:00.000Z",
+        source: "workflow",
+        provider: "codex",
+        model: "new",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+      const rows = store.breakdown({ sinceIso: "2025-01-01T00:00:00.000Z" });
+      expect(rows).toEqual([expect.objectContaining({ key: "workflow", split: "new" })]);
+    });
+  });
+
+  describe("jobs", () => {
+    test("groups recurring run spend and excludes chat turns", () => {
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-opus",
+        inputTokens: 100,
+        outputTokens: 100,
+      });
+      store.record({
+        source: "workflow",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 10,
+        outputTokens: 5,
+        runId: "run-1",
+        workflowName: "smoke-test",
+      });
+      store.record({
+        source: "workflow",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 20,
+        outputTokens: 5,
+        runId: "run-1",
+        workflowName: "smoke-test",
+      });
+      store.record({
+        source: "workflow",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 1,
+        outputTokens: 9,
+        runId: "run-2",
+        workflowName: "smoke-test",
+      });
+      const rows = store.jobs();
+      expect(rows).toEqual([
+        {
+          key: "smoke-test",
+          runs: 2,
+          totalTokens: 50,
+          avgTokensPerRun: 25,
+          p95TokensPerRun: 40,
+        },
+      ]);
+    });
+
+    test("falls back from workflow to rib to source and respects sinceIso", () => {
+      store.record({
+        ts: "2020-01-01T00:00:00.000Z",
+        source: "workflow",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 100,
+        outputTokens: 100,
+        runId: "old",
+        workflowName: "old-job",
+      });
+      store.record({
+        ts: "2030-01-01T00:00:00.000Z",
+        source: "rib",
+        provider: "pi",
+        model: "pi-1",
+        inputTokens: 3,
+        outputTokens: 7,
+        ribId: "osdu",
+      });
+      store.record({
+        ts: "2030-01-01T00:00:00.000Z",
+        source: "rib",
+        provider: "pi",
+        model: "pi-1",
+        inputTokens: 1,
+        outputTokens: 9,
+        ribId: "osdu",
+      });
+      store.record({
+        ts: "2030-01-01T00:00:00.000Z",
+        source: "workflow",
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 4,
+        outputTokens: 6,
+        runId: "source-run",
+      });
+      const rows = store.jobs({ sinceIso: "2025-01-01T00:00:00.000Z" });
+      expect(rows).toEqual([
+        expect.objectContaining({ key: "osdu", runs: 2, totalTokens: 20 }),
+        expect.objectContaining({ key: "workflow", runs: 1, totalTokens: 10 }),
       ]);
     });
   });

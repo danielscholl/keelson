@@ -5,6 +5,7 @@
 import {
   USAGE_PULSE_SNAPSHOT_KEY,
   type UsageEventRowWire,
+  type UsageEventSourceWire,
   type UsageSeriesResponseWire,
   type UsageSummaryResponseWire,
   usagePulseSnapshotSchema,
@@ -12,7 +13,9 @@ import {
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  getUsageBreakdown,
   getUsageEvents,
+  getUsageJobs,
   getUsageSeries,
   getUsageSummary,
   type UsageSeriesBucket,
@@ -24,6 +27,13 @@ import { formatTokens } from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
+type UsageSubView = "overview" | "models" | "jobs" | "ledger";
+const USAGE_SUBVIEWS: Array<{ id: UsageSubView; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "models", label: "Models" },
+  { id: "jobs", label: "Jobs" },
+  { id: "ledger", label: "Ledger" },
+];
 
 // Standard clip-rect technique: keeps the native <input type="radio"> in the
 // accessibility tree and tab order while the styled <label> carries the
@@ -64,15 +74,53 @@ const FAILURE_EVENTS_LIMIT = 200;
 
 export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
+  const [subView, setSubView] = useState<UsageSubView>("overview");
   const pulse = useSnapshot(USAGE_PULSE_SNAPSHOT_KEY);
 
   return (
     <div className="page usage-page">
       <UsageHeader range={range} onRangeChange={setRange} live={pulse.status === "live"} />
-      <PulseSection range={range} pulse={pulse} />
-      <OverTimeSection range={range} />
-      <ModelRosterSection range={range} />
-      <LedgerSection range={range} />
+      <UsageViewNav value={subView} onChange={setSubView} />
+      {subView === "overview" ? (
+        <>
+          <PulseSection range={range} pulse={pulse} />
+          <OverTimeSection range={range} />
+          <FlowSection range={range} />
+          <SignalsSection range={range} />
+        </>
+      ) : subView === "models" ? (
+        <ModelRosterSection range={range} />
+      ) : subView === "jobs" ? (
+        <JobsSection range={range} />
+      ) : (
+        <LedgerSection range={range} />
+      )}
+    </div>
+  );
+}
+
+function UsageViewNav({
+  value,
+  onChange,
+}: {
+  value: UsageSubView;
+  onChange: (view: UsageSubView) => void;
+}) {
+  return (
+    <div className="layout-toggle usage-view-nav" role="radiogroup" aria-label="View">
+      {USAGE_SUBVIEWS.map((view) => (
+        <label key={view.id} className={`layout-toggle-btn${view.id === value ? " active" : ""}`}>
+          <input
+            type="radio"
+            name="usage-view"
+            value={view.id}
+            checked={view.id === value}
+            onChange={() => onChange(view.id)}
+            style={VISUALLY_HIDDEN_STYLE}
+          />
+          {view.label}
+        </label>
+      ))}
     </div>
   );
 }
@@ -369,7 +417,11 @@ function formatBucketLabel(iso: string, bucket: UsageSeriesBucket): string {
   if (Number.isNaN(d.getTime())) return iso;
   return bucket === "hour"
     ? d.toLocaleTimeString([], { hour: "numeric" })
-    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+    : d.toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function formatModelLabel(model: string): string {
+  return model === "auto" ? "auto (unresolved)" : model;
 }
 
 // A "nice" y-axis ceiling (1/2/5 × 10^n) so grid labels read like 2.5M
@@ -663,7 +715,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <td>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                         <span className="usage-sdot" style={{ background: r.color }} />
-                        {r.key}
+                        {formatModelLabel(r.key)}
                       </span>
                     </td>
                     <td>{r.turns.toLocaleString()}</td>
@@ -697,6 +749,417 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
   );
 }
 
+function FlowSection({ range }: { range: UsageWindow }) {
+  const [rows, setRows] = useState<Array<{
+    key: string;
+    split: string;
+    inputTokens: number;
+    outputTokens: number;
+  }> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getUsageBreakdown({ window: range, groupBy: "source", splitBy: "model" })
+      .then((res) => {
+        if (!cancelled) setRows(res);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  return (
+    <section className="surface-region usage-flow-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="info" aria-hidden="true">
+          ⇄
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Source → model flow</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load source to model flow</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : rows?.some((row) => row.inputTokens + row.outputTokens > 0) ? (
+          <FlowChart rows={rows} />
+        ) : (
+          <div className="usage-stack-empty">
+            <span className="page-sub">No source to model flow recorded in this window yet.</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FlowChart({
+  rows,
+}: {
+  rows: Array<{ key: string; split: string; inputTokens: number; outputTokens: number }>;
+}) {
+  const links = rows
+    .map((row) => ({
+      source: row.key,
+      model: row.split,
+      tokens: row.inputTokens + row.outputTokens,
+    }))
+    .filter((row) => row.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens);
+  const total = links.reduce((sum, row) => sum + row.tokens, 0);
+  const sources = [...new Set(links.map((row) => row.source))].sort((a, b) => a.localeCompare(b));
+  const models = [...new Set(links.map((row) => row.model))].sort((a, b) => a.localeCompare(b));
+  const width = 960;
+  const height = Math.max(220, Math.max(sources.length, models.length) * 54 + 48);
+  const leftX = 130;
+  const rightX = width - 170;
+  const yFor = (items: string[], item: string) => {
+    const idx = Math.max(0, items.indexOf(item));
+    return 36 + (idx + 0.5) * ((height - 72) / Math.max(items.length, 1));
+  };
+  const maxTokens = Math.max(...links.map((row) => row.tokens), 1);
+
+  return (
+    <div className="usage-flow-wrap">
+      <svg
+        className="usage-flow-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Source to model token flow"
+      >
+        {links.map((link, i) => {
+          const y1 = yFor(sources, link.source);
+          const y2 = yFor(models, link.model);
+          const strokeWidth = Math.max(3, (link.tokens / maxTokens) * 22);
+          const share = total > 0 ? Math.round((link.tokens / total) * 100) : 0;
+          const color = `var(--s${(i % SERIES_COLOR_COUNT) + 1})`;
+          return (
+            <path
+              key={`${link.source}-${link.model}`}
+              className="usage-flow-ribbon"
+              d={`M ${leftX} ${y1} C ${leftX + 210} ${y1}, ${rightX - 210} ${y2}, ${rightX} ${y2}`}
+              fill="none"
+              stroke={color}
+              strokeWidth={strokeWidth}
+            >
+              <title>
+                {link.source} → {formatModelLabel(link.model)} · {formatTokens(link.tokens)} ·{" "}
+                {share}%
+              </title>
+            </path>
+          );
+        })}
+        {sources.map((source, i) => (
+          <g key={source} transform={`translate(0 ${yFor(sources, source)})`}>
+            <circle className="usage-flow-node-dot" r="5" cx={leftX} cy="0" />
+            <text className="usage-flow-label" x={leftX - 14} y="4" textAnchor="end">
+              {source}
+            </text>
+            <text className="usage-flow-side-label" x={leftX - 14} y="-14" textAnchor="end">
+              {i === 0 ? "Source" : ""}
+            </text>
+          </g>
+        ))}
+        {models.map((model, i) => (
+          <g key={model} transform={`translate(0 ${yFor(models, model)})`}>
+            <circle className="usage-flow-node-dot" r="5" cx={rightX} cy="0" />
+            <text className="usage-flow-label" x={rightX + 14} y="4">
+              {formatModelLabel(model)}
+            </text>
+            <text className="usage-flow-side-label" x={rightX + 14} y="-14">
+              {i === 0 ? "Model" : ""}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="usage-legend">
+        {links.slice(0, 6).map((link, i) => (
+          <span className="usage-legend-item" key={`${link.source}-${link.model}-legend`}>
+            <span
+              className="usage-sdot"
+              style={{ background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})` }}
+            />
+            {link.source} → {formatModelLabel(link.model)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function JobsSection({ range }: { range: UsageWindow }) {
+  const [jobs, setJobs] = useState<Array<{
+    key: string;
+    runs: number;
+    totalTokens: number;
+    avgTokensPerRun: number;
+    p95TokensPerRun: number;
+  }> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getUsageJobs({ window: range })
+      .then((res) => {
+        if (!cancelled) setJobs([...res].sort((a, b) => b.totalTokens - a.totalTokens));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  const maxTokens = Math.max(...(jobs ?? []).map((job) => job.totalTokens), 1);
+
+  return (
+    <section className="surface-region usage-jobs-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="brand" aria-hidden="true">
+          ⟳
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Jobs</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load jobs</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : jobs && jobs.length > 0 ? (
+          <>
+            <div className="canvas-view-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Job</th>
+                    <th>Runs</th>
+                    <th>Avg tokens/run</th>
+                    <th>p95</th>
+                    <th>Window total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((job) => (
+                    <tr key={job.key}>
+                      <td>{job.key}</td>
+                      <td>{job.runs.toLocaleString()}</td>
+                      <td>{formatTokens(job.avgTokensPerRun)}</td>
+                      <td>{formatTokens(job.p95TokensPerRun)}</td>
+                      <td>{formatTokens(job.totalTokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <section className="usage-burn-list" aria-label="Weekly burn by job">
+              {jobs.map((job, i) => {
+                const pct = Math.max(2, Math.round((job.totalTokens / maxTokens) * 100));
+                return (
+                  <div className="usage-burn-row" key={`${job.key}-burn`}>
+                    <span className="usage-burn-label">{job.key}</span>
+                    <span className="usage-popover-meter">
+                      <span
+                        className="usage-popover-meter-fill"
+                        style={{
+                          width: `${pct}%`,
+                          background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})`,
+                        }}
+                      />
+                    </span>
+                    <span className="usage-burn-value usage-mono">
+                      {formatTokens(job.totalTokens)}
+                    </span>
+                  </div>
+                );
+              })}
+            </section>
+          </>
+        ) : (
+          <div className="usage-stack-empty">
+            <span className="page-sub">No recurring workflow or rib spend in this window yet.</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SignalsSection({ range }: { range: UsageWindow }) {
+  const [signals, setSignals] = useState<{
+    failureTokens: number;
+    failureTurns: number;
+    failureTop: string | null;
+    downshift: string | null;
+    cacheReadRate: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      Promise.all(
+        FAILURE_STATUSES.map((status) =>
+          getUsageEvents({ window: range, status, limit: FAILURE_EVENTS_LIMIT }),
+        ),
+      ),
+      getUsageJobs({ window: range }),
+      getUsageSummary({ window: range }),
+    ])
+      .then(([eventsByStatus, jobs, summary]) => {
+        if (cancelled) return;
+        const failingEvents = eventsByStatus.flat();
+        const attribution = new Map<string, number>();
+        let failureTokens = 0;
+        for (const ev of failingEvents) {
+          const tokens = ev.inputTokens + ev.outputTokens;
+          failureTokens += tokens;
+          const key = ev.workflowName ?? ev.ribId ?? ev.source;
+          attribution.set(key, (attribution.get(key) ?? 0) + tokens);
+        }
+        const failureTop = [...attribution.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+        const downshift =
+          [...jobs]
+            .filter((job) => job.runs >= 3 && job.avgTokensPerRun < 500)
+            .sort((a, b) => b.runs - a.runs)[0]?.key ?? null;
+        const { totals } = summary;
+        setSignals({
+          failureTokens,
+          failureTurns: failingEvents.length,
+          failureTop,
+          downshift,
+          cacheReadRate:
+            totals.inputTokens > 0
+              ? Math.round((totals.cacheReadTokens / totals.inputTokens) * 100)
+              : 0,
+        });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  return (
+    <section className="surface-region usage-signals-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="caution" aria-hidden="true">
+          ◇
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Signals</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load signals</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : signals ? (
+          <div className="usage-signals-grid">
+            <SignalCard
+              title="Failure burn"
+              value={formatTokens(signals.failureTokens)}
+              detail={
+                signals.failureTurns > 0
+                  ? `${signals.failureTurns} failed turns · top: ${signals.failureTop ?? "unknown"}`
+                  : "No failure spend in this window."
+              }
+              tone={signals.failureTurns > 0 ? "hot" : "ok"}
+            />
+            <SignalCard
+              title="Downshift candidate"
+              value={signals.downshift ?? "No signal"}
+              detail={
+                signals.downshift
+                  ? "High run count with low average tokens per run."
+                  : "No high-volume low-output job found."
+              }
+            />
+            <SignalCard
+              title="Cache-read trend"
+              value={`${signals.cacheReadRate}%`}
+              detail="Current-window cache read share of input tokens."
+              tone={signals.cacheReadRate > 0 ? "ok" : undefined}
+            />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function SignalCard({
+  title,
+  value,
+  detail,
+  tone,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  tone?: "ok" | "hot";
+}) {
+  return (
+    <div className="usage-signal-card">
+      <div className="usage-stat-label">{title}</div>
+      <div className="usage-stat-value" data-tone={tone}>
+        {value}
+      </div>
+      <div className="usage-stat-sub">{detail}</div>
+    </div>
+  );
+}
+
 // Statuses beyond these mapped spellings (the read side accepts any string)
 // fall to the neutral pending dot rather than reading as failures.
 function statusDotClass(status: string): string {
@@ -715,17 +1178,43 @@ function formatEventDuration(ms: number): string {
 }
 
 const LEDGER_LIMIT = 50;
+const LEDGER_SOURCES: UsageEventSourceWire[] = ["chat", "workflow", "rib"];
+const LEDGER_STATUSES = ["ok", "error", "aborted", "timeout"] as const;
 
 function LedgerSection({ range }: { range: UsageWindow }) {
   const [events, setEvents] = useState<UsageEventRowWire[] | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<UsageEventSourceWire | "all">("all");
+  const [modelFilter, setModelFilter] = useState<string | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<string | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    getUsageSummary({ window: range, groupBy: "model" })
+      .then((summary) => {
+        if (!cancelled) setModels(summary.groups.map((group) => group.key));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    getUsageEvents({ window: range, limit: LEDGER_LIMIT })
+    getUsageEvents({
+      window: range,
+      limit: LEDGER_LIMIT,
+      source: sourceFilter === "all" ? undefined : sourceFilter,
+      model: modelFilter === "all" ? undefined : modelFilter,
+      status: statusFilter === "all" ? undefined : statusFilter,
+    })
       .then((res) => {
         if (!cancelled) setEvents(res);
       })
@@ -738,7 +1227,7 @@ function LedgerSection({ range }: { range: UsageWindow }) {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, sourceFilter, modelFilter, statusFilter]);
 
   return (
     <section className="surface-region usage-ledger-region">
@@ -753,6 +1242,53 @@ function LedgerSection({ range }: { range: UsageWindow }) {
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
+        <fieldset className="usage-ledger-filters">
+          <legend style={VISUALLY_HIDDEN_STYLE}>Ledger filters</legend>
+          <FilterChip
+            label="All sources"
+            active={sourceFilter === "all"}
+            onClick={() => setSourceFilter("all")}
+          />
+          {LEDGER_SOURCES.map((source) => (
+            <FilterChip
+              key={source}
+              label={source}
+              active={sourceFilter === source}
+              onClick={() => setSourceFilter(source)}
+            />
+          ))}
+          <span className="usage-filter-sep" />
+          <FilterChip
+            label="All models"
+            active={modelFilter === "all"}
+            onClick={() => setModelFilter("all")}
+          />
+          {models.map((model) => (
+            <FilterChip
+              key={model}
+              label={formatModelLabel(model)}
+              active={modelFilter === model}
+              onClick={() => setModelFilter(model)}
+            />
+          ))}
+          <span className="usage-filter-sep" />
+          <FilterChip
+            label="All statuses"
+            active={statusFilter === "all"}
+            onClick={() => setStatusFilter("all")}
+          />
+          {LEDGER_STATUSES.map((status) => (
+            <FilterChip
+              key={status}
+              label={status}
+              active={statusFilter === status}
+              onClick={() => setStatusFilter(status)}
+            />
+          ))}
+        </fieldset>
+        <div className="usage-ledger-count page-sub">
+          {events ? `${events.length.toLocaleString()} events` : "Loading events"}
+        </div>
         {error ? (
           <div className="empty-state" role="alert">
             <div className="empty-state-title">Couldn't load the ledger</div>
@@ -786,7 +1322,8 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                     </td>
                     <td>
                       <span className="run-provenance">
-                        {formatProviderModel(ev.provider, ev.model) ?? ev.model}
+                        {formatProviderModel(ev.provider, formatModelLabel(ev.model)) ??
+                          formatModelLabel(ev.model)}
                       </span>
                     </td>
                     <td>↑ {formatTokens(ev.inputTokens)}</td>
@@ -809,5 +1346,26 @@ function LedgerSection({ range }: { range: UsageWindow }) {
         )}
       </div>
     </section>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`chip${active ? " active" : ""}`}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }

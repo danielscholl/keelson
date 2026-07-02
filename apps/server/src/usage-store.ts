@@ -10,6 +10,7 @@ import type { Database } from "bun:sqlite";
 import type {
   UsageBreakdownRowWire,
   UsageEventRowWire,
+  UsageJobsRowWire,
   UsagePulseMinuteWire,
   UsagePulseSnapshotWire,
   UsageSeriesRowWire,
@@ -90,6 +91,8 @@ export interface UsageSeriesArgs {
 
 export interface UsageBreakdownArgs {
   sinceIso?: string;
+  groupBy?: UsageGroupBy;
+  splitBy?: UsageGroupBy;
 }
 
 export interface UsageEventsFilter {
@@ -100,6 +103,10 @@ export interface UsageEventsFilter {
   sinceIso?: string;
 }
 
+export interface UsageJobsArgs {
+  sinceIso?: string;
+}
+
 export interface UsageStore {
   record(input: RecordUsageEventInput): void;
   listEvents(filter?: ListUsageEventsFilter): UsageEvent[];
@@ -107,6 +114,7 @@ export interface UsageStore {
   summary(args: UsageSummaryArgs): UsageSummaryResponseWire;
   series(args: UsageSeriesArgs): UsageSeriesRowWire[];
   breakdown(args?: UsageBreakdownArgs): UsageBreakdownRowWire[];
+  jobs(args?: UsageJobsArgs): UsageJobsRowWire[];
   events(filter?: UsageEventsFilter): UsageEventRowWire[];
   // Backs USAGE_PULSE_SNAPSHOT_KEY: today's (local-day) running totals plus a
   // zero-filled per-minute series over the trailing 60 minutes. `now` is
@@ -206,8 +214,14 @@ interface SeriesRow extends TotalsRow {
 }
 
 interface BreakdownRow extends TotalsRow {
-  source: string;
-  model: string;
+  key: string;
+  split: string;
+}
+
+interface JobRunTokensRow {
+  key: string;
+  runId: string;
+  totalTokens: number;
 }
 
 interface MinuteRow extends Omit<TotalsRow, "events"> {
@@ -226,6 +240,12 @@ function minuteFloor(d: Date): Date {
 // per the spec — distinct from the UTC-bucketed minuteSeries below.
 function startOfLocalDayIso(now: Date): string {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+}
+
+function percentile(sorted: number[], pct: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.ceil((pct / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, Math.min(sorted.length - 1, idx))] ?? 0;
 }
 
 export function createUsageStore(db: Database): UsageStore {
@@ -338,6 +358,8 @@ export function createUsageStore(db: Database): UsageStore {
       return rows;
     },
     breakdown(args = {}) {
+      const groupColumn = GROUP_BY_COLUMN[args.groupBy ?? "source"];
+      const splitColumn = GROUP_BY_COLUMN[args.splitBy ?? "model"];
       const clauses: string[] = [];
       const params: Array<string> = [];
       if (args.sinceIso !== undefined) {
@@ -347,13 +369,56 @@ export function createUsageStore(db: Database): UsageStore {
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = db
         .query(
-          `SELECT source, model, ${TOTALS_SELECT}
+          `SELECT COALESCE(${groupColumn}, '${UNGROUPED_KEY}') AS key,
+                 COALESCE(${splitColumn}, '${UNGROUPED_KEY}') AS split,
+                 ${TOTALS_SELECT}
              FROM usage_events ${where}
-             GROUP BY source, model
-             ORDER BY source ASC, model ASC`,
+             GROUP BY key, split
+             ORDER BY key ASC, split ASC`,
         )
         .all(...params) as BreakdownRow[];
       return rows as UsageBreakdownRowWire[];
+    },
+    jobs(args = {}) {
+      const clauses = ["source IN ('workflow', 'rib')"];
+      const params: Array<string> = [];
+      if (args.sinceIso !== undefined) {
+        clauses.push("ts >= ?");
+        params.push(args.sinceIso);
+      }
+      const rows = db
+        .query(
+          `SELECT COALESCE(workflow_name, rib_id, source) AS key,
+                 COALESCE(run_id, printf('event:%d', id)) AS runId,
+                  COALESCE(SUM(input_tokens + output_tokens), 0) AS totalTokens
+             FROM usage_events
+            WHERE ${clauses.join(" AND ")}
+            GROUP BY key, runId
+            ORDER BY key ASC, totalTokens ASC`,
+        )
+        .all(...params) as JobRunTokensRow[];
+
+      const byJob = new Map<string, number[]>();
+      for (const row of rows) {
+        const totals = byJob.get(row.key) ?? [];
+        totals.push(row.totalTokens);
+        byJob.set(row.key, totals);
+      }
+
+      return [...byJob.entries()]
+        .map(([key, totals]) => {
+          const sorted = [...totals].sort((a, b) => a - b);
+          const totalTokens = totals.reduce((sum, value) => sum + value, 0);
+          const runs = totals.length;
+          return {
+            key,
+            runs,
+            totalTokens,
+            avgTokensPerRun: runs > 0 ? totalTokens / runs : 0,
+            p95TokensPerRun: percentile(sorted, 95),
+          };
+        })
+        .sort((a, b) => a.key.localeCompare(b.key));
     },
     events(filter = {}) {
       const clauses: string[] = [];
