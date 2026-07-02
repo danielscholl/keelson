@@ -12,11 +12,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { NodeHandler } from "@keelson/workflows";
 
 import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
+import { createUsageStore, type UsageStore } from "../src/usage-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import {
   type ActiveRuns,
@@ -32,21 +34,35 @@ import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 
-function makeController(): { controller: WorkflowController; activeRuns: ActiveRuns } {
+function makeController(opts?: { promptHandler?: NodeHandler; usageStore?: UsageStore }): {
+  controller: WorkflowController;
+  activeRuns: ActiveRuns;
+  usageStore?: UsageStore;
+  projectId: string;
+} {
   const db = openDatabase({ path: join(tmpDir, "test.db") });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
   const projectsStore = createProjectsStore(db);
+  const project = projectsStore.create({ name: "test-project", rootPath: tmpDir });
   const wfDir = join(tmpDir, "workflows");
   mkdirSync(wfDir, { recursive: true });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const activeRuns = createActiveRuns();
+  const usageStore = opts?.usageStore ?? createUsageStore(db);
   const controller = createWorkflowController(
-    { catalog, store, conversationStore, projectsStore },
+    {
+      catalog,
+      store,
+      conversationStore,
+      projectsStore,
+      usageStore,
+      ...(opts?.promptHandler !== undefined ? { promptHandler: opts.promptHandler } : {}),
+    },
     activeRuns,
     createWorkflowSubscribers(),
   );
-  return { controller, activeRuns };
+  return { controller, activeRuns, usageStore, projectId: project.id };
 }
 
 beforeEach(() => {
@@ -96,6 +112,49 @@ describe("WorkflowController.runDefinition (RibContext.runWorkflow)", () => {
     expect(res.nodes.first?.state).toBe("completed");
     expect(res.nodes.second?.state).toBe("completed");
     expect(res.nodes.second?.output).toContain("one");
+  });
+
+  test("records usage for a rib-driven prompt workflow", async () => {
+    const promptHandler: NodeHandler = {
+      type: "prompt",
+      handle: async () => ({
+        status: "succeeded",
+        output: { kind: "text", text: "prompt ok" },
+        usage: { inputTokens: 7, outputTokens: 3 },
+        provider: "stub",
+        model: "stub-model",
+      }),
+    };
+    const { controller, usageStore, projectId } = makeController({ promptHandler });
+    const res = await controller.runDefinition(
+      {
+        name: "usage-demo",
+        description: "prompt usage",
+        nodes: [{ id: "ask", prompt: "hello" }],
+      },
+      {},
+      tmpDir,
+      "rib-usage",
+    );
+    expect(res.status).toBe("succeeded");
+
+    const events = usageStore?.listEvents();
+    expect(events).toHaveLength(1);
+    expect(events?.[0]).toMatchObject({
+      source: "workflow",
+      provider: "stub",
+      model: "stub-model",
+      inputTokens: 7,
+      outputTokens: 3,
+      status: "ok",
+      nodeId: "ask",
+      workflowName: "usage-demo",
+      conversationId: null,
+      projectId,
+      ribId: "rib-usage",
+    });
+    expect(events?.[0]?.runId).toEqual(expect.any(String));
+    expect(events?.[0]?.durationMs).toEqual(expect.any(Number));
   });
 
   test("fails closed on a structurally-invalid definition (no run)", async () => {

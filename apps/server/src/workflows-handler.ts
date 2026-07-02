@@ -1075,6 +1075,7 @@ export interface WorkflowController {
     definition: unknown,
     inputs: Record<string, string>,
     cwd: string,
+    ribId?: string,
   ): Promise<RibWorkflowRunResult>;
 }
 
@@ -1131,6 +1132,7 @@ export function createWorkflowController(
       definition: unknown,
       inputs: Record<string, string>,
       cwd: string,
+      ribId?: string,
     ): Promise<RibWorkflowRunResult> {
       const parsed = workflowDefinitionSchema.safeParse(definition);
       if (!parsed.success) {
@@ -1198,6 +1200,7 @@ export function createWorkflowController(
         conversationId: "",
       });
       try {
+        const nodeStart = new Map<string, string>();
         const summary = await runWorkflow({
           workflow: definitionObj,
           runId,
@@ -1205,6 +1208,40 @@ export function createWorkflowController(
           handlers,
           cwd: workingDir,
           abortSignal: abort.signal,
+          ...(usageStore !== undefined
+            ? {
+                onEvent: (event: RunStreamEvent) => {
+                  if (event.type === "node_started") {
+                    nodeStart.set(event.nodeId, new Date().toISOString());
+                    return;
+                  }
+                  if (event.type !== "node_done") return;
+                  const usage = coerceTokenUsage(event.result.usage);
+                  const provider = sanitizeProvenanceField(event.result.provider);
+                  const model = sanitizeProvenanceField(event.result.model);
+                  if (usage === null || provider === null || model === null) return;
+                  const completedAt = new Date().toISOString();
+                  recordNodeUsage({
+                    usageStore,
+                    usage,
+                    provider,
+                    model,
+                    status: event.result.status,
+                    startedAt: nodeStart.get(event.nodeId) ?? null,
+                    completedAt,
+                    attribution: {
+                      runId,
+                      nodeId: event.nodeId,
+                      workflowName: definitionObj.name,
+                      conversationId: null,
+                      projectId: projectId ?? null,
+                      ribId: ribId ?? null,
+                    },
+                  });
+                  nodeStart.delete(event.nodeId);
+                },
+              }
+            : {}),
           ...artifacts.runWorkflowOptions(),
           ...(memoryTools !== undefined ? { memoryTools } : {}),
           ...(projectId !== undefined ? { projectId } : {}),
