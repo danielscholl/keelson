@@ -25,7 +25,11 @@ import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
-import { buildExploreSeed, type ExploreHandler, OPENING_PROMPT } from "../lib/exploreSeed.ts";
+import {
+  buildExploreSeedForPanel,
+  type ExploreHandler,
+  OPENING_PROMPT,
+} from "../lib/exploreSeed.ts";
 
 // A run-workflow directive may ask to stay on the current surface (see the `stay`
 // field on the run-workflow client effect), so the shared callback carries it.
@@ -321,7 +325,9 @@ function SurfaceRegion({
           type="button"
           className="surface-region-action surface-region-icon"
           onClick={() =>
-            onExplore(buildExploreSeed(board?.title ?? region.title ?? region.key, snap.data))
+            onExplore(
+              buildExploreSeedForPanel(board?.title ?? region.title ?? region.key, snap.data),
+            )
           }
           aria-label="Explore in chat"
           title="Explore this in chat"

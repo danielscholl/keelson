@@ -115,8 +115,12 @@ export function buildExploreSeed(panels: ExplorePanel[]): ChatSeed {
   if (panels.length === 0) {
     throw new Error("buildExploreSeed requires at least one panel");
   }
+  const firstPanel = panels[0];
+  if (!firstPanel) {
+    throw new Error("buildExploreSeed requires at least one panel");
+  }
   if (panels.length === 1) {
-    return buildSinglePanelExploreSeed(panels[0].name, panels[0].data);
+    return buildSinglePanelExploreSeed(firstPanel.name, firstPanel.data);
   }
 
   const perPanel = Math.max(MIN_PANEL_BODY_CHARS, Math.floor(MAX_BODY_CHARS / panels.length));
@@ -124,7 +128,11 @@ export function buildExploreSeed(panels: ExplorePanel[]): ChatSeed {
     name: capName(panel.name),
     body: truncatedBody(panel.data, perPanel),
   }));
-  const aggregateName = capName(`${renderedPanels[0].name} +${renderedPanels.length - 1} more`);
+  const firstRenderedPanel = renderedPanels[0];
+  if (!firstRenderedPanel) {
+    throw new Error("buildExploreSeed requires at least one panel");
+  }
+  const aggregateName = capName(`${firstRenderedPanel.name} +${renderedPanels.length - 1} more`);
   const directive =
     `You are helping the user explore one or more panels from their Keelson ` +
     `dashboard, which they just opened directly from those panels. Their current ` +
@@ -141,14 +149,16 @@ export function buildExploreSeed(panels: ExplorePanel[]): ChatSeed {
 
   let systemPrompt = assemble();
   while (systemPrompt.length > SEED_MAX_CHARS) {
-    const largest = renderedPanels.reduce((largestIndex, panel, index) => {
-      return panel.body.length > renderedPanels[largestIndex].body.length ? index : largestIndex;
-    }, 0);
+    let largest = firstRenderedPanel;
+    for (const panel of renderedPanels) {
+      if (panel.body.length > largest.body.length) {
+        largest = panel;
+      }
+    }
     const overflow = systemPrompt.length - SEED_MAX_CHARS;
-    const trimBy = Math.max(overflow + 16, Math.ceil(renderedPanels[largest].body.length * 0.2));
-    const trimTo = Math.max(0, renderedPanels[largest].body.length - trimBy);
-    renderedPanels[largest].body =
-      `${renderedPanels[largest].body.slice(0, trimTo)}\n\n…(truncated)`;
+    const trimBy = Math.max(overflow + 16, Math.ceil(largest.body.length * 0.2));
+    const trimTo = Math.max(0, largest.body.length - trimBy);
+    largest.body = `${largest.body.slice(0, trimTo)}\n\n…(truncated)`;
     systemPrompt = assemble();
   }
 
