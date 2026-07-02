@@ -4,6 +4,7 @@
 
 import {
   USAGE_PULSE_SNAPSHOT_KEY,
+  type UsageEventRowWire,
   type UsageSeriesResponseWire,
   type UsageSummaryResponseWire,
   usagePulseSnapshotSchema,
@@ -17,6 +18,7 @@ import {
   type UsageWindow,
 } from "../api.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
+import { formatProviderModel } from "../lib/formatProvenance.ts";
 import { formatTokens } from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
@@ -53,6 +55,8 @@ export function Usage() {
       <UsageHeader range={range} onRangeChange={setRange} live={pulse.status === "live"} />
       <PulseSection range={range} pulse={pulse} />
       <OverTimeSection range={range} />
+      <ModelRosterSection range={range} />
+      <LedgerSection range={range} />
     </div>
   );
 }
@@ -547,5 +551,252 @@ function StackChart({
         ))}
       </div>
     </>
+  );
+}
+
+interface RosterRow {
+  key: string;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachePct: number;
+  avgPerTurn: number;
+  share: number;
+  color: string;
+}
+
+function ModelRosterSection({ range }: { range: UsageWindow }) {
+  const [summary, setSummary] = useState<UsageSummaryResponseWire | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getUsageSummary({ window: range, groupBy: "model" })
+      .then((res) => {
+        if (!cancelled) setSummary(res);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  // usage/summary's groups come back ORDER BY key ASC (usage-store.ts), the
+  // same order pivotSeries' first-seen model list settles into for the stack
+  // chart — indexing the palette by that alphabetical order, not by this
+  // table's tokens-desc display order, keeps a model's dot the same color
+  // in both places.
+  const rows = useMemo((): RosterRow[] => {
+    if (!summary) return [];
+    const colorIndex = new Map(
+      [...summary.groups].sort((a, b) => a.key.localeCompare(b.key)).map((g, i) => [g.key, i]),
+    );
+    const grandTotal = summary.groups.reduce((sum, g) => sum + g.inputTokens + g.outputTokens, 0);
+    return [...summary.groups]
+      .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens))
+      .map((g) => {
+        const tokens = g.inputTokens + g.outputTokens;
+        return {
+          key: g.key,
+          turns: g.events,
+          inputTokens: g.inputTokens,
+          outputTokens: g.outputTokens,
+          cachePct: g.inputTokens > 0 ? Math.round((g.cacheReadTokens / g.inputTokens) * 100) : 0,
+          avgPerTurn: g.events > 0 ? tokens / g.events : 0,
+          share: grandTotal > 0 ? Math.round((tokens / grandTotal) * 100) : 0,
+          color: `var(--s${((colorIndex.get(g.key) ?? 0) % SERIES_COLOR_COUNT) + 1})`,
+        };
+      });
+  }, [summary]);
+
+  return (
+    <section className="surface-region usage-roster-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="brand" aria-hidden="true">
+          ◆
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Model roster</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load model roster</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : rows.length > 0 ? (
+          <div className="canvas-view-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Turns</th>
+                  <th>↑ In</th>
+                  <th>↓ Out</th>
+                  <th>Cache</th>
+                  <th>Avg / turn</th>
+                  <th>Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.key}>
+                    <td>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <span className="usage-sdot" style={{ background: r.color }} />
+                        {r.key}
+                      </span>
+                    </td>
+                    <td>{r.turns.toLocaleString()}</td>
+                    <td>↑ {formatTokens(r.inputTokens)}</td>
+                    <td>↓ {formatTokens(r.outputTokens)}</td>
+                    <td>{r.cachePct}%</td>
+                    <td>{formatTokens(r.avgPerTurn)}</td>
+                    <td>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <span className="usage-popover-meter" style={{ width: 72 }}>
+                          <span
+                            className="usage-popover-meter-fill"
+                            style={{ width: `${r.share}%`, background: r.color }}
+                          />
+                        </span>
+                        <span>{r.share}%</span>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="usage-stack-empty">
+            <span className="page-sub">No model spend recorded in this window yet.</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function formatEventDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
+const LEDGER_LIMIT = 50;
+
+function LedgerSection({ range }: { range: UsageWindow }) {
+  const [events, setEvents] = useState<UsageEventRowWire[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getUsageEvents({ window: range, limit: LEDGER_LIMIT })
+      .then((res) => {
+        if (!cancelled) setEvents(res);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  return (
+    <section className="surface-region usage-ledger-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="info" aria-hidden="true">
+          ≡
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Ledger</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load the ledger</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : events && events.length > 0 ? (
+          <div className="canvas-view-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Source</th>
+                  <th>Model</th>
+                  <th>↑ In</th>
+                  <th>↓ Out</th>
+                  <th>Cache</th>
+                  <th>Dur</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((ev) => (
+                  <tr key={ev.id}>
+                    <td>{new Date(ev.ts).toLocaleTimeString()}</td>
+                    <td>
+                      <span className="pill">{ev.source}</span>
+                    </td>
+                    <td>
+                      <span className="run-provenance">
+                        {formatProviderModel(ev.provider, ev.model) ?? ev.model}
+                      </span>
+                    </td>
+                    <td>↑ {formatTokens(ev.inputTokens)}</td>
+                    <td>↓ {formatTokens(ev.outputTokens)}</td>
+                    <td>{ev.cacheReadTokens != null ? formatTokens(ev.cacheReadTokens) : "—"}</td>
+                    <td>{ev.durationMs != null ? formatEventDuration(ev.durationMs) : "—"}</td>
+                    <td>
+                      <span
+                        className={`status-dot ${ev.status === "ok" ? "completed" : "failed"}`}
+                      />
+                      {ev.status}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="usage-stack-empty">
+            <span className="page-sub">No events recorded in this window yet.</span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
