@@ -256,7 +256,8 @@ function PulseStats({
         </div>
         <div className="usage-stat-label">Failure burn</div>
         <div className="usage-stat-sub">
-          {failureBurn.turns} errored / aborted / timed-out {failureBurn.turns === 1 ? "turn" : "turns"}
+          {failureBurn.turns} errored / aborted / timed-out{" "}
+          {failureBurn.turns === 1 ? "turn" : "turns"}
         </div>
       </div>
     </div>
