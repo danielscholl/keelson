@@ -1,0 +1,101 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License").
+
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import { getUsageBreakdown, getUsageEvents, getUsageSeries, getUsageSummary } from "../src/api.ts";
+
+const realFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+function stubFetch(body: unknown): void {
+  const fetchMock = mock(async () => Response.json(body));
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+}
+
+const validTotals = {
+  events: 3,
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+};
+
+describe("getUsageSummary", () => {
+  test("parses a valid usage summary payload", async () => {
+    stubFetch({ totals: validTotals, groups: [{ ...validTotals, key: "claude-sonnet-5" }] });
+    const result = await getUsageSummary();
+    expect(result.totals).toEqual(validTotals);
+    expect(result.groups[0]?.key).toBe("claude-sonnet-5");
+  });
+
+  test("rejects a malformed usage summary payload", async () => {
+    stubFetch({ totals: { ...validTotals, inputTokens: "not-a-number" }, groups: [] });
+    await expect(getUsageSummary()).rejects.toThrow();
+  });
+});
+
+describe("getUsageSeries", () => {
+  test("parses a valid usage series payload", async () => {
+    stubFetch([{ ...validTotals, bucketIso: "2026-07-01T00:00:00.000Z", key: "claude-sonnet-5" }]);
+    const result = await getUsageSeries();
+    expect(result).toHaveLength(1);
+    expect(result[0]?.bucketIso).toBe("2026-07-01T00:00:00.000Z");
+  });
+
+  test("rejects a malformed usage series payload (missing key)", async () => {
+    stubFetch([{ ...validTotals, bucketIso: "2026-07-01T00:00:00.000Z" }]);
+    await expect(getUsageSeries()).rejects.toThrow();
+  });
+});
+
+describe("getUsageBreakdown", () => {
+  test("parses a valid usage breakdown payload", async () => {
+    stubFetch([{ ...validTotals, source: "chat", model: "claude-sonnet-5" }]);
+    const result = await getUsageBreakdown();
+    expect(result).toHaveLength(1);
+    expect(result[0]?.source).toBe("chat");
+  });
+
+  test("rejects a malformed usage breakdown payload (invalid source enum)", async () => {
+    stubFetch([{ ...validTotals, source: "not-a-source", model: "claude-sonnet-5" }]);
+    await expect(getUsageBreakdown()).rejects.toThrow();
+  });
+});
+
+const validEventRow = {
+  id: 1,
+  ts: "2026-07-01T00:00:00.000Z",
+  source: "chat",
+  provider: "anthropic",
+  model: "claude-sonnet-5",
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheReadTokens: null,
+  cacheWriteTokens: null,
+  durationMs: null,
+  status: "ok",
+  conversationId: null,
+  runId: null,
+  nodeId: null,
+  workflowName: null,
+  ribId: null,
+  projectId: null,
+};
+
+describe("getUsageEvents", () => {
+  test("parses a valid usage events payload", async () => {
+    stubFetch([validEventRow]);
+    const result = await getUsageEvents();
+    expect(result).toHaveLength(1);
+    expect(result[0]?.model).toBe("claude-sonnet-5");
+  });
+
+  test("rejects a malformed usage events payload (invalid status enum)", async () => {
+    stubFetch([{ ...validEventRow, status: "not-a-status" }]);
+    await expect(getUsageEvents()).rejects.toThrow();
+  });
+});
