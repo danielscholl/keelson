@@ -27,6 +27,7 @@ import {
   invokeRibCommand,
   listProjects,
   listWorkflows,
+  postRibAction,
   resolveAgent,
   startWorkflowRun,
 } from "../api.ts";
@@ -54,6 +55,7 @@ import { ToolsPopover } from "../components/Chat/ToolsPopover.tsx";
 import { type SessionUsageTotals, UsageChip } from "../components/Chat/UsageChip.tsx";
 import { UsagePopover } from "../components/Chat/UsagePopover.tsx";
 import { AddToNotebookModal } from "../components/Memory/AddToNotebookModal.tsx";
+import { useRibsContext } from "../components/RibsProvider.tsx";
 import { SkeletonStack } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
@@ -349,6 +351,7 @@ export function Chat({
   const conversationsList = useConversations();
   const toast = useToast();
   const { openCanvas } = useCanvas();
+  const { ribs } = useRibsContext();
   const { settings, toggleFavorite, setLastUsed, setSidebarCollapsed } = useSettings();
 
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -462,6 +465,37 @@ export function Chat({
   // both so a double-click can't fire two appends.
   const [notebookTarget, setNotebookTarget] = useState<string | null>(null);
   const { appendWithUndo, saving: savingNotebook } = useNotebookAppend(activeProjectId);
+  const [ingestMenuMessageId, setIngestMenuMessageId] = useState<string | null>(null);
+  const [sendingIngestTo, setSendingIngestTo] = useState<string | null>(null);
+  const ingestTargets = useMemo(() => ribs.filter((rib) => rib.acceptsIngest ?? false), [ribs]);
+  const sendToSurface = useCallback(
+    async (targetId: string, text: string) => {
+      setSendingIngestTo(targetId);
+      try {
+        const result = await postRibAction(targetId, {
+          type: "ingest",
+          payload: {
+            text,
+            ...(conversationId ? { sourceConversationId: conversationId } : {}),
+          },
+        });
+        if (result.ok) {
+          toast.push({ kind: "ok", message: "Sent to surface" });
+          setIngestMenuMessageId(null);
+        } else {
+          toast.push({ kind: "error", message: `Send to surface: ${result.error}` });
+        }
+      } catch (err) {
+        toast.push({
+          kind: "error",
+          message: `Send to surface failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      } finally {
+        setSendingIngestTo(null);
+      }
+    },
+    [conversationId, toast],
+  );
 
   // Seed + name from a lane Ask handoff. Captured on mount when no convo
   // is hydrated; doSend reads + clears them on the createConversation call
@@ -1959,6 +1993,13 @@ export function Chat({
                     m.content.trim().length > 0 &&
                     conversationId !== null &&
                     isPersistedMessageId(m.id);
+                  const offerIngest =
+                    ingestTargets.length > 0 &&
+                    (m.role === "assistant" || m.role === "user") &&
+                    !m.streaming &&
+                    m.content.trim().length > 0 &&
+                    conversationId !== null &&
+                    isPersistedMessageId(m.id);
                   return (
                     <div key={m.id} className={`chat-message ${m.role}`}>
                       <span className="chat-role">{ROLE_LABEL[m.role]}</span>
@@ -2002,7 +2043,7 @@ export function Chat({
                           {formatTokens(m.usage.outputTokens)}
                         </div>
                       )}
-                      {(offerCanvas || offerNotebook) && (
+                      {(offerCanvas || offerNotebook || offerIngest) && (
                         <div className="chat-message-actions">
                           {offerCanvas && (
                             <button
@@ -2041,6 +2082,42 @@ export function Chat({
                                 ✎ Edit…
                               </button>
                             </>
+                          )}
+                          {offerIngest && (
+                            <span className="chat-message-ingest">
+                              <button
+                                type="button"
+                                className="chat-message-action"
+                                title="Send this message to a rib surface"
+                                disabled={sendingIngestTo !== null}
+                                onClick={() => {
+                                  if (ingestTargets.length === 1) {
+                                    void sendToSurface(ingestTargets[0]!.id, m.content);
+                                  } else {
+                                    setIngestMenuMessageId((current) =>
+                                      current === m.id ? null : m.id,
+                                    );
+                                  }
+                                }}
+                              >
+                                Send to surface
+                              </button>
+                              {ingestTargets.length > 1 && ingestMenuMessageId === m.id && (
+                                <span className="chat-message-ingest-menu">
+                                  {ingestTargets.map((target) => (
+                                    <button
+                                      key={target.id}
+                                      type="button"
+                                      className="chat-message-action"
+                                      disabled={sendingIngestTo !== null}
+                                      onClick={() => void sendToSurface(target.id, m.content)}
+                                    >
+                                      {target.displayName}
+                                    </button>
+                                  ))}
+                                </span>
+                              )}
+                            </span>
                           )}
                         </div>
                       )}
