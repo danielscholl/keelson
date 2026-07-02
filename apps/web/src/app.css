@@ -24,6 +24,16 @@
   --cyan:    #7cc0ff;
   --orange:  #f59f6c;
 
+  /* Usage "Over time" categorical series palette (validated CVD ΔE ≥ 18.5
+     against the --card surface) — cycled by model index, not reused
+     elsewhere so adding a semantic color never shifts a model's hue. */
+  --s1: #8b7cf6;
+  --s2: #bd8622;
+  --s3: #3f8edb;
+  --s4: #d4663f;
+  --s5: #2fa876;
+  --s6: #d260a4;
+
   --danger:  #e06666;
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
@@ -65,6 +75,14 @@
   --magenta: #804bc1;
   --cyan:    #2e6fd8;
   --orange:  #b66229;
+
+  /* Same series, re-tuned for CVD ΔE ≥ 16.8 against the light --card. */
+  --s1: #6d4fe0;
+  --s2: #b57a00;
+  --s3: #2e6fd8;
+  --s4: #b66229;
+  --s5: #15834f;
+  --s6: #804bc1;
 
   --danger:  #d9385e;
   --shadow-popover: 0 12px 32px rgba(57, 43, 92, 0.16);
@@ -8689,6 +8707,120 @@ a.cvb-card-title::after {
 }
 .usage-popover-meter.warn .usage-popover-meter-fill { background: var(--yellow); }
 .usage-popover-meter.hot .usage-popover-meter-fill { background: var(--red); }
+
+/* Usage page — Pulse section. Reuses .layout-toggle for the window control
+   and .surface-region-live for the header live dot rather than inventing new
+   segmented-control/dot idioms. */
+.usage-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.usage-mono { font-family: var(--font-mono, ui-monospace, monospace); }
+
+.usage-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.usage-stat {
+  min-width: 120px;
+}
+.usage-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg-strong);
+}
+.usage-stat-value[data-tone="ok"] { color: var(--green); }
+.usage-stat-value[data-tone="hot"] { color: var(--red); }
+.usage-stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.usage-stat-sub {
+  font-size: 11px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+
+.usage-pulse-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.usage-pulse-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.usage-pulse-svg {
+  max-width: 560px;
+  flex: 1 1 auto;
+  height: 44px;
+}
+.usage-pulse-now {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-strong);
+  white-space: nowrap;
+}
+.usage-pulse-dot {
+  animation: workflow-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .usage-pulse-dot { animation: none; }
+}
+
+/* Usage page — Over time stacked bar chart. Plain inline SVG (no chart lib);
+   segments reference --s1..--s6 cyclically by model index. */
+.usage-stack-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.usage-grid-line {
+  stroke: var(--border-soft);
+  stroke-width: 1;
+}
+.usage-axis-label {
+  font-size: 10px;
+  fill: var(--dim);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.usage-seg-rect {
+  transition: opacity 0.15s;
+}
+.usage-seg-rect:hover {
+  opacity: 0.85;
+}
+.usage-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.usage-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.usage-sdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.usage-stack-empty {
+  padding: 20px 0;
+}
 
 /* Workflow surfaces: per-node tokens in the trace head, run rollup in the
    header. Both reuse the muted monospace voice of .dur / .duration. */

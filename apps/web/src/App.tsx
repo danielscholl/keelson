@@ -18,6 +18,7 @@ import { watchStayRun } from "./lib/watchStayRun.ts";
 import { Chat } from "./views/Chat.tsx";
 import { Memory } from "./views/Memory.tsx";
 import { Surface } from "./views/Surface.tsx";
+import { Usage } from "./views/Usage.tsx";
 import { Workflows } from "./views/Workflows.tsx";
 
 export function App() {
@@ -177,6 +178,8 @@ function AppInner() {
         />
       ) : activeTab === "memory" ? (
         <Memory />
+      ) : activeTab === "usage" ? (
+        <Usage />
       ) : (
         <Chat
           key={seedNonce}
