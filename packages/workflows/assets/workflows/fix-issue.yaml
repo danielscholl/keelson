@@ -478,7 +478,7 @@ nodes:
 
       PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
       if [ -z "$PR_NUM" ]; then
-       PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null | tr -d '[:space:]')
+       PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null | grep -oE '[0-9]+' | head -1)
        if [ -n "$PR_NUM" ]; then
          printf '%s' "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
          PR_URL=$(gh pr view "$PR_NUM" --json url -q '.url' 2>/dev/null | tr -d '[:space:]')
