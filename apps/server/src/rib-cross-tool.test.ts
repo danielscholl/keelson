@@ -39,7 +39,7 @@ function policyEngine(
 
 function tool(
   name: string,
-  onExecute: (ctx: Pick<ToolContext, "abortSignal" | "emit">) => void | Promise<void>,
+  onExecute: (ctx: Pick<ToolContext, "abortSignal" | "emit">) => unknown | Promise<unknown>,
 ) {
   return {
     name,
