@@ -412,51 +412,63 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     if (!engine) {
       return { ok: false, error: "policy engine unavailable" };
     }
-    let allowed = false;
-    try {
-      const decision = await engine.evaluateToolCall(
-        { tool: name, args },
-        { surface: "rib", ribId: callerRibId, targetRibId, cwd: defaultCallCwd },
-      );
-      allowed = decision.outcome === "allow";
-    } catch {
-      allowed = false;
-    }
-    if (!allowed) {
-      return {
-        ok: false,
-        error: `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' denied`,
-      };
-    }
+    // Timeout/abort wiring is armed BEFORE the policy gate: an ASK pause must
+    // cancel on caller abort and count against the same bounded deadline as
+    // tool execution, so a pending approval can't outlive its caller.
     const timeoutMs = parseCrossRibCallTimeoutMs(opts?.timeoutMs, callTimeoutMs);
     const controller = new AbortController();
     const chunks: MessageChunk[] = [];
     let abortReason: "caller" | "timeout" = "timeout";
-    let controllerAbortListener: (() => void) | undefined;
-    const abortPromise = new Promise<never>((_, reject) => {
-      controllerAbortListener = () => {
-        const reason =
-          abortReason === "caller" ? "aborted by caller" : `timed out after ${timeoutMs}ms`;
-        reject(new Error(`cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${reason}`));
-      };
-      controller.signal.addEventListener("abort", controllerAbortListener, { once: true });
-    });
     const callerAbortListener = () => {
+      if (controller.signal.aborted) return;
       abortReason = "caller";
       controller.abort();
     };
     if (opts?.signal?.aborted) callerAbortListener();
     else opts?.signal?.addEventListener("abort", callerAbortListener, { once: true });
     const timer = setTimeout(() => {
+      if (controller.signal.aborted) return;
       abortReason = "timeout";
       controller.abort();
     }, timeoutMs);
+    const abortError = () =>
+      new Error(
+        `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${
+          abortReason === "caller" ? "aborted by caller" : `timed out after ${timeoutMs}ms`
+        }`,
+      );
+    // Created at race time (not pre-armed): a promise that rejects before the
+    // race attaches to it becomes an unhandled rejection when an abort during
+    // the policy gate short-circuits ahead of execute.
+    const raceAbort = () =>
+      new Promise<never>((_, reject) => {
+        if (controller.signal.aborted) return reject(abortError());
+        controller.signal.addEventListener("abort", () => reject(abortError()), { once: true });
+      });
     try {
-      if (controller.signal.aborted) {
-        const reason = opts?.signal?.aborted
-          ? "aborted by caller"
-          : `timed out after ${timeoutMs}ms`;
-        throw new Error(`cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${reason}`);
+      if (controller.signal.aborted) throw abortError();
+      let allowed = false;
+      try {
+        const decision = await engine.evaluateToolCall(
+          { tool: name, args },
+          {
+            surface: "rib",
+            ribId: callerRibId,
+            targetRibId,
+            cwd: defaultCallCwd,
+            signal: controller.signal,
+          },
+        );
+        allowed = decision.outcome === "allow";
+      } catch {
+        allowed = false;
+      }
+      if (controller.signal.aborted) throw abortError();
+      if (!allowed) {
+        return {
+          ok: false,
+          error: `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' denied`,
+        };
       }
       const parsed = entry.def.inputSchema.parse(args);
       const ctx: ToolContext = {
@@ -464,16 +476,13 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         emit: (chunk) => chunks.push(chunk),
         abortSignal: controller.signal,
       };
-      await Promise.race([entry.def.execute(parsed, ctx), abortPromise]);
+      await Promise.race([entry.def.execute(parsed, ctx), raceAbort()]);
       return { ok: true, chunks };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     } finally {
       clearTimeout(timer);
       opts?.signal?.removeEventListener("abort", callerAbortListener);
-      if (controllerAbortListener) {
-        controller.signal.removeEventListener("abort", controllerAbortListener);
-      }
     }
   };
   const {
