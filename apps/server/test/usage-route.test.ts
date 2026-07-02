@@ -189,6 +189,11 @@ describe("GET /api/usage/events", () => {
     expect(parsed[0].workflowName).toBe("smoke-test");
   });
 
+  test("200 at the limit cap boundary", async () => {
+    const res = await app.fetch(new Request("http://test/api/usage/events?limit=500"));
+    expect(res.status).toBe(200);
+  });
+
   test("400 on a limit past the 500 cap", async () => {
     const res = await app.fetch(new Request("http://test/api/usage/events?limit=100000"));
     expect(res.status).toBe(400);
