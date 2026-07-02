@@ -39,7 +39,10 @@ export interface ConversationStore {
   get(id: string): Conversation | undefined;
   list(): Conversation[];
   create(input: CreateConversationInput): Conversation;
-  appendMessage(id: string, message: Message): void;
+  // `provider`/`model` are persisted on the row but never round-tripped onto
+  // the wire `Message` type — they're server-internal provenance, not part of
+  // the chat wire schema.
+  appendMessage(id: string, message: Message, provenance?: MessageProvenance): void;
   setProviderSessionId(id: string, sessionId: string): void;
   update(id: string, patch: UpdateConversationPatch): Conversation | undefined;
   delete(id: string): boolean;
@@ -48,6 +51,14 @@ export interface ConversationStore {
   // (`totalTokens`). Backs the request-phase budget gate without loading full
   // message bodies.
   getUsageTotals(id: string): { totalTokens: number; turns: number };
+}
+
+// Provider/model provenance for one assistant row. Kept out of the wire
+// `Message` type (see appendMessage) so persisting it can't accidentally
+// widen SCHEMA_VERSION.
+export interface MessageProvenance {
+  provider?: string;
+  model?: string;
 }
 
 interface ConvRow {
@@ -214,7 +225,7 @@ export function createConversationStore(db: Database): ConversationStore {
     return groups;
   }
   const insertMsg = db.prepare(
-    "INSERT INTO messages(id, conversationId, role, content, content_parts, truncated, usage_json, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO messages(id, conversationId, role, content, content_parts, truncated, usage_json, provider, model, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   // Usage rides as JSON in usage_json, so the sum is done in JS over the
   // assistant rows rather than in SQL. Selects only the JSON column.
@@ -268,7 +279,7 @@ export function createConversationStore(db: Database): ConversationStore {
       if (input.projectId !== undefined) conv.projectId = input.projectId;
       return conv;
     },
-    appendMessage(id, message) {
+    appendMessage(id, message, provenance) {
       db.transaction(() => {
         const conv = selectConv.get(id) as ConvRow | null;
         if (!conv) return;
@@ -283,6 +294,8 @@ export function createConversationStore(db: Database): ConversationStore {
           partsJson,
           message.truncated ? 1 : 0,
           usageJson,
+          provenance?.provider ?? null,
+          provenance?.model ?? null,
           message.createdAt,
         );
         touchConv.run(new Date().toISOString(), id);

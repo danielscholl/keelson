@@ -42,6 +42,7 @@ import type { PolicyEngine } from "./policy-engine.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import type { ProjectsStore } from "./projects-store.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
+import type { UsageStore } from "./usage-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 import type { ActiveRuns } from "./workflows-handler.ts";
 import { purgeWorkflowRun } from "./workflows-handler.ts";
@@ -253,6 +254,9 @@ export interface ChatWebSocketDeps {
   // Unified policy engine. When set, the turn's tool set is gated through it
   // before reaching the provider (operator denylist + rib policies).
   policyEngine?: PolicyEngine;
+  // Optional usage ledger. When set, a turn that carries real spend records a
+  // `chat`-sourced event; undefined → capture is skipped.
+  usageStore?: UsageStore;
 }
 
 export function chatWebSocketHandlers(
@@ -303,6 +307,7 @@ export function chatWebSocketHandlers(
             ? { workflowAuthoringTools: deps.workflowAuthoringTools }
             : {}),
           ...(deps.policyEngine !== undefined ? { policyEngine: deps.policyEngine } : {}),
+          ...(deps.usageStore !== undefined ? { usageStore: deps.usageStore } : {}),
         });
       } finally {
         ws.data.chatBusy = false;
@@ -334,6 +339,9 @@ export interface ChatDeps {
   workflowAuthoringTools?: (project: { id: string; rootPath: string } | null) => ToolDefinition[];
   // Unified policy engine; gates the turn's tool set when set. See ChatWebSocketDeps.
   policyEngine?: PolicyEngine;
+  // Optional usage ledger. When set, a turn that carries real spend records a
+  // `chat`-sourced event; undefined → capture is skipped.
+  usageStore?: UsageStore;
 }
 
 // Worst-case section size is bounded at MAX_ITEMS × CONTENT_CHARS so a
@@ -428,6 +436,10 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // here and persisted on the assistant row (the chunk also streams to the
   // client so the live UI updates without a refetch).
   let turnUsage: TokenUsage | undefined;
+  // Session-side resolved model (pi et al emit a `model` MessageChunk when the
+  // requested model resolves to a concrete one server-side). Falls back to
+  // conv.model at persist time when no chunk arrived.
+  let resolvedModel: string | undefined;
 
   // Resume the stored session only when this turn runs against the SAME
   // provider that created it — a provider swap (model picker → different
@@ -636,6 +648,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       // an out-of-tree provider must not fail the turn at the strict parse.
       if (chunk.type === "model") {
         if (typeof chunk.model === "string" && chunk.model.length > 0) {
+          resolvedModel = chunk.model;
           deps.send(chunkFrame(conversationId, { type: "model", model: chunk.model }));
         }
         continue;
@@ -665,15 +678,47 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0);
     if (hasPersistable) {
       const truncated = deps.abortSignal.aborted || streamFailed;
-      deps.store.appendMessage(conversationId, {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: assistantContent,
-        ...(contentParts.length > 0 ? { contentParts } : {}),
-        ...(truncated ? { truncated: true } : {}),
-        ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
-        createdAt: new Date().toISOString(),
-      });
+      // Provider/model provenance on the row: the session-resolved model when
+      // one arrived this turn, else the conversation's pinned model — either
+      // way it reflects what the turn actually ran on, not just what was requested.
+      const effectiveModel = resolvedModel ?? conv.model;
+      deps.store.appendMessage(
+        conversationId,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: assistantContent,
+          ...(contentParts.length > 0 ? { contentParts } : {}),
+          ...(truncated ? { truncated: true } : {}),
+          ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
+          createdAt: new Date().toISOString(),
+        },
+        {
+          provider: message.providerId,
+          ...(effectiveModel !== undefined ? { model: effectiveModel } : {}),
+        },
+      );
+      // Usage ledger: only when the turn carried real spend — a context-only
+      // zero-total report or a content-only turn with no usage chunk adds
+      // nothing to any rollup, so it isn't worth an event row.
+      if (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
+        deps.usageStore?.record({
+          source: "chat",
+          provider: message.providerId,
+          model: effectiveModel ?? "unknown",
+          inputTokens: turnUsage.inputTokens,
+          outputTokens: turnUsage.outputTokens,
+          ...(turnUsage.cacheReadInputTokens !== undefined
+            ? { cacheReadTokens: turnUsage.cacheReadInputTokens }
+            : {}),
+          ...(turnUsage.cacheCreationInputTokens !== undefined
+            ? { cacheWriteTokens: turnUsage.cacheCreationInputTokens }
+            : {}),
+          status: streamFailed ? "error" : "ok",
+          conversationId,
+          ...(recallProjectId !== undefined ? { projectId: recallProjectId } : {}),
+        });
+      }
     }
     // Persist the provider session id so the next turn resumes this
     // conversation. Gated on providerMatches so a swapped-in provider's id

@@ -75,6 +75,7 @@ import {
   snapshotWebSocketHandlers,
 } from "./snapshots-handler.ts";
 import { constantTimeTokenEqual } from "./token-compare.ts";
+import { createUsageStore, type UsageStore } from "./usage-store.ts";
 import { createWorkflowAuthoringTools } from "./workflow-authoring-tools.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
 import { createWorkflowChatTools } from "./workflow-tools.ts";
@@ -248,6 +249,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // is done. A rib's coordinator uses it to fold prior decisions into a run and write
   // learnings back to the governed ledger.
   let memoryStoreRef: MemoryStore | undefined;
+  // Late-bound like the refs above: the usage store needs the database (created
+  // below), but the default runAgentTurn seam records a rib usage event lazily
+  // at turn-settle time, by which point boot is done.
+  let usageStoreRef: UsageStore | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
@@ -259,6 +264,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     getPolicyEngine: () => policyEngine,
     getWorkflowController: () => workflowControllerRef,
     getMemoryStore: () => memoryStoreRef,
+    getUsageStore: () => usageStoreRef,
     // Same cwd the heartbeat scheduler uses (repoRoot below), so a rib refresh
     // collapses onto an in-flight heartbeat run instead of racing it.
     refreshCwd: KEELSON_HOME,
@@ -296,6 +302,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const memoryStore = createMemoryStore(db);
   // Publish to the late-bound ref so RibContext.getMemory resolves once boot completes.
   memoryStoreRef = memoryStore;
+  const usageStore = createUsageStore(db);
+  // Publish to the late-bound ref so the default runAgentTurn seam can record
+  // rib-sourced usage events once boot completes.
+  usageStoreRef = usageStore;
   const projectsStore = createProjectsStore(db);
   projectsStoreRef = projectsStore;
   const projectNotebookStore = createProjectNotebookStore(db);
@@ -421,6 +431,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     memoryStore,
     projectNotebookStore,
     snapshotManager,
+    usageStore,
     ribWorkflowBindings: ribWorkflows.bindings,
     // Working dir for surface-panel refreshes (POST /:name/refresh) re-running a
     // rib collector — its node uses absolute paths, so the cwd is nominal. Kept
@@ -660,6 +671,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     workflowTools,
     workflowCatalog,
     workflowAuthoringTools,
+    usageStore,
     ...(policyEngine ? { policyEngine } : {}),
   });
   const workflowRunHandlers = workflowRunWebSocketHandlers({
