@@ -380,7 +380,7 @@ export function createUsageStore(db: Database): UsageStore {
       return rows as UsageBreakdownRowWire[];
     },
     jobs(args = {}) {
-      const clauses = ["run_id IS NOT NULL"];
+      const clauses = ["source IN ('workflow', 'rib')"];
       const params: Array<string> = [];
       if (args.sinceIso !== undefined) {
         clauses.push("ts >= ?");
@@ -389,11 +389,11 @@ export function createUsageStore(db: Database): UsageStore {
       const rows = db
         .query(
           `SELECT COALESCE(workflow_name, rib_id, source) AS key,
-                  run_id AS runId,
+                 COALESCE(run_id, printf('event:%d', id)) AS runId,
                   COALESCE(SUM(input_tokens + output_tokens), 0) AS totalTokens
              FROM usage_events
             WHERE ${clauses.join(" AND ")}
-            GROUP BY key, run_id
+            GROUP BY key, runId
             ORDER BY key ASC, totalTokens ASC`,
         )
         .all(...params) as JobRunTokensRow[];

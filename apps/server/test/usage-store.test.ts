@@ -630,7 +630,15 @@ describe("SQLite UsageStore", () => {
         model: "pi-1",
         inputTokens: 3,
         outputTokens: 7,
-        runId: "rib-run",
+        ribId: "osdu",
+      });
+      store.record({
+        ts: "2030-01-01T00:00:00.000Z",
+        source: "rib",
+        provider: "pi",
+        model: "pi-1",
+        inputTokens: 1,
+        outputTokens: 9,
         ribId: "osdu",
       });
       store.record({
@@ -644,7 +652,7 @@ describe("SQLite UsageStore", () => {
       });
       const rows = store.jobs({ sinceIso: "2025-01-01T00:00:00.000Z" });
       expect(rows).toEqual([
-        expect.objectContaining({ key: "osdu", runs: 1, totalTokens: 10 }),
+        expect.objectContaining({ key: "osdu", runs: 2, totalTokens: 20 }),
         expect.objectContaining({ key: "workflow", runs: 1, totalTokens: 10 }),
       ]);
     });
