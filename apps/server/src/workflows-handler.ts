@@ -2796,7 +2796,9 @@ function dispatchRunEvent(args: DispatchArgs): void {
             ? { cacheWriteTokens: usage.cacheCreationInputTokens }
             : {}),
           ...(durationMs !== null && Number.isFinite(durationMs) ? { durationMs } : {}),
-          status,
+          // Node statuses fold onto the ledger's turn vocabulary so one query
+          // never meets two spellings ('succeeded' vs 'ok') of the same state.
+          status: status === "succeeded" ? "ok" : status === "failed" ? "error" : status,
           runId,
           nodeId: event.nodeId,
           workflowName,
