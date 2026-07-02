@@ -37,6 +37,7 @@ let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
 let getUsageEventsImpl: typeof realApi.getUsageEvents = async () => [];
 let getUsageSeriesImpl: typeof realApi.getUsageSeries = async () => [];
 let getUsageBreakdownImpl: typeof realApi.getUsageBreakdown = async () => [];
+let getUsageJobsImpl: typeof realApi.getUsageJobs = async () => [];
 
 mock.module("../src/api.ts", () => ({
   ...realApi,
@@ -46,6 +47,7 @@ mock.module("../src/api.ts", () => ({
     getUsageSummaryImpl(...args),
   getUsageEvents: (...args: Parameters<typeof realApi.getUsageEvents>) =>
     getUsageEventsImpl(...args),
+  getUsageJobs: (...args: Parameters<typeof realApi.getUsageJobs>) => getUsageJobsImpl(...args),
   getUsageSeries: (...args: Parameters<typeof realApi.getUsageSeries>) =>
     getUsageSeriesImpl(...args),
 }));
@@ -55,6 +57,7 @@ afterAll(() => {
   getUsageEventsImpl = realApi.getUsageEvents;
   getUsageSeriesImpl = realApi.getUsageSeries;
   getUsageBreakdownImpl = realApi.getUsageBreakdown;
+  getUsageJobsImpl = realApi.getUsageJobs;
 });
 
 async function renderUsagePage() {
@@ -238,7 +241,7 @@ describe("Usage page", () => {
 
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() =>
-      expect(screen.getByText("Recurring workflow and rib spend will appear here.")).toBeDefined(),
+      expect(screen.getByText("No recurring workflow or rib spend in this window yet.")).toBeDefined(),
     );
 
     fireEvent.click(screen.getByLabelText("Ledger"));
@@ -271,5 +274,27 @@ describe("Usage page", () => {
     expect(screen.getAllByText("gpt-5.5").length).toBeGreaterThan(0);
     expect(calls).toEqual([{ window: "7d", groupBy: "source", splitBy: "model" }]);
     getUsageBreakdownImpl = async () => [];
+  });
+
+  test("renders recurring jobs table and burn bars", async () => {
+    getUsageJobsImpl = async () => [
+      {
+        key: "smoke-test",
+        runs: 3,
+        totalTokens: 1200,
+        avgTokensPerRun: 400,
+        p95TokensPerRun: 700,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() => expect(screen.getAllByText("smoke-test").length).toBeGreaterThan(0));
+    expect(screen.getByText("Avg tokens/run")).toBeDefined();
+    expect(screen.getByLabelText("Weekly burn by job")).toBeDefined();
+    getUsageJobsImpl = async () => [];
   });
 });

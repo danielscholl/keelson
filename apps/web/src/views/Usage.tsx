@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getUsageBreakdown,
   getUsageEvents,
+  getUsageJobs,
   getUsageSeries,
   getUsageSummary,
   type UsageSeriesBucket,
@@ -902,6 +903,39 @@ function FlowChart({
 }
 
 function JobsSection({ range }: { range: UsageWindow }) {
+  const [jobs, setJobs] = useState<
+    Array<{
+      key: string;
+      runs: number;
+      totalTokens: number;
+      avgTokensPerRun: number;
+      p95TokensPerRun: number;
+    }> | null
+  >(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getUsageJobs({ window: range })
+      .then((res) => {
+        if (!cancelled) setJobs([...res].sort((a, b) => b.totalTokens - a.totalTokens));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  const maxTokens = Math.max(...(jobs ?? []).map((job) => job.totalTokens), 1);
+
   return (
     <section className="surface-region usage-jobs-region">
       <div className="surface-region-head">
@@ -915,9 +949,69 @@ function JobsSection({ range }: { range: UsageWindow }) {
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
-        <div className="usage-stack-empty">
-          <span className="page-sub">Recurring workflow and rib spend will appear here.</span>
-        </div>
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load jobs</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : jobs && jobs.length > 0 ? (
+          <>
+            <div className="canvas-view-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Job</th>
+                    <th>Runs</th>
+                    <th>Avg tokens/run</th>
+                    <th>p95</th>
+                    <th>Window total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((job) => (
+                    <tr key={job.key}>
+                      <td>{job.key}</td>
+                      <td>{job.runs.toLocaleString()}</td>
+                      <td>{formatTokens(job.avgTokensPerRun)}</td>
+                      <td>{formatTokens(job.p95TokensPerRun)}</td>
+                      <td>{formatTokens(job.totalTokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="usage-burn-list" aria-label="Weekly burn by job">
+              {jobs.map((job, i) => {
+                const pct = Math.max(2, Math.round((job.totalTokens / maxTokens) * 100));
+                return (
+                  <div className="usage-burn-row" key={`${job.key}-burn`}>
+                    <span className="usage-burn-label">{job.key}</span>
+                    <span className="usage-popover-meter">
+                      <span
+                        className="usage-popover-meter-fill"
+                        style={{
+                          width: `${pct}%`,
+                          background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})`,
+                        }}
+                      />
+                    </span>
+                    <span className="usage-burn-value usage-mono">
+                      {formatTokens(job.totalTokens)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div className="usage-stack-empty">
+            <span className="page-sub">No recurring workflow or rib spend in this window yet.</span>
+          </div>
+        )}
       </div>
     </section>
   );
