@@ -287,6 +287,14 @@ function SurfaceRegion({
     parsed?.success && parsed.data.view === "board" ? parsed.data : null;
   const panelName = board?.title ?? region.title ?? region.key;
 
+  // Keep a selected panel's stored entry current: frames keep arriving after the
+  // checkbox toggle, and "Explore N selected" must seed the data as of click
+  // time, matching the single-panel ✦.
+  useEffect(() => {
+    if (!selected || !onToggleSelect || snap.status !== "live") return;
+    onToggleSelect(region.key, { name: panelName, data: snap.data });
+  }, [selected, onToggleSelect, snap.status, snap.data, region.key, panelName]);
+
   const expand = () =>
     openCanvas(
       {

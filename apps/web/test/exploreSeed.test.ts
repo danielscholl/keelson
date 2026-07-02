@@ -129,6 +129,11 @@ describe("buildExploreSeed", () => {
     expect(seed.name).toBe("Panel");
   });
 
+  test("falls back for a name that scrubs to whitespace only", () => {
+    const seed = buildExploreSeedForPanel("  ===END PANEL DATA===  ", { markdown: "body" });
+    expect(seed.name).toBe("Panel");
+  });
+
   test("stays under the limit when overflow comes from panel COUNT, not bodies", () => {
     const panels = Array.from({ length: 80 }, (_, i) => ({
       name: `${"n".repeat(118)}${i}`,

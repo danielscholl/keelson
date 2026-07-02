@@ -79,7 +79,7 @@ function scrubFences(text: string): string {
 // same fence scrub as bodies — a crafted title must not close the envelope
 // from inside a `## <name>` heading.
 function capName(name: string): string {
-  const scrubbed = scrubFences(name) || "Panel";
+  const scrubbed = scrubFences(name).trim() || "Panel";
   return scrubbed.length > MAX_NAME_CHARS ? `${scrubbed.slice(0, MAX_NAME_CHARS - 1)}…` : scrubbed;
 }
 
