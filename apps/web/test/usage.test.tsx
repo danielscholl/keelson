@@ -2,16 +2,61 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
-import { render, screen } from "@testing-library/react";
+import { afterAll, describe, expect, mock, test } from "bun:test";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { UsageChip } from "../src/components/Chat/UsageChip.tsx";
 import { UsagePopover } from "../src/components/Chat/UsagePopover.tsx";
+import * as realApi from "../src/api.ts";
 import {
   contextFillLevel,
   contextPercent,
   formatTokens,
   sumTokenSpend,
 } from "../src/lib/formatTokens.ts";
+
+mock.module("../src/hooks/useSnapshot.ts", () => ({
+  useSnapshot: () => ({
+    status: "empty",
+    data: null,
+    version: null,
+    composedAt: null,
+    reload: () => {},
+  }),
+}));
+
+let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
+  totals: {
+    events: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  },
+  groups: [],
+});
+let getUsageEventsImpl: typeof realApi.getUsageEvents = async () => [];
+let getUsageSeriesImpl: typeof realApi.getUsageSeries = async () => [];
+
+mock.module("../src/api.ts", () => ({
+  ...realApi,
+  getUsageSummary: (...args: Parameters<typeof realApi.getUsageSummary>) =>
+    getUsageSummaryImpl(...args),
+  getUsageEvents: (...args: Parameters<typeof realApi.getUsageEvents>) =>
+    getUsageEventsImpl(...args),
+  getUsageSeries: (...args: Parameters<typeof realApi.getUsageSeries>) =>
+    getUsageSeriesImpl(...args),
+}));
+
+afterAll(() => {
+  getUsageSummaryImpl = realApi.getUsageSummary;
+  getUsageEventsImpl = realApi.getUsageEvents;
+  getUsageSeriesImpl = realApi.getUsageSeries;
+});
+
+async function renderUsagePage() {
+  const { Usage } = await import("../src/views/Usage.tsx");
+  return render(<Usage />);
+}
 
 describe("formatTokens", () => {
   test("formats across magnitudes", () => {
@@ -171,5 +216,28 @@ describe("UsageChip — fabricated-zero guard", () => {
       />,
     );
     expect(screen.getByText("50%")).toBeDefined();
+  });
+});
+
+describe("Usage page", () => {
+  test("switches between usage sub-views", async () => {
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    await waitFor(() => expect(screen.getByText("Pulse")).toBeDefined());
+    expect(screen.getByRole("radiogroup", { name: "View" })).toBeDefined();
+
+    fireEvent.click(screen.getByLabelText("Models"));
+    await waitFor(() => expect(screen.getByText("Model roster")).toBeDefined());
+    expect(screen.queryByText("Pulse")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Jobs"));
+    await waitFor(() =>
+      expect(screen.getByText("Recurring workflow and rib spend will appear here.")).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Ledger"));
+    await waitFor(() => expect(screen.getByText("No events recorded in this window yet.")).toBeDefined());
   });
 });

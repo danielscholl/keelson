@@ -24,6 +24,13 @@ import { formatTokens } from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
+type UsageSubView = "overview" | "models" | "jobs" | "ledger";
+const USAGE_SUBVIEWS: Array<{ id: UsageSubView; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "models", label: "Models" },
+  { id: "jobs", label: "Jobs" },
+  { id: "ledger", label: "Ledger" },
+];
 
 // Standard clip-rect technique: keeps the native <input type="radio"> in the
 // accessibility tree and tab order while the styled <label> carries the
@@ -64,15 +71,53 @@ const FAILURE_EVENTS_LIMIT = 200;
 
 export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
+  const [subView, setSubView] = useState<UsageSubView>("overview");
   const pulse = useSnapshot(USAGE_PULSE_SNAPSHOT_KEY);
 
   return (
     <div className="page usage-page">
       <UsageHeader range={range} onRangeChange={setRange} live={pulse.status === "live"} />
-      <PulseSection range={range} pulse={pulse} />
-      <OverTimeSection range={range} />
-      <ModelRosterSection range={range} />
-      <LedgerSection range={range} />
+      <UsageViewNav value={subView} onChange={setSubView} />
+      {subView === "overview" ? (
+        <>
+          <PulseSection range={range} pulse={pulse} />
+          <OverTimeSection range={range} />
+          <FlowSection range={range} />
+          <SignalsSection range={range} />
+        </>
+      ) : subView === "models" ? (
+        <ModelRosterSection range={range} />
+      ) : subView === "jobs" ? (
+        <JobsSection range={range} />
+      ) : (
+        <LedgerSection range={range} />
+      )}
+    </div>
+  );
+}
+
+function UsageViewNav({
+  value,
+  onChange,
+}: {
+  value: UsageSubView;
+  onChange: (view: UsageSubView) => void;
+}) {
+  return (
+    <div className="layout-toggle usage-view-nav" role="radiogroup" aria-label="View">
+      {USAGE_SUBVIEWS.map((view) => (
+        <label key={view.id} className={`layout-toggle-btn${view.id === value ? " active" : ""}`}>
+          <input
+            type="radio"
+            name="usage-view"
+            value={view.id}
+            checked={view.id === value}
+            onChange={() => onChange(view.id)}
+            style={VISUALLY_HIDDEN_STYLE}
+          />
+          {view.label}
+        </label>
+      ))}
     </div>
   );
 }
@@ -692,6 +737,72 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
             <span className="page-sub">No model spend recorded in this window yet.</span>
           </div>
         )}
+      </div>
+    </section>
+  );
+}
+
+function FlowSection({ range }: { range: UsageWindow }) {
+  return (
+    <section className="surface-region usage-flow-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="info" aria-hidden="true">
+          ⇄
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Source → model flow</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        <div className="usage-stack-empty">
+          <span className="page-sub">Flow data will appear here.</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function JobsSection({ range }: { range: UsageWindow }) {
+  return (
+    <section className="surface-region usage-jobs-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="brand" aria-hidden="true">
+          ⟳
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Jobs</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        <div className="usage-stack-empty">
+          <span className="page-sub">Recurring workflow and rib spend will appear here.</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SignalsSection({ range }: { range: UsageWindow }) {
+  return (
+    <section className="surface-region usage-signals-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="caution" aria-hidden="true">
+          ◇
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Signals</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        <div className="usage-stack-empty">
+          <span className="page-sub">Deterministic usage signals will appear here.</span>
+        </div>
       </div>
     </section>
   );
