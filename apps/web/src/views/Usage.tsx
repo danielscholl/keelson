@@ -4,16 +4,37 @@
 
 import {
   USAGE_PULSE_SNAPSHOT_KEY,
+  type UsageSeriesResponseWire,
   type UsageSummaryResponseWire,
   usagePulseSnapshotSchema,
 } from "@keelson/shared";
 import { useEffect, useMemo, useState } from "react";
-import { getUsageEvents, getUsageSummary, type UsageWindow } from "../api.ts";
+import {
+  getUsageEvents,
+  getUsageSeries,
+  getUsageSummary,
+  type UsageSeriesBucket,
+  type UsageWindow,
+} from "../api.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { formatTokens } from "../lib/formatTokens.ts";
 
 const WINDOWS: UsageWindow[] = ["24h", "7d", "30d"];
 const WINDOW_LABEL: Record<UsageWindow, string> = { "24h": "24h", "7d": "7d", "30d": "30d" };
+
+// The series chart buckets hourly for the 24h window (24 points) and daily
+// for the wider windows (7 or 30 points) — a finer bucket than a day would
+// crowd 30 points into unreadable slivers.
+const SERIES_BUCKET: Record<UsageWindow, UsageSeriesBucket> = {
+  "24h": "hour",
+  "7d": "day",
+  "30d": "day",
+};
+
+// The validated categorical series palette (see app.css --s1..--s6): cycled
+// by model index so the stack and legend agree regardless of how many
+// distinct models appear in the window.
+const SERIES_COLOR_COUNT = 6;
 
 // Statuses that count as spend without a kept result — the failure-burn tile
 // sums these. usage/summary has no status dimension (its groups are by
@@ -31,6 +52,7 @@ export function Usage() {
     <div className="page usage-page">
       <UsageHeader range={range} onRangeChange={setRange} live={pulse.status === "live"} />
       <PulseSection range={range} pulse={pulse} />
+      <OverTimeSection range={range} />
     </div>
   );
 }
@@ -288,5 +310,242 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
       </svg>
       <span className="usage-pulse-now usage-mono">{formatTokens(last)} tok/min</span>
     </div>
+  );
+}
+
+interface StackBucket {
+  iso: string;
+  values: number[];
+  total: number;
+}
+
+// Pivots the flat series rows (one row per bucket × model) into per-bucket
+// stacks, in first-seen model order — that order also drives the palette
+// index and the legend, so a model keeps the same color across buckets.
+function pivotSeries(rows: UsageSeriesResponseWire): { models: string[]; buckets: StackBucket[] } {
+  const models: string[] = [];
+  const modelIndex = new Map<string, number>();
+  const bucketsByIso = new Map<string, StackBucket>();
+  const bucketOrder: string[] = [];
+
+  for (const row of rows) {
+    let idx = modelIndex.get(row.key);
+    if (idx === undefined) {
+      idx = models.length;
+      modelIndex.set(row.key, idx);
+      models.push(row.key);
+    }
+    let bucket = bucketsByIso.get(row.bucketIso);
+    if (!bucket) {
+      bucket = { iso: row.bucketIso, values: [], total: 0 };
+      bucketsByIso.set(row.bucketIso, bucket);
+      bucketOrder.push(row.bucketIso);
+    }
+    const tokens = row.inputTokens + row.outputTokens;
+    bucket.values[idx] = (bucket.values[idx] ?? 0) + tokens;
+    bucket.total += tokens;
+  }
+
+  bucketOrder.sort();
+  const buckets = bucketOrder.map((iso) => {
+    const b = bucketsByIso.get(iso);
+    if (!b) throw new Error(`missing bucket ${iso}`);
+    const values = models.map((_, i) => b.values[i] ?? 0);
+    return { iso, values, total: b.total };
+  });
+  return { models, buckets };
+}
+
+function formatBucketLabel(iso: string, bucket: UsageSeriesBucket): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return bucket === "hour"
+    ? d.toLocaleTimeString([], { hour: "numeric" })
+    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+// A "nice" y-axis ceiling (1/2/5 × 10^n) so grid labels read like 2.5M
+// rather than an arbitrary max-of-data fraction.
+function niceCeiling(max: number): number {
+  if (max <= 0) return 1;
+  const exp = Math.floor(Math.log10(max));
+  const base = 10 ** exp;
+  for (const step of [1, 2, 2.5, 5, 10]) {
+    const candidate = step * base;
+    if (candidate >= max) return candidate;
+  }
+  return 10 * base;
+}
+
+function OverTimeSection({ range }: { range: UsageWindow }) {
+  const [series, setSeries] = useState<UsageSeriesResponseWire | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const bucket = SERIES_BUCKET[range];
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getUsageSeries({ window: range, groupBy: "model", bucket })
+      .then((rows) => {
+        if (cancelled) return;
+        setSeries(rows);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range, bucket]);
+
+  const pivoted = useMemo(() => (series ? pivotSeries(series) : null), [series]);
+  const hasData = !!pivoted && pivoted.buckets.some((b) => b.total > 0);
+
+  return (
+    <section className="surface-region usage-stack-region">
+      <div className="surface-region-head">
+        <span className="surface-region-glyph-chip" data-tone="brand" aria-hidden="true">
+          ▤
+        </span>
+        <span className="surface-region-identity">
+          <span className="surface-region-title">Over time</span>
+        </span>
+        <span className="surface-region-spacer" />
+        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
+      </div>
+      <div className="surface-region-body">
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load usage series</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : pivoted && hasData ? (
+          <StackChart models={pivoted.models} buckets={pivoted.buckets} bucket={bucket} />
+        ) : (
+          <div className="usage-stack-empty">
+            <span className="page-sub">No token spend recorded in this window yet.</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function StackChart({
+  models,
+  buckets,
+  bucket,
+}: {
+  models: string[];
+  buckets: StackBucket[];
+  bucket: UsageSeriesBucket;
+}) {
+  const width = 960;
+  const height = 300;
+  const padL = 46;
+  const padR = 8;
+  const padT = 12;
+  const padB = 26;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+
+  const rawMax = Math.max(...buckets.map((b) => b.total), 0);
+  const ymax = niceCeiling(rawMax * 1.05);
+
+  const groupW = plotW / buckets.length;
+  const barW = Math.min(58, groupW * 0.52);
+
+  // Cap x-axis labels to roughly 8 so hourly (24-point) and 30-day series
+  // don't collide into an unreadable smear of overlapping text.
+  const labelStride = Math.max(1, Math.ceil(buckets.length / 8));
+
+  const gridLines = [0, 1, 2, 3, 4].map((t) => {
+    const value = (t * ymax) / 4;
+    const y = padT + plotH - (value / ymax) * plotH;
+    return { value, y };
+  });
+
+  return (
+    <>
+      <svg
+        className="usage-stack-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Tokens over time by model, bucketed by ${bucket}`}
+      >
+        {gridLines.map(({ value, y }) => (
+          <g key={value}>
+            <line className="usage-grid-line" x1={padL} x2={width - padR} y1={y} y2={y} />
+            <text className="usage-axis-label" x={padL - 8} y={y + 3} textAnchor="end">
+              {value ? formatTokens(value) : "0"}
+            </text>
+          </g>
+        ))}
+        {buckets.map((b, d) => {
+          const xc = padL + groupW * d + groupW / 2;
+          let cum = 0;
+          let topIdx = -1;
+          b.values.forEach((v, j) => {
+            if (v > 0) topIdx = j;
+          });
+          return (
+            <g key={b.iso}>
+              {b.values.map((v, j) => {
+                if (v <= 0) return null;
+                const h = (v / ymax) * plotH;
+                const yTop = padT + plotH - ((cum + v) / ymax) * plotH;
+                cum += v;
+                const gh = Math.max(1, h - 2);
+                const color = `var(--s${(j % SERIES_COLOR_COUNT) + 1})`;
+                if (j === topIdx) {
+                  const r = 4;
+                  const x = xc - barW / 2;
+                  const w = barW;
+                  const path = `M ${x} ${yTop + gh} L ${x} ${yTop + r} Q ${x} ${yTop} ${x + r} ${yTop} L ${x + w - r} ${yTop} Q ${x + w} ${yTop} ${x + w} ${yTop + r} L ${x + w} ${yTop + gh} Z`;
+                  return <path key={models[j]} className="usage-seg-rect" d={path} fill={color} />;
+                }
+                return (
+                  <rect
+                    key={models[j]}
+                    className="usage-seg-rect"
+                    x={xc - barW / 2}
+                    y={yTop}
+                    width={barW}
+                    height={gh}
+                    fill={color}
+                  />
+                );
+              })}
+              {d % labelStride === 0 && (
+                <text className="usage-axis-label" x={xc} y={height - 8} textAnchor="middle">
+                  {formatBucketLabel(b.iso, bucket)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="usage-legend">
+        {models.map((m, i) => (
+          <span className="usage-legend-item" key={m}>
+            <span
+              className="usage-sdot"
+              style={{ background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})` }}
+            />
+            {m}
+          </span>
+        ))}
+      </div>
+    </>
   );
 }
