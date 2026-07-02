@@ -166,6 +166,55 @@ describe("GatewayProvider.sendQuery", () => {
     });
   });
 
+  it("maps positive cached prompt tokens without double-counting reasoning tokens", async () => {
+    const usageLine = JSON.stringify({
+      choices: [{ delta: {} }],
+      usage: {
+        prompt_tokens: 11,
+        completion_tokens: 7,
+        prompt_tokens_details: { cached_tokens: 4 },
+        completion_tokens_details: { reasoning_tokens: 3 },
+      },
+    });
+    const { fn } = mockFetch(() => sse(chunk({ content: "x" }), usageLine, "[DONE]"));
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "http://h/v1",
+      getApiKey: noKey,
+      model: "m",
+      fetchImpl: fn,
+    });
+    const chunks = await collect(p.sendQuery("q", "/tmp"));
+    expect(chunks).toContainEqual({
+      type: "usage",
+      usage: { inputTokens: 11, outputTokens: 7, cacheReadInputTokens: 4 },
+    });
+  });
+
+  it("omits zero cached prompt tokens from usage chunks", async () => {
+    const usageLine = JSON.stringify({
+      choices: [{ delta: {} }],
+      usage: {
+        prompt_tokens: 11,
+        completion_tokens: 7,
+        prompt_tokens_details: { cached_tokens: 0 },
+      },
+    });
+    const { fn } = mockFetch(() => sse(chunk({ content: "x" }), usageLine, "[DONE]"));
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "http://h/v1",
+      getApiKey: noKey,
+      model: "m",
+      fetchImpl: fn,
+    });
+    const chunks = await collect(p.sendQuery("q", "/tmp"));
+    expect(chunks).toContainEqual({
+      type: "usage",
+      usage: { inputTokens: 11, outputTokens: 7 },
+    });
+  });
+
   it("omits Authorization when keyless and sends Bearer when a key is set", async () => {
     const keyless = mockFetch(() => sse("[DONE]"));
     await collect(
