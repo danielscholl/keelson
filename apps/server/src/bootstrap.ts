@@ -282,11 +282,16 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
   };
+  const crossRibGrants = parseCrossRibGrants(process.env.KEELSON_CROSS_RIB_GRANTS);
+  const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
   // The CLI-backed agent-turn seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
   const runAgentTurn =
     options.runAgentTurn ??
     makeRibAgentTurn({
+      getToolOwner: (name) => toolIndex.get(name)?.ribId,
+      isTurnToolGranted: (caller, target, name) =>
+        isCrossRibGrantAllowed(crossRibGrants, caller, target, name),
       ...(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {}),
       ...(options.getUsageStore ? { getUsageStore: options.getUsageStore } : {}),
     });
@@ -380,11 +385,9 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     options.getProviders ??
     ((): readonly RibProviderInfo[] =>
       getProviderInfoList().map((p) => ({ id: p.id, displayName: p.displayName })));
-  const crossRibGrants = parseCrossRibGrants(process.env.KEELSON_CROSS_RIB_GRANTS);
   const callTimeoutMs = parseCrossRibCallTimeoutMs(
     process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS,
   );
-  const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
   const defaultCallCwd = refreshCwd ?? process.cwd();
   const callTool = async (
     callerRibId: string,

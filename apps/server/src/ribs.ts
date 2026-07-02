@@ -170,6 +170,7 @@ export interface ApplyRibsOptions {
     targetRibId: string,
     name: string,
     args: unknown,
+    opts?: { signal?: AbortSignal; timeoutMs?: number },
   ) => Promise<CallToolResult>;
 }
 
@@ -317,8 +318,12 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         : {}),
       ...(opts.callTool
         ? {
-            callTool: (targetRibId: string, name: string, args: unknown) =>
-              opts.callTool!(rib.id, targetRibId, name, args),
+            callTool: (
+              targetRibId: string,
+              name: string,
+              args: unknown,
+              o?: { signal?: AbortSignal; timeoutMs?: number },
+            ) => opts.callTool!(rib.id, targetRibId, name, args, o),
           }
         : {}),
     };
