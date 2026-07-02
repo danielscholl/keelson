@@ -420,12 +420,14 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     const chunks: MessageChunk[] = [];
     let abortReason: "caller" | "timeout" = "timeout";
     const callerAbortListener = () => {
+      if (controller.signal.aborted) return;
       abortReason = "caller";
       controller.abort();
     };
     if (opts?.signal?.aborted) callerAbortListener();
     else opts?.signal?.addEventListener("abort", callerAbortListener, { once: true });
     const timer = setTimeout(() => {
+      if (controller.signal.aborted) return;
       abortReason = "timeout";
       controller.abort();
     }, timeoutMs);
