@@ -244,7 +244,10 @@ export async function resolveDefaultBranch(repoPath: string): Promise<string | n
   const hasOrigin = await runGit(["remote", "get-url", "origin"], repoPath);
   if (hasOrigin.exitCode !== 0) return null;
 
-  const originHead = await runGit(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], repoPath);
+  const originHead = await runGit(
+    ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+    repoPath,
+  );
   if (originHead.exitCode === 0) {
     const ref = originHead.stdout.trim().replace(/^refs\/remotes\//, "");
     if (ref.length > 0) return ref;

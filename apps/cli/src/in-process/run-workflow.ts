@@ -305,7 +305,12 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         );
       }
       try {
-        const created = await createWorktree({ repoPath: repoRoot, branch, dest, base: base ?? undefined });
+        const created = await createWorktree({
+          repoPath: repoRoot,
+          branch,
+          dest,
+          base: base ?? undefined,
+        });
         effectiveCwd = created.worktreePath;
         cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
         const deps = await ensureWorktreeDeps({

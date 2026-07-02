@@ -21,9 +21,9 @@ import {
   listWorktrees,
   NotAGitRepoError,
   removeWorktree,
-  resolveDefaultBranch,
   repoPathFromWorktree,
   resolveBranchTemplate,
+  resolveDefaultBranch,
   WorktreeCreationError,
   worktreePathForRepoLocal,
 } from "../src/worktree.ts";
