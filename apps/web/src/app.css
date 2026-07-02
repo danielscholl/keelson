@@ -8690,6 +8690,75 @@ a.cvb-card-title::after {
 .usage-popover-meter.warn .usage-popover-meter-fill { background: var(--yellow); }
 .usage-popover-meter.hot .usage-popover-meter-fill { background: var(--red); }
 
+/* Usage page — Pulse section. Reuses .layout-toggle for the window control
+   and .surface-region-live for the header live dot rather than inventing new
+   segmented-control/dot idioms. */
+.usage-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.usage-mono { font-family: var(--font-mono, ui-monospace, monospace); }
+
+.usage-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.usage-stat {
+  min-width: 120px;
+}
+.usage-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg-strong);
+}
+.usage-stat-value[data-tone="ok"] { color: var(--green); }
+.usage-stat-value[data-tone="hot"] { color: var(--red); }
+.usage-stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.usage-stat-sub {
+  font-size: 11px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+
+.usage-pulse-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.usage-pulse-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.usage-pulse-svg {
+  max-width: 560px;
+  flex: 1 1 auto;
+  height: 44px;
+}
+.usage-pulse-now {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-strong);
+  white-space: nowrap;
+}
+.usage-pulse-dot {
+  animation: workflow-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .usage-pulse-dot { animation: none; }
+}
+
 /* Workflow surfaces: per-node tokens in the trace head, run rollup in the
    header. Both reuse the muted monospace voice of .dur / .duration. */
 .trace-usage { white-space: nowrap; }
