@@ -41,7 +41,12 @@ interface OpenAiDelta {
 
 interface OpenAiStreamEvent {
   choices?: Array<{ delta?: OpenAiDelta }>;
-  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+  usage?: {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    prompt_tokens_details?: { cached_tokens?: unknown };
+    completion_tokens_details?: { reasoning_tokens?: unknown };
+  };
 }
 
 function errMessage(err: unknown): string {
@@ -71,9 +76,15 @@ function sseDataPayload(rawEvent: string): string | null {
   return dataLines.length > 0 ? dataLines.join("\n") : null;
 }
 
+type GatewayUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens?: number;
+};
+
 type ParsedSseEvent = {
   chunks: MessageChunk[];
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: GatewayUsage;
 };
 
 // Parse one event payload's JSON into message chunks. A non-JSON payload yields
@@ -232,7 +243,7 @@ export class GatewayProvider implements IAgentProvider {
     // multi-line `data:` events are reassembled rather than parsed per-fragment.
     const boundary = /\r?\n\r?\n/;
     let buffer = "";
-    let usage: { inputTokens: number; outputTokens: number } | undefined;
+    let usage: GatewayUsage | undefined;
     let finished = false;
     try {
       while (!finished) {
