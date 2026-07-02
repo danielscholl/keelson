@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import {
   RIBS_VERSION_SNAPSHOT_KEY,
+  type RibActionResponse,
   type RibSummary,
   type RibSurfaceDescriptor,
 } from "@keelson/shared";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import * as realApi from "../src/api.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
 
 // Stub the snapshot hook (not api.ts/ws.ts) so this file's mocks don't collide
@@ -50,6 +52,16 @@ mock.module("../src/hooks/useWorkflowTrigger.ts", () => ({
   }),
 }));
 
+const postRibActionCalls: Array<{ ribId: string; action: unknown }> = [];
+let postRibActionResult: RibActionResponse = { ok: true };
+mock.module("../src/api.ts", () => ({
+  ...realApi,
+  postRibAction: async (ribId: string, action: unknown) => {
+    postRibActionCalls.push({ ribId, action });
+    return postRibActionResult;
+  },
+}));
+
 let ribSummaries: RibSummary[] = [];
 mock.module("../src/hooks/useRibs.ts", () => ({
   useRibs: () => ({ status: "ready", ribs: ribSummaries, error: null, refresh: () => {} }),
@@ -72,11 +84,14 @@ function live(key: string, data: unknown) {
   snapStates[key] = { status: "live", data };
 }
 
-function renderSurface(descriptor: RibSurfaceDescriptor) {
+function renderSurface(
+  descriptor: RibSurfaceDescriptor,
+  opts?: { onOpenSurface?: (surfaceId: string, regionKey?: string) => void },
+) {
   return render(
     <RibsProvider>
       <CanvasProvider>
-        <Surface descriptor={descriptor} />
+        <Surface descriptor={descriptor} onOpenSurface={opts?.onOpenSurface} />
       </CanvasProvider>
     </RibsProvider>,
   );
@@ -89,6 +104,8 @@ beforeEach(() => {
   triggerCalls.length = 0;
   triggerRunning = false;
   triggerError = null;
+  postRibActionCalls.length = 0;
+  postRibActionResult = { ok: true };
   ribSummaries = [];
 });
 
@@ -457,6 +474,43 @@ describe("Surface", () => {
     });
     const btn = screen.getByRole("button", { name: "Reconcile" });
     expect(btn).toHaveProperty("disabled", false);
+  });
+
+  test("a region board action can open another surface and carries its region key", async () => {
+    live("rib:demo:cluster", {
+      view: "board",
+      title: "Cluster",
+      sections: [{ kind: "actions", items: [{ type: "open-room", label: "Open room" }] }],
+    });
+    postRibActionResult = {
+      ok: true,
+      data: {
+        effect: "open-surface",
+        surfaceId: "surface:chamber:rooms",
+        regionKey: "rib:chamber:room-7",
+      },
+    };
+    const surfaces: Array<{ surfaceId: string; regionKey?: string }> = [];
+    const { container } = renderSurface(
+      {
+        id: "cimpl",
+        title: "CIMPL",
+        layout: { rows: [{ columns: [{ key: "rib:demo:cluster" }] }] },
+      },
+      { onOpenSurface: (surfaceId, regionKey) => surfaces.push({ surfaceId, regionKey }) },
+    );
+
+    expect(container.querySelector(".surface-region")?.getAttribute("data-region-key")).toBe(
+      "rib:demo:cluster",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open room" }));
+
+    await waitFor(() =>
+      expect(surfaces).toEqual([
+        { surfaceId: "surface:chamber:rooms", regionKey: "rib:chamber:room-7" },
+      ]),
+    );
+    expect(postRibActionCalls).toEqual([{ ribId: "demo", action: { type: "open-room" } }]);
   });
 
   test("renders the surface title and subtitle as a page-identity slot", () => {
