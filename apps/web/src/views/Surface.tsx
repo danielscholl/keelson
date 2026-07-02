@@ -28,6 +28,7 @@ import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 import {
   buildExploreSeedForPanel,
   type ExploreHandler,
+  type ExplorePanel,
   OPENING_PROMPT,
 } from "../lib/exploreSeed.ts";
 
@@ -166,10 +167,14 @@ function groupRowsByZone(
 function SurfaceRegion({
   region,
   onExplore,
+  selected,
+  onToggleSelect,
   onLaunchWorkflow,
 }: {
   region: Region;
   onExplore?: ExploreHandler;
+  selected?: boolean;
+  onToggleSelect?: (key: string, panel: ExplorePanel | null) => void;
   onLaunchWorkflow?: LaunchWorkflow;
 }) {
   const collapsible = region.collapsible ?? false;
@@ -247,6 +252,7 @@ function SurfaceRegion({
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
     parsed?.success && parsed.data.view === "board" ? parsed.data : null;
+  const panelName = board?.title ?? region.title ?? region.key;
 
   const expand = () =>
     openCanvas(
@@ -324,16 +330,27 @@ function SurfaceRegion({
         <button
           type="button"
           className="surface-region-action surface-region-icon"
-          onClick={() =>
-            onExplore(
-              buildExploreSeedForPanel(board?.title ?? region.title ?? region.key, snap.data),
-            )
-          }
+          onClick={() => onExplore(buildExploreSeedForPanel(panelName, snap.data))}
           aria-label="Explore in chat"
           title="Explore this in chat"
         >
           <span aria-hidden="true">✦</span>
         </button>
+      )}
+      {snap.status === "live" && onToggleSelect && (
+        <input
+          type="checkbox"
+          className="surface-region-action surface-region-select"
+          checked={selected ?? false}
+          onChange={(event) =>
+            onToggleSelect(
+              region.key,
+              event.currentTarget.checked ? { name: panelName, data: snap.data } : null,
+            )
+          }
+          aria-label="Select panel for multi-panel explore"
+          title="Select for multi-panel explore"
+        />
       )}
       <button
         type="button"
