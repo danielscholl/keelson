@@ -476,7 +476,7 @@ nodes:
     bash: |
       set -uo pipefail
 
-      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | grep -oE '[0-9]+' | head -1)
       if [ -z "$PR_NUM" ]; then
        PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null | grep -oE '[0-9]+' | head -1)
        if [ -n "$PR_NUM" ]; then
