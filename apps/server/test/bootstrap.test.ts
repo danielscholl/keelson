@@ -38,13 +38,15 @@ import {
   bootstrapPromptHandler,
   bootstrapProviders,
   bootstrapRibs,
+  isCrossRibGrantAllowed,
+  parseCrossRibGrants,
   parsePromptTimeoutMs,
   parseToolDenylist,
   registerRibTools,
 } from "../src/bootstrap.ts";
 import type { MemoryStore } from "../src/memory-store.ts";
 import { discoverRibs } from "../src/rib-discovery.ts";
-import { parseRibList } from "../src/ribs.ts";
+import { applyRibs, parseRibList } from "../src/ribs.ts";
 
 describe("parseRibList", () => {
   test("unset returns an empty list (no ribs loaded by default)", () => {
@@ -72,6 +74,66 @@ describe("parseRibList", () => {
   test("drops empty entries between commas", () => {
     expect(parseRibList("cimpl,,osdu")).toEqual(["cimpl", "osdu"]);
     expect(parseRibList(",cimpl,")).toEqual(["cimpl"]);
+  });
+});
+
+describe("parseCrossRibGrants", () => {
+  function entries(raw: string | undefined) {
+    return Array.from(parseCrossRibGrants(raw), ([caller, targets]) => [
+      caller,
+      Array.from(targets, ([target, tools]) => [target, [...tools].sort()]),
+    ]);
+  }
+
+  test("unset or empty grants no cross-rib access", () => {
+    expect(entries(undefined)).toEqual([]);
+    expect(entries("")).toEqual([]);
+    expect(entries("   ")).toEqual([]);
+  });
+
+  test("parses caller target tool triples", () => {
+    expect(entries("caller:provider:probe_tool,other_tool;caller2:target:third_tool")).toEqual([
+      [
+        "caller",
+        [
+          [
+            "provider",
+            ["other_tool", "probe_tool"],
+          ],
+        ],
+      ],
+      [
+        "caller2",
+        [
+          [
+            "target",
+            ["third_tool"],
+          ],
+        ],
+      ],
+    ]);
+  });
+
+  test("trims whitespace and ignores empty or malformed segments", () => {
+    expect(entries(" caller : provider : probe_tool , ; ; bad ; a:b:c:d ")).toEqual([
+      [
+        "caller",
+        [
+          [
+            "provider",
+            ["probe_tool"],
+          ],
+        ],
+      ],
+    ]);
+  });
+
+  test("supports target-wide wildcard sugar", () => {
+    const grants = parseCrossRibGrants("caller:provider:*");
+
+    expect(isCrossRibGrantAllowed(grants, "caller", "provider", "probe_tool")).toBe(true);
+    expect(isCrossRibGrantAllowed(grants, "caller", "other", "probe_tool")).toBe(false);
+    expect(isCrossRibGrantAllowed(grants, "other", "provider", "probe_tool")).toBe(false);
   });
 });
 
@@ -643,6 +705,27 @@ describe("bootstrapRibs", () => {
       // alpha activates first and claims shared_tool; beta's copy is skipped.
       expect(tools.map((t) => t.name)).toEqual(["alpha_one", "shared_tool", "beta_one"]);
       expect(manifests.find((m) => m.id === "beta")?.registered).toEqual(["beta_one"]);
+    });
+
+    test("binds collected tool ownership to the registering rib id", () => {
+      const result = applyRibs({
+        active: ["alpha", "beta"],
+        available: {
+          alpha: fakeRib("alpha", ["alpha_one"]),
+          beta: fakeRib("beta", ["beta_one"]),
+        },
+        ctx: {
+          getExec: () => ({
+            runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+            runText: async () => ({ ok: true as const, data: "" }),
+          }),
+        },
+      });
+
+      expect(Array.from(result.toolOwners.entries()).sort()).toEqual([
+        ["alpha_one", "alpha"],
+        ["beta_one", "beta"],
+      ]);
     });
 
     test("registerRibTools exposes a rib's tools through getRegisteredTools", async () => {
