@@ -26,6 +26,7 @@ import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
 import {
+  buildExploreSeed,
   buildExploreSeedForPanel,
   type ExploreHandler,
   type ExplorePanel,
@@ -69,6 +70,23 @@ export function Surface({
   onLaunchWorkflow?: LaunchWorkflow;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
+  const [selected, setSelected] = useState<Map<string, ExplorePanel>>(() => new Map());
+  const onToggleSelect = useCallback((key: string, panel: ExplorePanel | null) => {
+    setSelected((current) => {
+      const next = new Map(current);
+      if (panel) {
+        next.set(key, panel);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  }, []);
+  const exploreSelected = useCallback(() => {
+    if (!onExplore || selected.size === 0) return;
+    onExplore(buildExploreSeed([...selected.values()]));
+    setSelected(new Map());
+  }, [onExplore, selected]);
   // A projectScoped surface carries the shared project chip in its header, wired to
   // the owning rib's select-project action; derive the rib id from a region key
   // (every region key is rib-namespaced).
@@ -93,6 +111,13 @@ export function Surface({
           )}
         </header>
       )}
+      {onExplore && selected.size > 0 && (
+        <div className="surface-selection-bar">
+          <button type="button" className="surface-region-action" onClick={exploreSelected}>
+            Explore {selected.size} selected
+          </button>
+        </div>
+      )}
       {/* Role-prefixed keys so a region remounts (re-reads its initial collapsed
           flag) if the descriptor swaps it for a different one at this slot. */}
       {header && (
@@ -100,6 +125,8 @@ export function Surface({
           key={`header:${header.key}`}
           region={header}
           onExplore={onExplore}
+          selected={selected.has(header.key)}
+          onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
         />
       )}
@@ -108,6 +135,8 @@ export function Surface({
           key={`banner:${banner.key}`}
           region={banner}
           onExplore={onExplore}
+          selected={selected.has(banner.key)}
+          onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
         />
       )}
@@ -125,6 +154,8 @@ export function Surface({
                   key={col.key}
                   region={col}
                   onExplore={onExplore}
+                  selected={selected.has(col.key)}
+                  onToggleSelect={onExplore ? onToggleSelect : undefined}
                   onLaunchWorkflow={onLaunchWorkflow}
                 />
               ))}
@@ -137,6 +168,8 @@ export function Surface({
           key={`footer:${footer.key}`}
           region={footer}
           onExplore={onExplore}
+          selected={selected.has(footer.key)}
+          onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
         />
       )}
