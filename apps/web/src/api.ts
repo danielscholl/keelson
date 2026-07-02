@@ -56,6 +56,15 @@ import {
   snapshotFrameSchema,
   startWorkflowRunResponseSchema,
   type UpdateProjectBody,
+  type UsageBreakdownResponseWire,
+  type UsageEventSourceWire,
+  type UsageEventsResponseWire,
+  type UsageSeriesResponseWire,
+  type UsageSummaryResponseWire,
+  usageBreakdownResponseSchema,
+  usageEventsResponseSchema,
+  usageSeriesResponseSchema,
+  usageSummaryResponseSchema,
   type WorkflowDetail,
   type WorkflowRunDetail,
   type WorkflowRunSummary,
@@ -608,6 +617,91 @@ export async function postRibAction(id: string, action: RibAction): Promise<RibA
       body: JSON.stringify(action),
       errorBody: "json-error",
     }),
+  );
+}
+
+// === Usage ==================================================================
+
+export type UsageWindow = "24h" | "7d" | "30d";
+export type UsageGroupBy = "model" | "provider" | "source" | "rib" | "workflow";
+export type UsageSeriesBucket = "hour" | "day";
+
+function buildUsageQuery(query: Record<string, string | number | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined) continue;
+    params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export interface UsageSummaryQuery {
+  window?: UsageWindow;
+  groupBy?: UsageGroupBy;
+}
+
+export async function getUsageSummary(
+  query: UsageSummaryQuery = {},
+): Promise<UsageSummaryResponseWire> {
+  const qs = buildUsageQuery({ window: query.window, groupBy: query.groupBy });
+  return usageSummaryResponseSchema.parse(
+    await apiRequest<unknown>(`/api/usage/summary${qs}`, { label: "/api/usage/summary" }),
+  );
+}
+
+export interface UsageSeriesQuery {
+  window?: UsageWindow;
+  groupBy?: UsageGroupBy;
+  bucket?: UsageSeriesBucket;
+}
+
+export async function getUsageSeries(
+  query: UsageSeriesQuery = {},
+): Promise<UsageSeriesResponseWire> {
+  const qs = buildUsageQuery({
+    window: query.window,
+    groupBy: query.groupBy,
+    bucket: query.bucket,
+  });
+  return usageSeriesResponseSchema.parse(
+    await apiRequest<unknown>(`/api/usage/series${qs}`, { label: "/api/usage/series" }),
+  );
+}
+
+export interface UsageBreakdownQuery {
+  window?: UsageWindow;
+}
+
+export async function getUsageBreakdown(
+  query: UsageBreakdownQuery = {},
+): Promise<UsageBreakdownResponseWire> {
+  const qs = buildUsageQuery({ window: query.window });
+  return usageBreakdownResponseSchema.parse(
+    await apiRequest<unknown>(`/api/usage/breakdown${qs}`, { label: "/api/usage/breakdown" }),
+  );
+}
+
+export interface UsageEventsQuery {
+  window?: UsageWindow;
+  limit?: number;
+  source?: UsageEventSourceWire;
+  model?: string;
+  status?: string;
+}
+
+export async function getUsageEvents(
+  query: UsageEventsQuery = {},
+): Promise<UsageEventsResponseWire> {
+  const qs = buildUsageQuery({
+    window: query.window,
+    limit: query.limit,
+    source: query.source,
+    model: query.model,
+    status: query.status,
+  });
+  return usageEventsResponseSchema.parse(
+    await apiRequest<unknown>(`/api/usage/events${qs}`, { label: "/api/usage/events" }),
   );
 }
 
