@@ -148,7 +148,8 @@ export function buildExploreSeed(panels: ExplorePanel[]): ChatSeed {
     `wants more detail or fresher data, call the available tools.`;
   let omitted = 0;
   const assemble = () => {
-    const note = omitted > 0 ? `\n\n…(${omitted} more panel${omitted === 1 ? "" : "s"} omitted)` : "";
+    const note =
+      omitted > 0 ? `\n\n…(${omitted} more panel${omitted === 1 ? "" : "s"} omitted)` : "";
     return `${directive}\n\n${FENCE_OPEN}\n${renderedPanels
       .map((panel) => `## ${panel.name}\n\n${panel.body}`)
       .join("\n\n")}${note}\n${FENCE_CLOSE}`;
