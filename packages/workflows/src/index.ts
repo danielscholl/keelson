@@ -116,6 +116,7 @@ export {
   type EnsureWorktreeDepsResult,
   ensureWorktreeDeps,
   gitToplevel,
+  headDivergesFrom,
   isGitRepo,
   listWorktrees,
   NotAGitRepoError,
@@ -124,6 +125,7 @@ export {
   removeWorktree,
   repoPathFromWorktree,
   resolveBranchTemplate,
+  resolveDefaultBranch,
   WorktreeCreationError,
   worktreePathForRepoLocal,
 } from "./worktree.ts";
