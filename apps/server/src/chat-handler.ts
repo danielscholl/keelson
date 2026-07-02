@@ -610,6 +610,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
     }
   }
 
+  const turnStart = Date.now();
   try {
     for await (const chunk of provider.sendQuery(message.prompt, cwd, resumeSessionId, {
       model: message.model ?? conv.model,
@@ -702,6 +703,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
       // zero-total report or a content-only turn with no usage chunk adds
       // nothing to any rollup, so it isn't worth an event row.
       if (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
+        const durationMs = Date.now() - turnStart;
         deps.usageStore?.record({
           source: "chat",
           provider: message.providerId,
@@ -714,6 +716,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
           ...(turnUsage.cacheCreationInputTokens !== undefined
             ? { cacheWriteTokens: turnUsage.cacheCreationInputTokens }
             : {}),
+          ...(Number.isFinite(durationMs) ? { durationMs } : {}),
           status: streamFailed ? "error" : "ok",
           conversationId,
           ...(recallProjectId !== undefined ? { projectId: recallProjectId } : {}),
