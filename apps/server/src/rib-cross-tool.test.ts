@@ -8,6 +8,7 @@ import type {
   MessageChunk,
   Rib,
   RibContext,
+  ToolContext,
   ToolDefinition,
 } from "@keelson/shared";
 import { z } from "zod";
@@ -43,13 +44,16 @@ function policyEngine(
   };
 }
 
-function tool(name: string, onExecute: (ctx: { emit: (chunk: MessageChunk) => void }) => void) {
+function tool(
+  name: string,
+  onExecute: (ctx: Pick<ToolContext, "abortSignal" | "emit">) => void | Promise<void>,
+) {
   return {
     name,
     description: name,
     inputSchema: z.object({}).strict(),
     execute: async (_input, ctx) => {
-      onExecute(ctx);
+      await onExecute(ctx);
     },
   } satisfies ToolDefinition;
 }
@@ -199,5 +203,101 @@ describe("cross-rib callTool", () => {
 
     expect(result.ok).toBe(false);
     expect(executed).toBe(0);
+  });
+
+  test("times out a never-resolving target tool", async () => {
+    process.env.KEELSON_CROSS_RIB_GRANTS = "caller:provider:probe_tool";
+    const callTool = await bootWithCaller({
+      provider: providerRib("provider", [
+        tool("probe_tool", async () => {
+          await new Promise(() => {});
+        }),
+      ]),
+    });
+
+    const result = await callTool("provider", "probe_tool", {}, { timeoutMs: 5 });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "cross-rib call 'caller' -> 'provider:probe_tool' timed out after 5ms",
+    });
+  });
+
+  test("aborts the target tool context on timeout", async () => {
+    process.env.KEELSON_CROSS_RIB_GRANTS = "caller:provider:probe_tool";
+    let observedAbort = false;
+    const callTool = await bootWithCaller({
+      provider: providerRib("provider", [
+        tool("probe_tool", async (ctx) => {
+          await new Promise<void>((resolve) => {
+            ctx.abortSignal.addEventListener(
+              "abort",
+              () => {
+                observedAbort = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          await new Promise(() => {});
+        }),
+      ]),
+    });
+
+    const result = await callTool("provider", "probe_tool", {}, { timeoutMs: 5 });
+
+    expect(result.ok).toBe(false);
+    expect(observedAbort).toBe(true);
+  });
+
+  test("forwards a caller abort signal into the target tool context", async () => {
+    process.env.KEELSON_CROSS_RIB_GRANTS = "caller:provider:probe_tool";
+    let observedAbort = false;
+    const caller = new AbortController();
+    const callTool = await bootWithCaller({
+      provider: providerRib("provider", [
+        tool("probe_tool", async (ctx) => {
+          await new Promise<void>((resolve) => {
+            ctx.abortSignal.addEventListener(
+              "abort",
+              () => {
+                observedAbort = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          await new Promise(() => {});
+        }),
+      ]),
+    });
+    const timer = setTimeout(() => caller.abort(), 5);
+
+    const result = await callTool("provider", "probe_tool", {}, { signal: caller.signal });
+    clearTimeout(timer);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "cross-rib call 'caller' -> 'provider:probe_tool' aborted by caller",
+    });
+    expect(observedAbort).toBe(true);
+  });
+
+  test("runs a fast tool when timeout opts are present", async () => {
+    process.env.KEELSON_CROSS_RIB_GRANTS = "caller:provider:probe_tool";
+    const callTool = await bootWithCaller({
+      provider: providerRib("provider", [
+        tool("probe_tool", (ctx) => {
+          ctx.emit({ type: "tool_result", toolUseId: "", content: "fast" });
+        }),
+      ]),
+    });
+
+    const result = await callTool("provider", "probe_tool", {}, { timeoutMs: 1_000 });
+
+    expect(result).toEqual({
+      ok: true,
+      chunks: [{ type: "tool_result", toolUseId: "", content: "fast" }],
+    } satisfies CallToolResult);
   });
 });
