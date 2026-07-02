@@ -32,6 +32,7 @@ export interface RibPolicyContribution {
 interface PolicyScopeBase {
   surface: PolicySurface;
   ribId?: string;
+  targetRibId?: string;
   provider?: string;
   cwd?: string;
   allowedDirectories?: readonly string[];
@@ -708,6 +709,7 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
   const makeCtx = (base: PolicyScopeBase): PolicyContext => ({
     surface: base.surface,
     ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
+    ...(base.targetRibId !== undefined ? { targetRibId: base.targetRibId } : {}),
     ...(base.provider !== undefined ? { provider: base.provider } : {}),
     ...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
     ...(base.allowedDirectories !== undefined
@@ -724,6 +726,7 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
     tool,
     ...(args !== undefined ? { args } : {}),
     ...(base.ribId !== undefined ? { ribId: base.ribId } : {}),
+    ...(base.targetRibId !== undefined ? { targetRibId: base.targetRibId } : {}),
     ...(base.provider !== undefined ? { provider: base.provider } : {}),
   });
 

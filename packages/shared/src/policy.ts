@@ -78,7 +78,14 @@ export type PolicyDecision =
   | { outcome: "ask"; reason: string };
 
 export type PolicyEvent =
-  | { phase: "tool_call"; tool: string; args?: unknown; ribId?: string; provider?: string }
+  | {
+      phase: "tool_call";
+      tool: string;
+      args?: unknown;
+      ribId?: string;
+      targetRibId?: string;
+      provider?: string;
+    }
   | { phase: "tool_result"; tool: string; result: unknown }
   | { phase: "request"; prompt: string }
   | { phase: "response"; text: string };
@@ -109,6 +116,7 @@ export interface SessionUsage {
 export interface PolicyContext {
   readonly surface: PolicySurface;
   readonly ribId?: string;
+  readonly targetRibId?: string;
   // The provider id backing the turn under evaluation, when known.
   readonly provider?: string;
   // The turn's working directory, used by path-scoping policies to resolve
