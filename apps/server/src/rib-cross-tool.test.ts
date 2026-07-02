@@ -133,7 +133,13 @@ describe("cross-rib callTool", () => {
     expect(seen).toEqual([
       {
         call: { tool: "probe_tool", args: {} },
-        base: { surface: "rib", ribId: "caller", targetRibId: "provider", cwd: process.cwd() },
+        base: {
+          surface: "rib",
+          ribId: "caller",
+          targetRibId: "provider",
+          cwd: process.cwd(),
+          signal: expect.any(AbortSignal),
+        },
       },
     ]);
   });
@@ -274,6 +280,61 @@ describe("cross-rib callTool", () => {
       error: "cross-rib call 'caller' -> 'provider:probe_tool' aborted by caller",
     });
     expect(observedAbort).toBe(true);
+  });
+
+  test("bounds a hanging policy ASK by the call timeout", async () => {
+    process.env.KEELSON_CROSS_RIB_GRANTS = "caller:provider:probe_tool";
+    let executed = 0;
+    const callTool = await bootWithCaller(
+      {
+        provider: providerRib("provider", [tool("probe_tool", () => executed++)]),
+      },
+      () =>
+        policyEngine(async (_call, base) => {
+          await new Promise<void>((resolve) => {
+            if (base.signal?.aborted) return resolve();
+            base.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { outcome: "deny", reason: "ask expired" };
+        }),
+    );
+
+    const result = await callTool("provider", "probe_tool", {}, { timeoutMs: 5 });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "cross-rib call 'caller' -> 'provider:probe_tool' timed out after 5ms",
+    });
+    expect(executed).toBe(0);
+  });
+
+  test("cancels a pending policy ASK on caller abort", async () => {
+    process.env.KEELSON_CROSS_RIB_GRANTS = "caller:provider:probe_tool";
+    let executed = 0;
+    const caller = new AbortController();
+    const callTool = await bootWithCaller(
+      {
+        provider: providerRib("provider", [tool("probe_tool", () => executed++)]),
+      },
+      () =>
+        policyEngine(async (_call, base) => {
+          await new Promise<void>((resolve) => {
+            if (base.signal?.aborted) return resolve();
+            base.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { outcome: "allow" };
+        }),
+    );
+    const timer = setTimeout(() => caller.abort(), 5);
+
+    const result = await callTool("provider", "probe_tool", {}, { signal: caller.signal });
+    clearTimeout(timer);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "cross-rib call 'caller' -> 'provider:probe_tool' aborted by caller",
+    });
+    expect(executed).toBe(0);
   });
 
   test("runs a fast tool when timeout opts are present", async () => {
