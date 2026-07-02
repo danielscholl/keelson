@@ -57,6 +57,7 @@ import {
   type DagNode,
   defaultRunUntilBashProbe,
   ensureWorktreeDeps,
+  headDivergesFrom,
   isGitRepo,
   type MemoryTools,
   makeApprovalHandler,
@@ -73,6 +74,7 @@ import {
   type RunSummary,
   removeWorktree,
   resolveBranchTemplate,
+  resolveDefaultBranch,
   runWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
@@ -637,6 +639,7 @@ interface StartRunCoreParams {
   resolvedProject: Pick<Project, "id" | "rootPath"> | null;
   isolationOn: boolean;
   branchTemplate: string | undefined;
+  worktreeBase: string | undefined;
   // Trigger provenance for the run row. Omitted → 'manual'. The owning rib id
   // (null for local workflows) is stamped so the runs feed can badge/filter and
   // bulk-delete by rib even after the rib is removed.
@@ -710,8 +713,16 @@ function startRunCore(
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
-  const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
-    params;
+  const {
+    workflow,
+    inputs,
+    workingDir,
+    projectId,
+    resolvedProject,
+    isolationOn,
+    branchTemplate,
+    worktreeBase,
+  } = params;
   const origin: WorkflowRunOrigin = params.origin ?? "manual";
   const ribId = params.ribId ?? null;
   const notebook = buildNotebookAdapter(
@@ -792,6 +803,7 @@ function startRunCore(
     isolation: isolationOn
       ? {
           branchTemplate,
+          base: worktreeBase,
           // Anchor worktrees at the project's rootPath whenever workingDir sits
           // inside it (incl. equal); fall back to workingDir otherwise.
           projectRootPath:
@@ -1306,6 +1318,7 @@ export function createWorkflowController(
             resolvedProject,
             isolationOn,
             branchTemplate: workflow.worktree?.branch,
+            worktreeBase: workflow.worktree?.base,
             origin: origin ?? "manual",
             ribId: ribIdFor(catalog, workflow.name, scope),
           },
@@ -1754,6 +1767,7 @@ export function workflowsRoutes(
           resolvedProject,
           isolationOn,
           branchTemplate,
+          worktreeBase: workflow.worktree?.base,
           origin: "manual",
           ribId: ribIdFor(catalog, workflow.name, scope),
         },
@@ -1812,6 +1826,7 @@ export function workflowsRoutes(
           // collector that opts into isolation must not write the live checkout.
           isolationOn: workflow.worktree?.enabled === true,
           branchTemplate: workflow.worktree?.branch,
+          worktreeBase: workflow.worktree?.base,
           // A panel refresh is a producer run, same class as the heartbeat's —
           // keep it out of the default (manual) runs feed and subject to prune.
           origin: "scheduled",
@@ -2123,6 +2138,8 @@ export function workflowRunWebSocketHandlers(deps: {
 interface IsolationConfig {
   /** YAML-supplied branch template; undefined → default. */
   branchTemplate: string | undefined;
+  /** YAML-supplied start-point; undefined → resolve from the repo. */
+  base: string | undefined;
   /** Source repo root; worktrees land at `<projectRootPath>/.worktrees/<branch>/`. */
   projectRootPath: string;
 }
@@ -2248,8 +2265,32 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
         projectRootPath: isolation.projectRootPath,
         branch,
       });
+      const base = isolation.base ?? (await resolveDefaultBranch(cwd));
       try {
-        const created = await createWorktree({ repoPath: cwd, branch, dest });
+        if (base !== null) {
+          try {
+            store.setRunWorktreeBase(runId, base);
+          } catch (err) {
+            console.warn(
+              `[workflows] failed to persist worktree base for ${runId}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+          if (await headDivergesFrom(cwd, base)) {
+            subscribers.broadcast(runId, {
+              type: "run_warning",
+              nodeId: null,
+              message: `current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
+            });
+          }
+        }
+        const created = await createWorktree({
+          repoPath: cwd,
+          branch,
+          dest,
+          base: base ?? undefined,
+        });
         effectiveCwd = created.worktreePath;
         worktreePathForCleanup = created.worktreePath;
         cleanupOnSuccessOnly = true;

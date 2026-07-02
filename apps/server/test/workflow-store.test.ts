@@ -63,6 +63,23 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.error).toBeNull();
   });
 
+  test("persists resolved worktree base on the run row", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "hello-world",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db, "hello-world-conv"),
+      workingDir: "/repo",
+    });
+
+    expect(store.getRun("r1")!.worktreeBase).toBeNull();
+    store.setRunWorktreeBase("r1", "origin/main");
+    expect(store.getRun("r1")!.worktreeBase).toBe("origin/main");
+  });
+
   test("upsertNodeOutput then updateRunStatus persists the terminal state", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);

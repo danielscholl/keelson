@@ -40,6 +40,19 @@ async function git(args: string[], cwd: string): Promise<void> {
   }
 }
 
+async function gitText(args: string[], cwd: string): Promise<string> {
+  const proc = Bun.spawn({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(`git ${args.join(" ")} in ${cwd}: ${stderr}`);
+  }
+  return stdout;
+}
+
 async function initRepo(path: string): Promise<void> {
   await git(["init", "--initial-branch=main"], path);
   await git(["config", "user.email", "t@t"], path);
@@ -47,6 +60,14 @@ async function initRepo(path: string): Promise<void> {
   writeFileSync(join(path, "README.md"), "x\n");
   await git(["add", "README.md"], path);
   await git(["commit", "-m", "init"], path);
+}
+
+async function addOrigin(path: string): Promise<void> {
+  const remote = join(path, "origin.git");
+  await git(["init", "--bare", "--initial-branch=main", remote], path);
+  await git(["remote", "add", "origin", remote], path);
+  await git(["push", "-u", "origin", "main"], path);
+  await git(["remote", "set-head", "origin", "-a"], path);
 }
 
 beforeEach(() => {
@@ -273,6 +294,47 @@ nodes:
     // execution falls back to the repo path.
     expect(run.status).toBe("succeeded");
     expect(run.worktreePath).toBeNull();
+  });
+
+  test("default base excludes divergent checkout commits and is exposed on run detail", async () => {
+    await initRepo(repoDir);
+    await addOrigin(repoDir);
+    await git(["checkout", "-b", "feature"], repoDir);
+    writeFileSync(join(repoDir, "feature.txt"), "feature\n");
+    await git(["add", "feature.txt"], repoDir);
+    await git(["commit", "-m", "feature"], repoDir);
+    writeWorkflow(
+      "base.yaml",
+      `name: basecheck
+description: verify isolated worktree starts from default branch
+worktree:
+  enabled: true
+nodes:
+  - id: no-feature
+    bash: test ! -f feature.txt
+`,
+    );
+    const { app, projectId } = makeRig();
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/basecheck/runs", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {}, projectId }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      worktreeBase: string | null;
+    };
+
+    expect(run.status).toBe("succeeded");
+    expect(run.worktreeBase).toBe("origin/main");
+    const branch = `keelson/basecheck/${runId.slice(0, 8)}`;
+    expect((await gitText(["log", "--oneline", `origin/main..${branch}`], repoDir)).trim()).toBe(
+      "",
+    );
   });
 
   test("failed run keeps its worktree on disk for inspection", async () => {

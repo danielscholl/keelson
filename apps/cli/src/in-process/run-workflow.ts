@@ -23,6 +23,7 @@ import {
   discoverWorkflows,
   ensureWorktreeDeps,
   gitToplevel,
+  headDivergesFrom,
   isGitRepo,
   makeApprovalHandler,
   makeCancelHandler,
@@ -37,6 +38,7 @@ import {
   type RunSummary,
   removeWorktree,
   resolveBranchTemplate,
+  resolveDefaultBranch,
   runWorkflow,
   type WorkflowDefinition,
   worktreePathForRepoLocal,
@@ -296,8 +298,19 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         projectRootPath: repoRoot,
         branch,
       });
+      const base = workflow.worktree?.base ?? (await resolveDefaultBranch(repoRoot));
+      if (base !== null && (await headDivergesFrom(repoRoot, base))) {
+        console.warn(
+          `[keelson] current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
+        );
+      }
       try {
-        const created = await createWorktree({ repoPath: repoRoot, branch, dest });
+        const created = await createWorktree({
+          repoPath: repoRoot,
+          branch,
+          dest,
+          base: base ?? undefined,
+        });
         effectiveCwd = created.worktreePath;
         cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
         const deps = await ensureWorktreeDeps({

@@ -47,6 +47,11 @@ export const workflowWorktreePolicySchema = z.object({
    * `~/.keelson/worktrees/<project>/`.
    */
   branch: z.string().min(1).optional(),
+  /**
+   * Git ref used as the PR/worktree branch start-point. Omitted resolves to the
+   * repo default branch; unresolved local-only repos preserve HEAD-based behavior.
+   */
+  base: z.string().min(1).optional(),
 });
 
 export type WorkflowWorktreePolicy = z.infer<typeof workflowWorktreePolicySchema>;

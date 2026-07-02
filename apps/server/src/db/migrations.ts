@@ -306,6 +306,15 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    description: "workflow run worktree base ref",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE workflow_runs ADD COLUMN worktree_base TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
