@@ -72,7 +72,7 @@ const breakdownQuerySchema = z
 const eventsQuerySchema = z
   .object({
     window: windowSchema,
-    limit: z.coerce.number().int().nonnegative().optional(),
+    limit: z.coerce.number().int().nonnegative().max(500).optional(),
     source: eventSourceSchema.optional(),
     model: z.string().optional(),
     status: z.string().optional(),
