@@ -5,6 +5,7 @@
 import {
   USAGE_PULSE_SNAPSHOT_KEY,
   type UsageEventRowWire,
+  type UsageEventSourceWire,
   type UsageSeriesResponseWire,
   type UsageSummaryResponseWire,
   usagePulseSnapshotSchema,
@@ -1177,17 +1178,43 @@ function formatEventDuration(ms: number): string {
 }
 
 const LEDGER_LIMIT = 50;
+const LEDGER_SOURCES: UsageEventSourceWire[] = ["chat", "workflow", "rib"];
+const LEDGER_STATUSES = ["ok", "error", "aborted", "timeout"] as const;
 
 function LedgerSection({ range }: { range: UsageWindow }) {
   const [events, setEvents] = useState<UsageEventRowWire[] | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<UsageEventSourceWire | "all">("all");
+  const [modelFilter, setModelFilter] = useState<string | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<string | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    getUsageSummary({ window: range, groupBy: "model" })
+      .then((summary) => {
+        if (!cancelled) setModels(summary.groups.map((group) => group.key));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    getUsageEvents({ window: range, limit: LEDGER_LIMIT })
+    getUsageEvents({
+      window: range,
+      limit: LEDGER_LIMIT,
+      source: sourceFilter === "all" ? undefined : sourceFilter,
+      model: modelFilter === "all" ? undefined : modelFilter,
+      status: statusFilter === "all" ? undefined : statusFilter,
+    })
       .then((res) => {
         if (!cancelled) setEvents(res);
       })
@@ -1200,7 +1227,7 @@ function LedgerSection({ range }: { range: UsageWindow }) {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, sourceFilter, modelFilter, statusFilter]);
 
   return (
     <section className="surface-region usage-ledger-region">
@@ -1215,6 +1242,52 @@ function LedgerSection({ range }: { range: UsageWindow }) {
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
+        <div className="usage-ledger-filters" aria-label="Ledger filters">
+          <FilterChip
+            label="All sources"
+            active={sourceFilter === "all"}
+            onClick={() => setSourceFilter("all")}
+          />
+          {LEDGER_SOURCES.map((source) => (
+            <FilterChip
+              key={source}
+              label={source}
+              active={sourceFilter === source}
+              onClick={() => setSourceFilter(source)}
+            />
+          ))}
+          <span className="usage-filter-sep" />
+          <FilterChip
+            label="All models"
+            active={modelFilter === "all"}
+            onClick={() => setModelFilter("all")}
+          />
+          {models.map((model) => (
+            <FilterChip
+              key={model}
+              label={formatModelLabel(model)}
+              active={modelFilter === model}
+              onClick={() => setModelFilter(model)}
+            />
+          ))}
+          <span className="usage-filter-sep" />
+          <FilterChip
+            label="All statuses"
+            active={statusFilter === "all"}
+            onClick={() => setStatusFilter("all")}
+          />
+          {LEDGER_STATUSES.map((status) => (
+            <FilterChip
+              key={status}
+              label={status}
+              active={statusFilter === status}
+              onClick={() => setStatusFilter(status)}
+            />
+          ))}
+        </div>
+        <div className="usage-ledger-count page-sub">
+          {events ? `${events.length.toLocaleString()} events` : "Loading events"}
+        </div>
         {error ? (
           <div className="empty-state" role="alert">
             <div className="empty-state-title">Couldn't load the ledger</div>
@@ -1272,5 +1345,21 @@ function LedgerSection({ range }: { range: UsageWindow }) {
         )}
       </div>
     </section>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className={`chip${active ? " active" : ""}`} aria-pressed={active} onClick={onClick}>
+      {label}
+    </button>
   );
 }

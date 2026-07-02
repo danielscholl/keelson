@@ -441,4 +441,75 @@ describe("Usage page", () => {
     });
     getUsageEventsImpl = async () => [];
   });
+
+  test("passes active ledger filters to the events query", async () => {
+    const eventCalls: Parameters<typeof realApi.getUsageEvents>[0][] = [];
+    getUsageSummaryImpl = async (query) =>
+      query.groupBy === "model"
+        ? {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [
+              {
+                key: "auto",
+                events: 1,
+                inputTokens: 10,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+              },
+            ],
+          }
+        : {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [],
+          };
+    getUsageEventsImpl = async (query) => {
+      eventCalls.push(query);
+      return [];
+    };
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Ledger"));
+    await waitFor(() => expect(screen.getByLabelText("Ledger filters")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "workflow" }));
+    fireEvent.click(await screen.findByRole("button", { name: "auto (unresolved)" }));
+    fireEvent.click(screen.getByRole("button", { name: "error" }));
+
+    await waitFor(() =>
+      expect(eventCalls).toContainEqual({
+        window: "7d",
+        limit: 50,
+        source: "workflow",
+        model: "auto",
+        status: "error",
+      }),
+    );
+    expect(screen.getByText("0 events")).toBeDefined();
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageEventsImpl = async () => [];
+  });
 });
