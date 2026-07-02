@@ -5,6 +5,7 @@
 import {
   usageBreakdownResponseSchema,
   usageEventsResponseSchema,
+  usageGroupBySchema,
   usageSeriesResponseSchema,
   usageSummaryResponseSchema,
 } from "@keelson/shared";
@@ -36,13 +37,7 @@ function windowToSinceIso(window: "24h" | "7d" | "30d"): string {
   return new Date(Date.now() - WINDOW_MS[window]).toISOString();
 }
 
-const groupBySchema: z.ZodType<UsageGroupBy> = z.enum([
-  "model",
-  "provider",
-  "source",
-  "rib",
-  "workflow",
-]);
+const groupBySchema: z.ZodType<UsageGroupBy> = usageGroupBySchema;
 
 const bucketSchema: z.ZodType<UsageSeriesBucket> = z.enum(["hour", "day"]);
 
@@ -66,6 +61,8 @@ const seriesQuerySchema = z
 const breakdownQuerySchema = z
   .object({
     window: windowSchema,
+    groupBy: groupBySchema.default("source"),
+    splitBy: groupBySchema.default("model"),
   })
   .strict();
 
@@ -123,12 +120,20 @@ export function usageRoutes(app: Hono, deps: UsageRoutesDeps): void {
   app.get("/api/usage/breakdown", (c) => {
     const parsed = breakdownQuerySchema.safeParse({
       window: c.req.query("window"),
+      groupBy: c.req.query("groupBy"),
+      splitBy: c.req.query("splitBy"),
     });
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
     const sinceIso = windowToSinceIso(parsed.data.window);
-    const result = usageBreakdownResponseSchema.parse(store.breakdown({ sinceIso }));
+    const result = usageBreakdownResponseSchema.parse(
+      store.breakdown({
+        sinceIso,
+        groupBy: parsed.data.groupBy,
+        splitBy: parsed.data.splitBy,
+      }),
+    );
     return c.json(result);
   });
 
