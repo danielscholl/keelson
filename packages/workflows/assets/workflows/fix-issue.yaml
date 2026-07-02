@@ -510,7 +510,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: review-correctness
-    depends_on: [create-pr]
+    depends_on: [enforce-draft]
     context: fresh
     prompt: |
       You are one of three INDEPENDENT reviewers of the branch that was just
@@ -530,7 +530,7 @@ nodes:
       nothing real, output exactly "No correctness issues found." Do NOT edit files.
 
   - id: review-conventions
-    depends_on: [create-pr]
+    depends_on: [enforce-draft]
     context: fresh
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
@@ -550,7 +550,7 @@ nodes:
       issues found." Do NOT edit files.
 
   - id: review-coverage
-    depends_on: [create-pr]
+    depends_on: [enforce-draft]
     context: fresh
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
