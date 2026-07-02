@@ -173,6 +173,8 @@ export interface CreateWorktreeOptions {
   branch: string;
   /** Absolute path where the worktree will be created. */
   dest: string;
+  /** Optional git ref used as the start-point for a newly-created branch. */
+  base?: string;
 }
 
 export interface CreateWorktreeResult {
@@ -224,7 +226,7 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Creat
   const args =
     branchExists.exitCode === 0
       ? ["worktree", "add", opts.dest, opts.branch]
-      : ["worktree", "add", "-b", opts.branch, opts.dest];
+      : ["worktree", "add", "-b", opts.branch, opts.dest, ...(opts.base ? [opts.base] : [])];
   const result = await runGit(args, opts.repoPath);
   if (result.exitCode !== 0) {
     throw new WorktreeCreationError(
@@ -236,6 +238,28 @@ export async function createWorktree(opts: CreateWorktreeOptions): Promise<Creat
     branchCreated: branchExists.exitCode !== 0,
     adopted: false,
   };
+}
+
+export async function resolveDefaultBranch(repoPath: string): Promise<string | null> {
+  const hasOrigin = await runGit(["remote", "get-url", "origin"], repoPath);
+  if (hasOrigin.exitCode !== 0) return null;
+
+  const originHead = await runGit(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], repoPath);
+  if (originHead.exitCode === 0) {
+    const ref = originHead.stdout.trim().replace(/^refs\/remotes\//, "");
+    if (ref.length > 0) return ref;
+  }
+
+  for (const ref of ["origin/main", "origin/master", "main", "master"]) {
+    const exists = await runGit(["rev-parse", "--verify", "--quiet", ref], repoPath);
+    if (exists.exitCode === 0) return ref;
+  }
+  return null;
+}
+
+export async function headDivergesFrom(repoPath: string, base: string): Promise<boolean> {
+  const out = await runGit(["merge-base", "--is-ancestor", "HEAD", base], repoPath);
+  return out.exitCode !== 0;
 }
 
 export interface EnsureWorktreeDepsResult {

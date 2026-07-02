@@ -16,10 +16,12 @@ import {
   createWorktree,
   ensureWorktreeDeps,
   gitToplevel,
+  headDivergesFrom,
   isGitRepo,
   listWorktrees,
   NotAGitRepoError,
   removeWorktree,
+  resolveDefaultBranch,
   repoPathFromWorktree,
   resolveBranchTemplate,
   WorktreeCreationError,
@@ -35,6 +37,19 @@ async function git(args: string[], cwd: string): Promise<void> {
     const err = await new Response(proc.stderr).text();
     throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${err}`);
   }
+}
+
+async function gitText(args: string[], cwd: string): Promise<string> {
+  const proc = Bun.spawn({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${stderr}`);
+  }
+  return stdout;
 }
 
 async function bun(args: string[], cwd: string): Promise<void> {
@@ -62,6 +77,14 @@ async function initRepo(path: string): Promise<void> {
   writeFileSync(join(path, "README.md"), "test repo\n");
   await git(["add", "README.md"], path);
   await git(["commit", "-m", "initial"], path);
+}
+
+async function addOrigin(path: string): Promise<void> {
+  const remote = join(path, "origin.git");
+  await git(["init", "--bare", "--initial-branch=main", remote], path);
+  await git(["remote", "add", "origin", remote], path);
+  await git(["push", "-u", "origin", "main"], path);
+  await git(["remote", "set-head", "origin", "-a"], path);
 }
 
 beforeEach(() => {
@@ -157,6 +180,25 @@ describe("createWorktree", () => {
     expect(existsSync(join(dest, "README.md"))).toBe(true);
   });
 
+  test("creates a new branch from base instead of checkout HEAD", async () => {
+    await initRepo(tmp);
+    writeFileSync(join(tmp, "feature.txt"), "feature\n");
+    await git(["checkout", "-b", "feature"], tmp);
+    await git(["add", "feature.txt"], tmp);
+    await git(["commit", "-m", "feature"], tmp);
+
+    const dest = join(tmp, ".wt", "base");
+    await createWorktree({
+      repoPath: tmp,
+      branch: "keelson/test/base",
+      dest,
+      base: "main",
+    });
+
+    expect((await gitText(["log", "--oneline", "main..keelson/test/base"], tmp)).trim()).toBe("");
+    expect(existsSync(join(dest, "feature.txt"))).toBe(false);
+  });
+
   test("throws NotAGitRepoError for a non-repo path", async () => {
     await expect(
       createWorktree({ repoPath: tmp, branch: "x", dest: join(tmp, "wt") }),
@@ -183,6 +225,45 @@ describe("createWorktree", () => {
     await expect(
       createWorktree({ repoPath: tmp, branch: "keelson/test/feature", dest }),
     ).rejects.toBeInstanceOf(WorktreeCreationError);
+  });
+});
+
+describe("resolveDefaultBranch", () => {
+  test("prefers origin HEAD", async () => {
+    await initRepo(tmp);
+    await addOrigin(tmp);
+
+    expect(await resolveDefaultBranch(tmp)).toBe("origin/main");
+  });
+
+  test("falls back to origin main then local main when origin exists", async () => {
+    await initRepo(tmp);
+    await addOrigin(tmp);
+    await git(["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"], tmp);
+    expect(await resolveDefaultBranch(tmp)).toBe("origin/main");
+
+    await git(["update-ref", "-d", "refs/remotes/origin/main"], tmp);
+    expect(await resolveDefaultBranch(tmp)).toBe("main");
+  });
+
+  test("returns null for a local-only repo", async () => {
+    await initRepo(tmp);
+
+    expect(await resolveDefaultBranch(tmp)).toBeNull();
+  });
+});
+
+describe("headDivergesFrom", () => {
+  test("detects when HEAD has commits outside the base", async () => {
+    await initRepo(tmp);
+    expect(await headDivergesFrom(tmp, "main")).toBe(false);
+
+    await git(["checkout", "-b", "feature"], tmp);
+    writeFileSync(join(tmp, "feature.txt"), "feature\n");
+    await git(["add", "feature.txt"], tmp);
+    await git(["commit", "-m", "feature"], tmp);
+
+    expect(await headDivergesFrom(tmp, "main")).toBe(true);
   });
 });
 
