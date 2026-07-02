@@ -1219,7 +1219,7 @@ export function createWorkflowController(
                   const usage = coerceTokenUsage(event.result.usage);
                   const provider = sanitizeProvenanceField(event.result.provider);
                   const model = sanitizeProvenanceField(event.result.model);
-                  if (usage === null || provider === null || model === null) return;
+                  if (usage === undefined || provider === null || model === null) return;
                   const completedAt = new Date().toISOString();
                   recordNodeUsage({
                     usageStore,
