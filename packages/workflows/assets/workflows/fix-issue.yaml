@@ -478,8 +478,14 @@ nodes:
 
       PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
       if [ -z "$PR_NUM" ]; then
-       echo "DRAFT_GUARD: UNKNOWN — no .pr-number recorded; cannot enforce draft"
-       exit 0
+       PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null | tr -d '[:space:]')
+       if [ -n "$PR_NUM" ]; then
+         printf '%s' "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
+         echo "DRAFT_GUARD: RECOVERED — resolved PR #$PR_NUM from the head branch"
+       else
+         echo "DRAFT_GUARD: FAILED — no .pr-number recorded and no PR found for the head branch"
+         exit 1
+       fi
       fi
 
       IS_DRAFT=$(gh pr view "$PR_NUM" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
