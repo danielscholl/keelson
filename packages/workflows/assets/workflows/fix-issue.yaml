@@ -471,6 +471,32 @@ nodes:
       8. Verify base: `gh pr view --json baseRefName -q '.baseRefName'` must be `main`.
          If not, `gh pr edit <num> --base main`.
 
+  - id: enforce-draft
+    depends_on: [create-pr]
+    bash: |
+      set -uo pipefail
+
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
+      if [ -z "$PR_NUM" ]; then
+       echo "DRAFT_GUARD: UNKNOWN — no .pr-number recorded; cannot enforce draft"
+       exit 0
+      fi
+
+      IS_DRAFT=$(gh pr view "$PR_NUM" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
+      if [ "$IS_DRAFT" = "false" ]; then
+       if gh pr ready --undo "$PR_NUM"; then
+         echo "DRAFT_GUARD: CONVERTED — PR #$PR_NUM was ready; converted back to draft"
+       else
+         echo "DRAFT_GUARD: FAILED — PR #$PR_NUM is ready but 'gh pr ready --undo' failed"
+         exit 1
+       fi
+      elif [ "$IS_DRAFT" = "true" ]; then
+       echo "DRAFT_GUARD: OK — PR #$PR_NUM already a draft"
+      else
+       echo "DRAFT_GUARD: UNKNOWN — unable to read draft state for PR #$PR_NUM"
+      fi
+      exit 0
+
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 7: REVIEW LOOP — panel → triage → fix → re-review
   # A single self-review is the same model grading its own homework and misses
