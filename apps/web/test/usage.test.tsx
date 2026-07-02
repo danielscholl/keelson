@@ -4,9 +4,9 @@
 
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import * as realApi from "../src/api.ts";
 import { UsageChip } from "../src/components/Chat/UsageChip.tsx";
 import { UsagePopover } from "../src/components/Chat/UsagePopover.tsx";
-import * as realApi from "../src/api.ts";
 import {
   contextFillLevel,
   contextPercent,
@@ -241,11 +241,15 @@ describe("Usage page", () => {
 
     fireEvent.click(screen.getByLabelText("Jobs"));
     await waitFor(() =>
-      expect(screen.getByText("No recurring workflow or rib spend in this window yet.")).toBeDefined(),
+      expect(
+        screen.getByText("No recurring workflow or rib spend in this window yet."),
+      ).toBeDefined(),
     );
 
     fireEvent.click(screen.getByLabelText("Ledger"));
-    await waitFor(() => expect(screen.getByText("No events recorded in this window yet.")).toBeDefined());
+    await waitFor(() =>
+      expect(screen.getByText("No events recorded in this window yet.")).toBeDefined(),
+    );
   });
 
   test("renders source to model flow from one breakdown aggregate call", async () => {

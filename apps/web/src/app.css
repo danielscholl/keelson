@@ -8716,6 +8716,10 @@ a.cvb-card-title::after {
   align-items: center;
   gap: 10px;
 }
+.usage-view-nav {
+  align-self: flex-start;
+  margin-bottom: 14px;
+}
 .usage-mono { font-family: var(--font-mono, ui-monospace, monospace); }
 
 .usage-stats {
@@ -8820,6 +8824,107 @@ a.cvb-card-title::after {
 }
 .usage-stack-empty {
   padding: 20px 0;
+}
+
+.usage-flow-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.usage-flow-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.usage-flow-ribbon {
+  opacity: 0.58;
+  stroke-linecap: round;
+  transition: opacity 120ms ease;
+}
+.usage-flow-ribbon:hover {
+  opacity: 0.86;
+}
+.usage-flow-node-dot {
+  fill: var(--card-2);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+.usage-flow-label {
+  fill: var(--fg);
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.usage-flow-side-label {
+  fill: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.usage-burn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.usage-burn-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 2fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.usage-burn-label {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-burn-value {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.usage-signals-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.usage-signal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+
+.usage-ledger-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.usage-filter-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-soft);
+}
+.usage-ledger-count {
+  margin-top: -6px;
+}
+
+@media (max-width: 760px) {
+  .usage-signals-grid {
+    grid-template-columns: 1fr;
+  }
+  .usage-burn-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Workflow surfaces: per-node tokens in the trace head, run rollup in the

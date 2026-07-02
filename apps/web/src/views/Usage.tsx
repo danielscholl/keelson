@@ -750,9 +750,12 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
 }
 
 function FlowSection({ range }: { range: UsageWindow }) {
-  const [rows, setRows] = useState<
-    Array<{ key: string; split: string; inputTokens: number; outputTokens: number }> | null
-  >(null);
+  const [rows, setRows] = useState<Array<{
+    key: string;
+    split: string;
+    inputTokens: number;
+    outputTokens: number;
+  }> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -797,7 +800,7 @@ function FlowSection({ range }: { range: UsageWindow }) {
           <div className="page-sub" style={{ padding: "20px 0" }}>
             Loading…
           </div>
-        ) : rows && rows.some((row) => row.inputTokens + row.outputTokens > 0) ? (
+        ) : rows?.some((row) => row.inputTokens + row.outputTokens > 0) ? (
           <FlowChart rows={rows} />
         ) : (
           <div className="usage-stack-empty">
@@ -859,8 +862,8 @@ function FlowChart({
               strokeWidth={strokeWidth}
             >
               <title>
-                {link.source} → {formatModelLabel(link.model)} · {formatTokens(link.tokens)} · {share}
-                %
+                {link.source} → {formatModelLabel(link.model)} · {formatTokens(link.tokens)} ·{" "}
+                {share}%
               </title>
             </path>
           );
@@ -904,15 +907,13 @@ function FlowChart({
 }
 
 function JobsSection({ range }: { range: UsageWindow }) {
-  const [jobs, setJobs] = useState<
-    Array<{
-      key: string;
-      runs: number;
-      totalTokens: number;
-      avgTokensPerRun: number;
-      p95TokensPerRun: number;
-    }> | null
-  >(null);
+  const [jobs, setJobs] = useState<Array<{
+    key: string;
+    runs: number;
+    totalTokens: number;
+    avgTokensPerRun: number;
+    p95TokensPerRun: number;
+  }> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -985,7 +986,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                 </tbody>
               </table>
             </div>
-            <div className="usage-burn-list" aria-label="Weekly burn by job">
+            <section className="usage-burn-list" aria-label="Weekly burn by job">
               {jobs.map((job, i) => {
                 const pct = Math.max(2, Math.round((job.totalTokens / maxTokens) * 100));
                 return (
@@ -1006,7 +1007,7 @@ function JobsSection({ range }: { range: UsageWindow }) {
                   </div>
                 );
               })}
-            </div>
+            </section>
           </>
         ) : (
           <div className="usage-stack-empty">
@@ -1053,8 +1054,7 @@ function SignalsSection({ range }: { range: UsageWindow }) {
           const key = ev.workflowName ?? ev.ribId ?? ev.source;
           attribution.set(key, (attribution.get(key) ?? 0) + tokens);
         }
-        const failureTop =
-          [...attribution.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+        const failureTop = [...attribution.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
         const downshift =
           [...jobs]
             .filter((job) => job.runs >= 3 && job.avgTokensPerRun < 500)
@@ -1242,7 +1242,8 @@ function LedgerSection({ range }: { range: UsageWindow }) {
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
-        <div className="usage-ledger-filters" aria-label="Ledger filters">
+        <fieldset className="usage-ledger-filters">
+          <legend style={VISUALLY_HIDDEN_STYLE}>Ledger filters</legend>
           <FilterChip
             label="All sources"
             active={sourceFilter === "all"}
@@ -1284,7 +1285,7 @@ function LedgerSection({ range }: { range: UsageWindow }) {
               onClick={() => setStatusFilter(status)}
             />
           ))}
-        </div>
+        </fieldset>
         <div className="usage-ledger-count page-sub">
           {events ? `${events.length.toLocaleString()} events` : "Loading events"}
         </div>
@@ -1358,7 +1359,12 @@ function FilterChip({
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={`chip${active ? " active" : ""}`} aria-pressed={active} onClick={onClick}>
+    <button
+      type="button"
+      className={`chip${active ? " active" : ""}`}
+      aria-pressed={active}
+      onClick={onClick}
+    >
       {label}
     </button>
   );
