@@ -158,8 +158,10 @@ export function buildExploreSeed(panels: ExplorePanel[]): ChatSeed {
     const overflow = systemPrompt.length - SEED_MAX_CHARS;
     const trimBy = Math.max(overflow + 16, Math.ceil(largest.body.length * 0.2));
     const trimTo = Math.max(0, largest.body.length - trimBy);
+    const prevLength = systemPrompt.length;
     largest.body = `${largest.body.slice(0, trimTo)}\n\n…(truncated)`;
     systemPrompt = assemble();
+    if (systemPrompt.length >= prevLength) break;
   }
 
   return { systemPrompt, openingPrompt: OPENING_PROMPT, name: aggregateName };
