@@ -671,12 +671,18 @@ export async function getUsageSeries(
 
 export interface UsageBreakdownQuery {
   window?: UsageWindow;
+  groupBy?: UsageGroupBy;
+  splitBy?: UsageGroupBy;
 }
 
 export async function getUsageBreakdown(
   query: UsageBreakdownQuery = {},
 ): Promise<UsageBreakdownResponseWire> {
-  const qs = buildUsageQuery({ window: query.window });
+  const qs = buildUsageQuery({
+    window: query.window,
+    groupBy: query.groupBy,
+    splitBy: query.splitBy,
+  });
   return usageBreakdownResponseSchema.parse(
     await apiRequest<unknown>(`/api/usage/breakdown${qs}`, { label: "/api/usage/breakdown" }),
   );
