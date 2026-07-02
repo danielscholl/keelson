@@ -185,11 +185,8 @@ function PulseSection({
             Loading…
           </div>
         ) : summary && summary.totals.events === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-title">No usage yet in this window</div>
-            <div className="empty-state-body">
-              Spend shows up here once chat, a workflow, or a rib reports its first turn.
-            </div>
+          <div className="usage-stack-empty">
+            <span className="page-sub">No usage recorded in this window.</span>
           </div>
         ) : summary && failureBurn ? (
           <>
