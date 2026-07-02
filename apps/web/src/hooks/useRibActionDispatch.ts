@@ -122,7 +122,14 @@ export function useRibActionDispatch(
           if (onOpenSurface && isOpenSurfaceShaped(result.data)) {
             const parsed = ribClientEffectSchema.safeParse(result.data);
             if (parsed.success && parsed.data.effect === "open-surface") {
-              onOpenSurface(parsed.data.surfaceId, parsed.data.regionKey);
+              // Isolate the handler: it navigates and scrolls (DOM APIs), and a
+              // throw must not turn a successful rib action into a failure.
+              try {
+                onOpenSurface(parsed.data.surfaceId, parsed.data.regionKey);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                toast.push({ kind: "error", message: `open-surface handler failed: ${message}` });
+              }
               return result;
             }
             const error = `${action.type}: invalid open-surface directive`;

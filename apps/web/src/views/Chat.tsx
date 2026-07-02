@@ -2090,6 +2090,12 @@ export function Chat({
                                 className="chat-message-action"
                                 title="Send this message to a rib surface"
                                 disabled={sendingIngestTo !== null}
+                                aria-haspopup={ingestTargets.length > 1 ? "menu" : undefined}
+                                aria-expanded={
+                                  ingestTargets.length > 1
+                                    ? ingestMenuMessageId === m.id
+                                    : undefined
+                                }
                                 onClick={() => {
                                   if (ingestTargets.length === 1) {
                                     void sendToSurface(ingestTargets[0]!.id, m.content);
