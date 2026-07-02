@@ -452,6 +452,10 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       controller.abort();
     }, timeoutMs);
     try {
+      if (controller.signal.aborted) {
+        const reason = opts?.signal?.aborted ? "aborted by caller" : `timed out after ${timeoutMs}ms`;
+        throw new Error(`cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${reason}`);
+      }
       const parsed = entry.def.inputSchema.parse(args);
       const ctx: ToolContext = {
         cwd: defaultCallCwd,
