@@ -697,6 +697,15 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
   );
 }
 
+// Foreign statuses (the read side accepts any string) fall to the neutral
+// pending dot rather than reading as failures.
+function statusDotClass(status: string): string {
+  if (status === "ok" || status === "succeeded") return "completed";
+  if (status === "error" || status === "failed" || status === "timeout") return "failed";
+  if (status === "aborted" || status === "cancelled") return "cancelled";
+  return "pending";
+}
+
 function formatEventDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -785,9 +794,7 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                     <td>{ev.cacheReadTokens != null ? formatTokens(ev.cacheReadTokens) : "—"}</td>
                     <td>{ev.durationMs != null ? formatEventDuration(ev.durationMs) : "—"}</td>
                     <td>
-                      <span
-                        className={`status-dot ${ev.status === "ok" ? "completed" : "failed"}`}
-                      />
+                      <span className={`status-dot ${statusDotClass(ev.status)}`} />
                       {ev.status}
                     </td>
                   </tr>
