@@ -381,6 +381,51 @@ describe("Surface", () => {
     expect(seeds[0]?.systemPrompt).toContain("BEGIN PANEL DATA");
   });
 
+  test("selected live regions raise one aggregate explore seed", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    live("rib:demo:security", board("Security", "Critical", 5));
+    const seeds: ChatSeed[] = [];
+    render(
+      <CanvasProvider>
+        <Surface
+          descriptor={{
+            id: "cimpl",
+            title: "CIMPL",
+            layout: {
+              rows: [
+                {
+                  columns: [
+                    { key: "rib:demo:quality", title: "Quality" },
+                    { key: "rib:demo:security", title: "Security" },
+                  ],
+                },
+              ],
+            },
+          }}
+          onExplore={(s) => seeds.push(s)}
+        />
+      </CanvasProvider>,
+    );
+
+    const checkboxes = screen.getAllByRole("checkbox", {
+      name: "Select panel for multi-panel explore",
+    });
+    const [qualityCheckbox, securityCheckbox] = checkboxes;
+    if (!qualityCheckbox || !securityCheckbox) {
+      throw new Error("expected two selectable live panels");
+    }
+    fireEvent.click(qualityCheckbox);
+    fireEvent.click(securityCheckbox);
+    fireEvent.click(screen.getByRole("button", { name: "Explore 2 selected" }));
+
+    expect(seeds).toHaveLength(1);
+    expect(seeds[0]?.name).toBe("Quality +1 more");
+    expect(seeds[0]?.systemPrompt).toContain("## Quality");
+    expect(seeds[0]?.systemPrompt).toContain("## Security");
+    expect(seeds[0]?.systemPrompt.match(/===BEGIN PANEL DATA/g)?.length).toBe(1);
+    expect(seeds[0]?.systemPrompt.match(/===END PANEL DATA===/g)?.length).toBe(1);
+  });
+
   test("no Explore control on a region still waiting for its first snapshot", () => {
     const seeds: ChatSeed[] = [];
     render(

@@ -3244,6 +3244,10 @@ button.tab:focus-visible {
   font-size: 13px;
   color: var(--muted);
 }
+.surface-selection-bar {
+  display: flex;
+  justify-content: flex-end;
+}
 /* Section zone: a titled run of dynamic rows the merge derives from a group. */
 .surface-zone {
   display: flex;

@@ -25,7 +25,13 @@ import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
-import { buildExploreSeed, type ExploreHandler, OPENING_PROMPT } from "../lib/exploreSeed.ts";
+import {
+  buildExploreSeed,
+  buildExploreSeedForPanel,
+  type ExploreHandler,
+  type ExplorePanel,
+  OPENING_PROMPT,
+} from "../lib/exploreSeed.ts";
 
 // A run-workflow directive may ask to stay on the current surface (see the `stay`
 // field on the run-workflow client effect), so the shared callback carries it.
@@ -64,6 +70,23 @@ export function Surface({
   onLaunchWorkflow?: LaunchWorkflow;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
+  const [selected, setSelected] = useState<Map<string, ExplorePanel>>(() => new Map());
+  const onToggleSelect = useCallback((key: string, panel: ExplorePanel | null) => {
+    setSelected((current) => {
+      const next = new Map(current);
+      if (panel) {
+        next.set(key, panel);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  }, []);
+  const exploreSelected = useCallback(() => {
+    if (!onExplore || selected.size === 0) return;
+    onExplore(buildExploreSeed([...selected.values()]));
+    setSelected(new Map());
+  }, [onExplore, selected]);
   // A projectScoped surface carries the shared project chip in its header, wired to
   // the owning rib's select-project action; derive the rib id from a region key
   // (every region key is rib-namespaced).
@@ -88,6 +111,13 @@ export function Surface({
           )}
         </header>
       )}
+      {onExplore && selected.size > 0 && (
+        <div className="surface-selection-bar">
+          <button type="button" className="surface-region-action" onClick={exploreSelected}>
+            Explore {selected.size} selected
+          </button>
+        </div>
+      )}
       {/* Role-prefixed keys so a region remounts (re-reads its initial collapsed
           flag) if the descriptor swaps it for a different one at this slot. */}
       {header && (
@@ -95,6 +125,8 @@ export function Surface({
           key={`header:${header.key}`}
           region={header}
           onExplore={onExplore}
+          selected={selected.has(header.key)}
+          onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
         />
       )}
@@ -103,6 +135,8 @@ export function Surface({
           key={`banner:${banner.key}`}
           region={banner}
           onExplore={onExplore}
+          selected={selected.has(banner.key)}
+          onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
         />
       )}
@@ -120,6 +154,8 @@ export function Surface({
                   key={col.key}
                   region={col}
                   onExplore={onExplore}
+                  selected={selected.has(col.key)}
+                  onToggleSelect={onExplore ? onToggleSelect : undefined}
                   onLaunchWorkflow={onLaunchWorkflow}
                 />
               ))}
@@ -132,6 +168,8 @@ export function Surface({
           key={`footer:${footer.key}`}
           region={footer}
           onExplore={onExplore}
+          selected={selected.has(footer.key)}
+          onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
         />
       )}
@@ -162,10 +200,14 @@ function groupRowsByZone(
 function SurfaceRegion({
   region,
   onExplore,
+  selected,
+  onToggleSelect,
   onLaunchWorkflow,
 }: {
   region: Region;
   onExplore?: ExploreHandler;
+  selected?: boolean;
+  onToggleSelect?: (key: string, panel: ExplorePanel | null) => void;
   onLaunchWorkflow?: LaunchWorkflow;
 }) {
   const collapsible = region.collapsible ?? false;
@@ -243,6 +285,15 @@ function SurfaceRegion({
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
     parsed?.success && parsed.data.view === "board" ? parsed.data : null;
+  const panelName = board?.title ?? region.title ?? region.key;
+
+  // Keep a selected panel's stored entry current: frames keep arriving after the
+  // checkbox toggle, and "Explore N selected" must seed the data as of click
+  // time, matching the single-panel ✦.
+  useEffect(() => {
+    if (!selected || !onToggleSelect || snap.status !== "live") return;
+    onToggleSelect(region.key, { name: panelName, data: snap.data });
+  }, [selected, onToggleSelect, snap.status, snap.data, region.key, panelName]);
 
   const expand = () =>
     openCanvas(
@@ -320,14 +371,29 @@ function SurfaceRegion({
         <button
           type="button"
           className="surface-region-action surface-region-icon"
-          onClick={() =>
-            onExplore(buildExploreSeed(board?.title ?? region.title ?? region.key, snap.data))
-          }
+          onClick={() => onExplore(buildExploreSeedForPanel(panelName, snap.data))}
           aria-label="Explore in chat"
           title="Explore this in chat"
         >
           <span aria-hidden="true">✦</span>
         </button>
+      )}
+      {(snap.status === "live" || selected) && onToggleSelect && (
+        <input
+          type="checkbox"
+          className="surface-region-action surface-region-select"
+          checked={selected ?? false}
+          onChange={(event) =>
+            onToggleSelect(
+              region.key,
+              event.currentTarget.checked && snap.status === "live"
+                ? { name: panelName, data: snap.data }
+                : null,
+            )
+          }
+          aria-label="Select panel for multi-panel explore"
+          title="Select for multi-panel explore"
+        />
       )}
       <button
         type="button"
