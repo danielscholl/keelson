@@ -8,6 +8,8 @@ import {
   ribAuthStatusSchema,
   ribClientEffectSchema,
   ribIdFromKey,
+  ribIngestPayloadSchema,
+  ribSummarySchema,
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
 } from "../src/rib.ts";
@@ -90,11 +92,25 @@ describe("rib v2 wire schemas", () => {
           views: [{ key: "rib:osdu:graph", canvasKind: "view" }],
           surfaces: [],
           hasOnAction: true,
+          acceptsIngest: true,
           auth: { authenticated: true },
         },
       ],
     });
     expect(res.ribs[0]?.id).toBe("osdu");
+    expect(res.ribs[0]?.acceptsIngest).toBe(true);
+  });
+
+  it("keeps acceptsIngest optional on the public summary wire schema", () => {
+    const summary = ribSummarySchema.parse({
+      id: "legacy",
+      displayName: "Legacy Rib",
+      registered: [],
+      views: [],
+      surfaces: [],
+      hasOnAction: false,
+    });
+    expect(summary.acceptsIngest ?? false).toBe(false);
   });
 });
 
@@ -479,13 +495,43 @@ describe("rib client effect schema", () => {
     ).toBe(false);
   });
 
-  it("still rejects an unknown discriminator after the open-canvas arm was added", () => {
+  it("round-trips a valid open-surface effect with surface id and region key", () => {
+    const effect = {
+      effect: "open-surface" as const,
+      surfaceId: "surface:chamber:rooms",
+      regionKey: "rib:chamber:room-7",
+    };
+    expect(ribClientEffectSchema.parse(effect)).toEqual(effect);
+  });
+
+  it("parses an open-surface effect with region key omitted", () => {
+    const parsed = ribClientEffectSchema.parse({
+      effect: "open-surface",
+      surfaceId: "surface:chamber:rooms",
+    });
+    expect(parsed).toEqual({ effect: "open-surface", surfaceId: "surface:chamber:rooms" });
+  });
+
+  it("rejects an open-surface effect with an empty surface id or extra field", () => {
+    expect(
+      ribClientEffectSchema.safeParse({ effect: "open-surface", surfaceId: "" }).success,
+    ).toBe(false);
+    expect(
+      ribClientEffectSchema.safeParse({
+        effect: "open-surface",
+        surfaceId: "surface:chamber:rooms",
+        extra: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("still rejects an unknown discriminator after more effect arms were added", () => {
     expect(
       ribClientEffectSchema.safeParse({ effect: "open-url", url: "https://x.test" }).success,
     ).toBe(false);
   });
 
-  it("still parses open-chat and run-workflow after the open-canvas arm was added", () => {
+  it("still parses existing effects after more effect arms were added", () => {
     expect(
       ribClientEffectSchema.safeParse({
         effect: "open-chat",
@@ -496,5 +542,21 @@ describe("rib client effect schema", () => {
       ribClientEffectSchema.safeParse({ effect: "run-workflow", workflow: "chamber-genesis" })
         .success,
     ).toBe(true);
+  });
+});
+
+describe("rib ingest payload schema", () => {
+  it("accepts text with an optional source conversation id", () => {
+    expect(ribIngestPayloadSchema.parse({ text: "Summarize this." })).toEqual({
+      text: "Summarize this.",
+    });
+    expect(
+      ribIngestPayloadSchema.parse({ text: "Summarize this.", sourceConversationId: "conv-1" }),
+    ).toEqual({ text: "Summarize this.", sourceConversationId: "conv-1" });
+  });
+
+  it("rejects empty and oversized text", () => {
+    expect(ribIngestPayloadSchema.safeParse({ text: "" }).success).toBe(false);
+    expect(ribIngestPayloadSchema.safeParse({ text: "x".repeat(8001) }).success).toBe(false);
   });
 });

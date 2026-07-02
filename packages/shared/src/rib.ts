@@ -438,6 +438,8 @@ export interface Rib {
   // boards. Each region `key` must live under the rib's namespace, like view
   // keys; the harness rejects out-of-namespace keys at activation.
   surfaces?: readonly RibSurfaceDescriptor[];
+  // Declares support for the conventional `ingest` action from host surfaces.
+  acceptsIngest?: boolean;
   // Workflow definitions the rib contributes to the catalog at activation,
   // optionally each bound to a rib-namespaced snapshot key.
   contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
@@ -503,6 +505,7 @@ export const ribSummarySchema = z
     views: z.array(ribViewDescriptorSchema),
     surfaces: z.array(ribSurfaceDescriptorSchema),
     hasOnAction: z.boolean(),
+    acceptsIngest: z.boolean().optional(),
     auth: ribAuthStatusSchema.optional(),
   })
   .strict();
@@ -547,7 +550,8 @@ export type OpenChatSeed = z.infer<typeof openChatSeedSchema>;
 // an open string (the catalog name / `:name` path segment) — rib-contributed
 // names aren't known here; `args` maps onto the run API's `inputs`. `open-canvas`
 // opens the item's snapshot board (`key`) in the canvas drawer — the View verb an
-// index card's "Open" uses.
+// index card's "Open" uses. `open-surface` switches the active rib surface tab,
+// optionally focusing one region after navigation.
 export const ribClientEffectSchema = z.discriminatedUnion("effect", [
   z.object({ effect: z.literal("open-chat"), seed: openChatSeedSchema }).strict(),
   z
@@ -568,8 +572,23 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
       title: z.string().optional(),
     })
     .strict(),
+  z
+    .object({
+      effect: z.literal("open-surface"),
+      surfaceId: z.string().min(1),
+      regionKey: z.string().min(1).optional(),
+    })
+    .strict(),
 ]);
 export type RibClientEffect = z.infer<typeof ribClientEffectSchema>;
+
+export const ribIngestPayloadSchema = z
+  .object({
+    text: z.string().min(1).max(8000),
+    sourceConversationId: z.string().min(1).optional(),
+  })
+  .strict();
+export type RibIngestPayload = z.infer<typeof ribIngestPayloadSchema>;
 
 // An agent a rib offers for direct chat — the cheap descriptor `listAgents`
 // returns (no system prompt assembled here). `slug` is slash-safe so it can ride
