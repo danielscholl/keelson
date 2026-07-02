@@ -12,6 +12,7 @@ import {
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  getUsageBreakdown,
   getUsageEvents,
   getUsageSeries,
   getUsageSummary,
@@ -417,6 +418,10 @@ function formatBucketLabel(iso: string, bucket: UsageSeriesBucket): string {
     : d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function formatModelLabel(model: string): string {
+  return model === "auto" ? "auto (unresolved)" : model;
+}
+
 // A "nice" y-axis ceiling (1/2/5 × 10^n) so grid labels read like 2.5M
 // rather than an arbitrary max-of-data fraction.
 function niceCeiling(max: number): number {
@@ -743,6 +748,31 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
 }
 
 function FlowSection({ range }: { range: UsageWindow }) {
+  const [rows, setRows] = useState<
+    Array<{ key: string; split: string; inputTokens: number; outputTokens: number }> | null
+  >(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getUsageBreakdown({ window: range, groupBy: "source", splitBy: "model" })
+      .then((res) => {
+        if (!cancelled) setRows(res);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
   return (
     <section className="surface-region usage-flow-region">
       <div className="surface-region-head">
@@ -756,11 +786,118 @@ function FlowSection({ range }: { range: UsageWindow }) {
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
-        <div className="usage-stack-empty">
-          <span className="page-sub">Flow data will appear here.</span>
-        </div>
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load source to model flow</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : rows && rows.some((row) => row.inputTokens + row.outputTokens > 0) ? (
+          <FlowChart rows={rows} />
+        ) : (
+          <div className="usage-stack-empty">
+            <span className="page-sub">No source to model flow recorded in this window yet.</span>
+          </div>
+        )}
       </div>
     </section>
+  );
+}
+
+function FlowChart({
+  rows,
+}: {
+  rows: Array<{ key: string; split: string; inputTokens: number; outputTokens: number }>;
+}) {
+  const links = rows
+    .map((row) => ({
+      source: row.key,
+      model: row.split,
+      tokens: row.inputTokens + row.outputTokens,
+    }))
+    .filter((row) => row.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens);
+  const total = links.reduce((sum, row) => sum + row.tokens, 0);
+  const sources = [...new Set(links.map((row) => row.source))].sort((a, b) => a.localeCompare(b));
+  const models = [...new Set(links.map((row) => row.model))].sort((a, b) => a.localeCompare(b));
+  const width = 960;
+  const height = Math.max(220, Math.max(sources.length, models.length) * 54 + 48);
+  const leftX = 130;
+  const rightX = width - 170;
+  const yFor = (items: string[], item: string) => {
+    const idx = Math.max(0, items.indexOf(item));
+    return 36 + (idx + 0.5) * ((height - 72) / Math.max(items.length, 1));
+  };
+  const maxTokens = Math.max(...links.map((row) => row.tokens), 1);
+
+  return (
+    <div className="usage-flow-wrap">
+      <svg
+        className="usage-flow-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Source to model token flow"
+      >
+        {links.map((link, i) => {
+          const y1 = yFor(sources, link.source);
+          const y2 = yFor(models, link.model);
+          const strokeWidth = Math.max(3, (link.tokens / maxTokens) * 22);
+          const share = total > 0 ? Math.round((link.tokens / total) * 100) : 0;
+          const color = `var(--s${(i % SERIES_COLOR_COUNT) + 1})`;
+          return (
+            <path
+              key={`${link.source}-${link.model}`}
+              className="usage-flow-ribbon"
+              d={`M ${leftX} ${y1} C ${leftX + 210} ${y1}, ${rightX - 210} ${y2}, ${rightX} ${y2}`}
+              fill="none"
+              stroke={color}
+              strokeWidth={strokeWidth}
+            >
+              <title>
+                {link.source} → {formatModelLabel(link.model)} · {formatTokens(link.tokens)} · {share}
+                %
+              </title>
+            </path>
+          );
+        })}
+        {sources.map((source, i) => (
+          <g key={source} transform={`translate(0 ${yFor(sources, source)})`}>
+            <circle className="usage-flow-node-dot" r="5" cx={leftX} cy="0" />
+            <text className="usage-flow-label" x={leftX - 14} y="4" textAnchor="end">
+              {source}
+            </text>
+            <text className="usage-flow-side-label" x={leftX - 14} y="-14" textAnchor="end">
+              {i === 0 ? "Source" : ""}
+            </text>
+          </g>
+        ))}
+        {models.map((model, i) => (
+          <g key={model} transform={`translate(0 ${yFor(models, model)})`}>
+            <circle className="usage-flow-node-dot" r="5" cx={rightX} cy="0" />
+            <text className="usage-flow-label" x={rightX + 14} y="4">
+              {formatModelLabel(model)}
+            </text>
+            <text className="usage-flow-side-label" x={rightX + 14} y="-14">
+              {i === 0 ? "Model" : ""}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="usage-legend">
+        {links.slice(0, 6).map((link, i) => (
+          <span className="usage-legend-item" key={`${link.source}-${link.model}-legend`}>
+            <span
+              className="usage-sdot"
+              style={{ background: `var(--s${(i % SERIES_COLOR_COUNT) + 1})` }}
+            />
+            {link.source} → {formatModelLabel(link.model)}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 

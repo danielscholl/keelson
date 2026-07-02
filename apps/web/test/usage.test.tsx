@@ -36,9 +36,12 @@ let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => ({
 });
 let getUsageEventsImpl: typeof realApi.getUsageEvents = async () => [];
 let getUsageSeriesImpl: typeof realApi.getUsageSeries = async () => [];
+let getUsageBreakdownImpl: typeof realApi.getUsageBreakdown = async () => [];
 
 mock.module("../src/api.ts", () => ({
   ...realApi,
+  getUsageBreakdown: (...args: Parameters<typeof realApi.getUsageBreakdown>) =>
+    getUsageBreakdownImpl(...args),
   getUsageSummary: (...args: Parameters<typeof realApi.getUsageSummary>) =>
     getUsageSummaryImpl(...args),
   getUsageEvents: (...args: Parameters<typeof realApi.getUsageEvents>) =>
@@ -51,6 +54,7 @@ afterAll(() => {
   getUsageSummaryImpl = realApi.getUsageSummary;
   getUsageEventsImpl = realApi.getUsageEvents;
   getUsageSeriesImpl = realApi.getUsageSeries;
+  getUsageBreakdownImpl = realApi.getUsageBreakdown;
 });
 
 async function renderUsagePage() {
@@ -239,5 +243,33 @@ describe("Usage page", () => {
 
     fireEvent.click(screen.getByLabelText("Ledger"));
     await waitFor(() => expect(screen.getByText("No events recorded in this window yet.")).toBeDefined());
+  });
+
+  test("renders source to model flow from one breakdown aggregate call", async () => {
+    const calls: Parameters<typeof realApi.getUsageBreakdown>[0][] = [];
+    getUsageBreakdownImpl = async (query) => {
+      calls.push(query);
+      return [
+        {
+          key: "workflow",
+          split: "gpt-5.5",
+          events: 2,
+          inputTokens: 100,
+          outputTokens: 40,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ];
+    };
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Source to model token flow")).toBeDefined());
+    expect(screen.getByText("workflow")).toBeDefined();
+    expect(screen.getAllByText("gpt-5.5").length).toBeGreaterThan(0);
+    expect(calls).toEqual([{ window: "7d", groupBy: "source", splitBy: "model" }]);
+    getUsageBreakdownImpl = async () => [];
   });
 });
