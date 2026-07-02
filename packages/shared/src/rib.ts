@@ -154,6 +154,10 @@ export interface RibProviderInfo {
   readonly displayName: string;
 }
 
+export type CallToolResult =
+  | { ok: true; chunks: readonly MessageChunk[] }
+  | { ok: false; error: string };
+
 // Dependency-injection surface the harness passes to every rib. The
 // `getSidecar` resolver intentionally returns `unknown` — each rib declares
 // its own structural narrowing and casts at the registration boundary.
@@ -230,6 +234,10 @@ export interface RibContext {
   // built against an older harness degrades to no provider awareness (it can still pin
   // a provider and let the turn resolve or fail), not a throw.
   getProviders?: () => readonly RibProviderInfo[];
+  // Governed cross-rib invocation of a sibling rib's owned tool. The harness resolves
+  // (never throws), denies by default unless the operator granted the caller/target/tool
+  // triple and policy allows it, and omits the method on older hosts.
+  callTool?: (targetRibId: string, name: string, args: unknown) => Promise<CallToolResult>;
 }
 
 // The harness-owned snapshot key the SPA subscribes to as a manifest-revision
