@@ -75,6 +75,7 @@ import {
   snapshotWebSocketHandlers,
 } from "./snapshots-handler.ts";
 import { constantTimeTokenEqual } from "./token-compare.ts";
+import { usageRoutes } from "./usage-handler.ts";
 import { createUsageStore, type UsageStore } from "./usage-store.ts";
 import { createWorkflowAuthoringTools } from "./workflow-authoring-tools.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
@@ -603,6 +604,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   });
   projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
   memoryRoutes(app, { memoryStore });
+  usageRoutes(app, { store: usageStore });
   projectNotebookRoutes(app, { store: projectNotebookStore, projectsStore });
   chatRememberRoutes(app, { conversationStore: store, memoryStore });
   credentialsRoutes(app, credentialStore, {
