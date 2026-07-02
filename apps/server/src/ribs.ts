@@ -59,6 +59,7 @@ export interface RibManifest {
   readonly views: readonly RibViewDescriptor[];
   readonly surfaces: readonly RibSurfaceDescriptor[];
   readonly hasOnAction: boolean;
+  readonly acceptsIngest: boolean;
 }
 
 export interface RibDisposer {
@@ -344,6 +345,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       views,
       surfaces,
       hasOnAction: typeof rib.onAction === "function",
+      acceptsIngest: rib.acceptsIngest ?? false,
     });
 
     if (rib.authStatus) {
