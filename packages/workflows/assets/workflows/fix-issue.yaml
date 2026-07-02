@@ -488,7 +488,12 @@ nodes:
        fi
       fi
 
-      IS_DRAFT=$(gh pr view "$PR_NUM" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
+      IS_DRAFT=""
+      for attempt in 1 2 3; do
+       IS_DRAFT=$(gh pr view "$PR_NUM" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
+       [ -n "$IS_DRAFT" ] && break
+       sleep 2
+      done
       if [ "$IS_DRAFT" = "false" ]; then
        if gh pr ready --undo "$PR_NUM"; then
          echo "DRAFT_GUARD: CONVERTED — PR #$PR_NUM was ready; converted back to draft"
@@ -499,7 +504,8 @@ nodes:
       elif [ "$IS_DRAFT" = "true" ]; then
        echo "DRAFT_GUARD: OK — PR #$PR_NUM already a draft"
       else
-       echo "DRAFT_GUARD: UNKNOWN — unable to read draft state for PR #$PR_NUM"
+       echo "DRAFT_GUARD: FAILED — draft state unreadable for PR #$PR_NUM after 3 attempts"
+       exit 1
       fi
       exit 0
 
