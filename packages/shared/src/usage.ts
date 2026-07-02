@@ -19,6 +19,9 @@ export type UsageEventSourceWire = z.infer<typeof usageEventSourceSchema>;
 export const usageEventStatusSchema = z.enum(["ok", "error", "aborted", "timeout"]);
 export type UsageEventStatusWire = z.infer<typeof usageEventStatusSchema>;
 
+export const usageGroupBySchema = z.enum(["model", "provider", "source", "rib", "workflow"]);
+export type UsageGroupByWire = z.infer<typeof usageGroupBySchema>;
+
 // Aggregated token counts shared by the summary/series/breakdown responses.
 // These are COALESCE'd SUM(...) results, so unlike the per-event ledger row
 // they're always non-negative integers, never null.
@@ -62,11 +65,11 @@ export type UsageSeriesRowWire = z.infer<typeof usageSeriesRowSchema>;
 export const usageSeriesResponseSchema = z.array(usageSeriesRowSchema);
 export type UsageSeriesResponseWire = z.infer<typeof usageSeriesResponseSchema>;
 
-// (c) GET /api/usage/breakdown — a source x model matrix.
+// (c) GET /api/usage/breakdown — a groupBy x splitBy matrix; defaults to source x model.
 export const usageBreakdownRowSchema = usageTotalsSchema
   .extend({
-    source: usageEventSourceSchema,
-    model: z.string(),
+    key: z.string(),
+    split: z.string(),
   })
   .strict();
 export type UsageBreakdownRowWire = z.infer<typeof usageBreakdownRowSchema>;
