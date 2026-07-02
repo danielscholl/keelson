@@ -1018,6 +1018,69 @@ function JobsSection({ range }: { range: UsageWindow }) {
 }
 
 function SignalsSection({ range }: { range: UsageWindow }) {
+  const [signals, setSignals] = useState<{
+    failureTokens: number;
+    failureTurns: number;
+    failureTop: string | null;
+    downshift: string | null;
+    cacheReadRate: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      Promise.all(
+        FAILURE_STATUSES.map((status) =>
+          getUsageEvents({ window: range, status, limit: FAILURE_EVENTS_LIMIT }),
+        ),
+      ),
+      getUsageJobs({ window: range }),
+      getUsageSummary({ window: range }),
+    ])
+      .then(([eventsByStatus, jobs, summary]) => {
+        if (cancelled) return;
+        const failingEvents = eventsByStatus.flat();
+        const attribution = new Map<string, number>();
+        let failureTokens = 0;
+        for (const ev of failingEvents) {
+          const tokens = ev.inputTokens + ev.outputTokens;
+          failureTokens += tokens;
+          const key = ev.workflowName ?? ev.ribId ?? ev.source;
+          attribution.set(key, (attribution.get(key) ?? 0) + tokens);
+        }
+        const failureTop =
+          [...attribution.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+        const downshift =
+          [...jobs]
+            .filter((job) => job.runs >= 3 && job.avgTokensPerRun < 500)
+            .sort((a, b) => b.runs - a.runs)[0]?.key ?? null;
+        const { totals } = summary;
+        setSignals({
+          failureTokens,
+          failureTurns: failingEvents.length,
+          failureTop,
+          downshift,
+          cacheReadRate:
+            totals.inputTokens > 0
+              ? Math.round((totals.cacheReadTokens / totals.inputTokens) * 100)
+              : 0,
+        });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
   return (
     <section className="surface-region usage-signals-region">
       <div className="surface-region-head">
@@ -1031,11 +1094,68 @@ function SignalsSection({ range }: { range: UsageWindow }) {
         <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
       </div>
       <div className="surface-region-body">
-        <div className="usage-stack-empty">
-          <span className="page-sub">Deterministic usage signals will appear here.</span>
-        </div>
+        {error ? (
+          <div className="empty-state" role="alert">
+            <div className="empty-state-title">Couldn't load signals</div>
+            <div className="empty-state-body">{error}</div>
+          </div>
+        ) : loading ? (
+          <div className="page-sub" style={{ padding: "20px 0" }}>
+            Loading…
+          </div>
+        ) : signals ? (
+          <div className="usage-signals-grid">
+            <SignalCard
+              title="Failure burn"
+              value={formatTokens(signals.failureTokens)}
+              detail={
+                signals.failureTurns > 0
+                  ? `${signals.failureTurns} failed turns · top: ${signals.failureTop ?? "unknown"}`
+                  : "No failure spend in this window."
+              }
+              tone={signals.failureTurns > 0 ? "hot" : "ok"}
+            />
+            <SignalCard
+              title="Downshift candidate"
+              value={signals.downshift ?? "No signal"}
+              detail={
+                signals.downshift
+                  ? "High run count with low average tokens per run."
+                  : "No high-volume low-output job found."
+              }
+            />
+            <SignalCard
+              title="Cache-read trend"
+              value={`${signals.cacheReadRate}%`}
+              detail="Current-window cache read share of input tokens."
+              tone={signals.cacheReadRate > 0 ? "ok" : undefined}
+            />
+          </div>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function SignalCard({
+  title,
+  value,
+  detail,
+  tone,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  tone?: "ok" | "hot";
+}) {
+  return (
+    <div className="usage-signal-card">
+      <div className="usage-stat-label">{title}</div>
+      <div className="usage-stat-value" data-tone={tone}>
+        {value}
+      </div>
+      <div className="usage-stat-sub">{detail}</div>
+    </div>
   );
 }
 

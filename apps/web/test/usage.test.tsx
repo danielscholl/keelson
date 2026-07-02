@@ -297,4 +297,72 @@ describe("Usage page", () => {
     expect(screen.getByLabelText("Weekly burn by job")).toBeDefined();
     getUsageJobsImpl = async () => [];
   });
+
+  test("renders deterministic usage signals", async () => {
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 1,
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheReadTokens: 250,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageJobsImpl = async () => [
+      {
+        key: "standing-lens",
+        runs: 5,
+        totalTokens: 1500,
+        avgTokensPerRun: 300,
+        p95TokensPerRun: 400,
+      },
+    ];
+    getUsageEventsImpl = async (query) =>
+      query.status === "error"
+        ? [
+            {
+              id: 1,
+              ts: "2026-07-01T00:00:00.000Z",
+              source: "workflow",
+              provider: "codex",
+              model: "gpt-5.5",
+              inputTokens: 100,
+              outputTokens: 50,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              durationMs: 1000,
+              status: "error",
+              conversationId: null,
+              runId: "run-1",
+              nodeId: null,
+              workflowName: "standing-lens",
+              ribId: null,
+              projectId: null,
+            },
+          ]
+        : [];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    await waitFor(() => expect(screen.getAllByText("Failure burn").length).toBeGreaterThan(0));
+    expect(screen.getByText(/top: standing-lens/)).toBeDefined();
+    expect(screen.getByText("Downshift candidate")).toBeDefined();
+    expect(screen.getByText("standing-lens")).toBeDefined();
+    expect(screen.getAllByText("25%").length).toBeGreaterThan(0);
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageJobsImpl = async () => [];
+    getUsageEventsImpl = async () => [];
+  });
 });
