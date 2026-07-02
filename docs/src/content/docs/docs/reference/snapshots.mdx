@@ -142,7 +142,7 @@ one-level layout wrapper that nests leaf sections side by side.
 | `bars` | `inline?`, `items: [{ label, value, total, tone?, trailing? }]` | Meters and offender lists. |
 | `table` | `columns`, `rows`, `caption?` | The same table shape as the view. |
 | `cards` | `boxed?`, `items: [{ title, titleTone?, mono?, dot?, pill?, href?, bar?, fields?, actions?, footnote?, reason? }]` | Rich item cards. A card may carry `actions: ActionItem[]` for inline per-card buttons, distinct from a standalone `actions` section. |
-| `rows` | `boxed?`, `items: [{ icon?, glyph?, chip?, text, href?, trailing? }]` | A status or feed list. |
+| `rows` | `boxed?`, `items: [{ icon?, glyph?, chip?, text, href?, trailing?, detail? }]` | A status or feed list. A row with `detail` (long-form plain text, up to 4,000 chars) renders as a disclosure that expands beneath the row. |
 | `actions` | `items: ActionItem[]` | Buttons. See below. |
 | `grid` | `cells: [{ label, href?, badge: { text, tone? } }]` | A dense at-a-glance matrix. |
 | `columns` | `columns: [{ weight?, sections: LeafSection[] }]` | Lays leaf sections side by side. One level deep only. |
