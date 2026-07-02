@@ -656,12 +656,14 @@ describe("bootstrapRibs", () => {
       views: [{ key: "rib:alpha:v", canvasKind: "view", title: "V" }],
       onAction: () => ({ ok: true }),
       authStatus: () => ({ authenticated: true }),
+      acceptsIngest: true,
     };
     const { manifests, probes, actionHandlers } = await bootstrapRibs({
       available: { alpha: rib },
     });
     expect(manifests[0]?.views).toEqual([{ key: "rib:alpha:v", canvasKind: "view", title: "V" }]);
     expect(manifests[0]?.hasOnAction).toBe(true);
+    expect(manifests[0]?.acceptsIngest).toBe(true);
     expect(await probes.get("alpha")?.()).toEqual({ authenticated: true });
     expect(await actionHandlers.get("alpha")?.({ type: "go" })).toEqual({ ok: true });
   });

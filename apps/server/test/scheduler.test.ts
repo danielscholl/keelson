@@ -33,6 +33,7 @@ function manifest(surfaces: RibSurfaceDescriptor[]): RibManifest {
     views: [],
     surfaces,
     hasOnAction: false,
+    acceptsIngest: false,
   };
 }
 

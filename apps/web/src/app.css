@@ -8346,6 +8346,24 @@ a.cvb-card-title::after {
   text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
 }
 .chat-message-action:hover { color: var(--fg); border-color: var(--border); }
+.chat-message-ingest {
+  position: relative;
+  display: inline-flex;
+}
+.chat-message-ingest-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  min-width: 160px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-popover);
+}
 
 .save-memory-backdrop {
   position: fixed; inset: 0;

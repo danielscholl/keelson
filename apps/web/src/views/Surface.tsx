@@ -40,6 +40,7 @@ type LaunchWorkflow = (
   args: Record<string, string>,
   stay?: boolean,
 ) => void | Promise<void>;
+type OpenSurface = (surfaceId: string, regionKey?: string) => void;
 
 interface Region {
   key: string;
@@ -60,6 +61,7 @@ export function Surface({
   descriptor,
   onExplore,
   onLaunchWorkflow,
+  onOpenSurface,
 }: {
   descriptor: RibSurfaceDescriptor;
   // Raised when a region's "explore in chat" control fires, carrying the seed
@@ -68,6 +70,7 @@ export function Surface({
   // Raised when a board action returns a run-workflow directive; App launches
   // the run and (unless `stay`) focuses the Workflows tab.
   onLaunchWorkflow?: LaunchWorkflow;
+  onOpenSurface?: OpenSurface;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
   const [selected, setSelected] = useState<Map<string, ExplorePanel>>(() => new Map());
@@ -128,6 +131,7 @@ export function Surface({
           selected={selected.has(header.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
+          onOpenSurface={onOpenSurface}
         />
       )}
       {banner && (
@@ -138,6 +142,7 @@ export function Surface({
           selected={selected.has(banner.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
+          onOpenSurface={onOpenSurface}
         />
       )}
       {groupRowsByZone(rows).map((zone) => (
@@ -157,6 +162,7 @@ export function Surface({
                   selected={selected.has(col.key)}
                   onToggleSelect={onExplore ? onToggleSelect : undefined}
                   onLaunchWorkflow={onLaunchWorkflow}
+                  onOpenSurface={onOpenSurface}
                 />
               ))}
             </div>
@@ -171,6 +177,7 @@ export function Surface({
           selected={selected.has(footer.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
           onLaunchWorkflow={onLaunchWorkflow}
+          onOpenSurface={onOpenSurface}
         />
       )}
     </div>
@@ -203,12 +210,14 @@ function SurfaceRegion({
   selected,
   onToggleSelect,
   onLaunchWorkflow,
+  onOpenSurface,
 }: {
   region: Region;
   onExplore?: ExploreHandler;
   selected?: boolean;
   onToggleSelect?: (key: string, panel: ExplorePanel | null) => void;
   onLaunchWorkflow?: LaunchWorkflow;
+  onOpenSurface?: OpenSurface;
 }) {
   const collapsible = region.collapsible ?? false;
   const [collapsed, setCollapsed] = useState(collapsible ? (region.collapsed ?? false) : false);
@@ -267,9 +276,13 @@ function SurfaceRegion({
           source: { type: "snapshot", key },
           ...(title ? { title } : {}),
         },
-        { onOpenChat, ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}) },
+        {
+          onOpenChat,
+          ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+          ...(onOpenSurface ? { onOpenSurface } : {}),
+        },
       ),
-    [openCanvas, onOpenChat, onLaunchWorkflow, resolveCanvasKind],
+    [openCanvas, onOpenChat, onLaunchWorkflow, onOpenSurface, resolveCanvasKind],
   );
   // Only wire onOpenChat when onExplore exists; otherwise the dispatch would
   // intercept an open-chat directive, no-op, and swallow the normal success path.
@@ -280,6 +293,7 @@ function SurfaceRegion({
     onOpenChat: onExplore ? onOpenChat : undefined,
     ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
     onOpenCanvas,
+    ...(onOpenSurface ? { onOpenSurface } : {}),
   });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
@@ -304,7 +318,11 @@ function SurfaceRegion({
       },
       // So an Enter/launch button clicked in the expanded drawer behaves the same
       // way it does inline, instead of being swallowed with a success toast.
-      { onOpenChat, ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}) },
+      {
+        onOpenChat,
+        ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+        ...(onOpenSurface ? { onOpenSurface } : {}),
+      },
     );
 
   // The gradient lane head: static identity (glyph + title) the rib supplies,
@@ -421,7 +439,11 @@ function SurfaceRegion({
   );
 
   return (
-    <section className="surface-region" data-collapsed={collapsed || undefined}>
+    <section
+      className="surface-region"
+      data-collapsed={collapsed || undefined}
+      data-region-key={region.key}
+    >
       {head}
       {!collapsed &&
         (ribId ? (

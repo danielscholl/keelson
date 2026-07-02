@@ -51,6 +51,7 @@ interface Rib {
   composeBundle?(ctx: RibContext): Promise<unknown>;
   views?: readonly RibViewDescriptor[];
   surfaces?: readonly RibSurfaceDescriptor[];
+  acceptsIngest?: boolean;
   contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
   contributePolicies?(ctx: RibContext): readonly Policy[];
   onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
@@ -168,6 +169,22 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
    `{ ok: false, error }`. This path is loopback-trusted today; the
    capability-token envelope is a later milestone.
 
+   A successful action may place a recognized client effect in `data`:
+   `open-chat` opens a fresh seeded conversation, `run-workflow` launches a
+   catalog workflow, `open-canvas` opens a snapshot in the canvas drawer, and
+   `open-surface` switches the active surface tab. The `open-surface` shape is
+   `{ effect: "open-surface", surfaceId, regionKey? }`, where `surfaceId` is the
+   browser tab id (`surface:<ribId>:<surfaceId>`) and `regionKey` optionally
+   focuses one region after the tab switch. Unknown or malformed effects are
+   rejected at the surface edge rather than treated as successful navigation.
+
+   `acceptsIngest?: boolean` advertises that a rib handles the conventional
+   `ingest` action. When set, chat can send a persisted message to that rib with
+   `{ type: "ingest", payload: { text, sourceConversationId? } }`. `text` is
+   the message body, capped by `ribIngestPayloadSchema`; `sourceConversationId`
+   identifies the conversation that produced it when one exists. Treat the
+   payload as untrusted user data and narrow it at the rib boundary.
+
 8. **`listAgents(ctx)` / `resolveAgent(slug, ctx)`** offer named chat agents,
    reusable turn templates of a system prompt plus an optional model, surfaced at
    `GET /api/agents`. `listAgents` is cheap and returns `AgentSummary`s;
@@ -257,8 +274,9 @@ endpoints, both typed in `@keelson/shared`:
 
 - `GET /api/ribs` returns `ListRibsResponse` (`{ ribs: RibSummary[] }`). Each
   `RibSummary` is `{ id, displayName, registered, views, surfaces, hasOnAction,
-  auth? }`. `views` and `surfaces` are always present (possibly empty); `auth`
-  appears only when the rib declares `authStatus`.
+  acceptsIngest?, auth? }`. `views` and `surfaces` are always present (possibly
+  empty); `auth` appears only when the rib declares `authStatus`. Consumers treat
+  absent `acceptsIngest` as `false`.
 - `POST /api/ribs/:id/action` returns `RibActionResponse`, the discriminated
   `RibActionResult` the rib's `onAction` produced.
 - `GET /api/agents` returns `ListAgentsResponse` (`{ agents: AgentRef[] }`), the
