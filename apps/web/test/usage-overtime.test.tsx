@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { UsageSeriesResponseWire } from "@keelson/shared";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
@@ -21,9 +21,18 @@ mock.module("../src/hooks/useSnapshot.ts", () => ({
 
 let seriesRows: UsageSeriesResponseWire = [];
 
-mock.module("../src/api.ts", () => ({
-  ...realApi,
-  getUsageSummary: async () => ({
+// Reassignable impls behind stable wrappers (the Canvas.test.tsx /
+// useRibActionDispatch.test.tsx idiom): bun's mock.module is process-global
+// and unrestorable, so the wrappers must delegate to bindings this file can
+// point back at the real api once its tests finish — otherwise whichever
+// test file loads later inherits these fixtures (order differs between
+// macOS and Linux readdir, so it fails only on CI).
+let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => summaryFixture();
+let getUsageEventsImpl: typeof realApi.getUsageEvents = async () => [];
+let getUsageSeriesImpl: typeof realApi.getUsageSeries = async () => seriesRows;
+
+function summaryFixture() {
+  return {
     totals: {
       events: 1,
       inputTokens: 100,
@@ -32,10 +41,24 @@ mock.module("../src/api.ts", () => ({
       cacheWriteTokens: 0,
     },
     groups: [],
-  }),
-  getUsageEvents: async () => [],
-  getUsageSeries: async () => seriesRows,
+  };
+}
+
+mock.module("../src/api.ts", () => ({
+  ...realApi,
+  getUsageSummary: (...args: Parameters<typeof realApi.getUsageSummary>) =>
+    getUsageSummaryImpl(...args),
+  getUsageEvents: (...args: Parameters<typeof realApi.getUsageEvents>) =>
+    getUsageEventsImpl(...args),
+  getUsageSeries: (...args: Parameters<typeof realApi.getUsageSeries>) =>
+    getUsageSeriesImpl(...args),
 }));
+
+afterAll(() => {
+  getUsageSummaryImpl = realApi.getUsageSummary;
+  getUsageEventsImpl = realApi.getUsageEvents;
+  getUsageSeriesImpl = realApi.getUsageSeries;
+});
 
 async function renderUsage() {
   const { Usage } = await import("../src/views/Usage.tsx");
