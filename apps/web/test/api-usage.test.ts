@@ -94,8 +94,14 @@ describe("getUsageEvents", () => {
     expect(result[0]?.model).toBe("claude-sonnet-5");
   });
 
-  test("rejects a malformed usage events payload (invalid status enum)", async () => {
-    stubFetch([{ ...validEventRow, status: "not-a-status" }]);
+  test("accepts a foreign status (read side outlives writer enums)", async () => {
+    stubFetch([{ ...validEventRow, status: "succeeded" }]);
+    const result = await getUsageEvents();
+    expect(result[0]?.status).toBe("succeeded");
+  });
+
+  test("rejects a malformed usage events payload (negative token count)", async () => {
+    stubFetch([{ ...validEventRow, inputTokens: -1 }]);
     await expect(getUsageEvents()).rejects.toThrow();
   });
 });
