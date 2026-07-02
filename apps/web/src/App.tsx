@@ -116,6 +116,24 @@ function AppInner() {
     [activeProjectId, toast, handleOpenWorkflowRun],
   );
 
+  const handleOpenSurface = useCallback(
+    (surfaceId: string, regionKey?: string) => {
+      if (!surfaceTabs.some((t) => t.id === surfaceId)) {
+        toast.push({ kind: "error", message: "Surface not available" });
+        return;
+      }
+      setActiveTab(surfaceId as ActiveTab);
+      if (regionKey) {
+        requestAnimationFrame(() => {
+          document
+            .querySelector(`[data-region-key="${CSS.escape(regionKey)}"]`)
+            ?.scrollIntoView({ block: "start" });
+        });
+      }
+    },
+    [surfaceTabs, toast],
+  );
+
   const themePreference = settings.theme ?? "system";
   useEffect(() => {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
@@ -170,6 +188,7 @@ function AppInner() {
           descriptor={activeSurface}
           onExplore={handleExplore}
           onLaunchWorkflow={handleLaunchWorkflowFromAction}
+          onOpenSurface={handleOpenSurface}
         />
       ) : activeTab === "workflows" ? (
         <Workflows
