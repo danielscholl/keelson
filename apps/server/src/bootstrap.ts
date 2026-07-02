@@ -325,7 +325,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const runWorkflowSeam =
     getWorkflowController && refreshCwd !== undefined
       ? async (
-          _ribId: string,
+          ribId: string,
           definition: unknown,
           inputs: Record<string, string>,
           opts?: { cwd?: string },
@@ -335,7 +335,12 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
             if (!controller) {
               return { status: "failed", nodes: {}, error: "workflow controller unavailable" };
             }
-            return await controller.runDefinition(definition, inputs, opts?.cwd ?? refreshCwd);
+            return await controller.runDefinition(
+              definition,
+              inputs,
+              opts?.cwd ?? refreshCwd,
+              ribId,
+            );
           } catch (err) {
             return {
               status: "failed",

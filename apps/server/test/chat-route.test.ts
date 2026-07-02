@@ -1751,6 +1751,7 @@ describe("handleChatRequest — usage ledger", () => {
       status: "ok",
       conversationId: conv.id,
     });
+    expect(events[0].durationMs).toEqual(expect.any(Number));
 
     // Provider/model provenance also lands on the assistant message row
     // itself (server-internal — never round-tripped onto the wire Message).

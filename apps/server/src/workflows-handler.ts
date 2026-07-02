@@ -1075,6 +1075,7 @@ export interface WorkflowController {
     definition: unknown,
     inputs: Record<string, string>,
     cwd: string,
+    ribId?: string,
   ): Promise<RibWorkflowRunResult>;
 }
 
@@ -1131,6 +1132,7 @@ export function createWorkflowController(
       definition: unknown,
       inputs: Record<string, string>,
       cwd: string,
+      ribId?: string,
     ): Promise<RibWorkflowRunResult> {
       const parsed = workflowDefinitionSchema.safeParse(definition);
       if (!parsed.success) {
@@ -1198,6 +1200,7 @@ export function createWorkflowController(
         conversationId: "",
       });
       try {
+        const nodeStart = new Map<string, string>();
         const summary = await runWorkflow({
           workflow: definitionObj,
           runId,
@@ -1205,6 +1208,40 @@ export function createWorkflowController(
           handlers,
           cwd: workingDir,
           abortSignal: abort.signal,
+          ...(usageStore !== undefined
+            ? {
+                onEvent: (event: RunStreamEvent) => {
+                  if (event.type === "node_started") {
+                    nodeStart.set(event.nodeId, new Date().toISOString());
+                    return;
+                  }
+                  if (event.type !== "node_done") return;
+                  const usage = coerceTokenUsage(event.result.usage);
+                  const provider = sanitizeProvenanceField(event.result.provider);
+                  const model = sanitizeProvenanceField(event.result.model);
+                  if (usage === undefined || provider === null || model === null) return;
+                  const completedAt = new Date().toISOString();
+                  recordNodeUsage({
+                    usageStore,
+                    usage,
+                    provider,
+                    model,
+                    status: event.result.status,
+                    startedAt: nodeStart.get(event.nodeId) ?? null,
+                    completedAt,
+                    attribution: {
+                      runId,
+                      nodeId: event.nodeId,
+                      workflowName: definitionObj.name,
+                      conversationId: null,
+                      projectId: projectId ?? null,
+                      ribId: ribId ?? null,
+                    },
+                  });
+                  nodeStart.delete(event.nodeId);
+                },
+              }
+            : {}),
           ...artifacts.runWorkflowOptions(),
           ...(memoryTools !== undefined ? { memoryTools } : {}),
           ...(projectId !== undefined ? { projectId } : {}),
@@ -2660,6 +2697,47 @@ function sanitizeProvenanceField(v: unknown): string | null {
     : trimmed;
 }
 
+interface NodeUsageAttribution {
+  runId: string;
+  nodeId: string;
+  workflowName: string;
+  conversationId: string | null;
+  projectId: string | null;
+  ribId: string | null;
+}
+
+function recordNodeUsage(args: {
+  usageStore?: UsageStore;
+  usage: NonNullable<ReturnType<typeof coerceTokenUsage>>;
+  provider: string;
+  model: string;
+  status: WorkflowNodeStatus;
+  startedAt: string | null;
+  completedAt: string;
+  attribution: NodeUsageAttribution;
+}): void {
+  const { usageStore, usage, provider, model, status, startedAt, completedAt, attribution } = args;
+  const durationMs = startedAt !== null ? Date.parse(completedAt) - Date.parse(startedAt) : null;
+  usageStore?.record({
+    source: "workflow",
+    provider,
+    model,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.cacheReadInputTokens !== undefined
+      ? { cacheReadTokens: usage.cacheReadInputTokens }
+      : {}),
+    ...(usage.cacheCreationInputTokens !== undefined
+      ? { cacheWriteTokens: usage.cacheCreationInputTokens }
+      : {}),
+    ...(durationMs !== null && Number.isFinite(durationMs) ? { durationMs } : {}),
+    // Node statuses fold onto the ledger's turn vocabulary so one query
+    // never meets two spellings ('succeeded' vs 'ok') of the same state.
+    status: status === "succeeded" ? "ok" : status === "failed" ? "error" : status,
+    ...attribution,
+  });
+}
+
 interface DispatchArgs {
   event: RunStreamEvent;
   runId: string;
@@ -2781,30 +2859,22 @@ function dispatchRunEvent(args: DispatchArgs): void {
       // columns, so it's skipped rather than recorded with a placeholder.
       if (usage !== null && provider !== null && model !== null) {
         const run = store.getRun(runId);
-        const durationMs =
-          startedAt !== null ? Date.parse(completedAt) - Date.parse(startedAt) : null;
-        usageStore?.record({
-          source: "workflow",
+        recordNodeUsage({
+          usageStore,
+          usage,
           provider,
           model,
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          ...(usage.cacheReadInputTokens !== undefined
-            ? { cacheReadTokens: usage.cacheReadInputTokens }
-            : {}),
-          ...(usage.cacheCreationInputTokens !== undefined
-            ? { cacheWriteTokens: usage.cacheCreationInputTokens }
-            : {}),
-          ...(durationMs !== null && Number.isFinite(durationMs) ? { durationMs } : {}),
-          // Node statuses fold onto the ledger's turn vocabulary so one query
-          // never meets two spellings ('succeeded' vs 'ok') of the same state.
-          status: status === "succeeded" ? "ok" : status === "failed" ? "error" : status,
-          runId,
-          nodeId: event.nodeId,
-          workflowName,
-          conversationId: run?.conversationId ?? null,
-          projectId: run?.projectId ?? null,
-          ribId: run?.ribId ?? null,
+          status,
+          startedAt,
+          completedAt,
+          attribution: {
+            runId,
+            nodeId: event.nodeId,
+            workflowName,
+            conversationId: run?.conversationId ?? null,
+            projectId: run?.projectId ?? null,
+            ribId: run?.ribId ?? null,
+          },
         });
       }
       // Free the per-node accumulator now that we've persisted it; keeps the
