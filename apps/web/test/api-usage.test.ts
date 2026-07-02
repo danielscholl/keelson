@@ -9,7 +9,7 @@ import {
   getUsageJobs,
   getUsageSeries,
   getUsageSummary,
-} from "../src/api.ts";
+} from "../src/api.ts?api-usage";
 
 const realFetch = globalThis.fetch;
 

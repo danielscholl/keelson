@@ -58,6 +58,7 @@ afterAll(() => {
   getUsageSeriesImpl = realApi.getUsageSeries;
   getUsageBreakdownImpl = realApi.getUsageBreakdown;
   getUsageJobsImpl = realApi.getUsageJobs;
+  mock.module("../src/api.ts", () => realApi);
 });
 
 async function renderUsagePage() {
@@ -489,7 +490,9 @@ describe("Usage page", () => {
     });
 
     fireEvent.click(screen.getByLabelText("Ledger"));
-    await waitFor(() => expect(screen.getByLabelText("Ledger filters")).toBeDefined());
+    await waitFor(() =>
+      expect(screen.getByRole("group", { name: "Ledger filters" })).toBeDefined(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "workflow" }));
     fireEvent.click(await screen.findByRole("button", { name: "auto (unresolved)" }));
     fireEvent.click(screen.getByRole("button", { name: "error" }));

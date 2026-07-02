@@ -65,6 +65,7 @@ afterAll(() => {
   getUsageSeriesImpl = realApi.getUsageSeries;
   getUsageBreakdownImpl = realApi.getUsageBreakdown;
   getUsageJobsImpl = realApi.getUsageJobs;
+  mock.module("../src/api.ts", () => realApi);
 });
 
 async function renderUsage() {
