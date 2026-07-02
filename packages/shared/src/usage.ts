@@ -90,7 +90,10 @@ export const usageEventRowSchema = z
     cacheReadTokens: z.number().int().nonnegative().nullable(),
     cacheWriteTokens: z.number().int().nonnegative().nullable(),
     durationMs: z.number().int().nonnegative().nullable(),
-    status: usageEventStatusSchema,
+    // Read-side stays open: the ledger is append-only history, so rows written
+    // by another writer version must render, not 500 the whole tail. The
+    // closed enum governs writers only.
+    status: z.string().min(1),
     conversationId: z.string().nullable(),
     runId: z.string().nullable(),
     nodeId: z.string().nullable(),

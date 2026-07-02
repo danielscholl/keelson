@@ -199,6 +199,21 @@ describe("GET /api/usage/events", () => {
     expect(res.status).toBe(400);
   });
 
+  test("rows with a foreign status still serve (append-only history outlives writer enums)", async () => {
+    store.record({
+      source: "workflow",
+      provider: "copilot",
+      model: "auto",
+      inputTokens: 10,
+      outputTokens: 2,
+      status: "succeeded",
+    });
+    const res = await app.fetch(new Request("http://test/api/usage/events"));
+    expect(res.status).toBe(200);
+    const rows = await res.json();
+    expect(rows.some((r) => r.status === "succeeded")).toBe(true);
+  });
+
   test("400 on a bad window", async () => {
     const res = await app.fetch(new Request("http://test/api/usage/events?window=bogus"));
     expect(res.status).toBe(400);
