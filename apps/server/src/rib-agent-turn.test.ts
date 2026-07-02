@@ -87,9 +87,7 @@ function makeRun(
     getRegisteredTools: deps.getRegisteredTools ?? (() => []),
     ...(deps.denylist !== undefined ? { denylist: deps.denylist } : {}),
     ...(deps.getToolOwner !== undefined ? { getToolOwner: deps.getToolOwner } : {}),
-    ...(deps.isTurnToolGranted !== undefined
-      ? { isTurnToolGranted: deps.isTurnToolGranted }
-      : {}),
+    ...(deps.isTurnToolGranted !== undefined ? { isTurnToolGranted: deps.isTurnToolGranted } : {}),
     ...(deps.getPolicyEngine !== undefined ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore !== undefined ? { getUsageStore: deps.getUsageStore } : {}),
   });

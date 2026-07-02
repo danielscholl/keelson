@@ -3,14 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type {
-  CallToolResult,
-  MessageChunk,
-  Rib,
-  RibContext,
-  ToolContext,
-  ToolDefinition,
-} from "@keelson/shared";
+import type { CallToolResult, Rib, RibContext, ToolContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import { bootstrapRibs } from "./bootstrap.ts";
 import type { PolicyEngine } from "./policy-engine.ts";

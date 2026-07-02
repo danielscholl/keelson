@@ -385,9 +385,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     options.getProviders ??
     ((): readonly RibProviderInfo[] =>
       getProviderInfoList().map((p) => ({ id: p.id, displayName: p.displayName })));
-  const callTimeoutMs = parseCrossRibCallTimeoutMs(
-    process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS,
-  );
+  const callTimeoutMs = parseCrossRibCallTimeoutMs(process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS);
   const defaultCallCwd = refreshCwd ?? process.cwd();
   const callTool = async (
     callerRibId: string,
@@ -439,9 +437,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       controllerAbortListener = () => {
         const reason =
           abortReason === "caller" ? "aborted by caller" : `timed out after ${timeoutMs}ms`;
-        reject(
-          new Error(`cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${reason}`),
-        );
+        reject(new Error(`cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${reason}`));
       };
       controller.signal.addEventListener("abort", controllerAbortListener, { once: true });
     });
