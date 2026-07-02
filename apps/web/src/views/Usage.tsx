@@ -291,7 +291,7 @@ function PulseSparkline({ pulse }: { pulse: unknown }) {
   const height = 44;
   const n = values.length;
   const max = Math.max(...values, 1) * 1.15;
-  const x = (i: number) => (i / (n - 1)) * (width - 10) + 4;
+  const x = (i: number) => (i / Math.max(n - 1, 1)) * (width - 10) + 4;
   const y = (v: number) => height - 4 - (v / max) * (height - 10);
 
   const linePath = values
@@ -697,8 +697,8 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
   );
 }
 
-// Foreign statuses (the read side accepts any string) fall to the neutral
-// pending dot rather than reading as failures.
+// Statuses beyond these mapped spellings (the read side accepts any string)
+// fall to the neutral pending dot rather than reading as failures.
 function statusDotClass(status: string): string {
   if (status === "ok" || status === "succeeded") return "completed";
   if (status === "error" || status === "failed" || status === "timeout") return "failed";
@@ -710,7 +710,7 @@ function formatEventDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
+  const seconds = Math.floor((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
 }
 
