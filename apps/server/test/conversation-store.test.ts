@@ -209,6 +209,7 @@ describe("SQLite ConversationStore", () => {
       { version: 3 },
       { version: 4 },
       { version: 5 },
+      { version: 6 },
     ]);
     db2.close();
   });
