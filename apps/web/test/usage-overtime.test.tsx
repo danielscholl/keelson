@@ -30,6 +30,8 @@ let seriesRows: UsageSeriesResponseWire = [];
 let getUsageSummaryImpl: typeof realApi.getUsageSummary = async () => summaryFixture();
 let getUsageEventsImpl: typeof realApi.getUsageEvents = async () => [];
 let getUsageSeriesImpl: typeof realApi.getUsageSeries = async () => seriesRows;
+let getUsageBreakdownImpl: typeof realApi.getUsageBreakdown = async () => [];
+let getUsageJobsImpl: typeof realApi.getUsageJobs = async () => [];
 
 function summaryFixture() {
   return {
@@ -46,10 +48,13 @@ function summaryFixture() {
 
 mock.module("../src/api.ts", () => ({
   ...realApi,
+  getUsageBreakdown: (...args: Parameters<typeof realApi.getUsageBreakdown>) =>
+    getUsageBreakdownImpl(...args),
   getUsageSummary: (...args: Parameters<typeof realApi.getUsageSummary>) =>
     getUsageSummaryImpl(...args),
   getUsageEvents: (...args: Parameters<typeof realApi.getUsageEvents>) =>
     getUsageEventsImpl(...args),
+  getUsageJobs: (...args: Parameters<typeof realApi.getUsageJobs>) => getUsageJobsImpl(...args),
   getUsageSeries: (...args: Parameters<typeof realApi.getUsageSeries>) =>
     getUsageSeriesImpl(...args),
 }));
@@ -58,6 +63,8 @@ afterAll(() => {
   getUsageSummaryImpl = realApi.getUsageSummary;
   getUsageEventsImpl = realApi.getUsageEvents;
   getUsageSeriesImpl = realApi.getUsageSeries;
+  getUsageBreakdownImpl = realApi.getUsageBreakdown;
+  getUsageJobsImpl = realApi.getUsageJobs;
 });
 
 async function renderUsage() {
@@ -108,6 +115,7 @@ describe("Usage — Over time stacked chart", () => {
     await waitFor(() => expect(screen.getByLabelText(/Tokens over time by model/)).toBeDefined());
     expect(screen.getByText("claude-sonnet-5")).toBeDefined();
     expect(screen.getByText("gpt-5.5")).toBeDefined();
+    expect(screen.getByText("Jul 2")).toBeDefined();
   });
 
   test("shows a quiet placeholder line instead of a broken chart when the series is empty", async () => {

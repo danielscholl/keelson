@@ -416,7 +416,7 @@ function formatBucketLabel(iso: string, bucket: UsageSeriesBucket): string {
   if (Number.isNaN(d.getTime())) return iso;
   return bucket === "hour"
     ? d.toLocaleTimeString([], { hour: "numeric" })
-    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+    : d.toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function formatModelLabel(model: string): string {
@@ -714,7 +714,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
                     <td>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                         <span className="usage-sdot" style={{ background: r.color }} />
-                        {r.key}
+                        {formatModelLabel(r.key)}
                       </span>
                     </td>
                     <td>{r.turns.toLocaleString()}</td>
@@ -1248,7 +1248,8 @@ function LedgerSection({ range }: { range: UsageWindow }) {
                     </td>
                     <td>
                       <span className="run-provenance">
-                        {formatProviderModel(ev.provider, ev.model) ?? ev.model}
+                        {formatProviderModel(ev.provider, formatModelLabel(ev.model)) ??
+                          formatModelLabel(ev.model)}
                       </span>
                     </td>
                     <td>↑ {formatTokens(ev.inputTokens)}</td>

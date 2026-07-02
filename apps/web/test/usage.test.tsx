@@ -365,4 +365,80 @@ describe("Usage page", () => {
     getUsageJobsImpl = async () => [];
     getUsageEventsImpl = async () => [];
   });
+
+  test("labels auto model rows as unresolved", async () => {
+    getUsageSummaryImpl = async (query) =>
+      query.groupBy === "model"
+        ? {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [
+              {
+                key: "auto",
+                events: 1,
+                inputTokens: 10,
+                outputTokens: 5,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+              },
+            ],
+          }
+        : {
+            totals: {
+              events: 1,
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+            groups: [],
+          };
+    getUsageEventsImpl = async () => [
+      {
+        id: 1,
+        ts: "2026-07-01T00:00:00.000Z",
+        source: "chat",
+        provider: "copilot",
+        model: "auto",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        durationMs: 1000,
+        status: "ok",
+        conversationId: null,
+        runId: null,
+        nodeId: null,
+        workflowName: null,
+        ribId: null,
+        projectId: null,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(screen.getByLabelText("Models"));
+    await waitFor(() => expect(screen.getByText("auto (unresolved)")).toBeDefined());
+
+    fireEvent.click(screen.getByLabelText("Ledger"));
+    await waitFor(() => expect(screen.getByText("copilot · auto (unresolved)")).toBeDefined());
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageEventsImpl = async () => [];
+  });
 });
