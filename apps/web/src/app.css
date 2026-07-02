@@ -4007,6 +4007,50 @@ a.cvb-card-title::after {
   flex: none;
 }
 
+/* A row carrying `detail` renders as a native disclosure: the summary is the
+   row itself plus a caret; the body is an inset pre-wrapped text block. */
+.cvb-row-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.cvb-row-details > summary::-webkit-details-marker {
+  display: none;
+}
+.cvb-row-details > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.cvb-row-caret {
+  flex: none;
+  color: var(--muted);
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cvb-row-caret {
+    transition: none;
+  }
+}
+.cvb-row-details[open] .cvb-row-caret {
+  transform: rotate(90deg);
+}
+.cvb-rows .cvb-row-details:last-child .cvb-row {
+  border-bottom: none;
+}
+.cvb-row-detail {
+  margin: 2px 0 8px 24px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border);
+  background: var(--bg-soft);
+  border-radius: 0 8px 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* boxed rows — a status list: each row is an inset card, the tone glyph reads
    as a check/mark, and the value is left-aligned after a fixed label column. */
 .cvb-rows--boxed {
