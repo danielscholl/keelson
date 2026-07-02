@@ -260,6 +260,11 @@ describe("canvasViewSchema", () => {
               trailing: "21m",
             },
             { glyph: "ok", text: "Services", trailing: "29/29 ready" },
+            {
+              glyph: "info",
+              text: "review passed",
+              detail: "Full synthesis:\nboth reviewers agreed.",
+            },
           ],
         },
         {
@@ -292,6 +297,21 @@ describe("canvasViewSchema", () => {
       canvasViewSchema.parse({
         view: "board",
         sections: [{ kind: "rows", items: [{ icon: "", text: "x" }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a rows item detail that is empty or over the cap", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "rows", items: [{ text: "x", detail: "" }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "rows", items: [{ text: "x", detail: "y".repeat(4001) }] }],
       }),
     ).toThrow();
   });

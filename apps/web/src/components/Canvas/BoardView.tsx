@@ -698,34 +698,55 @@ function Section({ section }: { section: BoardSection }) {
       const key = makeKeyer();
       return (
         <div className={`cvb-rows${section.boxed ? " cvb-rows--boxed" : ""}`}>
-          {section.items.map((r) => (
-            <div key={key(JSON.stringify(r))} className="cvb-row">
-              {r.icon && (
-                <span className="cvb-row-icon" aria-hidden="true">
-                  {r.icon}
-                </span>
-              )}
-              {r.glyph && <span className="cvb-glyph" data-tone={r.glyph} />}
-              {r.chip && (
-                <span className="cvb-chip" data-tone={r.chip.tone}>
-                  {r.chip.label}
-                </span>
-              )}
-              {isSafeLinkScheme(r.href) ? (
-                <a
-                  className="cvb-link cvb-row-text"
-                  href={r.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {r.text}
-                </a>
-              ) : (
-                <span className="cvb-row-text">{r.text}</span>
-              )}
-              {r.trailing && <span className="cvb-row-trailing">{r.trailing}</span>}
-            </div>
-          ))}
+          {section.items.map((r) => {
+            const rowKey = key(JSON.stringify(r));
+            const body = (
+              <>
+                {r.icon && (
+                  <span className="cvb-row-icon" aria-hidden="true">
+                    {r.icon}
+                  </span>
+                )}
+                {r.glyph && <span className="cvb-glyph" data-tone={r.glyph} />}
+                {r.chip && (
+                  <span className="cvb-chip" data-tone={r.chip.tone}>
+                    {r.chip.label}
+                  </span>
+                )}
+                {isSafeLinkScheme(r.href) ? (
+                  <a
+                    className="cvb-link cvb-row-text"
+                    href={r.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {r.text}
+                  </a>
+                ) : (
+                  <span className="cvb-row-text">{r.text}</span>
+                )}
+                {r.trailing && <span className="cvb-row-trailing">{r.trailing}</span>}
+              </>
+            );
+            if (!r.detail) {
+              return (
+                <div key={rowKey} className="cvb-row">
+                  {body}
+                </div>
+              );
+            }
+            return (
+              <details key={rowKey} className="cvb-row-details">
+                <summary className="cvb-row">
+                  {body}
+                  <span className="cvb-row-caret" aria-hidden="true">
+                    ▸
+                  </span>
+                </summary>
+                <div className="cvb-row-detail">{r.detail}</div>
+              </details>
+            );
+          })}
         </div>
       );
     }

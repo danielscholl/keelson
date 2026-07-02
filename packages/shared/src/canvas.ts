@@ -356,6 +356,9 @@ const rowsSectionSchema = z
           text: z.string().min(1),
           href: z.string().optional(),
           trailing: z.string().optional(),
+          // Long-form body disclosed under the row on demand (pre-wrapped plain
+          // text, not markdown) — the full record behind a capped one-line `text`.
+          detail: z.string().min(1).max(4000).optional(),
         })
         .strict(),
     ),

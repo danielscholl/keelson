@@ -561,6 +561,44 @@ describe("CanvasProvider / useCanvas", () => {
     expect(screen.getByRole("button", { name: "Copy user" })).toBeTruthy();
   });
 
+  test("board rows item with detail renders a disclosure; without detail renders a plain row", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            {
+              kind: "rows",
+              items: [
+                { glyph: "ok", text: "plain row", trailing: "R8" },
+                { glyph: "info", text: "review passed", detail: "Full synthesis:\nboth agreed." },
+              ],
+            },
+          ],
+        }),
+      },
+      title: "board",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    const disclosure = dialog.querySelector("details.cvb-row-details");
+    expect(disclosure).not.toBeNull();
+    expect(disclosure?.querySelector("summary .cvb-row-text")?.textContent).toBe("review passed");
+    expect(disclosure?.querySelector(".cvb-row-detail")?.textContent).toContain("Full synthesis:");
+    const plain = [...dialog.querySelectorAll("div.cvb-row")].find((el) =>
+      el.textContent?.includes("plain row"),
+    );
+    expect(plain).toBeTruthy();
+    expect(plain?.closest("details")).toBeNull();
+  });
+
   test("board renders a grid, inline bars, and a toned-mono card title with a reason line", () => {
     const doc: CanvasDocument = {
       kind: "view",
