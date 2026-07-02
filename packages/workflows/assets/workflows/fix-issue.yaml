@@ -481,6 +481,8 @@ nodes:
        PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null | tr -d '[:space:]')
        if [ -n "$PR_NUM" ]; then
          printf '%s' "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
+         PR_URL=$(gh pr view "$PR_NUM" --json url -q '.url' 2>/dev/null | tr -d '[:space:]')
+         [ -n "$PR_URL" ] && printf '%s' "$PR_URL" > "$KEELSON_ARTIFACTS_DIR/.pr-url"
          echo "DRAFT_GUARD: RECOVERED — resolved PR #$PR_NUM from the head branch"
        else
          echo "DRAFT_GUARD: FAILED — no .pr-number recorded and no PR found for the head branch"
