@@ -33,14 +33,17 @@ function recorders() {
   const chats: OpenChatSeed[] = [];
   const launches: Array<{ workflow: string; args: Record<string, string> }> = [];
   const canvases: Array<{ key: string; title?: string }> = [];
+  const surfaces: Array<{ surfaceId: string; regionKey?: string }> = [];
   return {
     chats,
     launches,
     canvases,
+    surfaces,
     onOpenChat: (seed: OpenChatSeed) => chats.push(seed),
     onLaunchWorkflow: (workflow: string, args: Record<string, string>) =>
       launches.push({ workflow, args }),
     onOpenCanvas: (key: string, title?: string) => canvases.push({ key, title }),
+    onOpenSurface: (surfaceId: string, regionKey?: string) => surfaces.push({ surfaceId, regionKey }),
   };
 }
 
@@ -377,6 +380,86 @@ describe("useRibActionDispatch — open-canvas directive", () => {
     const res = await runAct(result.current.run, ACTION);
     expect(res.ok).toBe(true);
     // Not intercepted: the success toast fires and onSuccess runs (not swallowed).
+    expect(toastText()).toContain("convene ✓");
+    expect(onSuccessCalls).toEqual([ACTION]);
+  });
+});
+
+describe("useRibActionDispatch — open-surface directive", () => {
+  test("opens the target surface with region key, no success toast", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: {
+        effect: "open-surface",
+        surfaceId: "surface:chamber:rooms",
+        regionKey: "rib:chamber:room-7",
+      },
+    });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onOpenSurface: rec.onOpenSurface }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res).toEqual({
+      ok: true,
+      data: {
+        effect: "open-surface",
+        surfaceId: "surface:chamber:rooms",
+        regionKey: "rib:chamber:room-7",
+      },
+    });
+    expect(rec.surfaces).toEqual([
+      { surfaceId: "surface:chamber:rooms", regionKey: "rib:chamber:room-7" },
+    ]);
+    expect(okToastCount()).toBe(0);
+    expect(toastCount()).toBe(0);
+  });
+
+  test("passes an undefined region key when omitted", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-surface", surfaceId: "surface:chamber:rooms" },
+    });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onOpenSurface: rec.onOpenSurface }),
+      { wrapper },
+    );
+    await runAct(result.current.run, ACTION);
+    expect(rec.surfaces).toEqual([
+      { surfaceId: "surface:chamber:rooms", regionKey: undefined },
+    ]);
+  });
+
+  test("a shaped-but-invalid open-surface returns an error result and toasts", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-surface", surfaceId: "" },
+    });
+    const rec = recorders();
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onOpenSurface: rec.onOpenSurface }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res).toEqual({ ok: false, error: "convene: invalid open-surface directive" });
+    expect(rec.surfaces).toEqual([]);
+    expect(toastText()).toContain("invalid open-surface directive");
+  });
+
+  test("falls through to the normal success path when onOpenSurface is absent", async () => {
+    postRibActionImpl = async () => ({
+      ok: true,
+      data: { effect: "open-surface", surfaceId: "surface:chamber:rooms" },
+    });
+    const onSuccessCalls: RibAction[] = [];
+    const { result } = renderHook(
+      () => useRibActionDispatch("rib:demo", { onSuccess: (a) => onSuccessCalls.push(a) }),
+      { wrapper },
+    );
+    const res = await runAct(result.current.run, ACTION);
+    expect(res.ok).toBe(true);
     expect(toastText()).toContain("convene ✓");
     expect(onSuccessCalls).toEqual([ACTION]);
   });

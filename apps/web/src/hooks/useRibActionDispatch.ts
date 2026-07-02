@@ -37,6 +37,7 @@ export function useRibActionDispatch(
     // opens that snapshot's board in the canvas drawer (the View verb). Sync: it's
     // a setState that opens a drawer, not a paid/duplicable action — no await.
     onOpenCanvas?: (key: string, title?: string) => void;
+    onOpenSurface?: (surfaceId: string, regionKey?: string) => void;
   },
 ): BoardActionApi {
   const toast = useToast();
@@ -44,6 +45,7 @@ export function useRibActionDispatch(
   const onOpenChat = opts?.onOpenChat;
   const onLaunchWorkflow = opts?.onLaunchWorkflow;
   const onOpenCanvas = opts?.onOpenCanvas;
+  const onOpenSurface = opts?.onOpenSurface;
 
   const run = useCallback(
     async (action: RibAction): Promise<RibActionResult> => {
@@ -117,6 +119,16 @@ export function useRibActionDispatch(
             toast.push({ kind: "error", message: error });
             return { ok: false, error };
           }
+          if (onOpenSurface && isOpenSurfaceShaped(result.data)) {
+            const parsed = ribClientEffectSchema.safeParse(result.data);
+            if (parsed.success && parsed.data.effect === "open-surface") {
+              onOpenSurface(parsed.data.surfaceId, parsed.data.regionKey);
+              return result;
+            }
+            const error = `${action.type}: invalid open-surface directive`;
+            toast.push({ kind: "error", message: error });
+            return { ok: false, error };
+          }
           toast.push({ kind: "ok", message: `${action.type} ✓` });
           // Isolate the callback: a throwing onSuccess must not turn a
           // successful action into a failure result.
@@ -136,7 +148,7 @@ export function useRibActionDispatch(
         return { ok: false, error: message };
       }
     },
-    [ribId, toast, onSuccess, onOpenChat, onLaunchWorkflow, onOpenCanvas],
+    [ribId, toast, onSuccess, onOpenChat, onLaunchWorkflow, onOpenCanvas, onOpenSurface],
   );
 
   // Raw: no toast, no reload. The copy button shows its own flash and the
@@ -180,5 +192,13 @@ function isOpenCanvasShaped(data: unknown): boolean {
     typeof data === "object" &&
     data !== null &&
     (data as { effect?: unknown }).effect === "open-canvas"
+  );
+}
+
+function isOpenSurfaceShaped(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { effect?: unknown }).effect === "open-surface"
   );
 }
