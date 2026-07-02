@@ -370,7 +370,7 @@ function SurfaceRegion({
           <span aria-hidden="true">✦</span>
         </button>
       )}
-      {snap.status === "live" && onToggleSelect && (
+      {(snap.status === "live" || selected) && onToggleSelect && (
         <input
           type="checkbox"
           className="surface-region-action surface-region-select"
@@ -378,7 +378,9 @@ function SurfaceRegion({
           onChange={(event) =>
             onToggleSelect(
               region.key,
-              event.currentTarget.checked ? { name: panelName, data: snap.data } : null,
+              event.currentTarget.checked && snap.status === "live"
+                ? { name: panelName, data: snap.data }
+                : null,
             )
           }
           aria-label="Select panel for multi-panel explore"
