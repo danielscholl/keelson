@@ -256,7 +256,7 @@ function PulseStats({
         </div>
         <div className="usage-stat-label">Failure burn</div>
         <div className="usage-stat-sub">
-          {failureBurn.turns} errored / timed-out {failureBurn.turns === 1 ? "turn" : "turns"}
+          {failureBurn.turns} errored / aborted / timed-out {failureBurn.turns === 1 ? "turn" : "turns"}
         </div>
       </div>
     </div>
@@ -337,39 +337,29 @@ interface StackBucket {
 }
 
 // Pivots the flat series rows (one row per bucket × model) into per-bucket
-// stacks, in first-seen model order — that order also drives the palette
-// index and the legend, so a model keeps the same color across buckets.
+// stacks, in alphabetical model order — the same localeCompare order the
+// roster's palette index uses, so a model wears one color everywhere.
 function pivotSeries(rows: UsageSeriesResponseWire): { models: string[]; buckets: StackBucket[] } {
-  const models: string[] = [];
-  const modelIndex = new Map<string, number>();
-  const bucketsByIso = new Map<string, StackBucket>();
-  const bucketOrder: string[] = [];
+  const totalsByModel = new Map<string, Map<string, number>>();
+  const bucketTotals = new Map<string, number>();
 
   for (const row of rows) {
-    let idx = modelIndex.get(row.key);
-    if (idx === undefined) {
-      idx = models.length;
-      modelIndex.set(row.key, idx);
-      models.push(row.key);
-    }
-    let bucket = bucketsByIso.get(row.bucketIso);
-    if (!bucket) {
-      bucket = { iso: row.bucketIso, values: [], total: 0 };
-      bucketsByIso.set(row.bucketIso, bucket);
-      bucketOrder.push(row.bucketIso);
-    }
     const tokens = row.inputTokens + row.outputTokens;
-    bucket.values[idx] = (bucket.values[idx] ?? 0) + tokens;
-    bucket.total += tokens;
+    let perBucket = totalsByModel.get(row.key);
+    if (!perBucket) {
+      perBucket = new Map();
+      totalsByModel.set(row.key, perBucket);
+    }
+    perBucket.set(row.bucketIso, (perBucket.get(row.bucketIso) ?? 0) + tokens);
+    bucketTotals.set(row.bucketIso, (bucketTotals.get(row.bucketIso) ?? 0) + tokens);
   }
 
-  bucketOrder.sort();
-  const buckets = bucketOrder.map((iso) => {
-    const b = bucketsByIso.get(iso);
-    if (!b) throw new Error(`missing bucket ${iso}`);
-    const values = models.map((_, i) => b.values[i] ?? 0);
-    return { iso, values, total: b.total };
-  });
+  const models = [...totalsByModel.keys()].sort((a, b) => a.localeCompare(b));
+  const buckets = [...bucketTotals.keys()].sort().map((iso) => ({
+    iso,
+    values: models.map((m) => totalsByModel.get(m)?.get(iso) ?? 0),
+    total: bucketTotals.get(iso) ?? 0,
+  }));
   return { models, buckets };
 }
 
