@@ -86,6 +86,8 @@ function makeRun(
     // inject their own.
     getRegisteredTools: deps.getRegisteredTools ?? (() => []),
     ...(deps.denylist !== undefined ? { denylist: deps.denylist } : {}),
+    ...(deps.getToolOwner !== undefined ? { getToolOwner: deps.getToolOwner } : {}),
+    ...(deps.isTurnToolGranted !== undefined ? { isTurnToolGranted: deps.isTurnToolGranted } : {}),
     ...(deps.getPolicyEngine !== undefined ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore !== undefined ? { getUsageStore: deps.getUsageStore } : {}),
   });
@@ -299,6 +301,60 @@ describe("makeRibAgentTurn — tool rails", () => {
     expect(opts?.allowedTools).toEqual(["chamber_emit_lens"]);
     // The provider needs the full catalog to tell registered MCP names from built-ins.
     expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens", "chamber_emit_genesis"]);
+  });
+
+  it("projects a self-owned requested registered tool", async () => {
+    const lens = fakeTool("chamber_emit_lens");
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      {
+        getRegisteredTools: () => [lens],
+        getToolOwner: () => "chamber",
+        isTurnToolGranted: () => false,
+      },
+    );
+    expect(opts?.tools).toEqual([lens]);
+    expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens"]);
+  });
+
+  it("drops an ungranted sibling-owned requested registered tool", async () => {
+    const sibling = fakeTool("sibling_probe");
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "sibling_probe" }] },
+      {
+        getRegisteredTools: () => [sibling],
+        getToolOwner: () => "sibling",
+        isTurnToolGranted: () => false,
+      },
+    );
+    expect(opts?.allowedTools).toEqual(["sibling_probe"]);
+    expect(opts?.tools).toBeUndefined();
+    expect(opts?.registeredMcpToolNames).toEqual(["sibling_probe"]);
+  });
+
+  it("projects a sibling-owned requested registered tool when granted", async () => {
+    const sibling = fakeTool("sibling_probe");
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "sibling_probe" }] },
+      {
+        getRegisteredTools: () => [sibling],
+        getToolOwner: () => "sibling",
+        isTurnToolGranted: (caller, target, name) =>
+          caller === "chamber" && target === "sibling" && name === "sibling_probe",
+      },
+    );
+    expect(opts?.tools).toEqual([sibling]);
+    expect(opts?.registeredMcpToolNames).toEqual(["sibling_probe"]);
+  });
+
+  it("keeps registered tool projection unchanged when no owner resolver is injected", async () => {
+    const lens = fakeTool("chamber_emit_lens");
+    const opts = await optionsFor(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      { getRegisteredTools: () => [lens] },
+    );
+    expect(opts?.tools).toEqual([lens]);
+    expect(opts?.registeredMcpToolNames).toEqual(["chamber_emit_lens"]);
   });
 
   it("leaves a requested name that resolves to no registered def unprojected", async () => {

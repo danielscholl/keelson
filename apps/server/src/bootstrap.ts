@@ -269,6 +269,8 @@ export interface RibBootstrap {
 
 export type CrossRibGrants = Map<string, Map<string, Set<string>>>;
 
+const DEFAULT_CROSS_RIB_CALL_TIMEOUT_MS = 30_000;
+
 export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
   const available =
@@ -280,11 +282,16 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
   };
+  const crossRibGrants = parseCrossRibGrants(process.env.KEELSON_CROSS_RIB_GRANTS);
+  const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
   // The CLI-backed agent-turn seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
   const runAgentTurn =
     options.runAgentTurn ??
     makeRibAgentTurn({
+      getToolOwner: (name) => toolIndex.get(name)?.ribId,
+      isTurnToolGranted: (caller, target, name) =>
+        isCrossRibGrantAllowed(crossRibGrants, caller, target, name),
       ...(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {}),
       ...(options.getUsageStore ? { getUsageStore: options.getUsageStore } : {}),
     });
@@ -378,14 +385,14 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     options.getProviders ??
     ((): readonly RibProviderInfo[] =>
       getProviderInfoList().map((p) => ({ id: p.id, displayName: p.displayName })));
-  const crossRibGrants = parseCrossRibGrants(process.env.KEELSON_CROSS_RIB_GRANTS);
-  const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
+  const callTimeoutMs = parseCrossRibCallTimeoutMs(process.env.KEELSON_CROSS_RIB_CALL_TIMEOUT_MS);
   const defaultCallCwd = refreshCwd ?? process.cwd();
   const callTool = async (
     callerRibId: string,
     targetRibId: string,
     name: string,
     args: unknown,
+    opts?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<CallToolResult> => {
     const entry = toolIndex.get(name);
     if (!entry || entry.ribId !== targetRibId) {
@@ -421,18 +428,52 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         error: `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' denied`,
       };
     }
+    const timeoutMs = parseCrossRibCallTimeoutMs(opts?.timeoutMs, callTimeoutMs);
+    const controller = new AbortController();
     const chunks: MessageChunk[] = [];
-    const ctx: ToolContext = {
-      cwd: defaultCallCwd,
-      emit: (chunk) => chunks.push(chunk),
-      abortSignal: new AbortController().signal,
+    let abortReason: "caller" | "timeout" = "timeout";
+    let controllerAbortListener: (() => void) | undefined;
+    const abortPromise = new Promise<never>((_, reject) => {
+      controllerAbortListener = () => {
+        const reason =
+          abortReason === "caller" ? "aborted by caller" : `timed out after ${timeoutMs}ms`;
+        reject(new Error(`cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${reason}`));
+      };
+      controller.signal.addEventListener("abort", controllerAbortListener, { once: true });
+    });
+    const callerAbortListener = () => {
+      abortReason = "caller";
+      controller.abort();
     };
+    if (opts?.signal?.aborted) callerAbortListener();
+    else opts?.signal?.addEventListener("abort", callerAbortListener, { once: true });
+    const timer = setTimeout(() => {
+      abortReason = "timeout";
+      controller.abort();
+    }, timeoutMs);
     try {
+      if (controller.signal.aborted) {
+        const reason = opts?.signal?.aborted
+          ? "aborted by caller"
+          : `timed out after ${timeoutMs}ms`;
+        throw new Error(`cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' ${reason}`);
+      }
       const parsed = entry.def.inputSchema.parse(args);
-      await entry.def.execute(parsed, ctx);
+      const ctx: ToolContext = {
+        cwd: defaultCallCwd,
+        emit: (chunk) => chunks.push(chunk),
+        abortSignal: controller.signal,
+      };
+      await Promise.race([entry.def.execute(parsed, ctx), abortPromise]);
       return { ok: true, chunks };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      clearTimeout(timer);
+      opts?.signal?.removeEventListener("abort", callerAbortListener);
+      if (controllerAbortListener) {
+        controller.signal.removeEventListener("abort", controllerAbortListener);
+      }
     }
   };
   const {
@@ -928,6 +969,15 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const n = Number(raw.trim());
   return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function parseCrossRibCallTimeoutMs(
+  raw: string | number | undefined,
+  fallback = DEFAULT_CROSS_RIB_CALL_TIMEOUT_MS,
+): number {
+  if (raw === undefined) return fallback;
+  const n = typeof raw === "number" ? raw : Number(raw.trim());
+  return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
 export function parseCrossRibGrants(raw: string | undefined): CrossRibGrants {

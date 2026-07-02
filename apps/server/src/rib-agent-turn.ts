@@ -52,12 +52,12 @@ export interface MakeRibAgentTurnDeps {
   // Neutral cwd for turns that don't pin one. Defaults to the OS temp dir so a
   // rib turn never runs in the server's (host repo) cwd.
   defaultCwd?: string;
-  // Resolve a turn's requested tool NAMES to full registered tool defs so a
-  // rib's own tools project to the provider (e.g. a Mind authoring a lens
-  // mid-room via chamber_emit_lens). Defaults to the live @keelson/skills
-  // registry. A turn only ever names tools its own rib registered, so this
-  // never reaches past the rib's catalog.
+  // Resolve a turn's requested tool NAMES to full registered tool defs so
+  // permitted rib tools project to the provider. Defaults to the live
+  // @keelson/skills registry.
   getRegisteredTools?: () => readonly ToolDefinition[];
+  getToolOwner?: (name: string) => string | undefined;
+  isTurnToolGranted?: (callerRibId: string, targetRibId: string, name: string) => boolean;
   // Operator denylist floor (KEELSON_WORKFLOW_TOOL_DENYLIST): names removed from
   // the projection even when requested, matching the workflow prompt path. Used
   // only on the no-engine fallback path; when `getPolicyEngine` resolves an
@@ -84,6 +84,8 @@ interface ResolvedDeps {
   neutralCwd: string;
   getRegisteredTools: () => readonly ToolDefinition[];
   denied: ReadonlySet<string>;
+  getToolOwner?: (name: string) => string | undefined;
+  isTurnToolGranted?: (callerRibId: string, targetRibId: string, name: string) => boolean;
   getPolicyEngine?: () => PolicyEngine | undefined;
   getUsageStore?: () => UsageStore | undefined;
 }
@@ -104,6 +106,8 @@ export function makeRibAgentTurn(
       ...DEFAULT_TOOL_DENYLIST,
       ...(deps.denylist ?? parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST)),
     ]),
+    ...(deps.getToolOwner ? { getToolOwner: deps.getToolOwner } : {}),
+    ...(deps.isTurnToolGranted ? { isTurnToolGranted: deps.isTurnToolGranted } : {}),
     ...(deps.getPolicyEngine ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore ? { getUsageStore: deps.getUsageStore } : {}),
   };
@@ -333,7 +337,9 @@ async function toolOptions(
   if (req.tools !== undefined && req.tools.length > 0) {
     const requested = new Set(req.tools.map((t) => t.name));
     const catalog = deps.getRegisteredTools();
-    const matched = catalog.filter((t) => requested.has(t.name));
+    const matched = catalog
+      .filter((t) => requested.has(t.name))
+      .filter((t) => isToolReachableByRib(t, deps, meta.ribId));
     // Gate through the unified policy engine when wired (denylist builtin + this
     // rib's policies); otherwise fall back to the local denylist floor. A gate
     // fault falls back to the denylist floor (not the whole turn) — this seam's
@@ -401,6 +407,17 @@ async function toolOptions(
       });
   }
   return out;
+}
+
+function isToolReachableByRib(
+  tool: ToolDefinition,
+  deps: ResolvedDeps,
+  callerRibId: string,
+): boolean {
+  if (!deps.getToolOwner) return true;
+  const owner = deps.getToolOwner(tool.name);
+  if (owner === undefined || owner === callerRibId) return true;
+  return deps.isTurnToolGranted?.(callerRibId, owner, tool.name) === true;
 }
 
 // KEELSON_WORKFLOW_TOOL_DENYLIST → tool names to drop from the projection.
