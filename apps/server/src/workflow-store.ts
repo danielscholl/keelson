@@ -37,6 +37,8 @@ export interface CreateRunInput {
   workingDir: string;
   // Populated by the executor only when isolation is on; null otherwise.
   worktreePath?: string | null;
+  // Resolved git start-point used for a newly-created isolated worktree branch.
+  worktreeBase?: string | null;
   // How the run was triggered. Omitted → 'manual' (the operator paths). The
   // heartbeat / panel-refresh pass 'scheduled' so producer runs stay out of the
   // default feed and get retention-pruned.
@@ -97,6 +99,7 @@ export interface WorkflowStore {
   // Patches worktree_path after-the-fact (worktree creation is lazy, so the
   // path isn't known at createRun time when isolation is on).
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
+  setRunWorktreeBase(runId: string, worktreeBase: string | null): void;
   // Accumulated model-call spend for one run: the count of node rows carrying
   // usage (`turns`) and the sum of their input+output tokens (`totalTokens`).
   // Backs the request-phase budget gate without loading node bodies.
@@ -144,6 +147,7 @@ interface RunRow {
   project_id: string | null;
   working_dir: string | null;
   worktree_path: string | null;
+  worktree_base: string | null;
   origin: string;
   rib_id: string | null;
 }
@@ -173,6 +177,7 @@ function rowToRunSummary(row: RunRow): WorkflowRunSummary {
     projectId: row.project_id,
     workingDir: row.working_dir,
     worktreePath: row.worktree_path,
+    worktreeBase: row.worktree_base,
     origin: row.origin === "scheduled" ? "scheduled" : "manual",
     ribId: row.rib_id,
   };
@@ -237,7 +242,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, origin, rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
@@ -246,6 +251,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     "UPDATE workflow_runs SET status = 'running', completed_at = NULL, error = NULL WHERE id = ? AND status IN ('failed', 'cancelled')",
   );
   const updateWorktreePath = db.prepare("UPDATE workflow_runs SET worktree_path = ? WHERE id = ?");
+  const updateWorktreeBase = db.prepare("UPDATE workflow_runs SET worktree_base = ? WHERE id = ?");
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
   const listRunsAll = db.prepare(
     "SELECT * FROM workflow_runs ORDER BY started_at DESC, rowid DESC",
@@ -301,6 +307,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.projectId ?? null,
         input.workingDir,
         input.worktreePath ?? null,
+        input.worktreeBase ?? null,
         input.origin ?? "manual",
         input.ribId ?? null,
       );
@@ -313,6 +320,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     },
     setRunWorktreePath(runId, worktreePath) {
       updateWorktreePath.run(worktreePath, runId);
+    },
+    setRunWorktreeBase(runId, worktreeBase) {
+      updateWorktreeBase.run(worktreeBase, runId);
     },
     upsertNodeOutput(input) {
       upsertNode.run(

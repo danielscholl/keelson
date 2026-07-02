@@ -150,10 +150,11 @@ export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
 // pre-migration rows + post-FK orphans (conversation deleted) carry no link,
 // but every newly-created run sets it.
 //
-// `projectId` / `workingDir` / `worktreePath` are nullable on the wire for
-// back-compat with rows created before the projects feature landed. New runs
-// always have `workingDir`; `projectId` is set when the caller targeted a
-// named project; `worktreePath` is populated only when isolation is on.
+// `projectId` / `workingDir` / `worktreePath` / `worktreeBase` are nullable on
+// the wire for back-compat with rows created before the projects feature landed.
+// New runs always have `workingDir`; `projectId` is set when the caller targeted
+// a named project; `worktreePath` and `worktreeBase` are populated only when
+// isolation is on and the value is known.
 export const workflowRunSummarySchema = z
   .object({
     runId: z.string(),
@@ -166,6 +167,7 @@ export const workflowRunSummarySchema = z
     projectId: z.string().nullable(),
     workingDir: z.string().nullable(),
     worktreePath: z.string().nullable(),
+    worktreeBase: z.string().nullable().default(null),
     // Trigger provenance (migration 3). Defaulted so pre-migration rows and the
     // fixtures that predate the column keep parsing.
     origin: workflowRunOriginSchema.default("manual"),
