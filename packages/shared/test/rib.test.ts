@@ -513,9 +513,9 @@ describe("rib client effect schema", () => {
   });
 
   it("rejects an open-surface effect with an empty surface id or extra field", () => {
-    expect(
-      ribClientEffectSchema.safeParse({ effect: "open-surface", surfaceId: "" }).success,
-    ).toBe(false);
+    expect(ribClientEffectSchema.safeParse({ effect: "open-surface", surfaceId: "" }).success).toBe(
+      false,
+    );
     expect(
       ribClientEffectSchema.safeParse({
         effect: "open-surface",

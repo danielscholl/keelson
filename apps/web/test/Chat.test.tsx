@@ -72,7 +72,13 @@ mock.module("../src/hooks/useRibs.ts", () => ({
 }));
 
 mock.module("../src/hooks/useSnapshot.ts", () => ({
-  useSnapshot: () => ({ status: "empty", data: null, version: null, composedAt: null, reload: () => {} }),
+  useSnapshot: () => ({
+    status: "empty",
+    data: null,
+    version: null,
+    composedAt: null,
+    reload: () => {},
+  }),
 }));
 
 const { RibsProvider } = await import("../src/components/RibsProvider.tsx");

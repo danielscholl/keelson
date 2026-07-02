@@ -43,7 +43,8 @@ function recorders() {
     onLaunchWorkflow: (workflow: string, args: Record<string, string>) =>
       launches.push({ workflow, args }),
     onOpenCanvas: (key: string, title?: string) => canvases.push({ key, title }),
-    onOpenSurface: (surfaceId: string, regionKey?: string) => surfaces.push({ surfaceId, regionKey }),
+    onOpenSurface: (surfaceId: string, regionKey?: string) =>
+      surfaces.push({ surfaceId, regionKey }),
   };
 }
 
@@ -427,9 +428,7 @@ describe("useRibActionDispatch — open-surface directive", () => {
       { wrapper },
     );
     await runAct(result.current.run, ACTION);
-    expect(rec.surfaces).toEqual([
-      { surfaceId: "surface:chamber:rooms", regionKey: undefined },
-    ]);
+    expect(rec.surfaces).toEqual([{ surfaceId: "surface:chamber:rooms", regionKey: undefined }]);
   });
 
   test("a shaped-but-invalid open-surface returns an error result and toasts", async () => {
