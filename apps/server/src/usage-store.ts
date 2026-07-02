@@ -7,6 +7,12 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import type { Database } from "bun:sqlite";
+import type {
+  UsageBreakdownRowWire,
+  UsageEventRowWire,
+  UsageSeriesRowWire,
+  UsageSummaryResponseWire,
+} from "@keelson/shared";
 
 export type UsageEventSource = "chat" | "workflow" | "rib";
 
@@ -62,10 +68,44 @@ export interface UsageTotals {
   outputTokens: number;
 }
 
+// Attribution columns (rib_id, workflow_name) are nullable; grouping by them
+// buckets ungrouped rows under this literal key rather than dropping them.
+export const UNGROUPED_KEY = "(none)";
+
+export type UsageGroupBy = "model" | "provider" | "source" | "rib" | "workflow";
+export type UsageSeriesBucket = "hour" | "day";
+
+export interface UsageSummaryArgs {
+  sinceIso?: string;
+  groupBy: UsageGroupBy;
+}
+
+export interface UsageSeriesArgs {
+  sinceIso?: string;
+  bucket: UsageSeriesBucket;
+  groupBy: UsageGroupBy;
+}
+
+export interface UsageBreakdownArgs {
+  sinceIso?: string;
+}
+
+export interface UsageEventsFilter {
+  limit?: number;
+  source?: UsageEventSource;
+  model?: string;
+  status?: string;
+  sinceIso?: string;
+}
+
 export interface UsageStore {
   record(input: RecordUsageEventInput): void;
   listEvents(filter?: ListUsageEventsFilter): UsageEvent[];
   totals(args?: { sinceIso?: string }): UsageTotals;
+  summary(args: UsageSummaryArgs): UsageSummaryResponseWire;
+  series(args: UsageSeriesArgs): UsageSeriesRowWire[];
+  breakdown(args?: UsageBreakdownArgs): UsageBreakdownRowWire[];
+  events(filter?: UsageEventsFilter): UsageEventRowWire[];
 }
 
 interface UsageEventRow {
@@ -124,6 +164,46 @@ function floorNullableCount(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
 }
 
+// groupBy is always one of the fixed UsageGroupBy literals, never
+// user-supplied SQL, so interpolating the resolved column name is safe.
+const GROUP_BY_COLUMN: Record<UsageGroupBy, string> = {
+  model: "model",
+  provider: "provider",
+  source: "source",
+  rib: "rib_id",
+  workflow: "workflow_name",
+};
+
+const TOTALS_SELECT = `
+  COUNT(*) AS events,
+  COALESCE(SUM(input_tokens), 0) AS inputTokens,
+  COALESCE(SUM(output_tokens), 0) AS outputTokens,
+  COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+  COALESCE(SUM(cache_write_tokens), 0) AS cacheWriteTokens
+`;
+
+interface TotalsRow {
+  events: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+interface GroupRow extends TotalsRow {
+  key: string;
+}
+
+interface SeriesRow extends TotalsRow {
+  bucketIso: string;
+  key: string;
+}
+
+interface BreakdownRow extends TotalsRow {
+  source: string;
+  model: string;
+}
+
 export function createUsageStore(db: Database): UsageStore {
   const insertEvent = db.prepare(
     `INSERT INTO usage_events(
@@ -177,6 +257,96 @@ export function createUsageStore(db: Database): UsageStore {
         args.sinceIso !== undefined ? totalsSince.get(args.sinceIso) : totalsAll.get()
       ) as { events: number; inputTokens: number; outputTokens: number };
       return row;
+    },
+    summary(args) {
+      const column = GROUP_BY_COLUMN[args.groupBy];
+      const clauses: string[] = [];
+      const params: Array<string> = [];
+      if (args.sinceIso !== undefined) {
+        clauses.push("ts >= ?");
+        params.push(args.sinceIso);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const totalsRow = db
+        .query(`SELECT ${TOTALS_SELECT} FROM usage_events ${where}`)
+        .get(...params) as TotalsRow;
+      const groupRows = db
+        .query(
+          `SELECT COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${TOTALS_SELECT}
+             FROM usage_events ${where}
+             GROUP BY key
+             ORDER BY key ASC`,
+        )
+        .all(...params) as GroupRow[];
+      return { totals: totalsRow, groups: groupRows };
+    },
+    series(args) {
+      const column = GROUP_BY_COLUMN[args.groupBy];
+      const strftimeFormat =
+        args.bucket === "hour" ? "%Y-%m-%dT%H:00:00.000Z" : "%Y-%m-%dT00:00:00.000Z";
+      const clauses: string[] = [];
+      const params: Array<string> = [];
+      if (args.sinceIso !== undefined) {
+        clauses.push("ts >= ?");
+        params.push(args.sinceIso);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const rows = db
+        .query(
+          `SELECT strftime('${strftimeFormat}', ts) AS bucketIso,
+                  COALESCE(${column}, '${UNGROUPED_KEY}') AS key, ${TOTALS_SELECT}
+             FROM usage_events ${where}
+             GROUP BY bucketIso, key
+             ORDER BY bucketIso ASC, key ASC`,
+        )
+        .all(...params) as SeriesRow[];
+      return rows;
+    },
+    breakdown(args = {}) {
+      const clauses: string[] = [];
+      const params: Array<string> = [];
+      if (args.sinceIso !== undefined) {
+        clauses.push("ts >= ?");
+        params.push(args.sinceIso);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const rows = db
+        .query(
+          `SELECT source, model, ${TOTALS_SELECT}
+             FROM usage_events ${where}
+             GROUP BY source, model
+             ORDER BY source ASC, model ASC`,
+        )
+        .all(...params) as BreakdownRow[];
+      return rows as UsageBreakdownRowWire[];
+    },
+    events(filter = {}) {
+      const clauses: string[] = [];
+      const params: Array<string | number> = [];
+      if (filter.source !== undefined) {
+        clauses.push("source = ?");
+        params.push(filter.source);
+      }
+      if (filter.model !== undefined) {
+        clauses.push("model = ?");
+        params.push(filter.model);
+      }
+      if (filter.status !== undefined) {
+        clauses.push("status = ?");
+        params.push(filter.status);
+      }
+      if (filter.sinceIso !== undefined) {
+        clauses.push("ts >= ?");
+        params.push(filter.sinceIso);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const limit =
+        filter.limit !== undefined && filter.limit >= 0 ? Math.floor(filter.limit) : 100;
+      params.push(limit);
+      const rows = db
+        .query(`SELECT * FROM usage_events ${where} ORDER BY ts DESC, id DESC LIMIT ?`)
+        .all(...params) as UsageEventRow[];
+      return rows.map(rowToEvent) as UsageEventRowWire[];
     },
   };
 }

@@ -709,6 +709,19 @@ function fakeUsageStore() {
     },
     listEvents: () => [],
     totals: () => ({ events: 0, inputTokens: 0, outputTokens: 0 }),
+    summary: () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    }),
+    series: () => [],
+    breakdown: () => [],
+    events: () => [],
   };
   return { store, events };
 }
