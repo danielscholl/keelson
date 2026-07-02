@@ -14,6 +14,7 @@ import type { PolicyEngine } from "./policy-engine.ts";
 import { createPolicyEngine } from "./policy-engine.ts";
 import { type MakeRibAgentTurnDeps, makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { applyRibs } from "./ribs.ts";
+import type { UsageStore } from "./usage-store.ts";
 
 // A minimal registered tool def for tool-projection tests — only the fields the
 // seam reads (name) matter; the schema/execute satisfy the contract shape.
@@ -86,6 +87,7 @@ function makeRun(
     getRegisteredTools: deps.getRegisteredTools ?? (() => []),
     ...(deps.denylist !== undefined ? { denylist: deps.denylist } : {}),
     ...(deps.getPolicyEngine !== undefined ? { getPolicyEngine: deps.getPolicyEngine } : {}),
+    ...(deps.getUsageStore !== undefined ? { getUsageStore: deps.getUsageStore } : {}),
   });
 }
 
@@ -694,6 +696,111 @@ describe("makeRibAgentTurn — response-phase redaction", () => {
     const result = await run("chamber", { prompt: "hi" }).result;
     expect(result.status).toBe("error");
     expect(gateCalled).toBe(false);
+  });
+});
+
+// A minimal in-memory UsageStore.record() spy — mirrors the shape of
+// createUsageStore's UsageStore without touching bun:sqlite.
+function fakeUsageStore() {
+  const events: Parameters<UsageStore["record"]>[0][] = [];
+  const store: UsageStore = {
+    record: (input) => {
+      events.push(input);
+    },
+    listEvents: () => [],
+    totals: () => ({ events: 0, inputTokens: 0, outputTokens: 0 }),
+  };
+  return { store, events };
+}
+
+describe("makeRibAgentTurn — usage capture", () => {
+  it("captures the provider's usage chunk onto the settled result", async () => {
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "text", content: "hi" },
+          { type: "usage", usage: { inputTokens: 5, outputTokens: 7 } },
+          { type: "done" },
+        ],
+      }),
+    );
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("ok");
+    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 7 });
+  });
+
+  it("records a rib-sourced usage event with ribId/provider/model/status", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "text", content: "hi" },
+          { type: "usage", usage: { inputTokens: 5, outputTokens: 7 } },
+          { type: "done" },
+        ],
+      }),
+      { getUsageStore: () => store },
+    );
+    await run("chamber", { prompt: "hi", model: "claude-opus" }).result;
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      source: "rib",
+      ribId: "chamber",
+      provider: "claude",
+      model: "claude-opus",
+      status: "ok",
+      inputTokens: 5,
+      outputTokens: 7,
+    });
+  });
+
+  it("falls back to 'unknown' model when the request names none", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [{ type: "usage", usage: { inputTokens: 1, outputTokens: 1 } }, { type: "done" }],
+      }),
+      { getUsageStore: () => store },
+    );
+    await run("chamber", { prompt: "hi" }).result;
+    expect(events[0]?.model).toBe("unknown");
+  });
+
+  it("does not record when the turn carries no usage chunk", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(fakeProvider(), { getUsageStore: () => store });
+    await run("chamber", { prompt: "hi" }).result;
+    expect(events).toHaveLength(0);
+  });
+
+  it("does not record a zero-total usage report", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [{ type: "usage", usage: { inputTokens: 0, outputTokens: 0 } }, { type: "done" }],
+      }),
+      { getUsageStore: () => store },
+    );
+    await run("chamber", { prompt: "hi" }).result;
+    expect(events).toHaveLength(0);
+  });
+
+  it("records with status 'error' when usage arrives before a mid-stream provider error", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "usage", usage: { inputTokens: 2, outputTokens: 3 } },
+          { type: "error", message: "boom" },
+          { type: "done" },
+        ],
+      }),
+      { getUsageStore: () => store },
+    );
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("error");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ status: "error", inputTokens: 2, outputTokens: 3 });
   });
 });
 

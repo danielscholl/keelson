@@ -14,16 +14,19 @@ import {
   isRegisteredProvider as registryHasProvider,
   type SendQueryOptions,
 } from "@keelson/providers";
-import type {
-  MessageChunk,
-  RibAgentTurn,
-  RibAgentTurnRequest,
-  RibAgentTurnResult,
-  ToolDefinition,
+import {
+  coerceTokenUsage,
+  type MessageChunk,
+  type RibAgentTurn,
+  type RibAgentTurnRequest,
+  type RibAgentTurnResult,
+  type TokenUsage,
+  type ToolDefinition,
 } from "@keelson/shared";
 import { getRegisteredTools as liveRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
 import type { PolicyEngine } from "./policy-engine.ts";
+import type { UsageStore } from "./usage-store.ts";
 
 // Registry-routed `runAgentTurn` seam (packages/shared/src/rib.ts): resolve a
 // provider the same way workflow `prompt` nodes do (req.provider hint →
@@ -66,6 +69,12 @@ export interface MakeRibAgentTurnDeps {
   // local `denied` floor applies. Lazy because the engine is built after the
   // ribs that use it activate.
   getPolicyEngine?: () => PolicyEngine | undefined;
+  // Lazy resolver for the usage ledger. When it returns a store, a turn that
+  // carries real spend records a `rib`-sourced event on settle; undefined (or
+  // no store returned) skips capture. Lazy for the same reason as
+  // getPolicyEngine: the store is built by the composition root after the
+  // ribs that use it activate.
+  getUsageStore?: () => UsageStore | undefined;
 }
 
 interface ResolvedDeps {
@@ -76,6 +85,7 @@ interface ResolvedDeps {
   getRegisteredTools: () => readonly ToolDefinition[];
   denied: ReadonlySet<string>;
   getPolicyEngine?: () => PolicyEngine | undefined;
+  getUsageStore?: () => UsageStore | undefined;
 }
 
 export function makeRibAgentTurn(
@@ -95,6 +105,7 @@ export function makeRibAgentTurn(
       ...(deps.denylist ?? parseToolDenylist(process.env.KEELSON_WORKFLOW_TOOL_DENYLIST)),
     ]),
     ...(deps.getPolicyEngine ? { getPolicyEngine: deps.getPolicyEngine } : {}),
+    ...(deps.getUsageStore ? { getUsageStore: deps.getUsageStore } : {}),
   };
   // `ribId` scopes the turn's tool gate: it rides the policy event so a rib
   // policy can govern its own (or another rib's) turn. Provider routing stays
@@ -191,35 +202,66 @@ async function runTurn(
 
   let assistantText = "";
   let providerError: string | undefined;
+  let turnUsage: TokenUsage | undefined;
+  // Records a `rib`-sourced usage event (when the turn actually carried spend)
+  // and folds `turnUsage` onto the settled result. Called from every return
+  // point after `providerId` is known — mirrors the chat/workflow seams' "only
+  // when the turn carried real spend" rule so a content-only or zero-total
+  // turn doesn't add a row.
+  const settle = (result: RibAgentTurnResult): RibAgentTurnResult => {
+    if (turnUsage !== undefined && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
+      deps.getUsageStore?.()?.record({
+        source: "rib",
+        provider: providerId,
+        model: req.model ?? "unknown",
+        inputTokens: turnUsage.inputTokens,
+        outputTokens: turnUsage.outputTokens,
+        ...(turnUsage.cacheReadInputTokens !== undefined
+          ? { cacheReadTokens: turnUsage.cacheReadInputTokens }
+          : {}),
+        ...(turnUsage.cacheCreationInputTokens !== undefined
+          ? { cacheWriteTokens: turnUsage.cacheCreationInputTokens }
+          : {}),
+        status: result.status,
+        ribId,
+      });
+    }
+    return turnUsage !== undefined ? { ...result, usage: turnUsage } : result;
+  };
   try {
     const stream = provider.sendQuery(req.prompt, cwd, req.resumeSessionId, options);
     for await (const chunk of stream) {
       if (controller.signal.aborted) break;
       if (chunk.type === "text") assistantText += chunk.content;
       else if (chunk.type === "error") providerError = chunk.message;
+      else if (chunk.type === "usage") {
+        const coerced = coerceTokenUsage(chunk.usage);
+        if (coerced !== undefined) turnUsage = coerced;
+      }
     }
   } catch (err) {
     if (timedOut)
-      return { status: "timeout", text: assistantText, error: errMessage(err), providerId };
+      return settle({ status: "timeout", text: assistantText, error: errMessage(err), providerId });
     if (controller.signal.aborted || isAbortError(err)) {
-      return { status: "aborted", text: assistantText, providerId };
+      return settle({ status: "aborted", text: assistantText, providerId });
     }
     const msg = errMessage(err);
-    return {
+    return settle({
       status: /timed?\s*out|timeout/i.test(msg) ? "timeout" : "error",
       text: assistantText,
       error: msg,
       providerId,
-    };
+    });
   } finally {
     if (timer) clearTimeout(timer);
     req.abortSignal?.removeEventListener("abort", onCallerAbort);
   }
 
-  if (timedOut) return { status: "timeout", text: assistantText, providerId };
-  if (controller.signal.aborted) return { status: "aborted", text: assistantText, providerId };
+  if (timedOut) return settle({ status: "timeout", text: assistantText, providerId });
+  if (controller.signal.aborted)
+    return settle({ status: "aborted", text: assistantText, providerId });
   if (providerError !== undefined) {
-    return { status: "error", text: assistantText, error: providerError, providerId };
+    return settle({ status: "error", text: assistantText, error: providerError, providerId });
   }
 
   // Response-phase policy gate on the COMPLETE assembled prose — the same
@@ -240,7 +282,7 @@ async function runTurn(
         text: assistantText,
       });
       if (decision.outcome === "deny") {
-        return { status: "error", text: "", error: decision.reason, providerId };
+        return settle({ status: "error", text: "", error: decision.reason, providerId });
       }
       if (typeof decision.data === "string") assistantText = decision.data;
     } catch (err) {
@@ -248,7 +290,7 @@ async function runTurn(
     }
   }
 
-  return { status: "ok", text: assistantText, providerId };
+  return settle({ status: "ok", text: assistantText, providerId });
 }
 
 // Map the request's tool rails onto SendQueryOptions:

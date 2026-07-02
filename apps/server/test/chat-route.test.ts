@@ -37,6 +37,7 @@ import { type ConversationStore, createConversationStore } from "../src/conversa
 import { openDatabase } from "../src/db/init.ts";
 import { createPolicyEngine } from "../src/policy-engine.ts";
 import type { WsData } from "../src/server-context.ts";
+import { createUsageStore } from "../src/usage-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { createActiveRuns } from "../src/workflows-handler.ts";
 
@@ -1711,6 +1712,69 @@ describe("handleChatRequest — token usage", () => {
     expect(user!.usage).toBeUndefined();
     // And the full conversation still validates against the wire schema.
     conversationSchema.parse(stored);
+  });
+});
+
+describe("handleChatRequest — usage ledger", () => {
+  function makeFrame(conversationId: string, providerId: string, prompt: string): ClientFrame {
+    return {
+      version: WIRE_PROTOCOL_VERSION,
+      conversationId,
+      message: { type: "request", providerId, prompt },
+    };
+  }
+
+  test("a turn that carries real spend records a chat-sourced usage event", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    const store = createConversationStore(db);
+    const usageStore = createUsageStore(db);
+    const conv = store.create({ providerId: "stub" });
+
+    await handleChatRequest(makeFrame(conv.id, "stub", "one two three"), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+      usageStore,
+    });
+
+    const events = usageStore.listEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      source: "chat",
+      provider: "stub",
+      // The stub never emits a `model` chunk and this conversation has no
+      // pinned model, so the ledger falls back to "unknown" rather than
+      // dropping the event.
+      model: "unknown",
+      inputTokens: 3,
+      outputTokens: 3,
+      status: "ok",
+      conversationId: conv.id,
+    });
+
+    // Provider/model provenance also lands on the assistant message row
+    // itself (server-internal — never round-tripped onto the wire Message).
+    const row = db
+      .query("SELECT provider, model FROM messages WHERE conversationId = ? AND role = 'assistant'")
+      .get(conv.id) as { provider: string | null; model: string | null };
+    expect(row.provider).toBe("stub");
+    expect(row.model).toBeNull();
+  });
+
+  test("without a usage chunk, no event is recorded", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    const store = createConversationStore(db);
+    const usageStore = createUsageStore(db);
+    const conv = store.create({ providerId: "stub" });
+
+    await handleChatRequest(makeFrame(conv.id, "stub", ""), {
+      send: () => {},
+      store,
+      abortSignal: new AbortController().signal,
+      usageStore,
+    });
+
+    expect(usageStore.listEvents()).toHaveLength(0);
   });
 });
 

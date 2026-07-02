@@ -273,6 +273,39 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    description: "usage ledger: per-turn spend events across chat, workflow, and rib surfaces",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE usage_events (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts                 TEXT NOT NULL,
+          source             TEXT NOT NULL,
+          provider           TEXT NOT NULL,
+          model              TEXT NOT NULL,
+          input_tokens       INTEGER NOT NULL DEFAULT 0,
+          output_tokens      INTEGER NOT NULL DEFAULT 0,
+          cache_read_tokens  INTEGER,
+          cache_write_tokens INTEGER,
+          duration_ms        INTEGER,
+          status             TEXT NOT NULL DEFAULT 'ok',
+          conversation_id    TEXT,
+          run_id             TEXT,
+          node_id            TEXT,
+          workflow_name      TEXT,
+          rib_id             TEXT,
+          project_id         TEXT
+        );
+        CREATE INDEX ix_usage_events_ts ON usage_events(ts);
+        CREATE INDEX ix_usage_events_model_ts ON usage_events(model, ts);
+        CREATE INDEX ix_usage_events_source_ts ON usage_events(source, ts);
+
+        ALTER TABLE messages ADD COLUMN provider TEXT;
+        ALTER TABLE messages ADD COLUMN model TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

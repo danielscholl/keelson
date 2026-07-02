@@ -8,7 +8,8 @@
 
 import { z } from "zod";
 import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
-import type { MessageChunk } from "./chat.ts";
+import type { MessageChunk, TokenUsage } from "./chat.ts";
+
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
 import type { MemoryTools } from "./memory.ts";
 import type { Policy } from "./policy.ts";
@@ -117,6 +118,10 @@ export interface RibAgentTurnResult {
   // The provider id the turn resolved to.
   providerId?: string;
   sessionId?: string;
+  // The provider's final usage-bearing chunk, coerced. Undefined when the
+  // provider never reported one (a text-only stream, or a turn that failed
+  // before the stream reached that point).
+  usage?: TokenUsage;
 }
 
 // A settled dual-handle, NOT a bare AsyncGenerator: `stream` is live progress,

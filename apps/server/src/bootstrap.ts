@@ -83,6 +83,7 @@ import {
 import { makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { discoverRibs } from "./rib-discovery.ts";
 import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
+import type { UsageStore } from "./usage-store.ts";
 // Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
 // import direction is not turned into a runtime cycle.
 import type { WorkflowController } from "./workflows-handler.ts";
@@ -222,6 +223,10 @@ export interface BootstrapRibsOptions {
   // Backs RibContext.getProviders. Defaults to the live provider registry
   // (getProviderInfoList); tests may inject a deterministic list.
   getProviders?: () => readonly RibProviderInfo[];
+  // Lazy resolver for the usage ledger backing the default makeRibAgentTurn's
+  // rib-sourced event capture. Lazy for the same reason as getMemoryStore: the
+  // store needs the db, created AFTER bootstrapRibs returns.
+  getUsageStore?: () => UsageStore | undefined;
 }
 
 export interface RibBootstrap {
@@ -274,7 +279,10 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
   const runAgentTurn =
     options.runAgentTurn ??
-    makeRibAgentTurn(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {});
+    makeRibAgentTurn({
+      ...(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {}),
+      ...(options.getUsageStore ? { getUsageStore: options.getUsageStore } : {}),
+    });
   // RibContext.refreshWorkflow resolver. Fires the EXISTING run facade with the
   // SAME (cwd, {}) the heartbeat uses so a refresh collapses onto an in-flight
   // heartbeat run; `origin: "scheduled"` forces scope=undefined so the rib's own

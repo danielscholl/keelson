@@ -98,6 +98,7 @@ import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
+import type { UsageStore } from "./usage-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
 export interface WorkflowsHandlerOptions {
@@ -142,6 +143,9 @@ export interface WorkflowsHandlerOptions {
   // workflow name. A bound run fans its structured output to the rib's key in
   // addition to the run-scoped one.
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
+  // Optional usage ledger. When set, each node_done carrying real usage records
+  // a `workflow`-sourced event; undefined → capture is skipped.
+  usageStore?: UsageStore;
 }
 
 // Renders the user-facing dispatch bubble that anchors the workflow run inside
@@ -622,6 +626,7 @@ interface StartRunCoreDeps {
   projectNotebookStore?: ProjectNotebookStore;
   snapshotManager?: SnapshotManager;
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
+  usageStore?: UsageStore;
 }
 
 interface StartRunCoreParams {
@@ -704,7 +709,7 @@ function startRunCore(
   params: StartRunCoreParams,
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
-  const { snapshotManager, ribWorkflowBindings, projectNotebookStore } = deps;
+  const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
   const { workflow, inputs, workingDir, projectId, resolvedProject, isolationOn, branchTemplate } =
     params;
   const origin: WorkflowRunOrigin = params.origin ?? "manual";
@@ -802,6 +807,7 @@ function startRunCore(
     ...(notebook !== undefined ? { notebook } : {}),
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+    ...(usageStore !== undefined ? { usageStore } : {}),
   });
   activeRuns.register(runId, {
     abort,
@@ -839,7 +845,7 @@ function resumeRunCore(
   runId: string,
 ): ResumeRunResult {
   const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
-  const { snapshotManager, ribWorkflowBindings, catalog } = deps;
+  const { snapshotManager, ribWorkflowBindings, catalog, usageStore } = deps;
   const { projectsStore, projectNotebookStore } = deps;
 
   const run = store.getRun(runId);
@@ -921,6 +927,7 @@ function resumeRunCore(
     ...(memoryTools !== undefined ? { memoryTools } : {}),
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+    ...(usageStore !== undefined ? { usageStore } : {}),
     ...(notebook !== undefined ? { notebook } : {}),
     completedNodeOutputs,
     existingWorktreePath: run.worktreePath ?? undefined,
@@ -1108,8 +1115,15 @@ export function createWorkflowController(
   activeRuns: ActiveRuns,
   subscribers: WorkflowSubscribers,
 ): WorkflowController {
-  const { catalog, store, conversationStore, projectsStore, snapshotManager, ribWorkflowBindings } =
-    opts;
+  const {
+    catalog,
+    store,
+    conversationStore,
+    projectsStore,
+    snapshotManager,
+    ribWorkflowBindings,
+    usageStore,
+  } = opts;
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
   return {
@@ -1245,6 +1259,7 @@ export function createWorkflowController(
             ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
             ...(snapshotManager !== undefined ? { snapshotManager } : {}),
             ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+            ...(usageStore !== undefined ? { usageStore } : {}),
           },
           {
             workflow,
@@ -1377,6 +1392,7 @@ export function workflowsRoutes(
     refreshCwd,
     snapshotManager,
     ribWorkflowBindings,
+    usageStore,
   } = opts;
   const {
     promptHandler: effectivePromptHandler,
@@ -1691,6 +1707,7 @@ export function workflowsRoutes(
           ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+          ...(usageStore !== undefined ? { usageStore } : {}),
         },
         {
           workflow,
@@ -1746,6 +1763,7 @@ export function workflowsRoutes(
           ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+          ...(usageStore !== undefined ? { usageStore } : {}),
         },
         {
           workflow,
@@ -1926,6 +1944,7 @@ export function workflowsRoutes(
         memoryTools,
         ...(snapshotManager !== undefined ? { snapshotManager } : {}),
         ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+        ...(usageStore !== undefined ? { usageStore } : {}),
         ...(projectsStore !== undefined ? { projectsStore } : {}),
         ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
         catalog,
@@ -2110,6 +2129,9 @@ interface ExecuteRunArgs {
   // Existing worktree path for re-entry: skip createWorktree and run in place
   // at this path. When set, the worktree is cleaned up only on success.
   existingWorktreePath?: string;
+  // Optional usage ledger. When set, each node_done carrying real usage records
+  // a `workflow`-sourced event; undefined → capture is skipped.
+  usageStore?: UsageStore;
 }
 
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
@@ -2132,6 +2154,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     ribWorkflowBindings,
     completedNodeOutputs,
     existingWorktreePath,
+    usageStore,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -2565,7 +2588,9 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
           subscribers,
           nodeStart,
           nodeAccumulators,
+          workflowName: workflow.name,
           ...(publishRun !== undefined ? { publishStructured: publishRun } : {}),
+          ...(usageStore !== undefined ? { usageStore } : {}),
         });
       },
     });
@@ -2645,10 +2670,25 @@ interface DispatchArgs {
   // Snapshot bridge: when set, a node's structured output is
   // republished under the run-scoped snapshot key. Undefined → no publish.
   publishStructured?: (value: unknown) => void;
+  // Owning workflow's name, stamped onto each recorded usage event.
+  workflowName: string;
+  // Optional usage ledger. When set, a node_done carrying real usage records a
+  // `workflow`-sourced event; undefined → capture is skipped.
+  usageStore?: UsageStore;
 }
 
 function dispatchRunEvent(args: DispatchArgs): void {
-  const { event, runId, store, subscribers, nodeStart, nodeAccumulators, publishStructured } = args;
+  const {
+    event,
+    runId,
+    store,
+    subscribers,
+    nodeStart,
+    nodeAccumulators,
+    publishStructured,
+    workflowName,
+    usageStore,
+  } = args;
   switch (event.type) {
     case "run_started":
       subscribers.broadcast(runId, {
@@ -2734,6 +2774,36 @@ function dispatchRunEvent(args: DispatchArgs): void {
       // on the run-scoped snapshot key.
       if (event.result.output.kind === "structured") {
         publishStructured?.(event.result.output.value);
+      }
+      // Usage ledger: only a node that both spent tokens and resolved a
+      // provider/model can be attributed — an unattributed event (e.g. a
+      // non-LLM node) would violate the ledger's NOT NULL provider/model
+      // columns, so it's skipped rather than recorded with a placeholder.
+      if (usage !== null && provider !== null && model !== null) {
+        const run = store.getRun(runId);
+        const durationMs =
+          startedAt !== null ? Date.parse(completedAt) - Date.parse(startedAt) : null;
+        usageStore?.record({
+          source: "workflow",
+          provider,
+          model,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          ...(usage.cacheReadInputTokens !== undefined
+            ? { cacheReadTokens: usage.cacheReadInputTokens }
+            : {}),
+          ...(usage.cacheCreationInputTokens !== undefined
+            ? { cacheWriteTokens: usage.cacheCreationInputTokens }
+            : {}),
+          ...(durationMs !== null && Number.isFinite(durationMs) ? { durationMs } : {}),
+          status,
+          runId,
+          nodeId: event.nodeId,
+          workflowName,
+          conversationId: run?.conversationId ?? null,
+          projectId: run?.projectId ?? null,
+          ribId: run?.ribId ?? null,
+        });
       }
       // Free the per-node accumulator now that we've persisted it; keeps the
       // map bounded for long-running multi-node workflows.
