@@ -21,6 +21,7 @@
 
 import {
   type AgentSummary,
+  type CallToolResult,
   type CommandCompletion,
   type CommandInvokeResult,
   type MemoryTools,
@@ -103,6 +104,7 @@ export interface ApplyRibsResult {
   // (see `registerRibTools` in bootstrap.ts); `applyRibs` itself stays free of
   // that global side effect so unit tests can run it repeatedly.
   readonly tools: ToolDefinition[];
+  readonly toolOwners: ReadonlyMap<string, string>;
 }
 
 export function parseRibList(value: string | undefined): readonly string[] {
@@ -163,6 +165,12 @@ export interface ApplyRibsOptions {
   // rib can make availability-aware provider choices. Optional so applyRibs unit tests
   // stay deterministic without the provider registry.
   readonly getProviders?: () => readonly RibProviderInfo[];
+  readonly callTool?: (
+    callerRibId: string,
+    targetRibId: string,
+    name: string,
+    args: unknown,
+  ) => Promise<CallToolResult>;
 }
 
 /**
@@ -213,6 +221,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
   const workflowContributions: RibWorkflowContribution[] = [];
   const policies: RibPolicyContribution[] = [];
   const tools: ToolDefinition[] = [];
+  const toolOwners = new Map<string, string>();
   const seen = new Set<string>();
   // Tool names are a single global namespace shared across ribs; track claims
   // so a later rib can't silently shadow an earlier rib's tool.
@@ -306,6 +315,12 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
               opts.getProviders!().map(({ id, displayName }) => ({ id, displayName })),
           }
         : {}),
+      ...(opts.callTool
+        ? {
+            callTool: (targetRibId: string, name: string, args: unknown) =>
+              opts.callTool!(rib.id, targetRibId, name, args),
+          }
+        : {}),
     };
 
     const ribToolNames = collectRibTools(
@@ -313,6 +328,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       rib.registerTools?.(ribCtx),
       claimedToolNames,
       tools,
+      toolOwners,
     );
 
     manifests.push({
@@ -453,6 +469,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     workflowContributions,
     policies,
     tools,
+    toolOwners,
   };
 }
 
@@ -466,6 +483,7 @@ function collectRibTools(
   raw: unknown,
   claimed: Set<string>,
   collected: ToolDefinition[],
+  owners: Map<string, string>,
 ): string[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) {
@@ -486,6 +504,7 @@ function collectRibTools(
     }
     claimed.add(entry.name);
     collected.push(entry);
+    owners.set(entry.name, ribId);
     names.push(entry.name);
   }
   return names;

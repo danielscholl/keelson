@@ -26,9 +26,11 @@ import type {
   AgentSummary,
   ApprovalDecision,
   ApprovalRequest,
+  CallToolResult,
   CommandCompletion,
   CommandInvokeResult,
   MemoryTools,
+  MessageChunk,
   OpenChatSeed,
   Project,
   Rib,
@@ -42,6 +44,7 @@ import type {
   RibProviderInfo,
   RibWorkflowRunResult,
   SnapshotManager,
+  ToolContext,
   ToolDefinition,
   WorkflowDiscoveryNotice,
   WorkflowSource,
@@ -264,6 +267,8 @@ export interface RibBootstrap {
   disposeAll(): Promise<void>;
 }
 
+export type CrossRibGrants = Map<string, Map<string, Set<string>>>;
+
 export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
   const available =
@@ -368,6 +373,63 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     options.getProviders ??
     ((): readonly RibProviderInfo[] =>
       getProviderInfoList().map((p) => ({ id: p.id, displayName: p.displayName })));
+  const crossRibGrants = parseCrossRibGrants(process.env.KEELSON_CROSS_RIB_GRANTS);
+  const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
+  const defaultCallCwd = refreshCwd ?? process.cwd();
+  const callTool = async (
+    callerRibId: string,
+    targetRibId: string,
+    name: string,
+    args: unknown,
+  ): Promise<CallToolResult> => {
+    const entry = toolIndex.get(name);
+    if (!entry || entry.ribId !== targetRibId) {
+      return { ok: false, error: `rib '${targetRibId}' does not own tool '${name}'` };
+    }
+    // Grant check first: an ungranted call must never reach the policy engine,
+    // whose per-call ASK phase can surface an operator approval prompt for a
+    // call that would be denied regardless.
+    const granted = isCrossRibGrantAllowed(crossRibGrants, callerRibId, targetRibId, name);
+    if (!granted) {
+      return {
+        ok: false,
+        error: `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' denied`,
+      };
+    }
+    const engine = options.getPolicyEngine?.();
+    if (!engine) {
+      return { ok: false, error: "policy engine unavailable" };
+    }
+    let allowed = false;
+    try {
+      const decision = await engine.evaluateToolCall(
+        { tool: name, args },
+        { surface: "rib", ribId: callerRibId, targetRibId, cwd: defaultCallCwd },
+      );
+      allowed = decision.outcome === "allow";
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) {
+      return {
+        ok: false,
+        error: `cross-rib call '${callerRibId}' -> '${targetRibId}:${name}' denied`,
+      };
+    }
+    const chunks: MessageChunk[] = [];
+    const ctx: ToolContext = {
+      cwd: defaultCallCwd,
+      emit: (chunk) => chunks.push(chunk),
+      abortSignal: new AbortController().signal,
+    };
+    try {
+      const parsed = entry.def.inputSchema.parse(args);
+      await entry.def.execute(parsed, ctx);
+      return { ok: true, chunks };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
   const {
     manifests,
     disposers,
@@ -381,6 +443,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     workflowContributions,
     policies,
     tools,
+    toolOwners,
   } = applyRibs({
     active,
     available,
@@ -395,7 +458,12 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
     ...(getMemory ? { getMemory } : {}),
     getProviders,
+    callTool,
   });
+  for (const tool of tools) {
+    const owner = toolOwners.get(tool.name);
+    if (owner) toolIndex.set(tool.name, { ribId: owner, def: tool });
+  }
   return {
     manifests,
     probes,
@@ -855,6 +923,46 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const n = Number(raw.trim());
   return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+export function parseCrossRibGrants(raw: string | undefined): CrossRibGrants {
+  const grants: CrossRibGrants = new Map();
+  if (raw === undefined || raw.trim() === "") return grants;
+  for (const segment of raw.split(";")) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    const [caller, target, tools, ...rest] = trimmed.split(":").map((part) => part.trim());
+    if (!caller || !target || !tools || rest.length > 0) continue;
+    const names = tools
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+    if (names.length === 0) continue;
+    let targetGrants = grants.get(caller);
+    if (!targetGrants) {
+      targetGrants = new Map();
+      grants.set(caller, targetGrants);
+    }
+    let toolGrants = targetGrants.get(target);
+    if (!toolGrants) {
+      toolGrants = new Set();
+      targetGrants.set(target, toolGrants);
+    }
+    for (const name of names) {
+      toolGrants.add(name);
+    }
+  }
+  return grants;
+}
+
+export function isCrossRibGrantAllowed(
+  grants: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>,
+  callerRibId: string,
+  targetRibId: string,
+  name: string,
+): boolean {
+  const tools = grants.get(callerRibId)?.get(targetRibId);
+  return tools?.has(name) === true || tools?.has("*") === true;
 }
 
 // Workflow prompt-node handler. Env-gated:
