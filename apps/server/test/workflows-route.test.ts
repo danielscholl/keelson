@@ -9,7 +9,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
@@ -1770,6 +1770,69 @@ nodes:
     expect(second.nodes.find((n) => n.nodeId === "fail")?.status).toBe("failed");
     expect(readFileSync(prepCountPath, "utf8").trim()).toBe("1");
     expect(readFileSync(failCountPath, "utf8").trim()).toBe("2");
+  });
+
+  test("POST /resume-run re-runs the failure-cascaded tail once the failed node succeeds", async () => {
+    const flakyCountPath = join(tmpDir, "cascade-flaky-count.txt");
+    const tailMarkPath = join(tmpDir, "cascade-tail-ran.txt");
+    const neverMarkPath = join(tmpDir, "cascade-never-ran.txt");
+    writeWorkflow(
+      "resume-cascade.yaml",
+      `name: resume-cascade
+description: cascade-skipped tail re-runs on resume; condition-skips re-derive
+nodes:
+  - id: prepare
+    bash: echo ready
+  - id: flaky
+    depends_on: [prepare]
+    bash: |
+      n=0
+      if [ -f "${flakyCountPath}" ]; then n=$(cat "${flakyCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${flakyCountPath}"
+      if [ "$n" -lt 2 ]; then exit 7; fi
+      echo "flaky:$n"
+  - id: tail
+    depends_on: [flaky]
+    bash: |
+      echo ran > "${tailMarkPath}"
+      echo tail-done
+  - id: never
+    depends_on: [prepare]
+    when: "$prepare.output == 'nope'"
+    bash: echo ran > "${neverMarkPath}"
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-cascade/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    const first = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string }>;
+    };
+    expect(first.status).toBe("failed");
+    expect(first.nodes.find((n) => n.nodeId === "flaky")?.status).toBe("failed");
+    expect(first.nodes.find((n) => n.nodeId === "tail")?.status).toBe("skipped");
+    expect(first.nodes.find((n) => n.nodeId === "never")?.status).toBe("skipped");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+
+    const second = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string }>;
+    };
+    expect(second.status).toBe("succeeded");
+    expect(second.nodes.find((n) => n.nodeId === "flaky")?.status).toBe("succeeded");
+    expect(second.nodes.find((n) => n.nodeId === "tail")?.status).toBe("succeeded");
+    expect(second.nodes.find((n) => n.nodeId === "never")?.status).toBe("skipped");
+    expect(readFileSync(flakyCountPath, "utf8").trim()).toBe("2");
+    expect(readFileSync(tailMarkPath, "utf8").trim()).toBe("ran");
+    expect(existsSync(neverMarkPath)).toBe(false);
   });
 
   test("POST /resume-run rejects cross-origin requests (CSRF)", async () => {
