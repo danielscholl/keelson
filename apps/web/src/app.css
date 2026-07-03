@@ -4526,7 +4526,8 @@ a.cvb-card-title::after {
   content: "•";
   color: var(--id-tone);
 }
-.canvas-cell-badge[data-tone^="id-"] {
+.canvas-cell-badge[data-tone^="id-"],
+.cvb-grid-badge[data-tone^="id-"] {
   color: var(--fg);
   background: color-mix(in srgb, var(--id-tone) 18%, transparent);
 }
