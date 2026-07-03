@@ -563,7 +563,9 @@ class RunArtifactsDir {
   static async create(runId: string): Promise<RunArtifactsDir> {
     try {
       const dir = join(tmpdir(), `keelson-run-${runId}`);
-      await mkdir(dir, { recursive: true });
+      // 0o700 preserves mkdtemp's owner-only posture — artifacts can hold
+      // issue text and plans that other local users shouldn't read.
+      await mkdir(dir, { recursive: true, mode: 0o700 });
       return new RunArtifactsDir(dir);
     } catch (err) {
       console.warn(
