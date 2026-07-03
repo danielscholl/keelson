@@ -15,7 +15,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import {
@@ -557,9 +557,16 @@ export function createWorkflowSubscribers(): WorkflowSubscribers {
 class RunArtifactsDir {
   private constructor(private readonly dir: string | undefined) {}
 
+  // Deterministic per-run path (no mkdtemp suffix): a resumed execution must
+  // land in the SAME dir so artifacts written by seeded nodes (plan.md,
+  // .issue-number) — and the absolute paths their outputs embed — stay valid.
   static async create(runId: string): Promise<RunArtifactsDir> {
     try {
-      return new RunArtifactsDir(await mkdtemp(join(tmpdir(), `keelson-run-${runId}-`)));
+      const dir = join(tmpdir(), `keelson-run-${runId}`);
+      // 0o700 preserves mkdtemp's owner-only posture — artifacts can hold
+      // issue text and plans that other local users shouldn't read.
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      return new RunArtifactsDir(dir);
     } catch (err) {
       console.warn(
         `[workflows] failed to create artifacts dir for ${runId}: ${
@@ -2717,7 +2724,12 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     // the run-scoped snapshot key (also closes its WS subscribers).
     await lastRecompose;
     unregisterSnapshot?.();
-    await artifacts.cleanup();
+    // Failed / cancelled runs keep their artifacts dir: those are the resumable
+    // states, and a resumed execution re-enters the same deterministic path —
+    // same policy as the worktree retention above.
+    if (terminalStatus !== "failed" && terminalStatus !== "cancelled") {
+      await artifacts.cleanup();
+    }
   }
 }
 
