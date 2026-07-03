@@ -34,6 +34,16 @@
   --s5: #2fa876;
   --s6: #d260a4;
 
+  /* Reserved identity tones (canvas `id-*`) — one per repeatedly-rendered actor
+     (squad member, chamber mind). Validated as a categorical set against this
+     mode's --card surface (all-pairs CVD + contrast); see keelson#389. Distinct
+     from --s* (Usage chart series) so neither palette shifts the other. */
+  --id-blue: #4f7df0;
+  --id-amber: #c27718;
+  --id-teal: #0e9d8f;
+  --id-rose: #ba3d78;
+  --id-olive: #5f6e0a;
+
   --danger:  #e06666;
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-card:    0 2px 6px rgba(0, 0, 0, 0.4);
@@ -83,6 +93,13 @@
   --s4: #b66229;
   --s5: #15834f;
   --s6: #804bc1;
+
+  /* Identity tones, re-stepped for the light --card (same validation). */
+  --id-blue: #2457c5;
+  --id-amber: #b45309;
+  --id-teal: #11b3a5;
+  --id-rose: #992558;
+  --id-olive: #6b7f1a;
 
   --danger:  #d9385e;
   --shadow-popover: 0 12px 32px rgba(57, 43, 92, 0.16);
@@ -4466,6 +4483,76 @@ a.cvb-card-title::after {
 }
 .surface-region-glyph-chip[data-tone="accent"] {
   color: var(--accent);
+}
+
+/* Identity tones (id-blue…id-olive) — reserved actor slots (keelson#389). One
+   attribute rule per tone binds --id-tone; consumers key on the `id-` prefix so
+   every data-tone site carries all five without a per-tone copy of the accent
+   block. Identity TEXT stays in ink — the dot/wash carries the hue, the name
+   carries the identity — because two of the five hues sit below 3:1 on one
+   surface by validated design (the name is the relief channel). */
+[data-tone="id-blue"] {
+  --id-tone: var(--id-blue);
+}
+[data-tone="id-amber"] {
+  --id-tone: var(--id-amber);
+}
+[data-tone="id-teal"] {
+  --id-tone: var(--id-teal);
+}
+[data-tone="id-rose"] {
+  --id-tone: var(--id-rose);
+}
+[data-tone="id-olive"] {
+  --id-tone: var(--id-olive);
+}
+.canvas-view-table td[data-tone^="id-"],
+.cvb-stat-value[data-tone^="id-"],
+.cvb-field-value[data-tone^="id-"],
+.cvb-link[data-tone^="id-"],
+.surface-region-glyph-chip[data-tone^="id-"] {
+  color: var(--id-tone);
+}
+.cvb-bar-fill[data-tone^="id-"],
+.cvb-card-dot[data-tone^="id-"],
+.cvb-glyph[data-tone^="id-"] {
+  background: var(--id-tone);
+}
+.cvb-segment-bullet[data-tone^="id-"] {
+  background: var(--id-tone);
+  box-shadow: 0 0 4px var(--id-tone);
+}
+.cvb-rows--boxed .cvb-glyph[data-tone^="id-"]::before {
+  content: "•";
+  color: var(--id-tone);
+}
+.canvas-cell-badge[data-tone^="id-"] {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--id-tone) 18%, transparent);
+}
+.cvb-pill[data-tone^="id-"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--id-tone) 45%, transparent);
+}
+.cvb-chip[data-tone^="id-"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--id-tone) 40%, transparent);
+  background: color-mix(in srgb, var(--id-tone) 14%, transparent);
+}
+.cvb-chip[data-tone^="id-"]::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--id-tone);
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.cvb-header-status[data-tone^="id-"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--id-tone) 45%, transparent);
+  background: color-mix(in srgb, var(--id-tone) 10%, transparent);
 }
 
 /* Not a bar — a scrim. The footer is absolutely positioned over the bottom of

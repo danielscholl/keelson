@@ -663,6 +663,24 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("board");
   });
 
+  it("parses every reserved identity tone everywhere a tone is accepted", () => {
+    for (const tone of ["id-blue", "id-amber", "id-teal", "id-rose", "id-olive"]) {
+      const v = canvasViewSchema.parse({
+        view: "board",
+        header: { status: { label: "ok", tone } },
+        sections: [
+          { kind: "segments", items: [{ label: "x", n: 1, tone }] },
+          {
+            kind: "cards",
+            items: [{ title: "member", titleTone: tone, pill: { label: "role", tone } }],
+          },
+          { kind: "rows", items: [{ text: "turn", glyph: tone, chip: { label: "edie", tone } }] },
+        ],
+      });
+      expect(v.view).toBe("board");
+    }
+  });
+
   it("parses a card with a toned monospace title and a labelled reason line", () => {
     const v = canvasViewSchema.parse({
       view: "board",

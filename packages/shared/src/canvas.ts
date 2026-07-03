@@ -72,6 +72,14 @@ export type CanvasHtmlAction = z.infer<typeof canvasHtmlActionSchema>;
 // brand (violet), and accent (indigo) extend the ramp for decorative identity
 // (lane glyphs), multi-step scales (an A–E grade chip: ok·info·warn·caution·error),
 // and hash-keyed category hues where neighbouring items need distinct colours.
+//
+// id-* are reserved identity slots for actors a rib renders repeatedly (squad
+// members, chamber minds): assign one per actor at creation in a fixed order and
+// persist it — never hash per render, and never seat an actor in a status hue.
+// The five hues were validated as a categorical set (CVD separation + contrast)
+// against both SPA card surfaces; an actor's name must always accompany the
+// colour (the chip renderer keeps identity text in ink for this reason). A sixth
+// actor folds to `neutral` + name rather than minting a hue.
 export const canvasToneSchema = z.enum([
   "ok",
   "warn",
@@ -81,6 +89,11 @@ export const canvasToneSchema = z.enum([
   "caution",
   "brand",
   "accent",
+  "id-blue",
+  "id-amber",
+  "id-teal",
+  "id-rose",
+  "id-olive",
 ]);
 export type CanvasTone = z.infer<typeof canvasToneSchema>;
 

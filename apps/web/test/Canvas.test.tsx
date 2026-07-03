@@ -561,6 +561,41 @@ describe("CanvasProvider / useCanvas", () => {
     expect(screen.getByRole("button", { name: "Copy user" })).toBeTruthy();
   });
 
+  test("board renders reserved identity tones through to data-tone attributes", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            {
+              kind: "cards",
+              items: [
+                { title: "edie", dot: "id-olive", pill: { label: "reviewer", tone: "id-olive" } },
+              ],
+            },
+            {
+              kind: "rows",
+              items: [{ chip: { label: "fenster", tone: "id-teal" }, text: "reviewed the diff" }],
+            },
+          ],
+        }),
+      },
+      title: "minds",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector('.cvb-card-dot[data-tone="id-olive"]')).not.toBeNull();
+    expect(dialog.querySelector('.cvb-pill[data-tone="id-olive"]')?.textContent).toBe("reviewer");
+    expect(dialog.querySelector('.cvb-chip[data-tone="id-teal"]')?.textContent).toBe("fenster");
+  });
+
   test("board rows item with detail renders a disclosure; without detail renders a plain row", () => {
     const doc: CanvasDocument = {
       kind: "view",
