@@ -598,7 +598,9 @@ describe("CanvasProvider / useCanvas", () => {
     expect(dialog.querySelector('.cvb-card-dot[data-tone="id-olive"]')).not.toBeNull();
     expect(dialog.querySelector('.cvb-pill[data-tone="id-olive"]')?.textContent).toBe("reviewer");
     expect(dialog.querySelector('.cvb-chip[data-tone="id-teal"]')?.textContent).toBe("fenster");
-    expect(dialog.querySelector('.cvb-grid-badge[data-tone="id-rose"]')?.textContent).toBe("verbal");
+    expect(dialog.querySelector('.cvb-grid-badge[data-tone="id-rose"]')?.textContent).toBe(
+      "verbal",
+    );
   });
 
   test("board rows item with detail renders a disclosure; without detail renders a plain row", () => {
