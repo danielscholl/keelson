@@ -846,6 +846,38 @@ describe("makeRibAgentTurn — usage capture", () => {
     expect(events[0]?.model).toBe("unknown");
   });
 
+  it("prefers the provider-reported model chunk over the requested model", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "model", model: "gpt-5.5" },
+          { type: "usage", usage: { inputTokens: 5, outputTokens: 7 } },
+          { type: "done" },
+        ],
+      }),
+      { getUsageStore: () => store },
+    );
+    await run("chamber", { prompt: "hi", model: "auto" }).result;
+    expect(events[0]?.model).toBe("gpt-5.5");
+  });
+
+  it("ignores a blank model chunk and keeps the requested model", async () => {
+    const { store, events } = fakeUsageStore();
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "model", model: "   " },
+          { type: "usage", usage: { inputTokens: 1, outputTokens: 1 } },
+          { type: "done" },
+        ],
+      }),
+      { getUsageStore: () => store },
+    );
+    await run("chamber", { prompt: "hi", model: "claude-opus" }).result;
+    expect(events[0]?.model).toBe("claude-opus");
+  });
+
   it("does not record when the turn carries no usage chunk", async () => {
     const { store, events } = fakeUsageStore();
     const run = makeRun(fakeProvider(), { getUsageStore: () => store });

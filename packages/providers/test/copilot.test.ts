@@ -30,7 +30,8 @@ import {
 // --- Mock SDK harness ---
 
 interface MockSession extends CopilotSessionLike {
-  emit(event: string, data?: Record<string, unknown>): void;
+  // `envelope` merges fields beside `data` (e.g. agentId on sub-agent events).
+  emit(event: string, data?: Record<string, unknown>, envelope?: Record<string, unknown>): void;
   readonly sent: Array<{ prompt: string }>;
   readonly aborted: boolean;
   readonly disconnected: boolean;
@@ -153,10 +154,14 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       ): Promise<void> {
         setModelCalls.push({ model, options });
       },
-      emit(eventType: string, data?: Record<string, unknown>): void {
+      emit(
+        eventType: string,
+        data?: Record<string, unknown>,
+        envelope?: Record<string, unknown>,
+      ): void {
         const set = handlers.get(eventType);
         if (!set) return;
-        const event = { type: eventType, data: data ?? {} };
+        const event = { type: eventType, data: data ?? {}, ...envelope };
         for (const h of set) h(event);
       },
     };
@@ -2187,6 +2192,80 @@ describe("CopilotProvider — token usage (chat/workflow usage feedback)", () =>
     const chunks = await drain(provider.sendQuery("hi", "/tmp"));
 
     expect(chunks.filter((c) => c.type === "usage")).toHaveLength(0);
+  });
+});
+
+describe("CopilotProvider — resolved-model reporting", () => {
+  const makeProvider = (sdk: ReturnType<typeof makeMockSdk>) =>
+    new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+  it("emits one model chunk, deduped across same-model usage events", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("assistant.usage", { model: "gpt-5.5", inputTokens: 10, outputTokens: 2 });
+        session.emit("assistant.usage", { model: "gpt-5.5", inputTokens: 20, outputTokens: 4 });
+        session.emit("session.idle");
+      },
+    });
+
+    const chunks = await drain(makeProvider(sdk).sendQuery("hi", "/tmp"));
+
+    expect(chunks.filter((c) => c.type === "model")).toEqual([{ type: "model", model: "gpt-5.5" }]);
+  });
+
+  it("re-emits on a mid-turn model switch", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("assistant.usage", { model: "gpt-5.5", inputTokens: 10, outputTokens: 2 });
+        session.emit("assistant.usage", {
+          model: "claude-sonnet-4.6",
+          inputTokens: 5,
+          outputTokens: 1,
+        });
+        session.emit("session.idle");
+      },
+    });
+
+    const chunks = await drain(makeProvider(sdk).sendQuery("hi", "/tmp"));
+
+    expect(chunks.filter((c) => c.type === "model")).toEqual([
+      { type: "model", model: "gpt-5.5" },
+      { type: "model", model: "claude-sonnet-4.6" },
+    ]);
+  });
+
+  it("ignores sub-agent usage events so a helper's model is not reported as the turn's", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit(
+          "assistant.usage",
+          { model: "gpt-5-mini", inputTokens: 3, outputTokens: 1 },
+          { agentId: "sub-1" },
+        );
+        session.emit("assistant.usage", { model: "gpt-5.5", inputTokens: 10, outputTokens: 2 });
+        session.emit("session.idle");
+      },
+    });
+
+    const chunks = await drain(makeProvider(sdk).sendQuery("hi", "/tmp"));
+
+    expect(chunks.filter((c) => c.type === "model")).toEqual([{ type: "model", model: "gpt-5.5" }]);
+  });
+
+  it("emits no model chunk when usage events omit the model", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("assistant.usage", { inputTokens: 10, outputTokens: 2 });
+        session.emit("session.idle");
+      },
+    });
+
+    const chunks = await drain(makeProvider(sdk).sendQuery("hi", "/tmp"));
+
+    expect(chunks.filter((c) => c.type === "model")).toHaveLength(0);
   });
 });
 

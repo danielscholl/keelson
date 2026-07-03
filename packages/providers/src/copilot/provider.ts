@@ -586,8 +586,25 @@ export class CopilotProvider implements IAgentProvider {
       // Context gauge straight from the SDK; latest event wins.
       let contextTokens: number | undefined;
       let contextWindow: number | undefined;
+      // The model that served the turn's root-agent calls. Copilot resolves
+      // "auto" session-side; each usage event names the model that served that
+      // API call, so surfacing it (deduped, last wins on a mid-turn switch)
+      // lets downstream ledgers record what actually ran rather than the
+      // requested alias. Sub-agent calls (top-level agentId set) are skipped so
+      // a helper's model can't masquerade as the turn's.
+      let reportedModel: string | undefined;
       unsubs.push(
         session.on("assistant.usage", (event: unknown) => {
+          const servedModel = readString(event, "model");
+          if (
+            servedModel !== undefined &&
+            servedModel.length > 0 &&
+            servedModel !== reportedModel &&
+            readTopLevelString(event, "agentId") === undefined
+          ) {
+            reportedModel = servedModel;
+            queue.push({ type: "model", model: servedModel });
+          }
           const input = readCount(event, "inputTokens");
           const output = readCount(event, "outputTokens");
           const cacheRead = readCount(event, "cacheReadTokens");
@@ -829,6 +846,14 @@ function readString(event: unknown, key: string): string | undefined {
   const data = (event as { data?: unknown }).data;
   if (!data || typeof data !== "object") return undefined;
   const v = (data as Record<string, unknown>)[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+// Reads a field beside `data` on the event envelope (e.g. `agentId`, which the
+// SDK stamps on sub-agent events), unlike readString which reads inside `data`.
+function readTopLevelString(event: unknown, key: string): string | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const v = (event as Record<string, unknown>)[key];
   return typeof v === "string" ? v : undefined;
 }
 
