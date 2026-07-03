@@ -248,7 +248,7 @@ async function runTurn(
       } else if (chunk.type === "model") {
         // Blank reports are ignored so they can't null out a real requested model.
         if (typeof chunk.model === "string" && chunk.model.trim().length > 0) {
-          resolvedModel = chunk.model;
+          resolvedModel = chunk.model.trim();
         }
       }
     }

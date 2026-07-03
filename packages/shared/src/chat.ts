@@ -109,8 +109,10 @@ export const messageChunkSchema = z.discriminatedUnion("type", [
   // usage-bearing SDK event. Never accumulated across stream events.
   z.object({ type: z.literal("usage"), usage: tokenUsageSchema }).strict(),
   // The model the provider's session actually resolved for this turn, for
-  // providers whose default is decided session-side (pi's defaultModel is "").
-  // Display-only: consumers must not pin it onto subsequent requests.
+  // providers whose default is decided session-side (pi's defaultModel is "",
+  // copilot's is "auto"). May re-emit when the session switches models
+  // mid-turn (copilot's rate-limit auto-switch); consumers keep the last
+  // report. Display-only: consumers must not pin it onto subsequent requests.
   z.object({ type: z.literal("model"), model: z.string().min(1) }).strict(),
   z
     .object({

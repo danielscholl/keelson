@@ -161,7 +161,8 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       ): void {
         const set = handlers.get(eventType);
         if (!set) return;
-        const event = { type: eventType, data: data ?? {}, ...envelope };
+        // Envelope first so a stray `type`/`data` key can't clobber the event shape.
+        const event = { ...envelope, type: eventType, data: data ?? {} };
         for (const h of set) h(event);
       },
     };
