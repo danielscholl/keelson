@@ -116,6 +116,75 @@ describe("makeRibAgentTurn — provider routing", () => {
     ]);
   });
 
+  it("forwards tool_use/tool_result chunks on the stream ahead of the settled tail", async () => {
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "tool_use", id: "t1", toolName: "read", toolInput: { file_path: "a.ts" } },
+          { type: "tool_result", toolUseId: "t1", content: "ok" },
+          { type: "text", content: "hello" },
+          { type: "done" },
+        ],
+      }),
+    );
+    const turn = run("squad", { prompt: "trace me" });
+    expect(await drain(turn.stream)).toEqual([
+      { type: "tool_use", id: "t1", toolName: "read", toolInput: { file_path: "a.ts" } },
+      { type: "tool_result", toolUseId: "t1", content: "ok" },
+      { type: "text", content: "hello" },
+      { type: "done" },
+    ]);
+    expect(await turn.result).toEqual({ status: "ok", text: "hello", providerId: "claude" });
+  });
+
+  it("delivers tool chunks live, before the provider stream completes", async () => {
+    // The provider holds its stream open until the consumer has SEEN the
+    // tool_use chunk — the turn can only settle if the chunk crossed mid-turn.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const provider: IAgentProvider = {
+      getType: () => "fake",
+      getCapabilities: () => ({}) as never,
+      listModels: async () => [],
+      async *sendQuery() {
+        yield { type: "tool_use", id: "t1", toolName: "bash" } as MessageChunk;
+        await gate;
+        yield { type: "text", content: "traced" } as MessageChunk;
+        yield { type: "done" } as MessageChunk;
+      },
+    };
+    const run = makeRun(provider);
+    const turn = run("squad", { prompt: "live?" });
+    let sawLiveToolUse = false;
+    const consumer = (async () => {
+      for await (const chunk of turn.stream) {
+        if (chunk.type === "tool_use") {
+          sawLiveToolUse = true;
+          release();
+        }
+      }
+    })();
+    expect(await turn.result).toEqual({ status: "ok", text: "traced", providerId: "claude" });
+    await consumer;
+    expect(sawLiveToolUse).toBe(true);
+  });
+
+  it("settles the result even when nobody consumes the stream", async () => {
+    const run = makeRun(
+      fakeProvider({
+        chunks: [
+          { type: "tool_use", id: "t1", toolName: "read" },
+          { type: "text", content: "hello" },
+          { type: "done" },
+        ],
+      }),
+    );
+    const turn = run("squad", { prompt: "unconsumed" });
+    expect(await turn.result).toEqual({ status: "ok", text: "hello", providerId: "claude" });
+  });
+
   it("routes through the req.provider hint and stamps providerId from it", async () => {
     let queriedId = "";
     const claude = fakeProvider({ onQuery: () => (queriedId = "claude") });

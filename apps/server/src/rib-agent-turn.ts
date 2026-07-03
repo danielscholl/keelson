@@ -115,9 +115,44 @@ export function makeRibAgentTurn(
   // policy can govern its own (or another rib's) turn. Provider routing stays
   // global.
   return (ribId, req) => {
-    const result = runTurn(resolved, req, ribId);
-    return { result, stream: toStream(result) };
+    const relay = newRelay();
+    const result = runTurn(resolved, req, ribId, (chunk) => relayPush(relay, chunk));
+    // runTurn never rejects, but close on both paths so a defect there can't
+    // leave the stream's consumer parked forever.
+    result.then(
+      () => relayClose(relay),
+      () => relayClose(relay),
+    );
+    return { result, stream: toStream(relay, result) };
   };
+}
+
+// Live-forwarding conduit between runTurn's provider loop and the rib-facing
+// stream. Never applies backpressure — an unconsumed stream must not stall the
+// turn — so the buffer is capped and the oldest chunks fall off; the rib-side
+// trace fold caps far below this anyway.
+const RELAY_CHUNK_CAP = 1024;
+
+interface ChunkRelay {
+  queue: MessageChunk[];
+  notify: (() => void) | undefined;
+  closed: boolean;
+}
+
+function newRelay(): ChunkRelay {
+  return { queue: [], notify: undefined, closed: false };
+}
+
+function relayPush(relay: ChunkRelay, chunk: MessageChunk): void {
+  if (relay.closed) return;
+  relay.queue.push(chunk);
+  if (relay.queue.length > RELAY_CHUNK_CAP) relay.queue.shift();
+  relay.notify?.();
+}
+
+function relayClose(relay: ChunkRelay): void {
+  relay.closed = true;
+  relay.notify?.();
 }
 
 // req.provider hint → KEELSON_WORKFLOW_PROVIDER → first registered non-stub
@@ -152,6 +187,7 @@ async function runTurn(
   deps: ResolvedDeps,
   req: RibAgentTurnRequest,
   ribId: string,
+  onChunk?: (chunk: MessageChunk) => void,
 ): Promise<RibAgentTurnResult> {
   // Reject an empty/whitespace prompt at the seam, before touching a
   // provider, so a transiently-empty prompt is a legible contract violation.
@@ -250,6 +286,10 @@ async function runTurn(
         if (typeof chunk.model === "string" && chunk.model.trim().length > 0) {
           resolvedModel = chunk.model.trim();
         }
+      } else if (chunk.type === "tool_use" || chunk.type === "tool_result") {
+        // Forward tool activity to the rib-facing stream as it happens — the
+        // one signal a rib cannot reconstruct from the settled result.
+        onChunk?.(chunk);
       }
     }
   } catch (err) {
@@ -448,9 +488,25 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// The result is the source of truth; synthesize the stream from it — the full
-// text as one chunk (an error chunk on failure), then a terminal done.
-async function* toStream(result: Promise<RibAgentTurnResult>): AsyncGenerator<MessageChunk> {
+// Live tool chunks first (as the relay delivers them), then the settled tail:
+// the result stays the source of truth for text — the full text as one chunk
+// (an error chunk on failure), then a terminal done.
+async function* toStream(
+  relay: ChunkRelay,
+  result: Promise<RibAgentTurnResult>,
+): AsyncGenerator<MessageChunk> {
+  while (true) {
+    const chunk = relay.queue.shift();
+    if (chunk) {
+      yield chunk;
+      continue;
+    }
+    if (relay.closed) break;
+    await new Promise<void>((resolve) => {
+      relay.notify = resolve;
+    });
+    relay.notify = undefined;
+  }
   const r = await result;
   if (r.text) yield { type: "text", content: r.text };
   // Emit an error chunk whenever the result carries one, so a failed turn never

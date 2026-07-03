@@ -126,8 +126,10 @@ export interface RibAgentTurnResult {
 
 // A settled dual-handle, NOT a bare AsyncGenerator: `stream` is live progress,
 // `result` settles exactly once after the stream completes. `result` is the
-// source of truth; the stream is derived from it (full text, then a terminal
-// `done`).
+// source of truth for text/usage; the stream forwards the provider's tool_use /
+// tool_result chunks AS THEY HAPPEN (so a rib can trace a mind mid-turn), then
+// appends the settled text (an error chunk on failure) and a terminal `done`.
+// Ribs must not assemble text from the stream — take it from `result`.
 export interface RibAgentTurn {
   stream: AsyncIterable<MessageChunk>;
   result: Promise<RibAgentTurnResult>;
