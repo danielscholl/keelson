@@ -207,6 +207,10 @@ async function runTurn(
   let assistantText = "";
   let providerError: string | undefined;
   let turnUsage: TokenUsage | undefined;
+  // Provider-reported served model (the `model` chunk), preferred over
+  // req.model in the ledger row so an "auto"-style hint records what ran —
+  // mirrors the chat and workflow-prompt seams.
+  let resolvedModel: string | undefined;
   // Records a `rib`-sourced usage event (when the turn actually carried spend)
   // and folds `turnUsage` onto the settled result. Called from every return
   // point after `providerId` is known — mirrors the chat/workflow seams' "only
@@ -217,7 +221,7 @@ async function runTurn(
       deps.getUsageStore?.()?.record({
         source: "rib",
         provider: providerId,
-        model: req.model ?? "unknown",
+        model: resolvedModel ?? req.model ?? "unknown",
         inputTokens: turnUsage.inputTokens,
         outputTokens: turnUsage.outputTokens,
         ...(turnUsage.cacheReadInputTokens !== undefined
@@ -241,6 +245,11 @@ async function runTurn(
       else if (chunk.type === "usage") {
         const coerced = coerceTokenUsage(chunk.usage);
         if (coerced !== undefined) turnUsage = coerced;
+      } else if (chunk.type === "model") {
+        // Blank reports are ignored so they can't null out a real requested model.
+        if (typeof chunk.model === "string" && chunk.model.trim().length > 0) {
+          resolvedModel = chunk.model.trim();
+        }
       }
     }
   } catch (err) {
