@@ -1835,6 +1835,51 @@ nodes:
     expect(existsSync(neverMarkPath)).toBe(false);
   });
 
+  test("POST /resume-run reuses the artifacts dir so seeded nodes' files survive", async () => {
+    const artifactsFlakyCountPath = join(tmpDir, "artifacts-flaky-count.txt");
+    writeWorkflow(
+      "resume-artifacts.yaml",
+      `name: resume-artifacts
+description: seeded-node artifacts persist across a resume
+nodes:
+  - id: plan
+    bash: echo the-plan > "$KEELSON_ARTIFACTS_DIR/plan.md"
+  - id: flaky
+    depends_on: [plan]
+    bash: |
+      n=0
+      if [ -f "${artifactsFlakyCountPath}" ]; then n=$(cat "${artifactsFlakyCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${artifactsFlakyCountPath}"
+      if [ "$n" -lt 2 ]; then exit 7; fi
+      cat "$KEELSON_ARTIFACTS_DIR/plan.md"
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-artifacts/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    const first = (await pollUntilTerminal(app, runId)) as { status: string };
+    expect(first.status).toBe("failed");
+    const artifactsDir = join(tmpdir(), `keelson-run-${runId}`);
+    expect(existsSync(join(artifactsDir, "plan.md"))).toBe(true);
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+
+    const second = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string; outputText: string | null }>;
+    };
+    expect(second.status).toBe("succeeded");
+    expect(second.nodes.find((n) => n.nodeId === "flaky")?.outputText ?? "").toContain("the-plan");
+    // Success cleans the dir; the failed attempt above had retained it for resume.
+    expect(existsSync(artifactsDir)).toBe(false);
+  });
+
   test("POST /resume-run rejects cross-origin requests (CSRF)", async () => {
     const { app } = makeRig();
     const res = await app.fetch(
