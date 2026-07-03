@@ -647,10 +647,14 @@ interface StartRunCoreParams {
   ribId?: string | null;
 }
 
-// Seed-map builder from persisted rows: maps terminal node rows to NodeOutput
-// so the executor can re-enter from the first incomplete node. Only maps
-// success-terminal rows (succeeded → completed, skipped → skipped); failed/awaiting
-// rows are deliberately excluded so they re-run on resume.
+// Seed-map builder from persisted rows: maps succeeded rows to NodeOutput so
+// the executor can re-enter from the first incomplete node. Skipped rows are
+// deliberately NOT seeded: a persisted skip can be a failure cascade (upstream
+// failed → trigger_rule skipped the tail), and replaying it would keep the tail
+// skipped after the failed node re-runs. Skips are pure re-derivations —
+// trigger_rule / when: evaluate over the seeded upstream outputs, so a
+// legitimate condition-skip re-derives identically. Failed/awaiting rows are
+// likewise excluded so they re-run on resume.
 function buildResumeSeed(nodes: NodeOutputRow[]): Map<string, NodeOutput> {
   const seed = new Map<string, NodeOutput>();
   for (const node of nodes) {
@@ -660,11 +664,6 @@ function buildResumeSeed(nodes: NodeOutputRow[]): Map<string, NodeOutput> {
         output: node.outputText ?? "",
         ...(node.startedAt !== null ? { startedAt: node.startedAt } : {}),
         ...(node.completedAt !== null ? { completedAt: node.completedAt } : {}),
-      });
-    } else if (node.status === "skipped") {
-      seed.set(node.nodeId, {
-        state: "skipped",
-        output: "",
       });
     }
   }
