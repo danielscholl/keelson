@@ -663,7 +663,7 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("board");
   });
 
-  it("parses every reserved identity tone everywhere a tone is accepted", () => {
+  it("parses every reserved identity tone across board tone sites", () => {
     for (const tone of ["id-blue", "id-amber", "id-teal", "id-rose", "id-olive"]) {
       const v = canvasViewSchema.parse({
         view: "board",
@@ -672,9 +672,10 @@ describe("canvasViewSchema", () => {
           { kind: "segments", items: [{ label: "x", n: 1, tone }] },
           {
             kind: "cards",
-            items: [{ title: "member", titleTone: tone, pill: { label: "role", tone } }],
+            items: [{ title: "member", titleTone: tone, dot: tone, pill: { label: "role", tone } }],
           },
           { kind: "rows", items: [{ text: "turn", glyph: tone, chip: { label: "edie", tone } }] },
+          { kind: "grid", cells: [{ label: "R1", badge: { text: "edie", tone } }] },
         ],
       });
       expect(v.view).toBe("board");

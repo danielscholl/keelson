@@ -36,8 +36,8 @@
 
   /* Reserved identity tones (canvas `id-*`) — one per repeatedly-rendered actor
      (squad member, chamber mind). Validated as a categorical set against this
-     mode's --card surface (all-pairs CVD + contrast); see keelson#389. Distinct
-     from --s* (Usage chart series) so neither palette shifts the other. */
+     mode's --card surface (all-pairs CVD + contrast). Distinct from --s*
+     (Usage chart series) so neither palette shifts the other. */
   --id-blue: #4f7df0;
   --id-amber: #c27718;
   --id-teal: #0e9d8f;
@@ -4485,12 +4485,14 @@ a.cvb-card-title::after {
   color: var(--accent);
 }
 
-/* Identity tones (id-blue…id-olive) — reserved actor slots (keelson#389). One
-   attribute rule per tone binds --id-tone; consumers key on the `id-` prefix so
-   every data-tone site carries all five without a per-tone copy of the accent
-   block. Identity TEXT stays in ink — the dot/wash carries the hue, the name
-   carries the identity — because two of the five hues sit below 3:1 on one
-   surface by validated design (the name is the relief channel). */
+/* Identity tones (id-blue…id-olive) — reserved actor slots. One attribute rule
+   per tone binds --id-tone; consumers key on the `id-` prefix so every
+   data-tone site carries all five without a per-tone copy of the accent block.
+   Where the tone labels an actor (chips, pills, badges, header status) the TEXT
+   stays in ink and the dot/wash carries the hue: two of the five hues sit below
+   3:1 on one surface by validated design, and the always-present name is the
+   relief channel. Value-type consumers (table cells, stat/field values, links,
+   glyph chips) color text like every other tone. */
 [data-tone="id-blue"] {
   --id-tone: var(--id-blue);
 }
