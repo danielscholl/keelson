@@ -90,6 +90,15 @@ function stripConfirm(args: unknown): unknown {
   return rest;
 }
 
+// A tool that declares `confirm` in its own input schema runs its own
+// confirmation flow (dry-run preview → confirmed execute), so the host gate
+// must defer: gating would shadow the tool's preview phase and stripping the
+// arg would make its confirmed phase unreachable.
+function declaresConfirm(tool: ToolDefinition): boolean {
+  const props = toInputJsonSchema(tool).properties;
+  return isRecord(props) && "confirm" in props;
+}
+
 // Build a low-level MCP Server over keelson's tool registry (plus injected
 // extras). The tool list is read lazily on each tools/list, so ribs registered
 // at boot are reflected without re-wiring. Tool execution runs server-side via
@@ -133,9 +142,10 @@ export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
         isError: true,
       };
     }
+    const hostGated = tool.requires_confirmation === true && !declaresConfirm(tool);
     const confirmed = isRecord(args) && args.confirm === true;
-    const callArgs = tool.requires_confirmation === true ? stripConfirm(args) : args;
-    if (tool.requires_confirmation === true && !confirmed) {
+    const callArgs = hostGated ? stripConfirm(args) : args;
+    if (hostGated && !confirmed) {
       return {
         content: [
           {

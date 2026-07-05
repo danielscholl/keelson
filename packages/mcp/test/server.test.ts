@@ -200,6 +200,33 @@ describe("createKeelsonMcpServer — confirmation gate", () => {
     expect(state.seenInput).toEqual({ q: "x" });
   });
 
+  test("self-gating tools (schema-declared confirm) bypass the host gate and keep confirm", async () => {
+    const calls: unknown[] = [];
+    registerTool({
+      name: "osdu_self_gated",
+      description: "two-phase tool with its own confirm flow",
+      inputSchema: z.object({ confirm: z.boolean().optional(), q: z.string().optional() }),
+      state_changing: true,
+      requires_confirmation: true,
+      execute: async (input, ctx) => {
+        calls.push(input);
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "self-gated ran" });
+      },
+    });
+    const client = await connect({ exposeStateChanging: true });
+
+    const preview = await client.callTool({ name: "osdu_self_gated", arguments: { q: "x" } });
+    expect(preview.isError).toBeFalsy();
+    expect((preview.content as Array<{ text: string }>)[0]?.text).toBe("self-gated ran");
+
+    const confirmedRes = await client.callTool({
+      name: "osdu_self_gated",
+      arguments: { confirm: true, q: "x" },
+    });
+    expect(confirmedRes.isError).toBeFalsy();
+    expect(calls).toEqual([{ q: "x" }, { confirm: true, q: "x" }]);
+  });
+
   test("tools without requires_confirmation execute without confirm", async () => {
     let executed = false;
     registerTool({
