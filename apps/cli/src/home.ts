@@ -2,14 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveKeelsonHome, resolveRibsRoot } from "@keelson/shared/paths";
 

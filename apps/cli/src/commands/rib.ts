@@ -12,8 +12,8 @@ import {
   listedRibs,
   parseManifestRibDeps,
   readManifestText,
-  restoreHome,
   resolveKeelsonHome,
+  restoreHome,
   snapshotHome,
 } from "../home.ts";
 import { listRibs } from "../http/ribs-client.ts";

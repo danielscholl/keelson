@@ -36,8 +36,9 @@ function writeRibSource(dir: string, version: string): void {
 }
 
 function manifestRibKeyCount(home: string): number {
-  return readFileSync(join(home, "package.json"), "utf8").match(/"@keelson\/rib-faketest"/g)
-    ?.length ?? 0;
+  return (
+    readFileSync(join(home, "package.json"), "utf8").match(/"@keelson\/rib-faketest"/g)?.length ?? 0
+  );
 }
 
 // A stand-in for keelson serve that answers only GET /api/ribs, so the CLI's HTTP
