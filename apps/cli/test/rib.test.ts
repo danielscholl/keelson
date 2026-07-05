@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnEnv } from "./spawn-env.ts";
@@ -25,6 +25,19 @@ async function runCli(
     proc.exited,
   ]);
   return { stdout, exitCode };
+}
+
+function writeRibSource(dir: string, version: string): void {
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({ name: "@keelson/rib-faketest", version, main: "./index.ts" }),
+  );
+  writeFileSync(join(dir, "index.ts"), "export default { id: 'faketest' };\n");
+}
+
+function manifestRibKeyCount(home: string): number {
+  return readFileSync(join(home, "package.json"), "utf8").match(/"@keelson\/rib-faketest"/g)
+    ?.length ?? 0;
 }
 
 // A stand-in for keelson serve that answers only GET /api/ribs, so the CLI's HTTP
@@ -172,6 +185,66 @@ describe("keelson rib (home lifecycle)", () => {
     const env = JSON.parse(stdout.trim());
     const fake = env.data.ribs.find((r: { id: string }) => r.id === "faketest");
     expect(fake?.version).toBe("0.0.0");
+  });
+
+  test("re-sourcing a same-name local rib keeps one manifest entry and data", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-rib-resource-"));
+    const resourceHome = join(root, "home");
+    const srcA = join(root, "src-a");
+    const srcB = join(root, "src-b");
+    try {
+      mkdirSync(srcA);
+      mkdirSync(srcB);
+      writeRibSource(srcA, "0.0.0");
+      writeRibSource(srcB, "0.0.1");
+
+      const first = await runCli(["--json", "rib", "add", srcA], { KEELSON_HOME: resourceHome });
+      expect(first.exitCode).toBe(0);
+      const dataDir = join(resourceHome, "rib-faketest");
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "sentinel"), "keep\n");
+
+      const { stdout, exitCode } = await runCli(["--json", "rib", "add", srcB], {
+        KEELSON_HOME: resourceHome,
+      });
+      expect(exitCode).toBe(0);
+      const env = JSON.parse(stdout.trim());
+      const manifest = JSON.parse(readFileSync(join(resourceHome, "package.json"), "utf8"));
+      expect(env.ok).toBe(true);
+      expect(env.data.resourced).toBe("faketest");
+      expect(env.data.installed).toContain("faketest");
+      expect(manifestRibKeyCount(resourceHome)).toBe(1);
+      expect(manifest.dependencies["@keelson/rib-faketest"]).toBe(srcB);
+      expect(existsSync(join(dataDir, "sentinel"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("failed re-source restores the manifest bytes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "keelson-rib-resource-fail-"));
+    const resourceHome = join(root, "home");
+    const srcA = join(root, "src-a");
+    try {
+      mkdirSync(srcA);
+      writeRibSource(srcA, "0.0.0");
+
+      const first = await runCli(["--json", "rib", "add", srcA], { KEELSON_HOME: resourceHome });
+      expect(first.exitCode).toBe(0);
+      const beforeText = readFileSync(join(resourceHome, "package.json"), "utf8");
+
+      const { stdout, exitCode } = await runCli(
+        ["--json", "rib", "add", join(root, "does-not-exist")],
+        { KEELSON_HOME: resourceHome },
+      );
+      expect(exitCode).toBe(1);
+      const env = JSON.parse(stdout.trim());
+      expect(env.ok).toBe(false);
+      expect(env.code).toBe("INSTALL_FAILED");
+      expect(readFileSync(join(resourceHome, "package.json"), "utf8")).toBe(beforeText);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("remove uninstalls it", async () => {
