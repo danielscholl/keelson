@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveKeelsonHome, resolveRibsRoot } from "@keelson/shared/paths";
 
@@ -26,6 +26,60 @@ export function ensureHome(home: string = resolveKeelsonHome()): string {
 // The @keelson scope directory for home-local package mutations.
 export function homeRibsDir(home: string = resolveKeelsonHome()): string {
   return join(home, "node_modules", "@keelson");
+}
+
+export function readManifestText(home: string = resolveKeelsonHome()): string {
+  return readFileSync(join(home, "package.json"), "utf8");
+}
+
+export function writeManifestText(home: string, text: string): void {
+  writeFileSync(join(home, "package.json"), text);
+}
+
+export function parseManifestRibDeps(text: string): Map<string, string> {
+  const manifest = JSON.parse(text) as { dependencies?: Record<string, unknown> };
+  const deps = new Map<string, string>();
+  for (const [name, source] of Object.entries(manifest.dependencies ?? {})) {
+    if (name.startsWith("@keelson/rib-") && typeof source === "string") {
+      deps.set(name, source);
+    }
+  }
+  return deps;
+}
+
+export function findDuplicateRibKeys(text: string): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const match of text.matchAll(/"(@keelson\/rib-[^"]+)"\s*:/g)) {
+    const name = match[1];
+    if (!name) continue;
+    if (seen.has(name)) duplicates.add(name);
+    seen.add(name);
+  }
+  return [...duplicates].sort();
+}
+
+export interface HomeSnapshot {
+  manifestText: string;
+  lockText: string | null;
+}
+
+export function snapshotHome(home: string = resolveKeelsonHome()): HomeSnapshot {
+  const lockPath = join(home, "bun.lock");
+  return {
+    manifestText: readManifestText(home),
+    lockText: existsSync(lockPath) ? readFileSync(lockPath, "utf8") : null,
+  };
+}
+
+export function restoreHome(home: string, snapshot: HomeSnapshot): void {
+  writeManifestText(home, snapshot.manifestText);
+  const lockPath = join(home, "bun.lock");
+  if (snapshot.lockText === null) {
+    rmSync(lockPath, { force: true });
+  } else {
+    writeFileSync(lockPath, snapshot.lockText);
+  }
 }
 
 function ribIdsFromDir(dir: string): string[] {
