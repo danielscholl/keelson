@@ -5,7 +5,17 @@
 import { resolve } from "node:path";
 import type { RibSummary } from "@keelson/shared";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
-import { ensureHome, installedRibIds, listedRibs, resolveKeelsonHome } from "../home.ts";
+import {
+  ensureHome,
+  findDuplicateRibKeys,
+  installedRibIds,
+  listedRibs,
+  parseManifestRibDeps,
+  readManifestText,
+  restoreHome,
+  resolveKeelsonHome,
+  snapshotHome,
+} from "../home.ts";
 import { listRibs } from "../http/ribs-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
@@ -38,6 +48,21 @@ async function runBunPm(args: string[], home: string, quiet: boolean): Promise<n
     stderr: quiet ? "ignore" : "inherit",
   });
   return await proc.exited;
+}
+
+async function runBunPmCaptured(
+  args: string[],
+  home: string,
+  quiet: boolean,
+): Promise<{ code: number; stderr: string }> {
+  const proc = Bun.spawn(["bun", ...args], {
+    cwd: home,
+    stdout: quiet ? "ignore" : "inherit",
+    stderr: "pipe",
+  });
+  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (!quiet && stderr.length > 0) process.stderr.write(stderr);
+  return { code, stderr };
 }
 
 // Skip probeServer: the actual GET surfaces "connection refused" via
@@ -99,6 +124,46 @@ function toShowItem(rib: RibSummary) {
   };
 }
 
+function detectResourceCollision(beforeText: string, afterText: string): string | null {
+  const duplicate = findDuplicateRibKeys(afterText)[0];
+  if (duplicate) return duplicate;
+
+  try {
+    const beforeDeps = parseManifestRibDeps(beforeText);
+    const afterDeps = parseManifestRibDeps(afterText);
+    for (const [name, source] of beforeDeps) {
+      if (afterDeps.has(name) && afterDeps.get(name) !== source) return name;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function resolveRibId(pkgName: string): string {
+  return pkgName.replace(/^@keelson\/rib-/, "");
+}
+
+function installCause(result: { code: number; stderr: string }): string {
+  const detail = result.stderr.trim().split("\n").at(-1)?.trim();
+  return detail ? `${detail} (exit ${result.code})` : `exit ${result.code}`;
+}
+
+function failInstall(
+  source: string,
+  cause: string,
+  opts: BaseOptions,
+  pkgName?: string | null,
+): never {
+  const fallback = pkgName
+    ? `keelson rib remove ${resolveRibId(pkgName)} && keelson rib add ${source}`
+    : null;
+  const message = `bun add ${source} failed: ${cause}`;
+  emit({ error: message, code: "INSTALL_FAILED" }, { json: opts.json });
+  if (!opts.json && fallback) process.stdout.write(`try: ${fallback}\n`);
+  process.exit(EXIT_FAIL);
+}
+
 export interface RibListOptions extends BaseOptions {
   // Read installed ribs straight from the home's node_modules instead of the
   // running server — works before `keelson start` is up, but only carries ids.
@@ -130,22 +195,54 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
   }
   const home = ensureHome();
   const source = resolveRibSource(trimmed);
+  const snapshot = snapshotHome(home);
+  const beforeDeps = parseManifestRibDeps(snapshot.manifestText);
   const before = new Set(installedRibIds(home));
-  const code = await runBunPm(["add", source], home, opts.json);
-  if (code !== 0) {
-    emit(
-      { error: `bun add ${source} failed (exit ${code})`, code: "INSTALL_FAILED" },
-      { json: opts.json },
-    );
-    process.exit(EXIT_FAIL);
+  const firstAdd = await runBunPmCaptured(["add", source], home, opts.json);
+  const afterFirstText = readManifestText(home);
+  let resourced: string | null = null;
+  let collision = detectResourceCollision(snapshot.manifestText, afterFirstText);
+
+  if (firstAdd.code !== 0 || collision !== null) {
+    if (collision === null && beforeDeps.size === 1) collision = [...beforeDeps.keys()][0] ?? null;
+    if (collision === null) {
+      restoreHome(home, snapshot);
+      failInstall(source, installCause(firstAdd), opts, null);
+    }
+
+    restoreHome(home, snapshot);
+    const removeCode = await runBunPm(["remove", collision], home, opts.json);
+    if (removeCode !== 0) {
+      restoreHome(home, snapshot);
+      failInstall(source, `bun remove ${collision} failed (exit ${removeCode})`, opts, collision);
+    }
+
+    const retryAdd = await runBunPmCaptured(["add", source], home, opts.json);
+    const afterRetryText = readManifestText(home);
+    if (retryAdd.code !== 0 || findDuplicateRibKeys(afterRetryText).length > 0) {
+      restoreHome(home, snapshot);
+      failInstall(source, installCause(retryAdd), opts, collision);
+    }
+    resourced = resolveRibId(collision);
   }
+
   const installed = installedRibIds(home);
   const added = installed.filter((id) => !before.has(id));
   // A rib only activates at server boot; warn when one is already running.
   const server = await probeServer(opts.baseUrl ? { baseUrl: opts.baseUrl } : {});
-  emit({ data: { added, installed, home, restartRequired: server !== null } }, { json: opts.json });
+  emit(
+    { data: { added, installed, home, restartRequired: server !== null, resourced } },
+    { json: opts.json },
+  );
   if (!opts.json) {
-    if (added.length > 0) {
+    if (resourced) {
+      process.stdout.write(`resourced ${resourced}\n`);
+      if (server !== null) {
+        process.stdout.write(
+          "restart the server (`keelson stop && keelson start`) to activate the rib\n",
+        );
+      }
+    } else if (added.length > 0) {
       process.stdout.write(`added ${added.join(", ")}\n`);
       if (server !== null) {
         process.stdout.write(
