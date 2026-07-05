@@ -154,6 +154,74 @@ describe("createKeelsonMcpServer", () => {
   });
 });
 
+describe("createKeelsonMcpServer — confirmation gate", () => {
+  function registerConfirmationTool(name = "osdu_confirm") {
+    const state: { executed: boolean; seenInput?: unknown } = { executed: false };
+    registerTool({
+      name,
+      description: "confirmation required",
+      inputSchema: z.object({ q: z.string().optional() }).passthrough(),
+      state_changing: true,
+      requires_confirmation: true,
+      execute: async (input, ctx) => {
+        state.executed = true;
+        state.seenInput = input;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "confirmed" });
+      },
+    });
+    return state;
+  }
+
+  test("requires_confirmation tools return a non-error confirmation prompt before execution", async () => {
+    const state = registerConfirmationTool();
+    const client = await connect({ exposeStateChanging: true });
+
+    const res = await client.callTool({ name: "osdu_confirm", arguments: { q: "x" } });
+
+    expect(res.isError).toBeFalsy();
+    const text = (res.content as Array<{ text: string }>)[0]?.text;
+    expect(text).toContain("requires confirmation");
+    expect(text).toContain("osdu_confirm");
+    expect(state.executed).toBe(false);
+  });
+
+  test("requires_confirmation tools execute when confirmed and do not receive confirm", async () => {
+    const state = registerConfirmationTool();
+    const client = await connect({ exposeStateChanging: true });
+
+    const res = await client.callTool({
+      name: "osdu_confirm",
+      arguments: { confirm: true, q: "x" },
+    });
+
+    expect(res.isError).toBeFalsy();
+    expect((res.content as Array<{ text: string }>)[0]?.text).toBe("confirmed");
+    expect(state.executed).toBe(true);
+    expect(state.seenInput).toEqual({ q: "x" });
+  });
+
+  test("tools without requires_confirmation execute without confirm", async () => {
+    let executed = false;
+    registerTool({
+      name: "osdu_plain",
+      description: "plain state-changing tool",
+      inputSchema: z.object({}),
+      state_changing: true,
+      execute: async (_input, ctx) => {
+        executed = true;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "plain" });
+      },
+    });
+    const client = await connect({ exposeStateChanging: true });
+
+    const res = await client.callTool({ name: "osdu_plain", arguments: {} });
+
+    expect(res.isError).toBeFalsy();
+    expect((res.content as Array<{ text: string }>)[0]?.text).toBe("plain");
+    expect(executed).toBe(true);
+  });
+});
+
 describe("createKeelsonMcpServer — policy gate", () => {
   test("a tool-call deny short-circuits before the tool runs", async () => {
     let executed = false;
