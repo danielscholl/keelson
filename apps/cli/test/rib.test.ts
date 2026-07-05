@@ -215,7 +215,7 @@ describe("keelson rib (home lifecycle)", () => {
       expect(env.data.resourced).toBe("faketest");
       expect(env.data.installed).toContain("faketest");
       expect(manifestRibKeyCount(resourceHome)).toBe(1);
-      expect(manifest.dependencies["@keelson/rib-faketest"]).toBe(srcB);
+      expect(manifest.dependencies["@keelson/rib-faketest"]).toBe(srcB.replaceAll("\\", "/"));
       expect(existsSync(join(dataDir, "sentinel"))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });

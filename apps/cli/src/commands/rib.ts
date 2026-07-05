@@ -156,7 +156,9 @@ async function rollbackHome(
 ): Promise<string | null> {
   restoreHome(home, snapshot);
   const reinstallCode = await runBunPm(["install"], home, quiet);
-  return reinstallCode === 0 ? null : `rollback restore failed: bun install exited ${reinstallCode}`;
+  return reinstallCode === 0
+    ? null
+    : `rollback restore failed: bun install exited ${reinstallCode}`;
 }
 
 function failInstall(
