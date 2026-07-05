@@ -2230,6 +2230,13 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   // this instead of re-reading from SQLite — test teardown can delete the DB
   // file between the executor returning and our cleanup running.
   let terminalStatus: WorkflowRunStatus | null = null;
+  // The run_done event is captured here rather than dispatched immediately so
+  // the finally block can persist/broadcast it AFTER artifacts.cleanup() runs
+  // — otherwise a client polling status can observe "succeeded" while the run's
+  // artifacts dir still exists on disk (a race that Windows' slower recursive
+  // directory removal turns into a reliable CI failure).
+  let pendingRunDoneEvent: Extract<RunStreamEvent, { type: "run_done" }> | undefined;
+  let runDoneCompletedAt: string | undefined;
   if (existingWorktreePath !== undefined) {
     effectiveCwd = existingWorktreePath;
     worktreePathForCleanup = existingWorktreePath;
@@ -2664,7 +2671,12 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       ...(notebook !== undefined ? { notebook } : {}),
       ...(completedNodeOutputs !== undefined ? { completedNodeOutputs } : {}),
       onEvent: (event) => {
-        if (event.type === "run_done") terminalStatus = event.status;
+        if (event.type === "run_done") {
+          terminalStatus = event.status;
+          runDoneCompletedAt = new Date().toISOString();
+          pendingRunDoneEvent = event;
+          return;
+        }
         dispatchRunEvent({
           event,
           runId,
@@ -2717,6 +2729,40 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
         }
       }
     }
+    // Failed / cancelled runs keep their artifacts dir: those are the resumable
+    // states, and a resumed execution re-enters the same deterministic path —
+    // same policy as the worktree retention above.
+    if (terminalStatus !== "failed" && terminalStatus !== "cancelled") {
+      await artifacts.cleanup();
+    }
+    // Persist/broadcast the terminal status now that cleanup has finished, so
+    // a client can never observe "succeeded" while the artifacts dir (or a
+    // success-cleaned worktree) is still on disk. Best-effort like the
+    // cleanup steps above: a caller that never awaits `entry.done` (or a test
+    // harness that force-closes db handles between runs) can race this write
+    // against teardown; swallow rather than reject the whole run promise.
+    if (pendingRunDoneEvent) {
+      try {
+        dispatchRunEvent({
+          event: pendingRunDoneEvent,
+          runId,
+          store,
+          subscribers,
+          nodeStart,
+          nodeAccumulators,
+          workflowName: workflow.name,
+          ...(runDoneCompletedAt !== undefined ? { completedAt: runDoneCompletedAt } : {}),
+          ...(publishRun !== undefined ? { publishStructured: publishRun } : {}),
+          ...(usageStore !== undefined ? { usageStore } : {}),
+        });
+      } catch (err) {
+        console.warn(
+          `[workflows] failed to persist terminal status for ${runId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
     activeRuns.delete(runId);
     // Close any lingering WS subscribers — the run will emit no further frames.
     subscribers.closeRun(runId);
@@ -2724,12 +2770,6 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     // the run-scoped snapshot key (also closes its WS subscribers).
     await lastRecompose;
     unregisterSnapshot?.();
-    // Failed / cancelled runs keep their artifacts dir: those are the resumable
-    // states, and a resumed execution re-enters the same deterministic path —
-    // same policy as the worktree retention above.
-    if (terminalStatus !== "failed" && terminalStatus !== "cancelled") {
-      await artifacts.cleanup();
-    }
   }
 }
 
@@ -2805,6 +2845,10 @@ interface DispatchArgs {
   // Optional usage ledger. When set, a node_done carrying real usage records a
   // `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  // Timestamp to persist for a deferred run_done dispatch, captured when the
+  // executor actually finished (before any post-completion cleanup ran) so
+  // `completedAt` reflects real runtime rather than dispatch time.
+  completedAt?: string;
 }
 
 function dispatchRunEvent(args: DispatchArgs): void {
@@ -2818,6 +2862,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
     publishStructured,
     workflowName,
     usageStore,
+    completedAt: completedAtOverride,
   } = args;
   switch (event.type) {
     case "run_started":
@@ -2954,7 +2999,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
       store.updateRunStatus({
         runId,
         status,
-        completedAt: new Date().toISOString(),
+        completedAt: completedAtOverride ?? new Date().toISOString(),
         error,
       });
       subscribers.broadcast(runId, { type: "run_done", status });
