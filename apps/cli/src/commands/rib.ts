@@ -212,7 +212,7 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
   const firstAdd = await runBunPmCaptured(["add", source], home, opts.json);
   const afterFirstText = readManifestText(home);
   let resourced: string | null = null;
-  let collision = detectResourceCollision(snapshot.manifestText, afterFirstText);
+  const collision = detectResourceCollision(snapshot.manifestText, afterFirstText);
 
   if (firstAdd.code !== 0 || collision !== null) {
     if (collision === null) {
