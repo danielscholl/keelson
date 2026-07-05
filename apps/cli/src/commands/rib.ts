@@ -149,6 +149,16 @@ function installCause(result: { code: number; stderr: string }): string {
   return detail ? `${detail} (exit ${result.code})` : `exit ${result.code}`;
 }
 
+async function rollbackHome(
+  home: string,
+  snapshot: { manifestText: string; lockText: string | null },
+  quiet: boolean,
+): Promise<string | null> {
+  restoreHome(home, snapshot);
+  const reinstallCode = await runBunPm(["install"], home, quiet);
+  return reinstallCode === 0 ? null : `rollback restore failed: bun install exited ${reinstallCode}`;
+}
+
 function failInstall(
   source: string,
   cause: string,
@@ -196,7 +206,6 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
   const home = ensureHome();
   const source = resolveRibSource(trimmed);
   const snapshot = snapshotHome(home);
-  const beforeDeps = parseManifestRibDeps(snapshot.manifestText);
   const before = new Set(installedRibIds(home));
   const firstAdd = await runBunPmCaptured(["add", source], home, opts.json);
   const afterFirstText = readManifestText(home);
@@ -204,24 +213,26 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
   let collision = detectResourceCollision(snapshot.manifestText, afterFirstText);
 
   if (firstAdd.code !== 0 || collision !== null) {
-    if (collision === null && beforeDeps.size === 1) collision = [...beforeDeps.keys()][0] ?? null;
     if (collision === null) {
-      restoreHome(home, snapshot);
-      failInstall(source, installCause(firstAdd), opts, null);
+      const rollbackError = await rollbackHome(home, snapshot, opts.json);
+      const cause = installCause(firstAdd);
+      failInstall(source, rollbackError ? `${cause}; ${rollbackError}` : cause, opts, null);
     }
 
     restoreHome(home, snapshot);
     const removeCode = await runBunPm(["remove", collision], home, opts.json);
     if (removeCode !== 0) {
-      restoreHome(home, snapshot);
-      failInstall(source, `bun remove ${collision} failed (exit ${removeCode})`, opts, collision);
+      const rollbackError = await rollbackHome(home, snapshot, opts.json);
+      const cause = `bun remove ${collision} failed (exit ${removeCode})`;
+      failInstall(source, rollbackError ? `${cause}; ${rollbackError}` : cause, opts, collision);
     }
 
     const retryAdd = await runBunPmCaptured(["add", source], home, opts.json);
     const afterRetryText = readManifestText(home);
     if (retryAdd.code !== 0 || findDuplicateRibKeys(afterRetryText).length > 0) {
-      restoreHome(home, snapshot);
-      failInstall(source, installCause(retryAdd), opts, collision);
+      const rollbackError = await rollbackHome(home, snapshot, opts.json);
+      const cause = installCause(retryAdd);
+      failInstall(source, rollbackError ? `${cause}; ${rollbackError}` : cause, opts, collision);
     }
     resourced = resolveRibId(collision);
   }

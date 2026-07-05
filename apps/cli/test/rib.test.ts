@@ -222,7 +222,7 @@ describe("keelson rib (home lifecycle)", () => {
     }
   });
 
-  test("failed re-source restores the manifest bytes", async () => {
+  test("failed add leaves an existing installed rib intact", async () => {
     const root = mkdtempSync(join(tmpdir(), "keelson-rib-resource-fail-"));
     const resourceHome = join(root, "home");
     const srcA = join(root, "src-a");
@@ -243,6 +243,12 @@ describe("keelson rib (home lifecycle)", () => {
       expect(env.ok).toBe(false);
       expect(env.code).toBe("INSTALL_FAILED");
       expect(readFileSync(join(resourceHome, "package.json"), "utf8")).toBe(beforeText);
+      const listed = await runCli(["--json", "rib", "list", "--installed"], {
+        KEELSON_HOME: resourceHome,
+      });
+      expect(listed.exitCode).toBe(0);
+      const listedEnv = JSON.parse(listed.stdout.trim());
+      expect(listedEnv.data.ribs.find((r: { id: string }) => r.id === "faketest")).toBeDefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
