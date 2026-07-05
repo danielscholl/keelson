@@ -80,6 +80,25 @@ function toInputJsonSchema(tool: ToolDefinition): Record<string, unknown> {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stripConfirm(args: unknown): unknown {
+  if (!isRecord(args)) return args;
+  const { confirm: _confirm, ...rest } = args;
+  return rest;
+}
+
+// A tool that declares `confirm` in its own input schema runs its own
+// confirmation flow (dry-run preview → confirmed execute), so the host gate
+// must defer: gating would shadow the tool's preview phase and stripping the
+// arg would make its confirmed phase unreachable.
+function declaresConfirm(tool: ToolDefinition): boolean {
+  const props = toInputJsonSchema(tool).properties;
+  return isRecord(props) && "confirm" in props;
+}
+
 // Build a low-level MCP Server over keelson's tool registry (plus injected
 // extras). The tool list is read lazily on each tools/list, so ribs registered
 // at boot are reflected without re-wiring. Tool execution runs server-side via
@@ -123,11 +142,25 @@ export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
         isError: true,
       };
     }
+    const hostGated = tool.requires_confirmation === true && !declaresConfirm(tool);
+    const confirmed = isRecord(args) && args.confirm === true;
+    const callArgs = hostGated ? stripConfirm(args) : args;
+    if (hostGated && !confirmed) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Tool '${name}' requires confirmation. Re-issue this tools/call with "confirm": true to execute. Supplied arguments: ${JSON.stringify(callArgs ?? {})}`,
+          },
+        ],
+        isError: false,
+      };
+    }
     // Pre-execution policy gate: the same denylist / ask / rib-policy stack the
     // chat and workflow surfaces run, so a tool reachable over MCP can't sidestep
     // it. A deny surfaces as an error result rather than running the tool.
     if (opts.policyGate) {
-      const decision = await opts.policyGate.evaluateToolCall({ tool: name, args });
+      const decision = await opts.policyGate.evaluateToolCall({ tool: name, args: callArgs });
       if (decision.outcome === "deny") {
         return {
           content: [{ type: "text" as const, text: `Tool '${name}' denied: ${decision.reason}` }],
@@ -135,7 +168,7 @@ export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
         };
       }
     }
-    const res = await executeToolDefinition(tool, args, {
+    const res = await executeToolDefinition(tool, callArgs, {
       cwd: opts.defaultCwd,
       abortSignal: extra.signal,
     });
