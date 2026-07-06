@@ -204,9 +204,10 @@ family.
 - **Bespoke SVG** for the signature hero illustration, "The Frame"
   (`assets/figures/the-frame-ship.svg`): a naval side elevation where the keelson
   beam is the harness, the frames are ribs, the CLI is the rudder (it steers from
-  the shell), the browser SPA is a surface, and a dashed bridge marks a capability
-  still under construction in a rib. Dashed lines mean planned or hidden detail,
-  the blueprint convention. SVG gives true curve control the other tools cannot.
+  the shell), the browser SPA is a surface, and a dashed superstructure
+  (wheelhouse, mast, and rigging) marks capability still under construction in a
+  rib. Dashed lines mean planned or hidden detail, the blueprint convention. SVG
+  gives true curve control the other tools cannot.
 - **Excalidraw** for technical in-doc figures (boot sequence, snapshot streaming),
   rendered and inspected with
   `cd ~/.claude/skills/excalidraw-diagram/references && uv run python render_excalidraw.py <path>.excalidraw`,
