@@ -3994,6 +3994,45 @@ a.cvb-card-title::after {
   margin-top: 2px;
 }
 
+/* people — identity-toned names in a field's value slot (a room's cast). Each
+   name wears its own dot; the name itself stays in ink (the id-* accompaniment
+   rule). A non-identity tone falls back to the muted dot. */
+.cvb-people {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cvb-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: ui-monospace, monospace;
+  color: var(--fg);
+}
+.cvb-person::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--id-tone, var(--muted));
+  flex: none;
+}
+
+/* Stacked card fields — one field per line (a boot readout, a log tail); the
+   inline `·` separators drop with the row layout. Scoped like the separator
+   rule below so it outweighs the non-boxed meta-row rule above (a boxed card
+   already stacks its fields its own way, so stacked is a no-op there). */
+.cvb-cards:not(.cvb-cards--boxed) .cvb-card-fields--stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 3px;
+}
+.cvb-cards:not(.cvb-cards--boxed) .cvb-card-fields--stacked .cvb-field:not(:first-child)::before {
+  content: none;
+}
+
 /* boxed cards — each field is an inset pill (value + copy icon), stacked, so a
    service card reads as a list of copyable credentials / addresses. */
 /* Service cards stay a responsive gallery; plain cards (movers/stalled) keep the

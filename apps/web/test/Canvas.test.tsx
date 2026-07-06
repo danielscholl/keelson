@@ -603,6 +603,64 @@ describe("CanvasProvider / useCanvas", () => {
     );
   });
 
+  test("board renders a people field as toned names and stacks a stacked card's fields", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            {
+              kind: "cards",
+              items: [
+                {
+                  title: "architecture debate",
+                  fields: [
+                    {
+                      label: "with",
+                      people: [
+                        { name: "Mycroft", tone: "id-amber" },
+                        { name: "Jarvis", tone: "id-teal" },
+                      ],
+                    },
+                    { label: "started", value: "2h ago" },
+                  ],
+                },
+                {
+                  title: "Athena",
+                  stacked: true,
+                  fields: [{ value: "> writing SOUL.md…" }, { value: "> identity: Athena" }],
+                },
+              ],
+            },
+          ],
+        }),
+      },
+      title: "rooms",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    const people = dialog.querySelector(".cvb-people");
+    expect(people).not.toBeNull();
+    const persons = people ? [...people.querySelectorAll(".cvb-person")] : [];
+    expect(persons.map((p) => p.textContent)).toEqual(["Mycroft", "Jarvis"]);
+    expect(persons[0]?.getAttribute("data-tone")).toBe("id-amber");
+    expect(persons[1]?.getAttribute("data-tone")).toBe("id-teal");
+    // The plain-value sibling still renders through the scalar path.
+    expect(dialog.textContent).toContain("2h ago");
+    // The stacked card carries the column modifier; the non-stacked one doesn't.
+    const fieldBlocks = [...dialog.querySelectorAll(".cvb-card-fields")];
+    expect(fieldBlocks.length).toBe(2);
+    expect(fieldBlocks[0]?.classList.contains("cvb-card-fields--stacked")).toBe(false);
+    expect(fieldBlocks[1]?.classList.contains("cvb-card-fields--stacked")).toBe(true);
+  });
+
   test("board rows item with detail renders a disclosure; without detail renders a plain row", () => {
     const doc: CanvasDocument = {
       kind: "view",

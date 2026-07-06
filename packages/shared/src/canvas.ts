@@ -167,13 +167,23 @@ const canvasPillSchema = z
   .object({ label: z.string().min(1), tone: canvasToneSchema.optional() })
   .strict();
 
+// One entry in a `people` field — a name wearing a tone (canonically an id-*
+// identity hue). The name is required so identity colour never renders without
+// it (the id-* accompaniment rule); a bare dot can't be authored.
+const canvasPersonSchema = z
+  .object({ name: z.string().min(1), tone: canvasToneSchema.optional() })
+  .strict();
+export type CanvasPerson = z.infer<typeof canvasPersonSchema>;
+
 // A card field / status cell that can link out (`href`) or expose a copy button
 // (`copyable` for a value already in the payload; `copyAction` to fetch the
-// value on demand) — for portal URLs and credentials.
+// value on demand) — for portal URLs and credentials. A field carries either a
+// scalar `value` or `people` (identity-toned names in the value slot — a room's
+// cast, a change's reviewers), never both.
 const canvasFieldSchema = z
   .object({
     label: z.string().optional(),
-    value: canvasCellScalarSchema,
+    value: canvasCellScalarSchema.optional(),
     tone: canvasToneSchema.optional(),
     href: z.string().optional(),
     copyable: z.boolean().optional(),
@@ -185,6 +195,7 @@ const canvasFieldSchema = z
       .object({ type: z.string().min(1), payload: z.unknown().optional() })
       .strict()
       .optional(),
+    people: z.array(canvasPersonSchema).min(1).optional(),
   })
   .strict()
   // The two copy modes are mutually exclusive: a field with both would render
@@ -192,7 +203,17 @@ const canvasFieldSchema = z
   // via the rib), so a producer could silently copy the wrong value.
   .refine((f) => !(f.copyable && f.copyAction), {
     message: "a field sets at most one of copyable / copyAction",
-  });
+  })
+  .refine((f) => (f.value === undefined) !== (f.people === undefined), {
+    message: "a field carries exactly one of value / people",
+  })
+  // The link/copy/tone affordances all act on the scalar value; on a people
+  // field they would dangle off a value that doesn't exist.
+  .refine(
+    (f) =>
+      !f.people || (f.tone === undefined && f.href === undefined && !f.copyable && !f.copyAction),
+    { message: "a people field carries only a label" },
+  );
 
 // One free-text input an action collects before it dispatches. The base renders
 // a labelled field; the typed value is merged into the dispatched payload under
@@ -336,6 +357,10 @@ const cardsSectionSchema = z
           // ref) so the salient token reads as status, not prose.
           titleTone: canvasToneSchema.optional(),
           mono: z.boolean().optional(),
+          // Render this card's fields as a stacked column (one field per line)
+          // instead of the inline `·`-joined meta row — for line-oriented
+          // readouts (a boot sequence, a log tail) where the break IS the shape.
+          stacked: z.boolean().optional(),
           dot: canvasToneSchema.optional(),
           pill: canvasPillSchema.optional(),
           href: z.string().optional(),

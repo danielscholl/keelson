@@ -677,11 +677,23 @@ function Section({ section }: { section: BoardSection }) {
                   </div>
                 )}
                 {c.fields && c.fields.length > 0 && (
-                  <div className="cvb-card-fields">
+                  <div className={`cvb-card-fields${c.stacked ? " cvb-card-fields--stacked" : ""}`}>
                     {c.fields.map((f) => (
                       <span key={fieldKey(JSON.stringify(f))} className="cvb-field">
                         {f.label && <span className="cvb-field-label">{f.label}</span>}
-                        {isSafeLinkScheme(f.href) ? (
+                        {f.people ? (
+                          <span className="cvb-people">
+                            {f.people.map((p) => (
+                              <span
+                                key={fieldKey(JSON.stringify(p))}
+                                className="cvb-person"
+                                data-tone={p.tone}
+                              >
+                                {p.name}
+                              </span>
+                            ))}
+                          </span>
+                        ) : isSafeLinkScheme(f.href) ? (
                           <a
                             className="cvb-link"
                             href={f.href}
@@ -689,20 +701,20 @@ function Section({ section }: { section: BoardSection }) {
                             rel="noopener noreferrer"
                             data-tone={f.tone}
                           >
-                            {scalarText(f.value)}
+                            {scalarText(f.value ?? null)}
                           </a>
                         ) : (
                           <span className="cvb-field-value" data-tone={f.tone}>
-                            {scalarText(f.value)}
+                            {scalarText(f.value ?? null)}
                           </span>
                         )}
                         {f.copyAction && (
                           <CopyActionButton
                             action={{ type: f.copyAction.type, payload: f.copyAction.payload }}
-                            label={f.label ?? (f.value !== null ? String(f.value) : undefined)}
+                            label={f.label ?? (f.value != null ? String(f.value) : undefined)}
                           />
                         )}
-                        {f.copyable && f.value !== null && (
+                        {f.copyable && f.value != null && (
                           <button
                             type="button"
                             className="cvb-copy"
