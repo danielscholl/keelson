@@ -708,6 +708,67 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses a people field and a stacked card", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "architecture debate",
+              stacked: true,
+              fields: [
+                {
+                  label: "with",
+                  people: [
+                    { name: "Mycroft", tone: "id-amber" },
+                    { name: "Jarvis", tone: "id-teal" },
+                    { name: "Athena" },
+                  ],
+                },
+                { label: "started", value: "2h ago" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const cards = v.view === "board" ? v.sections[0] : undefined;
+    const card = cards?.kind === "cards" ? cards.items[0] : undefined;
+    expect(card?.stacked).toBe(true);
+    expect(card?.fields?.[0]?.people?.length).toBe(3);
+  });
+
+  it("rejects a field carrying both value and people, or neither", () => {
+    const board = (field: Record<string, unknown>) => ({
+      view: "board",
+      sections: [{ kind: "cards", items: [{ title: "x", fields: [field] }] }],
+    });
+    expect(() =>
+      canvasViewSchema.parse(board({ value: "v", people: [{ name: "Mycroft" }] })),
+    ).toThrow();
+    expect(() => canvasViewSchema.parse(board({ label: "with" }))).toThrow();
+  });
+
+  it("rejects value-affordances and empty/nameless entries on a people field", () => {
+    const board = (field: Record<string, unknown>) => ({
+      view: "board",
+      sections: [{ kind: "cards", items: [{ title: "x", fields: [field] }] }],
+    });
+    for (const bad of [
+      { people: [{ name: "Mycroft" }], tone: "ok" },
+      { people: [{ name: "Mycroft" }], href: "https://x.test" },
+      { people: [{ name: "Mycroft" }], copyable: true },
+      { people: [{ name: "Mycroft" }], copyAction: { type: "reveal" } },
+      { people: [] },
+      { people: [{ name: "" }] },
+      { people: [{ tone: "id-blue" }] },
+    ]) {
+      expect(() => canvasViewSchema.parse(board(bad))).toThrow();
+    }
+  });
+
   it("parses the accent tone everywhere a tone is accepted", () => {
     const v = canvasViewSchema.parse({
       view: "board",
