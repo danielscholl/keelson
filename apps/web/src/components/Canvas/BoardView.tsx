@@ -10,6 +10,7 @@ import {
 import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { ConfirmModal, type ConfirmModalMode } from "../ConfirmModal.tsx";
 import { useBoardActions } from "./BoardActionContext.tsx";
+import { ChartSection } from "./ChartSection.tsx";
 import { TableView } from "./TableView.tsx";
 
 type BoardSection = CanvasBoardView["sections"][number];
@@ -811,6 +812,8 @@ function Section({ section }: { section: BoardSection }) {
     }
     case "actions":
       return <ActionsSection section={section} />;
+    case "chart":
+      return <ChartSection section={section} />;
     case "grid": {
       const key = makeKeyer();
       return (
