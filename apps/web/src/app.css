@@ -3588,6 +3588,34 @@ button.tab:focus-visible {
 .cvb-actions--wrap > .cvb-action:has(.cvb-action-form) .cvb-action-form {
   align-self: stretch;
 }
+/* Tabs layout: a single-select strip for mutually exclusive modes (a shape
+   picker). Each wrapper dissolves (display: contents) so buttons and the one
+   open form are siblings in the row: buttons keep source order, the form's
+   `order` sends it below the whole strip as a stable full-width panel — it
+   never breaks mid-row, so the strip's geometry holds while switching tabs.
+   The active tab reads via its accent underline, not indentation. */
+.cvb-actions--tabs {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cvb-actions--tabs > .cvb-action {
+  display: contents;
+}
+.cvb-actions--tabs .cvb-action-button {
+  width: auto;
+  justify-content: center;
+}
+.cvb-actions--tabs .cvb-action-button[aria-expanded="true"] {
+  background: var(--card-2);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.cvb-actions--tabs .cvb-action-form {
+  order: 1;
+  flex-basis: 100%;
+}
 .cvb-action-button {
   background: var(--bg-soft); color: var(--fg);
   border: 1px solid var(--border); border-radius: 8px;

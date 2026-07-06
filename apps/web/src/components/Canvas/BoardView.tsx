@@ -97,13 +97,28 @@ function actionConfirmBody(item: ActionItem): string {
 // One action button. With no `fields` it dispatches on click (confirming first
 // when destructive). With `fields` it toggles an inline form and dispatches the
 // collected values on submit, so a payload-carrying action can gather its input.
-function ActionItemButton({ item }: { item: ActionItem }) {
+// A tabs section lifts the form's open state to itself via `open`/`onOpenChange`
+// so opening one item closes its siblings; uncontrolled (both absent) elsewhere.
+// The pair is a union so one can't be passed without the other.
+type ActionItemButtonProps = { item: ActionItem } & (
+  | { open: boolean; onOpenChange: (open: boolean) => void }
+  | { open?: never; onOpenChange?: never }
+);
+
+function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionItemButtonProps) {
   const ctx = useBoardActions();
   const fields = item.fields ?? [];
   const hasFields = fields.length > 0;
-  const expanded = hasFields && item.expanded === true;
+  // `expanded` (an always-open form with no disclosure button) contradicts the
+  // one-open-panel model, so a controlled (tabs) item ignores it.
+  const expanded = hasFields && item.expanded === true && onOpenChange === undefined;
   const [pending, setPending] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = controlledOpen ?? localOpen;
+  const setOpen = (next: boolean) => {
+    if (onOpenChange) onOpenChange(next);
+    else setLocalOpen(next);
+  };
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -142,7 +157,7 @@ function ActionItemButton({ item }: { item: ActionItem }) {
     if (!ctx || pending) return;
     if (hasFields) {
       setError(null);
-      setOpen((o) => !o);
+      setOpen(!open);
       return;
     }
     requestDispatch();
@@ -457,11 +472,28 @@ function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; action
 // namespace). With no provider in scope the buttons render disabled.
 function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "actions" }> }) {
   const key = makeKeyer();
+  const tabs = section.tabs === true;
+  // Tabs own their items' form-open state so exactly one form exists at a time;
+  // indexed (not typed) so two items sharing a `type` stay independent.
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const layout = tabs ? " cvb-actions--tabs" : section.wrap ? " cvb-actions--wrap" : "";
   return (
-    <div className={`cvb-actions${section.wrap ? " cvb-actions--wrap" : ""}`}>
-      {section.items.map((a) => (
-        <ActionItemButton key={key(a.type)} item={a} />
-      ))}
+    <div className={`cvb-actions${layout}`}>
+      {section.items.map((a, i) =>
+        tabs ? (
+          <ActionItemButton
+            key={key(a.type)}
+            item={a}
+            open={openIndex === i}
+            // A close only clears the slot when THIS item holds it — a
+            // fieldless sibling's post-dispatch close must not fold the
+            // open tab.
+            onOpenChange={(o: boolean) => setOpenIndex((cur) => (o ? i : cur === i ? null : cur))}
+          />
+        ) : (
+          <ActionItemButton key={key(a.type)} item={a} />
+        ),
+      )}
     </div>
   );
 }

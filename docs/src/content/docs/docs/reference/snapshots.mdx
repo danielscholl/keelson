@@ -143,7 +143,7 @@ one-level layout wrapper that nests leaf sections side by side.
 | `table` | `columns`, `rows`, `caption?` | The same table shape as the view. |
 | `cards` | `boxed?`, `items: [{ title, titleTone?, mono?, dot?, pill?, href?, bar?, fields?, actions?, footnote?, reason? }]` | Rich item cards. A card may carry `actions: ActionItem[]` for inline per-card buttons, distinct from a standalone `actions` section. |
 | `rows` | `boxed?`, `items: [{ icon?, glyph?, chip?, text, href?, trailing?, detail? }]` | A status or feed list. A row with `detail` (long-form plain text, up to 4,000 chars) renders as a disclosure that expands beneath the row. |
-| `actions` | `wrap?`, `items: ActionItem[]` | Buttons. `wrap` lays them out as an inline wrapping row of compact chips (a selection strip) instead of a full-width stacked column; an action whose form is open breaks to its own full-width line. See below. |
+| `actions` | `wrap?`, `tabs?`, `items: ActionItem[]` | Buttons. `wrap` lays them out as an inline wrapping row of compact chips (a selection strip) instead of a full-width stacked column; an action whose form is open breaks to its own full-width line. `tabs` renders a single-select strip instead: opening one action's form closes the others', and the open form is a stable full-width panel beneath the whole strip (at rest none is active; clicking the active tab closes it; takes precedence over `wrap`, and `expanded` is inert). See below. |
 | `grid` | `cells: [{ label, href?, badge: { text, tone? } }]` | A dense at-a-glance matrix. |
 | `columns` | `columns: [{ weight?, sections: LeafSection[] }]` | Lays leaf sections side by side. One level deep only. |
 

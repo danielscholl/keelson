@@ -367,6 +367,104 @@ describe("board actions with input fields", () => {
   }, 15000);
 });
 
+describe("tabs actions section", () => {
+  function tabsBoard(extra?: Record<string, unknown>): CanvasBoardView {
+    return {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            {
+              type: "convene-discussion",
+              label: "Discussion",
+              fields: [{ name: "topic", label: "Topic" }],
+              ...(extra ?? {}),
+            },
+            {
+              type: "convene-debate",
+              label: "Debate",
+              fields: [{ name: "motion", label: "Motion" }],
+            },
+            { type: "refresh", label: "Refresh" },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+  }
+
+  test("a tabs section renders the tabs layout class and takes precedence over wrap", () => {
+    const view = {
+      view: "board",
+      sections: [{ kind: "actions", tabs: true, wrap: true, items: [{ type: "a", label: "A" }] }],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const section = container.querySelector(".cvb-actions");
+    expect(section?.classList.contains("cvb-actions--tabs")).toBe(true);
+    expect(section?.classList.contains("cvb-actions--wrap")).toBe(false);
+  });
+
+  test("opening one tab closes the other — exactly one form exists at a time", () => {
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={tabsBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Debate" }));
+    expect(screen.getByText("Motion")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Discussion" }));
+    expect(screen.getByText("Topic")).toBeDefined();
+    expect(screen.queryByText("Motion")).toBeNull();
+    expect(container.querySelectorAll(".cvb-action-form")).toHaveLength(1);
+  });
+
+  test("clicking the active tab closes its form", () => {
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={tabsBoard()} />
+      </BoardActionProvider>,
+    );
+    const tab = screen.getByRole("button", { name: "Debate" });
+    fireEvent.click(tab);
+    expect(container.querySelector(".cvb-action-form")).not.toBeNull();
+    fireEvent.click(tab);
+    expect(container.querySelector(".cvb-action-form")).toBeNull();
+  });
+
+  test("expanded is inert inside a tabs section — the form stays closed until opened", () => {
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={tabsBoard({ expanded: true })} />
+      </BoardActionProvider>,
+    );
+    expect(container.querySelector(".cvb-action-form")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Discussion" }));
+    expect(container.querySelector(".cvb-action-form")).not.toBeNull();
+  });
+
+  test("an item without fields still dispatches on click, leaving the open tab alone", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={tabsBoard()} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Debate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(calls).toEqual([{ type: "refresh" }]));
+    expect(container.querySelectorAll(".cvb-action-form")).toHaveLength(1);
+  });
+});
+
 describe("copy-on-reveal field", () => {
   const realClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   afterEach(() => {

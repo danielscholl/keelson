@@ -366,6 +366,20 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses an actions section with tabs, and rejects a non-boolean tabs", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [{ kind: "actions", tabs: true, items: [{ type: "pick", label: "Pick" }] }],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", tabs: "yes", items: [{ type: "x", label: "X" }] }],
+      }),
+    ).toThrow();
+  });
+
   it("rejects an action item missing type or label, and an unknown key (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({
