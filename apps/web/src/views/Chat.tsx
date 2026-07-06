@@ -831,14 +831,17 @@ export function Chat({
         } else if (payload.type === "tool_use") {
           const assistantId = activeAssistantIdRef.current;
           if (!assistantId) return;
-          if (payload.toolName === "canvas_publish" && payload.id !== undefined) {
-            const early = earlyToolResultsRef.current.get(payload.id);
-            if (early === undefined) {
-              pendingCanvasPublishRef.current.add(payload.id);
-            } else {
-              earlyToolResultsRef.current.delete(payload.id);
-              if (!early.isError) openPublishedArtifact(early.content);
+          // A result that arrived before this tool_use was parked; consume it
+          // so the row renders hydrated and canvas_publish can auto-open.
+          const early =
+            payload.id !== undefined ? earlyToolResultsRef.current.get(payload.id) : undefined;
+          if (payload.id !== undefined && early !== undefined) {
+            earlyToolResultsRef.current.delete(payload.id);
+            if (payload.toolName === "canvas_publish" && !early.isError) {
+              openPublishedArtifact(early.content);
             }
+          } else if (payload.toolName === "canvas_publish" && payload.id !== undefined) {
+            pendingCanvasPublishRef.current.add(payload.id);
           }
           // Emitter id pairs with a later tool_result.toolUseId; the local
           // fallback only serves as a React key (no result will arrive).
@@ -846,6 +849,9 @@ export function Chat({
             id: payload.id ?? newId(),
             toolName: payload.toolName,
             toolInput: payload.toolInput,
+            ...(early !== undefined
+              ? { result: early.content, ...(early.isError ? { isError: true } : {}) }
+              : {}),
           };
           setMessages((prev) =>
             prev.map((m) =>
@@ -942,6 +948,10 @@ export function Chat({
         const assistantId = activeAssistantIdRef.current;
         activeAssistantIdRef.current = null;
         pendingSendRef.current = null;
+        // A turn ending without `done` must not leak parked canvas pairings
+        // into the next turn — providers reuse short call ids across turns.
+        pendingCanvasPublishRef.current.clear();
+        earlyToolResultsRef.current.clear();
         setError(frame.event.message);
         setStreaming(false);
         setMessages((prev) =>
@@ -1022,6 +1032,8 @@ export function Chat({
           if (assistantId) {
             activeAssistantIdRef.current = null;
             pendingSendRef.current = null;
+            pendingCanvasPublishRef.current.clear();
+            earlyToolResultsRef.current.clear();
             setStreaming(false);
             setError("Connection dropped during response");
             setMessages((prev) =>

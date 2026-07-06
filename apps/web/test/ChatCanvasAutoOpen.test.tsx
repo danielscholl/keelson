@@ -116,7 +116,7 @@ beforeEach(() => {
 });
 
 describe("canvas_publish auto-open", () => {
-  test("result-before-use order (the copilot bridge) opens the drawer", async () => {
+  test("result-before-use order (the copilot bridge) opens the drawer and hydrates the row", async () => {
     renderChat();
     await sendPrompt();
     act(() => {
@@ -124,6 +124,9 @@ describe("canvas_publish auto-open", () => {
       onFrame?.(chunk({ type: "tool_use", id: "call_1", toolName: "canvas_publish" }));
     });
     await waitFor(() => expect(screen.getByText("Auto-open Check")).toBeTruthy());
+    // The parked result also hydrates the tool row — the transcript shows the
+    // publish outcome, not a forever-pending call.
+    expect(document.body.textContent).toContain("canvas:artifact:auto-open-check");
   });
 
   test("use-before-result order opens the drawer too", async () => {
@@ -151,6 +154,31 @@ describe("canvas_publish auto-open", () => {
       );
       onFrame?.({ conversationId: "conv-1", event: { type: "done" } } as ChatFrame);
     });
+    // Flush pending microtask/state updates before asserting absence, so a
+    // late async open can't slip past the check.
+    await act(async () => {});
+    expect(screen.queryByText("Auto-open Check")).toBeNull();
+  });
+
+  test("a parked result does not leak across an errored turn (call-id reuse)", async () => {
+    renderChat();
+    await sendPrompt();
+    act(() => {
+      // Turn 1 parks a result with no matching tool_use, then errors out.
+      onFrame?.(chunk({ type: "tool_result", toolUseId: "call_9", content: publishResult }));
+      onFrame?.({
+        conversationId: "conv-1",
+        event: { type: "error", message: "provider fell over" },
+      } as ChatFrame);
+    });
+    await sendPrompt();
+    act(() => {
+      // Turn 2 reuses the call id for a fresh canvas_publish; the stale parked
+      // result must not pair with it and open the wrong artifact.
+      onFrame?.(chunk({ type: "tool_use", id: "call_9", toolName: "canvas_publish" }));
+      onFrame?.({ conversationId: "conv-1", event: { type: "done" } } as ChatFrame);
+    });
+    await act(async () => {});
     expect(screen.queryByText("Auto-open Check")).toBeNull();
   });
 });
