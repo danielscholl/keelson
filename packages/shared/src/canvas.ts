@@ -460,6 +460,35 @@ const gridSectionSchema = z
   })
   .strict();
 
+// A deterministic line/timeseries plot the base renders itself — the recurring-
+// metrics counterpart to agent-authored `canvas_publish` artifacts. Series wear
+// the fixed-order `--s1..--s6` categorical palette by array index (the set is
+// CVD/contrast-validated as a whole); the 6-series cap is the never-cycle rule
+// made structural — a 7th series folds into a producer-side "other", never a
+// recycled hue. `x` may be numbers (linear scale) or strings (ordered
+// categories); mixing across the section falls back to categories.
+const chartSectionSchema = z
+  .object({
+    kind: z.literal("chart"),
+    title: z.string().optional(),
+    yLabel: z.string().optional(),
+    series: z
+      .array(
+        z
+          .object({
+            label: z.string().min(1),
+            points: z
+              .array(z.object({ x: z.union([z.number(), z.string()]), y: z.number() }).strict())
+              .min(1),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(6),
+  })
+  .strict();
+export type CanvasChartSection = z.infer<typeof chartSectionSchema>;
+
 const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   statsSectionSchema,
   segmentsSectionSchema,
@@ -469,6 +498,7 @@ const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   rowsSectionSchema,
   actionsSectionSchema,
   gridSectionSchema,
+  chartSectionSchema,
 ]);
 
 // `columns` lays leaf sections side by side (a two-column Lifecycle | Actions
@@ -501,6 +531,7 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   rowsSectionSchema,
   actionsSectionSchema,
   gridSectionSchema,
+  chartSectionSchema,
   columnsBoardSectionSchema,
 ]);
 
@@ -534,6 +565,19 @@ function assertUniqueColumnKeys(
   }
 }
 
+// Series labels key the legend, the tooltip rows, and the fixed-order palette
+// assignment — a duplicate would seat two lines in one identity.
+function assertUniqueSeriesLabels(
+  series: { label: string }[],
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+) {
+  const labels = series.map((s) => s.label);
+  if (new Set(labels).size !== labels.length) {
+    ctx.addIssue({ code: "custom", message: "series labels must be unique", path });
+  }
+}
+
 export const canvasViewSchema = z
   .discriminatedUnion("view", [canvasTableViewSchema, canvasGraphViewSchema, canvasBoardViewSchema])
   .superRefine((view, ctx) => {
@@ -551,12 +595,16 @@ export const canvasViewSchema = z
     view.sections.forEach((section, i) => {
       if (section.kind === "table") {
         assertUniqueColumnKeys(section.columns, ctx, ["sections", i, "columns"]);
+      } else if (section.kind === "chart") {
+        assertUniqueSeriesLabels(section.series, ctx, ["sections", i, "series"]);
       } else if (section.kind === "columns") {
         section.columns.forEach((col, c) => {
           col.sections.forEach((leaf, s) => {
+            const path = ["sections", i, "columns", c, "sections", s];
             if (leaf.kind === "table") {
-              const path = ["sections", i, "columns", c, "sections", s, "columns"];
-              assertUniqueColumnKeys(leaf.columns, ctx, path);
+              assertUniqueColumnKeys(leaf.columns, ctx, [...path, "columns"]);
+            } else if (leaf.kind === "chart") {
+              assertUniqueSeriesLabels(leaf.series, ctx, [...path, "series"]);
             }
           });
         });

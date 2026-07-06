@@ -325,6 +325,87 @@ describe("canvasViewSchema", () => {
     ).toThrow(/unique/);
   });
 
+  it("parses a chart section, top-level and nested in columns", () => {
+    const chart = {
+      kind: "chart",
+      title: "Tokens per round",
+      yLabel: "tokens",
+      series: [
+        {
+          label: "input",
+          points: [
+            { x: 1, y: 1200 },
+            { x: 2, y: 3400 },
+          ],
+        },
+        { label: "output", points: [{ x: "2026-07-01", y: 900 }] },
+      ],
+    };
+    const v = canvasViewSchema.parse({ view: "board", sections: [chart] });
+    expect(v.view).toBe("board");
+    const nested = canvasViewSchema.parse({
+      view: "board",
+      sections: [{ kind: "columns", columns: [{ sections: [chart] }] }],
+    });
+    expect(nested.view).toBe("board");
+  });
+
+  it("rejects a chart with no series or more than six", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "chart", series: [] }],
+      }),
+    ).toThrow();
+    const seven = Array.from({ length: 7 }, (_, i) => ({
+      label: `s${i}`,
+      points: [{ x: 0, y: 0 }],
+    }));
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "chart", series: seven }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects duplicate chart series labels, top-level and nested in columns", () => {
+    const dup = {
+      kind: "chart",
+      series: [
+        { label: "a", points: [{ x: 0, y: 1 }] },
+        { label: "a", points: [{ x: 0, y: 2 }] },
+      ],
+    };
+    expect(() => canvasViewSchema.parse({ view: "board", sections: [dup] })).toThrow(/unique/);
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "columns", columns: [{ sections: [dup] }] }],
+      }),
+    ).toThrow(/unique/);
+  });
+
+  it("rejects a chart series with empty points or a non-finite y", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "chart", series: [{ label: "a", points: [] }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "chart",
+            series: [{ label: "a", points: [{ x: 0, y: Number.POSITIVE_INFINITY }] }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("rejects an unknown key on a card field (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({

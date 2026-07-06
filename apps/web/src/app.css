@@ -4544,6 +4544,110 @@ a.cvb-card-title::after {
   font-size: 11px;
 }
 
+/* chart section — plain inline SVG line/timeseries; series stroke --s1..--s6
+   by index. The tooltip is pointer-events-none so it never steals the hover
+   that positions it. */
+.cvb-chart {
+  position: relative;
+}
+.cvb-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.cvb-chart-ylabel {
+  font-size: 10px;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+.cvb-chart-grid-line {
+  stroke: var(--border-soft);
+  stroke-width: 1;
+}
+.cvb-chart-axis-label {
+  font-size: 10px;
+  fill: var(--dim);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+}
+.cvb-chart-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.cvb-chart-endpoint-label {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.cvb-chart-crosshair {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.cvb-chart-hover-dot {
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+.cvb-chart-tooltip {
+  position: absolute;
+  top: 10px;
+  z-index: 3;
+  pointer-events: none;
+  transform: translateX(10px);
+  min-width: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 78%, transparent);
+  font-size: 11px;
+}
+.cvb-chart-tooltip--left {
+  transform: translateX(calc(-100% - 10px));
+}
+.cvb-chart-tooltip-title {
+  color: var(--dim);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  margin-bottom: 4px;
+}
+.cvb-chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cvb-chart-tooltip-label {
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cvb-chart-tooltip-value {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.cvb-chart-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.cvb-chart-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cvb-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* accent tone (indigo) — completes the ramp for every data-tone consumer, so a
    producer can use it for hash-keyed category hues and identity accents. */
 .canvas-view-table td[data-tone="accent"] {
