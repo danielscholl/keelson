@@ -275,6 +275,20 @@ describe("canvasViewSchema", () => {
             { type: "delete", label: "Delete", tone: "error", destructive: true },
           ],
         },
+        {
+          kind: "chart",
+          title: "Unit pass rate",
+          yLabel: "%",
+          series: [
+            {
+              label: "unit",
+              points: [
+                { x: 1, y: 98.2 },
+                { x: 2, y: 99.1 },
+              ],
+            },
+          ],
+        },
       ],
     });
     expect(v.view).toBe("board");
@@ -404,6 +418,49 @@ describe("canvasViewSchema", () => {
         ],
       }),
     ).toThrow();
+  });
+
+  it("rejects duplicate x values within one chart series, by stringified identity", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "chart",
+            series: [
+              {
+                label: "a",
+                points: [
+                  { x: 1, y: 10 },
+                  { x: 1, y: 20 },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/unique/);
+    // The renderer keys slots on String(x), so numeric 1 and string "1" are
+    // one identity inside a series too.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "chart",
+            series: [
+              {
+                label: "a",
+                points: [
+                  { x: 1, y: 10 },
+                  { x: "1", y: 20 },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/unique/);
   });
 
   it("rejects an unknown key on a card field (strict)", () => {

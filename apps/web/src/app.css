@@ -4544,9 +4544,8 @@ a.cvb-card-title::after {
   font-size: 11px;
 }
 
-/* chart section — plain inline SVG line/timeseries; series stroke --s1..--s6
-   by index. The tooltip is pointer-events-none so it never steals the hover
-   that positions it. */
+/* chart section — the tooltip is pointer-events-none so it never steals the
+   hover that positions it. */
 .cvb-chart {
   position: relative;
 }

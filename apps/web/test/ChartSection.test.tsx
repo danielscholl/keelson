@@ -104,7 +104,58 @@ describe("chart board section", () => {
       <BoardView view={chartBoard([{ label: "once", points: [{ x: "now", y: 7 }] }])} />,
     );
     expect(container.querySelector("path.cvb-chart-line")).toBeNull();
-    expect(container.querySelectorAll("circle").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("circle").length).toBe(1);
+  });
+
+  test("the title lands in the svg's accessible name", () => {
+    const { container } = render(
+      <BoardView view={chartBoard([ramp("input", 0)], { title: "Tokens per round" })} />,
+    );
+    const svg = container.querySelector("svg.cvb-chart-svg");
+    expect(svg?.getAttribute("aria-label")).toBe("Tokens per round: input");
+  });
+
+  test("numeric x labels bump to the next magnitude tier at the rounding boundary", () => {
+    const { container } = render(
+      <BoardView
+        view={chartBoard([
+          {
+            label: "wide",
+            points: [
+              { x: 999999, y: 1 },
+              { x: 2000000, y: 2 },
+            ],
+          },
+        ])}
+      />,
+    );
+    const labels = [...container.querySelectorAll("text.cvb-chart-axis-label")].map(
+      (t) => t.textContent,
+    );
+    expect(labels).toContain("1M");
+    expect(labels).toContain("2M");
+    expect(labels).not.toContain("1000k");
+  });
+
+  test("a sub-unit y domain keeps its grid labels distinct", () => {
+    const { container } = render(
+      <BoardView
+        view={chartBoard([
+          {
+            label: "rate",
+            points: [
+              { x: 1, y: 0.05 },
+              { x: 2, y: 0.15 },
+            ],
+          },
+        ])}
+      />,
+    );
+    // Grid labels are the text elements anchored at the y axis (x = 40).
+    const gridLabels = [...container.querySelectorAll("text.cvb-chart-axis-label")]
+      .filter((t) => t.getAttribute("x") === "40")
+      .map((t) => t.textContent);
+    expect(new Set(gridLabels).size).toBe(gridLabels.length);
   });
 
   test("hover shows a crosshair and a tooltip with per-series values, and leave clears it", () => {
