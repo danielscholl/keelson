@@ -8,7 +8,10 @@
 // are active — guidance that NAMES the available workflows and steers the model
 // to run them via workflow_run rather than executing their names in a shell.
 // The catalog index is the standing anchor that lets the model match a request
-// like "run smoke-test" without a workflow_list round-trip first.
+// like "run smoke-test" without a workflow_list round-trip first. The canvas
+// artifact guidance rides the same tool-conditional pattern.
+
+import { buildCanvasArtifactGuidance } from "@keelson/shared";
 
 export interface WorkflowSummaryLike {
   name: string;
@@ -23,6 +26,9 @@ export interface BuildChatSystemPromptInput {
   // Pass only when the workflow_* tools are active this turn; an empty/omitted
   // list drops the workflow guidance entirely.
   workflows?: readonly WorkflowSummaryLike[];
+  // Pass only when canvas_publish is active this turn — appends the canvas
+  // artifact authoring guidance (frame contract, tokens, chart rules).
+  canvasArtifacts?: boolean;
 }
 
 // Bound the always-on name index so the base prompt stays roughly constant as
@@ -93,6 +99,9 @@ export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string
   }
   if (input.workflows !== undefined) {
     parts.push(buildWorkflowGuidance(input.workflows));
+  }
+  if (input.canvasArtifacts === true) {
+    parts.push(buildCanvasArtifactGuidance());
   }
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }

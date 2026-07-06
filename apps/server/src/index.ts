@@ -38,6 +38,7 @@ import pkg from "../package.json" with { type: "json" };
 import { agentsRoutes } from "./agents-handler.ts";
 import { createApprovalRegistry } from "./approval-registry.ts";
 import { approvalsRoutes } from "./approvals-handler.ts";
+import { createArtifactStore } from "./artifact-store.ts";
 import {
   bootstrapPolicyEngine,
   bootstrapPromptHandler,
@@ -47,6 +48,7 @@ import {
   prepareRibWorkflows,
   registerRibTools,
 } from "./bootstrap.ts";
+import { createCanvasTools } from "./canvas-tools.ts";
 import { chatRoutes, chatWebSocketHandlers, handleChatUpgrade } from "./chat-handler.ts";
 import { chatRememberRoutes } from "./chat-remember-handler.ts";
 import { commandsRoutes } from "./commands-handler.ts";
@@ -228,6 +230,16 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     validate: (d) => policyApprovalsSnapshotSchema.parse(d),
   });
   void snapshotManager.recompose(POLICY_APPROVALS_SNAPSHOT_KEY);
+
+  // Canvas artifacts: file-backed pages under <home>/artifacts, each driving a
+  // `canvas:artifact:<slug>` key on the base snapshot manager. Tools register
+  // into the shared registry BEFORE registerRibTools below, so the harness
+  // owns the canvas_* names and a colliding rib tool is skipped, mirroring the
+  // workflow_* authority rule in chat-handler.
+  const artifactStore = createArtifactStore(paths.artifactsDir);
+  const canvasTools = createCanvasTools({ store: artifactStore, snapshotManager });
+  registerRibTools(canvasTools.tools);
+  canvasTools.registerExisting();
 
   // Keyring store is needed before ribs so each rib gets a namespaced, read-only
   // credential reader scoped to its own keys.

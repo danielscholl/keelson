@@ -32,4 +32,8 @@ describe("canvasKindForKey", () => {
   test("defaults to view with no ribs", () => {
     expect(canvasKindForKey([], "rib:demo:any")).toBe("view");
   });
+
+  test("canvas artifact keys are html by namespace, no rib manifest needed", () => {
+    expect(canvasKindForKey([], "canvas:artifact:run-report")).toBe("html");
+  });
 });

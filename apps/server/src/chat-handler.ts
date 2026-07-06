@@ -513,6 +513,9 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // Advertise workflows only when the tools are actually wired this turn, so the
   // model is never told about a capability it can't invoke.
   const workflowToolsActive = deps.workflowTools !== undefined && deps.workflowTools.length > 0;
+  // Same rule for the canvas artifact guidance: only when canvas_publish rides
+  // this turn's tool list (it registers at boot, so normally always).
+  const canvasArtifactsActive = allTools.some((t) => t.name === "canvas_publish");
 
   const notebookContent =
     recallProjectId !== undefined
@@ -535,6 +538,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
             ) ?? [],
         }
       : {}),
+    ...(canvasArtifactsActive ? { canvasArtifacts: true } : {}),
   });
 
   // Final tool gate: the unified policy engine (operator denylist + rib

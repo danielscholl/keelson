@@ -108,4 +108,15 @@ describe("buildChatSystemPrompt", () => {
     expect(seedAt).toBeGreaterThan(recallAt);
     expect(wfAt).toBeGreaterThan(seedAt);
   });
+
+  test("canvas artifact guidance rides only the canvasArtifacts flag", () => {
+    expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).not.toContain(
+      "## Canvas artifacts",
+    );
+    const out = buildChatSystemPrompt({ seedSystemPrompt: "seed", canvasArtifacts: true });
+    expect(out).toContain("## Canvas artifacts");
+    // The token block rides along so guidance and the SPA agree on hex values.
+    expect(out).toContain(':root[data-theme="light"]');
+    expect(out).toContain("canvas_design_guide");
+  });
 });

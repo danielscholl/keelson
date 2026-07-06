@@ -44,6 +44,7 @@ export interface KeelsonPaths {
   readonly dbPath: string;
   readonly workflowsDir: string;
   readonly ribsRoot: string;
+  readonly artifactsDir: string;
 }
 
 export function keelsonPaths(home: string = resolveKeelsonHome()): KeelsonPaths {
@@ -52,6 +53,7 @@ export function keelsonPaths(home: string = resolveKeelsonHome()): KeelsonPaths 
     dbPath: process.env.KEELSON_DB?.trim() || join(home, "keelson.db"),
     workflowsDir: process.env.KEELSON_WORKFLOWS_DIR?.trim() || join(home, "workflows"),
     ribsRoot: resolveRibsRoot(home),
+    artifactsDir: join(home, "artifacts"),
   };
 }
 

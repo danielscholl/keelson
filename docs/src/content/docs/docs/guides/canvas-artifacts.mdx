@@ -1,0 +1,81 @@
+---
+title: Canvas artifacts
+description: Publish designed, self-contained HTML pages, reports, briefings, and charts to the canvas with canvas_publish, validated fail-closed against keelson's design tokens.
+sidebar:
+  order: 8
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A canvas artifact is a designed, self-contained HTML page an agent publishes to
+the canvas drawer: a run report, an audit briefing, a chart of usage over time.
+Ask for one in chat ("make a report of this run") and the agent authors the
+page, publishes it with the `canvas_publish` tool, and the drawer opens on it.
+Artifacts persist under `<home>/artifacts/` as plain `.html` files, survive
+server restarts, and update in place when the agent republishes the same name.
+
+The pipeline has three parts:
+
+- **Design guidance.** When `canvas_publish` is available, the chat system
+  prompt carries the authoring contract: theme through CSS custom properties
+  (keelson's dark values on `:root`, light overrides on
+  `:root[data-theme="light"]`), system font stack, no external resources, and
+  the keelson palette inlined as literal hex. The `canvas_design_guide` tool
+  serves deeper references on demand: page layout, chart-form selection, the
+  color system, mark anatomy, and an anti-pattern catalog.
+- **Computable validation.** A page that carries categorical chart series
+  declares its palette on `<body data-palette-dark="…" data-palette-light="…">`.
+  Publishing validates color-vision-deficiency separation and surface contrast
+  per theme and rejects hard failures with a per-check report, so the agent
+  fixes the colors and retries in the same turn. Palettes are checked by
+  computation, never by eyeball.
+- **The sandboxed frame.** Artifacts render through the same hardened `html`
+  canvas kind ribs use: an opaque-origin iframe whose CSP blocks all network
+  egress. The host stamps the app's resolved theme onto the frame and pushes
+  toggles live, so a token-styled page re-themes without a reload.
+
+## Publishing from chat
+
+Any provider with the tool registry sees `canvas_publish`. A typical exchange:
+
+```text
+you>  Chart last week's token usage by model and publish it as a page.
+agent> [canvas_design_guide: form] [canvas_design_guide: color]
+agent> [canvas_publish: "Token usage, June 29 to July 5"]
+```
+
+The drawer opens on the published page. The tool result records the artifact
+key (`canvas:artifact:<slug>`), and republishing with `name: <slug>` updates
+that page in place rather than minting a sibling.
+
+## Publishing from a workflow
+
+The bundled `design-artifact` workflow is the reference shape: one prompt node
+with `allowed_tools: [canvas_publish, canvas_design_guide]` that reads the
+guide, authors the page, and publishes through the validated gate.
+
+```bash
+keelson workflow run design-artifact "a briefing on this week's merged PRs"
+```
+
+Artifact quality tracks the authoring model. Pin `provider:` or `model:` in
+the workflow (or set `KEELSON_WORKFLOW_PROVIDER`) to route artifact authoring
+at your strongest option.
+
+<Aside type="note" title="Boards first, artifacts second">
+The structured `view` canvas (boards, tables, graphs) stays the right home for
+live operational status: it is schema-validated, consistent across ribs, and
+free to re-render. An artifact earns its place when the deliverable is a
+designed page someone will read, keep, or share.
+</Aside>
+
+## The design tokens
+
+Generated pages match the app because they inline the same palette the SPA
+renders: `@keelson/shared` exports `DESIGN_TOKENS` (surfaces, ink, semantic
+accents, the six chart-series slots, the five identity tones) for both themes,
+and a drift guard keeps the module identical to the app stylesheet. The
+sandboxed frame cannot read the app's CSS custom properties across its origin
+boundary, so inlining the values is what keeps an artifact on-palette. Rib
+authors can import the same tokens and `validateCategoricalPalette` /
+`validateOrdinalRamp` checks to build their own validated producers.

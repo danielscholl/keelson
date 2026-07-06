@@ -1,0 +1,41 @@
+# Reference authoring pipeline for designed canvas artifacts: read the design
+# guide, author a self-contained themed page, publish it through the validated
+# canvas_publish gate. Palette validation is fail-closed inside the tool, so a
+# bad palette surfaces as a tool error the author node must fix and retry —
+# fail_on_tool_error stays off for exactly that reason.
+# No provider pin — artifact quality tracks the strongest available model;
+# operators can pin `provider:`/`model:` here or via KEELSON_WORKFLOW_PROVIDER.
+
+name: design-artifact
+description: |
+  Use when: User wants a designed, shareable HTML page — a report, briefing, chart, or
+            dashboard — built from data or findings and published to the canvas.
+  Triggers: "make a report of", "publish an artifact", "chart this as a page",
+            "design a briefing", "canvas report".
+  Does: Reads the canvas design guide (page + color sections), authors a self-contained
+        token-themed HTML page in the keelson palette, and publishes it via canvas_publish,
+        which validates declared chart palettes (CVD + contrast) fail-closed.
+  NOT for: Live operational status a rib already renders as a board (open that surface),
+           plain prose answers (chat), or multi-page sites (one page per artifact).
+
+nodes:
+  - id: author
+    prompt: |
+      Build a designed canvas artifact for this request:
+
+      $ARGUMENTS
+
+      Work in this order:
+      1. Call canvas_design_guide with section "page", then "form" if the page
+         carries any chart, then "color" for the palette instance.
+      2. Author ONE self-contained HTML page following the guide: CSS custom
+         properties with keelson's dark values on :root and light overrides on
+         :root[data-theme="light"], system font stack, real content from the
+         request above, no external resources. Declare any categorical chart
+         palette on <body data-palette-dark="…" data-palette-light="…">.
+      3. Publish with canvas_publish. If it rejects the palette, fix the colors
+         (prefer the keelson series slots) and publish again.
+
+      Finish by reporting the published artifact's key and title.
+    allowed_tools: [canvas_publish, canvas_design_guide]
+    idle_timeout: 300000

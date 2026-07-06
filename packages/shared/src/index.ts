@@ -14,6 +14,7 @@ export * from "./canvas.ts";
 export * from "./chat.ts";
 export * from "./commands.ts";
 export * from "./description.ts";
+export * from "./design-guidance.ts";
 export * from "./design-tokens.ts";
 export * from "./memory.ts";
 export * from "./palette.ts";
