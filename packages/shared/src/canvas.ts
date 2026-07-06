@@ -255,6 +255,10 @@ const canvasActionItemSchema = z
         message: "action field names must be unique",
       })
       .optional(),
+    // Render `fields` as an always-open form whose submit button carries the
+    // action's label/glyph/tone — no disclosure click — for a hero action whose
+    // input IS the affordance. Inert without `fields`.
+    expanded: z.boolean().optional(),
     // Confirmation presentation metadata. `destructive` still marks dangerous
     // actions; this only controls whether the confirm dialog is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),

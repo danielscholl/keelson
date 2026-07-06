@@ -413,6 +413,38 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses an expanded action item, and rejects a non-boolean expanded", () => {
+    const ok = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "describe-own",
+              label: "Author",
+              tone: "brand",
+              expanded: true,
+              fields: [{ name: "brief", label: "Brief", multiline: true }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(ok.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [{ type: "x", label: "X", expanded: "yes" }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("parses an action item with a glyph and an opaque payload", () => {
     const v = canvasViewSchema.parse({
       view: "board",

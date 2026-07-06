@@ -101,6 +101,7 @@ function ActionItemButton({ item }: { item: ActionItem }) {
   const ctx = useBoardActions();
   const fields = item.fields ?? [];
   const hasFields = fields.length > 0;
+  const expanded = hasFields && item.expanded === true;
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -159,22 +160,24 @@ function ActionItemButton({ item }: { item: ActionItem }) {
 
   return (
     <div className="cvb-action">
-      <button
-        type="button"
-        className={`cvb-action-button${item.destructive ? " is-destructive" : ""}`}
-        data-tone={item.tone}
-        disabled={!ctx || pending}
-        aria-expanded={hasFields ? open : undefined}
-        onClick={onButtonClick}
-      >
-        {item.glyph && (
-          <span className="cvb-action-glyph" aria-hidden="true">
-            {item.glyph}
-          </span>
-        )}
-        {item.label}
-      </button>
-      {hasFields && open && (
+      {!expanded && (
+        <button
+          type="button"
+          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}`}
+          data-tone={item.tone}
+          disabled={!ctx || pending}
+          aria-expanded={hasFields ? open : undefined}
+          onClick={onButtonClick}
+        >
+          {item.glyph && (
+            <span className="cvb-action-glyph" aria-hidden="true">
+              {item.glyph}
+            </span>
+          )}
+          {item.label}
+        </button>
+      )}
+      {hasFields && (expanded || open) && (
         <form className="cvb-action-form" onSubmit={onSubmit}>
           {fields.map((f) => {
             const id = `cvb-af-${item.type}-${f.name}`;
@@ -206,12 +209,24 @@ function ActionItemButton({ item }: { item: ActionItem }) {
           })}
           {error && <p className="cvb-action-form-error">{error}</p>}
           <div className="cvb-action-form-controls">
-            <button type="submit" className="cvb-action-button" disabled={pending}>
+            <button
+              type="submit"
+              className="cvb-action-button"
+              data-tone={item.tone}
+              disabled={!ctx || pending}
+            >
+              {expanded && item.glyph && (
+                <span className="cvb-action-glyph" aria-hidden="true">
+                  {item.glyph}
+                </span>
+              )}
               {item.label}
             </button>
-            <button type="button" className="cvb-action-button" onClick={() => setOpen(false)}>
-              Cancel
-            </button>
+            {!expanded && (
+              <button type="button" className="cvb-action-button" onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+            )}
           </div>
         </form>
       )}
