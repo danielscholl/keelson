@@ -510,9 +510,12 @@ export function Chat({
   const wsRef = useRef<ReconnectingChatWsHandle | null>(null);
   const wsStateRef = useRef<ReconnectingWsState>("connecting");
   const activeAssistantIdRef = useRef<string | null>(null);
-  // tool_use ids of in-flight canvas_publish calls: the matching tool_result
-  // carries the published artifact's key, and the drawer auto-opens on it.
+  // Pair canvas_publish tool_use/tool_result chunks in EITHER order — the
+  // copilot bridge emits a call's result chunk before its tool_use — so the
+  // drawer can auto-open on the published artifact's key. earlyToolResults
+  // holds at most one turn's unmatched results (cleared on done/error).
   const pendingCanvasPublishRef = useRef<Set<string>>(new Set());
+  const earlyToolResultsRef = useRef<Map<string, { content: string; isError: boolean }>>(new Map());
   const pendingSendRef = useRef<{
     prompt: string;
     userId: string;
@@ -765,6 +768,27 @@ export function Chat({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, []);
 
+  // A finished canvas_publish IS the deliverable — open its artifact in the
+  // drawer, the Artifacts experience, rather than leaving the page buried in a
+  // JSON tool result. A non-JSON result (older server) just skips the open.
+  const openPublishedArtifact = useCallback(
+    (content: string) => {
+      try {
+        const result = JSON.parse(content) as { key?: unknown; title?: unknown };
+        if (typeof result.key === "string" && result.key.length > 0) {
+          openCanvas({
+            kind: "html",
+            source: { type: "snapshot", key: result.key },
+            ...(typeof result.title === "string" && result.title.length > 0
+              ? { title: result.title }
+              : {}),
+          });
+        }
+      } catch {}
+    },
+    [openCanvas],
+  );
+
   const handleFrame = useCallback(
     (frame: ChatFrame) => {
       // Drop frames for non-active conversations, except UNKNOWN_CONVERSATION
@@ -807,7 +831,16 @@ export function Chat({
         } else if (payload.type === "tool_use") {
           const assistantId = activeAssistantIdRef.current;
           if (!assistantId) return;
-          if (payload.toolName === "canvas_publish" && payload.id !== undefined) {
+          // A result that arrived before this tool_use was parked; consume it
+          // so the row renders hydrated and canvas_publish can auto-open.
+          const early =
+            payload.id !== undefined ? earlyToolResultsRef.current.get(payload.id) : undefined;
+          if (payload.id !== undefined && early !== undefined) {
+            earlyToolResultsRef.current.delete(payload.id);
+            if (payload.toolName === "canvas_publish" && !early.isError) {
+              openPublishedArtifact(early.content);
+            }
+          } else if (payload.toolName === "canvas_publish" && payload.id !== undefined) {
             pendingCanvasPublishRef.current.add(payload.id);
           }
           // Emitter id pairs with a later tool_result.toolUseId; the local
@@ -816,6 +849,9 @@ export function Chat({
             id: payload.id ?? newId(),
             toolName: payload.toolName,
             toolInput: payload.toolInput,
+            ...(early !== undefined
+              ? { result: early.content, ...(early.isError ? { isError: true } : {}) }
+              : {}),
           };
           setMessages((prev) =>
             prev.map((m) =>
@@ -827,24 +863,15 @@ export function Chat({
           // against stale frames from a previous turn).
           const assistantId = activeAssistantIdRef.current;
           if (!assistantId) return;
-          if (pendingCanvasPublishRef.current.delete(payload.toolUseId) && !payload.isError) {
-            // A finished canvas_publish IS the deliverable — open it, the same
-            // way the Artifacts experience does, rather than leaving the page
-            // buried in a JSON tool result.
-            try {
-              const result = JSON.parse(payload.content) as { key?: unknown; title?: unknown };
-              if (typeof result.key === "string" && result.key.length > 0) {
-                openCanvas({
-                  kind: "html",
-                  source: { type: "snapshot", key: result.key },
-                  ...(typeof result.title === "string" && result.title.length > 0
-                    ? { title: result.title }
-                    : {}),
-                });
-              }
-            } catch {
-              // A non-JSON result (older server) just skips the auto-open.
-            }
+          if (pendingCanvasPublishRef.current.delete(payload.toolUseId)) {
+            if (!payload.isError) openPublishedArtifact(payload.content);
+          } else {
+            // Result before its tool_use (the copilot bridge's order): park it
+            // so the tool_use side can pair it. Bounded to one turn.
+            earlyToolResultsRef.current.set(payload.toolUseId, {
+              content: payload.content,
+              isError: payload.isError === true,
+            });
           }
           setMessages((prev) =>
             prev.map((m) =>
@@ -921,6 +948,10 @@ export function Chat({
         const assistantId = activeAssistantIdRef.current;
         activeAssistantIdRef.current = null;
         pendingSendRef.current = null;
+        // A turn ending without `done` must not leak parked canvas pairings
+        // into the next turn — providers reuse short call ids across turns.
+        pendingCanvasPublishRef.current.clear();
+        earlyToolResultsRef.current.clear();
         setError(frame.event.message);
         setStreaming(false);
         setMessages((prev) =>
@@ -935,6 +966,8 @@ export function Chat({
         const assistantId = activeAssistantIdRef.current;
         activeAssistantIdRef.current = null;
         pendingSendRef.current = null;
+        pendingCanvasPublishRef.current.clear();
+        earlyToolResultsRef.current.clear();
         setStreaming(false);
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
@@ -979,7 +1012,7 @@ export function Chat({
         }
       }
     },
-    [conversationsList, setConversationId, toast, openCanvas],
+    [conversationsList, setConversationId, toast, openPublishedArtifact],
   );
 
   const ensureWs = useCallback((): ReconnectingChatWsHandle => {
@@ -999,6 +1032,8 @@ export function Chat({
           if (assistantId) {
             activeAssistantIdRef.current = null;
             pendingSendRef.current = null;
+            pendingCanvasPublishRef.current.clear();
+            earlyToolResultsRef.current.clear();
             setStreaming(false);
             setError("Connection dropped during response");
             setMessages((prev) =>
