@@ -458,7 +458,7 @@ function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; action
 function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "actions" }> }) {
   const key = makeKeyer();
   return (
-    <div className="cvb-actions">
+    <div className={`cvb-actions${section.wrap ? " cvb-actions--wrap" : ""}`}>
       {section.items.map((a) => (
         <ActionItemButton key={key(a.type)} item={a} />
       ))}

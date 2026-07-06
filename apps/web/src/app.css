@@ -3563,6 +3563,31 @@ button.tab:focus-visible {
   align-items: stretch;
   gap: 6px;
 }
+/* Wrap layout: an inline row of compact chips that wraps, for a selection strip
+   (a toggle set, a shape picker) where a full-width stacked column wastes the
+   surface's width. Each action sizes to its content; the one whose `fields` form
+   is open breaks to its own full-width line so the form still reads as a panel
+   beneath the row (its button stays compact, the form stretches). */
+.cvb-actions--wrap {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cvb-actions--wrap > .cvb-action {
+  flex: 0 0 auto;
+  align-items: flex-start;
+}
+.cvb-actions--wrap .cvb-action-button {
+  width: auto;
+  justify-content: center;
+}
+.cvb-actions--wrap > .cvb-action:has(.cvb-action-form) {
+  flex-basis: 100%;
+}
+.cvb-actions--wrap > .cvb-action:has(.cvb-action-form) .cvb-action-form {
+  align-self: stretch;
+}
 .cvb-action-button {
   background: var(--bg-soft); color: var(--fg);
   border: 1px solid var(--border); border-radius: 8px;
