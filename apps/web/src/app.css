@@ -4020,8 +4020,10 @@ a.cvb-card-title::after {
 }
 
 /* Stacked card fields — one field per line (a boot readout, a log tail); the
-   inline `·` separators drop with the row layout. */
-.cvb-card-fields--stacked {
+   inline `·` separators drop with the row layout. Scoped like the separator
+   rule below so it outweighs the non-boxed meta-row rule above (a boxed card
+   already stacks its fields its own way, so stacked is a no-op there). */
+.cvb-cards:not(.cvb-cards--boxed) .cvb-card-fields--stacked {
   flex-direction: column;
   flex-wrap: nowrap;
   align-items: stretch;
