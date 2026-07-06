@@ -7,49 +7,95 @@
       .slate{ fill:#64748b; }
       .brass{ fill:#8a5a1f; }
     </style>
+    <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#1e3a5f"/>
+    </marker>
   </defs>
 
   <!-- waterline -->
   <line x1="150" y1="356" x2="950" y2="356" stroke="#1e3a5f" stroke-width="1"
         stroke-dasharray="7 6" stroke-opacity="0.38"/>
-  <text class="lbl slate" x="948" y="349" font-size="10" fill-opacity="0.7" text-anchor="end">design waterline</text>
+  <text class="lbl slate" x="946" y="349" font-size="10" fill-opacity="0.7" text-anchor="end">design waterline</text>
 
-  <!-- light frames (ribs of the hull), keel to sheer -->
+  <!-- light frames (ribs of the hull), keel to bulwark -->
   <g stroke="#2f6fb0" stroke-width="1" stroke-opacity="0.5">
-    <line x1="232" y1="446" x2="232" y2="318"/>
-    <line x1="390" y1="450" x2="390" y2="322"/>
-    <line x1="450" y1="451" x2="450" y2="322"/>
-    <line x1="570" y1="449" x2="570" y2="320"/>
-    <line x1="630" y1="447" x2="630" y2="318"/>
-    <line x1="748" y1="440" x2="748" y2="308"/>
-    <line x1="806" y1="434" x2="806" y2="299"/>
+    <line x1="232" y1="445" x2="232" y2="320"/>
+    <line x1="390" y1="452" x2="390" y2="338"/>
+    <line x1="450" y1="453" x2="450" y2="340"/>
+    <line x1="570" y1="452" x2="570" y2="341"/>
+    <line x1="630" y1="451" x2="630" y2="340"/>
+    <line x1="748" y1="448" x2="748" y2="331"/>
+    <line x1="806" y1="445" x2="806" y2="307"/>
   </g>
 
-  <!-- hull -->
-  <path d="M 150 300
-           C 250 316, 410 324, 520 323
-           C 642 322, 760 314, 820 296
-           C 866 282, 894 268, 906 250
-           C 919 304, 906 384, 876 432
-           C 720 456, 360 458, 200 442
-           L 174 438
-           C 158 408, 150 352, 150 300 Z"
+  <!-- hull: stem raked forward, sheer dipping amidships, cruiser stern -->
+  <path d="M 180 294
+           C 272 312, 430 330, 545 330
+           C 662 330, 775 312, 830 289
+           C 858 278, 888 268, 910 256
+           C 908 296, 902 336, 896 372
+           C 890 406, 876 432, 838 442
+           C 640 452, 400 454, 214 446
+           C 202 436, 194 414, 191 380
+           C 188 356, 180 334, 172 318
+           C 168 308, 171 299, 180 294 Z"
         fill="#1e3a5f" fill-opacity="0.05" stroke="#1e3a5f" stroke-width="2.2"
         stroke-linejoin="round"/>
-  <!-- deck line just inside the sheer -->
-  <path d="M 162 306 C 256 320, 412 328, 520 327 C 640 326, 758 318, 816 301"
+
+  <!-- bulwark band under the cap rail -->
+  <path d="M 185 307 C 274 324, 432 342, 546 342 C 660 342, 766 324, 820 301 C 850 289, 878 279, 900 268"
         fill="none" stroke="#1e3a5f" stroke-width="1" stroke-opacity="0.45"/>
 
-  <!-- bridge: a deckhouse drawn dashed, a structure still on the ways -->
+  <!-- plank seams below the waterline -->
+  <g fill="none" stroke="#1e3a5f" stroke-width="1" stroke-opacity="0.14">
+    <path d="M 210 396 C 420 410, 650 408, 876 388"/>
+    <path d="M 216 424 C 420 436, 650 434, 862 416"/>
+  </g>
+
+  <!-- bow flash: three stripes, one for each rib aboard -->
+  <g fill="none" stroke="#2f6fb0" stroke-width="4.5" stroke-opacity="0.55" stroke-linecap="round">
+    <path d="M 808 312 C 832 306, 854 297, 870 286"/>
+    <path d="M 814 328 C 838 322, 860 313, 876 302"/>
+    <path d="M 820 344 C 844 338, 866 329, 882 318"/>
+  </g>
+
+  <!-- draft marks on the stem -->
+  <g stroke="#64748b" stroke-width="1" stroke-opacity="0.6">
+    <line x1="888" y1="382" x2="896" y2="382"/>
+    <line x1="886" y1="400" x2="894" y2="400"/>
+    <line x1="878" y1="418" x2="886" y2="418"/>
+    <line x1="852" y1="436" x2="860" y2="436"/>
+  </g>
+  <g class="lbl" fill="#64748b" fill-opacity="0.65" font-size="8">
+    <text x="900" y="385">16</text>
+    <text x="898" y="403">14</text>
+    <text x="890" y="421">12</text>
+    <text x="864" y="439">10</text>
+  </g>
+
+  <!-- registration on the bow flank: her port is 7878 -->
+  <text class="lbl slate" x="706" y="347" font-size="11" fill-opacity="0.55" letter-spacing="1">KL-1-7878</text>
+
+  <!-- superstructure: wheelhouse, foremast, and rigging drawn dashed, still on the ways -->
   <g stroke="#1e3a5f" stroke-width="1.4" stroke-dasharray="4 3" fill="#1e3a5f" fill-opacity="0.04" stroke-linejoin="round">
-    <rect x="372" y="298" width="86" height="28" rx="2"/>
-    <rect x="392" y="278" width="48" height="22" rx="2"/>
-    <line x1="416" y1="278" x2="416" y2="262" stroke-dasharray="3 2"/>
-    <line x1="408" y1="266" x2="424" y2="266" stroke-dasharray="3 2"/>
+    <path d="M 368 328 L 368 311 Q 368 307 372 307 L 468 307 Q 472 307 472 311 L 472 331" fill="none"/>
+    <circle cx="386" cy="317" r="3" stroke-dasharray="2 2" fill="none"/>
+    <circle cx="454" cy="317" r="3" stroke-dasharray="2 2" fill="none"/>
+    <rect x="398" y="283" width="62" height="24" rx="2"/>
+    <line x1="394" y1="283" x2="466" y2="283"/>
+    <line x1="404" y1="291" x2="454" y2="291" stroke-dasharray="3 2"/>
+    <line x1="430" y1="283" x2="430" y2="258" stroke-dasharray="3 2"/>
+    <rect x="424" y="252" width="12" height="5" rx="2.5" stroke-dasharray="2 2"/>
+  </g>
+  <g stroke="#1e3a5f" fill="none" stroke-linecap="round">
+    <line x1="618" y1="330" x2="618" y2="192" stroke-width="1.4" stroke-dasharray="4 3" stroke-opacity="0.85"/>
+    <line x1="600" y1="214" x2="636" y2="214" stroke-width="1.4" stroke-dasharray="4 3" stroke-opacity="0.85"/>
+    <line x1="618" y1="192" x2="900" y2="262" stroke-width="1" stroke-dasharray="2 3" stroke-opacity="0.55"/>
+    <line x1="618" y1="192" x2="462" y2="283" stroke-width="1" stroke-dasharray="2 3" stroke-opacity="0.55"/>
   </g>
 
   <!-- keelson beam: the harness, along the keel -->
-  <line x1="190" y1="420" x2="862" y2="420" stroke="#1e3a5f" stroke-width="6"
+  <line x1="216" y1="420" x2="848" y2="420" stroke="#1e3a5f" stroke-width="6"
         stroke-linecap="round"/>
 
   <!-- three ribs that bolt on: continuous brass members from the keel up to their label -->
@@ -82,26 +128,28 @@
 
   <!-- browser SPA: the visible surface -->
   <g>
-    <rect x="22" y="262" width="104" height="30" rx="5" fill="#eaf1f8" stroke="#1e3a5f" stroke-width="1.4"/>
-    <text class="lbl navy" x="74" y="282" font-size="13" text-anchor="middle">browser SPA</text>
-    <line x1="126" y1="284" x2="198" y2="318" stroke="#1e3a5f" stroke-width="1.4" marker-end="url(#ah)"/>
-    <text class="lbl slate" x="150" y="305" font-size="10">HTTP / WS</text>
+    <rect x="22" y="252" width="104" height="30" rx="5" fill="#eaf1f8" stroke="#1e3a5f" stroke-width="1.4"/>
+    <text class="lbl navy" x="74" y="272" font-size="13" text-anchor="middle">browser SPA</text>
+    <line x1="126" y1="267" x2="196" y2="303" stroke="#1e3a5f" stroke-width="1.4" marker-end="url(#ah)"/>
+    <text class="lbl slate" x="138" y="282" font-size="10">HTTP / WS</text>
+  </g>
+
+  <!-- propeller in the aperture -->
+  <g stroke="#1e3a5f" stroke-width="1.3" fill="#1e3a5f" fill-opacity="0.08">
+    <ellipse cx="188" cy="411" rx="2.5" ry="7.5" transform="rotate(12 188 411)"/>
+    <ellipse cx="188" cy="429" rx="2.5" ry="7.5" transform="rotate(12 188 429)"/>
+    <circle cx="188" cy="420" r="2.2" fill-opacity="0.5"/>
   </g>
 
   <!-- keelson CLI: the rudder that steers the harness -->
   <g>
-    <line x1="158" y1="406" x2="150" y2="436" stroke="#1e3a5f" stroke-width="1"/>
-    <path d="M 150 430 L 162 430 L 150 486 L 134 482 Z" fill="#1e3a5f" fill-opacity="0.1"
+    <line x1="186" y1="366" x2="178" y2="382" stroke="#1e3a5f" stroke-width="1"/>
+    <path d="M 166 380 L 182 382 L 175 452 L 151 445 Z" fill="#1e3a5f" fill-opacity="0.1"
           stroke="#1e3a5f" stroke-width="1.6" stroke-linejoin="round"/>
-    <line x1="96" y1="452" x2="134" y2="468" stroke="#1e3a5f" stroke-width="1" stroke-opacity="0.6"/>
-    <text class="lbl navy"  x="90" y="450" font-size="13" text-anchor="end">keelson CLI</text>
-    <text class="lbl slate" x="90" y="466" font-size="11" text-anchor="end">steers from the shell</text>
+    <line x1="155" y1="484" x2="163" y2="450" stroke="#1e3a5f" stroke-width="1" stroke-opacity="0.6"/>
+    <text class="lbl navy"  x="150" y="500" font-size="13" text-anchor="middle">keelson CLI</text>
+    <text class="lbl slate" x="150" y="516" font-size="11" text-anchor="middle">steers from the shell</text>
   </g>
-  <defs>
-    <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-      <path d="M0,0 L6,3 L0,6 Z" fill="#1e3a5f"/>
-    </marker>
-  </defs>
 
   <!-- title -->
   <text class="lbl brass" x="30" y="46" font-size="26" letter-spacing="3">THE FRAME</text>
