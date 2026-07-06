@@ -65,6 +65,10 @@ export function isCopilotConnectionError(err: unknown): boolean {
   return (
     lower.includes("not connected") ||
     lower.includes("disconnect") ||
+    // The SDK's JSON-RPC layer rejects in-flight requests with "Pending
+    // response rejected since connection got disposed" when a teardown races
+    // a fresh request — the disposed family is transport-class, not auth.
+    lower.includes("disposed") ||
     lower.includes("econnrefused") ||
     lower.includes("econnreset") ||
     lower.includes("etimedout") ||

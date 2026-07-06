@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
+import { isCopilotConnectionError } from "../src/copilot/errors.ts";
 import {
   type CopilotToolProjectionContext,
   projectToolsForCopilot,
@@ -875,6 +876,80 @@ describe("CopilotProvider — warm client (issue #327)", () => {
     expect(stops[1]).toBe(true);
   });
 
+  it("re-spawns and retries when session open rejects with the disposed-connection error", async () => {
+    // The live failure (keelson#415): the first turn on a reused warm client
+    // rejects with the SDK's JSON-RPC disposal message when a prior turn's
+    // detached teardown races it. Connection-class, so the retry must fire.
+    let instances = 0;
+    const stops: boolean[] = [];
+    const makeIdleSession = (): CopilotSessionLike => {
+      const handlers = new Map<string, Set<(e: unknown) => void>>();
+      return {
+        sessionId: "s",
+        async send() {
+          queueMicrotask(() => {
+            for (const h of handlers.get("session.idle") ?? [])
+              h({ type: "session.idle", data: {} });
+          });
+          return "m";
+        },
+        on(t: string, h: (e: unknown) => void) {
+          let set = handlers.get(t);
+          if (!set) {
+            set = new Set();
+            handlers.set(t, set);
+          }
+          set.add(h);
+          return () => set!.delete(h);
+        },
+        async abort() {},
+        async disconnect() {},
+        async setModel() {},
+      };
+    };
+    class DisposedClient {
+      idx: number;
+      constructor(public readonly options: Record<string, unknown>) {
+        this.idx = instances++;
+        stops[this.idx] = false;
+      }
+      async start() {}
+      async stop() {
+        stops[this.idx] = true;
+        return [];
+      }
+      async createSession() {
+        if (this.idx === 0) {
+          throw new Error("Pending response rejected since connection got disposed");
+        }
+        return makeIdleSession();
+      }
+      async resumeSession() {
+        return this.createSession();
+      }
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      }
+      async listModels() {
+        return [];
+      }
+    }
+    const module = {
+      CopilotClient: DisposedClient as unknown as CopilotSdkModule["CopilotClient"],
+      approveAll: (() => ({ kind: "permit" })) as unknown as CopilotSdkModule["approveAll"],
+    };
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => module }),
+    });
+    // The turn completes on the respawn instead of erroring.
+    await drain(provider.sendQuery("hi", "/tmp"));
+    expect(instances).toBe(2);
+    await provider.dispose();
+    expect(stops[0]).toBe(true);
+    expect(stops[1]).toBe(true);
+  });
+
   it("drops both clients when the warm one and its respawn are both wedged", async () => {
     let instances = 0;
     const stops: boolean[] = [];
@@ -1104,6 +1179,21 @@ describe("disposeAllProviders (registry drain)", () => {
     expect(sdk.lastClient()!.stopped).toBe(false);
     await disposeAllProviders();
     expect(sdk.lastClient()!.stopped).toBe(true);
+  });
+});
+
+describe("isCopilotConnectionError", () => {
+  it("classifies the JSON-RPC disposed-connection rejection as connection-class", () => {
+    expect(
+      isCopilotConnectionError(
+        new Error("Pending response rejected since connection got disposed"),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps auth and rate-limit failures out of the connection class", () => {
+    expect(isCopilotConnectionError(new Error("HTTP 401 Unauthorized"))).toBe(false);
+    expect(isCopilotConnectionError(new Error("Got 429 rate_limit"))).toBe(false);
   });
 });
 
