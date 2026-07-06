@@ -77,7 +77,7 @@ the browser either has a renderer for that shape or refuses politely.
 | --- | --- |
 | `markdown` | Formatted text. |
 | `view` | A typed visualization: a `table`, a `graph` of nodes and edges, or a `board`. |
-| `html` | Untrusted rib-supplied markup rendered in a sandboxed iframe. The host owns the document shell (a CSP with `connect-src 'none'` blocks script-initiated network connections; a bridge script is injected first). Frame script calls `keelson.action(type, payload)` to post typed actions back; the rib's handler receives them with `origin: "canvas-html"`. |
+| `html` | Untrusted rib-supplied markup rendered in a sandboxed iframe. The host owns the document shell (a CSP with `connect-src 'none'` blocks script-initiated network connections; a bridge script is injected first). Frame script calls `keelson.action(type, payload)` to post typed actions back; the rib's handler receives them with `origin: "canvas-html"`. The shell stamps the app's resolved theme as `data-theme` on the frame's root element and pushes later toggles into the frame, so markup styled through `:root[data-theme]` token overrides re-themes live. |
 
 The `board` is the workhorse: a dashboard composed from a fixed section
 vocabulary, stats, segments, bars, tables, cards, rows, actions, and a grid,

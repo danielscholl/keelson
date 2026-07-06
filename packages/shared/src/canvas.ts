@@ -60,6 +60,20 @@ export const canvasHtmlActionSchema = z
   .strict();
 export type CanvasHtmlAction = z.infer<typeof canvasHtmlActionSchema>;
 
+// Host→frame counterpart: the SPA pushes its resolved theme into a sandboxed
+// `html` canvas so token-level markup (styled through `:root[data-theme]`
+// overrides) re-themes live without an iframe reload — the opaque-origin frame
+// cannot observe the parent's data-theme itself. The shell stamps the initial
+// theme at compose time; this message carries subsequent toggles.
+export const CANVAS_HTML_THEME_CHANNEL = "keelson:canvas:html:theme";
+export const canvasHtmlThemeSchema = z
+  .object({
+    channel: z.literal(CANVAS_HTML_THEME_CHANNEL),
+    theme: z.enum(["light", "dark"]),
+  })
+  .strict();
+export type CanvasHtmlThemeMessage = z.infer<typeof canvasHtmlThemeSchema>;
+
 // Payload contract for a `kind: "view"` canvas. The data carries its own `view`
 // discriminant — the producer (a workflow or a rib) bakes it in; the base picks
 // a renderer from a closed catalog. Domain-free on purpose: `node.kind` is a
