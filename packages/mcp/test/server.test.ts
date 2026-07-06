@@ -285,8 +285,26 @@ describe("createKeelsonMcpServer — strict arguments", () => {
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ text: string }>)[0]?.text ?? "";
     expect(text).toContain("unknown property 'inputs'");
-    expect(text).toContain("arguments");
+    expect(text).toContain("Allowed: arguments, name.");
     expect(executed).toBe(false);
+  });
+
+  test("the host confirm envelope is never an unknown key, even on ungated tools", async () => {
+    let executed = false;
+    const client = await connect({
+      exposeStateChanging: true,
+      extraTools: [
+        workflowRunTool(() => {
+          executed = true;
+        }),
+      ],
+    });
+    const res = await client.callTool({
+      name: "workflow_run",
+      arguments: { name: "chamber-genesis", confirm: true },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(executed).toBe(true);
   });
 
   test("a call with only schema-declared properties still executes", async () => {
