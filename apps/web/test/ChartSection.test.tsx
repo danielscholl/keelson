@@ -107,12 +107,62 @@ describe("chart board section", () => {
     expect(container.querySelectorAll("circle").length).toBe(1);
   });
 
-  test("the title lands in the svg's accessible name", () => {
+  test("the title lands in the svg's accessible name, with a fallback for empty titles", () => {
     const { container } = render(
       <BoardView view={chartBoard([ramp("input", 0)], { title: "Tokens per round" })} />,
     );
     const svg = container.querySelector("svg.cvb-chart-svg");
     expect(svg?.getAttribute("aria-label")).toBe("Tokens per round: input");
+    const untitled = render(<BoardView view={chartBoard([ramp("input", 0)], { title: "" })} />);
+    const fallbackSvg = untitled.container.querySelector("svg.cvb-chart-svg");
+    expect(fallbackSvg?.getAttribute("aria-label")).toBe("Line chart: input");
+  });
+
+  test("endpoint labels ending near the plot bottom shift up instead of piling on the clamp", () => {
+    const bottomRamp = (label: string, y: number): ChartSeries => ({
+      label,
+      points: [
+        { x: 1, y: 1000 },
+        { x: 2, y },
+      ],
+    });
+    const { container } = render(
+      <BoardView
+        view={chartBoard([
+          bottomRamp("a", 5),
+          bottomRamp("b", 6),
+          bottomRamp("c", 7),
+          bottomRamp("d", 8),
+        ])}
+      />,
+    );
+    const ys = [...container.querySelectorAll("text.cvb-chart-endpoint-label")]
+      .map((t) => Number(t.getAttribute("y")))
+      .sort((a, b) => a - b);
+    expect(ys.length).toBe(4);
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  test("a mixed-sign domain draws a zero baseline; a non-negative one does not", () => {
+    const mixed = render(
+      <BoardView
+        view={chartBoard([
+          {
+            label: "delta",
+            points: [
+              { x: 1, y: -300 },
+              { x: 2, y: 800 },
+            ],
+          },
+        ])}
+      />,
+    );
+    expect(mixed.container.querySelector(".cvb-chart-zero-line")).not.toBeNull();
+    mixed.unmount();
+    const positive = render(<BoardView view={chartBoard([ramp("up", 0)])} />);
+    expect(positive.container.querySelector(".cvb-chart-zero-line")).toBeNull();
   });
 
   test("numeric x labels bump to the next magnitude tier at the rounding boundary", () => {

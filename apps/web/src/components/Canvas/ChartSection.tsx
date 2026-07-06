@@ -42,6 +42,7 @@ interface ChartGeometry {
   slots: ChartSlot[];
   padR: number;
   direct: boolean;
+  floor: number;
   gridLines: { value: number; y: number }[];
   xLabels: ChartSlot[];
   lines: ChartLine[];
@@ -180,28 +181,35 @@ function buildGeometry(section: CanvasChartSection): ChartGeometry {
     };
   });
 
+  // Nudge endpoint labels apart top-down, then shift the whole run back up if
+  // it overran the plot bottom — a one-sided clamp would pile bottom-ending
+  // series onto one y. ≤4 labels × 12 units always fits the plot height.
   const labelYs = new Map<number, number>();
   if (direct) {
-    let prev = Number.NEGATIVE_INFINITY;
     const ends = lines
       .map((line, si) => ({ si, end: line.end }))
       .filter((e): e is { si: number; end: { x: number; y: number } } => e.end !== null)
       .sort((a, b) => a.end.y - b.end.y);
+    const nudged: number[] = [];
+    let prev = PAD_T - 6;
     for (const e of ends) {
-      const nudged = Math.min(Math.max(e.end.y, prev + 12, PAD_T + 6), PAD_T + PLOT_H);
-      labelYs.set(e.si, nudged);
-      prev = nudged;
+      prev = Math.max(e.end.y, prev + 12);
+      nudged.push(prev);
     }
+    const overflow = Math.max(0, (nudged[nudged.length - 1] ?? 0) - (PAD_T + PLOT_H));
+    ends.forEach((e, i) => {
+      labelYs.set(e.si, Math.max(nudged[i]! - overflow, PAD_T + 6));
+    });
   }
 
-  return { slots, padR, direct, gridLines, xLabels, lines, labelYs, y };
+  return { slots, padR, direct, floor, gridLines, xLabels, lines, labelYs, y };
 }
 
 export function ChartSection({ section }: { section: CanvasChartSection }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const geometry = useMemo(() => buildGeometry(section), [section]);
-  const { slots, padR, direct, gridLines, xLabels, lines, labelYs, y } = geometry;
+  const { slots, padR, direct, floor, gridLines, xLabels, lines, labelYs, y } = geometry;
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -235,7 +243,7 @@ export function ChartSection({ section }: { section: CanvasChartSection }) {
         className="cvb-chart-svg"
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
-        aria-label={`${section.title ?? "Line chart"}: ${section.series
+        aria-label={`${section.title || "Line chart"}: ${section.series
           .map((s) => s.label)
           .join(", ")}`}
         onPointerMove={onPointerMove}
@@ -249,6 +257,9 @@ export function ChartSection({ section }: { section: CanvasChartSection }) {
             </text>
           </g>
         ))}
+        {floor < 0 && (
+          <line className="cvb-chart-zero-line" x1={PAD_L} x2={WIDTH - padR} y1={y(0)} y2={y(0)} />
+        )}
         {xLabels.map((slot) => (
           <text
             key={slot.id}
