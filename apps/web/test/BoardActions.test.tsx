@@ -63,6 +63,24 @@ describe("board actions", () => {
     );
   });
 
+  test("a wrap actions section renders the wrap layout class", () => {
+    const view = {
+      view: "board",
+      sections: [
+        { kind: "actions", wrap: true, items: [{ type: "a", label: "A" }] },
+        { kind: "actions", items: [{ type: "b", label: "B" }] },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const sections = container.querySelectorAll(".cvb-actions");
+    expect(sections[0]?.classList.contains("cvb-actions--wrap")).toBe(true);
+    expect(sections[1]?.classList.contains("cvb-actions--wrap")).toBe(false);
+  });
+
   test("renders a leading glyph before the action label", () => {
     render(
       <BoardActionProvider run={okRun} reveal={okReveal}>

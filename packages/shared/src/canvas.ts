@@ -385,6 +385,12 @@ const actionsSectionSchema = z
   .object({
     kind: z.literal("actions"),
     title: z.string().optional(),
+    // Lay the buttons out as an inline wrapping row of compact chips instead of a
+    // full-width stacked column — for a selection strip (a toggle set, a shape
+    // picker) where a stacked column wastes the surface's width. An action that
+    // opens a `fields` form breaks to its own full-width line so the form still
+    // reads as a panel beneath the row. Default (absent) stays stacked.
+    wrap: z.boolean().optional(),
     items: z.array(canvasActionItemSchema),
   })
   .strict();
