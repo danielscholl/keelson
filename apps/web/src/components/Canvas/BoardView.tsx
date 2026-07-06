@@ -99,15 +99,13 @@ function actionConfirmBody(item: ActionItem): string {
 // collected values on submit, so a payload-carrying action can gather its input.
 // A tabs section lifts the form's open state to itself via `open`/`onOpenChange`
 // so opening one item closes its siblings; uncontrolled (both absent) elsewhere.
-function ActionItemButton({
-  item,
-  open: controlledOpen,
-  onOpenChange,
-}: {
-  item: ActionItem;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-}) {
+// The pair is a union so one can't be passed without the other.
+type ActionItemButtonProps = { item: ActionItem } & (
+  | { open: boolean; onOpenChange: (open: boolean) => void }
+  | { open?: never; onOpenChange?: never }
+);
+
+function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionItemButtonProps) {
   const ctx = useBoardActions();
   const fields = item.fields ?? [];
   const hasFields = fields.length > 0;
@@ -481,22 +479,21 @@ function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "a
   const layout = tabs ? " cvb-actions--tabs" : section.wrap ? " cvb-actions--wrap" : "";
   return (
     <div className={`cvb-actions${layout}`}>
-      {section.items.map((a, i) => (
-        <ActionItemButton
-          key={key(a.type)}
-          item={a}
-          {...(tabs
-            ? {
-                open: openIndex === i,
-                // A close only clears the slot when THIS item holds it — a
-                // fieldless sibling's post-dispatch close must not fold the
-                // open tab.
-                onOpenChange: (o: boolean) =>
-                  setOpenIndex((cur) => (o ? i : cur === i ? null : cur)),
-              }
-            : {})}
-        />
-      ))}
+      {section.items.map((a, i) =>
+        tabs ? (
+          <ActionItemButton
+            key={key(a.type)}
+            item={a}
+            open={openIndex === i}
+            // A close only clears the slot when THIS item holds it — a
+            // fieldless sibling's post-dispatch close must not fold the
+            // open tab.
+            onOpenChange={(o: boolean) => setOpenIndex((cur) => (o ? i : cur === i ? null : cur))}
+          />
+        ) : (
+          <ActionItemButton key={key(a.type)} item={a} />
+        ),
+      )}
     </div>
   );
 }
