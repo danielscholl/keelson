@@ -391,6 +391,14 @@ const actionsSectionSchema = z
     // opens a `fields` form breaks to its own full-width line so the form still
     // reads as a panel beneath the row. Default (absent) stays stacked.
     wrap: z.boolean().optional(),
+    // Render the buttons as a single-select tab strip: opening one item's
+    // `fields` form closes its siblings', and the open form renders as one
+    // stable full-width panel beneath the whole strip (never mid-row) — for a
+    // mode picker where at most one form should exist. At rest no tab is
+    // active; clicking the active tab closes it. Items without `fields` still
+    // dispatch on click. Takes precedence over `wrap` (the strip wraps on its
+    // own); `expanded` is inert inside a tabs section.
+    tabs: z.boolean().optional(),
     items: z.array(canvasActionItemSchema),
   })
   .strict();
