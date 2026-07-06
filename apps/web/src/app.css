@@ -3571,6 +3571,18 @@ button.tab:focus-visible {
 }
 .cvb-action-button:hover:not(:disabled) { background: var(--card-2); }
 .cvb-action-button:disabled { opacity: 0.6; cursor: default; }
+/* `brand` marks a board's one primary verb (e.g. a genesis hero) — filled
+   accent like .btn-run, so it reads as the screen's single filled button. */
+.cvb-action-button[data-tone="brand"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.cvb-action-button[data-tone="brand"]:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
 .cvb-action-button.is-destructive {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
@@ -3935,7 +3947,9 @@ a.cvb-card-title::after {
    base full-width stripe stack. */
 .cvb-cards--boxed {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* auto-fit (not auto-fill) so a short row's cards share the full width
+     instead of leaving phantom empty tracks beside them. */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
 }
 .cvb-cards--boxed .cvb-card-fields {
@@ -4556,6 +4570,26 @@ a.cvb-card-title::after {
   color: var(--fg);
   border-color: color-mix(in srgb, var(--id-tone) 45%, transparent);
   background: color-mix(in srgb, var(--id-tone) 10%, transparent);
+}
+/* Action buttons follow the actor rule: a hue dot + border wash, label in ink —
+   so a draft-set chip or an author-starter button wears the seat it names. */
+.cvb-action-button[data-tone^="id-"] {
+  border-color: color-mix(in srgb, var(--id-tone) 40%, transparent);
+  background: color-mix(in srgb, var(--id-tone) 12%, transparent);
+}
+.cvb-action-button[data-tone^="id-"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--id-tone) 20%, transparent);
+}
+.cvb-action-button[data-tone^="id-"]::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--id-tone);
+  flex: none;
+}
+.cvb-action-button[data-tone^="id-"] .cvb-action-glyph {
+  color: var(--id-tone);
 }
 
 /* Not a bar — a scrim. The footer is absolutely positioned over the bottom of

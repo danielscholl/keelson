@@ -226,6 +226,52 @@ describe("board actions with input fields", () => {
     );
   });
 
+  test("an expanded action renders its form open with the label as submit", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "describe-own",
+              label: "Author",
+              glyph: "✦",
+              tone: "brand",
+              expanded: true,
+              fields: [
+                { name: "brief", label: "Who should this Mind feel like?", multiline: true },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    // The form is open on mount — no disclosure toggle, no Cancel.
+    expect(container.querySelector(".cvb-action-form")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    const buttons = screen.getAllByRole("button", { name: /Author/ });
+    expect(buttons).toHaveLength(1);
+    const input = container.querySelector(".cvb-action-field-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "a skeptical staff engineer" } });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(calls).toEqual([
+        { type: "describe-own", payload: { brief: "a skeptical staff engineer" } },
+      ]),
+    );
+  });
+
   test("a required field blocks dispatch until filled", async () => {
     const calls: RibAction[] = [];
     const run = async (a: RibAction): Promise<RibActionResult> => {
