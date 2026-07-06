@@ -145,6 +145,30 @@ export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
     const hostGated = tool.requires_confirmation === true && !declaresConfirm(tool);
     const confirmed = isRecord(args) && args.confirm === true;
     const callArgs = hostGated ? stripConfirm(args) : args;
+    // Enforce the contract tools/list advertises: object schemas publish
+    // additionalProperties: false, but zod's default object parse STRIPS unknown
+    // keys instead of rejecting — a mis-keyed call (`inputs` for `arguments`)
+    // would silently run with defaults. Top-level keys only; nested values keep
+    // zod semantics. `confirm` is the host's envelope key, never a tool arg
+    // (self-gating tools declare it in `properties`), so it is exempt here
+    // regardless of gating.
+    const advertised = toInputJsonSchema(tool);
+    if (advertised.additionalProperties === false && isRecord(callArgs)) {
+      const known = isRecord(advertised.properties) ? Object.keys(advertised.properties) : [];
+      const knownSet = new Set(known);
+      const unknown = Object.keys(callArgs).filter((k) => k !== "confirm" && !knownSet.has(k));
+      if (unknown.length > 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Invalid arguments for tool '${name}': unknown ${unknown.length === 1 ? "property" : "properties"} ${unknown.map((k) => `'${k}'`).join(", ")}. Allowed: ${known.length > 0 ? known.sort().join(", ") : "(none)"}.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
     if (hostGated && !confirmed) {
       return {
         content: [

@@ -249,6 +249,100 @@ describe("createKeelsonMcpServer — confirmation gate", () => {
   });
 });
 
+describe("createKeelsonMcpServer — strict arguments", () => {
+  function workflowRunTool(onExecute: () => void): ToolDefinition {
+    return {
+      name: "workflow_run",
+      description: "run workflow",
+      inputSchema: z.object({
+        name: z.string(),
+        arguments: z.record(z.string(), z.string()).optional(),
+      }),
+      state_changing: true,
+      execute: async (_input, ctx) => {
+        onExecute();
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "started" });
+      },
+    };
+  }
+
+  test("an unknown top-level property is rejected, named, and the tool never runs", async () => {
+    let executed = false;
+    const client = await connect({
+      exposeStateChanging: true,
+      extraTools: [
+        workflowRunTool(() => {
+          executed = true;
+        }),
+      ],
+    });
+    // The observed misuse: `inputs` for `arguments` — zod's default parse would
+    // strip it and run the workflow with no arguments at all.
+    const res = await client.callTool({
+      name: "workflow_run",
+      arguments: { name: "chamber-genesis", inputs: { brief: "a skeptic" } },
+    });
+    expect(res.isError).toBe(true);
+    const text = (res.content as Array<{ text: string }>)[0]?.text ?? "";
+    expect(text).toContain("unknown property 'inputs'");
+    expect(text).toContain("Allowed: arguments, name.");
+    expect(executed).toBe(false);
+  });
+
+  test("the host confirm envelope is never an unknown key, even on ungated tools", async () => {
+    let executed = false;
+    const client = await connect({
+      exposeStateChanging: true,
+      extraTools: [
+        workflowRunTool(() => {
+          executed = true;
+        }),
+      ],
+    });
+    const res = await client.callTool({
+      name: "workflow_run",
+      arguments: { name: "chamber-genesis", confirm: true },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(executed).toBe(true);
+  });
+
+  test("a call with only schema-declared properties still executes", async () => {
+    let executed = false;
+    const client = await connect({
+      exposeStateChanging: true,
+      extraTools: [
+        workflowRunTool(() => {
+          executed = true;
+        }),
+      ],
+    });
+    const res = await client.callTool({
+      name: "workflow_run",
+      arguments: { name: "chamber-genesis", arguments: { brief: "a skeptic" } },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(executed).toBe(true);
+  });
+
+  test("a loose object schema keeps its pass-through semantics", async () => {
+    let seen: unknown;
+    registerTool({
+      name: "osdu_loose",
+      description: "tolerates extras by declaration",
+      inputSchema: z.looseObject({ q: z.string().optional() }),
+      execute: async (input, ctx) => {
+        seen = input;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "ok" });
+      },
+    });
+    const client = await connect();
+    const res = await client.callTool({ name: "osdu_loose", arguments: { q: "x", extra: "y" } });
+    expect(res.isError).toBeFalsy();
+    expect(seen).toEqual({ q: "x", extra: "y" });
+  });
+});
+
 describe("createKeelsonMcpServer — policy gate", () => {
   test("a tool-call deny short-circuits before the tool runs", async () => {
     let executed = false;
