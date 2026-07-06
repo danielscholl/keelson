@@ -587,3 +587,21 @@ export const getRunArtifactResponseSchema = z
   .object({ path: z.string(), content: z.string() })
   .strict();
 export type GetRunArtifactResponse = z.infer<typeof getRunArtifactResponseSchema>;
+
+// Harness-owned snapshot namespace for published canvas artifacts (designed
+// self-contained HTML pages from `canvas_publish`). Not under `rib:*` — like
+// RIBS_VERSION_SNAPSHOT_KEY these register on the base snapshot manager, and
+// the SPA resolves the `html` canvas kind from this prefix rather than a rib
+// manifest. Slugs are the identity: republishing a slug updates in place.
+export const CANVAS_ARTIFACT_KEY_PREFIX = "canvas:artifact:";
+export const canvasArtifactSlugSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9-]*$/, {
+    message: "artifact slug must be lowercase alphanumeric/dash",
+  });
+
+export function canvasArtifactKey(slug: string): string {
+  return `${CANVAS_ARTIFACT_KEY_PREFIX}${slug}`;
+}

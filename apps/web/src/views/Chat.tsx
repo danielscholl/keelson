@@ -510,6 +510,9 @@ export function Chat({
   const wsRef = useRef<ReconnectingChatWsHandle | null>(null);
   const wsStateRef = useRef<ReconnectingWsState>("connecting");
   const activeAssistantIdRef = useRef<string | null>(null);
+  // tool_use ids of in-flight canvas_publish calls: the matching tool_result
+  // carries the published artifact's key, and the drawer auto-opens on it.
+  const pendingCanvasPublishRef = useRef<Set<string>>(new Set());
   const pendingSendRef = useRef<{
     prompt: string;
     userId: string;
@@ -804,6 +807,9 @@ export function Chat({
         } else if (payload.type === "tool_use") {
           const assistantId = activeAssistantIdRef.current;
           if (!assistantId) return;
+          if (payload.toolName === "canvas_publish" && payload.id !== undefined) {
+            pendingCanvasPublishRef.current.add(payload.id);
+          }
           // Emitter id pairs with a later tool_result.toolUseId; the local
           // fallback only serves as a React key (no result will arrive).
           const call: LiveToolCall = {
@@ -821,6 +827,25 @@ export function Chat({
           // against stale frames from a previous turn).
           const assistantId = activeAssistantIdRef.current;
           if (!assistantId) return;
+          if (pendingCanvasPublishRef.current.delete(payload.toolUseId) && !payload.isError) {
+            // A finished canvas_publish IS the deliverable — open it, the same
+            // way the Artifacts experience does, rather than leaving the page
+            // buried in a JSON tool result.
+            try {
+              const result = JSON.parse(payload.content) as { key?: unknown; title?: unknown };
+              if (typeof result.key === "string" && result.key.length > 0) {
+                openCanvas({
+                  kind: "html",
+                  source: { type: "snapshot", key: result.key },
+                  ...(typeof result.title === "string" && result.title.length > 0
+                    ? { title: result.title }
+                    : {}),
+                });
+              }
+            } catch {
+              // A non-JSON result (older server) just skips the auto-open.
+            }
+          }
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
@@ -954,7 +979,7 @@ export function Chat({
         }
       }
     },
-    [conversationsList, setConversationId, toast],
+    [conversationsList, setConversationId, toast, openCanvas],
   );
 
   const ensureWs = useCallback((): ReconnectingChatWsHandle => {
