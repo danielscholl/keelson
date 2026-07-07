@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Message } from "@keelson/shared";
+import { type ContentBlock, canvasArtifactKey, type Message } from "@keelson/shared";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { rmTemp } from "./temp.ts";
@@ -41,6 +41,17 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
     base.truncated = overrides.truncated;
   }
   return base;
+}
+
+function canvasPublishParts(slug: string, callId: string): ContentBlock[] {
+  return [
+    { type: "tool_use", id: callId, toolName: "canvas_publish" },
+    {
+      type: "tool_result",
+      toolUseId: callId,
+      content: JSON.stringify({ key: canvasArtifactKey(slug), slug, title: slug }),
+    },
+  ];
 }
 
 describe("SQLite ConversationStore", () => {
@@ -316,6 +327,102 @@ describe("SQLite ConversationStore", () => {
       }
     ).c;
     expect(remaining).toBe(0);
+    db.close();
+  });
+
+  test("delete reports solely published canvas artifacts as orphaned", () => {
+    const db = openDatabase({ path: dbPath });
+    const orphanedCalls: string[][] = [];
+    const store = createConversationStore(db, {
+      onArtifactsOrphaned: (slugs) => orphanedCalls.push(slugs),
+    });
+    const conv = store.create({ providerId: "stub" });
+    store.appendMessage(
+      conv.id,
+      makeMessage({
+        id: "m1",
+        role: "assistant",
+        content: "Published an artifact.",
+        contentParts: canvasPublishParts("solo-artifact", "call_solo"),
+      }),
+    );
+
+    expect(store.delete(conv.id)).toBe(true);
+    expect(orphanedCalls).toEqual([["solo-artifact"]]);
+    db.close();
+  });
+
+  test("delete leaves artifacts published by another conversation intact", () => {
+    const db = openDatabase({ path: dbPath });
+    const orphanedCalls: string[][] = [];
+    const store = createConversationStore(db, {
+      onArtifactsOrphaned: (slugs) => orphanedCalls.push(slugs),
+    });
+    const first = store.create({ providerId: "stub" });
+    const second = store.create({ providerId: "stub" });
+    store.appendMessage(
+      first.id,
+      makeMessage({
+        id: "m1",
+        role: "assistant",
+        content: "Published shared.",
+        contentParts: canvasPublishParts("shared-artifact", "call_first"),
+      }),
+    );
+    store.appendMessage(
+      second.id,
+      makeMessage({
+        id: "m2",
+        role: "assistant",
+        content: "Published shared too.",
+        contentParts: canvasPublishParts("shared-artifact", "call_second"),
+      }),
+    );
+
+    expect(store.delete(first.id)).toBe(true);
+    expect(orphanedCalls).toEqual([]);
+    expect(store.get(second.id)).toBeDefined();
+    db.close();
+  });
+
+  test("delete commits before artifact cleanup callback runs", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createConversationStore(db, {
+      onArtifactsOrphaned: () => {
+        throw new Error("artifact cleanup failed");
+      },
+    });
+    const conv = store.create({ providerId: "stub" });
+    store.appendMessage(
+      conv.id,
+      makeMessage({
+        id: "m1",
+        role: "assistant",
+        content: "Published artifact.",
+        contentParts: canvasPublishParts("throwing-artifact", "call_throw"),
+      }),
+    );
+
+    expect(() => store.delete(conv.id)).toThrow("artifact cleanup failed");
+    expect(store.get(conv.id)).toBeUndefined();
+    const remaining = (
+      db.query("SELECT COUNT(*) AS c FROM messages WHERE conversationId = ?").get(conv.id) as {
+        c: number;
+      }
+    ).c;
+    expect(remaining).toBe(0);
+    db.close();
+  });
+
+  test("delete does not fire artifact cleanup for unknown ids", () => {
+    const db = openDatabase({ path: dbPath });
+    const orphanedCalls: string[][] = [];
+    const store = createConversationStore(db, {
+      onArtifactsOrphaned: (slugs) => orphanedCalls.push(slugs),
+    });
+
+    expect(store.delete("ghost-id")).toBe(false);
+    expect(orphanedCalls).toEqual([]);
     db.close();
   });
 

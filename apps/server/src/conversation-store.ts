@@ -14,7 +14,11 @@ import type {
   Message,
   WorkflowRunStatus,
 } from "@keelson/shared";
-import { parsePersistedTokenUsage } from "@keelson/shared";
+import {
+  canvasArtifactKey,
+  canvasArtifactSlugSchema,
+  parsePersistedTokenUsage,
+} from "@keelson/shared";
 
 export interface CreateConversationInput {
   id?: string;
@@ -51,6 +55,10 @@ export interface ConversationStore {
   // (`totalTokens`). Backs the request-phase budget gate without loading full
   // message bodies.
   getUsageTotals(id: string): { totalTokens: number; turns: number };
+}
+
+export interface ConversationStoreDeps {
+  onArtifactsOrphaned?: (slugs: string[]) => void;
 }
 
 // Provider/model provenance for one assistant row. Kept out of the wire
@@ -107,6 +115,55 @@ function parseContentParts(raw: string | null): ContentBlock[] | undefined {
     );
     return undefined;
   }
+}
+
+function parsePublishResultSlug(content: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (err) {
+    if (err instanceof SyntaxError) return undefined;
+    throw err;
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("slug" in parsed) ||
+    typeof parsed.slug !== "string"
+  ) {
+    return undefined;
+  }
+  return canvasArtifactSlugSchema.safeParse(parsed.slug).success ? parsed.slug : undefined;
+}
+
+function publishedCanvasSlugs(parts: ContentBlock[]): string[] {
+  const toolNames = new Map<string, string>();
+  for (const part of parts) {
+    if (part.type === "tool_use") toolNames.set(part.id, part.toolName);
+  }
+  const slugs = new Set<string>();
+  for (const part of parts) {
+    if (
+      part.type !== "tool_result" ||
+      part.isError === true ||
+      toolNames.get(part.toolUseId) !== "canvas_publish"
+    ) {
+      continue;
+    }
+    const slug = parsePublishResultSlug(part.content);
+    if (slug !== undefined) slugs.add(slug);
+  }
+  return Array.from(slugs);
+}
+
+function publishedCanvasSlugsFromRows(rows: Array<{ content_parts: string | null }>): string[] {
+  const slugs = new Set<string>();
+  for (const row of rows) {
+    const parts = parseContentParts(row.content_parts);
+    if (parts === undefined) continue;
+    for (const slug of publishedCanvasSlugs(parts)) slugs.add(slug);
+  }
+  return Array.from(slugs);
 }
 
 function rowToMessage(row: MessageRow): Message {
@@ -166,7 +223,10 @@ function rowToConversation(row: ConvRow, messages: Message[]): Conversation {
   return conv;
 }
 
-export function createConversationStore(db: Database): ConversationStore {
+export function createConversationStore(
+  db: Database,
+  deps: ConversationStoreDeps = {},
+): ConversationStore {
   const insertConv = db.prepare(
     "INSERT INTO conversations(id, providerId, model, providerSessionId, name, seedSystemPrompt, project_id, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
@@ -196,6 +256,12 @@ export function createConversationStore(db: Database): ConversationStore {
   // millisecond preserve insertion order — UUID-id tiebreak would shuffle them.
   const selectMessages = db.prepare(
     "SELECT id, role, content, content_parts, truncated, usage_json, createdAt FROM messages WHERE conversationId = ? ORDER BY rowid ASC",
+  );
+  const selectContentParts = db.prepare(
+    "SELECT content_parts FROM messages WHERE conversationId = ? ORDER BY rowid ASC",
+  );
+  const selectOtherContentPartsByArtifact = db.prepare(
+    "SELECT content_parts FROM messages WHERE conversationId != ? AND content_parts LIKE ?",
   );
   // Batched IN(?,?,...) hydration for list(); arity varies so it can't be
   // pre-compiled. conversationId returned alongside the message columns so
@@ -239,6 +305,28 @@ export function createConversationStore(db: Database): ConversationStore {
   // Messages cascade via the FK ON DELETE CASCADE on the messages table —
   // PRAGMA foreign_keys is enabled at openDatabase().
   const deleteConv = db.prepare("DELETE FROM conversations WHERE id = ?");
+  const deleteConversation = db.transaction(
+    (id: string): { deleted: boolean; orphaned: string[] } => {
+      const existing = selectConv.get(id) as ConvRow | null;
+      if (!existing) return { deleted: false, orphaned: [] };
+
+      const ownedSlugs = publishedCanvasSlugsFromRows(
+        selectContentParts.all(id) as Array<{ content_parts: string | null }>,
+      );
+      const orphaned: string[] = [];
+      for (const slug of ownedSlugs) {
+        const candidates = selectOtherContentPartsByArtifact.all(
+          id,
+          `%${canvasArtifactKey(slug)}%`,
+        ) as Array<{ content_parts: string | null }>;
+        const stillPublished = publishedCanvasSlugsFromRows(candidates).includes(slug);
+        if (!stillPublished) orphaned.push(slug);
+      }
+
+      const result = deleteConv.run(id);
+      return { deleted: (result.changes ?? 0) > 0, orphaned };
+    },
+  );
 
   return {
     get(id) {
@@ -324,9 +412,10 @@ export function createConversationStore(db: Database): ConversationStore {
       return rowToConversation(refreshed, messages);
     },
     delete(id) {
-      const result = deleteConv.run(id);
-      // bun:sqlite's RunResult exposes `changes` on the result object.
-      return (result.changes ?? 0) > 0;
+      const { deleted, orphaned } = deleteConversation(id);
+      if (!deleted) return false;
+      if (orphaned.length > 0) deps.onArtifactsOrphaned?.(orphaned);
+      return true;
     },
     getUsageTotals(id) {
       const rows = selectAssistantUsage.all(id) as { usage_json: string | null }[];

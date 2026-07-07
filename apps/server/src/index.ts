@@ -313,7 +313,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // for /api/projects/clone; make sure it exists before seeding or cloning.
   mkdirSync(WORKSPACE_ROOT, { recursive: true });
   const db = openDatabase({ path: DB_PATH });
-  const store = createConversationStore(db);
+  const store = createConversationStore(db, {
+    onArtifactsOrphaned: (slugs) => {
+      for (const slug of slugs) {
+        artifactStore.remove(slug);
+        canvasTools.unregister(slug);
+      }
+    },
+  });
   const workflowStore = createWorkflowStore(db);
   const memoryStore = createMemoryStore(db);
   // Publish to the late-bound ref so RibContext.getMemory resolves once boot completes.

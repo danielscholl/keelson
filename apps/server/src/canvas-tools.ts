@@ -108,21 +108,28 @@ export interface CanvasToolsHandle {
   // Re-register every persisted artifact's snapshot key — called once at boot
   // so pages survive a server restart without a re-publish.
   registerExisting(): void;
+  unregister(slug: string): void;
 }
 
 export function createCanvasTools(deps: CreateCanvasToolsDeps): CanvasToolsHandle {
   const registered = new Set<string>();
+  const unregisters = new Map<string, () => void>();
 
   function ensureKey(slug: string): void {
     if (registered.has(slug)) return;
-    deps.snapshotManager.register(canvasArtifactKey(slug), () => deps.store.get(slug)?.html ?? "", {
-      validate: (data: unknown) => {
-        if (typeof data !== "string" || data.length === 0) {
-          throw new Error(`${canvasArtifactKey(slug)} expects a non-empty html string`);
-        }
-        return data;
+    const off = deps.snapshotManager.register(
+      canvasArtifactKey(slug),
+      () => deps.store.get(slug)?.html ?? "",
+      {
+        validate: (data: unknown) => {
+          if (typeof data !== "string" || data.length === 0) {
+            throw new Error(`${canvasArtifactKey(slug)} expects a non-empty html string`);
+          }
+          return data;
+        },
       },
-    });
+    );
+    unregisters.set(slug, off);
     registered.add(slug);
   }
 
@@ -244,6 +251,11 @@ export function createCanvasTools(deps: CreateCanvasToolsDeps): CanvasToolsHandl
         // recompose a restored artifact would render empty until republished.
         void deps.snapshotManager.recompose(canvasArtifactKey(meta.slug));
       }
+    },
+    unregister(slug: string): void {
+      unregisters.get(slug)?.();
+      unregisters.delete(slug);
+      registered.delete(slug);
     },
   };
 }

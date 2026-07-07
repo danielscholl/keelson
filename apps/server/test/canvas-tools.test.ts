@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -54,6 +54,24 @@ beforeEach(() => {
 afterEach(async () => {
   await manager.dispose();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("artifact store", () => {
+  test("remove deletes both artifact files and is idempotent", () => {
+    const store = createArtifactStore(dir);
+    store.save({ slug: "remove-me", title: "Remove Me", html: PAGE() });
+
+    expect(existsSync(join(dir, "remove-me.html"))).toBe(true);
+    expect(existsSync(join(dir, "remove-me.json"))).toBe(true);
+
+    store.remove("remove-me");
+    store.remove("remove-me");
+    store.remove("../invalid");
+
+    expect(existsSync(join(dir, "remove-me.html"))).toBe(false);
+    expect(existsSync(join(dir, "remove-me.json"))).toBe(false);
+    expect(store.get("remove-me")).toBeUndefined();
+  });
 });
 
 describe("canvas_publish", () => {
@@ -168,6 +186,29 @@ describe("canvas_publish", () => {
     const { isError, content } = lastResult(chunks);
     expect(isError).toBe(true);
     expect(content).toContain("invalid input");
+  });
+
+  test("unregister removes the snapshot key and allows republish", async () => {
+    const first = makeCtx();
+    await tool("canvas_publish").execute({ title: "Disposable", html: PAGE() }, first.ctx);
+    const result = JSON.parse(lastResult(first.chunks).content) as { key: string; slug: string };
+
+    expect(manager.keys()).toContain(result.key);
+
+    handle.unregister(result.slug);
+    handle.unregister(result.slug);
+
+    expect(manager.keys()).not.toContain(result.key);
+    expect(manager.latest(result.key)).toBeUndefined();
+
+    const second = makeCtx();
+    await tool("canvas_publish").execute(
+      { title: "Disposable Again", html: "<body><h1>again</h1></body>", name: result.slug },
+      second.ctx,
+    );
+
+    expect(manager.keys()).toContain(result.key);
+    expect(manager.latest<string>(result.key)?.data).toContain("again");
   });
 });
 

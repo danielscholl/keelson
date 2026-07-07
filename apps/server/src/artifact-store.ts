@@ -29,6 +29,7 @@ export interface ArtifactStore {
   list(): CanvasArtifactMeta[];
   get(slug: string): CanvasArtifact | undefined;
   save(input: { slug: string; title: string; html: string }): CanvasArtifact;
+  remove(slug: string): void;
 }
 
 function htmlPath(dir: string, slug: string): string {
@@ -115,6 +116,12 @@ export function createArtifactStore(dir: string): ArtifactStore {
         throw err;
       }
       return { slug, title: input.title, updatedAt, html: input.html };
+    },
+
+    remove(slug: string): void {
+      if (!canvasArtifactSlugSchema.safeParse(slug).success) return;
+      rmSync(htmlPath(dir, slug), { force: true });
+      rmSync(metaPath(dir, slug), { force: true });
     },
   };
 }
