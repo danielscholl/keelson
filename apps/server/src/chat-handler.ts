@@ -60,6 +60,12 @@ export interface ChatRoutesOptions {
   // The provider the picker should preselect (config.defaultProvider → copilot
   // → first real). Surfaced on GET /api/providers; absent when unresolved.
   defaultProvider?: string;
+  // Harness-owned tools merged into every chat turn's tool set (see
+  // ChatDeps) but never registered into the shared registry, so GET
+  // /api/tools must fold them in itself or under-report what a turn can
+  // actually call.
+  workflowTools?: ToolDefinition[];
+  workflowAuthoringTools?: (project: { id: string; rootPath: string } | null) => ToolDefinition[];
 }
 
 const createConversationBodySchema = z
@@ -108,9 +114,21 @@ export function chatRoutes(
     }
   });
 
-  // Snapshot of tools registered at boot; per-conversation filtering TBD.
+  // Snapshot of tools available to a chat turn: the boot-registered registry
+  // plus the harness-owned workflow tools every turn gets appended (see
+  // ChatDeps.workflowTools/workflowAuthoringTools) — those never enter the
+  // shared registry, so they'd otherwise be invisible here. Authoring tools
+  // are listed with no project resolved; per-conversation filtering TBD.
   app.get("/api/tools", (c) => {
-    const tools = getRegisteredTools().map((t) => ({
+    const harnessTools = [
+      ...(opts.workflowTools ?? []),
+      ...(opts.workflowAuthoringTools?.(null) ?? []),
+    ];
+    const harnessNames = new Set(harnessTools.map((t) => t.name));
+    const tools = [
+      ...getRegisteredTools().filter((t) => !harnessNames.has(t.name)),
+      ...harnessTools,
+    ].map((t) => ({
       name: t.name,
       description: t.description,
       family: inferToolFamily(t.name),
