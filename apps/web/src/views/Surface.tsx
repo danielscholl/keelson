@@ -442,7 +442,9 @@ function SurfaceRegion({
     (region.hideWhenEmpty ?? false) &&
     !(
       snap.status === "live" &&
-      (parsed?.success && parsed.data.view !== "board" ? true : !!board && board.sections.length >= 1)
+      (parsed?.success && parsed.data.view !== "board"
+        ? true
+        : !!board && board.sections.length >= 1)
     );
   if (hidden) return null;
 

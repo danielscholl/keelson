@@ -3271,6 +3271,9 @@ button.tab:focus-visible {
   flex-direction: column;
   gap: 16px;
 }
+.surface-zone:not(:has(.surface-region)) {
+  display: none;
+}
 .surface-zone-title {
   margin: 0;
   font-size: 11px;
@@ -3286,6 +3289,9 @@ button.tab:focus-visible {
      each to its own content instead of stretching to the tallest sibling. */
   align-items: flex-start;
   flex-wrap: wrap;
+}
+.surface-row:empty {
+  display: none;
 }
 .surface-row > .surface-region {
   flex: 1 1 320px;

@@ -291,11 +291,9 @@ describe("seats and journey board sections", () => {
       "2",
       "3",
     ]);
-    expect([...container.querySelectorAll(".cvb-journey-title")].map((n) => n.textContent)).toEqual([
-      "Draft",
-      "Review",
-      "Ship",
-    ]);
+    expect([...container.querySelectorAll(".cvb-journey-title")].map((n) => n.textContent)).toEqual(
+      ["Draft", "Review", "Ship"],
+    );
     expect(container.querySelector(".cvb-journey-text")?.textContent).toBe("Waiting on maintainer");
   });
 
