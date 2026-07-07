@@ -127,7 +127,7 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
    more `rows` of `columns`, and an optional collapsible `footer`. Only the
    header and footer collapse. Each region is `{ key, workflow?, cadenceMs?,
    title?, glyph?, group?, groupTitle?, byline?, collapsible?, collapsed?,
-   live? }`:
+   live?, hideWhenEmpty? }`:
    `key` is namespaced; `workflow` is the catalog workflow a region's refresh
    re-runs; `cadenceMs` is the auto-refresh interval (floored to 30s, run on
    open and on a heartbeat); `glyph` is a `{ char, tone? }` chip for the region
@@ -140,7 +140,12 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
    collapse state (honored on header, footer, and row-column regions; banner
    regions cannot collapse); `live` opts the region head into a freshness dot the
    host pulses while frames stream in on the region's key and quiets once they
-   stop (reduced-motion keeps the lit dot without the motion; default off).
+   stop (reduced-motion keeps the lit dot without the motion; default off);
+   `hideWhenEmpty` renders the region (head and body) only once its snapshot is
+   live with content — a board that composes `sections: []` stays hidden, so a
+   rib can gate first-run panels on having something to say (banner regions
+   can't carry it, and avoid it on on-demand workflow regions, whose Load
+   affordance would be unreachable; default off).
 
 5. **`contributeWorkflows(ctx)`** returns `RibWorkflowContribution`s merged into
    the catalog at activation: `{ definition, bindSnapshotKey?, validate? }`.

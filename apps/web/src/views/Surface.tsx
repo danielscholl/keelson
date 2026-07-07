@@ -438,14 +438,13 @@ function SurfaceRegion({
   ) : (
     <SnapshotStateView snapshot={snap} busy={busy} />
   );
+  // Hidden only while there is nothing to say: no live frame yet, or a live
+  // board that parsed to zero sections (the rib's explicit empty signal). A
+  // payload that fails the view parse still renders its error state — hiding
+  // it would make producer bugs invisible.
   const hidden =
     (region.hideWhenEmpty ?? false) &&
-    !(
-      snap.status === "live" &&
-      (parsed?.success && parsed.data.view !== "board"
-        ? true
-        : !!board && board.sections.length >= 1)
-    );
+    (snap.status !== "live" || (board !== null && board.sections.length === 0));
   if (hidden) return null;
 
   return (

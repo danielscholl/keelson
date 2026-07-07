@@ -322,9 +322,14 @@ export const surfaceRegionSchema = z
   })
   .strict();
 export type RibSurfaceRegion = z.infer<typeof surfaceRegionSchema>;
-// Banner regions never collapse, so a banner can't carry collapse flags even
-// though every other slot's region shares the one region schema.
-const bannerRegionSchema = surfaceRegionSchema.omit({ collapsible: true, collapsed: true });
+// Banner regions never collapse and never hide, so a banner can't carry the
+// collapse flags or hideWhenEmpty even though every other slot's region shares
+// the one region schema.
+const bannerRegionSchema = surfaceRegionSchema.omit({
+  collapsible: true,
+  collapsed: true,
+  hideWhenEmpty: true,
+});
 export const ribSurfaceDescriptorSchema = z
   .object({
     id: z.string().min(1),

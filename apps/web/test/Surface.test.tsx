@@ -293,6 +293,20 @@ describe("Surface", () => {
     expect(screen.getByText("Table")).toBeDefined();
   });
 
+  test("hideWhenEmpty keeps a live payload that fails the view parse visible", () => {
+    // A producer bug must stay observable: the region renders its error state
+    // rather than silently disappearing.
+    live("rib:squad:broken", { view: "no-such-view" });
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      layout: {
+        rows: [{ columns: [{ key: "rib:squad:broken", title: "Broken", hideWhenEmpty: true }] }],
+      },
+    });
+    expect(container.querySelector('[data-region-key="rib:squad:broken"]')).not.toBeNull();
+  });
+
   test("a workflow-bound region with no cadence offers a one-shot Load, not an endless skeleton", () => {
     // chamber's Briefing footer shape: a producing workflow but no cadence, so
     // it never auto-runs and would otherwise shimmer forever.
