@@ -4522,6 +4522,105 @@ a.cvb-card-title::after {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
+.cvb-seats {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.cvb-seat {
+  --tone: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px dashed color-mix(in oklab, var(--tone) 55%, var(--card));
+  background: color-mix(in srgb, var(--tone) 8%, transparent);
+}
+.cvb-seat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--tone);
+  opacity: 0.55;
+}
+.cvb-seat[data-filled] {
+  border-style: solid;
+}
+.cvb-seat[data-filled] .cvb-seat-dot {
+  opacity: 1;
+}
+.cvb-seat[data-tone="ok"] {
+  --tone: var(--green);
+}
+.cvb-seat[data-tone="warn"] {
+  --tone: var(--yellow);
+}
+.cvb-seat[data-tone="error"] {
+  --tone: var(--red);
+}
+.cvb-seat[data-tone="info"] {
+  --tone: var(--cyan);
+}
+.cvb-seat[data-tone="caution"] {
+  --tone: var(--orange);
+}
+.cvb-seat[data-tone="brand"] {
+  --tone: var(--magenta);
+}
+.cvb-seat[data-tone="accent"] {
+  --tone: var(--accent);
+}
+.cvb-seat[data-tone^="id-"] {
+  --tone: var(--id-tone);
+}
+
+.cvb-journey {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.cvb-journey-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: start;
+  padding: 9px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+.cvb-journey-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 14%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.cvb-journey-title {
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.cvb-journey-text {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* inline bars — one compact row each (label · fixed track · trailing), for a
    dense offender / meter list. */
 .cvb-bars--inline .cvb-bar {

@@ -818,19 +818,31 @@ function Section({ section }: { section: BoardSection }) {
       const key = makeKeyer();
       return (
         <div className="cvb-seats">
-          {section.items.map((item) => (
-            <span
-              key={key(JSON.stringify(item))}
-              className="cvb-seat"
-              data-tone={item.tone ?? "neutral"}
-              data-filled={item.filled || undefined}
-              title={item.label}
-              aria-label={item.label}
-              aria-hidden={item.label ? undefined : true}
-            >
-              <span className="cvb-seat-dot" />
-            </span>
-          ))}
+          {section.items.map((item) =>
+            item.label ? (
+              <span
+                key={key(JSON.stringify(item))}
+                className="cvb-seat"
+                data-tone={item.tone ?? "neutral"}
+                data-filled={item.filled || undefined}
+                title={item.label}
+                role="img"
+                aria-label={item.label}
+              >
+                <span className="cvb-seat-dot" />
+              </span>
+            ) : (
+              <span
+                key={key(JSON.stringify(item))}
+                className="cvb-seat"
+                data-tone={item.tone ?? "neutral"}
+                data-filled={item.filled || undefined}
+                aria-hidden="true"
+              >
+                <span className="cvb-seat-dot" />
+              </span>
+            ),
+          )}
         </div>
       );
     }
