@@ -1,15 +1,5 @@
 import type { LiveToolCall } from "../components/Chat/ToolCallsBlock.tsx";
 
-// Long answers outgrow the fixed chat column the canvas drawer relieves; shorter
-// ones read fine in the bubble, so the affordance only appears past this length.
-export const CANVAS_OPEN_THRESHOLD = 2000;
-
-// Only finished assistant answers qualify: user/system/command rows aren't
-// markdown-rendered, and a streaming message is still growing.
-export function shouldOfferCanvas(role: string, content: string, streaming: boolean): boolean {
-  return role === "assistant" && !streaming && content.trim().length > CANVAS_OPEN_THRESHOLD;
-}
-
 function hasPublishedCanvasKey(result: string): boolean {
   let parsed: unknown;
   try {
@@ -37,4 +27,28 @@ export function publishedCanvasResult(
     if (hasPublishedCanvasKey(call.result)) selected = call.result;
   }
   return selected;
+}
+
+// The published artifact's snapshot key + human title, parsed from the
+// canvas_publish result JSON (shape: `{ key, title, ... }`). Used to render the
+// artifact card; the raw result string still drives the open handler.
+export interface PublishedArtifact {
+  key: string;
+  title?: string;
+}
+
+export function parsePublishedArtifact(result: string): PublishedArtifact | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
+  if (typeof parsed !== "object" || parsed === null || !("key" in parsed)) return undefined;
+  const key = (parsed as { key: unknown }).key;
+  if (typeof key !== "string" || key.trim().length === 0) return undefined;
+  const rawTitle = (parsed as { title?: unknown }).title;
+  const title = typeof rawTitle === "string" && rawTitle.trim().length > 0 ? rawTitle : undefined;
+  return title !== undefined ? { key, title } : { key };
 }

@@ -124,7 +124,9 @@ describe("canvas_publish auto-open", () => {
       onFrame?.(chunk({ type: "tool_result", toolUseId: "call_1", content: publishResult }));
       onFrame?.(chunk({ type: "tool_use", id: "call_1", toolName: "canvas_publish" }));
     });
-    await waitFor(() => expect(screen.getByText("Auto-open Check")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
+    );
     // The parked result also hydrates the tool row — the transcript shows the
     // publish outcome, not a forever-pending call.
     expect(document.body.textContent).toContain("canvas:artifact:auto-open-check");
@@ -137,7 +139,9 @@ describe("canvas_publish auto-open", () => {
       onFrame?.(chunk({ type: "tool_use", id: "call_2", toolName: "canvas_publish" }));
       onFrame?.(chunk({ type: "tool_result", toolUseId: "call_2", content: publishResult }));
     });
-    await waitFor(() => expect(screen.getByText("Auto-open Check")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
+    );
   });
 
   test("streamed successful publishes can reopen the drawer from the message row", async () => {
@@ -151,28 +155,31 @@ describe("canvas_publish auto-open", () => {
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
     );
-    expect(screen.getByRole("button", { name: "⤢ Open canvas" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open artifact: Auto-open Check" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close canvas" }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Auto-open Check" })).toBeNull(),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "⤢ Open canvas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open artifact: Auto-open Check" }));
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
     );
   });
 
-  test("reloaded conversations show the published canvas action", async () => {
+  // Regression: the copilot bridge persists a tool_result BEFORE its tool_use.
+  // A single-pass reconstruction dropped the stored result as an orphan, so a
+  // reopened conversation lost the artifact card even though the live turn showed it.
+  test("reloaded conversations show the published canvas action (result-before-use order)", async () => {
     conversations[0]!.messages = [
       {
         id: "22222222-2222-4222-8222-222222222222",
         role: "assistant",
         content: "Published an artifact.",
         contentParts: [
-          { type: "tool_use", id: "call_stored", toolName: "canvas_publish" },
           { type: "tool_result", toolUseId: "call_stored", content: publishResult },
+          { type: "tool_use", id: "call_stored", toolName: "canvas_publish" },
         ],
         createdAt: "2026-01-01T00:00:02.000Z",
       },
@@ -180,7 +187,7 @@ describe("canvas_publish auto-open", () => {
 
     renderChat();
 
-    fireEvent.click(await screen.findByRole("button", { name: "⤢ Open canvas" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open artifact: Auto-open Check" }));
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
     );

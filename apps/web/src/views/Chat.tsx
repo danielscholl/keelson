@@ -63,7 +63,7 @@ import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
 import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
-import { publishedCanvasResult, shouldOfferCanvas } from "../lib/chatCanvas.ts";
+import { parsePublishedArtifact, publishedCanvasResult } from "../lib/chatCanvas.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 import { formatTokens, hasSpend } from "../lib/formatTokens.ts";
 import {
@@ -2043,9 +2043,9 @@ export function Chat({
                   <div className="empty-state">Send a message to start a conversation.</div>
                 )}
                 {visibleMessages.map((m) => {
-                  const offerCanvas = shouldOfferCanvas(m.role, m.content, m.streaming ?? false);
                   const canvasResult =
                     m.role === "assistant" ? publishedCanvasResult(m.toolCalls) : undefined;
+                  const artifact = canvasResult ? parsePublishedArtifact(canvasResult) : undefined;
                   // Notebook actions need a persisted server id + a conversation;
                   // the canvas affordance is pure client text, so it's gated apart.
                   const offerNotebook =
@@ -2105,34 +2105,42 @@ export function Chat({
                           {formatTokens(m.usage.outputTokens)}
                         </div>
                       )}
-                      {(offerCanvas || offerNotebook || offerIngest || canvasResult) && (
+                      {artifact && (
+                        <button
+                          type="button"
+                          className="chat-artifact-card"
+                          aria-label={
+                            artifact.title
+                              ? `Open artifact: ${artifact.title}`
+                              : "Open canvas artifact"
+                          }
+                          title="Open the published canvas artifact"
+                          onClick={() =>
+                            openCanvas({
+                              kind: "html",
+                              source: { type: "snapshot", key: artifact.key },
+                              ...(artifact.title ? { title: artifact.title } : {}),
+                            })
+                          }
+                        >
+                          <span className="chat-artifact-glyph" aria-hidden="true">
+                            ◫
+                          </span>
+                          <span className="chat-artifact-text">
+                            <span className="chat-artifact-title">
+                              {artifact.title ?? "Canvas artifact"}
+                            </span>
+                            <span className="chat-artifact-sub">
+                              {artifact.title ? "Canvas artifact · Open" : "Open"}
+                            </span>
+                          </span>
+                          <span className="chat-artifact-arrow" aria-hidden="true">
+                            →
+                          </span>
+                        </button>
+                      )}
+                      {(offerNotebook || offerIngest) && (
                         <div className="chat-message-actions">
-                          {offerCanvas && (
-                            <button
-                              type="button"
-                              className="chat-message-action"
-                              title="Open this message in the canvas drawer"
-                              onClick={() =>
-                                openCanvas({
-                                  kind: "markdown",
-                                  source: { type: "inline", text: m.content },
-                                  title: "Assistant message",
-                                })
-                              }
-                            >
-                              ⤢ Open in canvas
-                            </button>
-                          )}
-                          {canvasResult && (
-                            <button
-                              type="button"
-                              className="chat-message-action"
-                              title="Open the published canvas"
-                              onClick={() => openPublishedArtifact(canvasResult)}
-                            >
-                              ⤢ Open canvas
-                            </button>
-                          )}
                           {offerNotebook && (
                             <>
                               <button
