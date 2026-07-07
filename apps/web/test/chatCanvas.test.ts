@@ -1,41 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import type { LiveToolCall } from "../src/components/Chat/ToolCallsBlock.tsx";
+import type { ContentBlock } from "@keelson/shared";
 import {
-  CANVAS_OPEN_THRESHOLD,
-  publishedCanvasResult,
-  shouldOfferCanvas,
-} from "../src/lib/chatCanvas.ts";
-
-const long = "x".repeat(CANVAS_OPEN_THRESHOLD + 1);
-const short = "x".repeat(CANVAS_OPEN_THRESHOLD - 1);
-
-describe("shouldOfferCanvas", () => {
-  test("a finished, long assistant answer qualifies", () => {
-    expect(shouldOfferCanvas("assistant", long, false)).toBe(true);
-  });
-
-  test("a still-streaming answer does not (content is still growing)", () => {
-    expect(shouldOfferCanvas("assistant", long, true)).toBe(false);
-  });
-
-  test("a short assistant answer reads fine in the bubble", () => {
-    expect(shouldOfferCanvas("assistant", short, false)).toBe(false);
-  });
-
-  test("the threshold is exclusive — exactly THRESHOLD chars does not qualify", () => {
-    expect(shouldOfferCanvas("assistant", "x".repeat(CANVAS_OPEN_THRESHOLD), false)).toBe(false);
-  });
-
-  test("only assistant rows qualify — user/system/command are not markdown-rendered", () => {
-    expect(shouldOfferCanvas("user", long, false)).toBe(false);
-    expect(shouldOfferCanvas("system", long, false)).toBe(false);
-    expect(shouldOfferCanvas("command", long, false)).toBe(false);
-  });
-
-  test("length is measured after trimming whitespace", () => {
-    expect(shouldOfferCanvas("assistant", `${" ".repeat(5000)}hi`, false)).toBe(false);
-  });
-});
+  type LiveToolCall,
+  toolCallsFromContentParts,
+} from "../src/components/Chat/ToolCallsBlock.tsx";
+import { parsePublishedArtifact, publishedCanvasResult } from "../src/lib/chatCanvas.ts";
 
 describe("publishedCanvasResult", () => {
   test("returns the result string for a successful publish", () => {
@@ -71,5 +40,54 @@ describe("publishedCanvasResult", () => {
     ];
 
     expect(publishedCanvasResult(calls)).toBe(second);
+  });
+});
+
+describe("parsePublishedArtifact", () => {
+  test("extracts key and title from a publish result", () => {
+    const result = JSON.stringify({ key: "canvas:artifact:audit", slug: "audit", title: "Audit" });
+    expect(parsePublishedArtifact(result)).toEqual({
+      key: "canvas:artifact:audit",
+      title: "Audit",
+    });
+  });
+
+  test("omits an absent or blank title", () => {
+    const result = JSON.stringify({ key: "canvas:artifact:x", title: "   " });
+    expect(parsePublishedArtifact(result)).toEqual({ key: "canvas:artifact:x" });
+  });
+
+  test("returns undefined without a usable key", () => {
+    expect(parsePublishedArtifact(JSON.stringify({ slug: "x" }))).toBeUndefined();
+    expect(parsePublishedArtifact(JSON.stringify({ key: "" }))).toBeUndefined();
+    expect(parsePublishedArtifact("not json")).toBeUndefined();
+  });
+});
+
+describe("toolCallsFromContentParts", () => {
+  const publish = JSON.stringify({ key: "canvas:artifact:audit", slug: "audit", title: "Audit" });
+
+  test("pairs a tool_result that follows its tool_use", () => {
+    const parts: ContentBlock[] = [
+      { type: "tool_use", id: "t1", toolName: "canvas_publish", toolInput: { title: "Audit" } },
+      { type: "tool_result", toolUseId: "t1", content: publish },
+    ];
+    expect(publishedCanvasResult(toolCallsFromContentParts(parts))).toBe(publish);
+  });
+
+  // Regression: the copilot bridge persists a tool_result BEFORE its tool_use.
+  // A single forward pass dropped it as an orphan, so the reopened chat lost the
+  // artifact affordance even though the live turn had shown it.
+  test("pairs a tool_result that precedes its tool_use (copilot order)", () => {
+    const parts: ContentBlock[] = [
+      { type: "tool_result", toolUseId: "t1", content: publish },
+      { type: "tool_use", id: "t1", toolName: "canvas_publish", toolInput: { title: "Audit" } },
+    ];
+    expect(publishedCanvasResult(toolCallsFromContentParts(parts))).toBe(publish);
+  });
+
+  test("drops a truly orphaned tool_result", () => {
+    const parts: ContentBlock[] = [{ type: "tool_result", toolUseId: "missing", content: publish }];
+    expect(toolCallsFromContentParts(parts)).toEqual([]);
   });
 });

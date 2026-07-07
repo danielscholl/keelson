@@ -21,24 +21,31 @@ export interface LiveToolCall {
 // Rebuild LiveToolCall[] from persisted `contentParts` so reloaded turns
 // render identically to the live path. Orphan tool_result blocks are
 // dropped, mirroring the live handler's defensive shape.
+//
+// Two passes, not one: some providers (the copilot bridge) persist a
+// tool_result BEFORE its tool_use, and a single forward pass would drop that
+// result as an orphan — losing, e.g., a canvas_publish key so the artifact
+// affordance vanishes on reload. The live handler parks early results for the
+// same reason; registering every tool_use first makes pairing order-independent.
 export function toolCallsFromContentParts(parts: readonly ContentBlock[]): LiveToolCall[] {
   const calls: LiveToolCall[] = [];
   const byId = new Map<string, LiveToolCall>();
   for (const block of parts) {
-    if (block.type === "tool_use") {
-      const call: LiveToolCall = {
-        id: block.id,
-        toolName: block.toolName,
-        ...(block.toolInput !== undefined ? { toolInput: block.toolInput } : {}),
-      };
-      calls.push(call);
-      byId.set(block.id, call);
-    } else if (block.type === "tool_result") {
-      const target = byId.get(block.toolUseId);
-      if (!target) continue;
-      target.result = block.content;
-      if (block.isError !== undefined) target.isError = block.isError;
-    }
+    if (block.type !== "tool_use") continue;
+    const call: LiveToolCall = {
+      id: block.id,
+      toolName: block.toolName,
+      ...(block.toolInput !== undefined ? { toolInput: block.toolInput } : {}),
+    };
+    calls.push(call);
+    byId.set(block.id, call);
+  }
+  for (const block of parts) {
+    if (block.type !== "tool_result") continue;
+    const target = byId.get(block.toolUseId);
+    if (!target) continue;
+    target.result = block.content;
+    if (block.isError !== undefined) target.isError = block.isError;
   }
   return calls;
 }

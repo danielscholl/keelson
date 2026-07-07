@@ -2982,6 +2982,23 @@ button.tab:focus-visible {
   background: #fff;
 }
 
+/* An html canvas has no markdown reading column and no footer scrim, so its
+   frame owns the whole drawer body and its own scroll. Drop the reading padding
+   and the 70vh floor and let the frame flex to fill the exact available height,
+   so it reaches the drawer floor at any viewport size instead of stopping at 70vh. */
+.canvas-drawer-html .canvas-drawer-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.canvas-drawer-html .canvas-drawer-body .canvas-html-frame {
+  flex: 1 1 0;
+  min-height: 0;
+  border-radius: 0;
+}
+
 /* Full-width surface, but keep the reading column comfortable and centered. */
 .canvas-drawer-body .markdown-content {
   max-width: 70ch;
@@ -8841,6 +8858,69 @@ a.cvb-card-title::after {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   box-shadow: var(--shadow-popover);
+}
+
+/* The published-artifact affordance: the deliverable a canvas_publish turn
+   produced, named and always visible (unlike the hover-revealed secondary
+   actions above), opening the artifact in the canvas drawer on click. */
+.chat-artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 340px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--card-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--fg);
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.chat-artifact-card:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--card-2));
+  border-color: color-mix(in srgb, var(--accent) 48%, transparent);
+}
+.chat-artifact-glyph {
+  flex: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--accent);
+}
+.chat-artifact-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.chat-artifact-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-artifact-sub {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.chat-artifact-arrow {
+  flex: none;
+  font-size: 14px;
+  color: var(--accent);
+  opacity: 0.7;
+  transition: transform 100ms ease, opacity 100ms ease;
+}
+.chat-artifact-card:hover .chat-artifact-arrow {
+  opacity: 1;
+  transform: translateX(2px);
 }
 
 .save-memory-backdrop {
