@@ -112,6 +112,7 @@ async function sendPrompt(): Promise<void> {
 
 beforeEach(() => {
   sessionStorage.setItem("keelson.conversationId", "conv-1");
+  conversations[0]!.messages = [];
   onFrame = null;
 });
 
@@ -137,6 +138,52 @@ describe("canvas_publish auto-open", () => {
       onFrame?.(chunk({ type: "tool_result", toolUseId: "call_2", content: publishResult }));
     });
     await waitFor(() => expect(screen.getByText("Auto-open Check")).toBeTruthy());
+  });
+
+  test("streamed successful publishes can reopen the drawer from the message row", async () => {
+    renderChat();
+    await sendPrompt();
+    act(() => {
+      onFrame?.(chunk({ type: "tool_use", id: "call_4", toolName: "canvas_publish" }));
+      onFrame?.(chunk({ type: "tool_result", toolUseId: "call_4", content: publishResult }));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: "⤢ Open canvas" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close canvas" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Auto-open Check" })).toBeNull(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "⤢ Open canvas" }));
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
+    );
+  });
+
+  test("reloaded conversations show the published canvas action", async () => {
+    conversations[0]!.messages = [
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        role: "assistant",
+        content: "Published an artifact.",
+        contentParts: [
+          { type: "tool_use", id: "call_stored", toolName: "canvas_publish" },
+          { type: "tool_result", toolUseId: "call_stored", content: publishResult },
+        ],
+        createdAt: "2026-01-01T00:00:02.000Z",
+      },
+    ];
+
+    renderChat();
+
+    fireEvent.click(await screen.findByRole("button", { name: "⤢ Open canvas" }));
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Auto-open Check" })).toBeTruthy(),
+    );
   });
 
   test("an errored publish result never opens the drawer", async () => {
