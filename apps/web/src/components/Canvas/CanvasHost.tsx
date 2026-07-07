@@ -148,7 +148,7 @@ function CanvasDrawer({
       <div className="canvas-backdrop" onClick={onClose} aria-hidden="true" />
       <aside
         ref={dialogRef}
-        className="canvas-drawer"
+        className={`canvas-drawer canvas-drawer-${doc.kind}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

@@ -2909,8 +2909,7 @@ button.tab:focus-visible {
   left: 0;
   right: 0;
   height: 100vh;
-  /* Match the home-page content column: capped at --max-content-width and
-     centered, so the sheet sits over the content rather than the whole window. */
+  /* Match the home-page content column for capped reading surfaces. */
   width: 100%;
   max-width: var(--max-content-width);
   margin-inline: auto;
@@ -2921,6 +2920,10 @@ button.tab:focus-visible {
   display: flex;
   flex-direction: column;
   animation: credentials-slide-in 180ms ease-out;
+}
+
+.canvas-drawer-html {
+  max-width: none;
 }
 
 .canvas-drawer-header {
