@@ -406,6 +406,54 @@ describe("Usage page", () => {
     getUsageEventsImpl = async () => [];
   });
 
+  test("surfaces the warming-up cheaper-model signal for a cheap job below the run bar", async () => {
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 1,
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheReadTokens: 250,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageJobsImpl = async () => [
+      {
+        key: "smoke-test",
+        runs: 2,
+        totalTokens: 52,
+        avgTokensPerRun: 26,
+        p95TokensPerRun: 26,
+      },
+    ];
+    getUsageEventsImpl = async () => [];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Cheaper-model candidate").length).toBeGreaterThan(0),
+    );
+    // Warming up = cheap (avg < 500) but under the run bar (runs < 3); asserts the
+    // remaining-run countdown and the singular "run" branch of the pluralization.
+    expect(screen.getByText("Warming up")).toBeDefined();
+    expect(screen.getByText(/smoke-test looks cheap/)).toBeDefined();
+    expect(screen.getByText(/1 more run to flag it/)).toBeDefined();
+
+    getUsageSummaryImpl = async () => ({
+      totals: {
+        events: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      groups: [],
+    });
+    getUsageJobsImpl = async () => [];
+  });
+
   test("labels auto model rows as unresolved", async () => {
     getUsageSummaryImpl = async (query) =>
       query.groupBy === "model"
