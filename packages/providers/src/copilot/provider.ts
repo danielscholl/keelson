@@ -414,15 +414,7 @@ export class CopilotProvider implements IAgentProvider {
       this.cancelIdleTimer();
 
       try {
-        yield* this.streamTurn(
-          prompt,
-          warm,
-          token,
-          cwd,
-          resumeSessionId,
-          options,
-          attempt === 0,
-        );
+        yield* this.streamTurn(prompt, warm, token, cwd, resumeSessionId, options, attempt === 0);
         return;
       } catch (err) {
         if (err instanceof RetryableConnectionError && attempt === 0) {

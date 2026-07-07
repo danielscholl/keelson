@@ -724,6 +724,92 @@ describe("CopilotProvider — abort", () => {
 
 describe("CopilotProvider — warm client (issue #327)", () => {
   const idle = (s: MockSession) => s.emit("session.idle");
+  const disposedConnectionMessage = "Pending response rejected since connection got disposed";
+  type HandlerMap = Map<string, Set<(event: unknown) => void>>;
+
+  const emitSessionEvent = (
+    handlers: HandlerMap,
+    eventType: string,
+    data: Record<string, unknown> = {},
+  ) => {
+    for (const h of handlers.get(eventType) ?? []) {
+      h({ type: eventType, data });
+    }
+  };
+
+  const makeSessionForRun = (
+    run: (handlers: HandlerMap) => void | Promise<void>,
+  ): CopilotSessionLike => {
+    const handlers: HandlerMap = new Map();
+    return {
+      sessionId: "s",
+      send(): Promise<unknown> {
+        return new Promise((resolve, reject) => {
+          queueMicrotask(async () => {
+            try {
+              await run(handlers);
+              resolve("m");
+            } catch (err) {
+              reject(err);
+            }
+          });
+        });
+      },
+      on(t: string, h: (e: unknown) => void) {
+        let set = handlers.get(t);
+        if (!set) {
+          set = new Set();
+          handlers.set(t, set);
+        }
+        set.add(h);
+        return () => set!.delete(h);
+      },
+      async abort() {},
+      async disconnect() {},
+      async setModel() {},
+    };
+  };
+
+  const makeTurnClientModule = (
+    createSession: (idx: number) => CopilotSessionLike,
+    onStop?: (idx: number) => void,
+  ) => {
+    let instances = 0;
+    const stops: boolean[] = [];
+    class TurnClient {
+      idx: number;
+      constructor(public readonly options: Record<string, unknown>) {
+        this.idx = instances++;
+        stops[this.idx] = false;
+      }
+      async start() {}
+      async stop() {
+        stops[this.idx] = true;
+        onStop?.(this.idx);
+        return [];
+      }
+      async createSession() {
+        return createSession(this.idx);
+      }
+      async resumeSession() {
+        return this.createSession();
+      }
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      }
+      async listModels() {
+        return [];
+      }
+    }
+    return {
+      count: () => instances,
+      stops,
+      module: {
+        CopilotClient: TurnClient as unknown as CopilotSdkModule["CopilotClient"],
+        approveAll: (() => ({ kind: "permit" })) as unknown as CopilotSdkModule["approveAll"],
+      },
+    };
+  };
 
   it("reuses one warm client across sequential turns (no re-spawn)", async () => {
     const sdk = makeMockSdk({
@@ -949,6 +1035,133 @@ describe("CopilotProvider — warm client (issue #327)", () => {
     await provider.dispose();
     expect(stops[0]).toBe(true);
     expect(stops[1]).toBe(true);
+  });
+
+  it("retries when send rejects with the disposed-connection error before streaming", async () => {
+    const harness = makeTurnClientModule((idx) =>
+      idx === 0
+        ? makeSessionForRun(() => {
+            throw new Error(disposedConnectionMessage);
+          })
+        : makeSessionForRun((handlers) => {
+            emitSessionEvent(handlers, "assistant.message_delta", { deltaContent: "ok" });
+            emitSessionEvent(handlers, "session.idle");
+          }),
+    );
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => harness.module }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+
+    expect(harness.count()).toBe(2);
+    expect(chunks).toEqual([{ type: "text", content: "ok" }]);
+    expect(chunks.some((c) => c.type === "error")).toBe(false);
+    await provider.dispose();
+    expect(harness.stops[0]).toBe(true);
+    expect(harness.stops[1]).toBe(true);
+  });
+
+  it("retries when session.error carries the disposed-connection error before streaming", async () => {
+    const harness = makeTurnClientModule((idx) =>
+      idx === 0
+        ? makeSessionForRun((handlers) => {
+            emitSessionEvent(handlers, "session.error", { message: disposedConnectionMessage });
+          })
+        : makeSessionForRun((handlers) => {
+            emitSessionEvent(handlers, "assistant.message_delta", { deltaContent: "ok" });
+            emitSessionEvent(handlers, "session.idle");
+          }),
+    );
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => harness.module }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+
+    expect(harness.count()).toBe(2);
+    expect(chunks).toEqual([{ type: "text", content: "ok" }]);
+    expect(chunks.some((c) => c.type === "error")).toBe(false);
+  });
+
+  it("does not retry when send rejects with the disposed-connection error after streaming", async () => {
+    const harness = makeTurnClientModule(() =>
+      makeSessionForRun((handlers) => {
+        emitSessionEvent(handlers, "assistant.message_delta", { deltaContent: "partial" });
+        throw new Error(disposedConnectionMessage);
+      }),
+    );
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => harness.module }),
+    });
+    const chunks: MessageChunk[] = [];
+    let thrown: unknown = null;
+
+    try {
+      for await (const chunk of provider.sendQuery("hi", "/tmp")) {
+        chunks.push(chunk);
+      }
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(harness.count()).toBe(1);
+    expect(chunks.map((c) => c.type)).toEqual(["text", "error"]);
+  });
+
+  it("surfaces the disposed-connection error when the retry also rejects before streaming", async () => {
+    const harness = makeTurnClientModule(() =>
+      makeSessionForRun(() => {
+        throw new Error(disposedConnectionMessage);
+      }),
+    );
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => harness.module }),
+    });
+    const chunks: MessageChunk[] = [];
+    let thrown: unknown = null;
+
+    try {
+      for await (const chunk of provider.sendQuery("hi", "/tmp")) {
+        chunks.push(chunk);
+      }
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(harness.count()).toBe(2);
+    expect(chunks.map((c) => c.type)).toEqual(["error"]);
+    await provider.dispose();
+    expect(harness.stops[0]).toBe(true);
+    expect(harness.stops[1]).toBe(true);
+  });
+
+  it("does not acquire a retry client when the abort signal is already aborted", async () => {
+    const ac = new AbortController();
+    const harness = makeTurnClientModule(
+      () =>
+        makeSessionForRun(() => {
+          throw new Error(disposedConnectionMessage);
+        }),
+      () => ac.abort(),
+    );
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => harness.module }),
+    });
+
+    const chunks = await drain(
+      provider.sendQuery("hi", "/tmp", undefined, { abortSignal: ac.signal }),
+    );
+
+    expect(chunks).toHaveLength(0);
+    expect(harness.count()).toBe(1);
   });
 
   it("drops both clients when the warm one and its respawn are both wedged", async () => {
