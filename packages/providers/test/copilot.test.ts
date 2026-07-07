@@ -2454,6 +2454,46 @@ describe("CopilotProvider — token usage (chat/workflow usage feedback)", () =>
     });
   });
 
+  it("normalizes Anthropic-served usage and clamps cache-heavy calls", async () => {
+    const sdk = makeMockSdk({
+      scenario: (session) => {
+        session.emit("assistant.usage", {
+          model: "claude-sonnet-4.5",
+          inputTokens: 100,
+          outputTokens: 5,
+          cacheReadTokens: 70,
+          cacheWriteTokens: 10,
+        });
+        session.emit("assistant.usage", {
+          model: "claude-sonnet-4.5",
+          inputTokens: 50,
+          outputTokens: 7,
+          cacheReadTokens: 80,
+          cacheWriteTokens: 30,
+        });
+        session.emit("session.idle");
+      },
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => undefined,
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+
+    const usageChunks = chunks.filter((c) => c.type === "usage");
+    expect(usageChunks).toHaveLength(1);
+    expect(usageChunks[0]).toEqual({
+      type: "usage",
+      usage: {
+        inputTokens: 20,
+        outputTokens: 12,
+        cacheReadInputTokens: 150,
+        cacheCreationInputTokens: 40,
+      },
+    });
+  });
+
   it("emits a context-only usage chunk when only session.usage_info fires", async () => {
     const sdk = makeMockSdk({
       scenario: (session) => {
