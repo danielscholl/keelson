@@ -25,6 +25,9 @@ export interface RecordUsageEventInput {
   source: UsageEventSource;
   provider: string;
   model: string;
+  // Fresh input only; cache read/write live in their own columns. Historical
+  // rows written before provider normalization may mix cache-inclusive and
+  // fresh-only conventions, and there is no per-row flag to backfill them.
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number | null;
@@ -388,6 +391,8 @@ export function createUsageStore(db: Database): UsageStore {
       }
       const rows = db
         .query(
+          // Job burn uses fresh input + output; cache columns stay separately
+          // queryable through summary/series/events rather than being folded in.
           `SELECT COALESCE(workflow_name, rib_id, source) AS key,
                  COALESCE(run_id, printf('event:%d', id)) AS runId,
                   COALESCE(SUM(input_tokens + output_tokens), 0) AS totalTokens

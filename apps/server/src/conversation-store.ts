@@ -50,10 +50,9 @@ export interface ConversationStore {
   setProviderSessionId(id: string, sessionId: string): void;
   update(id: string, patch: UpdateConversationPatch): Conversation | undefined;
   delete(id: string): boolean;
-  // Accumulated assistant-turn spend for one conversation: the count of
-  // assistant messages (`turns`) and the sum of their input+output tokens
-  // (`totalTokens`). Backs the request-phase budget gate without loading full
-  // message bodies.
+  // Accumulated assistant-turn spend for one conversation: `totalTokens` is
+  // fresh input + output. Cache read/write stay separate in TokenUsage; older
+  // rows may carry mixed provider input conventions.
   getUsageTotals(id: string): { totalTokens: number; turns: number };
 }
 
