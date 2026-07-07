@@ -785,6 +785,7 @@ describe("CopilotProvider — warm client (issue #327)", () => {
       scenario: (s) => {
         turn += 1;
         if (turn === 1) {
+          s.emit("assistant.message_delta", { deltaContent: "partial" });
           s.emit("session.error", { message: "socket disconnected", errorType: "network" });
         } else {
           s.emit("assistant.message_delta", { deltaContent: "ok" });
