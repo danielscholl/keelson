@@ -52,6 +52,7 @@ interface Region {
   collapsible?: boolean;
   collapsed?: boolean;
   live?: boolean;
+  hideWhenEmpty?: boolean;
 }
 
 // A rib's primary surface: region-bound boards laid out as header → banner →
@@ -437,6 +438,13 @@ function SurfaceRegion({
   ) : (
     <SnapshotStateView snapshot={snap} busy={busy} />
   );
+  const hidden =
+    (region.hideWhenEmpty ?? false) &&
+    !(
+      snap.status === "live" &&
+      (parsed?.success && parsed.data.view !== "board" ? true : !!board && board.sections.length >= 1)
+    );
+  if (hidden) return null;
 
   return (
     <section
