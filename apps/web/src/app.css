@@ -3282,7 +3282,10 @@ button.tab:focus-visible {
 .surface-row {
   display: flex;
   gap: 16px;
-  align-items: stretch;
+  /* Each region is a self-contained bordered card, so size it to its own content
+     rather than stretching to the tallest sibling — an empty panel beside a tall one
+     shipped a column of air. Regions carry no height-fill children that need stretch. */
+  align-items: flex-start;
   flex-wrap: wrap;
 }
 .surface-row > .surface-region {
