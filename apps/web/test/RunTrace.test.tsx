@@ -18,6 +18,9 @@ function node(partial: Partial<NodeView> & { nodeId: string }): NodeView {
   };
 }
 
+const TRACE_USAGE_TOOLTIP =
+  "Cumulative input tokens across all model API calls in this node — not the current prompt size. Context fill is shown separately.";
+
 describe("RunTrace — per-node model", () => {
   // Warm the module graph (RunTrace pulls MarkdownContent → shiki) so the
   // first render doesn't pay the import cost inside its per-test timeout.
@@ -78,5 +81,104 @@ describe("RunTrace — per-node model", () => {
     // Provider from the runtime, model backfilled from the declared "auto".
     expect(screen.getByText("copilot · auto")).toBeDefined();
     expect(screen.getByTitle("Ran on copilot · auto")).toBeDefined();
+  });
+
+  test("node usage popover shows context and cache rows from reported usage", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt" }];
+    const nodes: Record<string, NodeView> = {
+      reason: node({
+        nodeId: "reason",
+        type: "prompt",
+        usage: {
+          inputTokens: 1500,
+          outputTokens: 340,
+          cacheReadInputTokens: 9000,
+          cacheCreationInputTokens: 1200,
+          contextTokens: 60_000,
+          contextWindow: 200_000,
+        },
+      }),
+    };
+    const { container } = render(
+      <RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />,
+    );
+    const trigger = screen.getByTitle(TRACE_USAGE_TOOLTIP);
+    const popoverId = trigger.getAttribute("popovertarget");
+
+    expect(trigger.textContent).toBe("↑1.5k ↓340");
+    expect(popoverId).toContain("reason");
+    expect(container.querySelector(`[id="${popoverId}"]`)).not.toBeNull();
+    expect(screen.getByText("Context")).toBeDefined();
+    expect(screen.getByText("60k of 200k (30%)")).toBeDefined();
+    expect(screen.getByText("Node")).toBeDefined();
+    expect(screen.getByText("Cache read")).toBeDefined();
+    expect(screen.getByText("9k")).toBeDefined();
+    expect(screen.getByText("Cache write")).toBeDefined();
+    expect(screen.getByText("1.2k")).toBeDefined();
+  });
+
+  test("node usage popover omits absent cache and context rows", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt" }];
+    const nodes: Record<string, NodeView> = {
+      reason: node({
+        nodeId: "reason",
+        type: "prompt",
+        usage: { inputTokens: 10, outputTokens: 5 },
+      }),
+    };
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />);
+
+    expect(screen.getByTitle(TRACE_USAGE_TOOLTIP)).toBeDefined();
+    expect(screen.queryByText("Context")).toBeNull();
+    expect(screen.queryByText("Cache read")).toBeNull();
+    expect(screen.queryByText("Cache write")).toBeNull();
+  });
+
+  test("context-only usage does not render a fabricated input/output chip", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt" }];
+    const nodes: Record<string, NodeView> = {
+      reason: node({
+        nodeId: "reason",
+        type: "prompt",
+        usage: { inputTokens: 0, outputTokens: 0, contextTokens: 42_000, contextWindow: 200_000 },
+      }),
+    };
+    const { container } = render(
+      <RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />,
+    );
+
+    expect(container.querySelector(".trace-usage")).toBeNull();
+    expect(screen.queryByText(/↑0/)).toBeNull();
+    expect(screen.queryByText(/↓0/)).toBeNull();
+  });
+
+  test("node usage popover ids are unique per node", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [
+      { id: "plan/one", type: "prompt" },
+      { id: "plan/two", type: "prompt" },
+    ];
+    const nodes: Record<string, NodeView> = {
+      "plan/one": node({
+        nodeId: "plan/one",
+        type: "prompt",
+        usage: { inputTokens: 10, outputTokens: 1 },
+      }),
+      "plan/two": node({
+        nodeId: "plan/two",
+        type: "prompt",
+        usage: { inputTokens: 20, outputTokens: 2 },
+      }),
+    };
+    const { container } = render(
+      <RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />,
+    );
+    const ids = [...container.querySelectorAll(".trace-usage")].map((el) =>
+      el.getAttribute("popovertarget"),
+    );
+
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids[0]).toContain("plan%2Fone");
+    expect(ids[1]).toContain("plan%2Ftwo");
   });
 });

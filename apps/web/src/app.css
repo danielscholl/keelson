@@ -9429,7 +9429,19 @@ a.cvb-card-title::after {
 
 /* Workflow surfaces: per-node tokens in the trace head, run rollup in the
    header. Both reuse the muted monospace voice of .dur / .duration. */
-.trace-usage { white-space: nowrap; }
+.trace-usage {
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.trace-usage:hover { color: var(--fg); }
+.trace-usage:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
 .run-usage {
   font-family: ui-monospace, monospace;
   font-size: 12px;
