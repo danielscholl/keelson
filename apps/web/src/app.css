@@ -4555,6 +4555,7 @@ a.cvb-card-title::after {
 }
 .cvb-seat[data-filled] {
   border-style: solid;
+  border-color: var(--tone);
 }
 .cvb-seat[data-filled] .cvb-seat-dot {
   opacity: 1;
