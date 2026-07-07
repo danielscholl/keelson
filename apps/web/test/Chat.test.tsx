@@ -28,7 +28,45 @@ const conversations: Conversation[] = [
       },
     ],
   },
+  {
+    id: "conv-2",
+    name: "Second chat",
+    providerId: "stub",
+    model: "stub-model",
+    projectId: null,
+    createdAt: "2026-01-02T00:00:00.000Z",
+    updatedAt: "2026-01-02T00:00:00.000Z",
+    messages: [
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        role: "user",
+        content: "Second question",
+        createdAt: "2026-01-02T00:00:01.000Z",
+      },
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        role: "assistant",
+        content: "Second answer here",
+        createdAt: "2026-01-02T00:00:02.000Z",
+      },
+    ],
+  },
 ];
+
+// Gate that lets a test hold a getConversation call open, so the intermediate
+// loading state (skeleton, prior transcript cleared) is observable before the
+// incoming conversation resolves. Null gate = resolve immediately.
+let getConversationGate: Promise<void> | null = null;
+let releaseConversationGate: (() => void) | null = null;
+function armConversationGate(): void {
+  getConversationGate = new Promise<void>((resolve) => {
+    releaseConversationGate = () => {
+      releaseConversationGate = null;
+      getConversationGate = null;
+      resolve();
+    };
+  });
+}
 
 let ribSummaries: RibSummary[] = [];
 const postRibActionCalls: Array<{ id: string; action: unknown }> = [];
@@ -54,7 +92,10 @@ mock.module("../src/api.ts", () => ({
   }),
   fetchTools: async () => [],
   getCommands: async () => [],
-  getConversation: async (id: string) => conversations.find((c) => c.id === id) ?? null,
+  getConversation: async (id: string) => {
+    if (getConversationGate) await getConversationGate;
+    return conversations.find((c) => c.id === id) ?? null;
+  },
   invokeRibCommand: async () => ({ effect: "message", message: "ok" }),
   listConversations: async () => conversations,
   listProjects: async () => [],
@@ -101,6 +142,8 @@ beforeEach(() => {
   ribSummaries = [];
   postRibActionCalls.length = 0;
   postRibActionResult = { ok: true };
+  getConversationGate = null;
+  releaseConversationGate = null;
 });
 
 describe("Chat send to surface", () => {
@@ -139,5 +182,25 @@ describe("Chat send to surface", () => {
       ]),
     );
     expect(await screen.findByText("Sent to surface")).toBeDefined();
+  });
+});
+
+describe("Chat conversation switch", () => {
+  test("clears the previous transcript and shows a skeleton while the next loads", async () => {
+    const { container } = renderChat();
+    await screen.findByText("Send this summary");
+
+    // Hold the incoming load open so the intermediate state is observable.
+    armConversationGate();
+    fireEvent.click(screen.getByText("Second chat"));
+
+    // The outgoing conversation's messages must clear immediately rather than
+    // linger until the incoming fetch resolves; a skeleton stands in.
+    await waitFor(() => expect(screen.queryByText("Send this summary")).toBeNull());
+    expect(container.querySelector(".chat-skeleton")).not.toBeNull();
+
+    // Release the load; the incoming conversation renders.
+    releaseConversationGate?.();
+    expect(await screen.findByText("Second answer here")).toBeDefined();
   });
 });

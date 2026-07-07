@@ -1835,6 +1835,10 @@ export function Chat({
       abortActiveStream();
       setError(null);
       setHydrating(true);
+      // Drop the outgoing transcript now so the load skeleton shows during the
+      // fetch; the skeleton branch keys off visibleMessages.length === 0, so a
+      // stale non-empty list would keep the previously-selected chat on screen.
+      setMessages([]);
       setConversationId(id);
       conversationIdRef.current = id;
       // Stale-resolution guard: rapid clicks fire overlapping requests; a
