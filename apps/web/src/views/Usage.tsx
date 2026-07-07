@@ -6,6 +6,7 @@ import {
   USAGE_PULSE_SNAPSHOT_KEY,
   type UsageEventRowWire,
   type UsageEventSourceWire,
+  type UsageJobsRowWire,
   type UsageSeriesResponseWire,
   type UsageSummaryResponseWire,
   usagePulseSnapshotSchema,
@@ -71,6 +72,12 @@ const SERIES_COLOR_COUNT = 6;
 // shared limit out of the recent window the way a single combined query would.
 const FAILURE_STATUSES = ["error", "aborted", "timeout"] as const;
 const FAILURE_EVENTS_LIMIT = 200;
+
+// The "Cheaper-model candidate" signal flags a recurring workflow/rib job whose
+// per-run token spend is low enough a smaller model would likely serve it. A job
+// must repeat enough to judge (runs) and stay under the per-run token bar (avg).
+const RIGHT_SIZE_MIN_RUNS = 3;
+const RIGHT_SIZE_MAX_AVG_TOKENS = 500;
 
 function cacheReadRate(inputTokens: number, cacheReadTokens: number) {
   const totalInputTokens = inputTokens + cacheReadTokens;
@@ -1024,12 +1031,54 @@ function JobsSection({ range }: { range: UsageWindow }) {
   );
 }
 
+type RightSizeSignal = { value: string; detail: string; tone?: "accent" };
+
+// Four honest states so the card teaches whether it can ever fire (see the
+// RIGHT_SIZE_* thresholds): a real finding, a cheap job still warming up toward
+// the run bar, recurring jobs that earn their model, or no workflow/rib activity
+// at all — the chat-only case, where it can never fire.
+function computeRightSizeSignal(jobs: readonly UsageJobsRowWire[]): RightSizeSignal {
+  const cheap = jobs.filter((j) => j.avgTokensPerRun < RIGHT_SIZE_MAX_AVG_TOKENS);
+  const finding = cheap
+    .filter((j) => j.runs >= RIGHT_SIZE_MIN_RUNS)
+    .sort((a, b) => b.runs - a.runs)[0];
+  if (finding) {
+    const avg = formatTokens(Math.round(finding.avgTokensPerRun));
+    return {
+      value: finding.key,
+      detail: `Ran ${finding.runs}× · ~${avg} tok/run — likely fine on a smaller, cheaper model.`,
+      tone: "accent",
+    };
+  }
+  const warming = cheap
+    .filter((j) => j.runs < RIGHT_SIZE_MIN_RUNS)
+    .sort((a, b) => b.runs - a.runs)[0];
+  if (warming) {
+    const avg = formatTokens(Math.round(warming.avgTokensPerRun));
+    const remaining = RIGHT_SIZE_MIN_RUNS - warming.runs;
+    return {
+      value: "Warming up",
+      detail: `${warming.key} looks cheap (~${avg} tok/run) — ${remaining} more ${remaining === 1 ? "run" : "runs"} to flag it.`,
+    };
+  }
+  if (jobs.length > 0) {
+    return {
+      value: "Nothing to right-size",
+      detail: "Your recurring jobs earn their model — none is cheap enough to downshift.",
+    };
+  }
+  return {
+    value: "Not applicable yet",
+    detail: "Run a workflow or rib to check if any could use a smaller model.",
+  };
+}
+
 function SignalsSection({ range }: { range: UsageWindow }) {
   const [signals, setSignals] = useState<{
     failureTokens: number;
     failureTurns: number;
     failureTop: string | null;
-    downshift: string | null;
+    rightSize: RightSizeSignal;
     cacheReadRate: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1060,16 +1109,12 @@ function SignalsSection({ range }: { range: UsageWindow }) {
           attribution.set(key, (attribution.get(key) ?? 0) + tokens);
         }
         const failureTop = [...attribution.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-        const downshift =
-          [...jobs]
-            .filter((job) => job.runs >= 3 && job.avgTokensPerRun < 500)
-            .sort((a, b) => b.runs - a.runs)[0]?.key ?? null;
         const { totals } = summary;
         setSignals({
           failureTokens,
           failureTurns: failingEvents.length,
           failureTop,
-          downshift,
+          rightSize: computeRightSizeSignal(jobs),
           cacheReadRate: cacheReadRate(totals.inputTokens, totals.cacheReadTokens),
         });
       })
@@ -1119,13 +1164,11 @@ function SignalsSection({ range }: { range: UsageWindow }) {
               tone={signals.failureTurns > 0 ? "hot" : "ok"}
             />
             <SignalCard
-              title="Downshift candidate"
-              value={signals.downshift ?? "No signal"}
-              detail={
-                signals.downshift
-                  ? "High run count with low average tokens per run."
-                  : "No high-volume low-output job found."
-              }
+              title="Cheaper-model candidate"
+              value={signals.rightSize.value}
+              detail={signals.rightSize.detail}
+              tone={signals.rightSize.tone}
+              hint={`Flags a workflow or rib run ${RIGHT_SIZE_MIN_RUNS}+ times averaging under ${RIGHT_SIZE_MAX_AVG_TOKENS} tokens/run — a sign a smaller model would serve it.`}
             />
             <SignalCard
               title="Cache-read trend"
@@ -1145,14 +1188,16 @@ function SignalCard({
   value,
   detail,
   tone,
+  hint,
 }: {
   title: string;
   value: string;
   detail: string;
-  tone?: "ok" | "hot";
+  tone?: "ok" | "hot" | "accent";
+  hint?: string;
 }) {
   return (
-    <div className="usage-signal-card">
+    <div className="usage-signal-card" title={hint}>
       <div className="usage-stat-label">{title}</div>
       <div className="usage-stat-value" data-tone={tone}>
         {value}
