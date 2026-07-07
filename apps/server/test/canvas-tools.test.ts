@@ -187,6 +187,29 @@ describe("canvas_publish", () => {
     expect(isError).toBe(true);
     expect(content).toContain("invalid input");
   });
+
+  test("unregister removes the snapshot key and allows republish", async () => {
+    const first = makeCtx();
+    await tool("canvas_publish").execute({ title: "Disposable", html: PAGE() }, first.ctx);
+    const result = JSON.parse(lastResult(first.chunks).content) as { key: string; slug: string };
+
+    expect(manager.keys()).toContain(result.key);
+
+    handle.unregister(result.slug);
+    handle.unregister(result.slug);
+
+    expect(manager.keys()).not.toContain(result.key);
+    expect(manager.latest(result.key)).toBeUndefined();
+
+    const second = makeCtx();
+    await tool("canvas_publish").execute(
+      { title: "Disposable Again", html: "<body><h1>again</h1></body>", name: result.slug },
+      second.ctx,
+    );
+
+    expect(manager.keys()).toContain(result.key);
+    expect(manager.latest<string>(result.key)?.data).toContain("again");
+  });
 });
 
 describe("registerExisting", () => {
