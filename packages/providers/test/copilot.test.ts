@@ -2444,7 +2444,7 @@ describe("CopilotProvider — token usage (chat/workflow usage feedback)", () =>
     expect(usageChunks[0]).toEqual({
       type: "usage",
       usage: {
-        inputTokens: 160,
+        inputTokens: 127,
         outputTokens: 50,
         cacheReadInputTokens: 25,
         cacheCreationInputTokens: 8,

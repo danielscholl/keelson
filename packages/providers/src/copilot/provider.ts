@@ -658,7 +658,10 @@ export class CopilotProvider implements IAgentProvider {
             return;
           }
           sawCallUsage = true;
-          turnInput += input ?? 0;
+          turnInput += Math.max(
+            0,
+            (input ?? 0) - (cacheRead ?? 0) - (cacheWrite ?? 0),
+          );
           turnOutput += output ?? 0;
           turnCacheRead += cacheRead ?? 0;
           turnCacheWrite += cacheWrite ?? 0;
