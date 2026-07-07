@@ -383,8 +383,9 @@ describe("Usage page", () => {
 
     await waitFor(() => expect(screen.getAllByText("Failure burn").length).toBeGreaterThan(0));
     expect(screen.getByText(/top: standing-lens/)).toBeDefined();
-    expect(screen.getByText("Downshift candidate")).toBeDefined();
+    expect(screen.getByText("Cheaper-model candidate")).toBeDefined();
     expect(screen.getByText("standing-lens")).toBeDefined();
+    expect(screen.getByText(/likely fine on a smaller/)).toBeDefined();
     expect(screen.getByText("250 of 1.3k input")).toBeDefined();
     expect(screen.getAllByText("20%").length).toBeGreaterThan(0);
 

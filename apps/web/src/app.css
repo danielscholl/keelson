@@ -9314,9 +9314,11 @@ a.cvb-card-title::after {
   font-size: 22px;
   font-weight: 700;
   color: var(--fg-strong);
+  overflow-wrap: anywhere;
 }
 .usage-stat-value[data-tone="ok"] { color: var(--green); }
 .usage-stat-value[data-tone="hot"] { color: var(--red); }
+.usage-stat-value[data-tone="accent"] { color: var(--accent); }
 .usage-stat-label {
   font-size: 11px;
   color: var(--muted);
