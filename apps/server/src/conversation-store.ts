@@ -305,27 +305,28 @@ export function createConversationStore(
   // Messages cascade via the FK ON DELETE CASCADE on the messages table —
   // PRAGMA foreign_keys is enabled at openDatabase().
   const deleteConv = db.prepare("DELETE FROM conversations WHERE id = ?");
-  const deleteConversation = db.transaction((id: string): boolean => {
-    const existing = selectConv.get(id) as ConvRow | null;
-    if (!existing) return false;
+  const deleteConversation = db.transaction(
+    (id: string): { deleted: boolean; orphaned: string[] } => {
+      const existing = selectConv.get(id) as ConvRow | null;
+      if (!existing) return { deleted: false, orphaned: [] };
 
-    const ownedSlugs = publishedCanvasSlugsFromRows(
-      selectContentParts.all(id) as Array<{ content_parts: string | null }>,
-    );
-    const orphaned: string[] = [];
-    for (const slug of ownedSlugs) {
-      const candidates = selectOtherContentPartsByArtifact.all(
-        id,
-        `%${canvasArtifactKey(slug)}%`,
-      ) as Array<{ content_parts: string | null }>;
-      const stillPublished = publishedCanvasSlugsFromRows(candidates).includes(slug);
-      if (!stillPublished) orphaned.push(slug);
-    }
-    if (orphaned.length > 0) deps.onArtifactsOrphaned?.(orphaned);
+      const ownedSlugs = publishedCanvasSlugsFromRows(
+        selectContentParts.all(id) as Array<{ content_parts: string | null }>,
+      );
+      const orphaned: string[] = [];
+      for (const slug of ownedSlugs) {
+        const candidates = selectOtherContentPartsByArtifact.all(
+          id,
+          `%${canvasArtifactKey(slug)}%`,
+        ) as Array<{ content_parts: string | null }>;
+        const stillPublished = publishedCanvasSlugsFromRows(candidates).includes(slug);
+        if (!stillPublished) orphaned.push(slug);
+      }
 
-    const result = deleteConv.run(id);
-    return (result.changes ?? 0) > 0;
-  });
+      const result = deleteConv.run(id);
+      return { deleted: (result.changes ?? 0) > 0, orphaned };
+    },
+  );
 
   return {
     get(id) {
@@ -411,7 +412,10 @@ export function createConversationStore(
       return rowToConversation(refreshed, messages);
     },
     delete(id) {
-      return deleteConversation(id);
+      const { deleted, orphaned } = deleteConversation(id);
+      if (!deleted) return false;
+      if (orphaned.length > 0) deps.onArtifactsOrphaned?.(orphaned);
+      return true;
     },
     getUsageTotals(id) {
       const rows = selectAssistantUsage.all(id) as { usage_json: string | null }[];

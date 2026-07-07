@@ -385,6 +385,35 @@ describe("SQLite ConversationStore", () => {
     db.close();
   });
 
+  test("delete commits before artifact cleanup callback runs", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createConversationStore(db, {
+      onArtifactsOrphaned: () => {
+        throw new Error("artifact cleanup failed");
+      },
+    });
+    const conv = store.create({ providerId: "stub" });
+    store.appendMessage(
+      conv.id,
+      makeMessage({
+        id: "m1",
+        role: "assistant",
+        content: "Published artifact.",
+        contentParts: canvasPublishParts("throwing-artifact", "call_throw"),
+      }),
+    );
+
+    expect(() => store.delete(conv.id)).toThrow("artifact cleanup failed");
+    expect(store.get(conv.id)).toBeUndefined();
+    const remaining = (
+      db.query("SELECT COUNT(*) AS c FROM messages WHERE conversationId = ?").get(conv.id) as {
+        c: number;
+      }
+    ).c;
+    expect(remaining).toBe(0);
+    db.close();
+  });
+
   test("delete does not fire artifact cleanup for unknown ids", () => {
     const db = openDatabase({ path: dbPath });
     const orphanedCalls: string[][] = [];
