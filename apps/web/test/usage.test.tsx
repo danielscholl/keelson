@@ -6,7 +6,7 @@ import { afterAll, describe, expect, mock, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
 import { UsageChip } from "../src/components/Chat/UsageChip.tsx";
-import { UsagePopover } from "../src/components/Chat/UsagePopover.tsx";
+import { UsageBreakdown, UsagePopover } from "../src/components/Chat/UsagePopover.tsx";
 import {
   contextFillLevel,
   contextPercent,
@@ -151,6 +151,26 @@ describe("UsageChip", () => {
 });
 
 describe("UsagePopover", () => {
+  test("UsageBreakdown renders reported zero cache rows without inventing absent rows", () => {
+    render(
+      <UsageBreakdown
+        usage={{
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          contextTokens: 300,
+          contextWindow: 1000,
+        }}
+      />,
+    );
+    expect(screen.getByText("Context")).toBeDefined();
+    expect(screen.getByText("300 of 1k (30%)")).toBeDefined();
+    expect(screen.getByText("Cache read")).toBeDefined();
+    expect(screen.queryByText("Cache write")).toBeNull();
+    expect(screen.queryByText("↑ Input")).toBeNull();
+    expect(screen.queryByText("↓ Output")).toBeNull();
+  });
+
   test("renders context, last-turn, and session groups with cache rows", () => {
     render(
       <UsagePopover

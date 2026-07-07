@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { TokenUsage } from "@keelson/shared";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import {
   contextFillLevel,
@@ -19,6 +20,17 @@ interface UsagePopoverProps {
   totals: SessionUsageTotals;
 }
 
+interface UsagePopoverPanelProps {
+  popoverId: string;
+  ariaLabel?: string;
+  children: ReactNode;
+}
+
+interface UsageBreakdownProps {
+  usage: TokenUsage;
+  spendTitle?: string;
+}
+
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="usage-popover-row">
@@ -28,11 +40,59 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-// Breakdown behind the UsageChip. Three labeled groups keep the two distinct
-// measures from blurring together: "Context" is fill (last request vs the
-// model window), "Last turn" and "Session" are spend (per-turn and cumulative
-// totals). Rows render only when the provider reported the number.
-export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
+export function UsageBreakdown({ usage, spendTitle = "Last turn" }: UsageBreakdownProps) {
+  const pct = contextPercent(usage.contextTokens, usage.contextWindow);
+  const hasTurnSpend = hasSpend(usage);
+  const hasCacheRead = usage.cacheReadInputTokens !== undefined;
+  const hasCacheWrite = usage.cacheCreationInputTokens !== undefined;
+  const spendRows = hasTurnSpend || hasCacheRead || hasCacheWrite;
+  const cacheReadRow =
+    usage.cacheReadInputTokens !== undefined ? (
+      <Row label="Cache read" value={formatTokens(usage.cacheReadInputTokens)} />
+    ) : null;
+  const cacheWriteRow =
+    usage.cacheCreationInputTokens !== undefined ? (
+      <Row label="Cache write" value={formatTokens(usage.cacheCreationInputTokens)} />
+    ) : null;
+
+  return (
+    <>
+      {pct !== null && (
+        <section className="usage-popover-section">
+          <div className="usage-popover-section-title">Context</div>
+          <div className={`usage-popover-meter ${contextFillLevel(pct)}`} aria-hidden="true">
+            <span className="usage-popover-meter-fill" style={{ width: `${pct}%` }} />
+          </div>
+          <Row
+            label="In window"
+            value={`${formatTokens(usage.contextTokens ?? 0)} of ${formatTokens(
+              usage.contextWindow ?? 0,
+            )} (${pct}%)`}
+          />
+        </section>
+      )}
+      {spendRows && (
+        <section className="usage-popover-section">
+          <div className="usage-popover-section-title">{spendTitle}</div>
+          {hasTurnSpend && (
+            <>
+              <Row label="↑ Input" value={formatTokens(usage.inputTokens)} />
+              <Row label="↓ Output" value={formatTokens(usage.outputTokens)} />
+            </>
+          )}
+          {cacheReadRow}
+          {cacheWriteRow}
+        </section>
+      )}
+    </>
+  );
+}
+
+export function UsagePopoverPanel({
+  popoverId,
+  ariaLabel = "Token usage",
+  children,
+}: UsagePopoverPanelProps) {
   const popoverRef = useRef<HTMLDivElement | null>(null);
 
   // Anchor relative to the chip on open — same math as ToolsPopover, with a
@@ -80,12 +140,6 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
     return () => window.removeEventListener("resize", onResize);
   }, [reposition]);
 
-  const pct = contextPercent(latest.contextTokens, latest.contextWindow);
-  const hasTurnSpend = hasSpend(latest);
-  const hasCacheRead = (latest.cacheReadInputTokens ?? 0) > 0;
-  const hasCacheWrite = (latest.cacheCreationInputTokens ?? 0) > 0;
-  const lastTurnRows = hasTurnSpend || hasCacheRead || hasCacheWrite;
-
   return (
     <div
       ref={popoverRef}
@@ -93,39 +147,17 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
       popover="auto"
       className="usage-popover"
       role="dialog"
-      aria-label="Token usage"
+      aria-label={ariaLabel}
     >
-      {pct !== null && (
-        <section className="usage-popover-section">
-          <div className="usage-popover-section-title">Context</div>
-          <div className={`usage-popover-meter ${contextFillLevel(pct)}`} aria-hidden="true">
-            <span className="usage-popover-meter-fill" style={{ width: `${pct}%` }} />
-          </div>
-          <Row
-            label="In window"
-            value={`${formatTokens(latest.contextTokens ?? 0)} of ${formatTokens(latest.contextWindow ?? 0)} (${pct}%)`}
-          />
-        </section>
-      )}
-      {/* Zero-total turns skip the spend rows — "↑ Input 0" would be a
-          fabricated measurement. Cache rows gate on their own presence. */}
-      {lastTurnRows && (
-        <section className="usage-popover-section">
-          <div className="usage-popover-section-title">Last turn</div>
-          {hasTurnSpend && (
-            <>
-              <Row label="↑ Input" value={formatTokens(latest.inputTokens)} />
-              <Row label="↓ Output" value={formatTokens(latest.outputTokens)} />
-            </>
-          )}
-          {hasCacheRead && (
-            <Row label="Cache read" value={formatTokens(latest.cacheReadInputTokens ?? 0)} />
-          )}
-          {hasCacheWrite && (
-            <Row label="Cache write" value={formatTokens(latest.cacheCreationInputTokens ?? 0)} />
-          )}
-        </section>
-      )}
+      {children}
+    </div>
+  );
+}
+
+export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
+  return (
+    <UsagePopoverPanel popoverId={popoverId}>
+      <UsageBreakdown usage={latest} />
       {totals.turns > 0 && (
         <section className="usage-popover-section">
           <div className="usage-popover-section-title">Session</div>
@@ -134,6 +166,6 @@ export function UsagePopover({ popoverId, latest, totals }: UsagePopoverProps) {
           <Row label="Turns" value={String(totals.turns)} />
         </section>
       )}
-    </div>
+    </UsagePopoverPanel>
   );
 }

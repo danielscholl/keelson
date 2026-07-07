@@ -1,11 +1,12 @@
-import type { Project, WorkflowDetail } from "@keelson/shared";
-import { useEffect, useMemo, useState } from "react";
+import type { Project, TokenUsage, WorkflowDetail } from "@keelson/shared";
+import { useEffect, useId, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, sumTokenSpend } from "../../lib/formatTokens.ts";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
+import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
 import { DagGraph } from "./DagGraph.tsx";
 import { fallbackStatusFromRun, RunTrace } from "./RunTrace.tsx";
 import { StartComposer, type StartRequest } from "./StartComposer.tsx";
@@ -78,6 +79,7 @@ export function RunView({
   const preStart = runId === null;
   const { run, nodes, status, error, cancel, resume } = useWorkflowRun(runId);
   const [layout, setLayout] = useState<Layout>("split");
+  const generatedRunUsageId = useId();
   // Live wall-clock so the header's elapsed duration ticks while running.
   // Stopped on terminal status to avoid a churn loop.
   const [now, setNow] = useState(Date.now());
@@ -127,6 +129,14 @@ export function RunView({
   // percentage gauge here (a run total has no meaningful window to fill).
   const runUsage = useMemo(() => sumTokenSpend(Object.values(nodes).map((v) => v.usage)), [nodes]);
   const runTotalTokens = runUsage ? runUsage.inputTokens + runUsage.outputTokens : 0;
+  const runUsagePopoverId = `workflow-run-usage-${generatedRunUsageId.replace(/:/g, "")}`;
+  const runUsageTooltip =
+    runUsage != null
+      ? `${runTotalTokens} tokens total across nodes · ${runUsage.inputTokens} in · ${runUsage.outputTokens} out`
+      : "";
+  const runUsageBreakdown: TokenUsage | null = runUsage
+    ? { inputTokens: runUsage.inputTokens, outputTokens: runUsage.outputTokens }
+    : null;
 
   // Run-level provenance chip: collapse to one `provider · model` label only
   // when every node that reported one agrees. Nodes can pin different
@@ -201,13 +211,24 @@ export function RunView({
             <>
               <StatusBadge status={statusBadgeStatus(run.status)} />
               {elapsed != null && <span className="duration">{formatDuration(elapsed)}</span>}
-              {runUsage && (
-                <span
-                  className="run-usage"
-                  title={`${runTotalTokens} tokens total across nodes · ${runUsage.inputTokens} in · ${runUsage.outputTokens} out`}
-                >
-                  ↑{formatTokens(runUsage.inputTokens)} ↓{formatTokens(runUsage.outputTokens)}
-                </span>
+              {runUsageBreakdown && (
+                <>
+                  <button
+                    type="button"
+                    className="run-usage"
+                    popoverTarget={runUsagePopoverId}
+                    title={runUsageTooltip}
+                    aria-label={`${formatTokens(runUsageBreakdown.inputTokens)} input tokens, ${formatTokens(
+                      runUsageBreakdown.outputTokens,
+                    )} output tokens across nodes`}
+                  >
+                    ↑{formatTokens(runUsageBreakdown.inputTokens)} ↓
+                    {formatTokens(runUsageBreakdown.outputTokens)}
+                  </button>
+                  <UsagePopoverPanel popoverId={runUsagePopoverId} ariaLabel="Run token usage">
+                    <UsageBreakdown usage={runUsageBreakdown} spendTitle="Run" />
+                  </UsagePopoverPanel>
+                </>
               )}
               {runProvenance && (
                 <span

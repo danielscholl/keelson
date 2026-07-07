@@ -1,5 +1,5 @@
 import type { WorkflowNodeSummary } from "@keelson/shared";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
@@ -8,6 +8,7 @@ import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
 import { ToolCallsBlock, toolCallsFromContentParts } from "../Chat/ToolCallsBlock.tsx";
+import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
 import { ApprovalComposer } from "./ApprovalComposer.tsx";
 
 // When the run has reached terminal status, downstream nodes the hook
@@ -125,6 +126,7 @@ interface TraceRowProps {
 
 function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon }: TraceRowProps) {
   const { openCanvas, close } = useCanvas();
+  const rowId = useId();
   // Collapse by default for terminal nodes (much easier to scan a finished
   // run); auto-open live states so the user sees streaming output and
   // approval prompts without clicking.
@@ -171,6 +173,12 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
     toolCalls.length > 0 ||
     view.logLines.length > 0 ||
     Boolean(view.error);
+  const usagePopoverId = `workflow-node-usage-${encodeURIComponent(schema.id)}-${rowId.replace(
+    /:/g,
+    "",
+  )}`;
+  const usageTooltip =
+    "Cumulative input tokens across all model API calls in this node — not the current prompt size. Context fill is shown separately.";
 
   // The artifact the approval message points at (e.g. plan.md). Opening it
   // docks the approval composer in the canvas footer so the plan itself is the
@@ -257,12 +265,22 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
         {isAwaiting && <span className="dur awaiting">awaiting</span>}
         {dur && <span className="dur">{dur}</span>}
         {view.usage && hasSpend(view.usage) && (
-          <span
-            className="dur trace-usage"
-            title={`Tokens: ${view.usage.inputTokens} in, ${view.usage.outputTokens} out`}
-          >
-            ↑{formatTokens(view.usage.inputTokens)} ↓{formatTokens(view.usage.outputTokens)}
-          </span>
+          <>
+            <button
+              type="button"
+              className="dur trace-usage"
+              popoverTarget={usagePopoverId}
+              title={usageTooltip}
+              aria-label={`${formatTokens(view.usage.inputTokens)} input tokens, ${formatTokens(
+                view.usage.outputTokens,
+              )} output tokens. ${usageTooltip}`}
+            >
+              ↑{formatTokens(view.usage.inputTokens)} ↓{formatTokens(view.usage.outputTokens)}
+            </button>
+            <UsagePopoverPanel popoverId={usagePopoverId} ariaLabel={`${schema.id} token usage`}>
+              <UsageBreakdown usage={view.usage} spendTitle="Node" />
+            </UsagePopoverPanel>
+          </>
         )}
         {canvasText.trim().length > 0 && (
           <button
