@@ -12,7 +12,7 @@
 // boundaries so only the requested topic ever crosses into an agent turn — the
 // whole corpus (tens of thousands of tokens) never does.
 
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { type FileHandle, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RibDocsSource } from "@keelson/shared";
 
@@ -270,12 +270,19 @@ export class DocsCatalog {
   }
 
   private async readFreshCache(cachePath: string): Promise<string | null> {
+    // Open once and stat+read through the same handle so the freshness check and
+    // the read see the same inode — a path-based stat()-then-readFile() is a
+    // TOCTOU race (the file can change between the two path lookups).
+    let handle: FileHandle | undefined;
     try {
-      const info = await stat(cachePath);
+      handle = await open(cachePath, "r");
+      const info = await handle.stat();
       if (this.now() - info.mtimeMs > this.ttlMs) return null;
-      return await readFile(cachePath, "utf8");
+      return await handle.readFile("utf8");
     } catch {
       return null;
+    } finally {
+      await handle?.close();
     }
   }
 
