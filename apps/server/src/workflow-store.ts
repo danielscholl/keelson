@@ -100,9 +100,9 @@ export interface WorkflowStore {
   // path isn't known at createRun time when isolation is on).
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
   setRunWorktreeBase(runId: string, worktreeBase: string | null): void;
-  // Accumulated model-call spend for one run: the count of node rows carrying
-  // usage (`turns`) and the sum of their input+output tokens (`totalTokens`).
-  // Backs the request-phase budget gate without loading node bodies.
+  // Accumulated model-call spend for one run: `totalTokens` is fresh input +
+  // output. Cache read/write stay separate in TokenUsage; older rows may carry
+  // mixed provider input conventions.
   getRunUsageTotals(runId: string): { totalTokens: number; turns: number };
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];

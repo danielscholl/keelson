@@ -187,7 +187,31 @@ describe("GatewayProvider.sendQuery", () => {
     const chunks = await collect(p.sendQuery("q", "/tmp"));
     expect(chunks).toContainEqual({
       type: "usage",
-      usage: { inputTokens: 11, outputTokens: 7, cacheReadInputTokens: 4 },
+      usage: { inputTokens: 7, outputTokens: 7, cacheReadInputTokens: 4 },
+    });
+  });
+
+  it("clamps fresh input at zero when cached prompt tokens exceed prompt tokens", async () => {
+    const usageLine = JSON.stringify({
+      choices: [{ delta: {} }],
+      usage: {
+        prompt_tokens: 4,
+        completion_tokens: 7,
+        prompt_tokens_details: { cached_tokens: 11 },
+      },
+    });
+    const { fn } = mockFetch(() => sse(chunk({ content: "x" }), usageLine, "[DONE]"));
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "http://h/v1",
+      getApiKey: noKey,
+      model: "m",
+      fetchImpl: fn,
+    });
+    const chunks = await collect(p.sendQuery("q", "/tmp"));
+    expect(chunks).toContainEqual({
+      type: "usage",
+      usage: { inputTokens: 0, outputTokens: 7, cacheReadInputTokens: 11 },
     });
   });
 
