@@ -56,6 +56,8 @@ import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, createRibCredentialAccessor, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
+import { DocsCatalog, type DocsSource, KEELSON_CORE_DOCS_SOURCE } from "./docs-catalog.ts";
+import { createDocsTool } from "./docs-tool.ts";
 import { createDynamicRegionStore } from "./dynamic-region-store.ts";
 import { gatewaysRoutes } from "./gateways-handler.ts";
 import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
@@ -285,6 +287,20 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // collapses onto an in-flight heartbeat run instead of racing it.
     refreshCwd: KEELSON_HOME,
   });
+  // Docs catalog behind keelson_docs: keelson's own published corpus plus any
+  // docs a rib contributed. Registered BEFORE ribs.tools so the harness owns the
+  // keelson_docs name and a colliding rib tool is skipped — the same authority
+  // rule canvas_* / workflow_* follow. Core lists its own docs but never names a
+  // rib; installed ribs extend the catalog through their contributions.
+  const docsSources: DocsSource[] = [
+    KEELSON_CORE_DOCS_SOURCE,
+    ...ribs.docsContributions.map((c) => ({ id: c.ribId, ...c.source })),
+  ];
+  const docsCatalog = new DocsCatalog({
+    sources: docsSources,
+    cacheDir: join(paths.home, "docs-cache"),
+  });
+  registerRibTools([createDocsTool({ catalog: docsCatalog })]);
   // Register rib-contributed tools into the shared registry so the chat agent,
   // /api/tools, and workflow prompt nodes all pick them up via getRegisteredTools.
   registerRibTools(ribs.tools);

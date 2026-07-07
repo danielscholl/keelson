@@ -534,6 +534,9 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
   // Same rule for the canvas artifact guidance: only when canvas_publish rides
   // this turn's tool list (it registers at boot, so normally always).
   const canvasArtifactsActive = allTools.some((t) => t.name === "canvas_publish");
+  // Same rule for the docs guidance: only when keelson_docs rides this turn's
+  // tool list (it registers at boot, so normally always).
+  const docsActive = allTools.some((t) => t.name === "keelson_docs");
 
   const notebookContent =
     recallProjectId !== undefined
@@ -557,6 +560,7 @@ export async function handleChatRequest(frame: ClientFrame, deps: ChatDeps): Pro
         }
       : {}),
     ...(canvasArtifactsActive ? { canvasArtifacts: true } : {}),
+    ...(docsActive ? { docs: true } : {}),
   });
 
   // Final tool gate: the unified policy engine (operator denylist + rib

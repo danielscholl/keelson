@@ -119,4 +119,11 @@ describe("buildChatSystemPrompt", () => {
     expect(out).toContain(':root[data-theme="light"]');
     expect(out).toContain("canvas_design_guide");
   });
+
+  test("docs guidance rides only the docs flag and names the keelson_docs tool", () => {
+    expect(buildChatSystemPrompt({ seedSystemPrompt: "seed" })).not.toContain("## Documentation");
+    const out = buildChatSystemPrompt({ seedSystemPrompt: "seed", docs: true });
+    expect(out).toContain("## Documentation");
+    expect(out).toContain("keelson_docs");
+  });
 });
