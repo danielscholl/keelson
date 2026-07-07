@@ -12,7 +12,7 @@
 // boundaries so only the requested topic ever crosses into an agent turn — the
 // whole corpus (tens of thousands of tokens) never does.
 
-import { type FileHandle, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { type FileHandle, mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RibDocsSource } from "@keelson/shared";
 
@@ -68,12 +68,16 @@ export interface DocsCatalogOptions {
   // A single topic read is capped at this many characters so one oversized page
   // can't blow the turn; the rest is one more read away.
   maxSectionChars?: number;
+  // Per-fetch timeout for a corpus load, owned by the catalog (not a caller) so a
+  // coalesced fetch can't hang and no single caller's cancellation ends it.
+  fetchTimeoutMs?: number;
   // Injected in tests; defaults to Date.now.
   now?: () => number;
 }
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_SECTION_CHARS = 32_000;
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 
 interface ParsedTopic extends DocsTopic {
   body: string;
@@ -148,6 +152,7 @@ export class DocsCatalog {
   private readonly fetchImpl: typeof fetch;
   private readonly ttlMs: number;
   private readonly maxSectionChars: number;
+  private readonly fetchTimeoutMs: number;
   private readonly now: () => number;
   private readonly memCache = new Map<string, ParsedTopic[]>();
   private readonly inflight = new Map<string, Promise<ParsedTopic[]>>();
@@ -166,6 +171,7 @@ export class DocsCatalog {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
     this.maxSectionChars = opts.maxSectionChars ?? DEFAULT_MAX_SECTION_CHARS;
+    this.fetchTimeoutMs = opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
     this.now = opts.now ?? Date.now;
   }
 
@@ -220,21 +226,21 @@ export class DocsCatalog {
   private async topicsFor(source: DocsSource, signal?: AbortSignal): Promise<ParsedTopic[]> {
     const cached = this.memCache.get(source.id);
     if (cached) return cached;
-    // Coalesce concurrent first reads of one source: parallel tool calls would
-    // otherwise each fetch the corpus and race a write to the same cache file.
-    const pending = this.inflight.get(source.id);
-    if (pending) return pending;
-    const load = this.loadTopics(source, signal);
-    this.inflight.set(source.id, load);
-    try {
-      return await load;
-    } finally {
-      this.inflight.delete(source.id);
+    // One shared background load per source, coalescing concurrent first reads so
+    // they don't each fetch the corpus and race a cache write. The shared load is
+    // bounded by the catalog's own fetch timeout and never tied to a caller's
+    // signal, so one caller's abort can't cancel the fetch or fail the others.
+    let load = this.inflight.get(source.id);
+    if (!load) {
+      load = this.loadTopics(source).finally(() => this.inflight.delete(source.id));
+      this.inflight.set(source.id, load);
     }
+    // A caller still observes its OWN signal without disturbing the shared load.
+    return signal ? raceAbort(load, signal) : load;
   }
 
-  private async loadTopics(source: DocsSource, signal?: AbortSignal): Promise<ParsedTopic[]> {
-    const { text, durable } = await this.loadCorpus(source, signal);
+  private async loadTopics(source: DocsSource): Promise<ParsedTopic[]> {
+    const { text, durable } = await this.loadCorpus(source);
     const topics = parseTopics(text);
     // Don't pin a stale fallback: a transient failure on the first read must not
     // freeze outdated docs for the whole process — the next call retries.
@@ -242,10 +248,7 @@ export class DocsCatalog {
     return topics;
   }
 
-  private async loadCorpus(
-    source: DocsSource,
-    signal?: AbortSignal,
-  ): Promise<{ text: string; durable: boolean }> {
+  private async loadCorpus(source: DocsSource): Promise<{ text: string; durable: boolean }> {
     if (source.content !== undefined) return { text: source.content, durable: true };
     const url = source.llmsFullUrl;
     if (!url) throw new Error("source has neither inline content nor a corpus URL");
@@ -255,7 +258,7 @@ export class DocsCatalog {
     if (fresh !== null) return { text: fresh, durable: true };
 
     try {
-      const res = await this.fetchImpl(url, signal ? { signal } : {});
+      const res = await this.fetchImpl(url, { signal: AbortSignal.timeout(this.fetchTimeoutMs) });
       if (!res.ok) throw new Error(`fetch ${url} returned ${res.status}`);
       const text = await res.text();
       await this.writeCache(cachePath, text);
@@ -289,7 +292,11 @@ export class DocsCatalog {
   private async writeCache(cachePath: string, text: string): Promise<void> {
     try {
       await mkdir(this.cacheDir, { recursive: true });
-      await writeFile(cachePath, text, "utf8");
+      // Write-then-rename so a concurrent cross-process reader never observes a
+      // half-written cache file (rename is atomic within a directory).
+      const tmp = `${cachePath}.${process.pid}.${this.now()}.tmp`;
+      await writeFile(tmp, text, "utf8");
+      await rename(tmp, cachePath);
     } catch {
       // A read-only home shouldn't break docs reads — the corpus is already in
       // memory for this process; only cross-process caching is lost.
@@ -337,4 +344,38 @@ async function readFileOrNull(path: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// Reject when `signal` aborts, otherwise settle with `p`. Lets a caller cancel
+// its own wait on a coalesced load without cancelling the load for other callers.
+function raceAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+// Give each rib-contributed source a stable, collision-free id. A rib with one
+// source keeps its bare rib id (`chamber`); a rib exposing several gets per-title
+// suffixes (`chamber-rooms`) so none shadow another under the catalog's
+// first-registration-wins rule. Any residual duplicate id the catalog warns on.
+export function stampRibDocsSources(
+  contributions: readonly { ribId: string; source: RibDocsSource }[],
+): DocsSource[] {
+  const byRib = new Map<string, { ribId: string; source: RibDocsSource }[]>();
+  for (const c of contributions) {
+    const list = byRib.get(c.ribId);
+    if (list) list.push(c);
+    else byRib.set(c.ribId, [c]);
+  }
+  const out: DocsSource[] = [];
+  for (const [ribId, list] of byRib) {
+    for (const c of list) {
+      const id = list.length === 1 ? ribId : `${ribId}-${slugify(c.source.title)}`;
+      out.push({ id, ...c.source });
+    }
+  }
+  return out;
 }

@@ -18,11 +18,15 @@ export const ribDocsSourceSchema = z
   .object({
     title: z.string().min(1).max(80),
     summary: z.string().min(1).max(280),
-    llmsFullUrl: z.string().url().optional(),
+    // http(s) only: the harness fetches this server-side, so a `file:` / other
+    // scheme from a careless rib must not become a reachable request.
+    llmsFullUrl: z.url({ protocol: /^https?$/ }).optional(),
     content: z.string().min(1).optional(),
   })
   .strict()
-  .refine((s) => s.llmsFullUrl !== undefined || s.content !== undefined, {
-    message: "a docs source must set either 'llmsFullUrl' or 'content'",
+  // Exactly one: neither leaves nothing to read, both leaves the reader an
+  // undocumented precedence choice.
+  .refine((s) => (s.llmsFullUrl !== undefined) !== (s.content !== undefined), {
+    message: "a docs source must set exactly one of 'llmsFullUrl' or 'content'",
   });
 export type RibDocsSource = z.infer<typeof ribDocsSourceSchema>;

@@ -20,9 +20,12 @@ const docsInputSchema = z
     source: z.string().min(1).optional(),
     section: z.string().min(1).optional(),
   })
-  .strict();
-
-const FETCH_TIMEOUT_MS = 15_000;
+  .strict()
+  // `section` names a topic within a source, so it's meaningless without one —
+  // reject the malformed call rather than silently listing sources.
+  .refine((v) => v.source !== undefined || v.section === undefined, {
+    message: "`section` requires a `source`",
+  });
 
 function emitResult(ctx: ToolContext, content: string, isError = false): void {
   // toolUseId is a placeholder — Claude ignores it, Copilot rewrites it to the
@@ -67,10 +70,10 @@ export function createDocsTool({ catalog }: CreateDocsToolDeps): ToolDefinition 
         return;
       }
 
-      const signal = AbortSignal.any([ctx.abortSignal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]);
-
+      // Pass only the caller's own signal; the corpus fetch's timeout is owned by
+      // the catalog so one caller's cancellation can't fail a concurrent reader.
       if (!section) {
-        const result = await catalog.toc(source, signal);
+        const result = await catalog.toc(source, ctx.abortSignal);
         if (!result.ok) {
           emitResult(ctx, result.error, true);
           return;
@@ -82,7 +85,7 @@ export function createDocsTool({ catalog }: CreateDocsToolDeps): ToolDefinition 
         return;
       }
 
-      const result = await catalog.readSection(source, section, signal);
+      const result = await catalog.readSection(source, section, ctx.abortSignal);
       if (!result.ok) {
         const toc = result.topics ? `\n\nAvailable sections:\n${renderTopics(result.topics)}` : "";
         emitResult(ctx, `${result.error}${toc}`, true);

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DocsCatalog, type DocsSource, parseTopics } from "./docs-catalog.ts";
+import { DocsCatalog, type DocsSource, parseTopics, stampRibDocsSources } from "./docs-catalog.ts";
 
 const CORPUS = `<SYSTEM>preamble ignored</SYSTEM>
 
@@ -206,6 +206,24 @@ describe("DocsCatalog URL fetch + cache", () => {
     expect(calls).toBe(1);
   });
 
+  test("one caller aborting a coalesced read does not fail a concurrent caller", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      await new Promise((r) => setTimeout(r, 20)); // both callers share this fetch
+      return new Response(CORPUS);
+    }) as unknown as typeof fetch;
+    const catalog = new DocsCatalog({ sources: [urlSource()], cacheDir, fetchImpl });
+    const ac = new AbortController();
+    const abortedP = catalog.toc("web", ac.signal); // creates the shared load
+    const healthyP = catalog.readSection("web", "alpha"); // joins the same load, no signal
+    ac.abort();
+    const [aborted, healthy] = await Promise.all([abortedP, healthyP]);
+    expect(aborted.ok).toBe(false); // the aborting caller's own signal is observed
+    expect(healthy.ok).toBe(true); // the other caller still gets the corpus
+    expect(calls).toBe(1); // the shared fetch was not cancelled
+  });
+
   test("a stale fallback is not pinned; each read retries the fetch", async () => {
     const seed = new DocsCatalog({
       sources: [urlSource()],
@@ -262,5 +280,22 @@ describe("DocsCatalog URL fetch + cache", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error).toContain("503");
+  });
+});
+
+describe("stampRibDocsSources", () => {
+  const src = (title: string) => ({ title, summary: "s", llmsFullUrl: "https://x/full.txt" });
+
+  test("a single-source rib keeps its bare rib id", () => {
+    const out = stampRibDocsSources([{ ribId: "chamber", source: src("Chamber") }]);
+    expect(out.map((s) => s.id)).toEqual(["chamber"]);
+  });
+
+  test("a multi-source rib gets per-title suffixes so none are dropped", () => {
+    const out = stampRibDocsSources([
+      { ribId: "chamber", source: src("Rooms") },
+      { ribId: "chamber", source: src("Lenses") },
+    ]);
+    expect(out.map((s) => s.id)).toEqual(["chamber-rooms", "chamber-lenses"]);
   });
 });

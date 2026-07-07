@@ -56,7 +56,12 @@ import { createConversationStore } from "./conversation-store.ts";
 import { createKeyringStore, createRibCredentialAccessor, getCredential } from "./credentials.ts";
 import { credentialsRoutes } from "./credentials-handler.ts";
 import { openDatabase } from "./db/init.ts";
-import { DocsCatalog, type DocsSource, KEELSON_CORE_DOCS_SOURCE } from "./docs-catalog.ts";
+import {
+  DocsCatalog,
+  type DocsSource,
+  KEELSON_CORE_DOCS_SOURCE,
+  stampRibDocsSources,
+} from "./docs-catalog.ts";
 import { createDocsTool } from "./docs-tool.ts";
 import { createDynamicRegionStore } from "./dynamic-region-store.ts";
 import { gatewaysRoutes } from "./gateways-handler.ts";
@@ -294,7 +299,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // rib; installed ribs extend the catalog through their contributions.
   const docsSources: DocsSource[] = [
     KEELSON_CORE_DOCS_SOURCE,
-    ...ribs.docsContributions.map((c) => ({ id: c.ribId, ...c.source })),
+    ...stampRibDocsSources(ribs.docsContributions),
   ];
   const docsCatalog = new DocsCatalog({
     sources: docsSources,

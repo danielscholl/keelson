@@ -75,4 +75,12 @@ describe("keelson_docs tool", () => {
     expect(isError).toBe(true);
     expect(content).toContain("Unknown docs source");
   });
+
+  test("a section without a source is rejected, not silently listed", async () => {
+    const { content, isError } = await run({ section: "alpha" });
+    expect(isError).toBe(true);
+    expect(content).toContain("invalid input");
+    // It must not fall through to the source-listing path.
+    expect(content).not.toContain("table of contents");
+  });
 });
