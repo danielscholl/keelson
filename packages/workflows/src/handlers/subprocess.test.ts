@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { tmpdir } from "node:os";
@@ -140,12 +140,22 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
   });
 
   test("an unwritable artifacts dir degrades to truncation-only, not a throw", () => {
-    const env = buildSubprocessEnv({}, upstreamOf("validate", big), {
-      artifactsDir: "/dev/null/not-a-dir",
-    });
-    expect(Object.hasOwn(env, "KEELSON_NODE_validate_OUTPUT_FILE")).toBe(false);
-    const value = env.KEELSON_NODE_validate_OUTPUT as string;
-    expect(value).toContain("[keelson: output truncated");
+    // A path nested under a regular FILE is un-mkdir-able on every platform
+    // (ENOTDIR on POSIX, ERROR_DIRECTORY on Windows) — unlike /dev/null/...,
+    // which Windows happily creates as D:\dev\null\... .
+    const dir = mkdtempSync(join(tmpdir(), "keelson-envcap-"));
+    try {
+      const filePath = join(dir, "plain-file");
+      writeFileSync(filePath, "x");
+      const env = buildSubprocessEnv({}, upstreamOf("validate", big), {
+        artifactsDir: join(filePath, "not-a-dir"),
+      });
+      expect(Object.hasOwn(env, "KEELSON_NODE_validate_OUTPUT_FILE")).toBe(false);
+      const value = env.KEELSON_NODE_validate_OUTPUT as string;
+      expect(value).toContain("[keelson: output truncated");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("oversized inputs and ARGUMENTS are capped the same way (no file spill)", () => {
