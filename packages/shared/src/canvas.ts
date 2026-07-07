@@ -492,6 +492,45 @@ const chartSectionSchema = z
   .strict();
 export type CanvasChartSection = z.infer<typeof chartSectionSchema>;
 
+// A fixed-capacity identity row: labelled seats render as named items, while
+// unlabelled seats stay decorative so regions do not invent identities.
+const seatsSectionSchema = z
+  .object({
+    kind: z.literal("seats"),
+    title: z.string().optional(),
+    items: z
+      .array(
+        z
+          .object({
+            tone: canvasToneSchema.optional(),
+            filled: z.boolean().optional(),
+            label: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+export type CanvasSeatsSection = z.infer<typeof seatsSectionSchema>;
+
+const journeySectionSchema = z
+  .object({
+    kind: z.literal("journey"),
+    title: z.string().optional(),
+    items: z
+      .array(
+        z
+          .object({
+            title: z.string().min(1),
+            text: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+export type CanvasJourneySection = z.infer<typeof journeySectionSchema>;
+
 const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   statsSectionSchema,
   segmentsSectionSchema,
@@ -502,6 +541,8 @@ const leafBoardSectionSchema = z.discriminatedUnion("kind", [
   actionsSectionSchema,
   gridSectionSchema,
   chartSectionSchema,
+  seatsSectionSchema,
+  journeySectionSchema,
 ]);
 
 // `columns` lays leaf sections side by side (a two-column Lifecycle | Actions
@@ -535,6 +576,8 @@ const canvasBoardSectionSchema = z.discriminatedUnion("kind", [
   actionsSectionSchema,
   gridSectionSchema,
   chartSectionSchema,
+  seatsSectionSchema,
+  journeySectionSchema,
   columnsBoardSectionSchema,
 ]);
 

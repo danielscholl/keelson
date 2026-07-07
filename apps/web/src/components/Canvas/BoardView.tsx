@@ -814,6 +814,52 @@ function Section({ section }: { section: BoardSection }) {
       return <ActionsSection section={section} />;
     case "chart":
       return <ChartSection section={section} />;
+    case "seats": {
+      const key = makeKeyer();
+      return (
+        <div className="cvb-seats">
+          {section.items.map((item) =>
+            item.label ? (
+              <span
+                key={key(JSON.stringify(item))}
+                className="cvb-seat"
+                data-tone={item.tone ?? "neutral"}
+                data-filled={item.filled || undefined}
+                title={item.label}
+                role="img"
+                aria-label={item.label}
+              >
+                <span className="cvb-seat-dot" />
+              </span>
+            ) : (
+              <span
+                key={key(JSON.stringify(item))}
+                className="cvb-seat"
+                data-tone={item.tone ?? "neutral"}
+                data-filled={item.filled || undefined}
+                aria-hidden="true"
+              >
+                <span className="cvb-seat-dot" />
+              </span>
+            ),
+          )}
+        </div>
+      );
+    }
+    case "journey": {
+      const key = makeKeyer();
+      return (
+        <div className="cvb-journey">
+          {section.items.map((item, index) => (
+            <div key={key(JSON.stringify(item))} className="cvb-journey-step">
+              <span className="cvb-journey-num">{index + 1}</span>
+              <span className="cvb-journey-title">{item.title}</span>
+              {item.text && <span className="cvb-journey-text">{item.text}</span>}
+            </div>
+          ))}
+        </div>
+      );
+    }
     case "grid": {
       const key = makeKeyer();
       return (

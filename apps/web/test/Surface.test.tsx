@@ -244,6 +244,69 @@ describe("Surface", () => {
     expect(screen.queryByText("Waiting for the first update…")).toBeNull();
   });
 
+  test("hideWhenEmpty omits a region until a live board has sections", () => {
+    const descriptor: RibSurfaceDescriptor = {
+      id: "squad",
+      title: "Squad",
+      layout: {
+        rows: [
+          {
+            zoneTitle: "Casting",
+            columns: [{ key: "rib:squad:casting", title: "Casting", hideWhenEmpty: true }],
+          },
+        ],
+      },
+    };
+    const first = renderSurface(descriptor);
+    expect(first.container.querySelector('[data-region-key="rib:squad:casting"]')).toBeNull();
+    expect(first.container.querySelector(".surface-row")?.children.length).toBe(0);
+
+    live("rib:squad:casting", board("Casting", "Seats", 3));
+    first.unmount();
+    const withContent = renderSurface(descriptor);
+    expect(
+      withContent.container.querySelector('[data-region-key="rib:squad:casting"]'),
+    ).not.toBeNull();
+    expect(screen.getByText("Seats")).toBeDefined();
+
+    live("rib:squad:casting", { view: "board", title: "Casting", sections: [] });
+    withContent.unmount();
+    const emptyAgain = renderSurface(descriptor);
+    expect(emptyAgain.container.querySelector('[data-region-key="rib:squad:casting"]')).toBeNull();
+    expect(emptyAgain.container.querySelector(".surface-row")?.children.length).toBe(0);
+  });
+
+  test("hideWhenEmpty treats non-board live payloads as content", () => {
+    live("rib:squad:table", {
+      view: "table",
+      columns: [{ key: "name" }],
+      rows: [{ name: "Ready" }],
+    });
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      layout: {
+        rows: [{ columns: [{ key: "rib:squad:table", title: "Table", hideWhenEmpty: true }] }],
+      },
+    });
+    expect(container.querySelector('[data-region-key="rib:squad:table"]')).not.toBeNull();
+    expect(screen.getByText("Table")).toBeDefined();
+  });
+
+  test("hideWhenEmpty keeps a live payload that fails the view parse visible", () => {
+    // A producer bug must stay observable: the region renders its error state
+    // rather than silently disappearing.
+    live("rib:squad:broken", { view: "no-such-view" });
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      layout: {
+        rows: [{ columns: [{ key: "rib:squad:broken", title: "Broken", hideWhenEmpty: true }] }],
+      },
+    });
+    expect(container.querySelector('[data-region-key="rib:squad:broken"]')).not.toBeNull();
+  });
+
   test("a workflow-bound region with no cadence offers a one-shot Load, not an endless skeleton", () => {
     // chamber's Briefing footer shape: a producing workflow but no cadence, so
     // it never auto-runs and would otherwise shimmer forever.

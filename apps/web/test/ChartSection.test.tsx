@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { CanvasBoardView } from "@keelson/shared";
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { BoardView } from "../src/components/Canvas/BoardView.tsx";
 
 type ChartSeries = { label: string; points: { x: number | string; y: number }[] };
@@ -240,5 +240,78 @@ describe("chart board section", () => {
     } as CanvasBoardView;
     const { container } = render(<BoardView view={view} />);
     expect(container.querySelectorAll("path.cvb-chart-line").length).toBe(1);
+  });
+});
+
+describe("seats and journey board sections", () => {
+  test("seats render filled state, labels, decorative seats, and default tone", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "seats",
+          items: [
+            { label: "Navigator", tone: "id-blue", filled: true },
+            {},
+            { label: "Observer", filled: false },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const seats = container.querySelectorAll(".cvb-seat");
+    expect(seats.length).toBe(3);
+    expect(seats[0]?.getAttribute("data-filled")).toBe("true");
+    expect(seats[1]?.hasAttribute("data-filled")).toBe(false);
+    expect(seats[2]?.hasAttribute("data-filled")).toBe(false);
+    expect(screen.getByLabelText("Navigator").getAttribute("title")).toBe("Navigator");
+    expect(seats[1]?.getAttribute("aria-hidden")).toBe("true");
+    expect(seats[2]?.getAttribute("data-tone")).toBe("neutral");
+  });
+
+  test("journey renders numbered steps, titles, and optional text", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "journey",
+          items: [
+            { title: "Draft" },
+            { title: "Review", text: "Waiting on maintainer" },
+            { title: "Ship" },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    const steps = container.querySelectorAll(".cvb-journey-step");
+    expect(steps.length).toBe(3);
+    expect([...container.querySelectorAll(".cvb-journey-num")].map((n) => n.textContent)).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
+    expect([...container.querySelectorAll(".cvb-journey-title")].map((n) => n.textContent)).toEqual(
+      ["Draft", "Review", "Ship"],
+    );
+    expect(container.querySelector(".cvb-journey-text")?.textContent).toBe("Waiting on maintainer");
+  });
+
+  test("seats and journey nested inside columns render", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "columns",
+          columns: [
+            { sections: [{ kind: "seats", items: [{ label: "A" }, {}] }] },
+            { sections: [{ kind: "journey", items: [{ title: "One" }, { title: "Two" }] }] },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    expect(container.querySelectorAll(".cvb-seat").length).toBe(2);
+    expect(container.querySelectorAll(".cvb-journey-step").length).toBe(2);
   });
 });

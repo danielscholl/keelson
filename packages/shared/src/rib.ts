@@ -316,12 +316,20 @@ export const surfaceRegionSchema = z
     // derived from frame cadence, not a rib field) and quiets when they stop.
     // Default off — regions that omit it render unchanged.
     live: z.boolean().optional(),
+    // Hide the whole region until a live snapshot has content; avoid on-demand
+    // workflow regions because hiding would also hide their Load affordance.
+    hideWhenEmpty: z.boolean().optional(),
   })
   .strict();
 export type RibSurfaceRegion = z.infer<typeof surfaceRegionSchema>;
-// Banner regions never collapse, so a banner can't carry collapse flags even
-// though every other slot's region shares the one region schema.
-const bannerRegionSchema = surfaceRegionSchema.omit({ collapsible: true, collapsed: true });
+// Banner regions never collapse and never hide, so a banner can't carry the
+// collapse flags or hideWhenEmpty even though every other slot's region shares
+// the one region schema.
+const bannerRegionSchema = surfaceRegionSchema.omit({
+  collapsible: true,
+  collapsed: true,
+  hideWhenEmpty: true,
+});
 export const ribSurfaceDescriptorSchema = z
   .object({
     id: z.string().min(1),

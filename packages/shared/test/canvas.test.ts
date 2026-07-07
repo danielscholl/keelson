@@ -364,6 +364,66 @@ describe("canvasViewSchema", () => {
     expect(nested.view).toBe("board");
   });
 
+  it("parses seats and journey sections, top-level and nested in columns", () => {
+    const seats = {
+      kind: "seats",
+      title: "Bench",
+      items: [{ label: "A", tone: "ok", filled: true }, {}],
+    };
+    const journey = {
+      kind: "journey",
+      title: "Path",
+      items: [{ title: "Draft" }, { title: "Review", text: "In progress" }],
+    };
+    expect(canvasViewSchema.parse({ view: "board", sections: [seats, journey] }).view).toBe(
+      "board",
+    );
+    expect(
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "columns",
+            columns: [{ sections: [seats] }, { sections: [journey] }],
+          },
+        ],
+      }).view,
+    ).toBe("board");
+  });
+
+  it("rejects invalid seats and journey sections", () => {
+    expect(() =>
+      canvasViewSchema.parse({ view: "board", sections: [{ kind: "seats", items: [] }] }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({ view: "board", sections: [{ kind: "journey", items: [] }] }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "seats", items: [{}], extra: true }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "seats", items: [{ extra: true }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "journey", items: [{ title: "Draft" }], extra: true }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "journey", items: [{ title: "Draft", extra: true }] }],
+      }),
+    ).toThrow();
+  });
+
   it("rejects a chart with no series or more than six", () => {
     expect(() =>
       canvasViewSchema.parse({

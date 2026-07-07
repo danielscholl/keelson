@@ -192,6 +192,39 @@ describe("rib surface descriptor schema", () => {
     expect(s.layout.rows[0]?.columns[0]?.live).toBeUndefined();
   });
 
+  it("carries an optional hideWhenEmpty flag on regions, but never on a banner", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "squad",
+      title: "Squad",
+      layout: {
+        header: { key: "rib:squad:cluster", hideWhenEmpty: true },
+        rows: [{ columns: [{ key: "rib:squad:run", hideWhenEmpty: true }] }],
+      },
+    });
+    expect(s.layout.header?.hideWhenEmpty).toBe(true);
+    expect(s.layout.rows[0]?.columns[0]?.hideWhenEmpty).toBe(true);
+
+    // Banners always render full: like the collapse flags, hideWhenEmpty is
+    // stripped from the banner slot's schema.
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "squad",
+        title: "Squad",
+        layout: {
+          banner: { key: "rib:squad:release", hideWhenEmpty: true },
+          rows: [{ columns: [{ key: "rib:squad:run" }] }],
+        },
+      }).success,
+    ).toBe(false);
+
+    const withoutFlag = ribSurfaceDescriptorSchema.parse({
+      id: "demo",
+      title: "Demo",
+      layout: { rows: [{ columns: [{ key: "rib:demo:run" }] }] },
+    });
+    expect(withoutFlag.layout.rows[0]?.columns[0]?.hideWhenEmpty).toBeUndefined();
+  });
+
   it("rejects a cadenceMs below the 30s floor or non-integer", () => {
     expect(
       ribSurfaceDescriptorSchema.safeParse({
@@ -213,6 +246,13 @@ describe("rib surface descriptor schema", () => {
     expect(
       ribSurfaceDescriptorSchema.safeParse({ id: "x", title: "X", layout: { rows: [] }, extra: 1 })
         .success,
+    ).toBe(false);
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        layout: { rows: [{ columns: [{ key: "rib:x:a", extra: true }] }] },
+      }).success,
     ).toBe(false);
     expect(
       ribSurfaceDescriptorSchema.safeParse({
