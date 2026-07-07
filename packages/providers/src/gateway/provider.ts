@@ -110,7 +110,10 @@ function parseSseData(payload: string): ParsedSseEvent {
   const out = nonNegInt(event.usage?.completion_tokens);
   const cacheRead = nonNegInt(event.usage?.prompt_tokens_details?.cached_tokens);
   if (inp !== undefined && out !== undefined) {
-    const usage: GatewayUsage = { inputTokens: inp, outputTokens: out };
+    const usage: GatewayUsage = {
+      inputTokens: Math.max(0, inp - (cacheRead ?? 0)),
+      outputTokens: out,
+    };
     if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
     return { chunks, usage };
   }
