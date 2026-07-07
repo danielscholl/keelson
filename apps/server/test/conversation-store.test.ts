@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canvasArtifactKey, type ContentBlock, type Message } from "@keelson/shared";
+import { type ContentBlock, canvasArtifactKey, type Message } from "@keelson/shared";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { rmTemp } from "./temp.ts";

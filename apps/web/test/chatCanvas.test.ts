@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { LiveToolCall } from "../src/components/Chat/ToolCallsBlock.tsx";
-import { CANVAS_OPEN_THRESHOLD, publishedCanvasResult, shouldOfferCanvas } from "../src/lib/chatCanvas.ts";
+import {
+  CANVAS_OPEN_THRESHOLD,
+  publishedCanvasResult,
+  shouldOfferCanvas,
+} from "../src/lib/chatCanvas.ts";
 
 const long = "x".repeat(CANVAS_OPEN_THRESHOLD + 1);
 const short = "x".repeat(CANVAS_OPEN_THRESHOLD - 1);
@@ -43,7 +47,9 @@ describe("publishedCanvasResult", () => {
 
   test("ignores errored publishes", () => {
     const result = JSON.stringify({ key: "canvas:artifact:failed", slug: "failed" });
-    const calls: LiveToolCall[] = [{ id: "call-1", toolName: "canvas_publish", result, isError: true }];
+    const calls: LiveToolCall[] = [
+      { id: "call-1", toolName: "canvas_publish", result, isError: true },
+    ];
 
     expect(publishedCanvasResult(calls)).toBeUndefined();
   });

@@ -27,10 +27,13 @@ function hasPublishedCanvasKey(result: string): boolean {
   );
 }
 
-export function publishedCanvasResult(toolCalls: readonly LiveToolCall[] | undefined): string | undefined {
+export function publishedCanvasResult(
+  toolCalls: readonly LiveToolCall[] | undefined,
+): string | undefined {
   let selected: string | undefined;
   for (const call of toolCalls ?? []) {
-    if (call.toolName !== "canvas_publish" || call.isError === true || call.result === undefined) continue;
+    if (call.toolName !== "canvas_publish" || call.isError === true || call.result === undefined)
+      continue;
     if (hasPublishedCanvasKey(call.result)) selected = call.result;
   }
   return selected;
