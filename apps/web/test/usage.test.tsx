@@ -332,7 +332,16 @@ describe("Usage page", () => {
         cacheReadTokens: 250,
         cacheWriteTokens: 0,
       },
-      groups: [],
+      groups: [
+        {
+          key: "claude-sonnet-5",
+          events: 1,
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadTokens: 250,
+          cacheWriteTokens: 0,
+        },
+      ],
     });
     getUsageJobsImpl = async () => [
       {
@@ -376,7 +385,12 @@ describe("Usage page", () => {
     expect(screen.getByText(/top: standing-lens/)).toBeDefined();
     expect(screen.getByText("Downshift candidate")).toBeDefined();
     expect(screen.getByText("standing-lens")).toBeDefined();
-    expect(screen.getAllByText("25%").length).toBeGreaterThan(0);
+    expect(screen.getByText("250 of 1.3k input")).toBeDefined();
+    expect(screen.getAllByText("20%").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByLabelText("Models"));
+    await waitFor(() => expect(screen.getByText("claude-sonnet-5")).toBeDefined());
+    expect(screen.getByText("20%")).toBeDefined();
     getUsageSummaryImpl = async () => ({
       totals: {
         events: 0,

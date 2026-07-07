@@ -72,6 +72,11 @@ const SERIES_COLOR_COUNT = 6;
 const FAILURE_STATUSES = ["error", "aborted", "timeout"] as const;
 const FAILURE_EVENTS_LIMIT = 200;
 
+function cacheReadRate(inputTokens: number, cacheReadTokens: number) {
+  const totalInputTokens = inputTokens + cacheReadTokens;
+  return totalInputTokens > 0 ? Math.round((cacheReadTokens / totalInputTokens) * 100) : 0;
+}
+
 export function Usage() {
   const [range, setRange] = useState<UsageWindow>("7d");
   const [subView, setSubView] = useState<UsageSubView>("overview");
@@ -272,8 +277,8 @@ function PulseStats({
 }) {
   const { totals } = summary;
   const totalTokens = totals.inputTokens + totals.outputTokens;
-  const cacheReadRate =
-    totals.inputTokens > 0 ? Math.round((totals.cacheReadTokens / totals.inputTokens) * 100) : 0;
+  const totalInputTokens = totals.inputTokens + totals.cacheReadTokens;
+  const cacheReadRatePct = cacheReadRate(totals.inputTokens, totals.cacheReadTokens);
 
   return (
     <div className="usage-stats">
@@ -291,11 +296,11 @@ function PulseStats({
       </div>
       <div className="usage-stat">
         <div className="usage-stat-value" data-tone="ok">
-          {cacheReadRate}%
+          {cacheReadRatePct}%
         </div>
         <div className="usage-stat-label">Cache read rate</div>
         <div className="usage-stat-sub usage-mono">
-          {formatTokens(totals.cacheReadTokens)} of {formatTokens(totals.inputTokens)} input
+          {formatTokens(totals.cacheReadTokens)} of {formatTokens(totalInputTokens)} input
         </div>
       </div>
       <div className="usage-stat">
@@ -665,7 +670,7 @@ function ModelRosterSection({ range }: { range: UsageWindow }) {
           turns: g.events,
           inputTokens: g.inputTokens,
           outputTokens: g.outputTokens,
-          cachePct: g.inputTokens > 0 ? Math.round((g.cacheReadTokens / g.inputTokens) * 100) : 0,
+          cachePct: cacheReadRate(g.inputTokens, g.cacheReadTokens),
           avgPerTurn: g.events > 0 ? tokens / g.events : 0,
           share: grandTotal > 0 ? Math.round((tokens / grandTotal) * 100) : 0,
           color: `var(--s${((colorIndex.get(g.key) ?? 0) % SERIES_COLOR_COUNT) + 1})`,
@@ -1065,10 +1070,7 @@ function SignalsSection({ range }: { range: UsageWindow }) {
           failureTurns: failingEvents.length,
           failureTop,
           downshift,
-          cacheReadRate:
-            totals.inputTokens > 0
-              ? Math.round((totals.cacheReadTokens / totals.inputTokens) * 100)
-              : 0,
+          cacheReadRate: cacheReadRate(totals.inputTokens, totals.cacheReadTokens),
         });
       })
       .catch((err: unknown) => {
