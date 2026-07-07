@@ -228,7 +228,7 @@ chmod +x "$BIN_DIR/keelson"
 
 echo "keelson v$KEELSON_VERSION installed to $KEELSON_HOME"
 echo "launcher: $BIN_DIR/keelson  (ensure $BIN_DIR is on PATH)"
-echo "next: keelson rib add https://github.com/danielscholl/keelson-rib-chamber && keelson start"
+echo "next: keelson start && keelson doctor"
 `;
 }
 
@@ -318,6 +318,6 @@ if (-not (($env:Path -split ";") -contains $BinDir)) {
 
 Write-Host "keelson v$KeelsonVersion installed to $KeelsonHome"
 Write-Host "launcher: $BinDir\\keelson.cmd"
-Write-Host "next: keelson rib add https://github.com/danielscholl/keelson-rib-chamber; keelson start"
+Write-Host "next: keelson start; keelson doctor"
 `;
 }
