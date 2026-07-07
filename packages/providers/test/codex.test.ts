@@ -201,7 +201,25 @@ describe("mapCodexEvent", () => {
     ).toEqual([
       {
         type: "usage",
-        usage: { inputTokens: 100, outputTokens: 30, cacheReadInputTokens: 20 },
+        usage: { inputTokens: 80, outputTokens: 30, cacheReadInputTokens: 20 },
+      },
+    ]);
+  });
+
+  test("turn.completed clamps fresh input at zero when cached input exceeds total input", () => {
+    expect(
+      mapCodexEvent({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 10,
+          cached_input_tokens: 20,
+          output_tokens: 5,
+        },
+      }),
+    ).toEqual([
+      {
+        type: "usage",
+        usage: { inputTokens: 0, outputTokens: 5, cacheReadInputTokens: 20 },
       },
     ]);
   });

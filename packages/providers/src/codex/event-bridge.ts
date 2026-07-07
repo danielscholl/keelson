@@ -47,7 +47,10 @@ function mapCodexUsage(u: unknown): TokenUsage | undefined {
   if (input === undefined && output === undefined && cacheRead === undefined) {
     return undefined;
   }
-  const usage: TokenUsage = { inputTokens: input ?? 0, outputTokens: output ?? 0 };
+  const usage: TokenUsage = {
+    inputTokens: Math.max(0, (input ?? 0) - (cacheRead ?? 0)),
+    outputTokens: output ?? 0,
+  };
   if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
   return usage;
 }
