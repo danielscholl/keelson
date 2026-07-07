@@ -22,6 +22,9 @@
  * additions (e.g. `KEELSON_RUN_ID`) reach both surfaces.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type { NodeStreamEvent } from "../executor.ts";
 import type { NodeOutput } from "../schema/index.ts";
 
@@ -207,12 +210,34 @@ const PARENT_ENV: Readonly<Record<string, string>> = (() => {
   return env;
 })();
 
+// Per-value cap on the env channel. The executor hands every completed node's
+// output to each downstream subprocess, so a long DAG whose mid-run nodes emit
+// large outputs (full test transcripts run 400KB+) can push the combined env
+// past the platform spawn limit — macOS caps argv+env at ~1MiB total and Linux
+// caps a single "KEY=value" string at 128KiB — failing posix_spawn with E2BIG.
+// 16KiB/value keeps a 25-node closure near 400KiB worst case. Truncation keeps
+// head + tail (leaders like `PLAN_FILE=` and trailers like `VALIDATION_STATUS:`
+// are what bash nodes grep); the full text is spilled to an artifacts file.
+export const ENV_VALUE_MAX_CHARS = 16 * 1024;
+const ENV_VALUE_HEAD_CHARS = 8 * 1024;
+const ENV_VALUE_TAIL_CHARS = 8 * 1024;
+
+function truncateEnvValue(value: string, note: string): string {
+  return `${value.slice(0, ENV_VALUE_HEAD_CHARS)}\n[keelson: ${note}]\n${value.slice(-ENV_VALUE_TAIL_CHARS)}`;
+}
+
 /**
  * Build the env block for a workflow subprocess. Layers `KEELSON_INPUTS_*`,
  * `KEELSON_NODE_*_OUTPUT`, `KEELSON_ARGUMENTS`, and (when provided) the per-run
  * `KEELSON_ARTIFACTS_DIR` onto a snapshot of the parent env. Non-alphanumeric
  * chars in keys/node ids are normalized to `_` so the resulting names are
  * valid POSIX env-var identifiers.
+ *
+ * Values over `ENV_VALUE_MAX_CHARS` are head+tail truncated with an inline
+ * marker. A truncated node output is additionally spilled in full to
+ * `<artifactsDir>/node-outputs/<id>.txt`, with the path published as
+ * `KEELSON_NODE_<id>_OUTPUT_FILE` (omitted when there is no artifacts dir or
+ * the write fails — the truncated env value is always still set).
  */
 export function buildSubprocessEnv(
   inputs: Readonly<Record<string, string>>,
@@ -227,12 +252,36 @@ export function buildSubprocessEnv(
   // per-run value.
   delete env.KEELSON_ARTIFACTS_DIR;
   delete env.ARTIFACTS_DIR;
+  const capInput = (v: string): string =>
+    v.length <= ENV_VALUE_MAX_CHARS
+      ? v
+      : truncateEnvValue(v, `input truncated — ${v.length} chars total`);
   for (const [k, v] of Object.entries(inputs)) {
-    env[`KEELSON_INPUTS_${envSafe(k)}`] = v;
+    env[`KEELSON_INPUTS_${envSafe(k)}`] = capInput(v);
   }
-  env.KEELSON_ARGUMENTS = inputs.ARGUMENTS ?? "";
+  env.KEELSON_ARGUMENTS = capInput(inputs.ARGUMENTS ?? "");
   for (const [id, out] of upstream.entries()) {
-    env[`KEELSON_NODE_${envSafe(id)}_OUTPUT`] = out.output ?? "";
+    const full = out.output ?? "";
+    const name = `KEELSON_NODE_${envSafe(id)}_OUTPUT`;
+    if (full.length <= ENV_VALUE_MAX_CHARS) {
+      env[name] = full;
+      continue;
+    }
+    let fileNote = "";
+    if (options?.artifactsDir !== undefined) {
+      try {
+        const dir = join(options.artifactsDir, "node-outputs");
+        mkdirSync(dir, { recursive: true });
+        const spillPath = join(dir, `${envSafe(id)}.txt`);
+        writeFileSync(spillPath, full);
+        env[`${name}_FILE`] = spillPath;
+        fileNote = `; full output at $${name}_FILE`;
+      } catch {
+        // Spill is best-effort: an unwritable artifacts dir must not fail the
+        // node, and the truncated env value below still carries head + tail.
+      }
+    }
+    env[name] = truncateEnvValue(full, `output truncated — ${full.length} chars total${fileNote}`);
   }
   // Two env vars for the same path: `KEELSON_ARTIFACTS_DIR` is the prefixed
   // channel that matches the rest of our env contract (KEELSON_INPUTS_*,
