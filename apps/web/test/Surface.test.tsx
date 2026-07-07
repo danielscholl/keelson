@@ -277,7 +277,11 @@ describe("Surface", () => {
   });
 
   test("hideWhenEmpty treats non-board live payloads as content", () => {
-    live("rib:squad:table", { view: "table", columns: [{ key: "name" }], rows: [{ name: "Ready" }] });
+    live("rib:squad:table", {
+      view: "table",
+      columns: [{ key: "name" }],
+      rows: [{ name: "Ready" }],
+    });
     const { container } = renderSurface({
       id: "squad",
       title: "Squad",
