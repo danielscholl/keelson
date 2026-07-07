@@ -1995,6 +1995,42 @@ describe("ClaudeProvider — token usage edge cases", () => {
     });
   });
 
+  it("keeps Anthropic input_tokens fresh-only when cache fields are present", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          usage: {
+            input_tokens: 10,
+            output_tokens: 3,
+            cache_read_input_tokens: 90,
+            cache_creation_input_tokens: 5,
+          },
+          uuid: "result-uuid",
+          session_id: "sess-id",
+        } as ClaudeSdkMessage);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    const chunks = await drain(provider.sendQuery("hi", "/tmp"));
+    const usageChunk = chunks.find((c) => c.type === "usage");
+    expect(usageChunk).toEqual({
+      type: "usage",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 3,
+        cacheReadInputTokens: 90,
+        cacheCreationInputTokens: 5,
+      },
+    });
+  });
+
   it("emits no usage chunk when the assistant message has an empty usage object and result has no usage", async () => {
     const sdk = makeMockSdk({
       scenario: async (push) => {
