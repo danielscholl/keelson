@@ -22,11 +22,7 @@
  * additions (e.g. `KEELSON_RUN_ID`) reach both surfaces.
  */
 
-// biome-ignore lint/suspicious/noTsIgnore: Bun bundles Node built-ins at runtime.
-// @ts-ignore
 import { mkdirSync, writeFileSync } from "node:fs";
-// biome-ignore lint/suspicious/noTsIgnore: Bun bundles Node built-ins at runtime.
-// @ts-ignore
 import { join } from "node:path";
 
 import type { NodeStreamEvent } from "../executor.ts";

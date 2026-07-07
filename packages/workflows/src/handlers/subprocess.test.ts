@@ -9,14 +9,8 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-// biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
-// @ts-ignore
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-// biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
-// @ts-ignore
 import { tmpdir } from "node:os";
-// biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
-// @ts-ignore
 import { join } from "node:path";
 
 import type { NodeOutput } from "../schema/index.ts";
