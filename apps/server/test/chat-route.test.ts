@@ -28,6 +28,7 @@ import type { Server, ServerWebSocket } from "bun";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  type ChatRoutesOptions,
   chatRoutes,
   chatWebSocketHandlers,
   handleChatRequest,
@@ -58,10 +59,10 @@ interface TestRig {
   store: ConversationStore;
 }
 
-function makeRig(): TestRig {
+function makeRig(opts: ChatRoutesOptions = {}): TestRig {
   const store = makeMemStore();
   const app = new Hono();
-  chatRoutes(app, store, makeWorkflowDeps());
+  chatRoutes(app, store, makeWorkflowDeps(), opts);
   return { app, store };
 }
 
@@ -164,6 +165,37 @@ describe("REST chat endpoints", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { tools: unknown[] };
     expect(body.tools).toEqual([]);
+  });
+
+  test("GET /api/tools includes harness-owned workflow tools, not just the registry", async () => {
+    clearToolRegistry();
+    try {
+      const mkTool = (name: string, description: string): ToolDefinition => ({
+        name,
+        description,
+        inputSchema: z.object({}).strict(),
+        execute: async () => {},
+      });
+      registerTool(mkTool("canvas_publish", "Registry fixture"));
+
+      const { app } = makeRig({
+        workflowTools: [mkTool("workflow_run", "Run a workflow")],
+        workflowAuthoringTools: (project) => [
+          mkTool("workflow_save", project ? "Save (scoped)" : "Save (unscoped)"),
+        ],
+      });
+      const res = await app.fetch(new Request("http://test/api/tools"));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        tools: Array<{ name: string; family: string; description: string }>;
+      };
+      const byName = new Map(body.tools.map((t) => [t.name, t]));
+      expect(byName.get("canvas_publish")?.family).toBe("canvas");
+      expect(byName.get("workflow_run")?.family).toBe("workflow");
+      expect(byName.get("workflow_save")?.description).toBe("Save (unscoped)");
+    } finally {
+      clearToolRegistry();
+    }
   });
 
   test("POST /api/conversations mints id and returns a valid Conversation", async () => {

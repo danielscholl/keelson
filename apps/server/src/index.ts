@@ -619,6 +619,8 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     {
       projectsStore,
       ...(bootstrap.defaultProvider ? { defaultProvider: bootstrap.defaultProvider } : {}),
+      workflowTools,
+      workflowAuthoringTools,
     },
   );
   workflowsRoutes(app, workflowHandlerOptions, activeWorkflowRuns, workflowSubscribers);
