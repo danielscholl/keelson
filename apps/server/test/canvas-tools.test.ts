@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -54,6 +54,24 @@ beforeEach(() => {
 afterEach(async () => {
   await manager.dispose();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("artifact store", () => {
+  test("remove deletes both artifact files and is idempotent", () => {
+    const store = createArtifactStore(dir);
+    store.save({ slug: "remove-me", title: "Remove Me", html: PAGE() });
+
+    expect(existsSync(join(dir, "remove-me.html"))).toBe(true);
+    expect(existsSync(join(dir, "remove-me.json"))).toBe(true);
+
+    store.remove("remove-me");
+    store.remove("remove-me");
+    store.remove("../invalid");
+
+    expect(existsSync(join(dir, "remove-me.html"))).toBe(false);
+    expect(existsSync(join(dir, "remove-me.json"))).toBe(false);
+    expect(store.get("remove-me")).toBeUndefined();
+  });
 });
 
 describe("canvas_publish", () => {
