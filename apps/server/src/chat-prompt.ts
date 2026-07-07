@@ -29,6 +29,10 @@ export interface BuildChatSystemPromptInput {
   // Pass only when canvas_publish is active this turn — appends the canvas
   // artifact authoring guidance (frame contract, tokens, chart rules).
   canvasArtifacts?: boolean;
+  // Pass only when the keelson_docs tool is active this turn — appends the
+  // guidance that points the model at Keelson's (and installed ribs') docs
+  // instead of guessing about harness behavior.
+  docs?: boolean;
 }
 
 // Bound the always-on name index so the base prompt stays roughly constant as
@@ -86,6 +90,21 @@ export function buildWorkflowGuidance(workflows: readonly WorkflowSummaryLike[])
   ].join("\n");
 }
 
+// A compact, always-tiny stanza: it names the keelson_docs tool and how to walk
+// it, but lists no sources or summaries — those come back from the first tool
+// call, so the base prompt cost stays flat no matter how many ribs are installed.
+export function buildDocsGuidance(): string {
+  return [
+    "## Documentation",
+    "",
+    "Keelson and its installed ribs publish their own documentation, reachable with the keelson_docs tool. When you need to know how Keelson behaves or how to do something in Keelson — workflows, ribs, the CLI, config, providers, memory — read the docs instead of guessing; the user usually can't see Keelson's source, and the docs are the contract.",
+    "",
+    "- Call keelson_docs with no arguments to list documentation sources.",
+    "- Call it with a `source` id to get that source's table of contents.",
+    "- Call it with `source` and a `section` name to read one topic. Only that topic is returned, so read the section you need rather than pulling everything.",
+  ].join("\n");
+}
+
 export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string | undefined {
   const parts: string[] = [];
   if (input.notebookSection !== undefined && input.notebookSection.length > 0) {
@@ -102,6 +121,9 @@ export function buildChatSystemPrompt(input: BuildChatSystemPromptInput): string
   }
   if (input.canvasArtifacts === true) {
     parts.push(buildCanvasArtifactGuidance());
+  }
+  if (input.docs === true) {
+    parts.push(buildDocsGuidance());
   }
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }

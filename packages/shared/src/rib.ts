@@ -11,6 +11,7 @@ import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
 import type { MessageChunk, TokenUsage } from "./chat.ts";
 
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
+import type { RibDocsSource } from "./docs.ts";
 import type { MemoryTools } from "./memory.ts";
 import type { Policy } from "./policy.ts";
 import type { Project } from "./projects.ts";
@@ -453,6 +454,13 @@ export interface Rib {
   // Workflow definitions the rib contributes to the catalog at activation,
   // optionally each bound to a rib-namespaced snapshot key.
   contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
+  // Documentation sources the rib contributes to the harness docs catalog at
+  // activation — each an `llms-full.txt` corpus (or inline content) the
+  // keelson_docs tool lists, indexes, and slices on demand so an installed rib
+  // extends what the agent can look up about itself. Collected once at boot,
+  // like contributeWorkflows; the harness namespaces each source under the
+  // owning rib id, so core never hardcodes any rib's docs.
+  contributeDocs?(ctx: RibContext): readonly RibDocsSource[];
   // Policies the rib contributes to the harness governance stack at activation.
   // The harness composes them with its builtins behind one engine and evaluates
   // them at every turn path's hook points (see `Policy`). Collected once at boot,

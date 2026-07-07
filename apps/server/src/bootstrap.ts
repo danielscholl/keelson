@@ -85,7 +85,13 @@ import {
 } from "./policy-engine.ts";
 import { makeRibAgentTurn } from "./rib-agent-turn.ts";
 import { discoverRibs } from "./rib-discovery.ts";
-import { applyRibs, parseRibList, type RibManifest, type RibWorkflowContribution } from "./ribs.ts";
+import {
+  applyRibs,
+  parseRibList,
+  type RibDocsContribution,
+  type RibManifest,
+  type RibWorkflowContribution,
+} from "./ribs.ts";
 import type { UsageStore } from "./usage-store.ts";
 // Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
 // import direction is not turned into a runtime cycle.
@@ -253,6 +259,9 @@ export interface RibBootstrap {
   >;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
+  // Rib-contributed docs sources, tagged by owning rib — folded into the
+  // DocsCatalog behind keelson_docs at the composition root.
+  readonly docsContributions: RibDocsContribution[];
   // Rib-contributed policies, tagged by owning rib — folded into the PolicyEngine
   // at the composition root.
   readonly policies: RibPolicyContribution[];
@@ -496,6 +505,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    docsContributions,
     policies,
     tools,
     toolOwners,
@@ -529,6 +539,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    docsContributions,
     policies,
     tools,
     async disposeAll() {

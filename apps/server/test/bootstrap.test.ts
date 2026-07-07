@@ -168,6 +168,50 @@ describe("bootstrapRibs", () => {
     expect(manifests.map((m) => m.id)).toEqual(["alpha"]);
   });
 
+  test("contributeDocs sources are collected and stamped with the owning rib id", async () => {
+    delete process.env.KEELSON_RIBS;
+    const docsRib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      contributeDocs: () => [
+        { title: "Chamber", summary: "generative rooms", llmsFullUrl: "https://example/full.txt" },
+      ],
+    };
+    const { docsContributions } = await bootstrapRibs({ available: { chamber: docsRib } });
+    expect(docsContributions).toEqual([
+      {
+        ribId: "chamber",
+        source: {
+          title: "Chamber",
+          summary: "generative rooms",
+          llmsFullUrl: "https://example/full.txt",
+        },
+      },
+    ]);
+  });
+
+  test("a docs source with neither a URL nor content is dropped (schema-gated)", async () => {
+    delete process.env.KEELSON_RIBS;
+    const badRib = {
+      id: "alpha",
+      displayName: "alpha",
+      contributeDocs: () => [{ title: "Alpha", summary: "no corpus" }],
+    } as unknown as Rib;
+    const { docsContributions } = await bootstrapRibs({ available: { alpha: badRib } });
+    expect(docsContributions).toEqual([]);
+  });
+
+  test("a non-array contributeDocs return is ignored", async () => {
+    delete process.env.KEELSON_RIBS;
+    const badRib = {
+      id: "alpha",
+      displayName: "alpha",
+      contributeDocs: () => ({ title: "Alpha", summary: "x", content: "# T\n\nbody" }),
+    } as unknown as Rib;
+    const { docsContributions } = await bootstrapRibs({ available: { alpha: badRib } });
+    expect(docsContributions).toEqual([]);
+  });
+
   test("malformed tool entries are dropped so GET /api/ribs can't 500", async () => {
     delete process.env.KEELSON_RIBS;
     const ribBadTools = {

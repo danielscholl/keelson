@@ -36,11 +36,13 @@ import {
   type RibAuthStatus,
   type RibCommandDescriptor,
   type RibContext,
+  type RibDocsSource,
   type RibProviderInfo,
   type RibSurfaceDescriptor,
   type RibViewDescriptor,
   type RibWorkflowRunResult,
   ribDisplayNameSchema,
+  ribDocsSourceSchema,
   ribIdSchema,
   ribSurfaceDescriptorSchema,
   ribViewDescriptorSchema,
@@ -78,6 +80,14 @@ export interface RibWorkflowContribution {
   readonly publish?: (value: unknown) => void;
 }
 
+// A docs source a rib contributed (Rib.contributeDocs), tagged with the owning
+// rib id. The composition root folds these into the DocsCatalog behind the
+// keelson_docs tool, namespaced under `ribId` so core never names a rib.
+export interface RibDocsContribution {
+  readonly ribId: string;
+  readonly source: RibDocsSource;
+}
+
 export interface ApplyRibsResult {
   readonly manifests: RibManifest[];
   readonly disposers: RibDisposer[];
@@ -97,6 +107,9 @@ export interface ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >;
   readonly workflowContributions: RibWorkflowContribution[];
+  // Docs sources each active rib contributed (Rib.contributeDocs), tagged with
+  // the owning rib id. The composition root folds these into the DocsCatalog.
+  readonly docsContributions: RibDocsContribution[];
   // Policies each active rib contributed (Rib.contributePolicies), tagged with
   // the owning rib id. The composition root folds these into the PolicyEngine.
   readonly policies: RibPolicyContribution[];
@@ -221,6 +234,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     (name: string, prefix: string) => Promise<readonly CommandCompletion[]>
   >();
   const workflowContributions: RibWorkflowContribution[] = [];
+  const docsContributions: RibDocsContribution[] = [];
   const policies: RibPolicyContribution[] = [];
   const tools: ToolDefinition[] = [];
   const toolOwners = new Map<string, string>();
@@ -439,6 +453,27 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       }
     }
 
+    if (rib.contributeDocs) {
+      // Defensive like contributePolicies: a non-array return or a source that
+      // fails the schema (no title/summary, or neither a URL nor content) warns
+      // and is dropped rather than throwing.
+      const contributed = rib.contributeDocs(ribCtx);
+      if (!Array.isArray(contributed)) {
+        console.warn(`[keelson] rib '${rib.id}' contributeDocs did not return an array; ignoring`);
+      } else {
+        for (const source of contributed) {
+          const parsed = ribDocsSourceSchema.safeParse(source);
+          if (!parsed.success) {
+            console.warn(
+              `[keelson] rib '${rib.id}' contributed an invalid docs source: ${parsed.error.issues[0]?.message ?? "schema violation"}; skipping`,
+            );
+            continue;
+          }
+          docsContributions.push({ ribId: rib.id, source: parsed.data });
+        }
+      }
+    }
+
     if (rib.contributePolicies) {
       // Defensive like collectRibTools: a non-array return (or a malformed
       // entry) warns and is dropped rather than throwing, so one rib's bug can't
@@ -474,6 +509,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     commandInvokers,
     commandCompleters,
     workflowContributions,
+    docsContributions,
     policies,
     tools,
     toolOwners,

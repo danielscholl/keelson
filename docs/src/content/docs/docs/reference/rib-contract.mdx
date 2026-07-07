@@ -53,6 +53,7 @@ interface Rib {
   surfaces?: readonly RibSurfaceDescriptor[];
   acceptsIngest?: boolean;
   contributeWorkflows?(ctx: RibContext): readonly RibWorkflowContribution[];
+  contributeDocs?(ctx: RibContext): readonly RibDocsSource[];
   contributePolicies?(ctx: RibContext): readonly Policy[];
   onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
   listAgents?(ctx: RibContext): readonly AgentSummary[] | Promise<readonly AgentSummary[]>;
@@ -155,14 +156,24 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
    producer-side fail-closed gate (a zod `.parse`) run before the frame is
    cached or broadcast.
 
-6. **`contributePolicies(ctx)`** returns the governance `Policy`s the rib adds to
+6. **`contributeDocs(ctx)`** returns the `RibDocsSource`s the rib adds to the
+   harness docs catalog, collected once at activation like `contributeWorkflows`.
+   Each source is `{ title, summary, llmsFullUrl?, content? }` — an
+   `llms-full.txt` corpus the harness fetches and caches, or inline `content`.
+   The `keelson_docs` tool surfaces every source: it lists them, indexes one into
+   its H1 topics, and returns a single topic on demand, so the whole corpus never
+   enters a turn. The harness namespaces each source under the owning rib id, so
+   an installed rib extends what the agent can read about itself and the core
+   never names a rib.
+
+7. **`contributePolicies(ctx)`** returns the governance `Policy`s the rib adds to
    the harness, collected once at activation like `contributeWorkflows`. Each
    `Policy` is `{ id, on?, evaluate(event, ctx) }`; `evaluate` returns `allow`,
    `deny` with a reason, or `ask`, and the harness composes rib policies with its
    builtins behind one engine evaluated at each turn's hook points (tool call,
    tool result, request, response) across the chat, workflow, and rib surfaces.
 
-7. **`onAction(action, ctx)`** handles inbound actions over
+8. **`onAction(action, ctx)`** handles inbound actions over
    `POST /api/ribs/:id/action`. `action` is `{ type, payload?, origin? }`:
    `type` is a rib-defined verb the base never enumerates; `payload` stays
    opaque for the rib to narrow; `origin` is `"board" | "canvas-html"` and is
@@ -190,28 +201,28 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
    identifies the conversation that produced it when one exists. Treat the
    payload as untrusted user data and narrow it at the rib boundary.
 
-8. **`listAgents(ctx)` / `resolveAgent(slug, ctx)`** offer named chat agents,
+9. **`listAgents(ctx)` / `resolveAgent(slug, ctx)`** offer named chat agents,
    reusable turn templates of a system prompt plus an optional model, surfaced at
    `GET /api/agents`. `listAgents` is cheap and returns `AgentSummary`s;
    `resolveAgent` lazily builds one slug's `OpenChatSeed` on selection and
    returns `null` for an unknown slug. A surface opens the seed as a fresh,
    seeded chat.
 
-9. **`listCommands(ctx)` / `invokeCommand(name, arg, ctx)` /
-   `completeCommand(name, prefix, ctx)`** add slash commands to the chat
-   composer, surfaced at `GET /api/commands`. `listCommands` returns static
-   descriptors. `invokeCommand` is a side-effect-free resolver: it decides which
-   closed effect the surface performs (open one of the rib's agents, run a
-   workflow, or show a message), and the surface, not the rib, performs it.
-   `completeCommand` backs argument type-ahead and must return the full candidate
-   set for an empty `prefix`.
+10. **`listCommands(ctx)` / `invokeCommand(name, arg, ctx)` /
+    `completeCommand(name, prefix, ctx)`** add slash commands to the chat
+    composer, surfaced at `GET /api/commands`. `listCommands` returns static
+    descriptors. `invokeCommand` is a side-effect-free resolver: it decides which
+    closed effect the surface performs (open one of the rib's agents, run a
+    workflow, or show a message), and the surface, not the rib, performs it.
+    `completeCommand` backs argument type-ahead and must return the full candidate
+    set for an empty `prefix`.
 
-10. **`authStatus(ctx)`** is a credential probe surfaced in `GET /api/ribs` (and
+11. **`authStatus(ctx)`** is a credential probe surfaced in `GET /api/ribs` (and
     optionally `doctor`). It returns `{ authenticated, statusMessage? }`. The
     probe is not expected to throw; a throwing probe is caught at the seam and
     reported as `{ authenticated: false, statusMessage: <error> }`.
 
-11. **`dispose()`** is teardown, sync or async. The harness awaits it during
+12. **`dispose()`** is teardown, sync or async. The harness awaits it during
     shutdown, before the database closes, so a rib holding sockets, watchers, or
     child processes can tear down cleanly.
 
