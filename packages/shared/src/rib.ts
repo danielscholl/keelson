@@ -316,6 +316,9 @@ export const surfaceRegionSchema = z
     // derived from frame cadence, not a rib field) and quiets when they stop.
     // Default off — regions that omit it render unchanged.
     live: z.boolean().optional(),
+    // Hide the whole region until a live snapshot has content; avoid on-demand
+    // workflow regions because hiding would also hide their Load affordance.
+    hideWhenEmpty: z.boolean().optional(),
   })
   .strict();
 export type RibSurfaceRegion = z.infer<typeof surfaceRegionSchema>;
