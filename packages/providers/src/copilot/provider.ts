@@ -92,6 +92,13 @@ interface WarmClient {
   stopRequested: boolean;
 }
 
+class RetryableConnectionError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = "RetryableConnectionError";
+  }
+}
+
 // The warm client lives as instance state, so the instance must outlive a
 // single turn. registration.ts registers this provider as a process-lifetime
 // singleton (one instance returned from every getAgentProvider("copilot")
@@ -379,34 +386,67 @@ export class CopilotProvider implements IAgentProvider {
     const token = await this.getCredential(COPILOT_CREDENTIAL_SERVICE_ID);
     if (options?.abortSignal?.aborted) return;
 
-    // Acquire the warm client (reused across turns; spawned on the first turn
-    // or after eviction). A spawn failure surfaces as a friendly system error,
-    // the same shape as a session-open failure below.
-    let warm: WarmClient;
-    try {
-      warm = await this.acquireClient(token, cwd);
-    } catch (err) {
-      const msg = buildFriendlyCopilotError(err);
-      yield { type: "system", content: msg };
-      throw err instanceof Error ? err : new Error(msg);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (options?.abortSignal?.aborted) return;
+
+      // Acquire the warm client (reused across turns; spawned on the first turn
+      // or after eviction). A spawn failure surfaces as a friendly system error,
+      // the same shape as a session-open failure below.
+      let warm: WarmClient;
+      try {
+        warm = await this.acquireClient(token, cwd);
+      } catch (err) {
+        const msg = buildFriendlyCopilotError(err);
+        yield { type: "system", content: msg };
+        throw err instanceof Error ? err : new Error(msg);
+      }
+
+      // Abort raced the spawn: leave the client warm for the next turn rather
+      // than stopping it, and don't open a session or send. Arm the idle timer so
+      // a freshly spawned, then-abandoned client is still bounded by eviction.
+      if (options?.abortSignal?.aborted) {
+        this.armIdleTimer();
+        return;
+      }
+
+      // A turn is starting on the warm client: cancel any pending idle eviction
+      // so a timer armed by the previous turn can't fire mid-stream here.
+      this.cancelIdleTimer();
+
+      try {
+        yield* this.streamTurn(prompt, warm, token, cwd, resumeSessionId, options, attempt === 0);
+        return;
+      } catch (err) {
+        if (err instanceof RetryableConnectionError && attempt === 0) {
+          continue;
+        }
+        if (err instanceof RetryableConnectionError) {
+          yield { type: "error", message: err.message };
+          throw err.cause ?? err;
+        }
+        throw err;
+      }
     }
+  }
 
-    // Abort raced the spawn: leave the client warm for the next turn rather
-    // than stopping it, and don't open a session or send. Arm the idle timer so
-    // a freshly spawned, then-abandoned client is still bounded by eviction.
-    if (options?.abortSignal?.aborted) {
-      this.armIdleTimer();
-      return;
-    }
-
-    // A turn is starting on the warm client: cancel any pending idle eviction
-    // so a timer armed by the previous turn can't fire mid-stream here.
-    this.cancelIdleTimer();
-
+  private async *streamTurn(
+    prompt: string,
+    warm: WarmClient,
+    token: string | undefined,
+    cwd: string,
+    resumeSessionId: string | undefined,
+    options: SendQueryOptions | undefined,
+    canRetry: boolean,
+  ): AsyncGenerator<MessageChunk> {
     const queue = new ChunkQueue();
     const unsubs: Array<() => void> = [];
     let session: CopilotSessionLike | null = null;
     let lastSessionError: string | null = null;
+    let yieldedContent = false;
+    const yieldChunk = (chunk: MessageChunk): MessageChunk => {
+      yieldedContent = true;
+      return chunk;
+    };
     // Set when the turn fails in a connection-y way so the finally drops the
     // warm client (a wedged subprocess shouldn't poison the next turn). On a
     // clean turn the client stays warm and only this turn's session is released.
@@ -474,7 +514,7 @@ export class CopilotProvider implements IAgentProvider {
         // if it was a connection fault so the next turn starts clean.
         connectionFailure = isCopilotConnectionError(err);
         const msg = buildFriendlyCopilotError(err);
-        yield { type: "system", content: msg };
+        yield yieldChunk({ type: "system", content: msg });
         throw err instanceof Error ? err : new Error(msg);
       }
 
@@ -495,7 +535,7 @@ export class CopilotProvider implements IAgentProvider {
           // Non-fatal — the SDK will resurface this as a session.error if
           // the model genuinely rejects the effort tier.
           const msg = err instanceof Error ? err.message : String(err);
-          yield { type: "system", content: `setModel failed: ${msg}` };
+          yield yieldChunk({ type: "system", content: `setModel failed: ${msg}` });
         }
       }
 
@@ -656,7 +696,7 @@ export class CopilotProvider implements IAgentProvider {
       while (true) {
         const chunk = await queue.next();
         if (chunk === null) break;
-        yield chunk;
+        yield yieldChunk(chunk);
       }
 
       // .catch above absorbs rejection; await ensures the promise settles
@@ -671,7 +711,7 @@ export class CopilotProvider implements IAgentProvider {
         if (turnCacheWrite > 0) usage.cacheCreationInputTokens = turnCacheWrite;
         if (contextTokens !== undefined) usage.contextTokens = contextTokens;
         if (contextWindow !== undefined) usage.contextWindow = contextWindow;
-        yield { type: "usage", usage };
+        yield yieldChunk({ type: "usage", usage });
       }
 
       // Session errors carry typed errorType (auth, rate_limit) — more
@@ -679,13 +719,19 @@ export class CopilotProvider implements IAgentProvider {
       if (lastSessionError) {
         connectionFailure = isCopilotConnectionError(lastSessionError);
         const msg = buildFriendlyCopilotError(lastSessionError);
-        yield { type: "error", message: msg };
+        if (connectionFailure && canRetry && !yieldedContent) {
+          throw new RetryableConnectionError(msg, new Error(msg));
+        }
+        yield yieldChunk({ type: "error", message: msg });
         throw new Error(msg);
       }
       if (sendError) {
         connectionFailure = isCopilotConnectionError(sendError);
         const msg = buildFriendlyCopilotError(sendError);
-        yield { type: "error", message: msg };
+        if (connectionFailure && canRetry && !yieldedContent) {
+          throw new RetryableConnectionError(msg, sendError);
+        }
+        yield yieldChunk({ type: "error", message: msg });
         throw sendError;
       }
     } finally {
