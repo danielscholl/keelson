@@ -12,7 +12,11 @@ import { clearRegistry, registerTool } from "@keelson/skills";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
-import { createKeelsonMcpServer, type KeelsonMcpServerOptions } from "../src/server.ts";
+import {
+  buildMcpInstructions,
+  createKeelsonMcpServer,
+  type KeelsonMcpServerOptions,
+} from "../src/server.ts";
 
 function readTool(name: string, content: string, stateChanging = false) {
   registerTool({
@@ -151,6 +155,45 @@ describe("createKeelsonMcpServer", () => {
     const res = await client.callTool({ name: "workflow_list", arguments: {} });
     expect((res.content as Array<{ text: string }>)[0]?.text).toBe("wf-a, wf-b");
     expect(res.isError).toBeFalsy();
+  });
+});
+
+describe("buildMcpInstructions", () => {
+  test("advertises the workflow_run loop and keelson_docs when state-changing is exposed", () => {
+    const text = buildMcpInstructions({ exposeStateChanging: true });
+    expect(text).toContain("workflow_run");
+    expect(text).toContain("workflow_respond");
+    expect(text).toContain("keelson_docs");
+  });
+
+  test("omits workflow_run but keeps keelson_docs when state-changing is withheld", () => {
+    const text = buildMcpInstructions({ exposeStateChanging: false });
+    expect(text).not.toContain("workflow_run");
+    expect(text).toContain("workflow_list");
+    expect(text).toContain("keelson_docs");
+  });
+
+  test("omits workflow_run when it is denylisted even with exposeStateChanging", () => {
+    const text = buildMcpInstructions({
+      exposeStateChanging: true,
+      toolDenylist: ["workflow_run"],
+    });
+    expect(text).not.toContain("workflow_run");
+  });
+
+  test("stays within Codex's ~512-char instructions cap in every branch", () => {
+    for (const policy of [
+      { exposeStateChanging: true },
+      { exposeStateChanging: false },
+      { exposeStateChanging: true, toolDenylist: ["workflow_run"] },
+    ] as const) {
+      expect(buildMcpInstructions(policy).length).toBeLessThanOrEqual(512);
+    }
+  });
+
+  test("the connected client receives the instructions in the initialize result", async () => {
+    const client = await connect({ exposeStateChanging: true });
+    expect(client.getInstructions()).toContain("keelson_docs");
   });
 });
 

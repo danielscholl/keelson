@@ -1,6 +1,6 @@
 ---
 title: Using keelson over MCP
-description: Expose your ribs' tools to other agents over the Model Context Protocol — state-changing tools included by default — and point an MCP client at the endpoint.
+description: Wire your coding agent to Keelson over the Model Context Protocol with keelson connect, or point any MCP client at the local endpoint. State-changing tools are exposed by default.
 sidebar:
   order: 7
 ---
@@ -27,18 +27,64 @@ hidden or denied tool is reported as unknown, so the endpoint never reveals what
 is withholding.
 
 <Aside type="note" title="Open on loopback by default">
-A fresh endpoint serves the full registry — state-changing tools included — on
+A fresh endpoint serves the full registry (state-changing tools included) on
 loopback with no token. Lock it down deliberately: `exposeStateChanging: false`
 restricts it to read-only, `requireToken` adds a bearer token, and `toolDenylist`
 hides tools by name. See [Configuration](../configuration/#mcp-gateway) for every knob.
 </Aside>
 
-## Connect an HTTP client
+## Connect an agent with one command
 
-A client that speaks HTTP MCP points straight at the endpoint:
+`keelson connect` wires a coding agent to the endpoint for you, from the repo you
+want to work in. It writes the MCP server entry into that agent's own config and
+drops a small, portable skill that teaches the agent when to reach for Keelson.
+
+```bash
+keelson connect claude      # or: copilot, codex, or 'all'
+```
+
+It handles three agents today, each written to that agent's native location:
+
+| Agent | Config it writes | Transport |
+|---|---|---|
+| `claude` | `.mcp.json` in the current repo | HTTP |
+| `copilot` | `~/.copilot/mcp-config.json` | HTTP |
+| `codex` | `~/.codex/config.toml` | the `keelson mcp` stdio bridge |
+
+Codex speaks only stdio, so it gets the bridge instead of the HTTP URL. The bridge
+resolves the server URL and token on each launch, so the wiring survives a restart
+or a non-default port.
+
+The skill lands at `.agents/skills/keelson/SKILL.md`, the shared directory Claude
+Code, the Copilot CLI, and Codex all read. It names no tool or rib: it points the
+agent at `keelson_docs` and the workflow tools, so it stays correct as you install
+or remove ribs.
+
+`keelson connect` records what it wrote, so reversing it is exact:
+
+```bash
+keelson connect --list        # show what is connected
+keelson disconnect claude     # or: keelson connect claude --undo
+```
+
+Disconnect removes only Keelson's own entry, never a sibling MCP server or a file
+you already had. Pass `--no-skill` to wire the connection without the skill, or
+`--url` to write a non-default endpoint.
+
+<Aside type="note" title="Restart the agent after connecting">
+An agent reads its MCP config at startup, so start a new session (or restart the
+agent) after `keelson connect` for it to take effect. Once connected, the agent
+can call `keelson_docs` to learn how Keelson behaves with no source checkout: the
+`keelson-agent` source is a short playbook on orchestrating through Keelson.
+</Aside>
+
+## Connect a client by hand
+
+For a client `keelson connect` does not cover, or to wire one yourself, point an
+HTTP MCP client straight at the endpoint:
 
 ```jsonc
-// Claude Code or Cursor: an HTTP MCP server
+// Cursor or another HTTP MCP client
 {
   "mcpServers": {
     "keelson": { "type": "http", "url": "http://127.0.0.1:7878/api/mcp" }

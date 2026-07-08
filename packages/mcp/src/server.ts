@@ -63,6 +63,26 @@ function isExposed(tool: ToolDefinition, policy: ExposurePolicy): boolean {
   return true;
 }
 
+// Server-wide guidance returned in the MCP `initialize` response. Clients that
+// honor the field fold it into the model's context before it reasons (Claude
+// Code injects it; Codex reads only the first ~512 chars) — so keep it tight and
+// lead with the imperative. It points at keelson_docs rather than enumerating
+// tools or ribs, so it stays correct as ribs are installed/removed and never
+// exceeds the cap. Policy-aware: it never advertises workflow_run when the
+// state-changing surface is withheld.
+export function buildMcpInstructions(policy: ExposurePolicy): string {
+  const canRun =
+    policy.exposeStateChanging === true && policy.toolDenylist?.includes("workflow_run") !== true;
+  const workflows = canRun
+    ? "Prefer routing repeatable or long-running work through Keelson rather than doing it all inline: list automations with workflow_list and start them with workflow_run; if one pauses for approval, relay its plan and resume with workflow_respond."
+    : "Browse its automations with workflow_list and inspect their runs with workflow_status.";
+  return [
+    "You're connected to Keelson, a local agent workbench that keeps work durable across sessions.",
+    workflows,
+    "Don't guess how Keelson or its installed ribs behave — call keelson_docs first; it's the contract and lists every capability currently installed.",
+  ].join(" ");
+}
+
 // Derive the JSON Schema MCP advertises for a tool's params. Mirrors
 // @keelson/providers' deriveToolParametersJsonSchema, kept local so this
 // package doesn't pull the provider SDKs. Always returns an object schema —
@@ -106,7 +126,7 @@ function declaresConfirm(tool: ToolDefinition): boolean {
 export function createKeelsonMcpServer(opts: KeelsonMcpServerOptions): Server {
   const server = new Server(
     { name: "keelson", version: opts.version ?? "0.0.0" },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {} }, instructions: buildMcpInstructions(opts) },
   );
 
   // The exposed universe = global registry (rib tools) + injected extras
