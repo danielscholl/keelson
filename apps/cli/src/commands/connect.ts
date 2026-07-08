@@ -97,21 +97,32 @@ function readIfExists(file: string): string | null {
   }
 }
 
-// Create the skill dir tree (idempotent) and report the chain of dirs it newly
-// made, deepest-first, so a last disconnect removes exactly what connect
-// introduced. Derived from mkdir's own report of the topmost dir it created, so
-// there is no check-then-act (TOCTOU) window.
-function ensureSkillDir(dir: string): string[] {
-  const firstCreated = mkdirSync(dir, { recursive: true });
-  if (firstCreated === undefined) return [];
-  const created: string[] = [];
+// Create the skill dir tree below `stopAt` (an existing ancestor, e.g. cwd) and
+// report the chain of dirs it newly made, deepest-first, so a last disconnect
+// removes exactly what connect introduced. Each level is created top-down with a
+// non-recursive mkdir: a successful create means the dir is new, EEXIST means it
+// was already there. mkdir is itself the atomic check, so there is no
+// check-then-act (TOCTOU) window and no reliance on a platform-specific
+// recursive-mkdir return value.
+function ensureSkillDir(dir: string, stopAt: string): string[] {
+  const levels: string[] = [];
   let d = dir;
-  while (d.length >= firstCreated.length) {
-    created.push(d);
-    if (d === firstCreated) break;
-    d = dirname(d);
+  while (d !== stopAt) {
+    levels.unshift(d);
+    const parent = dirname(d);
+    if (parent === d) break; // reached the fs root without hitting stopAt
+    d = parent;
   }
-  return created;
+  const created: string[] = [];
+  for (const level of levels) {
+    try {
+      mkdirSync(level);
+      created.push(level);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
+  return created.reverse(); // deepest-first, for removal order
 }
 
 function removeDirIfEmpty(dir: string): void {
@@ -167,7 +178,7 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
     const prior = data.skill;
     // Create the dir tree (idempotent). On the first connect, record which dirs
     // were newly made so a last disconnect removes exactly those.
-    const createdDirs = prior?.createdDirs ?? ensureSkillDir(skillDir);
+    const createdDirs = prior?.createdDirs ?? ensureSkillDir(skillDir, cwd);
     if (prior) mkdirSync(skillDir, { recursive: true });
     // Detect first-creation atomically with an exclusive write (no check-then-act):
     // `wx` throws EEXIST when the file is already there, meaning connect did not

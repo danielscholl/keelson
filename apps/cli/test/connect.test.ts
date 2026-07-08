@@ -199,4 +199,14 @@ describe("connect / disconnect (filesystem)", () => {
     expect(servers.keelson).toBeUndefined();
     expect(servers.other).toBeDefined();
   });
+
+  test("disconnect removes only the skill dirs connect created, keeping a pre-existing ancestor", () => {
+    // The operator already owns `.agents`; connect must create (and later remove)
+    // only `skills`/`keelson` beneath it, never the ancestor it didn't make.
+    mkdirSync(join(repo, ".agents"), { recursive: true });
+    runConnect(["claude"], connectOpts());
+    runDisconnect(["claude"], disconnectOpts());
+    expect(existsSync(join(repo, ".agents", "skills"))).toBe(false);
+    expect(existsSync(join(repo, ".agents"))).toBe(true);
+  });
 });
