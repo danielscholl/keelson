@@ -236,6 +236,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const resetConversation = (reason: string): void => {
     session.conversationId = undefined;
+    transcript.clear();
     info(`── ${reason} ──`);
   };
 
