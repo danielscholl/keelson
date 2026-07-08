@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DocsCatalog, type DocsSource, parseTopics, stampRibDocsSources } from "./docs-catalog.ts";
+import {
+  DocsCatalog,
+  type DocsSource,
+  KEELSON_AGENT_DOCS_SOURCE,
+  parseTopics,
+  stampRibDocsSources,
+} from "./docs-catalog.ts";
 
 const CORPUS = `<SYSTEM>preamble ignored</SYSTEM>
 
@@ -106,6 +112,50 @@ describe("DocsCatalog inline sources", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error).toContain("test");
+  });
+});
+
+describe("KEELSON_AGENT_DOCS_SOURCE (bundled agent playbook)", () => {
+  const catalog = new DocsCatalog({
+    sources: [KEELSON_AGENT_DOCS_SOURCE],
+    cacheDir: "/nonexistent",
+  });
+
+  test("ships inline (no network) and lists as the 'keelson-agent' start-here source", () => {
+    expect(KEELSON_AGENT_DOCS_SOURCE.content).toBeDefined();
+    expect(KEELSON_AGENT_DOCS_SOURCE.llmsFullUrl).toBeUndefined();
+    const listed = catalog.list().find((s) => s.id === "keelson-agent");
+    expect(listed?.summary.toLowerCase()).toContain("start here");
+  });
+
+  test("splits into the orchestration playbook topics", async () => {
+    const res = await catalog.toc("keelson-agent");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.topics.map((t) => t.slug)).toEqual([
+      "driving-keelson-as-an-agent",
+      "running-work-through-workflows",
+      "discovering-what-keelson-can-do",
+    ]);
+  });
+
+  test("the workflow topic teaches the discover→run→steer loop by tool name", async () => {
+    const res = await catalog.readSection("keelson-agent", "running-work-through-workflows");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    for (const tool of ["workflow_list", "workflow_run", "workflow_respond", "workflow_status"]) {
+      expect(res.content).toContain(tool);
+    }
+  });
+
+  test("stays rib-agnostic: teaches discovery via tools/list + keelson_docs, names no rib", async () => {
+    const res = await catalog.readSection("keelson-agent", "discovering-what-keelson-can-do");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.content).toContain("tools/list");
+    expect(res.content).toContain("keelson_docs");
+    // No hardcoded capability that would go stale as ribs are installed/removed.
+    expect(res.content.toLowerCase()).not.toContain("osdu");
   });
 });
 

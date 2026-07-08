@@ -59,6 +59,7 @@ import { openDatabase } from "./db/init.ts";
 import {
   DocsCatalog,
   type DocsSource,
+  KEELSON_AGENT_DOCS_SOURCE,
   KEELSON_CORE_DOCS_SOURCE,
   stampRibDocsSources,
 } from "./docs-catalog.ts";
@@ -298,6 +299,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // rule canvas_* / workflow_* follow. Core lists its own docs but never names a
   // rib; installed ribs extend the catalog through their contributions.
   const docsSources: DocsSource[] = [
+    KEELSON_AGENT_DOCS_SOURCE,
     KEELSON_CORE_DOCS_SOURCE,
     ...stampRibDocsSources(ribs.docsContributions),
   ];

@@ -15,6 +15,7 @@
 import { type FileHandle, mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RibDocsSource } from "@keelson/shared";
+import { KEELSON_AGENT_GUIDE } from "./docs-agent-guide.ts";
 
 // A registered source: a RibDocsSource plus the id the harness stamps
 // ("keelson" for core, the rib id for a rib).
@@ -31,6 +32,18 @@ export const KEELSON_CORE_DOCS_SOURCE: DocsSource = {
   summary:
     "The Keelson harness itself: chat, deterministic workflows, memory, ribs, providers, the CLI, and configuration.",
   llmsFullUrl: "https://danielscholl.github.io/keelson/llms-full.txt",
+};
+
+// The agent-facing orchestration playbook. Bundled inline (not site-fetched) so
+// it always matches the harness version an external agent is driving and is live
+// the instant a client connects — the operating manual for reproducing "how to
+// drive Keelson" without the codebase.
+export const KEELSON_AGENT_DOCS_SOURCE: DocsSource = {
+  id: "keelson-agent",
+  title: "Driving Keelson as an agent",
+  summary:
+    "Start here if you reach Keelson over MCP: when to orchestrate through Keelson, the workflow loop, and how to discover capabilities and ribs.",
+  content: KEELSON_AGENT_GUIDE,
 };
 
 export interface DocsSourceListing {

@@ -13,6 +13,7 @@ import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { runApprovalList, runApprovalResolve } from "./commands/approval.ts";
 import { runChatEntry } from "./commands/chat.ts";
+import { runConnect, runConnectStatus, runDisconnect } from "./commands/connect.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runGatewayAdd, runGatewayList, runGatewayRemove } from "./commands/gateway.ts";
 import { runMcpBridge } from "./commands/mcp.ts";
@@ -204,6 +205,43 @@ export function buildProgram(): Command {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", mcpOpts.baseUrl);
       await runMcpBridge({ ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  program
+    .command("connect [targets...]")
+    .description(
+      "wire an external agent (claude, copilot, codex, or 'all') to keelson's MCP endpoint and drop a portable skill",
+    )
+    .option("--url <url>", "MCP endpoint URL to write (default: http://127.0.0.1:7878/api/mcp)")
+    .option("--no-skill", "wire the MCP connection only; skip the shared SKILL.md drop")
+    .option("--undo", "reverse a previous connect for the named agents")
+    .option("--list", "show current connections instead of connecting")
+    .action(function connectAction(
+      this: Command,
+      targets: string[],
+      connectOpts: { url?: string; skill: boolean; undo?: boolean; list?: boolean },
+    ) {
+      const { json } = globalOpts(this);
+      if (connectOpts.list) {
+        runConnectStatus({ json });
+        return;
+      }
+      if (connectOpts.undo) {
+        runDisconnect(targets, { json });
+        return;
+      }
+      const url = requireNonEmpty(json, "--url", connectOpts.url);
+      runConnect(targets, { json, skill: connectOpts.skill, ...(url ? { url } : {}) });
+    });
+
+  program
+    .command("disconnect [targets...]")
+    .description(
+      "reverse `keelson connect` for the named agents (claude, copilot, codex, or 'all')",
+    )
+    .action(function disconnectAction(this: Command, targets: string[]) {
+      const { json } = globalOpts(this);
+      runDisconnect(targets, { json });
     });
 
   const workflow = program

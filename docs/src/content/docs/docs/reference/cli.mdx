@@ -68,6 +68,17 @@ This is for MCP clients that speak stdio only; a client that speaks HTTP points
 straight at `http://127.0.0.1:7878/api/mcp` and skips the bridge. See
 [Using keelson over MCP](../../guides/using-mcp/).
 
+## Connect an agent
+
+| Command | Does |
+| --- | --- |
+| `keelson connect <agent...>` | Wire an external agent (`claude`, `copilot`, `codex`, or `all`) to the MCP endpoint and drop a portable skill at `.agents/skills/keelson/SKILL.md`. `--no-skill` wires the connection only; `--url <url>` writes a non-default endpoint; `--undo` reverses; `--list` shows current connections. |
+| `keelson disconnect <agent...>` | Reverse a previous connect for the named agents, removing only Keelson's own entry and any file the connect created. |
+
+`keelson connect` records what it wrote under the keelson home, so a disconnect is
+exact: it never touches a sibling MCP server or a config file you already had. See
+[Using keelson over MCP](../../guides/using-mcp/#connect-an-agent-with-one-command).
+
 ## Workflows
 
 | Command | Does |

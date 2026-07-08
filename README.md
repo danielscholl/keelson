@@ -145,13 +145,26 @@ keelson gateway add ollama http://localhost:11434/v1 --model qwen3
 
 ## Use Keelson from other agents with MCP
 
-When the server is running, registered tools are available over the local MCP endpoint:
+Your own coding agent can drive Keelson through the local MCP endpoint — running workflows, reading Keelson's own docs, and using any installed rib's tools — so it orchestrates work through Keelson instead of doing everything itself.
+
+Wire one up with a single command from the repo you want to work in:
+
+```bash
+keelson connect claude      # or: copilot, codex, or 'all'
+```
+
+`keelson connect` writes the MCP server entry into that agent's config and drops a small, portable skill (`.agents/skills/keelson/SKILL.md`, read by Claude Code, Copilot CLI, and Codex) that teaches the agent when to reach for Keelson. It records what it wrote, so reversing it is exact — it removes only Keelson's own entry, never a sibling MCP server or a file you already had:
+
+```bash
+keelson connect --list      # show what's connected
+keelson disconnect claude   # or: keelson connect claude --undo
+```
+
+Prefer to wire it by hand, or use another client? The endpoint is:
 
 ```text
 http://127.0.0.1:7878/api/mcp
 ```
-
-Example client configuration:
 
 ```jsonc
 {
@@ -164,7 +177,7 @@ Example client configuration:
 }
 ```
 
-The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
+Once connected, an agent can call `keelson_docs` to learn how Keelson behaves — no source checkout required — and `workflow_list` / `workflow_run` to drive automations. The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
 
 ## CLI reference
 
@@ -175,6 +188,8 @@ keelson start                    # start the local server in the background
 keelson stop                     # stop the background server
 keelson restart                  # restart the background server
 keelson status                   # report server status
+keelson connect <agent>          # wire an agent (claude|copilot|codex|all) to the MCP endpoint
+keelson disconnect <agent>       # reverse a connect (also: keelson connect <agent> --undo)
 keelson chat "hello"             # chat turn (omit the message for interactive)
 keelson workflow list            # list available workflows
 keelson workflow run <name>      # run a workflow
