@@ -251,6 +251,14 @@ describe("resolveDefaultBranch", () => {
 
     expect(await resolveDefaultBranch(tmp)).toBeNull();
   });
+
+  test("returns null instead of throwing when the cwd does not exist", async () => {
+    // Bun.spawn throws ENOENT (posix_spawn) when its cwd was removed out from
+    // under it — e.g. a timed-out test's teardown, or a concurrent worktree
+    // removal. runGit must degrade to a non-zero result, not an unhandled throw.
+    const gone = join(tmp, "does-not-exist", "sub");
+    expect(await resolveDefaultBranch(gone)).toBeNull();
+  });
 });
 
 describe("headDivergesFrom", () => {

@@ -23,6 +23,11 @@ const GIT_TIMEOUT_MS = 30_000;
 // Resolving a fresh worktree's workspace graph is far slower than a git op.
 const BUN_INSTALL_TIMEOUT_MS = 300_000;
 
+// Resolve to absolute paths once so PATH lookup can't intermittently fail under
+// process pressure. Fall back to the bare name when resolution fails at load.
+const GIT_BIN = Bun.which("git") ?? "git";
+const BUN_BIN = Bun.which("bun") ?? "bun";
+
 // realpathSync.native resolves through the OS (GetFinalPathNameByHandle on
 // Windows), which also expands 8.3 short names (C:\Users\RUNNER~1\...) that the
 // portable implementation leaves intact. Git records long-form paths, so a
@@ -91,12 +96,23 @@ interface GitOutcome {
 }
 
 async function runGit(args: string[], cwd?: string): Promise<GitOutcome> {
-  const proc = Bun.spawn({
-    cmd: ["git", ...args],
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  try {
+    proc = Bun.spawn({
+      cmd: [GIT_BIN, ...args],
+      cwd,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (err) {
+    // Bun.spawn throws synchronously when the exec fails before the child
+    // starts — notably ENOENT when `cwd` was removed out from under an
+    // in-flight call (a timed-out test's teardown, or a concurrent worktree
+    // removal). Surface it as a non-zero git result so callers degrade like any
+    // other git failure instead of raising an unhandled rejection.
+    return { exitCode: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
+  }
   const timeout = setTimeout(() => {
     try {
       proc.kill();
@@ -114,13 +130,20 @@ async function runGit(args: string[], cwd?: string): Promise<GitOutcome> {
 }
 
 async function runBun(args: string[], cwd: string, abortSignal?: AbortSignal): Promise<GitOutcome> {
-  const proc = Bun.spawn({
-    cmd: ["bun", ...args],
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-  });
+  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  try {
+    proc = Bun.spawn({
+      cmd: [BUN_BIN, ...args],
+      cwd,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (err) {
+    // See runGit: a synchronous spawn throw (e.g. cwd removed mid-flight)
+    // degrades to a non-zero result rather than an unhandled rejection.
+    return { exitCode: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
+  }
   const kill = () => {
     try {
       proc.kill();

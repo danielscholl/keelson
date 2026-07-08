@@ -87,6 +87,7 @@ import { z } from "zod";
 
 import type { RibWorkflowBinding, WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
+import { createRunSlots, type RunSlots, resolveMaxConcurrentRuns } from "./run-concurrency.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
 import { resolveWorkflowName } from "./workflow-resolve.ts";
 
@@ -2227,7 +2228,58 @@ interface ExecuteRunArgs {
   usageStore?: UsageStore;
 }
 
+// Process-wide slot pool, lazily built so KEELSON_MAX_CONCURRENT_RUNS is read
+// after env setup. Only heavyweight (worktree-isolated / resumed-into-worktree)
+// runs pass through it; lightweight in-place runs (rib collectors, refreshes)
+// stay ungated so they never queue behind a long isolated run.
+let runSlotsSingleton: RunSlots | null = null;
+function runSlots(): RunSlots {
+  if (runSlotsSingleton === null) {
+    runSlotsSingleton = createRunSlots(resolveMaxConcurrentRuns());
+  }
+  return runSlotsSingleton;
+}
+
 async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
+  const heavy = args.isolation !== null || args.existingWorktreePath !== undefined;
+  if (!heavy) {
+    await runWorkflowExecution(args);
+    return;
+  }
+  const { abort, runId, store, subscribers, activeRuns } = args;
+  const slots = runSlots();
+  // Skip the queue warning for an already-cancelled run: acquire() returns
+  // immediately below and it's marked cancelled without ever queueing.
+  if (!abort.signal.aborted && slots.active >= slots.limit) {
+    subscribers.broadcast(runId, {
+      type: "run_warning",
+      nodeId: null,
+      message: `waiting for a run slot (${slots.waiting + 1} queued; ${slots.limit} runs concurrently)`,
+    });
+  }
+  const release = await slots.acquire(abort.signal);
+  try {
+    if (abort.signal.aborted) {
+      // Cancelled while queued — never entered the executor, so close the row
+      // out here (the executor's own run_done path never fires).
+      store.updateRunStatus({
+        runId,
+        status: "cancelled",
+        completedAt: new Date().toISOString(),
+        error: null,
+      });
+      subscribers.broadcast(runId, { type: "run_done", status: "cancelled" });
+      activeRuns.delete(runId);
+      subscribers.closeRun(runId);
+      return;
+    }
+    await runWorkflowExecution(args);
+  } finally {
+    release();
+  }
+}
+
+async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   const {
     workflow,
     runId,
