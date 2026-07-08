@@ -3,8 +3,11 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
+import { Container, Text } from "@earendil-works/pi-tui";
 import {
   AssistantTurnView,
+  createTranscriptSurface,
+  resetTranscript,
   summarizeToolResult,
   summarizeToolUse,
 } from "../src/interactive/transcript.ts";
@@ -19,6 +22,9 @@ function fakeSurface() {
     children,
     addChild(component: Renderable) {
       children.push(component);
+    },
+    clear() {
+      children.length = 0;
     },
     requestRender() {},
   };
@@ -70,6 +76,26 @@ describe("summarizeToolResult", () => {
 
   test("marks errors", () => {
     expect(summarizeToolResult("nope", true)).toBe("✗ nope");
+  });
+});
+
+describe("resetTranscript", () => {
+  test("clears the transcript before the reset banner and requests a render", () => {
+    const transcript = new Container();
+    let renders = 0;
+    const surface = createTranscriptSurface(transcript, () => {
+      renders++;
+    });
+
+    surface.addChild(new Text("previous user turn", 1, 0));
+    surface.addChild(new Text("previous assistant turn", 1, 0));
+    expect(transcript.children).toHaveLength(2);
+
+    resetTranscript(surface, "new conversation");
+
+    expect(transcript.children).toHaveLength(1);
+    expect(renderedText(transcript.children).trim()).toBe("── new conversation ──");
+    expect(renders).toBe(1);
   });
 });
 
