@@ -3338,6 +3338,83 @@ button.tab:focus-visible {
 }
 .surface-region[data-collapsed] .surface-region-head {
   border-bottom: none;
+  /* Collapsed = head only; round it to sit cleanly inside the card border now that
+     overflow is visible (see below). */
+  border-radius: 11px;
+}
+/* When collapsed there is no body to clip, so let the roster popover escape the card. */
+.surface-region[data-collapsed] {
+  overflow: visible;
+}
+
+/* Roster peek: identity dots beside the count; hover or focus the count to reveal the
+   names. The names ride the popover so an identity colour never renders without its
+   name (the id-* accompaniment rule) — the inline dots are its one-hover-away companion. */
+.surface-region-roster {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  border-radius: 999px;
+  outline: none;
+}
+.surface-region-roster:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.surface-region-roster-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.surface-region-roster-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--id-tone, var(--muted));
+  flex: none;
+}
+.surface-region-roster-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+.surface-region-roster:hover .surface-region-roster-pop,
+.surface-region-roster:focus-within .surface-region-roster-pop {
+  display: flex;
+}
+.surface-region-roster-pop-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.surface-region-roster-pop-row::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--id-tone, var(--muted));
+  flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .surface-region-roster-pop {
+    transition: none;
+  }
 }
 .surface-region-body {
   padding: 14px 16px;
