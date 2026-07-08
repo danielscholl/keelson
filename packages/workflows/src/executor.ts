@@ -692,6 +692,9 @@ async function runHandlerWithRetry(
         shouldRetryFailure(result.error, retry, abortSignal)
       ) {
         await backoff(`failure: ${result.error ?? "unknown error"}`);
+        // A cancel during the backoff wait is authoritative: surface the last
+        // failure rather than invoking the handler once more.
+        if (abortSignal.aborted) return result;
         continue;
       }
       return result;
@@ -703,6 +706,7 @@ async function runHandlerWithRetry(
         shouldRetryFailure(message, retry, abortSignal)
       ) {
         await backoff(`error: ${message}`);
+        if (abortSignal.aborted) throw err;
         continue;
       }
       throw err;

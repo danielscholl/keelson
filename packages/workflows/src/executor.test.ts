@@ -3038,6 +3038,23 @@ describe("runWorkflow — node retry", () => {
     expect(summary.status).not.toBe("succeeded");
   });
 
+  test("a cancel during the retry backoff is not followed by another handler call", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 3\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const controller = new AbortController();
+    // Would retry forever, but the cancel lands during the first backoff wait.
+    const { handler, attempts } = flakyHandler("bash", { failTimes: 99, error: "network error" });
+    setTimeout(() => controller.abort(), 100);
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      abortSignal: controller.signal,
+    });
+    expect(attempts()).toBe(1); // cancelled mid-backoff → handler not called again
+    expect(summary.status).not.toBe("succeeded");
+  });
+
   test("without a retry config a failure is not retried (opt-in)", async () => {
     const workflow = wf("");
     const { handler, attempts } = flakyHandler("bash", { failTimes: 5, error: "network error" });

@@ -389,7 +389,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowResume: ToolDefinition = {
     name: "workflow_resume",
     description:
-      "Resume a workflow run that FAILED or was cancelled, continuing from the last successfully-completed node — it reuses the run's worktree and prior node outputs, so nothing already done is re-run. Pass the runId from workflow_run or workflow_status. Use this to retry a run that stopped on a transient or since-fixed error; it is NOT for an approval pause (use workflow_respond for that). Returns the run's next state.",
+      "Resume a workflow run that FAILED or was cancelled, continuing from the last successfully-completed node — it reuses the run's worktree and prior node outputs, so completed work is not repeated (except the failed node, which re-runs, and any node marked always_run). Pass the runId from workflow_run or workflow_status. Use this to retry a run that stopped on a transient or since-fixed error; it is NOT for an approval pause (use workflow_respond for that). Returns the run's next state.",
     inputSchema: resumeInputSchema,
     state_changing: true,
     async execute(input, ctx) {

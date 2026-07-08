@@ -520,7 +520,8 @@ export async function deleteWorkflowRun(runId: string): Promise<void> {
 }
 
 // Re-enter a FAILED or cancelled run from its last completed node — reuses the
-// run's worktree and prior node outputs, so nothing already done re-runs. The
+// run's worktree and prior node outputs, so completed work is not repeated (the
+// failed node re-runs, as does any node marked always_run). The
 // body is ignored; the runId path param is the target. Distinct from
 // submitApproval, which resolves a paused approval node. A 404 (unknown run) or
 // 409 (still in progress / not resumable) throws with the server's error so the
