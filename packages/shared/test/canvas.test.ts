@@ -294,6 +294,34 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("board");
   });
 
+  it("parses a board header with a roster peek (people) and a collapse hint", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      header: {
+        status: { label: "2 minds", tone: "brand" },
+        people: [
+          { name: "Athena", tone: "id-blue" },
+          { name: "Bo", tone: "id-amber" },
+        ],
+        defaultCollapsed: true,
+      },
+      sections: [],
+    });
+    if (v.view !== "board") throw new Error("expected board");
+    expect(v.header?.people?.map((p) => p.name)).toEqual(["Athena", "Bo"]);
+    expect(v.header?.defaultCollapsed).toBe(true);
+  });
+
+  it("rejects a header person with a tone but no name (the id-* accompaniment rule)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        header: { people: [{ tone: "id-blue" }] },
+        sections: [],
+      }),
+    ).toThrow();
+  });
+
   it("rejects an unknown board section kind and an extra section key (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({ view: "board", sections: [{ kind: "timeline", items: [] }] }),

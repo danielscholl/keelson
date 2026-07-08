@@ -10,7 +10,7 @@ import {
   type RibSurfaceDescriptor,
   ribIdFromKey,
 } from "@keelson/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { postRibAction } from "../api.ts";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
 import { BoardBody, Segments } from "../components/Canvas/BoardView.tsx";
@@ -328,6 +328,26 @@ function SurfaceRegion({
     onToggleSelect(region.key, { name: panelName, data: snap.data });
   }, [selected, onToggleSelect, snap.status, snap.data, region.key, panelName]);
 
+  // Collapse-once: when the board first raises `defaultCollapsed` (its "populated"
+  // hint), fold the region to its head strip — but only on the false->true edge, and
+  // never over a manual toggle. Emptying (hint back to false) re-opens the region (a
+  // cold-start board needs its body visible) and re-arms the one-shot. Gated on
+  // `collapsible`, so a fixed region is untouched.
+  const collapseHint = board?.header?.defaultCollapsed ?? false;
+  const manuallyToggled = useRef(false);
+  const prevCollapseHint = useRef(false);
+  useEffect(() => {
+    if (!collapsible) return;
+    if (collapseHint && !prevCollapseHint.current && !manuallyToggled.current) {
+      setCollapsed(true);
+    }
+    if (!collapseHint) {
+      manuallyToggled.current = false;
+      if (prevCollapseHint.current) setCollapsed(false);
+    }
+    prevCollapseHint.current = collapseHint;
+  }, [collapsible, collapseHint]);
+
   const expand = () =>
     openCanvas(
       {
@@ -354,7 +374,10 @@ function SurfaceRegion({
           className="surface-region-toggle"
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand region" : "Collapse region"}
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => {
+            manuallyToggled.current = true;
+            setCollapsed((c) => !c);
+          }}
         >
           {collapsed ? "▸" : "▾"}
         </button>
@@ -374,11 +397,43 @@ function SurfaceRegion({
           {region.byline && <span className="surface-region-byline">{region.byline}</span>}
         </span>
       )}
-      {board?.header?.status && (
-        <span className="cvb-header-status" data-tone={board.header.status.tone}>
-          {board.header.status.label}
-        </span>
-      )}
+      {board?.header?.status &&
+        (board.header.people && board.header.people.length > 0 ? (
+          // The count carries the roster: identity dots inline, names on hover/focus.
+          <span
+            className="surface-region-roster"
+            role="img"
+            aria-label={`${board.header.status.label}: ${board.header.people.map((p) => p.name).join(", ")}`}
+          >
+            <span className="cvb-header-status" data-tone={board.header.status.tone}>
+              {board.header.status.label}
+            </span>
+            <span className="surface-region-roster-dots" aria-hidden="true">
+              {board.header.people.map((person) => (
+                <span
+                  key={person.name}
+                  className="surface-region-roster-dot"
+                  data-tone={person.tone}
+                />
+              ))}
+            </span>
+            <span className="surface-region-roster-pop" aria-hidden="true">
+              {board.header.people.map((person) => (
+                <span
+                  key={person.name}
+                  className="surface-region-roster-pop-row"
+                  data-tone={person.tone}
+                >
+                  {person.name}
+                </span>
+              ))}
+            </span>
+          </span>
+        ) : (
+          <span className="cvb-header-status" data-tone={board.header.status.tone}>
+            {board.header.status.label}
+          </span>
+        ))}
       {board?.header?.chip && (
         <span className="cvb-chip surface-region-scope">{board.header.chip}</span>
       )}

@@ -590,6 +590,16 @@ export const canvasBoardViewSchema = z
         status: canvasPillSchema.optional(),
         chip: z.string().optional(),
         segments: z.array(canvasSegmentSchema).optional(),
+        // An identity-toned roster peek for the region head: a dot per person, with
+        // the names revealed on hover of the status count. Reuses canvasPerson (name
+        // required — a bare dot can't be authored, the id-* accompaniment rule), so
+        // the colour is always one hover away from its name.
+        people: z.array(canvasPersonSchema).optional(),
+        // Hint that the region head may start collapsed because the board is
+        // "populated" (a producer sets it once it has real content). The host
+        // collapses once on the first false->true transition; a manual toggle wins
+        // after, and a return to false (emptied) re-arms it. Absent = never auto-collapse.
+        defaultCollapsed: z.boolean().optional(),
       })
       .strict()
       .optional(),
