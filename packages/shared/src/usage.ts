@@ -19,7 +19,7 @@ export type UsageEventSourceWire = z.infer<typeof usageEventSourceSchema>;
 export const usageEventStatusSchema = z.enum(["ok", "error", "aborted", "timeout"]);
 export type UsageEventStatusWire = z.infer<typeof usageEventStatusSchema>;
 
-export const usageGroupBySchema = z.enum(["model", "provider", "source", "rib", "workflow"]);
+export const usageGroupBySchema = z.enum(["model", "provider", "source", "rib", "workflow", "sourceDetail"]);
 export type UsageGroupByWire = z.infer<typeof usageGroupBySchema>;
 
 // Aggregated token counts shared by the summary/series/breakdown responses.
