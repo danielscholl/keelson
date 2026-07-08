@@ -252,6 +252,20 @@ nodes:
     const nodeB = result.workflow?.nodes.find((n) => n.id === "b");
     expect((nodeB as { provider?: string } | undefined)?.provider).toBe("copilot");
   });
+
+  test("bundled fix-issue investigation nodes carry explicit idle budgets", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/fix-issue.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    const investigate = result.workflow?.nodes.find((node) => node.id === "investigate");
+    const plan = result.workflow?.nodes.find((node) => node.id === "plan");
+
+    expect(investigate).toBeDefined();
+    expect(plan).toBeDefined();
+    expect(investigate?.idle_timeout).toBeGreaterThan(0);
+    expect(plan?.idle_timeout).toBeGreaterThan(0);
+  });
 });
 
 describe("parseWorkflow — warnings (non-fatal)", () => {
