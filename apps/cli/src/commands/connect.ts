@@ -7,7 +7,7 @@
 // write is recorded in the connect receipt so a disconnect reverses exactly what
 // connect wrote — never a sibling MCP server or a file the operator owned.
 
-import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { type ConnectionsData, loadConnections, saveConnections } from "../connect/receipt.ts";
@@ -86,18 +86,31 @@ function writeConfigFile(file: string, text: string): void {
   writeFileSync(file, text);
 }
 
-// The chain of dirs that did not exist under a skill path, deepest-first, so a
-// last disconnect removes exactly what connect introduced (and only if empty).
-function createMissingDirs(dir: string): string[] {
+// Read a file, or null when it does not exist — the race-free replacement for
+// existsSync-then-readFileSync, so there is no check-then-act (TOCTOU) window.
+function readIfExists(file: string): string | null {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+// Create the skill dir tree (idempotent) and report the chain of dirs it newly
+// made, deepest-first, so a last disconnect removes exactly what connect
+// introduced. Derived from mkdir's own report of the topmost dir it created, so
+// there is no check-then-act (TOCTOU) window.
+function ensureSkillDir(dir: string): string[] {
+  const firstCreated = mkdirSync(dir, { recursive: true });
+  if (firstCreated === undefined) return [];
   const created: string[] = [];
   let d = dir;
-  while (!existsSync(d)) {
+  while (d.length >= firstCreated.length) {
     created.push(d);
-    const parent = dirname(d);
-    if (parent === d) break;
-    d = parent;
+    if (d === firstCreated) break;
+    d = dirname(d);
   }
-  mkdirSync(dir, { recursive: true });
   return created;
 }
 
@@ -123,8 +136,8 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
   for (const id of targets) {
     const spec = TARGETS[id];
     const file = spec.resolvePath(cwd, osHome);
-    const existed = existsSync(file);
-    const existing = existed ? readFileSync(file, "utf8") : null;
+    const existing = readIfExists(file);
+    const existed = existing !== null;
     let result: string;
     if (spec.format === "json") {
       const { text, alreadyPresent } = applyJsonMcp(existing, url);
@@ -151,20 +164,31 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
   if (dropSkill) {
     skillPath = resolveSkillPath(cwd);
     const skillDir = dirname(skillPath);
-    const fileExisted = existsSync(skillPath);
     const prior = data.skill;
-    const createdDirs =
-      prior?.createdDirs ?? (existsSync(skillDir) ? [] : createMissingDirs(skillDir));
-    if (existsSync(skillDir) === false) mkdirSync(skillDir, { recursive: true });
-    writeFileSync(skillPath, SKILL_CONTENT);
+    // Create the dir tree (idempotent). On the first connect, record which dirs
+    // were newly made so a last disconnect removes exactly those.
+    const createdDirs = prior?.createdDirs ?? ensureSkillDir(skillDir);
+    if (prior) mkdirSync(skillDir, { recursive: true });
+    // Detect first-creation atomically with an exclusive write (no check-then-act):
+    // `wx` throws EEXIST when the file is already there, meaning connect did not
+    // create it and undo must not delete it. A prior record already knows.
+    let createdFile: boolean;
+    if (prior) {
+      createdFile = prior.createdFile;
+      writeFileSync(skillPath, SKILL_CONTENT);
+    } else {
+      try {
+        writeFileSync(skillPath, SKILL_CONTENT, { flag: "wx" });
+        createdFile = true;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        writeFileSync(skillPath, SKILL_CONTENT);
+        createdFile = false;
+      }
+    }
     const requestedBy = new Set<TargetId>(prior?.requestedBy ?? []);
     for (const id of targets) requestedBy.add(id);
-    data.skill = {
-      file: skillPath,
-      createdFile: prior?.createdFile ?? !fileExisted,
-      createdDirs,
-      requestedBy: [...requestedBy],
-    };
+    data.skill = { file: skillPath, createdFile, createdDirs, requestedBy: [...requestedBy] };
   }
 
   saveConnections(home, data);
@@ -204,8 +228,8 @@ export function runDisconnect(rawTargets: readonly string[], opts: DisconnectOpt
 }
 
 function reverseTargetConfig(file: string, format: "json" | "toml", createdFile: boolean): void {
-  if (!existsSync(file)) return;
-  const existing = readFileSync(file, "utf8");
+  const existing = readIfExists(file);
+  if (existing === null) return;
   const { text, empty } = format === "json" ? removeJsonMcp(existing) : removeTomlMcp(existing);
   if (empty && createdFile) rmSync(file, { force: true });
   else writeFileSync(file, text);
@@ -218,7 +242,7 @@ function reverseSkillFor(data: ConnectionsData, id: TargetId): void {
   if (!skill) return;
   skill.requestedBy = skill.requestedBy.filter((t) => t !== id);
   if (skill.requestedBy.length > 0) return;
-  if (skill.createdFile && existsSync(skill.file)) rmSync(skill.file, { force: true });
+  if (skill.createdFile) rmSync(skill.file, { force: true });
   for (const dir of skill.createdDirs) removeDirIfEmpty(dir);
   data.skill = undefined;
 }
