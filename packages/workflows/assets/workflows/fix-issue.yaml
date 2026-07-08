@@ -115,6 +115,8 @@ nodes:
     when: "$classify.output.issue_type == 'bug'"
     context: fresh
     model: claude-opus-4.8
+    # Bug investigation has the same chunk-sparse, single-turn shape as planning.
+    idle_timeout: 1800000
     prompt: |
       You are investigating a bug. Produce a precise root-cause analysis the
       implementation phase can act on.
