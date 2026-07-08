@@ -439,7 +439,8 @@ describe("Surface", () => {
 
   test("hideRegionActions suppresses the Explore, select, and Expand head controls", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
-    const seeds: ChatSeed[] = [];
+    // A no-op onExplore: its presence is what would normally render the controls,
+    // so passing it proves the opt-out — not the handler — is what suppresses them.
     render(
       <CanvasProvider>
         <Surface
@@ -449,7 +450,7 @@ describe("Surface", () => {
             hideRegionActions: true,
             layout: { rows: [{ columns: [{ key: "rib:demo:quality", title: "Quality" }] }] },
           }}
-          onExplore={(s) => seeds.push(s)}
+          onExplore={() => {}}
         />
       </CanvasProvider>,
     );
