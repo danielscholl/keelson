@@ -73,10 +73,14 @@ nodes:
 
       echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
 
-      # The fix/push phases mutate the PR's OWN head branch, but the worktree
-      # starts on the run's base branch — without this checkout, commits land on
-      # the base branch and `git push` targets the wrong ref.
-      gh pr checkout "$PR_NUM"
+      # Check out the PR head DETACHED, not as its branch. A plain
+      # `gh pr checkout` claims the PR's head branch, which git refuses when that
+      # branch is already checked out in a sibling worktree (fix-issue leaves the
+      # PR branch checked out under .worktrees/). Detaching targets the commit,
+      # so it never collides; the push node targets the head ref recorded here.
+      gh pr checkout "$PR_NUM" --detach
+      gh pr view "$PR_NUM" --json headRefName -q '.headRefName' \
+        > "$KEELSON_ARTIFACTS_DIR/.pr-head-ref"
 
       REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
       OWNER=$(echo "$REPO" | cut -d/ -f1)
@@ -254,8 +258,10 @@ nodes:
 
       ## Rules
 
-      - You are already on the PR's head branch — commit directly onto it; do
-        NOT create a new branch.
+      - The worktree is at the PR's head commit as a **detached HEAD** (by
+        design, so it can't collide with other worktrees). Commit directly onto
+        it; do NOT create, switch to, or reset a branch — the push step ships
+        these commits to the PR's branch.
       - Apply operator adjustments from the approval feedback before writing code.
       - Process only threads with `decision == "actionable-code-change"`.
       - Anchor each fix to its `path` and `line` from triage, and the comment
@@ -380,9 +386,15 @@ nodes:
     depends_on: [revalidate]
     bash: |
       set -euo pipefail
-      # The threads live on an existing PR branch — push to the existing upstream.
-      git push
-      echo "Pushed worktree branch to origin."
+      HEAD_REF=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-head-ref")
+      if [ -z "$HEAD_REF" ]; then
+        echo "No PR head ref recorded by fetch-threads — cannot push." >&2
+        exit 1
+      fi
+      # HEAD is detached at the PR head plus this run's commits; a bare `git push`
+      # has no upstream, so push explicitly to the PR's own branch.
+      git push origin "HEAD:refs/heads/$HEAD_REF"
+      echo "Pushed to origin/$HEAD_REF."
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 7: REPLY + RESOLVE
