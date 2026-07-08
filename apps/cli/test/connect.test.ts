@@ -163,4 +163,40 @@ describe("connect / disconnect (filesystem)", () => {
     const servers = JSON.parse(readFileSync(join(repo, ".mcp.json"), "utf8")).mcpServers;
     expect(Object.keys(servers)).toEqual(["keelson"]);
   });
+
+  test("connect creates the keelson home if it does not exist yet", () => {
+    const freshHome = join(base, "does-not-exist", "nested");
+    runConnect(["claude"], { json: true, cwd: repo, home: freshHome, osHome });
+    expect(existsSync(join(freshHome, "connections.json"))).toBe(true);
+  });
+
+  test("a corrupt receipt degrades to an empty ledger; disconnect does not throw", () => {
+    // Malformed skill (requestedBy is not an array): a naive cast would crash
+    // reverseSkillFor on `.filter` during disconnect.
+    writeFileSync(
+      join(home, "connections.json"),
+      JSON.stringify({
+        version: 1,
+        targets: {
+          claude: {
+            target: "claude",
+            file: join(repo, ".mcp.json"),
+            format: "json",
+            createdFile: false,
+            connectedAt: "x",
+          },
+        },
+        skill: { file: "/x/SKILL.md", createdFile: true, createdDirs: "oops", requestedBy: "nope" },
+      }),
+    );
+    writeFileSync(
+      join(repo, ".mcp.json"),
+      JSON.stringify({ mcpServers: { keelson: { type: "http", url: "u" }, other: {} } }),
+    );
+    expect(() => runDisconnect(["claude"], disconnectOpts())).not.toThrow();
+    // The valid target was still honored: keelson removed, sibling kept.
+    const servers = JSON.parse(readFileSync(join(repo, ".mcp.json"), "utf8")).mcpServers;
+    expect(servers.keelson).toBeUndefined();
+    expect(servers.other).toBeDefined();
+  });
 });

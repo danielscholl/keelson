@@ -7,7 +7,7 @@
 // disconnect` reverses precisely that and never a file or key the operator
 // owned. Honesty over cleverness — undo trusts this ledger, not a re-derivation.
 
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TargetFormat, TargetId } from "./targets.ts";
 
@@ -52,6 +52,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Structural guards so a hand-edited or corrupted receipt degrades to an empty
+// ledger instead of crashing a later reverse (e.g. `skill.requestedBy.filter`),
+// upholding the never-throws contract loadConnections documents.
+function isTargetRecord(v: unknown): v is TargetRecord {
+  return (
+    isRecord(v) &&
+    typeof v.target === "string" &&
+    typeof v.file === "string" &&
+    (v.format === "json" || v.format === "toml") &&
+    typeof v.createdFile === "boolean"
+  );
+}
+
+function isSkillRecord(v: unknown): v is SkillRecord {
+  return (
+    isRecord(v) &&
+    typeof v.file === "string" &&
+    typeof v.createdFile === "boolean" &&
+    Array.isArray(v.createdDirs) &&
+    v.createdDirs.every((d) => typeof d === "string") &&
+    Array.isArray(v.requestedBy) &&
+    v.requestedBy.every((t) => typeof t === "string")
+  );
+}
+
 // Read the receipt, tolerating absence/corruption by returning an empty ledger —
 // a connect that isn't recorded simply can't be auto-undone, never a throw.
 export function loadConnections(home: string): ConnectionsData {
@@ -64,10 +89,14 @@ export function loadConnections(home: string): ConnectionsData {
   try {
     const parsed = JSON.parse(text);
     if (isRecord(parsed) && parsed.version === 1 && isRecord(parsed.targets)) {
+      const targets: ConnectionsData["targets"] = {};
+      for (const [id, rec] of Object.entries(parsed.targets)) {
+        if (isTargetRecord(rec)) targets[id as TargetId] = rec;
+      }
       return {
         version: 1,
-        targets: parsed.targets as ConnectionsData["targets"],
-        ...(isRecord(parsed.skill) ? { skill: parsed.skill as unknown as SkillRecord } : {}),
+        targets,
+        ...(isSkillRecord(parsed.skill) ? { skill: parsed.skill } : {}),
       };
     }
   } catch {
@@ -85,5 +114,9 @@ export function saveConnections(home: string, data: ConnectionsData): void {
     rmSync(connectionsPath(home), { force: true });
     return;
   }
+  // The keelson home may not exist yet (its creation is best-effort at CLI
+  // startup), and the receipt is written AFTER the agent configs — so ensure it
+  // exists here rather than let the write fail and strand an un-recorded connect.
+  mkdirSync(home, { recursive: true });
   writeFileSync(connectionsPath(home), `${JSON.stringify(data, null, 2)}\n`);
 }
