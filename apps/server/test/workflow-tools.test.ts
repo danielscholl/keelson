@@ -9,6 +9,7 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -366,6 +367,89 @@ nodes:
     expect(result.content).toContain(`cwd "${cwd}"`);
     expect(result.content).toContain(
       'workflow_run with project="<registered project id or exact name>"',
+    );
+  });
+
+  const REPO_SCOPED_WF = `name: repo-scoped
+requiresProject: true
+description: |
+  Use when: a repo is required
+nodes:
+  - id: ok
+    bash: echo ok
+`;
+
+  function noRunsCreated(controller: WorkflowController): boolean {
+    const statuses = ["running", "paused", "succeeded", "failed", "cancelled"] as const;
+    return statuses.every((status) => controller.listRuns({ status }).length === 0);
+  }
+
+  test("workflow_run rejects a requiresProject workflow in a non-git cwd before any run", async () => {
+    writeWorkflow("repo-scoped.yaml", REPO_SCOPED_WF);
+    const { controller, tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "repo-scoped" }, ctx);
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("repo-scoped requires a git repository");
+    expect(result.content).toContain(cwd);
+    // makeRig registers "test-project" rooted at the non-git tmp cwd.
+    expect(result.content).toContain('Retry with project: "test-project"');
+    expect(noRunsCreated(controller)).toBe(true);
+  });
+
+  test("workflow_run rejects a requiresProject workflow when the selected project's root is non-git", async () => {
+    writeWorkflow("repo-scoped.yaml", REPO_SCOPED_WF);
+    const { controller, tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "repo-scoped", project: "test-project" }, ctx);
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("repo-scoped requires a git repository");
+    expect(result.content).toContain("selected project's root");
+    expect(noRunsCreated(controller)).toBe(true);
+  });
+
+  test("workflow_run starts a requiresProject workflow when the working dir is a git repo", async () => {
+    writeWorkflow("repo-scoped.yaml", REPO_SCOPED_WF);
+    const { controller, tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    execSync("git init -q", { cwd });
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "repo-scoped" }, ctx);
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("completed successfully");
+    const runId = extractRunId(chunks);
+    expect(runId.length).toBeGreaterThan(0);
+    expect(noRunsCreated(controller)).toBe(false);
+  });
+
+  test("workflow_run notes the resolved working dir when project is omitted", async () => {
+    writeWorkflow("done.yaml", NO_APPROVAL_WF);
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute({ name: "done" }, ctx);
+
+    const startedLine = chunks.find(
+      (c) => c.type === "text" && c.content.includes("Started workflow"),
+    );
+    expect(startedLine && startedLine.type === "text" ? startedLine.content : "").toContain(
+      `in "${cwd}"`,
     );
   });
 

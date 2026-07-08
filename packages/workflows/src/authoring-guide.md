@@ -50,6 +50,8 @@ Optional:
 - `worktree` — `{ enabled: true|false, branch: "template" }` pins git-worktree
   isolation per run; `branch` accepts `{workflow}` and `{run_id_short}`
   placeholders.
+- `requiresProject: true` — marks a repo-scoped workflow; `workflow_run` refuses
+  to start it unless the resolved working directory is a git repo.
 - `effort` (`low`|`medium`|`high`|`max`) and `thinking`
   (`adaptive`|`enabled`|`disabled` or `{type, budgetTokens}`) — claude-only
   reasoning controls.

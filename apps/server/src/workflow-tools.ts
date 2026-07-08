@@ -23,9 +23,10 @@ import {
   type WorkflowFrame,
   type WorkflowRunDetail,
 } from "@keelson/shared";
+import { isGitRepo } from "@keelson/workflows";
 import { z } from "zod";
 import type { WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
-import type { ProjectsStore } from "./projects-store.ts";
+import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
 import { resolveWorkflowName } from "./workflow-resolve.ts";
 import type { WatchResult, WorkflowController } from "./workflows-handler.ts";
 
@@ -36,7 +37,7 @@ export interface CreateWorkflowChatToolsDeps {
   // ctx.cwd (chat sets it to the project root) so catalog reads see that
   // project's workflows shadowing global. The controller re-derives the same
   // scope from workingDir, keeping list- and run-resolution in agreement.
-  projectsStore?: Pick<ProjectsStore, "findByPathPrefix" | "get" | "getByName">;
+  projectsStore?: Pick<ProjectsStore, "findByPathPrefix" | "get" | "getByName" | "list">;
   // Soft cap on how long workflow_run / workflow_respond block waiting for the
   // run to pause or finish before returning a "still running" result. Tunable
   // for tests; the chat default gives a plan/approval node time to reach its
@@ -221,6 +222,44 @@ function repoMissingHint(workingDir: string): string {
   return `Hint: workflow ran in cwd "${workingDir}", which is not a git repository. For repo-scoped workflows, call workflow_run with project="<registered project id or exact name>".`;
 }
 
+// Fail-fast message for a `requiresProject` workflow whose resolved working dir
+// isn't a git repo. Ranks registered projects that contain or sit inside the
+// resolved dir first, then falls back to all registered projects, so an
+// omitted-`project` caller gets a concrete `project="…"` to retry with.
+function repoScopedPreflightMessage(opts: {
+  name: string;
+  workingDir: string;
+  projectProvided: boolean;
+  projects: Project[];
+}): string {
+  const { name, workingDir, projectProvided, projects } = opts;
+  const canonWorkingDir = canonicalPath(workingDir);
+  const related = projects.filter((p) => {
+    const root = canonicalPath(p.rootPath);
+    return isPathInside(canonWorkingDir, root) || isPathInside(root, canonWorkingDir);
+  });
+  const suggestions = (related.length > 0 ? related : projects).slice(0, 10);
+
+  const lines: string[] = [`${name} requires a git repository.`];
+  if (projectProvided) {
+    lines.push(`The selected project's root "${workingDir}" is not a git repository.`);
+  } else {
+    lines.push(`The resolved working directory "${workingDir}" is not a git repository.`);
+  }
+
+  if (suggestions.length > 0) {
+    lines.push("", "Available projects:");
+    for (const p of suggestions) lines.push(`- ${p.name} -> ${p.rootPath}`);
+    lines.push("", `Retry with project: "${suggestions[0]!.name}".`);
+  } else {
+    lines.push(
+      "",
+      "No projects are registered. Register a project or run this workflow from a git repository.",
+    );
+  }
+  return lines.join("\n");
+}
+
 export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): ToolDefinition[] {
   const { controller, catalog } = deps;
   const watchDeadlineMs = deps.watchDeadlineMs ?? DEFAULT_CHAT_WATCH_DEADLINE_MS;
@@ -322,28 +361,47 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         return;
       }
       const name = resolution.name;
+      const workingDir = project?.rootPath ?? ctx.cwd;
+
+      const definition = catalog.get(name, scope);
+      if (definition?.requiresProject === true) {
+        const isRepo = await isGitRepo(workingDir).catch(() => false);
+        if (!isRepo) {
+          emitResult(
+            ctx,
+            repoScopedPreflightMessage({
+              name,
+              workingDir,
+              projectProvided: project !== undefined,
+              projects: deps.projectsStore?.list() ?? [],
+            }),
+            true,
+          );
+          return;
+        }
+      }
+
       const started = controller.startRun({
         name,
         inputs: { ARGUMENTS: parsed.data.arguments ?? "" },
-        workingDir: project?.rootPath ?? ctx.cwd,
+        workingDir,
         ...(project ? { project: { id: project.id, rootPath: project.rootPath } } : {}),
       });
       if (!started.ok) {
         emitResult(ctx, `Could not start workflow "${name}": ${started.message}`, true);
         return;
       }
-      ctx.emit({ type: "text", content: `Started workflow "${name}" (run ${started.runId}).\n` });
+      const scopeNote = project ? "" : ` in "${workingDir}"`;
+      ctx.emit({
+        type: "text",
+        content: `Started workflow "${name}"${scopeNote} (run ${started.runId}).\n`,
+      });
       const state = await controller.awaitPauseOrTerminal(started.runId, {
         onFrame: streamProgress(ctx),
         signal: ctx.abortSignal,
         deadlineMs: watchDeadlineMs,
       });
-      const { content, isError } = describeState(
-        controller,
-        started.runId,
-        state,
-        project?.rootPath ?? ctx.cwd,
-      );
+      const { content, isError } = describeState(controller, started.runId, state, workingDir);
       emitResult(ctx, content, isError);
     },
   };

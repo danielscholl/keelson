@@ -118,6 +118,7 @@ export const workflowDetailSchema = z
     description: z.string(),
     nodes: z.array(workflowNodeSummarySchema),
     worktree: workflowWorktreePolicyWireSchema.optional(),
+    requiresProject: z.boolean().optional(),
   })
   .strict();
 export type WorkflowDetail = z.infer<typeof workflowDetailSchema>;
