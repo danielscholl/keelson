@@ -251,16 +251,12 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
     if (resourced) {
       process.stdout.write(`resourced ${resourced}\n`);
       if (server !== null) {
-        process.stdout.write(
-          "restart the server (`keelson stop && keelson start`) to activate the rib\n",
-        );
+        process.stdout.write("restart the server (`keelson restart`) to activate the rib\n");
       }
     } else if (added.length > 0) {
       process.stdout.write(`added ${added.join(", ")}\n`);
       if (server !== null) {
-        process.stdout.write(
-          "restart the server (`keelson stop && keelson start`) to activate the new rib\n",
-        );
+        process.stdout.write("restart the server (`keelson restart`) to activate the new rib\n");
       }
     } else {
       // bun add succeeded but no new @keelson/rib-* appeared: either an
@@ -307,9 +303,7 @@ export async function runRibRemove(id: string, opts: BaseOptions): Promise<never
   if (!opts.json) {
     process.stdout.write(`removed ${trimmed}\n`);
     if (server !== null) {
-      process.stdout.write(
-        "restart the server (`keelson stop && keelson start`) to deactivate it\n",
-      );
+      process.stdout.write("restart the server (`keelson restart`) to deactivate it\n");
     }
   }
   process.exit(EXIT_OK);
