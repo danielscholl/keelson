@@ -50,14 +50,14 @@ the human gate before any mutation.
 | Node | Kind | What it does |
 | --- | --- | --- |
 | `extract-pr` | prompt | Parses the PR number out of `$ARGUMENTS`, or emits `CURRENT` for the next node to resolve. |
-| `fetch-threads` | bash | Resolves the PR number, checks out the PR's head branch in the worktree, pages the `reviewThreads` GraphQL query, filters `isResolved == false`, and writes `threads.json` (one entry per unresolved thread with `threadId`, `path`, `line`, `commentId`, and concatenated `body`). |
+| `fetch-threads` | bash | Resolves the PR number, refuses a fork PR (same-repo only), checks out the PR's head *commit* detached in the worktree — so it can't collide with a sibling worktree that already holds the branch — records the head ref, pages the `reviewThreads` GraphQL query, filters `isResolved == false`, and writes `threads.json` (one entry per unresolved thread with `threadId`, `path`, `line`, `commentId`, and concatenated `body`). |
 | `triage` | prompt | Reads the cited code on the PR branch and classifies each thread as `actionable-code-change`, `question`, `wontfix`, `already-addressed`, or `invalid` (a finding the code disproves). Pinned to `claude-opus-4.8` for reliable judgment. Writes `triage.json`. |
 | `approve` | approval | Shows the triage; pauses for human review before any branch mutation. Captures operator adjustments. |
 | `fix` | prompt | Reads triage, applies each `actionable-code-change` fix anchored to `path:line`, runs the narrowest covering check per fix, commits by name (never `git add -A`), and writes `results.json` with `action: "fixed"` or `"replied-only"` per thread. |
 | `validate` | bash | Runs `verify.sh` (discovered by the fix step). Always exits 0 so `fix-validation` can read the output. |
 | `fix-validation` | prompt | Repairs broken checks if any; commits fixes. Skips if validation passed. |
 | `revalidate` | bash | Hard gate: exits non-zero if checks fail or no `verify.sh` was recorded. Prevents push on a broken tree. |
-| `push` | bash | `git push` the worktree branch to the existing PR's upstream. |
+| `push` | bash | Pushes the run's commits from the detached HEAD to the PR's head branch on origin (`git push origin HEAD:refs/heads/<headRef>`, using the ref recorded by `fetch-threads`). |
 | `reply-resolve` | prompt | Posts a reply on every thread via REST; calls `resolveReviewThread` via GraphQL only for threads where `results.json` records `action == "fixed"`. |
 | `report` | prompt | Summarizes per-thread outcome (resolved / replied / left open) and the final validation status. |
 
