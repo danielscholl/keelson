@@ -240,8 +240,24 @@ const canvasActionFieldSchema = z
     required: z.boolean().optional(),
     // Render a multi-line textarea rather than a single-line input.
     multiline: z.boolean().optional(),
+    // A fixed choice set renders a <select> instead of a free-text input; the
+    // dispatched value is the chosen option's `value`. A non-required select
+    // offers `placeholder` as an empty "none" option, so an unset optional
+    // select dispatches "". Mutually exclusive with `multiline`.
+    options: z
+      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
+      .min(1)
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine((f) => !(f.multiline && f.options), {
+    message: "a field is either multiline or a select, not both",
+  })
+  // An option's `value` is both the dispatched value and the renderer's list key,
+  // so duplicates make the selection ambiguous and collide React keys.
+  .refine((f) => !f.options || new Set(f.options.map((o) => o.value)).size === f.options.length, {
+    message: "select option values must be unique",
+  });
 export type CanvasActionField = z.infer<typeof canvasActionFieldSchema>;
 
 const canvasActionConfirmSchema = z
@@ -297,8 +313,20 @@ const canvasActionItemSchema = z
     // Confirmation presentation metadata. `destructive` still marks dangerous
     // actions; this only controls whether the confirm dialog is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),
+    // Render the action non-interactive — dimmed and unclickable, its form sealed
+    // — when a precondition the state can't satisfy fails (a capability-gated tab
+    // whose current cast can't run it). `reason` is the human explanation of WHY
+    // it's disabled, surfaced as a tooltip — so it's only valid alongside
+    // `disabled: true` (a reason on a clickable action would be ambiguous). A
+    // producer that recomputes preconditions re-emits these on each recompose, so a
+    // state change flips the gate.
+    disabled: z.boolean().optional(),
+    reason: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine((a) => !a.reason || a.disabled === true, {
+    message: "reason explains why an action is disabled — set disabled: true alongside it",
+  });
 
 // The leaf board sections — every primitive except the layout-only `columns`.
 // Named so the same members compose both `leafBoardSectionSchema` (what a column

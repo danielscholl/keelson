@@ -116,6 +116,10 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   const [pending, setPending] = useState(false);
   const [localOpen, setLocalOpen] = useState(false);
   const open = controlledOpen ?? localOpen;
+  // A capability-gated (disabled), in-flight (pending), or provider-less action is
+  // "sealed": its button, its form controls, and its submit path all refuse, so an
+  // already-open form can't dispatch via the Enter key or a programmatic submit.
+  const sealed = !ctx || pending || item.disabled === true;
   const setOpen = (next: boolean) => {
     if (onOpenChange) onOpenChange(next);
     else setLocalOpen(next);
@@ -126,7 +130,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   const [confirmValues, setConfirmValues] = useState<Record<string, string> | undefined>(undefined);
 
   const dispatch = async (collected?: Record<string, string>) => {
-    if (!ctx || pending) return;
+    if (sealed) return;
     setPending(true);
     setError(null);
     try {
@@ -155,7 +159,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   };
 
   const onButtonClick = () => {
-    if (!ctx || pending) return;
+    if (sealed) return;
     if (hasFields) {
       setError(null);
       setOpen(!open);
@@ -166,6 +170,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (sealed) return;
     const missing = fields.find((f) => f.required && !values[f.name]?.trim());
     if (missing) {
       setError(`${missing.label} is required`);
@@ -179,10 +184,11 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       {!expanded && (
         <button
           type="button"
-          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}`}
+          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
           data-tone={item.tone}
-          disabled={!ctx || pending}
+          disabled={sealed}
           aria-expanded={hasFields ? open : undefined}
+          title={item.reason}
           onClick={onButtonClick}
         >
           {item.glyph && (
@@ -208,8 +214,26 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                     className="cvb-action-field-input"
                     placeholder={f.placeholder}
                     value={values[f.name] ?? ""}
+                    disabled={sealed}
                     onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
                   />
+                ) : f.options ? (
+                  <select
+                    id={id}
+                    className="cvb-action-field-input cvb-action-field-select"
+                    value={values[f.name] ?? ""}
+                    disabled={sealed}
+                    onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                  >
+                    <option value="" disabled={f.required}>
+                      {f.placeholder ?? (f.required ? "Select…" : "—")}
+                    </option>
+                    {f.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
                   <input
                     id={id}
@@ -217,6 +241,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                     className="cvb-action-field-input"
                     placeholder={f.placeholder}
                     value={values[f.name] ?? ""}
+                    disabled={sealed}
                     onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
                   />
                 )}
@@ -229,7 +254,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               type="submit"
               className="cvb-action-button"
               data-tone={item.tone}
-              disabled={!ctx || pending}
+              disabled={sealed}
+              title={item.reason}
             >
               {expanded && item.glyph && (
                 <span className="cvb-action-glyph" aria-hidden="true">

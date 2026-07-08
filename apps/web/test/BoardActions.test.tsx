@@ -800,3 +800,126 @@ describe("inline card actions", () => {
     expect(screen.getByRole("button", { name: "Aurora actions" })).not.toBeNull();
   });
 });
+
+describe("board actions — select fields and capability gating", () => {
+  test("a select field renders a combobox and dispatches the chosen option value", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "convene",
+              label: "Discussion",
+              payload: { strategy: "sequential" },
+              fields: [
+                {
+                  name: "project",
+                  label: "Project",
+                  placeholder: "No project (shared)",
+                  options: [
+                    { value: "keelson", label: "keelson" },
+                    { value: "chamber", label: "keelson-rib-chamber" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discussion" }));
+    const select = container.querySelector("select.cvb-action-field-select") as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    fireEvent.change(select, { target: { value: "chamber" } });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(calls).toEqual([
+        { type: "convene", payload: { strategy: "sequential", project: "chamber" } },
+      ]),
+    );
+  });
+
+  test("a disabled action item is non-clickable and carries its reason as a tooltip", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            { type: "convene", label: "Debate", disabled: true, reason: "Free a Mind to chair." },
+            { type: "convene", label: "Discussion" },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const debate = screen.getByRole("button", { name: "Debate" });
+    expect(debate).toHaveProperty("disabled", true);
+    expect(debate.getAttribute("title")).toBe("Free a Mind to chair.");
+    fireEvent.click(debate);
+    await Promise.resolve();
+    expect(calls).toHaveLength(0);
+    // The enabled sibling still dispatches on click.
+    fireEvent.click(screen.getByRole("button", { name: "Discussion" }));
+    await waitFor(() => expect(calls).toEqual([{ type: "convene" }]));
+  });
+
+  test("a sealed (disabled) action's open form can't dispatch — controls disabled, submit guarded", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "build",
+              label: "Build",
+              expanded: true,
+              disabled: true,
+              reason: "Free a Mind to manage.",
+              fields: [{ name: "topic", label: "Topic" }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const input = container.querySelector(".cvb-action-field-input") as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    // An Enter-key / programmatic submit on the open form is guarded — nothing dispatches.
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await Promise.resolve();
+    expect(calls).toHaveLength(0);
+  });
+});
