@@ -9,7 +9,13 @@ import type {
 } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cancelWorkflowRun, getWorkflowRun, StalePauseError, submitApproval } from "../api.ts";
+import {
+  cancelWorkflowRun,
+  getWorkflowRun,
+  resumeWorkflowRun,
+  StalePauseError,
+  submitApproval,
+} from "../api.ts";
 import type { NodeViewStatus } from "../lib/dagLayout.ts";
 import { createReconnectingWorkflowRunWs, type ReconnectingWsState } from "../ws.ts";
 
@@ -100,6 +106,9 @@ export interface UseWorkflowRunResult {
   error: string | null;
   wsState: ReconnectingWsState;
   cancel: () => Promise<void>;
+  // Re-enter a failed/cancelled run from its last completed node. Throws with
+  // the server's message on a non-resumable run (409) or unknown run (404).
+  resumeRun: () => Promise<void>;
   // Set when the executor pauses at an approval node. Stays defined across
   // reconnects via snapshot rehydration (the node row's status='awaiting'
   // carries the message in outputText).
@@ -455,6 +464,15 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
     await cancelWorkflowRun(runId);
   }, [runId]);
 
+  // Resume a terminal (failed/cancelled) run from its last completed node. Like
+  // `resume` above, no optimistic update: the server flips status back to
+  // running and the next snapshot/frame is the source of truth. Errors propagate
+  // so the caller can surface a non-resumable run.
+  const resumeRun = useCallback(async () => {
+    if (!runId) return;
+    await resumeWorkflowRun(runId);
+  }, [runId]);
+
   // Resume the paused approval node. The server flips run status back to
   // running and the executor proceeds; we don't optimistic-update here
   // because the next `node_done` (or a snapshot reload) is the source of
@@ -500,6 +518,7 @@ export function useWorkflowRun(runId: string | null): UseWorkflowRunResult {
     error,
     wsState,
     cancel,
+    resumeRun,
     awaitingNodeId: exposedRun.awaitingNodeId,
     resume,
   };

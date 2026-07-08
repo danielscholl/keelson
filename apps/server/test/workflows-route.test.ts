@@ -1772,6 +1772,72 @@ nodes:
     expect(readFileSync(failCountPath, "utf8").trim()).toBe("2");
   });
 
+  test("POST /resume-run re-runs an always_run node even though it succeeded", async () => {
+    const prepCountPath = join(tmpDir, "ar-prep-count.txt");
+    const gateCountPath = join(tmpDir, "ar-gate-count.txt");
+    const failCountPath = join(tmpDir, "ar-fail-count.txt");
+    writeWorkflow(
+      "resume-always.yaml",
+      `name: resume-always
+description: an always_run gate re-executes on resume; a normal node stays skipped
+nodes:
+  - id: prepare
+    bash: |
+      n=0
+      if [ -f "${prepCountPath}" ]; then n=$(cat "${prepCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${prepCountPath}"
+      echo "prepare:$n"
+  - id: gate
+    depends_on: [prepare]
+    always_run: true
+    bash: |
+      n=0
+      if [ -f "${gateCountPath}" ]; then n=$(cat "${gateCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${gateCountPath}"
+      echo "gate:$n"
+  - id: fail
+    depends_on: [gate]
+    bash: |
+      n=0
+      if [ -f "${failCountPath}" ]; then n=$(cat "${failCountPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${failCountPath}"
+      echo "fail:$n"
+      exit 7
+`,
+    );
+    const { app } = makeRig();
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-always/runs", { inputs: {} }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    const first = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string }>;
+    };
+    expect(first.status).toBe("failed");
+    expect(first.nodes.find((n) => n.nodeId === "gate")?.status).toBe("succeeded");
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+
+    const second = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; status: string }>;
+    };
+    expect(second.status).toBe("failed");
+    // prepare (normal, succeeded) is skipped on resume → ran exactly once.
+    expect(readFileSync(prepCountPath, "utf8").trim()).toBe("1");
+    // gate (always_run, succeeded) re-executes on resume despite its prior pass → twice.
+    expect(readFileSync(gateCountPath, "utf8").trim()).toBe("2");
+    // fail (failed) re-executes on resume → twice.
+    expect(readFileSync(failCountPath, "utf8").trim()).toBe("2");
+  });
+
   test("POST /resume-run re-runs the failure-cascaded tail once the failed node succeeds", async () => {
     const flakyCountPath = join(tmpDir, "cascade-flaky-count.txt");
     const tailMarkPath = join(tmpDir, "cascade-tail-ran.txt");

@@ -7,9 +7,10 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 // Chat-callable tools that expose the workflow engine to the LLM. A FIXED set
-// of four tools (constant base-prompt cost regardless of how many workflows are
+// of five tools (constant base-prompt cost regardless of how many workflows are
 // authored): workflow_list discovers, workflow_run starts + watches,
-// workflow_respond resolves a paused approval, workflow_status reports. They
+// workflow_respond resolves a paused approval, workflow_resume re-enters a
+// failed/cancelled run, workflow_status reports. They
 // drive the same in-process WorkflowController the HTTP routes use; run IDs flow
 // through the tool results so the model can carry them across chat turns.
 
@@ -174,6 +175,10 @@ const runInputSchema = z.object({
 // so the chat path enforces the SAME reply-size cap as POST /resume — just add
 // runId, which the route carries as a path param.
 const respondInputSchema = resumeWorkflowRunBodySchema.extend({
+  runId: z.string().min(1),
+});
+
+const resumeInputSchema = z.object({
   runId: z.string().min(1),
 });
 
@@ -381,6 +386,38 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
     },
   };
 
+  const workflowResume: ToolDefinition = {
+    name: "workflow_resume",
+    description:
+      "Resume a workflow run that FAILED or was cancelled, continuing from the last successfully-completed node — it reuses the run's worktree and prior node outputs, so completed work is not repeated (except the failed node, which re-runs, and any node marked always_run). Pass the runId from workflow_run or workflow_status. Use this to retry a run that stopped on a transient or since-fixed error; it is NOT for an approval pause (use workflow_respond for that). Returns the run's next state.",
+    inputSchema: resumeInputSchema,
+    state_changing: true,
+    async execute(input, ctx) {
+      const parsed = resumeInputSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
+        return;
+      }
+      const { runId } = parsed.data;
+      const result = controller.resumeRun(runId);
+      if (!result.ok) {
+        const hint =
+          result.reason === "not_terminal"
+            ? " Only failed or cancelled runs can be resumed; call workflow_status to check its state."
+            : " The run or its workflow is no longer available — it may have been purged, or its workflow definition removed or renamed.";
+        emitResult(ctx, `Could not resume run ${runId}: ${result.message}.${hint}`, true);
+        return;
+      }
+      const state = await controller.awaitPauseOrTerminal(runId, {
+        onFrame: streamProgress(ctx),
+        signal: ctx.abortSignal,
+        deadlineMs: watchDeadlineMs,
+      });
+      const { content, isError } = describeState(controller, runId, state, ctx.cwd);
+      emitResult(ctx, content, isError);
+    },
+  };
+
   const workflowStatus: ToolDefinition = {
     name: "workflow_status",
     description:
@@ -403,6 +440,11 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         const lines = [
           `Run ${runId} — workflow "${detail.workflowName}" — status ${detail.status}.`,
         ];
+        if (detail.status === "failed" || detail.status === "cancelled") {
+          lines.push(
+            `This run is ${detail.status}. Resume it from the last completed node with workflow_resume(runId="${runId}").`,
+          );
+        }
         if (awaiting) {
           // Surface the live pauseId (held only in the in-memory pending map, not
           // getRun) so a status-polled approval follows the same resume protocol
@@ -438,5 +480,5 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
     },
   };
 
-  return [workflowList, workflowRun, workflowRespond, workflowStatus];
+  return [workflowList, workflowRun, workflowRespond, workflowResume, workflowStatus];
 }
