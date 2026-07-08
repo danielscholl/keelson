@@ -1,6 +1,6 @@
 {
   "name": "keelson",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "description": "Local agent harness — multi-provider chat surface, deterministic YAML workflows, typed Rib extension contract",
   "license": "Apache-2.0",
   "author": "Daniel Scholl",
