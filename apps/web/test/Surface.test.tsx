@@ -463,6 +463,44 @@ describe("Surface", () => {
     ).toBeNull();
   });
 
+  test("flipping hideRegionActions on clears a stale selection and its bar", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    live("rib:demo:security", board("Security", "Critical", 5));
+    const descriptor = (hide: boolean): RibSurfaceDescriptor => ({
+      id: "cimpl",
+      title: "CIMPL",
+      ...(hide ? { hideRegionActions: true } : {}),
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:demo:quality", title: "Quality" },
+              { key: "rib:demo:security", title: "Security" },
+            ],
+          },
+        ],
+      },
+    });
+    const { rerender } = render(
+      <CanvasProvider>
+        <Surface descriptor={descriptor(false)} onExplore={() => {}} />
+      </CanvasProvider>,
+    );
+    const [firstCheckbox] = screen.getAllByRole("checkbox", {
+      name: "Select panel for multi-panel explore",
+    });
+    if (!firstCheckbox) throw new Error("expected a selectable panel");
+    fireEvent.click(firstCheckbox);
+    expect(screen.getByRole("button", { name: /Explore 1 selected/ })).toBeDefined();
+    // Opting the surface out of region actions drops the now-unreachable selection.
+    rerender(
+      <CanvasProvider>
+        <Surface descriptor={descriptor(true)} onExplore={() => {}} />
+      </CanvasProvider>,
+    );
+    expect(screen.queryByRole("button", { name: /Explore .* selected/ })).toBeNull();
+  });
+
   test("Explore raises a chat seed built from the region's live snapshot", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     const seeds: ChatSeed[] = [];

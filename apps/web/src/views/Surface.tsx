@@ -95,6 +95,12 @@ export function Surface({
     onExplore(buildExploreSeed([...selected.values()]));
     setSelected(new Map());
   }, [onExplore, selected]);
+  // If a surface opts out of region actions while panels are selected (a descriptor
+  // swapped in place, not a tab remount), drop the now-unreachable selection — its
+  // checkboxes and the selection bar are suppressed, so it could otherwise linger.
+  useEffect(() => {
+    if (hideRegionActions) setSelected((cur) => (cur.size > 0 ? new Map() : cur));
+  }, [hideRegionActions]);
   // A projectScoped surface carries the shared project chip in its header, wired to
   // the owning rib's select-project action; derive the rib id from a region key
   // (every region key is rib-namespaced).
