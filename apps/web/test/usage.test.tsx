@@ -279,7 +279,7 @@ describe("Usage page", () => {
       calls.push(query);
       return [
         {
-          key: "workflow",
+          key: "rib:squad",
           split: "gpt-5.5",
           events: 2,
           inputTokens: 100,
@@ -295,9 +295,9 @@ describe("Usage page", () => {
     });
 
     await waitFor(() => expect(screen.getByLabelText("Source to model token flow")).toBeDefined());
-    expect(screen.getByText("workflow")).toBeDefined();
+    expect(screen.getByText("rib:squad")).toBeDefined();
     expect(screen.getAllByText("gpt-5.5").length).toBeGreaterThan(0);
-    expect(calls).toEqual([{ window: "7d", groupBy: "source", splitBy: "model" }]);
+    expect(calls).toEqual([{ window: "7d", groupBy: "sourceDetail", splitBy: "model" }]);
     getUsageBreakdownImpl = async () => [];
   });
 
