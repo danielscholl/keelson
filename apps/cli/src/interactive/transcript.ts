@@ -41,6 +41,7 @@ export function summarizeToolResult(content: string, isError?: boolean): string 
 // a recording fake instead of a live terminal.
 export interface TranscriptSurface {
   addChild(component: Component): void;
+  clear(): void;
   requestRender(): void;
 }
 

@@ -208,6 +208,9 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
     addChild(component: Component) {
       transcript.addChild(component);
     },
+    clear() {
+      transcript.clear();
+    },
     requestRender() {
       tui.requestRender();
     },
@@ -236,7 +239,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const resetConversation = (reason: string): void => {
     session.conversationId = undefined;
-    transcript.clear();
+    surface.clear();
     info(`── ${reason} ──`);
   };
 
