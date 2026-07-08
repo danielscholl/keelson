@@ -2252,7 +2252,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
     subscribers.broadcast(runId, {
       type: "run_warning",
       nodeId: null,
-      message: `waiting for a run slot (${slots.waiting + 1} queued; ${slots.limit} run concurrently)`,
+      message: `waiting for a run slot (${slots.waiting + 1} queued; ${slots.limit} runs concurrently)`,
     });
   }
   const release = await slots.acquire(abort.signal);

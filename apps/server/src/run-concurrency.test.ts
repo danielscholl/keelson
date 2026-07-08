@@ -110,6 +110,22 @@ describe("createRunSlots", () => {
     rel();
     expect(slots.active).toBe(1);
   });
+
+  test("an already-aborted signal does not consume a slot even when capacity is free", async () => {
+    const slots = createRunSlots(2);
+    const ac = new AbortController();
+    ac.abort();
+
+    const noopRelease = await slots.acquire(ac.signal);
+    expect(slots.active).toBe(0);
+    expect(slots.waiting).toBe(0);
+    noopRelease(); // must be a no-op
+    expect(slots.active).toBe(0);
+
+    // A live caller still gets the untouched slot.
+    await slots.acquire();
+    expect(slots.active).toBe(1);
+  });
 });
 
 describe("resolveMaxConcurrentRuns", () => {

@@ -38,6 +38,12 @@ export function createRunSlots(limit: number): RunSlots {
 
   function acquire(signal?: AbortSignal): Promise<() => void> {
     return new Promise<() => void>((resolve) => {
+      // An already-cancelled caller must never take a slot — even when one is
+      // free — or it briefly blocks a live run before releasing.
+      if (signal?.aborted) {
+        resolve(() => {});
+        return;
+      }
       let released = false;
       const release = (): void => {
         if (released) return;
@@ -70,13 +76,7 @@ export function createRunSlots(limit: number): RunSlots {
         resolve(() => {});
       };
       queue.push(onSlot);
-      if (signal) {
-        if (signal.aborted) {
-          onAbort();
-          return;
-        }
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 
