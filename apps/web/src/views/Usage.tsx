@@ -775,7 +775,7 @@ function FlowSection({ range }: { range: UsageWindow }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getUsageBreakdown({ window: range, groupBy: "source", splitBy: "model" })
+    getUsageBreakdown({ window: range, groupBy: "sourceDetail", splitBy: "model" })
       .then((res) => {
         if (!cancelled) setRows(res);
       })
