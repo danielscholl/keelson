@@ -437,6 +437,32 @@ describe("Surface", () => {
     expect(screen.queryByRole("button", { name: "Explore in chat" })).toBeNull();
   });
 
+  test("hideRegionActions suppresses the Explore, select, and Expand head controls", () => {
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    const seeds: ChatSeed[] = [];
+    render(
+      <CanvasProvider>
+        <Surface
+          descriptor={{
+            id: "chamber",
+            title: "Chamber",
+            hideRegionActions: true,
+            layout: { rows: [{ columns: [{ key: "rib:demo:quality", title: "Quality" }] }] },
+          }}
+          onExplore={(s) => seeds.push(s)}
+        />
+      </CanvasProvider>,
+    );
+    // The board still renders (board actions flow through onExplore); only the
+    // head-strip host controls are gone.
+    expect(screen.getByText("Services")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Explore in chat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: "Select panel for multi-panel explore" }),
+    ).toBeNull();
+  });
+
   test("Explore raises a chat seed built from the region's live snapshot", () => {
     live("rib:demo:quality", board("Quality", "Services", 23));
     const seeds: ChatSeed[] = [];

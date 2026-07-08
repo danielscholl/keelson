@@ -74,6 +74,10 @@ export function Surface({
   onOpenSurface?: OpenSurface;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
+  // A surface can opt its whole layout out of the host's per-region explore/select/expand
+  // controls (a bespoke authoring console, not snapshot panels to lift into chat). Board
+  // actions still flow — only the head-strip chrome is suppressed.
+  const hideRegionActions = descriptor.hideRegionActions ?? false;
   const [selected, setSelected] = useState<Map<string, ExplorePanel>>(() => new Map());
   const onToggleSelect = useCallback((key: string, panel: ExplorePanel | null) => {
     setSelected((current) => {
@@ -115,7 +119,7 @@ export function Surface({
           )}
         </header>
       )}
-      {onExplore && selected.size > 0 && (
+      {onExplore && !hideRegionActions && selected.size > 0 && (
         <div className="surface-selection-bar">
           <button type="button" className="surface-region-action" onClick={exploreSelected}>
             Explore {selected.size} selected
@@ -131,6 +135,7 @@ export function Surface({
           onExplore={onExplore}
           selected={selected.has(header.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
+          hideActions={hideRegionActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
         />
@@ -142,6 +147,7 @@ export function Surface({
           onExplore={onExplore}
           selected={selected.has(banner.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
+          hideActions={hideRegionActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
         />
@@ -162,6 +168,7 @@ export function Surface({
                   onExplore={onExplore}
                   selected={selected.has(col.key)}
                   onToggleSelect={onExplore ? onToggleSelect : undefined}
+                  hideActions={hideRegionActions}
                   onLaunchWorkflow={onLaunchWorkflow}
                   onOpenSurface={onOpenSurface}
                 />
@@ -177,6 +184,7 @@ export function Surface({
           onExplore={onExplore}
           selected={selected.has(footer.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
+          hideActions={hideRegionActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
         />
@@ -210,6 +218,7 @@ function SurfaceRegion({
   onExplore,
   selected,
   onToggleSelect,
+  hideActions,
   onLaunchWorkflow,
   onOpenSurface,
 }: {
@@ -217,6 +226,9 @@ function SurfaceRegion({
   onExplore?: ExploreHandler;
   selected?: boolean;
   onToggleSelect?: (key: string, panel: ExplorePanel | null) => void;
+  // Suppress the head-strip explore/select/expand controls (surface opt-out). Board
+  // actions still flow through onExplore, so open-chat directives keep working.
+  hideActions?: boolean;
   onLaunchWorkflow?: LaunchWorkflow;
   onOpenSurface?: OpenSurface;
 }) {
@@ -386,7 +398,7 @@ function SurfaceRegion({
           {freshness.label}
         </span>
       )}
-      {snap.status === "live" && onExplore && (
+      {!hideActions && snap.status === "live" && onExplore && (
         <button
           type="button"
           className="surface-region-action surface-region-icon"
@@ -397,7 +409,7 @@ function SurfaceRegion({
           <span aria-hidden="true">✦</span>
         </button>
       )}
-      {(snap.status === "live" || selected) && onToggleSelect && (
+      {!hideActions && (snap.status === "live" || selected) && onToggleSelect && (
         <input
           type="checkbox"
           className="surface-region-action surface-region-select"
@@ -414,15 +426,17 @@ function SurfaceRegion({
           title="Select for multi-panel explore"
         />
       )}
-      <button
-        type="button"
-        className="surface-region-action surface-region-icon"
-        onClick={expand}
-        aria-label="Expand"
-        title="Open full view"
-      >
-        <span aria-hidden="true">⤢</span>
-      </button>
+      {!hideActions && (
+        <button
+          type="button"
+          className="surface-region-action surface-region-icon"
+          onClick={expand}
+          aria-label="Expand"
+          title="Open full view"
+        >
+          <span aria-hidden="true">⤢</span>
+        </button>
+      )}
     </div>
   );
 
