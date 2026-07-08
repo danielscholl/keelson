@@ -40,7 +40,7 @@ export async function detectSchemaSkew(
 }
 
 export function schemaSkewError(serverVersion: string): string {
-  return `server schema version '${serverVersion}' does not match this CLI's '${SCHEMA_VERSION}'; run \`keelson update\`, then restart the server (\`keelson stop\` && \`keelson start\`)`;
+  return `server schema version '${serverVersion}' does not match this CLI's '${SCHEMA_VERSION}'; run \`keelson update\`, then restart the server (\`keelson restart\`)`;
 }
 
 // Fail fast before the strict-parsing WS opens when the server's schema differs.

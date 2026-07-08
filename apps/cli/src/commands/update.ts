@@ -265,9 +265,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
         `advanced ribs: ${ribs.map((r) => r.replace("@keelson/rib-", "")).join(", ")}\n`,
       );
     if (server !== null)
-      process.stdout.write(
-        "restart the server (`keelson stop && keelson start`) to load the update\n",
-      );
+      process.stdout.write("restart the server (`keelson restart`) to load the update\n");
   }
   process.exit(EXIT_OK);
 }
