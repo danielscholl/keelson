@@ -290,6 +290,22 @@ describe("rib surface descriptor schema", () => {
     expect(s.subtitle).toBe("3 rooms · 2 lenses");
   });
 
+  it("round-trips the hideRegionActions opt-out (default undefined)", () => {
+    const opted = ribSurfaceDescriptorSchema.parse({
+      id: "chamber",
+      title: "Chamber",
+      hideRegionActions: true,
+      layout: { rows: [] },
+    });
+    expect(opted.hideRegionActions).toBe(true);
+    const withoutFlag = ribSurfaceDescriptorSchema.parse({
+      id: "chamber",
+      title: "Chamber",
+      layout: { rows: [] },
+    });
+    expect(withoutFlag.hideRegionActions).toBeUndefined();
+  });
+
   it("round-trips collapse flags + a byline on a row-column region", () => {
     const s = ribSurfaceDescriptorSchema.parse({
       id: "chamber",

@@ -342,6 +342,12 @@ export const ribSurfaceDescriptorSchema = z
     // no-project/shared scope). A rib that owns per-project scope sets this instead
     // of hand-rolling a picker board section. Absent = no host picker (default).
     projectScoped: z.boolean().optional(),
+    // Suppress the host's per-region controls — the ✦ "explore in chat" button, the
+    // ◻ multi-panel select box, and the ⤢ open-full-view button — on every region of
+    // this surface. A rib whose surface is an authoring console (not snapshot panels to
+    // lift into chat) opts out of the shared chrome; board actions still flow. Absent =
+    // show them (default).
+    hideRegionActions: z.boolean().optional(),
     layout: z
       .object({
         header: surfaceRegionSchema.optional(),
