@@ -4,7 +4,6 @@
 
 import {
   CombinedAutocompleteProvider,
-  type Component,
   Container,
   Editor,
   Loader,
@@ -63,7 +62,12 @@ import {
   resolveProjectBinding,
 } from "./project.ts";
 import { brass, dim, editorTheme, navy, red } from "./theme.ts";
-import { AssistantTurnView, userLine } from "./transcript.ts";
+import {
+  AssistantTurnView,
+  createTranscriptSurface,
+  resetTranscript,
+  userLine,
+} from "./transcript.ts";
 import { buildWelcomeLines, type WelcomeData } from "./welcome.ts";
 
 export interface InteractiveChatOptions {
@@ -204,17 +208,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
   tui.addChild(transcript);
   tui.addChild(new Spacer(1));
 
-  const surface = {
-    addChild(component: Component) {
-      transcript.addChild(component);
-    },
-    clear() {
-      transcript.clear();
-    },
-    requestRender() {
-      tui.requestRender();
-    },
-  };
+  const surface = createTranscriptSurface(transcript, () => tui.requestRender());
   const info = (line: string): void => {
     surface.addChild(new Text(dim(line), 1, 0));
     tui.requestRender();
@@ -239,8 +233,7 @@ export async function runInteractiveChat(opts: InteractiveChatOptions): Promise<
 
   const resetConversation = (reason: string): void => {
     session.conversationId = undefined;
-    surface.clear();
-    info(`── ${reason} ──`);
+    resetTranscript(surface, reason);
   };
 
   // Lazy caches behind the slash-argument completions.

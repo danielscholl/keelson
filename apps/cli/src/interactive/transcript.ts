@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { type Component, Markdown, Text } from "@earendil-works/pi-tui";
+import { type Component, type Container, Markdown, Text } from "@earendil-works/pi-tui";
 import { type MessageChunk, toolPresentation } from "@keelson/shared";
 import { brass, dim, italic, markdownTheme, red } from "./theme.ts";
 
@@ -43,6 +43,30 @@ export interface TranscriptSurface {
   addChild(component: Component): void;
   clear(): void;
   requestRender(): void;
+}
+
+// Wraps the transcript container so turn output appends above the editor; the
+// production TUI and tests share this surface instead of re-implementing it.
+export function createTranscriptSurface(
+  transcript: Container,
+  requestRender: () => void,
+): TranscriptSurface {
+  return {
+    addChild(component: Component) {
+      transcript.addChild(component);
+    },
+    clear() {
+      transcript.clear();
+    },
+    requestRender,
+  };
+}
+
+// Empties the transcript and drops a dim banner marking the new conversation.
+export function resetTranscript(surface: TranscriptSurface, reason: string): void {
+  surface.clear();
+  surface.addChild(new Text(dim(`── ${reason} ──`), 1, 0));
+  surface.requestRender();
 }
 
 // Renders one assistant turn: text chunks accumulate into a live Markdown
