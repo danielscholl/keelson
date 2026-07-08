@@ -758,9 +758,36 @@ describe("canvasViewSchema", () => {
         ],
       }),
     ).toThrow();
+    // Option values must be unique — they double as the dispatched value and list key.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "x",
+                label: "X",
+                fields: [
+                  {
+                    name: "f",
+                    label: "F",
+                    options: [
+                      { value: "dup", label: "One" },
+                      { value: "dup", label: "Two" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
-  it("parses a disabled action item with a reason, and rejects a non-boolean disabled / empty reason", () => {
+  it("parses a disabled action item with a reason, and rejects non-boolean disabled / empty reason / reason-without-disabled", () => {
     const ok = canvasViewSchema.parse({
       view: "board",
       sections: [
@@ -785,6 +812,13 @@ describe("canvasViewSchema", () => {
       canvasViewSchema.parse({
         view: "board",
         sections: [{ kind: "actions", items: [{ type: "x", label: "X", reason: "" }] }],
+      }),
+    ).toThrow();
+    // A reason is only valid alongside disabled: true (it explains why it's disabled).
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "x", label: "X", reason: "blocked" }] }],
       }),
     ).toThrow();
   });

@@ -885,4 +885,41 @@ describe("board actions — select fields and capability gating", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discussion" }));
     await waitFor(() => expect(calls).toEqual([{ type: "convene" }]));
   });
+
+  test("a sealed (disabled) action's open form can't dispatch — controls disabled, submit guarded", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "build",
+              label: "Build",
+              expanded: true,
+              disabled: true,
+              reason: "Free a Mind to manage.",
+              fields: [{ name: "topic", label: "Topic" }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const input = container.querySelector(".cvb-action-field-input") as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    // An Enter-key / programmatic submit on the open form is guarded — nothing dispatches.
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await Promise.resolve();
+    expect(calls).toHaveLength(0);
+  });
 });
