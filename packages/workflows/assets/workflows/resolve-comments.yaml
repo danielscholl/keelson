@@ -30,6 +30,8 @@ description: |
            Fixing a GitHub issue from scratch (use fix-issue).
            Threads already resolved.
 
+# Repo-scoped: the run's working directory must be a git repository.
+requiresProject: true
 worktree:
   enabled: true
 
