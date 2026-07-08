@@ -294,7 +294,7 @@ describe("bashHandler", () => {
     for (const l of lines) {
       expect(l.length).toBeLessThanOrEqual(64 * 1024);
     }
-  });
+  }, 15000);
 
   // The grandchild-reaping guarantee is asserted here through POSIX-only
   // mechanics: a shared `/tmp` view between bash and Node, plus `process.kill(

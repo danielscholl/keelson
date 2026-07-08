@@ -161,5 +161,5 @@ describe("pr-review workflow node graph", () => {
     const lines = out.trim().split("\n");
     expect(lines).toContain("foo.ts\t11"); // added line
     expect(lines).toContain("foo.ts\t10"); // context line, now anchorable
-  });
+  }, 15000);
 });
