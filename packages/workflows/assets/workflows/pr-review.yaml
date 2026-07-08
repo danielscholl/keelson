@@ -34,6 +34,9 @@ description: |
 # specific available id here or per-node for determinism. Resolution order is
 # node.model → workflow.model → provider.defaultModel.
 
+# Repo-scoped: the run's working directory must be a git repository.
+requiresProject: true
+
 nodes:
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 1: SCOPE

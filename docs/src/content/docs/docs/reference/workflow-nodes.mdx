@@ -41,6 +41,7 @@ immediately, with no server restart.
 | `interactive` | no | `true` is required when any loop node sets `loop.interactive: true`. |
 | `tags` | no | A list of strings for filtering. |
 | `worktree` | no | `{ enabled, branch }` pins git-worktree isolation per run; `branch` accepts `{workflow}` and `{run_id_short}`. |
+| `requiresProject` | no | `true` marks a repo-scoped workflow; `workflow_run` refuses to start it unless the resolved working directory is a git repo. |
 | `effort`, `thinking` | no | Claude-only reasoning controls. |
 
 The loader **accepts but ignores** these workflow-level fields, dropping them

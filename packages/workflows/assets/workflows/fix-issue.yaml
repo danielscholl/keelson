@@ -35,6 +35,8 @@ description: |
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
+# Repo-scoped: the run's working directory must be a git repository.
+requiresProject: true
 worktree:
   enabled: true
 

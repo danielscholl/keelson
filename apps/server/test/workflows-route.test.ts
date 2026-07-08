@@ -293,6 +293,39 @@ nodes:
     expect(nodes.find((n) => n.id === "fetch")?.model).toBeUndefined();
   });
 
+  test("GET /api/workflows/:name exposes requiresProject on the detail wire", async () => {
+    writeWorkflow(
+      "repo-scoped.yaml",
+      `name: repo-scoped
+description: needs a repo
+requiresProject: true
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+    );
+    writeWorkflow(
+      "loose.yaml",
+      `name: loose
+description: no repo needed
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+    );
+    const { app } = makeRig();
+
+    const marked = await app.fetch(new Request("http://test/api/workflows/repo-scoped"));
+    expect(marked.status).toBe(200);
+    const markedBody = (await marked.json()) as { workflow: { requiresProject?: boolean } };
+    expect(markedBody.workflow.requiresProject).toBe(true);
+
+    const loose = await app.fetch(new Request("http://test/api/workflows/loose"));
+    expect(loose.status).toBe(200);
+    const looseBody = (await loose.json()) as { workflow: { requiresProject?: boolean } };
+    expect(looseBody.workflow.requiresProject).toBeUndefined();
+  });
+
   test("GET /api/workflows/:name returns 404 for unknown workflow", async () => {
     const { app } = makeRig();
     const res = await app.fetch(new Request("http://test/api/workflows/nope"));

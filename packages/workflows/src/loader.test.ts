@@ -18,6 +18,51 @@ function tmpDir(): string {
 }
 
 describe("parseWorkflow — happy paths", () => {
+  test("requiresProject: true parses onto the workflow; omitted is undefined", () => {
+    const marked = parseWorkflow(
+      `
+name: repo-scoped
+description: needs a repo
+requiresProject: true
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+      "repo-scoped.yaml",
+    );
+    expect(marked.error).toBeNull();
+    expect(marked.workflow?.requiresProject).toBe(true);
+
+    const plain = parseWorkflow(
+      `
+name: plain
+description: no flag
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+      "plain.yaml",
+    );
+    expect(plain.error).toBeNull();
+    expect(plain.workflow?.requiresProject).toBeUndefined();
+  });
+
+  test("non-boolean requiresProject is ignored, not honored", () => {
+    const result = parseWorkflow(
+      `
+name: bad-flag
+description: junk value
+requiresProject: "yes"
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+      "bad-flag.yaml",
+    );
+    expect(result.error).toBeNull();
+    expect(result.workflow?.requiresProject).toBeUndefined();
+  });
+
   test("minimal workflow with one prompt node", () => {
     const yaml = `
 name: hello

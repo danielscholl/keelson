@@ -80,6 +80,8 @@ description: |
 # Mutates the working tree on the LOCAL path — branch, commits, push, PR. Run in
 # an isolated worktree by default so a run can't trample editor state. (The
 # DELEGATE path works entirely on GitHub; the worktree is just an idle checkout.)
+# Repo-scoped: the run's working directory must be a git repository.
+requiresProject: true
 worktree:
   enabled: true
 

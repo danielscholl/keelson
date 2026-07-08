@@ -672,6 +672,9 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
   let mutatesCheckout: boolean | undefined;
   if (typeof obj.mutates_checkout === "boolean") mutatesCheckout = obj.mutates_checkout;
 
+  let requiresProject: boolean | undefined;
+  if (typeof obj.requiresProject === "boolean") requiresProject = obj.requiresProject;
+
   let tags: string[] | undefined;
   if (Array.isArray(obj.tags)) {
     tags = [
@@ -705,6 +708,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     ...(additionalDirectories !== undefined ? { additionalDirectories } : {}),
     ...(interactive !== undefined ? { interactive } : {}),
     ...(mutatesCheckout !== undefined ? { mutates_checkout: mutatesCheckout } : {}),
+    ...(requiresProject !== undefined ? { requiresProject } : {}),
     nodes,
     ...(worktreePolicy ? { worktree: worktreePolicy } : {}),
     ...(tags !== undefined ? { tags } : {}),

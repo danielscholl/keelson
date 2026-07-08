@@ -273,6 +273,7 @@ function workflowToDetail(workflow: WorkflowDefinition) {
           },
         }
       : {}),
+    ...(workflow.requiresProject ? { requiresProject: true } : {}),
   };
 }
 
