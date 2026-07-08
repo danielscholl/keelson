@@ -240,8 +240,19 @@ const canvasActionFieldSchema = z
     required: z.boolean().optional(),
     // Render a multi-line textarea rather than a single-line input.
     multiline: z.boolean().optional(),
+    // A fixed choice set renders a <select> instead of a free-text input; the
+    // dispatched value is the chosen option's `value`. A non-required select
+    // offers `placeholder` as an empty "none" option, so an unset optional
+    // select dispatches "". Mutually exclusive with `multiline`.
+    options: z
+      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
+      .min(1)
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine((f) => !(f.multiline && f.options), {
+    message: "a field is either multiline or a select, not both",
+  });
 export type CanvasActionField = z.infer<typeof canvasActionFieldSchema>;
 
 const canvasActionConfirmSchema = z
@@ -297,6 +308,13 @@ const canvasActionItemSchema = z
     // Confirmation presentation metadata. `destructive` still marks dangerous
     // actions; this only controls whether the confirm dialog is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),
+    // Render the action non-interactive — dimmed and unclickable, its form sealed
+    // — when a precondition the state can't satisfy fails (a capability-gated tab
+    // whose current cast can't run it). `reason` is the human explanation,
+    // surfaced as a tooltip. A producer that recomputes preconditions re-emits
+    // these on each recompose, so a state change flips the gate.
+    disabled: z.boolean().optional(),
+    reason: z.string().min(1).optional(),
   })
   .strict();
 

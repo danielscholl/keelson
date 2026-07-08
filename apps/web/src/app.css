@@ -3729,6 +3729,10 @@ button.tab:focus-visible {
 }
 .cvb-action-button:hover:not(:disabled) { background: var(--card-2); }
 .cvb-action-button:disabled { opacity: 0.6; cursor: default; }
+/* A capability-gated action (a room shape the current cast can't run): dimmed
+   past the plain disabled state, and not-allowed so the block reads as a
+   precondition, not a transient pending. `reason` rides the button's title. */
+.cvb-action-button.is-disabled { opacity: 0.42; cursor: not-allowed; }
 /* `brand` marks a board's one primary verb (e.g. a genesis hero) — filled
    accent like .btn-run, so it reads as the screen's single filled button. */
 .cvb-action-button[data-tone="brand"] {
@@ -3790,6 +3794,9 @@ button.tab:focus-visible {
 textarea.cvb-action-field-input {
   min-height: 56px;
   resize: vertical;
+}
+select.cvb-action-field-select {
+  cursor: pointer;
 }
 .cvb-action-form-error {
   margin: 0;

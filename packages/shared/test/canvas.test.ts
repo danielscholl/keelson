@@ -699,6 +699,96 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses a select action field, and rejects multiline+options and an empty option", () => {
+    const ok = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "convene",
+              label: "Discussion",
+              fields: [
+                {
+                  name: "project",
+                  label: "Project",
+                  placeholder: "No project (shared)",
+                  options: [
+                    { value: "keelson", label: "keelson" },
+                    { value: "chamber", label: "keelson-rib-chamber" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(ok.view).toBe("board");
+    // A field is a select or a textarea, never both.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "x",
+                label: "X",
+                fields: [
+                  { name: "f", label: "F", multiline: true, options: [{ value: "a", label: "A" }] },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+    // An option carries a non-empty value and label.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [{ type: "x", label: "X", fields: [{ name: "f", label: "F", options: [] }] }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("parses a disabled action item with a reason, and rejects a non-boolean disabled / empty reason", () => {
+    const ok = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            { type: "convene", label: "Debate", disabled: true, reason: "Free a Mind to chair." },
+            { type: "convene", label: "Discussion" },
+          ],
+        },
+      ],
+    });
+    expect(ok.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "x", label: "X", disabled: "yes" }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "x", label: "X", reason: "" }] }],
+      }),
+    ).toThrow();
+  });
+
   it("parses an action item with a glyph and an opaque payload", () => {
     const v = canvasViewSchema.parse({
       view: "board",

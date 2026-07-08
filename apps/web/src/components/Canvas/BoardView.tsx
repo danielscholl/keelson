@@ -179,10 +179,11 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       {!expanded && (
         <button
           type="button"
-          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}`}
+          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
           data-tone={item.tone}
-          disabled={!ctx || pending}
+          disabled={!ctx || pending || item.disabled === true}
           aria-expanded={hasFields ? open : undefined}
+          title={item.reason}
           onClick={onButtonClick}
         >
           {item.glyph && (
@@ -210,6 +211,22 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                     value={values[f.name] ?? ""}
                     onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
                   />
+                ) : f.options ? (
+                  <select
+                    id={id}
+                    className="cvb-action-field-input cvb-action-field-select"
+                    value={values[f.name] ?? ""}
+                    onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                  >
+                    <option value="" disabled={f.required}>
+                      {f.placeholder ?? (f.required ? "Select…" : "—")}
+                    </option>
+                    {f.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
                   <input
                     id={id}
@@ -229,7 +246,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               type="submit"
               className="cvb-action-button"
               data-tone={item.tone}
-              disabled={!ctx || pending}
+              disabled={!ctx || pending || item.disabled === true}
+              title={item.reason}
             >
               {expanded && item.glyph && (
                 <span className="cvb-action-glyph" aria-hidden="true">
