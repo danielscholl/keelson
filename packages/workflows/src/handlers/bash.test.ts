@@ -71,7 +71,7 @@ describe("bashHandler", () => {
     // chars; assert the unevaluated literal form is present and the
     // evaluated form is not).
     expect(text).not.toMatch(/got=PWNED$/m);
-  }, 15000);
+  });
 
   test("bash receives rawBody — executor's text-substitution does not run shell code", async () => {
     // Tests that the handler reads ctx.rawBody, not ctx.resolvedBody.
@@ -294,7 +294,7 @@ describe("bashHandler", () => {
     for (const l of lines) {
       expect(l.length).toBeLessThanOrEqual(64 * 1024);
     }
-  });
+  }, 15000);
 
   // The grandchild-reaping guarantee is asserted here through POSIX-only
   // mechanics: a shared `/tmp` view between bash and Node, plus `process.kill(
