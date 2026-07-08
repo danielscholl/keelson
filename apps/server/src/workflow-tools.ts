@@ -223,25 +223,32 @@ function repoMissingHint(workingDir: string): string {
 }
 
 // Fail-fast message for a `requiresProject` workflow whose resolved working dir
-// isn't a git repo. Ranks registered projects that contain or sit inside the
-// resolved dir first, then falls back to all registered projects, so an
-// omitted-`project` caller gets a concrete `project="…"` to retry with.
-function repoScopedPreflightMessage(opts: {
+// isn't a git repo. Suggests only registered projects that are THEMSELVES git
+// repos (so the retry actually passes preflight), ranking ones that contain or
+// sit inside the resolved dir first, so a caller gets a concrete `project="…"`
+// to retry with.
+async function repoScopedPreflightMessage(opts: {
   name: string;
   workingDir: string;
   projectProvided: boolean;
   projects: Project[];
   excludeProjectId?: string;
-}): string {
+}): Promise<string> {
   const { name, workingDir, projectProvided, projects, excludeProjectId } = opts;
   const canonWorkingDir = canonicalPath(workingDir);
   // The caller-named project just failed the repo check; never suggest it back.
   const pool = excludeProjectId ? projects.filter((p) => p.id !== excludeProjectId) : projects;
-  const related = pool.filter((p) => {
+  // Keep only projects that are git repos — suggesting a non-repo project would
+  // send the caller straight back into this same preflight failure.
+  const gitProjects: Project[] = [];
+  for (const p of pool) {
+    if (await isGitRepo(p.rootPath).catch(() => false)) gitProjects.push(p);
+  }
+  const related = gitProjects.filter((p) => {
     const root = canonicalPath(p.rootPath);
     return isPathInside(canonWorkingDir, root) || isPathInside(root, canonWorkingDir);
   });
-  const suggestions = (related.length > 0 ? related : pool).slice(0, 10);
+  const suggestions = (related.length > 0 ? related : gitProjects).slice(0, 10);
 
   const lines: string[] = [`${name} requires a git repository.`];
   if (projectProvided) {
@@ -254,15 +261,10 @@ function repoScopedPreflightMessage(opts: {
     lines.push("", "Available projects:");
     for (const p of suggestions) lines.push(`- ${p.name} -> ${p.rootPath}`);
     lines.push("", `Retry with project: "${suggestions[0]!.name}".`);
-  } else if (projectProvided) {
-    lines.push(
-      "",
-      "No other registered project is a git repository. Register a project or run this workflow from a git repository.",
-    );
   } else {
     lines.push(
       "",
-      "No projects are registered. Register a project or run this workflow from a git repository.",
+      "No registered project is a git repository. Register a project rooted at a git repository, or run this workflow from one.",
     );
   }
   return lines.join("\n");
@@ -377,7 +379,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         if (!isRepo) {
           emitResult(
             ctx,
-            repoScopedPreflightMessage({
+            await repoScopedPreflightMessage({
               name,
               workingDir,
               projectProvided: project !== undefined,

@@ -384,10 +384,16 @@ nodes:
     return statuses.every((status) => controller.listRuns({ status }).length === 0);
   }
 
-  test("workflow_run rejects a requiresProject workflow in a non-git cwd before any run", async () => {
+  test("workflow_run rejects a requiresProject workflow in a non-git cwd and suggests a git-backed project", async () => {
     writeWorkflow("repo-scoped.yaml", REPO_SCOPED_WF);
-    const { controller, tools, cwd, dispose } = makeRig();
+    const { controller, tools, cwd, projectsStore, dispose } = makeRig();
     activeDispose = dispose;
+    // makeRig registers "test-project" rooted at the non-git tmp cwd; add a
+    // project that IS a git repo so there is a candidate the retry can pass on.
+    const gitRoot = join(cwd, "git-project-root");
+    mkdirSync(gitRoot, { recursive: true });
+    execSync("git init -q", { cwd: gitRoot });
+    projectsStore.create({ name: "git-project", rootPath: gitRoot });
     const run = toolByName(tools, "workflow_run");
 
     const { ctx, chunks } = makeCtx(cwd);
@@ -397,8 +403,10 @@ nodes:
     expect(result.isError).toBe(true);
     expect(result.content).toContain("repo-scoped requires a git repository");
     expect(result.content).toContain(cwd);
-    // makeRig registers "test-project" rooted at the non-git tmp cwd.
-    expect(result.content).toContain('Retry with project: "test-project"');
+    // Only the git-backed project is a valid retry target; the non-git
+    // "test-project" (rooted at the failing cwd) must not be suggested back.
+    expect(result.content).toContain('Retry with project: "git-project"');
+    expect(result.content).not.toContain('Retry with project: "test-project"');
     expect(noRunsCreated(controller)).toBe(true);
   });
 
@@ -418,7 +426,7 @@ nodes:
     // The project the caller named just failed the repo check — don't suggest
     // it back, and don't claim no projects are registered when one is.
     expect(result.content).not.toContain('Retry with project: "test-project"');
-    expect(result.content).toContain("No other registered project is a git repository");
+    expect(result.content).toContain("No registered project is a git repository");
     expect(result.content).not.toContain("No projects are registered");
     expect(noRunsCreated(controller)).toBe(true);
   });
