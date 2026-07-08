@@ -73,6 +73,15 @@ nodes:
 
       echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
 
+      # This workflow pushes fixes back to the PR's head branch on origin, so it
+      # only supports same-repo PRs. A fork PR's head lives on another repo; the
+      # detached checkout below drops that remote, and pushing to origin would
+      # silently write to the base repo. Refuse a fork PR early with a clear message.
+      if [ "$(gh pr view "$PR_NUM" --json isCrossRepository -q '.isCrossRepository')" = "true" ]; then
+        echo "PR #$PR_NUM is from a fork; resolve-comments only supports same-repo PRs." >&2
+        exit 1
+      fi
+
       # Check out the PR head DETACHED, not as its branch. A plain
       # `gh pr checkout` claims the PR's head branch, which git refuses when that
       # branch is already checked out in a sibling worktree (fix-issue leaves the
@@ -386,13 +395,16 @@ nodes:
     depends_on: [revalidate]
     bash: |
       set -euo pipefail
-      HEAD_REF=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-head-ref")
+      # Read defensively: under `set -e`, a bare `cat` on an absent artifact would
+      # abort before the guard below could print its clearer message.
+      HEAD_REF=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-head-ref" 2>/dev/null || true)
       if [ -z "$HEAD_REF" ]; then
         echo "No PR head ref recorded by fetch-threads — cannot push." >&2
         exit 1
       fi
       # HEAD is detached at the PR head plus this run's commits; a bare `git push`
-      # has no upstream, so push explicitly to the PR's own branch.
+      # has no upstream, so push explicitly to the PR's own branch on origin
+      # (fetch-threads has already guaranteed a same-repo PR).
       git push origin "HEAD:refs/heads/$HEAD_REF"
       echo "Pushed to origin/$HEAD_REF."
 
