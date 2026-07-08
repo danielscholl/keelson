@@ -35,30 +35,39 @@ hides tools by name. See [Configuration](../configuration/#mcp-gateway) for ever
 
 ## Connect an agent with one command
 
-`keelson connect` wires a coding agent to the endpoint for you, from the repo you
-want to work in. It writes the MCP server entry into that agent's own config and
-drops a small, portable skill that teaches the agent when to reach for Keelson.
+`keelson connect` wires a coding agent to the endpoint for you. It registers the
+MCP server in that agent's own config and drops a small, portable skill that
+teaches the agent when to reach for Keelson. Writes are machine-global by default —
+the connection follows you into every repo — so run it once from anywhere:
 
 ```bash
 keelson connect claude      # or: copilot, codex, or 'all'
 ```
 
-It handles three agents today, each written to that agent's native location:
+It handles three agents today, each wired at its native location:
 
-| Agent | Config it writes | Transport |
+| Agent | How it is wired (global) | Transport |
 |---|---|---|
-| `claude` | `.mcp.json` in the current repo | HTTP |
+| `claude` | `claude mcp add --scope user` (user scope, in `~/.claude.json`) | HTTP |
 | `copilot` | `~/.copilot/mcp-config.json` | HTTP |
 | `codex` | `~/.codex/config.toml` | the `keelson mcp` stdio bridge |
 
-Codex speaks only stdio, so it gets the bridge instead of the HTTP URL. The bridge
-resolves the server URL and token on each launch, so the wiring survives a restart
-or a non-default port.
+Claude has no dedicated global MCP file — its user scope lives inside
+`~/.claude.json`, its whole state file — so Keelson drives Claude's own `claude mcp`
+CLI rather than hand-editing it. Codex speaks only stdio, so it gets the bridge
+instead of the HTTP URL; the bridge resolves the server URL and token on each launch,
+so the wiring survives a restart or a non-default port.
 
-The skill lands at `.agents/skills/keelson/SKILL.md`, the shared directory Claude
-Code, the Copilot CLI, and Codex all read. It names no tool or rib: it points the
-agent at `keelson_docs` and the workflow tools, so it stays correct as you install
-or remove ribs.
+The skill lands in each agent's own skills directory: Copilot and Codex share
+`~/.agents/skills/keelson/SKILL.md` (both read it), and Claude reads its own
+`~/.claude/skills/keelson/SKILL.md`. It names no tool or rib: it points the agent at
+`keelson_docs` and the workflow tools, so it stays correct as you install or remove
+ribs.
+
+Prefer to commit the wiring into a repo? `keelson connect claude --local` writes the
+repo-scoped equivalents instead — a project `.mcp.json` for Claude and the skill
+under the repo's `.claude/skills` (Claude) or `.agents/skills` (Copilot, Codex) — so
+teammates inherit it through version control.
 
 `keelson connect` records what it wrote, so reversing it is exact:
 

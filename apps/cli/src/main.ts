@@ -213,13 +213,23 @@ export function buildProgram(): Command {
       "wire an external agent (claude, copilot, codex, or 'all') to keelson's MCP endpoint and drop a portable skill",
     )
     .option("--url <url>", "MCP endpoint URL to write (default: http://127.0.0.1:7878/api/mcp)")
-    .option("--no-skill", "wire the MCP connection only; skip the shared SKILL.md drop")
+    .option("--no-skill", "wire the MCP connection only; skip the SKILL.md drop")
+    .option(
+      "--local",
+      "write repo-scoped config/skill into the current directory instead of your machine-global agent config",
+    )
     .option("--undo", "reverse a previous connect for the named agents")
     .option("--list", "show current connections instead of connecting")
     .action(function connectAction(
       this: Command,
       targets: string[],
-      connectOpts: { url?: string; skill: boolean; undo?: boolean; list?: boolean },
+      connectOpts: {
+        url?: string;
+        skill: boolean;
+        local?: boolean;
+        undo?: boolean;
+        list?: boolean;
+      },
     ) {
       const { json } = globalOpts(this);
       if (connectOpts.list) {
@@ -231,7 +241,12 @@ export function buildProgram(): Command {
         return;
       }
       const url = requireNonEmpty(json, "--url", connectOpts.url);
-      runConnect(targets, { json, skill: connectOpts.skill, ...(url ? { url } : {}) });
+      runConnect(targets, {
+        json,
+        skill: connectOpts.skill,
+        ...(connectOpts.local ? { local: true } : {}),
+        ...(url ? { url } : {}),
+      });
     });
 
   program
