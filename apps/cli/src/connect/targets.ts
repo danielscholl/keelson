@@ -23,54 +23,106 @@ export const DEFAULT_MCP_URL = "http://127.0.0.1:7878/api/mcp";
 
 export type TargetFormat = "json" | "toml";
 
+// `global` writes to the operator's machine (OS home): the connection follows
+// them into every repo. `local` writes committable, repo-scoped files. Default
+// is global — connect is machine setup, not a per-repo artifact.
+export type Scope = "global" | "local";
+
+// A target whose MCP config is a dedicated file we edit surgically.
+export interface TargetMcpFile {
+  kind: "file";
+  file: string;
+  format: TargetFormat;
+}
+// A target we wire through the agent's own CLI. Claude's user scope lives inside
+// `~/.claude.json` — its whole state file (OAuth, session, caches) — which we
+// must not hand-edit, so we drive `claude mcp add/remove` instead.
+export interface TargetMcpCli {
+  kind: "cli";
+  command: string;
+  addArgs: string[];
+  removeArgs: string[];
+}
+export type TargetMcp = TargetMcpFile | TargetMcpCli;
+
 export interface TargetSpec {
   id: TargetId;
   label: string;
-  format: TargetFormat;
-  // Where this agent reads its MCP config. `cwd` is the repo the operator ran
-  // connect in; `home` is the OS home dir. Claude reads a project-scoped file
-  // (matching the "go into repo A and connect" flow); Copilot and Codex read
-  // their user-level config.
-  resolvePath(cwd: string, home: string): string;
-  // How this agent should reach keelson. HTTP targets point at the endpoint
-  // directly; Codex is stdio-only, so it runs the `keelson mcp` bridge, which
-  // self-resolves the server URL and token on each launch (restart-proof).
+  // How this agent reaches keelson. HTTP targets point at the endpoint directly;
+  // Codex runs the `keelson mcp` stdio bridge, which self-resolves the server URL
+  // and token on each launch (restart-proof).
   transport: "http" | "stdio-bridge";
+  // Path segments, under the scope root, of the skills dir this agent discovers.
+  // The keelson skill lands at `<root>/<...segments>/keelson/SKILL.md`. Copilot
+  // and codex both read `.agents/skills`, so they share one file; Claude reads
+  // only `.claude/skills`.
+  skillSegments: readonly string[];
+  resolveMcp(scope: Scope, cwd: string, osHome: string, url: string): TargetMcp;
 }
+
+const AGENTS_SKILLS = [".agents", "skills"] as const;
+const CLAUDE_SKILLS = [".claude", "skills"] as const;
 
 export const TARGETS: Record<TargetId, TargetSpec> = {
   claude: {
     id: "claude",
     label: "Claude Code",
-    format: "json",
     transport: "http",
-    resolvePath: (cwd) => join(cwd, ".mcp.json"),
+    skillSegments: CLAUDE_SKILLS,
+    resolveMcp: (scope, cwd, _osHome, url) =>
+      scope === "local"
+        ? { kind: "file", file: join(cwd, ".mcp.json"), format: "json" }
+        : {
+            kind: "cli",
+            command: "claude",
+            addArgs: ["mcp", "add", "--scope", "user", "--transport", "http", "keelson", url],
+            removeArgs: ["mcp", "remove", "--scope", "user", "keelson"],
+          },
   },
   copilot: {
     id: "copilot",
     label: "Copilot CLI",
-    format: "json",
     transport: "http",
-    resolvePath: (_cwd, home) => join(home, ".copilot", "mcp-config.json"),
+    skillSegments: AGENTS_SKILLS,
+    // Copilot has no project-scoped MCP config (github/copilot-cli#2528), so MCP
+    // is always the user-level file regardless of scope; `--local` relocates only
+    // the skill.
+    resolveMcp: (_scope, _cwd, osHome) => ({
+      kind: "file",
+      file: join(osHome, ".copilot", "mcp-config.json"),
+      format: "json",
+    }),
   },
   codex: {
     id: "codex",
     label: "Codex CLI",
-    format: "toml",
     transport: "stdio-bridge",
-    resolvePath: (_cwd, home) => join(home, ".codex", "config.toml"),
+    skillSegments: AGENTS_SKILLS,
+    resolveMcp: (_scope, _cwd, osHome) => ({
+      kind: "file",
+      file: join(osHome, ".codex", "config.toml"),
+      format: "toml",
+    }),
   },
 };
 
-// The portable agent skill, dropped into the shared `.agents/skills` dir that
-// Claude Code, Copilot CLI, and Codex all read. A thin, rib-agnostic pointer:
-// it names no capability (those are discovered live via keelson_docs and the
-// tool list), so it never goes stale as ribs are installed or removed.
-export const SKILL_DIR_SEGMENTS = [".agents", "skills", "keelson"] as const;
 export const SKILL_FILENAME = "SKILL.md";
 
-export function resolveSkillPath(cwd: string): string {
-  return join(cwd, ...SKILL_DIR_SEGMENTS, SKILL_FILENAME);
+// The `keelson/` skill dir for a target+scope. Its parent (the agent's skills
+// root) is what varies; the leaf is always `keelson/SKILL.md`.
+export function skillDir(spec: TargetSpec, scope: Scope, cwd: string, osHome: string): string {
+  return join(scope === "global" ? osHome : cwd, ...spec.skillSegments, "keelson");
+}
+
+export function skillFilePath(spec: TargetSpec, scope: Scope, cwd: string, osHome: string): string {
+  return join(skillDir(spec, scope, cwd, osHome), SKILL_FILENAME);
+}
+
+// The ancestor skill-dir cleanup must never climb past: the scope root the
+// segments hang off. Removal stops here so we never delete the operator's home
+// or repo, only the `.agents`/`.claude` tree we created beneath it.
+export function skillStopAt(scope: Scope, cwd: string, osHome: string): string {
+  return scope === "global" ? osHome : cwd;
 }
 
 export const SKILL_CONTENT = `---

@@ -153,7 +153,7 @@ Wire one up with a single command from the repo you want to work in:
 keelson connect claude      # or: copilot, codex, or 'all'
 ```
 
-`keelson connect` writes the MCP server entry into that agent's config and drops a small, portable skill (`.agents/skills/keelson/SKILL.md`, read by Claude Code, Copilot CLI, and Codex) that teaches the agent when to reach for Keelson. It records what it wrote, so reversing it is exact — it removes only Keelson's own entry, never a sibling MCP server or a file you already had:
+`keelson connect` registers the MCP server in that agent's own config and drops a small, portable skill into that agent's skills directory that teaches the agent when to reach for Keelson. It writes machine-global by default, so the connection follows you into every repo; pass `--local` to commit repo-scoped wiring into the current directory instead. It records what it wrote, so reversing it is exact — it removes only Keelson's own entry, never a sibling MCP server or a file you already had:
 
 ```bash
 keelson connect --list      # show what's connected

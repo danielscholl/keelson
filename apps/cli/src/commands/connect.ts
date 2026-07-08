@@ -3,9 +3,11 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 // `keelson connect` / `keelson disconnect`: wire (or unwire) an external coding
-// agent to the local MCP endpoint and drop a shared, portable agent skill. Every
-// write is recorded in the connect receipt so a disconnect reverses exactly what
-// connect wrote — never a sibling MCP server or a file the operator owned.
+// agent to the local MCP endpoint and drop a portable agent skill. Writes are
+// machine-global by default (the connection follows the operator into every
+// repo); `--local` writes committable, repo-scoped files instead. Every write is
+// recorded in the connect receipt so a disconnect reverses exactly what connect
+// did — never a sibling MCP server or a file the operator owned.
 
 import { mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -18,33 +20,60 @@ import {
   isTargetId,
   removeJsonMcp,
   removeTomlMcp,
-  resolveSkillPath,
+  type Scope,
   SKILL_CONTENT,
+  skillFilePath,
+  skillStopAt,
   TARGET_IDS,
   TARGETS,
   type TargetId,
 } from "../connect/targets.ts";
-import { EXIT_BAD_ARGS } from "../exit.ts";
+import { EXIT_BAD_ARGS, EXIT_FAIL } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
+
+// Result of running an agent's own CLI (Claude's `claude mcp add/remove`).
+export interface CommandResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+export type CommandRunner = (command: string, args: string[]) => CommandResult;
+
+// Default runner. A missing binary surfaces as a non-zero result, not a throw,
+// so a connect for one target failing is reported, not fatal to the process.
+function defaultRunCommand(command: string, args: string[]): CommandResult {
+  try {
+    const res = Bun.spawnSync({ cmd: [command, ...args], stdout: "pipe", stderr: "pipe" });
+    return { code: res.exitCode, stdout: res.stdout.toString(), stderr: res.stderr.toString() };
+  } catch (err) {
+    return { code: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export interface ConnectOptions {
   json: boolean;
   url?: string;
-  // Skip the shared SKILL.md drop (MCP wiring only). Default: drop it.
+  // Skip the SKILL.md drop (MCP wiring only). Default: drop it.
   skill?: boolean;
+  // Write repo-scoped files instead of machine-global ones. Default: global.
+  local?: boolean;
   // Injected in tests; default to the real cwd/homes. `home` is the keelson home
   // (where the receipt lives); `osHome` is the OS home (where an agent's own
   // config dir lives, e.g. ~/.codex) — deliberately distinct.
   cwd?: string;
   home?: string;
   osHome?: string;
+  // Injected in tests so Claude's `claude mcp` calls don't touch the real
+  // ~/.claude.json.
+  runCommand?: CommandRunner;
 }
 
 export interface DisconnectOptions {
   json: boolean;
   cwd?: string;
   home?: string;
+  runCommand?: CommandRunner;
 }
 
 // Resolve the operator's target list, expanding "all" and rejecting an unknown
@@ -97,12 +126,12 @@ function readIfExists(file: string): string | null {
   }
 }
 
-// Create the skill dir tree below `stopAt` (an existing ancestor, e.g. cwd) and
-// report the chain of dirs it newly made, deepest-first, so a last disconnect
-// removes exactly what connect introduced. Each level is created top-down with a
-// non-recursive mkdir: a successful create means the dir is new, EEXIST means it
-// was already there. mkdir is itself the atomic check, so there is no
-// check-then-act (TOCTOU) window and no reliance on a platform-specific
+// Create the skill dir tree below `stopAt` (an existing ancestor, e.g. cwd or the
+// OS home) and report the chain of dirs it newly made, deepest-first, so a last
+// disconnect removes exactly what connect introduced. Each level is created
+// top-down with a non-recursive mkdir: a successful create means the dir is new,
+// EEXIST means it was already there. mkdir is itself the atomic check, so there
+// is no check-then-act (TOCTOU) window and no reliance on a platform-specific
 // recursive-mkdir return value.
 function ensureSkillDir(dir: string, stopAt: string): string[] {
   const levels: string[] = [];
@@ -140,66 +169,114 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
   const osHome = opts.osHome ?? homedir();
   const url = opts.url ?? DEFAULT_MCP_URL;
   const dropSkill = opts.skill !== false;
+  const scope: Scope = opts.local ? "local" : "global";
+  const run = opts.runCommand ?? defaultRunCommand;
   const now = new Date().toISOString();
   const data = loadConnections(home);
 
   const connected: Array<Record<string, unknown>> = [];
+  const failed: Array<Record<string, unknown>> = [];
+  const succeeded: TargetId[] = [];
   for (const id of targets) {
     const spec = TARGETS[id];
-    const file = spec.resolvePath(cwd, osHome);
-    const existing = readIfExists(file);
-    const existed = existing !== null;
-    let result: string;
-    if (spec.format === "json") {
-      const { text, alreadyPresent } = applyJsonMcp(existing, url);
-      writeConfigFile(file, text);
-      result = alreadyPresent ? "updated" : "added";
-    } else {
-      const { text, alreadyPresent } = applyTomlMcp(existing);
-      writeConfigFile(file, text);
-      result = alreadyPresent ? "already-present" : "added";
+    const mcp = spec.resolveMcp(scope, cwd, osHome, url);
+    try {
+      if (mcp.kind === "file") {
+        const existing = readIfExists(mcp.file);
+        const existed = existing !== null;
+        let result: string;
+        if (mcp.format === "json") {
+          const { text, alreadyPresent } = applyJsonMcp(existing, url);
+          writeConfigFile(mcp.file, text);
+          result = alreadyPresent ? "updated" : "added";
+        } else {
+          const { text, alreadyPresent } = applyTomlMcp(existing);
+          writeConfigFile(mcp.file, text);
+          result = alreadyPresent ? "already-present" : "added";
+        }
+        const prior = data.targets[id];
+        const createdFile = prior?.mcp.kind === "file" ? prior.mcp.createdFile : !existed;
+        data.targets[id] = {
+          target: id,
+          mcp: { kind: "file", file: mcp.file, format: mcp.format, createdFile },
+          connectedAt: now,
+        };
+        connected.push({
+          target: id,
+          label: spec.label,
+          transport: spec.transport,
+          file: mcp.file,
+          result,
+        });
+      } else {
+        // Idempotent: clear any prior keelson entry, then add, so a re-connect
+        // leaves a single clean registration whether or not `add` rejects dupes.
+        run(mcp.command, mcp.removeArgs);
+        const res = run(mcp.command, mcp.addArgs);
+        if (res.code !== 0) {
+          const detail = res.stderr.trim();
+          throw new Error(
+            detail.length > 0
+              ? detail
+              : `\`${mcp.command} ${mcp.addArgs.join(" ")}\` exited ${res.code}`,
+          );
+        }
+        data.targets[id] = {
+          target: id,
+          mcp: { kind: "cli", command: mcp.command, removeArgs: mcp.removeArgs },
+          connectedAt: now,
+        };
+        connected.push({
+          target: id,
+          label: spec.label,
+          transport: spec.transport,
+          via: `${mcp.command} mcp`,
+          result: "added",
+        });
+      }
+      succeeded.push(id);
+    } catch (err) {
+      failed.push({ target: id, error: err instanceof Error ? err.message : String(err) });
     }
-    const prior = data.targets[id];
-    data.targets[id] = {
-      target: id,
-      file,
-      format: spec.format,
-      // Keep the original createdFile across idempotent re-connects.
-      createdFile: prior?.createdFile ?? !existed,
-      connectedAt: now,
-    };
-    connected.push({ target: id, label: spec.label, transport: spec.transport, file, result });
   }
 
-  let skillPath: string | undefined;
-  if (dropSkill) {
-    skillPath = resolveSkillPath(cwd);
-    const skillDir = dirname(skillPath);
-    const prior = data.skill;
-    // Create the dir tree (idempotent). On the first connect, record which dirs
-    // were newly made so a last disconnect removes exactly those.
-    const createdDirs = prior?.createdDirs ?? ensureSkillDir(skillDir, cwd);
-    if (prior) mkdirSync(skillDir, { recursive: true });
-    // Detect first-creation atomically with an exclusive write (no check-then-act):
-    // `wx` throws EEXIST when the file is already there, meaning connect did not
-    // create it and undo must not delete it. A prior record already knows.
-    let createdFile: boolean;
-    if (prior) {
-      createdFile = prior.createdFile;
-      writeFileSync(skillPath, SKILL_CONTENT);
-    } else {
-      try {
-        writeFileSync(skillPath, SKILL_CONTENT, { flag: "wx" });
-        createdFile = true;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-        writeFileSync(skillPath, SKILL_CONTENT);
-        createdFile = false;
-      }
+  const skills: string[] = [];
+  if (dropSkill && succeeded.length > 0) {
+    // Group by the skill file path so copilot + codex (both `.agents/skills`)
+    // share one reference-counted file rather than clobbering each other.
+    const byFile = new Map<string, TargetId[]>();
+    for (const id of succeeded) {
+      const file = skillFilePath(TARGETS[id], scope, cwd, osHome);
+      byFile.set(file, [...(byFile.get(file) ?? []), id]);
     }
-    const requestedBy = new Set<TargetId>(prior?.requestedBy ?? []);
-    for (const id of targets) requestedBy.add(id);
-    data.skill = { file: skillPath, createdFile, createdDirs, requestedBy: [...requestedBy] };
+    const stopAt = skillStopAt(scope, cwd, osHome);
+    for (const [file, ids] of byFile) {
+      const dir = dirname(file);
+      const prior = data.skills[file];
+      const createdDirs = prior?.createdDirs ?? ensureSkillDir(dir, stopAt);
+      if (prior) mkdirSync(dir, { recursive: true });
+      // Detect first-creation atomically with an exclusive write (no check-then-
+      // act): `wx` throws EEXIST when the file is already there, meaning connect
+      // did not create it and undo must not delete it. A prior record knows.
+      let createdFile: boolean;
+      if (prior) {
+        createdFile = prior.createdFile;
+        writeFileSync(file, SKILL_CONTENT);
+      } else {
+        try {
+          writeFileSync(file, SKILL_CONTENT, { flag: "wx" });
+          createdFile = true;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+          writeFileSync(file, SKILL_CONTENT);
+          createdFile = false;
+        }
+      }
+      const requestedBy = new Set<TargetId>(prior?.requestedBy ?? []);
+      for (const id of ids) requestedBy.add(id);
+      data.skills[file] = { file, createdFile, createdDirs, requestedBy: [...requestedBy] };
+      skills.push(file);
+    }
   }
 
   saveConnections(home, data);
@@ -207,18 +284,22 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
     {
       data: {
         connected,
-        ...(skillPath ? { skill: skillPath } : {}),
+        ...(skills.length > 0 ? { skills } : {}),
+        ...(failed.length > 0 ? { failed } : {}),
+        scope,
         url,
         hint: "restart the agent (or open a new session) so it picks up the connection",
       },
     },
     { json: opts.json },
   );
+  if (failed.length > 0) process.exit(EXIT_FAIL);
 }
 
 export function runDisconnect(rawTargets: readonly string[], opts: DisconnectOptions): void {
   const targets = resolveTargets(rawTargets, opts.json);
   const home = opts.home ?? resolveKeelsonHome();
+  const run = opts.runCommand ?? defaultRunCommand;
   const data = loadConnections(home);
 
   const results: Array<Record<string, unknown>> = [];
@@ -228,10 +309,15 @@ export function runDisconnect(rawTargets: readonly string[], opts: DisconnectOpt
       results.push({ target: id, result: "not-connected" });
       continue;
     }
-    reverseTargetConfig(rec.file, rec.format, rec.createdFile);
+    if (rec.mcp.kind === "file") {
+      reverseTargetConfig(rec.mcp.file, rec.mcp.format, rec.mcp.createdFile);
+      results.push({ target: id, result: "disconnected", file: rec.mcp.file });
+    } else {
+      run(rec.mcp.command, rec.mcp.removeArgs);
+      results.push({ target: id, result: "disconnected", via: `${rec.mcp.command} mcp` });
+    }
     delete data.targets[id];
-    reverseSkillFor(data, id);
-    results.push({ target: id, result: "disconnected", file: rec.file });
+    reverseSkillsFor(data, id);
   }
 
   saveConnections(home, data);
@@ -246,16 +332,17 @@ function reverseTargetConfig(file: string, format: "json" | "toml", createdFile:
   else writeFileSync(file, text);
 }
 
-// Drop a target's claim on the shared skill; remove the skill (and dirs connect
-// created for it) only once no connected target still wants it.
-function reverseSkillFor(data: ConnectionsData, id: TargetId): void {
-  const skill = data.skill;
-  if (!skill) return;
-  skill.requestedBy = skill.requestedBy.filter((t) => t !== id);
-  if (skill.requestedBy.length > 0) return;
-  if (skill.createdFile) rmSync(skill.file, { force: true });
-  for (const dir of skill.createdDirs) removeDirIfEmpty(dir);
-  data.skill = undefined;
+// Drop a target's claim on every skill it requested; remove a skill (and the
+// dirs connect created for it) only once no connected target still wants it.
+function reverseSkillsFor(data: ConnectionsData, id: TargetId): void {
+  for (const [path, skill] of Object.entries(data.skills)) {
+    if (!skill.requestedBy.includes(id)) continue;
+    skill.requestedBy = skill.requestedBy.filter((t) => t !== id);
+    if (skill.requestedBy.length > 0) continue;
+    if (skill.createdFile) rmSync(skill.file, { force: true });
+    for (const dir of skill.createdDirs) removeDirIfEmpty(dir);
+    delete data.skills[path];
+  }
 }
 
 export function runConnectStatus(opts: { json: boolean; home?: string }): void {
@@ -263,12 +350,17 @@ export function runConnectStatus(opts: { json: boolean; home?: string }): void {
   const data = loadConnections(home);
   const connections = Object.values(data.targets)
     .filter((r): r is NonNullable<typeof r> => r !== undefined)
-    .map((r) => ({ target: r.target, file: r.file, connectedAt: r.connectedAt }));
+    .map((r) => ({
+      target: r.target,
+      ...(r.mcp.kind === "file" ? { file: r.mcp.file } : { via: `${r.mcp.command} mcp` }),
+      connectedAt: r.connectedAt,
+    }));
+  const skills = Object.keys(data.skills);
   emit(
     {
       data: {
         connections,
-        ...(data.skill ? { skill: data.skill.file } : {}),
+        ...(skills.length > 0 ? { skills } : {}),
         ...(connections.length === 0
           ? { note: "no agents connected; run `keelson connect <agent>`" }
           : {}),
