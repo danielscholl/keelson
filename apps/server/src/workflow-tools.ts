@@ -231,14 +231,17 @@ function repoScopedPreflightMessage(opts: {
   workingDir: string;
   projectProvided: boolean;
   projects: Project[];
+  excludeProjectId?: string;
 }): string {
-  const { name, workingDir, projectProvided, projects } = opts;
+  const { name, workingDir, projectProvided, projects, excludeProjectId } = opts;
   const canonWorkingDir = canonicalPath(workingDir);
-  const related = projects.filter((p) => {
+  // The caller-named project just failed the repo check; never suggest it back.
+  const pool = excludeProjectId ? projects.filter((p) => p.id !== excludeProjectId) : projects;
+  const related = pool.filter((p) => {
     const root = canonicalPath(p.rootPath);
     return isPathInside(canonWorkingDir, root) || isPathInside(root, canonWorkingDir);
   });
-  const suggestions = (related.length > 0 ? related : projects).slice(0, 10);
+  const suggestions = (related.length > 0 ? related : pool).slice(0, 10);
 
   const lines: string[] = [`${name} requires a git repository.`];
   if (projectProvided) {
@@ -251,6 +254,11 @@ function repoScopedPreflightMessage(opts: {
     lines.push("", "Available projects:");
     for (const p of suggestions) lines.push(`- ${p.name} -> ${p.rootPath}`);
     lines.push("", `Retry with project: "${suggestions[0]!.name}".`);
+  } else if (projectProvided) {
+    lines.push(
+      "",
+      "No other registered project is a git repository. Register a project or run this workflow from a git repository.",
+    );
   } else {
     lines.push(
       "",
@@ -374,6 +382,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
               workingDir,
               projectProvided: project !== undefined,
               projects: deps.projectsStore?.list() ?? [],
+              excludeProjectId: project?.id,
             }),
             true,
           );

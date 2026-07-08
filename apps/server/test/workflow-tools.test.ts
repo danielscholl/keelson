@@ -415,6 +415,11 @@ nodes:
     expect(result.isError).toBe(true);
     expect(result.content).toContain("repo-scoped requires a git repository");
     expect(result.content).toContain("selected project's root");
+    // The project the caller named just failed the repo check — don't suggest
+    // it back, and don't claim no projects are registered when one is.
+    expect(result.content).not.toContain('Retry with project: "test-project"');
+    expect(result.content).toContain("No other registered project is a git repository");
+    expect(result.content).not.toContain("No projects are registered");
     expect(noRunsCreated(controller)).toBe(true);
   });
 
