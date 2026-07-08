@@ -2248,7 +2248,9 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
   }
   const { abort, runId, store, subscribers, activeRuns } = args;
   const slots = runSlots();
-  if (slots.active >= slots.limit) {
+  // Skip the queue warning for an already-cancelled run: acquire() returns
+  // immediately below and it's marked cancelled without ever queueing.
+  if (!abort.signal.aborted && slots.active >= slots.limit) {
     subscribers.broadcast(runId, {
       type: "run_warning",
       nodeId: null,
@@ -2262,7 +2264,7 @@ async function executeRunInBackground(args: ExecuteRunArgs): Promise<void> {
       // out here (the executor's own run_done path never fires).
       store.updateRunStatus({
         runId,
-        status: "cancelled" as WorkflowRunStatus,
+        status: "cancelled",
         completedAt: new Date().toISOString(),
         error: null,
       });
