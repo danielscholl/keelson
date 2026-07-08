@@ -81,7 +81,7 @@ export function buildWorkflowGuidance(workflows: readonly WorkflowSummaryLike[])
     "- Call workflow_list to read a workflow's purpose and triggers when the right match isn't obvious from the name.",
     "- When it is unclear whether the user wants a workflow, answer directly; you may suggest one by name.",
     "- Some workflows pause for plan approval. Relay the plan to the user, then call workflow_respond with the runId/nodeId/pauseId from the earlier tool result once they approve or give feedback.",
-    "- Use workflow_status to check or resume a run later.",
+    "- Use workflow_status to check a run later. If a run FAILED or was cancelled, call workflow_resume with its runId to continue from the last completed node (it reuses prior work) — that is for a failed run, not an approval pause.",
     "",
     "Authoring new workflows:",
     "- When the user wants to create or change a workflow, call workflow_schema for the YAML reference and workflow_get on a similar existing workflow to copy its shape, then draft and check the YAML with workflow_validate until it is clean.",

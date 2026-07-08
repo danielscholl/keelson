@@ -123,6 +123,20 @@ function extractPauseRefs(content: string): { runId: string; nodeId: string; pau
   return { runId: m[1]!, nodeId: m[2]!, pauseId: m[3]! };
 }
 
+const STARTED_RUN_RE = /\(run ([0-9a-f-]+)\)/;
+
+// Pull the runId from the "Started workflow … (run <id>)." progress line
+// workflow_run streams before its final tool_result.
+function extractRunId(chunks: MessageChunk[]): string {
+  for (const chunk of chunks) {
+    if (chunk.type === "text") {
+      const m = STARTED_RUN_RE.exec(chunk.content);
+      if (m) return m[1]!;
+    }
+  }
+  throw new Error("no 'Started workflow (run …)' line was emitted");
+}
+
 const NO_APPROVAL_WF = `name: done
 description: |
   Use when: a fast deterministic check is needed
@@ -138,6 +152,14 @@ nodes:
   - id: review
     approval:
       message: please approve
+`;
+
+const FAIL_WF = `name: boom
+description: |
+  Use when: exercising a failing gate
+nodes:
+  - id: boom
+    bash: exit 1
 `;
 
 describe("workflow chat tools", () => {
@@ -246,6 +268,67 @@ nodes:
     expect(chunks.some((c) => c.type === "text" && c.content.includes("Started workflow"))).toBe(
       true,
     );
+  });
+
+  test("workflow_resume is registered and marked state_changing", () => {
+    const { tools, dispose } = makeRig();
+    activeDispose = dispose;
+    const resume = toolByName(tools, "workflow_resume");
+    // Must ride the same MCP read-only gate as workflow_run / workflow_respond.
+    expect(resume.state_changing).toBe(true);
+  });
+
+  test("workflow_resume errors on an unknown run", async () => {
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const resume = toolByName(tools, "workflow_resume");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await resume.execute({ runId: "does-not-exist" }, ctx);
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("does-not-exist");
+  });
+
+  test("workflow_resume refuses a run that already succeeded", async () => {
+    writeWorkflow("done.yaml", NO_APPROVAL_WF);
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+    const resume = toolByName(tools, "workflow_resume");
+
+    const started = makeCtx(cwd);
+    await run.execute({ name: "done", arguments: "" }, started.ctx);
+    const runId = extractRunId(started.chunks);
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await resume.execute({ runId }, ctx);
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content.toLowerCase()).toContain("resumable");
+  });
+
+  test("workflow_resume re-enters a failed run from its last completed node", async () => {
+    writeWorkflow("boom.yaml", FAIL_WF);
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+    const resume = toolByName(tools, "workflow_resume");
+
+    const started = makeCtx(cwd);
+    await run.execute({ name: "boom", arguments: "" }, started.ctx);
+    const runId = extractRunId(started.chunks);
+    expect(lastToolResult(started.chunks).isError).toBe(true);
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await resume.execute({ runId }, ctx);
+    const result = lastToolResult(chunks);
+    // The resume was accepted (not a "Could not resume" rejection) — it
+    // re-entered and reached terminal, re-failing the same gate.
+    expect(result.content).not.toContain("Could not resume");
+    expect(result.content).toContain(runId);
+    expect(result.content).toContain("failed");
   });
 
   test("workflow_run with an unknown name returns an error result", async () => {

@@ -661,11 +661,16 @@ interface StartRunCoreParams {
 // skipped after the failed node re-runs. Skips are pure re-derivations —
 // trigger_rule / when: evaluate over the seeded upstream outputs, so a
 // legitimate condition-skip re-derives identically. Failed/awaiting rows are
-// likewise excluded so they re-run on resume.
-function buildResumeSeed(nodes: NodeOutputRow[]): Map<string, NodeOutput> {
+// likewise excluded so they re-run on resume. `alwaysRun` node ids are excluded
+// too, so a node marked `always_run: true` re-executes on resume even though it
+// succeeded (a gate/validation should re-check, not replay a stale pass).
+function buildResumeSeed(
+  nodes: NodeOutputRow[],
+  alwaysRun: ReadonlySet<string> = new Set(),
+): Map<string, NodeOutput> {
   const seed = new Map<string, NodeOutput>();
   for (const node of nodes) {
-    if (node.status === "succeeded") {
+    if (node.status === "succeeded" && !alwaysRun.has(node.nodeId)) {
       seed.set(node.nodeId, {
         state: "completed",
         output: node.outputText ?? "",
@@ -888,7 +893,12 @@ function resumeRunCore(
     };
   }
 
-  const completedNodeOutputs = buildResumeSeed(run.nodes);
+  const alwaysRun = new Set(
+    workflow.nodes
+      .filter((n) => (n as { always_run?: boolean }).always_run === true)
+      .map((n) => n.id),
+  );
+  const completedNodeOutputs = buildResumeSeed(run.nodes, alwaysRun);
 
   if (!run.workingDir) {
     return {
@@ -1078,6 +1088,10 @@ export interface WorkflowController {
     runId: string,
     body: { nodeId: string; text: string; pauseId?: string },
   ): ResolveApprovalResult;
+  // Re-enter a terminal (failed/cancelled) run from its last completed node,
+  // reusing the persisted worktree + node outputs. The same core the HTTP
+  // resume-run route drives; NOT the approval-resolution path above.
+  resumeRun(runId: string): ResumeRunResult;
   awaitPauseOrTerminal(runId: string, opts?: AwaitPauseOrTerminalOptions): Promise<WatchResult>;
   listRuns(opts?: { status?: WorkflowRunStatus }): WorkflowRunSummary[];
   getRun(runId: string): WorkflowRunDetail | undefined;
@@ -1341,6 +1355,25 @@ export function createWorkflowController(
 
     resolveApproval(runId, body) {
       return resolveApprovalCore({ activeRuns, store }, runId, body);
+    },
+
+    resumeRun(runId) {
+      return resumeRunCore(
+        {
+          store,
+          activeRuns,
+          subscribers,
+          promptHandler,
+          memoryTools,
+          catalog,
+          ...(projectsStore !== undefined ? { projectsStore } : {}),
+          ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
+          ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+          ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+          ...(usageStore !== undefined ? { usageStore } : {}),
+        },
+        runId,
+      );
     },
 
     awaitPauseOrTerminal(runId, options = {}) {

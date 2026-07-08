@@ -16,6 +16,7 @@ import type {
   NodeNotebookBlock,
   NodeOutput,
   OutputSchema,
+  StepRetryConfig,
   WorkflowDefinition,
 } from "./schema/index.ts";
 import { validateOutput } from "./schema/index.ts";
@@ -573,6 +574,142 @@ interface RunCtx {
   notebook?: NotebookAdapter;
 }
 
+// ---------------------------------------------------------------------------
+// Node retry — honors a node's `retry:` config (schema/retry.ts).
+//
+// A failed attempt re-runs the handler up to `max_attempts` extra times with
+// exponential backoff (`delay_ms` doubled each attempt), but only when the
+// failure is retryable under `on_error`. A user cancel is never retried:
+// abortSignal.aborted is authoritative, with a bare "aborted" error as backstop.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_RETRY_DELAY_MS = 3000;
+
+// The base `retry` field the DagNode union surfaces as optional; mirrors
+// nodeMemoryOf / outputSchemaOf below.
+function retryConfigOf(node: DagNode): StepRetryConfig | undefined {
+  return (node as { retry?: StepRetryConfig }).retry;
+}
+
+// Substrings marking a failure a retry could plausibly clear: transport blips,
+// timeouts, and rate-limit / overload (backoff is exactly what those want).
+// Matched against the friendly error string the handler already returned — no
+// structured error kind reaches this seam. Drawn from the provider error buckets
+// (packages/providers/*/errors.ts).
+const TRANSIENT_ERROR_MARKERS: readonly string[] = [
+  "econnreset",
+  "etimedout",
+  "econnrefused",
+  "epipe",
+  "socket hang up",
+  "socket closed",
+  "broken pipe",
+  "not connected",
+  "disconnect",
+  "process exited",
+  "worker exited",
+  "fetch failed",
+  "network",
+  "timeout",
+  "timed out",
+  "rate limit",
+  "rate-limit",
+  "too many requests",
+  "429",
+  "overloaded",
+  "temporarily unavailable",
+  "503",
+  "502",
+  "504",
+  "server error",
+];
+
+function isTransientError(error: string | undefined): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return TRANSIENT_ERROR_MARKERS.some((marker) => lower.includes(marker));
+}
+
+function isAbortError(error: string | undefined): boolean {
+  return error?.toLowerCase().includes("abort") ?? false;
+}
+
+function shouldRetryFailure(
+  error: string | undefined,
+  retry: StepRetryConfig,
+  abortSignal: AbortSignal,
+): boolean {
+  if (abortSignal.aborted || isAbortError(error)) return false;
+  return (retry.on_error ?? "transient") === "all" || isTransientError(error);
+}
+
+// Resolves after `ms`, or early if the signal aborts, so a cancel during the
+// backoff wait doesn't block the run's teardown.
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// Runs a node's handler, retrying a retryable failure per its `retry:` config.
+// Returns the final NodeResult; rethrows if the final attempt threw, so the
+// caller's writeback-on-throw path stays intact. A returned failure on the final
+// attempt flows through unchanged. Each retry emits a run_warning.
+async function runHandlerWithRetry(
+  handler: NodeHandler,
+  node: DagNode,
+  nodeCtx: NodeContext,
+  abortSignal: AbortSignal,
+  emit: (event: RunStreamEvent) => void,
+): Promise<NodeResult> {
+  const retry = retryConfigOf(node);
+  const maxRetries = retry?.max_attempts ?? 0;
+  for (let attempt = 0; ; attempt++) {
+    const backoff = async (reason: string): Promise<void> => {
+      const delayMs = (retry?.delay_ms ?? DEFAULT_RETRY_DELAY_MS) * 2 ** attempt;
+      emit({
+        type: "run_warning",
+        nodeId: node.id,
+        message: `retry ${attempt + 1}/${maxRetries} in ${delayMs}ms after ${reason}`,
+      });
+      await abortableDelay(delayMs, abortSignal);
+    };
+    try {
+      const result = await handler.handle(node, nodeCtx);
+      if (
+        result.status === "failed" &&
+        retry !== undefined &&
+        attempt < maxRetries &&
+        shouldRetryFailure(result.error, retry, abortSignal)
+      ) {
+        await backoff(`failure: ${result.error ?? "unknown error"}`);
+        continue;
+      }
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        retry !== undefined &&
+        attempt < maxRetries &&
+        shouldRetryFailure(message, retry, abortSignal)
+      ) {
+        await backoff(`error: ${message}`);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 async function runNodeOnce(node: DagNode, ctx: RunCtx): Promise<void> {
   try {
     await runNodeOnceInner(node, ctx);
@@ -677,7 +814,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
   emit({ type: "node_started", nodeId: node.id });
   const startedAtMs = Date.now();
   try {
-    let result = await handler.handle(node, nodeCtx);
+    let result = await runHandlerWithRetry(handler, node, nodeCtx, abortSignal, emit);
     // Validate structured output is JSON-serializable. JSON.stringify returns
     // undefined for top-level undefined / functions / symbols — those would
     // leave NodeOutput.output non-string, violating the schema and breaking

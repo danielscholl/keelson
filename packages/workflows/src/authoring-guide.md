@@ -159,6 +159,9 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `retry: { max_attempts, delay_ms, on_error }` — `max_attempts` 1–5
   (required), `delay_ms` 1000–60000 (doubled each attempt), `on_error`
   `transient` (default) | `all`. Not allowed on loop nodes.
+- `always_run: true` — re-execute this node on a resumed run even if it
+  succeeded before (a gate/validation re-checks instead of replaying a stale
+  pass). Off by default: a succeeded node is skipped on resume.
 - `fail_on_tool_error: true` — fail the node if any invoked tool errored.
 - `idle_timeout` — ms of AI-stream silence before the node fails.
 - `systemPrompt`, `effort`, `thinking` — claude-only per-node controls.

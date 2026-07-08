@@ -4,7 +4,7 @@
 
 import { describe, expect, mock, test } from "bun:test";
 import type { WorkflowDetail } from "@keelson/shared";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { NodeView, UseWorkflowRunResult } from "../src/hooks/useWorkflowRun.ts";
 
 let runResult: UseWorkflowRunResult;
@@ -58,6 +58,7 @@ function result(nodes: Record<string, NodeView>): UseWorkflowRunResult {
     error: null,
     wsState: "closed",
     cancel: async () => {},
+    resumeRun: async () => {},
     resume: async () => {},
   };
 }
@@ -126,5 +127,29 @@ describe("RunView usage header", () => {
     expect(container.querySelector(".run-usage")).toBeNull();
     expect(screen.queryByText(/↑0/)).toBeNull();
     expect(screen.queryByText(/↓0/)).toBeNull();
+  });
+});
+
+describe("RunView resume", () => {
+  test("a failed run offers a Resume button that re-enters the run", () => {
+    const resumeRun = mock(async () => {});
+    const base = result({});
+    runResult = {
+      ...base,
+      run: { ...base.run, status: "failed", error: "revalidate: exit code 1" },
+      resumeRun,
+    };
+
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+
+    const btn = screen.getByRole("button", { name: /Resume/ });
+    fireEvent.click(btn);
+    expect(resumeRun).toHaveBeenCalledTimes(1);
+  });
+
+  test("a succeeded run shows no Resume button", () => {
+    runResult = result({});
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Resume/ })).toBeNull();
   });
 });

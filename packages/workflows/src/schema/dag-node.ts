@@ -154,6 +154,10 @@ export const dagNodeBaseSchema = z.object({
   fail_on_tool_error: z.boolean().optional(),
   idle_timeout: z.number().optional(),
   retry: stepRetryConfigSchema.optional(),
+  // Opt a node OUT of resume-skip: on a resumed run it re-executes even if it
+  // succeeded before (a fresh gate/validation should re-check, not replay its
+  // stale pass). Off by default — a succeeded node is normally skipped on resume.
+  always_run: z.boolean().optional(),
   hooks: workflowNodeHooksSchema.optional(),
   mcp: z.string().min(1, "'mcp' must be a non-empty string path").optional(),
   skills: z
@@ -555,6 +559,7 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.memory !== undefined ? { memory: data.memory } : {}),
       ...(data.notebook !== undefined ? { notebook: data.notebook } : {}),
       ...(data.output_schema !== undefined ? { output_schema: data.output_schema } : {}),
+      ...(data.always_run !== undefined ? { always_run: data.always_run } : {}),
     };
 
     // Shared optional fields (valid on AI and bash nodes)

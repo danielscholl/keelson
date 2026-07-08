@@ -110,6 +110,27 @@ function failingHandler(type: string, error: string): NodeHandler {
   };
 }
 
+// Fails its first `failTimes` calls, then succeeds. Optionally aborts the given
+// controller on its first call (to exercise the never-retry-a-cancel path).
+function flakyHandler(
+  type: string,
+  opts: { failTimes: number; error: string; abortOnFirstCall?: AbortController },
+): { handler: NodeHandler; attempts: () => number } {
+  let calls = 0;
+  const handler: NodeHandler = {
+    type,
+    async handle() {
+      calls++;
+      if (calls === 1 && opts.abortOnFirstCall) opts.abortOnFirstCall.abort();
+      if (calls <= opts.failTimes) {
+        return { status: "failed", output: { kind: "text", text: "" }, error: opts.error };
+      }
+      return { status: "succeeded", output: { kind: "text", text: `ok after ${calls}` } };
+    },
+  };
+  return { handler, attempts: () => calls };
+}
+
 function recordEvents(): { events: RunStreamEvent[]; onEvent: (e: RunStreamEvent) => void } {
   const events: RunStreamEvent[] = [];
   return { events, onEvent: (e) => events.push(e) };
@@ -2927,5 +2948,104 @@ nodes:
     expect(summary.status).toBe("succeeded");
     expect(calls).toHaveLength(1);
     expect(calls[0].nodeId).toBe("n1");
+  });
+});
+
+describe("runWorkflow — node retry", () => {
+  const wf = (retry: string): WorkflowDefinition =>
+    parseInline(
+      `name: r\ndescription: |\n  Use when: t\nnodes:\n  - id: work\n    bash: echo hi\n${retry}`,
+    );
+
+  test("re-runs a transient failure and the node succeeds", async () => {
+    const workflow = wf("    retry:\n      max_attempts: 2\n      delay_ms: 1000\n");
+    const { handler, attempts } = flakyHandler("bash", {
+      failTimes: 1,
+      error: "network error: ETIMEDOUT",
+    });
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      onEvent,
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes.work.state).toBe("completed");
+    expect(attempts()).toBe(2); // 1 transient fail + 1 success
+    expect(events.some((e) => e.type === "run_warning" && /retry 1\/2/.test(e.message))).toBe(true);
+  });
+
+  test("on_error transient does NOT retry a non-transient failure", async () => {
+    const workflow = wf("    retry:\n      max_attempts: 3\n      delay_ms: 1000\n");
+    const { handler, attempts } = flakyHandler("bash", {
+      failTimes: 5,
+      error: "permission denied",
+    });
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("failed");
+    expect(attempts()).toBe(1);
+  });
+
+  test("on_error all retries a non-transient failure", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 1\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const { handler, attempts } = flakyHandler("bash", {
+      failTimes: 1,
+      error: "permission denied",
+    });
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("succeeded");
+    expect(attempts()).toBe(2);
+  });
+
+  test("a persistent transient failure fails after exhausting retries", async () => {
+    const workflow = wf("    retry:\n      max_attempts: 1\n      delay_ms: 1000\n");
+    const { handler, attempts } = flakyHandler("bash", {
+      failTimes: 5,
+      error: "rate limit exceeded (429)",
+    });
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("failed");
+    expect(attempts()).toBe(2); // initial + 1 retry, both fail
+  });
+
+  test("a user cancel is never retried, even with on_error all", async () => {
+    const workflow = wf(
+      "    retry:\n      max_attempts: 3\n      delay_ms: 1000\n      on_error: all\n",
+    );
+    const controller = new AbortController();
+    const { handler, attempts } = flakyHandler("bash", {
+      failTimes: 5,
+      error: "aborted",
+      abortOnFirstCall: controller,
+    });
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+      abortSignal: controller.signal,
+    });
+    expect(attempts()).toBe(1); // aborted mid-turn → no retry
+    expect(summary.status).not.toBe("succeeded");
+  });
+
+  test("without a retry config a failure is not retried (opt-in)", async () => {
+    const workflow = wf("");
+    const { handler, attempts } = flakyHandler("bash", { failTimes: 5, error: "network error" });
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+    expect(summary.status).toBe("failed");
+    expect(attempts()).toBe(1);
   });
 });

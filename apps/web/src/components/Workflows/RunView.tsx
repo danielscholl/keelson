@@ -77,8 +77,10 @@ export function RunView({
 }: RunViewProps) {
   const activeProject = projects.find((p) => p.id === selectedProjectId) ?? null;
   const preStart = runId === null;
-  const { run, nodes, status, error, cancel, resume } = useWorkflowRun(runId);
+  const { run, nodes, status, error, cancel, resumeRun, resume } = useWorkflowRun(runId);
   const [layout, setLayout] = useState<Layout>("split");
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const generatedRunUsageId = useId();
   // Live wall-clock so the header's elapsed duration ticks while running.
   // Stopped on terminal status to avoid a churn loop.
@@ -89,6 +91,9 @@ export function RunView({
   // ticking, and the trace's `streaming` flag true so the run surface
   // matches its real lifecycle.
   const isRunning = run.status === "running" || run.status === "paused" || run.status === "loading";
+  // Terminal-but-recoverable: the engine can re-enter a failed/cancelled run
+  // from its last completed node, so offer a Resume alongside the trace.
+  const isResumable = !preStart && (run.status === "failed" || run.status === "cancelled");
   useEffect(() => {
     if (preStart || !isRunning) return;
     const id = window.setInterval(() => setNow(Date.now()), 500);
@@ -160,6 +165,18 @@ export function RunView({
       await cancel();
     } catch (err) {
       console.warn("[run-view] cancel failed:", err);
+    }
+  };
+
+  const handleResume = async () => {
+    setResumeError(null);
+    setResuming(true);
+    try {
+      await resumeRun();
+    } catch (err) {
+      setResumeError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResuming(false);
     }
   };
 
@@ -243,6 +260,17 @@ export function RunView({
                   ✕ Cancel
                 </button>
               )}
+              {isResumable && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleResume}
+                  disabled={resuming}
+                  title="Re-enter this run from its last completed step — reuses the worktree and prior work"
+                >
+                  {resuming ? "Resuming…" : "↻ Resume"}
+                </button>
+              )}
             </>
           )}
           <div className="layout-toggle" role="radiogroup" aria-label="Run view layout">
@@ -280,6 +308,15 @@ export function RunView({
             ✕
           </span>
           <span>{run.error}</span>
+        </div>
+      )}
+
+      {resumeError && (
+        <div className="run-error" role="alert">
+          <span className="run-error-glyph" aria-hidden="true">
+            ✕
+          </span>
+          <span>Could not resume: {resumeError}</span>
         </div>
       )}
 
