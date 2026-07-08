@@ -643,7 +643,7 @@ export async function postRibAction(id: string, action: RibAction): Promise<RibA
 // === Usage ==================================================================
 
 export type UsageWindow = "24h" | "7d" | "30d";
-export type UsageGroupBy = "model" | "provider" | "source" | "rib" | "workflow";
+export type UsageGroupBy = "model" | "provider" | "source" | "rib" | "workflow" | "sourceDetail";
 export type UsageSeriesBucket = "hour" | "day";
 
 function buildUsageQuery(query: Record<string, string | number | undefined>): string {
