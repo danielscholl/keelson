@@ -78,7 +78,7 @@ export interface UsageTotals {
 // buckets ungrouped rows under this literal key rather than dropping them.
 export const UNGROUPED_KEY = "(none)";
 
-export type UsageGroupBy = "model" | "provider" | "source" | "rib" | "workflow";
+export type UsageGroupBy = "model" | "provider" | "source" | "rib" | "workflow" | "sourceDetail";
 export type UsageSeriesBucket = "hour" | "day";
 
 export interface UsageSummaryArgs {
@@ -181,14 +181,16 @@ function floorNullableCount(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
 }
 
-// groupBy is always one of the fixed UsageGroupBy literals, never
-// user-supplied SQL, so interpolating the resolved column name is safe.
+// groupBy is always one of the fixed UsageGroupBy literals, never user-supplied
+// SQL, so interpolating the resolved column name or expression is safe.
 const GROUP_BY_COLUMN: Record<UsageGroupBy, string> = {
   model: "model",
   provider: "provider",
   source: "source",
   rib: "rib_id",
   workflow: "workflow_name",
+  sourceDetail:
+    "CASE WHEN source = 'rib' AND rib_id IS NOT NULL AND rib_id <> '' THEN 'rib:' || rib_id ELSE source END",
 };
 
 const TOTALS_SELECT = `

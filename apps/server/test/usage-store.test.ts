@@ -519,6 +519,71 @@ describe("SQLite UsageStore", () => {
       ]);
     });
 
+    test("resolves rib sourceDetail keys while preserving literal sources", () => {
+      store.record({
+        source: "rib",
+        provider: "pi",
+        model: "gpt-5",
+        inputTokens: 1,
+        outputTokens: 2,
+        ribId: "squad",
+      });
+      store.record({
+        source: "rib",
+        provider: "pi",
+        model: "gpt-5",
+        inputTokens: 3,
+        outputTokens: 4,
+        ribId: "squad",
+      });
+      store.record({
+        source: "chat",
+        provider: "claude",
+        model: "claude-opus",
+        inputTokens: 5,
+        outputTokens: 6,
+      });
+      store.record({
+        source: "rib",
+        provider: "pi",
+        model: "legacy",
+        inputTokens: 7,
+        outputTokens: 8,
+      });
+
+      const rows = store.breakdown({ groupBy: "sourceDetail" });
+
+      expect(rows).toEqual([
+        {
+          key: "chat",
+          split: "claude-opus",
+          events: 1,
+          inputTokens: 5,
+          outputTokens: 6,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        {
+          key: "rib",
+          split: "legacy",
+          events: 1,
+          inputTokens: 7,
+          outputTokens: 8,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        {
+          key: "rib:squad",
+          split: "gpt-5",
+          events: 2,
+          inputTokens: 4,
+          outputTokens: 6,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ]);
+    });
+
     test("supports alternate splitBy dimensions and nullable coalescing", () => {
       store.record({
         source: "workflow",
