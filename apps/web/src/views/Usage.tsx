@@ -73,9 +73,9 @@ const SERIES_COLOR_COUNT = 6;
 const FAILURE_STATUSES = ["error", "aborted", "timeout"] as const;
 const FAILURE_EVENTS_LIMIT = 200;
 
-// The "Cheaper-model candidate" signal flags a recurring workflow/rib job whose
-// per-run token spend is low enough a smaller model would likely serve it. A job
-// must repeat enough to judge (runs) and stay under the per-run token bar (avg).
+// The recommendation strip flags a recurring workflow/rib job whose per-run token
+// spend is low enough a smaller model would likely serve it. A job must repeat
+// enough to judge (runs) and stay under the per-run token bar (avg).
 const RIGHT_SIZE_MIN_RUNS = 3;
 const RIGHT_SIZE_MAX_AVG_TOKENS = 500;
 
@@ -95,10 +95,10 @@ export function Usage() {
       <UsageViewNav value={subView} onChange={setSubView} />
       {subView === "overview" ? (
         <>
+          <RecommendationStrip range={range} onViewJobs={() => setSubView("jobs")} />
           <PulseSection range={range} pulse={pulse} />
           <OverTimeSection range={range} />
           <FlowSection range={range} />
-          <SignalsSection range={range} />
         </>
       ) : subView === "models" ? (
         <ModelRosterSection range={range} />
@@ -1031,179 +1031,87 @@ function JobsSection({ range }: { range: UsageWindow }) {
   );
 }
 
-type RightSizeSignal = { value: string; detail: string; tone?: "accent" };
-
-// Four honest states so the card teaches whether it can ever fire (see the
-// RIGHT_SIZE_* thresholds): a real finding, a cheap job still warming up toward
-// the run bar, recurring jobs that earn their model, or no workflow/rib activity
-// at all — the chat-only case, where it can never fire.
-function computeRightSizeSignal(jobs: readonly UsageJobsRowWire[]): RightSizeSignal {
-  const cheap = jobs.filter((j) => j.avgTokensPerRun < RIGHT_SIZE_MAX_AVG_TOKENS);
-  const finding = cheap
-    .filter((j) => j.runs >= RIGHT_SIZE_MIN_RUNS)
-    .sort((a, b) => b.runs - a.runs)[0];
-  if (finding) {
-    const avg = formatTokens(Math.round(finding.avgTokensPerRun));
-    return {
-      value: finding.key,
-      detail: `Ran ${finding.runs}× · ~${avg} tok/run — likely fine on a smaller, cheaper model.`,
-      tone: "accent",
-    };
-  }
-  const warming = cheap
-    .filter((j) => j.runs < RIGHT_SIZE_MIN_RUNS)
-    .sort((a, b) => b.runs - a.runs)[0];
-  if (warming) {
-    const avg = formatTokens(Math.round(warming.avgTokensPerRun));
-    const remaining = RIGHT_SIZE_MIN_RUNS - warming.runs;
-    return {
-      value: "Warming up",
-      detail: `${warming.key} looks cheap (~${avg} tok/run) — ${remaining} more ${remaining === 1 ? "run" : "runs"} to flag it.`,
-    };
-  }
-  if (jobs.length > 0) {
-    return {
-      value: "Nothing to right-size",
-      detail: "Your recurring jobs earn their model — none is cheap enough to downshift.",
-    };
-  }
-  return {
-    value: "Not applicable yet",
-    detail: "Run a workflow or rib to check if any could use a smaller model.",
-  };
+// A recurring workflow/rib job cheap enough that a smaller model would likely
+// serve it: repeated enough to judge (>= RIGHT_SIZE_MIN_RUNS) and under the
+// per-run token bar (< RIGHT_SIZE_MAX_AVG_TOKENS). Returns null when nothing
+// qualifies — the strip renders only for a real finding, and nothing otherwise.
+interface RightSizeFinding {
+  job: string;
+  runs: number;
+  avgTokensPerRun: number;
 }
 
-function SignalsSection({ range }: { range: UsageWindow }) {
-  const [signals, setSignals] = useState<{
-    failureTokens: number;
-    failureTurns: number;
-    failureTop: string | null;
-    rightSize: RightSizeSignal;
-    cacheReadRate: number;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function findRightSizeCandidate(jobs: readonly UsageJobsRowWire[]): RightSizeFinding | null {
+  const finding = jobs
+    .filter((j) => j.avgTokensPerRun < RIGHT_SIZE_MAX_AVG_TOKENS && j.runs >= RIGHT_SIZE_MIN_RUNS)
+    .sort((a, b) => b.runs - a.runs)[0];
+  if (!finding) return null;
+  return { job: finding.key, runs: finding.runs, avgTokensPerRun: finding.avgTokensPerRun };
+}
+
+// A single recommendation, above Pulse and only when one exists: metrics are
+// facts (they live in Pulse); a recommendation is a to-do, so it leads the tab
+// as an action and simply doesn't render when there's nothing to act on. The
+// same right-size finding the Jobs sub-view can drill into — the action jumps
+// there. Dismissable for the current window.
+function RecommendationStrip({
+  range,
+  onViewJobs,
+}: {
+  range: UsageWindow;
+  onViewJobs: () => void;
+}) {
+  const [finding, setFinding] = useState<RightSizeFinding | null>(null);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      Promise.all(
-        FAILURE_STATUSES.map((status) =>
-          getUsageEvents({ window: range, status, limit: FAILURE_EVENTS_LIMIT }),
-        ),
-      ),
-      getUsageJobs({ window: range }),
-      getUsageSummary({ window: range }),
-    ])
-      .then(([eventsByStatus, jobs, summary]) => {
-        if (cancelled) return;
-        const failingEvents = eventsByStatus.flat();
-        const attribution = new Map<string, number>();
-        let failureTokens = 0;
-        for (const ev of failingEvents) {
-          const tokens = ev.inputTokens + ev.outputTokens;
-          failureTokens += tokens;
-          const key = ev.workflowName ?? ev.ribId ?? ev.source;
-          attribution.set(key, (attribution.get(key) ?? 0) + tokens);
-        }
-        const failureTop = [...attribution.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-        const { totals } = summary;
-        setSignals({
-          failureTokens,
-          failureTurns: failingEvents.length,
-          failureTop,
-          rightSize: computeRightSizeSignal(jobs),
-          cacheReadRate: cacheReadRate(totals.inputTokens, totals.cacheReadTokens),
-        });
+    // A new window is a fresh evaluation: drop any stale finding and un-dismiss.
+    setFinding(null);
+    setDismissed(false);
+    getUsageJobs({ window: range })
+      .then((jobs) => {
+        if (!cancelled) setFinding(findRightSizeCandidate(jobs));
       })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+      .catch(() => {
+        // A nudge that can't load its data stays silent — the same jobs feed the
+        // Jobs sub-view, where a load error surfaces to the operator.
+        if (!cancelled) setFinding(null);
       });
     return () => {
       cancelled = true;
     };
   }, [range]);
 
-  return (
-    <section className="surface-region usage-signals-region">
-      <div className="surface-region-head">
-        <span className="surface-region-glyph-chip" data-tone="caution" aria-hidden="true">
-          ◇
-        </span>
-        <span className="surface-region-identity">
-          <span className="surface-region-title">Signals</span>
-        </span>
-        <span className="surface-region-spacer" />
-        <span className="surface-region-freshness">{WINDOW_LABEL[range]}</span>
-      </div>
-      <div className="surface-region-body">
-        {error ? (
-          <div className="empty-state" role="alert">
-            <div className="empty-state-title">Couldn't load signals</div>
-            <div className="empty-state-body">{error}</div>
-          </div>
-        ) : loading ? (
-          <div className="page-sub" style={{ padding: "20px 0" }}>
-            Loading…
-          </div>
-        ) : signals ? (
-          <div className="usage-signals-grid">
-            <SignalCard
-              title="Failure burn"
-              value={formatTokens(signals.failureTokens)}
-              detail={
-                signals.failureTurns > 0
-                  ? `${signals.failureTurns} failed turns · top: ${signals.failureTop ?? "unknown"}`
-                  : "No failure spend in this window."
-              }
-              tone={signals.failureTurns > 0 ? "hot" : "ok"}
-            />
-            <SignalCard
-              title="Cheaper-model candidate"
-              value={signals.rightSize.value}
-              detail={signals.rightSize.detail}
-              tone={signals.rightSize.tone}
-              hint={`Flags a workflow or rib run ${RIGHT_SIZE_MIN_RUNS}+ times averaging under ${RIGHT_SIZE_MAX_AVG_TOKENS} tokens/run — a sign a smaller model would serve it.`}
-            />
-            <SignalCard
-              title="Cache-read trend"
-              value={`${signals.cacheReadRate}%`}
-              detail="Current-window cache read share of input tokens."
-              tone={signals.cacheReadRate > 0 ? "ok" : undefined}
-            />
-          </div>
-        ) : null}
-      </div>
-    </section>
-  );
-}
+  if (!finding || dismissed) return null;
 
-function SignalCard({
-  title,
-  value,
-  detail,
-  tone,
-  hint,
-}: {
-  title: string;
-  value: string;
-  detail: string;
-  tone?: "ok" | "hot" | "accent";
-  hint?: string;
-}) {
+  const avg = formatTokens(Math.round(finding.avgTokensPerRun));
   return (
-    <div className="usage-signal-card" title={hint}>
-      <div className="usage-stat-label">{title}</div>
-      <div className="usage-stat-value" data-tone={tone}>
-        {value}
+    <section className="usage-reco" aria-label="Recommendation">
+      <span className="usage-reco-glyph" aria-hidden="true">
+        ◈
+      </span>
+      <div className="usage-reco-body">
+        <div className="usage-reco-eyebrow">Recommendation · right-size a job</div>
+        <div className="usage-reco-head">
+          <span className="usage-mono">{finding.job}</span> could run on a smaller, cheaper model
+        </div>
+        <div className="usage-reco-why">
+          Ran {finding.runs}× · ~{avg} tok/run — well under the bar where a lighter model keeps up.
+        </div>
       </div>
-      <div className="usage-stat-sub">{detail}</div>
-    </div>
+      <button type="button" className="usage-reco-act" onClick={onViewJobs}>
+        View in Jobs →
+      </button>
+      <button
+        type="button"
+        className="usage-reco-dismiss"
+        aria-label="Dismiss recommendation"
+        onClick={() => setDismissed(true)}
+      >
+        ×
+      </button>
+    </section>
   );
 }
 
