@@ -68,18 +68,13 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 // The form's starting values: each field's `defaultValue`, so a control opens on
 // a current value instead of blank. Also the post-submit reset target — never
-// bare `{}`, or a defaulted field would reopen empty.
+// bare `{}`, or a defaulted field would reopen empty. A changed default remounts
+// this subtree (SectionBlock is keyed by the section's JSON), so the initializer
+// re-runs on its own — no re-seed effect needed.
 function seedFieldValues(fields: readonly ActionField[]): Record<string, string> {
   const seed: Record<string, string> = {};
   for (const f of fields) if (f.defaultValue !== undefined) seed[f.name] = f.defaultValue;
   return seed;
-}
-
-// Just the field defaults, so a recompose that leaves them unchanged (a
-// heartbeat re-poll) doesn't reset a form the user is mid-edit in — but a
-// genuine default change (the pin moved) does.
-function defaultsSignature(fields: readonly ActionField[]): string {
-  return JSON.stringify(fields.map((f) => [f.name, f.defaultValue ?? null]));
 }
 
 // Collected field values merge over a static object payload (so the rib reads a
@@ -142,15 +137,6 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     else setLocalOpen(next);
   };
   const [values, setValues] = useState<Record<string, string>>(() => seedFieldValues(fields));
-  // Re-seed only when the field defaults actually change (a pin moved), not on
-  // every recompose, so a heartbeat re-poll can't wipe an in-progress edit.
-  const seededSig = useRef(defaultsSignature(fields));
-  const currentSig = defaultsSignature(fields);
-  useEffect(() => {
-    if (seededSig.current === currentSig) return;
-    seededSig.current = currentSig;
-    setValues(seedFieldValues(fields));
-  }, [currentSig, fields]);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmValues, setConfirmValues] = useState<Record<string, string> | undefined>(undefined);

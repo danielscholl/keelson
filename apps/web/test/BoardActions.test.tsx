@@ -900,6 +900,54 @@ describe("board actions — select fields and capability gating", () => {
     );
   });
 
+  test("a changed default remounts the form and re-seeds from the new value", async () => {
+    // SectionBlock is keyed by the section's JSON, so a moved pin remounts this
+    // subtree and the seed initializer re-runs — no re-seed effect involved.
+    const modelView = (defaultValue: string): CanvasBoardView =>
+      ({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "set-model",
+                label: `Model — ${defaultValue}`,
+                payload: { slug: "aria" },
+                fields: [
+                  {
+                    name: "model",
+                    label: "Model",
+                    defaultValue,
+                    options: [
+                      { value: "opus", label: "opus" },
+                      { value: "sonnet", label: "sonnet" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }) as CanvasBoardView;
+    const { container, rerender } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={modelView("sonnet")} />
+      </BoardActionProvider>,
+    );
+    const sel = () =>
+      container.querySelector("select.cvb-action-field-select") as HTMLSelectElement;
+    fireEvent.click(screen.getByRole("button", { name: "Model — sonnet" }));
+    expect(sel().value).toBe("sonnet");
+    rerender(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={modelView("opus")} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Model — opus" }));
+    expect(sel().value).toBe("opus");
+  });
+
   test("a text field opens pre-filled from its defaultValue", async () => {
     const view = {
       view: "board",
