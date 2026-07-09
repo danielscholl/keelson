@@ -60,9 +60,21 @@ export function Segments({ items }: { items: Segment[] }) {
 }
 
 type ActionItem = Extract<BoardSection, { kind: "actions" }>["items"][number];
+type ActionField = NonNullable<ActionItem["fields"]>[number];
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// The form's starting values: each field's `defaultValue`, so a control opens on
+// a current value instead of blank. Also the post-submit reset target — never
+// bare `{}`, or a defaulted field would reopen empty. A changed default remounts
+// this subtree (SectionBlock is keyed by the section's JSON), so the initializer
+// re-runs on its own — no re-seed effect needed.
+function seedFieldValues(fields: readonly ActionField[]): Record<string, string> {
+  const seed: Record<string, string> = {};
+  for (const f of fields) if (f.defaultValue !== undefined) seed[f.name] = f.defaultValue;
+  return seed;
 }
 
 // Collected field values merge over a static object payload (so the rib reads a
@@ -124,7 +136,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     if (onOpenChange) onOpenChange(next);
     else setLocalOpen(next);
   };
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(() => seedFieldValues(fields));
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmValues, setConfirmValues] = useState<Record<string, string> | undefined>(undefined);
@@ -140,7 +152,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       );
       if (result.ok) {
         setOpen(false);
-        setValues({});
+        setValues(seedFieldValues(fields));
       } else {
         setError(result.error);
       }
