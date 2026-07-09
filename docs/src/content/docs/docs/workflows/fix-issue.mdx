@@ -82,6 +82,7 @@ only when the pushed PR's checks pass.
 | | `fix-validation` | prompt | If it failed, fixes only what broke and commits; if it passed, stops. |
 | | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
 | Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, captures the PR number and URL. |
+| | `enforce-draft` | bash | Verifies the new PR is a draft; if it came up ready, runs `gh pr ready --undo` to force it back to draft, and fails the run if it cannot confirm the draft state. |
 | Review loop | `review-correctness` | prompt | One of three **independent, parallel** reviewers — hunts correctness defects in `git diff main...HEAD`. Does not edit. |
 | | `review-conventions` | prompt | Independent reviewer: checks the diff against `CLAUDE.md` / `CONTRIBUTING.md` (comment policy, conventions). |
 | | `review-coverage` | prompt | Independent reviewer: flags new behavior left untested, and tests authored but never wired in. |

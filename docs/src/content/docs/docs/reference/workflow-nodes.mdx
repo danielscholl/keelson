@@ -241,6 +241,7 @@ These apply across kinds (some only to agent nodes, as noted).
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
 | `output_format` | agent | Provider structured-output request (Claude). |
 | `retry` | all but `loop` | `{ max_attempts: 1-5, delay_ms: 1000-60000, on_error }`. `delay_ms` doubles each attempt; `on_error` is `transient` (default) or `all`. |
+| `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Use it for a gate or validation that should re-check rather than replay a stale pass. |
 | `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
 | `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
 | `systemPrompt`, `effort`, `thinking` | agent | Claude-only per-node controls. `effort` is `low` / `medium` / `high` / `max`; `thinking` is `adaptive` / `enabled` / `disabled`. |

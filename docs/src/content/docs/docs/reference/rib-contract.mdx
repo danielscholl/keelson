@@ -83,10 +83,13 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 | `getCredential?(serviceId)` | `Promise<string \| undefined>` | Read-only, resolves a keychain entry under `rib_<id>_<serviceId>`. A rib cannot read another rib's secrets. |
 | `getDataDir?()` | `string` | Absolute path to the rib's private data directory under the keelson home, named `rib-<id>` (`<home>/rib-<rib-id>`). Path only — the rib creates it when it writes. |
 | `getProjects?()` | `readonly Project[]` | Read-only snapshot of the operator's project records at call time. Use to offer project selection and pass `project.rootPath` as `RibAgentTurnRequest.cwd`. Optional: a rib built against an older harness degrades to no project selection, not a throw. |
-| `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, redaction, and credentials. Requested sibling rib tools project only when `KEELSON_CROSS_RIB_GRANTS` clears `caller:target:tool` or `caller:target:*`; self tools and SDK built-ins keep their existing behavior. |
+| `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, credentials, and the policy engine's `tool_result`/response redaction (the same gates the workflow `prompt` path runs). The return `RibAgentTurn` is a settled dual-handle `{ stream, result }`: `result` settles once with the authoritative text, usage, and status and is the source of truth, while `stream` forwards the provider's live `tool_use`/`tool_result` chunks so a rib can trace a mind mid-turn, then appends the settled text tail and a terminal `done`. A rib takes text from `result`, never reassembling it from the stream. `req.allowedDirectories` sets confinement roots for the turn: file and shell path args that canonicalize outside them are denied by the always-registered `builtin:path_confinement` policy (realpath-resolved against symlink escape), while empty or absent leaves the turn unconfined; it is wired on this rib-agent-turn path via the Claude provider. Requested sibling rib tools project only when `KEELSON_CROSS_RIB_GRANTS` clears `caller:target:tool` or `caller:target:*`; self tools and SDK built-ins keep their existing behavior. |
 | `callTool?(targetRibId, name, args, opts?)` | `Promise<CallToolResult>` | Governed cross-rib invocation of a sibling rib's owned tool. Denied by default, requires an operator grant in `KEELSON_CROSS_RIB_GRANTS` and policy approval, resolves to `{ ok: false }` instead of throwing, and is bounded by `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` (default 30000 ms). `opts.signal` forwards caller cancellation and `opts.timeoutMs` overrides the timeout for that call. |
 | `registerRegion?(surfaceId, region)` | `() => void` | Adds a snapshot-backed region to one of the rib's own surfaces at runtime, returning an unregister handle. Layout-only: the rib still registers the region's key, which must be namespaced. |
 | `refreshWorkflow?(workflowName, inputs?)` | `Promise<void>` | Re-runs one of the rib's own snapshot-bound producer workflows by name on demand; fresh output republishes to the bound key through the same publish→recompose bridge the cadence heartbeat uses. Optional string `inputs` ride to the run — an unbound per-item producer republishes through the rib's own tools instead of a bound key. Resolves (never throws) for an unknown name or failed run. |
+| `runWorkflow?(definition, inputs?, opts?)` | `Promise<RibWorkflowRunResult>` | Runs an in-memory workflow DAG the rib hands in (the same shape `contributeWorkflows` uses) on the shared executor, with the provider, memory, and policy gates already wired. Optional `inputs` ride the run and `opts.cwd` sets the working dir, defaulting to the keelson home. Resolves to the run's terminal `RibWorkflowRunResult` (never throws) for an invalid definition or a failed run. The caller owns trusting the definition: its `bash`/`script` nodes run as given. |
+| `getMemory?()` | `MemoryTools` | Recall prior decisions, lessons, and work-log rows and write new ones back to the governed memory ledger, the same `MemoryTools` the workflow executor binds. Writeback is evidence-default and review-gated: it cannot mint an instruction-grade, always-inject row. |
+| `getProviders?()` | `readonly RibProviderInfo[]` | A read-only `{ id, displayName }` snapshot of the providers registered at call time, so a rib can make an availability-aware vendor choice. It only lists what is registered and grants no access beyond the existing `runAgentTurn` routing. |
 | `getSidecar?()` | `Promise<unknown> \| unknown` | Opaque resolver; each rib narrows and casts at its own edge. |
 
 ## Hooks
@@ -126,7 +129,14 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 4. **`surfaces`** are static `RibSurfaceDescriptor`s: a top-level nav tab with a
    `layout` of an optional collapsible `header`, an optional `banner`, one or
    more `rows` of `columns`, and an optional collapsible `footer`. Only the
-   header and footer collapse. Each region is `{ key, workflow?, workflowArgs?,
+   header and footer collapse. Beyond `id`, `title`, and `layout`, the
+   descriptor carries three optional flags: `subtitle` adds a header subtitle
+   line; `projectScoped` opts the surface into the host's shared `ProjectChip`,
+   so on select the host dispatches the rib's `select-project` action with the
+   chosen project id and a per-project rib need not hand-roll a picker; and
+   `hideRegionActions` opts an authoring-console surface out of the host's
+   per-region explore, select, and open-full chrome (board actions and
+   head-action menus still flow). Each region is `{ key, workflow?, workflowArgs?,
    cadenceMs?, title?, glyph?, group?, groupTitle?, byline?, collapsible?,
    collapsed?, live?, hideWhenEmpty?, headActions? }`:
    `key` is namespaced; `workflow` is the catalog workflow a region's refresh
@@ -198,7 +208,10 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 
    A successful action may place a recognized client effect in `data`:
    `open-chat` opens a fresh seeded conversation, `run-workflow` launches a
-   catalog workflow, `open-canvas` opens a snapshot in the canvas drawer, and
+   catalog workflow (its optional `stay` flag keeps the operator on the current
+   surface instead of focusing the Workflows tab, so a run kicked off from a rib
+   surface can be watched in that surface's own live panel), `open-canvas` opens
+   a snapshot in the canvas drawer, and
    `open-surface` switches the active surface tab. The `open-surface` shape is
    `{ effect: "open-surface", surfaceId, regionKey? }`, where `surfaceId` is the
    browser tab id (`surface:<ribId>:<surfaceId>`) and `regionKey` optionally

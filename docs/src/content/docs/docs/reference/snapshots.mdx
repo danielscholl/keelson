@@ -126,9 +126,17 @@ The workhorse: an ordered stack of dashboard sections.
 ```ts
 { view: "board",
   title?,
-  header?: { status?: Pill, chip?, segments?: Segment[] },
+  header?: { status?: Pill, chip?, segments?: Segment[], people?: [{ name, tone? }], defaultCollapsed? },
   sections: BoardSection[] }
 ```
+
+The header's `people` is a roster peek: an identity-toned dot per person, names
+shown on hover of the status count. It shares `CanvasPerson` with a card's
+`people` field and the seats section but is its own primitive, and it carries the
+same name-required rule the [identity tones](#tones) state. `defaultCollapsed` is
+a one-shot hint that the region head may start collapsed once the board is
+populated: the host collapses once on the first transition to populated, a manual
+toggle wins after, and emptying the board re-arms it.
 
 ## Board sections
 
@@ -146,7 +154,7 @@ one-level layout wrapper that nests leaf sections side by side.
 | `actions` | `wrap?`, `tabs?`, `items: ActionItem[]` | Buttons. `wrap` lays them out as an inline wrapping row of compact chips (a selection strip) instead of a full-width stacked column; an action whose form is open breaks to its own full-width line. `tabs` renders a single-select strip instead: opening one action's form closes the others', and the open form is a stable full-width panel beneath the whole strip (at rest none is active; clicking the active tab closes it; takes precedence over `wrap`, and `expanded` is inert). See below. |
 | `grid` | `cells: [{ label, href?, badge: { text, tone? } }]` | A dense at-a-glance matrix. |
 | `chart` | `yLabel?`, `series: [{ label, points: [{ x, y }] }]` (1 to 6 series, unique labels, unique `x` per series) | A deterministic line/timeseries plot. Series wear the fixed-order categorical palette by index, never cycled: fold a seventh series into an "other" bucket. All-numeric `x` scales linearly; any string `x` renders as ordered categories in first-appearance order. Endpoint dots always mark line ends; direct endpoint labels appear up to 4 series, a legend appears for 2+, and hovering shows a crosshair with per-series values. Single y-axis by construction; pair the chart with a `table` section when exact values matter. |
-| `seats` | `items: [{ tone?, filled?, label? }]` | A fixed-capacity identity row — seats an actor roster fills. A dashed empty seat becomes solid when `filled`; a `label` (the actor's name) becomes the seat's tooltip and accessible name, and an unlabelled seat is decorative (`aria-hidden`), so identity colour never renders as an identity claim without a name. |
+| `seats` | `items: [{ tone?, filled?, label? }]` | A fixed-capacity identity row an actor roster fills. A dashed empty seat becomes solid when `filled`; a `label` (the actor's name) becomes the seat's tooltip and accessible name, and an unlabelled seat is decorative (`aria-hidden`). Identity colour never renders without a name (see [Tones](#tones)). |
 | `journey` | `items: [{ title, text? }]` | A numbered step strip (numbers derive from order) that says what will happen next — replaces stacks of "nothing here yet" placeholder chrome on first-run surfaces. |
 | `columns` | `columns: [{ weight?, sections: LeafSection[] }]` | Lays leaf sections side by side. One level deep only. |
 
@@ -168,6 +176,7 @@ category hues.
 | `ok` / `warn` / `error` / `neutral` | The semantic core: status. |
 | `info` / `caution` | Extend a multi-step scale (an A–E grade chip). |
 | `brand` / `accent` | Decorative identity, distinct neighboring hues. |
+| `id-blue` / `id-amber` / `id-teal` / `id-rose` / `id-olive` | Reserved identity hues. Assign one per repeatedly-rendered actor at creation and persist it, never hash per render, and never seat an actor in a status hue. Always render the actor's name alongside the colour; a sixth actor folds to `neutral` plus a name rather than minting a hue. |
 
 ## Actions
 
@@ -180,16 +189,46 @@ ActionItem = {
   type,                 // a rib-defined verb the base never enumerates
   label,
   glyph?, tone?,
-  destructive?,         // a confirm affordance on the button
+  destructive?,         // marks the action dangerous: a simple confirm
+  inline?,              // surface a destructive card action as a visible button, not the overflow menu
+  confirm?: Confirm,    // typed/irreversible confirm-dialog metadata, distinct from the boolean destructive
+  disabled?, reason?,   // gate the button (dim + seal); reason is the tooltip WHY, only with disabled: true
+  expanded?,            // render fields as an always-open hero form (inert without fields)
   payload?,             // opaque rib-defined context, dispatched verbatim
   fields?: ActionField[]   // input collected before dispatch
 }
 ```
 
-An `ActionField` is `{ name, label, placeholder?, required?, multiline? }`. When
-a button declares `fields`, clicking it opens a small form, and the collected
-`{ name: value }` map is merged into the dispatched payload. Field names must be
-unique within an action.
+An `ActionField` is `{ name, label, placeholder?, required?, multiline?,
+options?, defaultValue? }`. When a button declares `fields`, clicking it opens a
+small form, and the collected `{ name: value }` map is merged into the dispatched
+payload. Field names must be unique within an action. `options` (an array of
+`{ value, label }`) renders a select instead of a text input: the dispatched
+value is the chosen option's `value`, a non-required select offers `placeholder`
+as an empty "none" option, and the option values must be unique. It is mutually
+exclusive with `multiline`. `defaultValue` pre-fills the control; for a select it
+must name an option value or `""`.
+
+`inline` surfaces a destructive card action as a visible, still-confirm-guarded
+button on the card instead of hiding it in the card's overflow (⋯) menu. It is
+inert on a non-destructive action, which always renders inline.
+
+`confirm` is typed confirmation-dialog metadata,
+`{ irreversible?, subject?, title?, body?, label?, confirmLabel?, cancelLabel? }`,
+distinct from the boolean `destructive`. `destructive` still marks the action
+dangerous; `confirm` only controls whether the confirm dialog is simple or typed,
+and an `irreversible` confirm requires a `subject` the operator types before
+confirm enables.
+
+`disabled` renders the button non-interactive, dimmed and its form sealed, when a
+precondition the state cannot satisfy fails (a capability-gated tab whose current
+cast cannot run it). `reason` is the human explanation of why, surfaced as a
+tooltip, and is valid only alongside `disabled: true`. A producer that recomputes
+preconditions re-emits both on each recompose, so a state change flips the gate.
+
+`expanded` renders `fields` as an always-open form whose submit button carries
+the action's label, glyph, and tone, for a hero action whose input is the
+affordance. It is inert without `fields`.
 
 <Aside type="note" title="Revealing a secret on copy">
 A card field's `copyAction` is reveal-on-copy: the copy button dispatches the

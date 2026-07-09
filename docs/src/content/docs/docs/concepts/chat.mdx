@@ -27,24 +27,27 @@ Each message you send runs the same sequence on the server:
 | Step | What happens |
 | --- | --- |
 | Resolve the provider | The message names a provider and model; the server looks it up in the registry and constructs it. An unknown provider is rejected before the turn starts. |
-| Assemble the system prompt | Four sources compose in a fixed order: the project notebook, memory recall, a conversation seed, and workflow guidance. Nothing else is added silently. |
+| Assemble the system prompt | Several sections compose in a fixed order: the project notebook, memory recall, a conversation seed, workflow guidance, and tool-conditional guidance for canvas artifacts and the docs tool (the last two ride the turn's tool list, so normally on). |
 | Project the tools | The registered tools, the built-in workflow tools plus whatever ribs have added, are filtered by policy into the set this turn may see. |
 | Stream the turn | The provider runs the turn and streams chunks back over the WebSocket, text, tool calls, and results, as they happen. |
 | Gate each tool call | Before any projected tool executes, it passes an args-aware policy check; a denied call returns an error result instead of running. |
 | Persist | The conversation and its messages are saved to SQLite, and the provider session id is recorded so the next turn can continue the same thread. |
 
-The system prompt's four sources are the subject of
+The system prompt's sections are the subject of
 [Memory and state](../memory-and-state/#what-the-agent-actually-sees); the short
 version is that everything the agent knows across turns arrives through one of
-them, and three of the four are files or rows you can read.
+them, and the ones that carry your own state (notebook, recall, seed) are files
+or rows you can read.
 
 ## The agent starts empty
 
-Keelson ships no domain tools. Out of the box the agent can hold a conversation
-and run the built-in workflow tools (start a workflow, check a run), and nothing
-more. Every other capability, from reading a cluster to opening an issue to
-querying a dataset, reaches the agent because a [rib](../the-rib-model/)
-registered it. A rib's `registerTools` puts its tools in the shared registry,
+Keelson ships no domain tools. Out of the box the agent has the harness-native
+tools and nothing more: it can run and check workflows and author new ones, read
+Keelson's and its ribs' documentation with `keelson_docs`, publish a canvas
+artifact with `canvas_publish`, and append to the project notebook with
+`note_project`. What it cannot do is anything domain-specific. Every such
+capability, from reading a cluster to opening an issue to querying a dataset,
+reaches the agent because a [rib](../the-rib-model/) registered it. A rib's `registerTools` puts its tools in the shared registry,
 and from that moment they are on tap in chat with no further wiring, the same
 tools a workflow `prompt` node opts into by name.
 
@@ -69,6 +72,18 @@ the server process: a restart does not resume a mid-conversation provider
 session, though the conversation and its messages stay durable in the store
 either way.
 
+## Seeded and named agents
+
+A conversation can open pre-seeded. A surface panel's "explore in chat" handoff,
+or a rib-contributed named agent you pick from the composer, hands the new chat a
+write-once seed system prompt: a directive the turn carries ahead of your first
+message. Because the seed is set once at creation and never mutated, it stays
+provenance you can read rather than hidden instruction, one of the ordered
+sections above. Such a seed may also pin its own provider and model, so entering
+a named agent runs the agent's configured model instead of the surface's session
+default. Where the seed comes from is [the rib model](../the-rib-model/); how a
+panel hands one off is [snapshots and surfaces](../snapshots-and-surfaces/).
+
 ## Bounded the same way everywhere
 
 Chat, workflow `prompt` nodes, and a rib's own agent turns are the three places
@@ -79,6 +94,34 @@ runs (the gate). Above both sits the operator's tool denylist, a floor no turn
 can rise over. The allow-or-deny decision is the same engine a workflow uses, so
 a tool you have forbidden is forbidden everywhere, not just on one surface.
 
+Two further phases sit dormant by default: a policy (a rib's, say) can redact a
+tool's result before the model reads it, and gate a whole turn on the session's
+accumulated token spend before it runs. Neither fires unless a policy opts into
+it, so the default path pays for neither.
+
+## Rib slash-commands
+
+Tools are not the only thing a rib adds to chat. A rib can register
+slash-commands that surface in the composer's slash menu alongside the built-in
+ones (workflow, project, session). Typing one runs it server-side and returns a
+closed effect the surface performs, opening a seeded chat, say, rather than
+streaming a model turn. The menu aggregates every installed rib's commands, drops
+any name a surface reserves for its own, and dedupes across ribs so the first
+registered wins. A command reaches only its own rib's agents; it cannot open
+another rib's.
+
+## The usage chip
+
+The composer carries a small usage chip, and it reports two distinct measures
+without conflating them. When the provider reports a context window, the chip is
+a fill gauge: what percent of the window this conversation currently occupies,
+the how-close-to-the-edge number. When there is no window, it falls back to the
+session's up and down token totals, how much was spent across the thread. When a
+turn reports neither, it renders nothing rather than a fabricated `↑ 0 ↓ 0`. The
+popover behind it breaks the numbers out by context, last turn, and session, with
+cache read and write when the provider supplies them. The counts are always
+tokens, never dollars; [Usage](../usage/) is where the ledger lives.
+
 ## Where to go next
 
 - [Workflows](../workflows/) is the deterministic complement: the same agent and
@@ -86,5 +129,5 @@ a tool you have forbidden is forbidden everywhere, not just on one surface.
 - [The rib model](../the-rib-model/) is where chat's tools come from, and how a
   rib registers them.
 - [Providers](../providers/) is the swappable agent behind every turn.
-- [Memory and state](../memory-and-state/) details the system prompt's four
-  sources and what the store keeps.
+- [Memory and state](../memory-and-state/) details the system prompt's sections
+  and what the store keeps.

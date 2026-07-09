@@ -108,12 +108,32 @@ picks the package up. If it still does not appear:
 
 See [Managing ribs](../../guides/managing-ribs/) for the full lifecycle.
 
+## A connected agent does not see Keelson's tools
+
+An agent reads its MCP config only at startup, so a connection made mid-session is
+invisible until it re-reads. Restart the agent, or open a new session, so it picks
+up the endpoint. Verify what is wired with:
+
+```sh
+keelson connect --list
+```
+
+If `keelson connect` reported a problem, it exits `1` when any target fails and
+names the failed target in a `failed` entry, so a mixed run tells you which agent
+did not connect. The usual cause is that the agent's CLI or config directory was
+unavailable, for example `claude mcp add` returns `127` when the `claude` binary is
+not on `PATH`. Install or fix that agent, then re-run `keelson connect`.
+
+See [Using keelson over MCP](../../guides/using-mcp/) for the wiring each agent uses.
+
 ## A paused run shows failed after a restart
 
 This is expected. An approval pause is held by the running server process, not by
 the database, so a restart cannot resume it. Boot reconciliation finds the stale
-run and marks it failed rather than pretending it can continue. Runs are durable
-as records; they are not yet resumable as processes.
+run and marks it failed rather than pretending it can continue. The run's
+completed node outputs stay durable in the database, so you can re-start it from
+the last completed node with `keelson workflow resume`; only the in-flight
+approval is lost, and the run reaches that node again on resume.
 
 ## A command exits non-zero from a script
 

@@ -35,6 +35,7 @@ source during development; an installed harness almost always lands on
 | `server.json` | The running server's record: URL, pid, version, schema version, start timestamp, shutdown token, and (when MCP token-gating is enabled) an MCP token. Written on start, cleaned on stop. |
 | `workflows/` | Your global workflow YAML files. |
 | `commands/` | Named markdown prompt files a workflow `command` node runs. |
+| `artifacts/` | Published [canvas artifacts](../../guides/canvas-artifacts/), one `<slug>.html` page (openable in any browser) plus a `<slug>.json` sidecar; re-registered at boot. |
 | `node_modules/@keelson/` | Installed rib packages, discovered at boot. |
 | `rib-<id>/` | Private data directory for a rib that calls `getDataDir()`. Created on first write; named to mirror the `@keelson/rib-<id>` package. |
 | `logs/server.log` | The background server's log, named in the error hints when something is wrong. |

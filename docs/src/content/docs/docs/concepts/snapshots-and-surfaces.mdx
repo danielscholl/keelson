@@ -80,8 +80,9 @@ the browser either has a renderer for that shape or refuses politely.
 | `html` | Untrusted rib-supplied markup rendered in a sandboxed iframe. The host owns the document shell (a CSP with `connect-src 'none'` blocks script-initiated network connections; a bridge script is injected first). Frame script calls `keelson.action(type, payload)` to post typed actions back; the rib's handler receives them with `origin: "canvas-html"`. The shell stamps the app's resolved theme as `data-theme` on the frame's root element and pushes later toggles into the frame, so markup styled through `:root[data-theme]` token overrides re-themes live. |
 
 The `board` is the workhorse: a dashboard composed from a fixed section
-vocabulary, stats, segments, bars, tables, cards, rows, actions, and a grid,
-with one level of columns for layout. Sections carry **tones**, a small
+vocabulary, stats, segments, bars, tables, cards, rows, actions, a grid, a chart
+(a deterministic line or timeseries plot), seats (a fixed-capacity identity row),
+and a journey (a numbered next-steps strip), with one level of columns for layout. Sections carry **tones**, a small
 semantic palette (`ok`, `warn`, `error`, `neutral`, and a few decorative
 accents), so status reads consistently across every rib's boards. An
 `actions` section is how a board gets buttons: each action posts back to the
@@ -121,9 +122,11 @@ daemon's schedule.
 
 The substrate is not a rib-only side channel. Workflow runs publish their
 progress under run-scoped keys the browser watches the same way, and the
-built-in surfaces ride the same pump as rib surfaces. The strongest evidence
-is the shape of the web app itself: its views directory holds Chat,
-Workflows, Memory, and a single generic `Surface` component that renders
+built-in surfaces ride the same pump as rib surfaces: the harness registers a
+built-in `USAGE_PULSE_SNAPSHOT_KEY` stream that feeds the first-party Usage
+surface exactly as a namespaced rib key feeds a rib surface. The strongest
+evidence is the shape of the web app itself: its views directory holds Chat,
+Workflows, Memory, Usage, and a single generic `Surface` component that renders
 every rib ever installed. When a new rib lights up a new tab, no new UI code
 ships; the rib only published data.
 
