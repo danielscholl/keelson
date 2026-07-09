@@ -4,6 +4,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -11,6 +12,7 @@ import { isSafeLinkScheme } from "../../lib/safeLink.ts";
 import { ConfirmModal, type ConfirmModalMode } from "../ConfirmModal.tsx";
 import { useBoardActions } from "./BoardActionContext.tsx";
 import { ChartSection } from "./ChartSection.tsx";
+import { ModelCatalogPopover, ModelFieldPicker } from "./ModelFieldPicker.tsx";
 import { TableView } from "./TableView.tsx";
 
 type BoardSection = CanvasBoardView["sections"][number];
@@ -73,7 +75,14 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // re-runs on its own — no re-seed effect needed.
 function seedFieldValues(fields: readonly ActionField[]): Record<string, string> {
   const seed: Record<string, string> = {};
-  for (const f of fields) if (f.defaultValue !== undefined) seed[f.name] = f.defaultValue;
+  for (const f of fields) {
+    if (f.defaultValue !== undefined) seed[f.name] = f.defaultValue;
+    // A model picker's companion provider key seeds alongside its model, so an
+    // untouched submit re-affirms the current provider/model pair intact.
+    if (f.modelPicker?.providerField && f.modelPicker.providerDefault !== undefined) {
+      seed[f.modelPicker.providerField] = f.modelPicker.providerDefault;
+    }
+  }
   return seed;
 }
 
@@ -109,7 +118,9 @@ function actionConfirmBody(item: ActionItem): string {
 
 // One action button. With no `fields` it dispatches on click (confirming first
 // when destructive). With `fields` it toggles an inline form and dispatches the
-// collected values on submit, so a payload-carrying action can gather its input.
+// collected values on submit, so a payload-carrying action can gather its input —
+// except when the only field is a model picker, which opens straight off the
+// button and dispatches on pick (see `soloPicker`).
 // A tabs section lifts the form's open state to itself via `open`/`onOpenChange`
 // so opening one item closes its siblings; uncontrolled (both absent) elsewhere.
 // The pair is a union so one can't be passed without the other.
@@ -125,6 +136,12 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   // `expanded` (an always-open form with no disclosure button) contradicts the
   // one-open-panel model, so a controlled (tabs) item ignores it.
   const expanded = hasFields && item.expanded === true && onOpenChange === undefined;
+  // An action whose ONLY input is a model picker skips the intermediate form:
+  // the action button itself opens the catalog popover and picking dispatches
+  // immediately — a form whose one control is the picker would just add a
+  // redundant submit step. Light-dismiss on the popover is the cancel.
+  const soloPicker = !expanded && fields.length === 1 && fields[0]?.modelPicker ? fields[0] : null;
+  const soloPickerPopoverId = useId();
   const [pending, setPending] = useState(false);
   const [localOpen, setLocalOpen] = useState(false);
   const open = controlledOpen ?? localOpen;
@@ -191,6 +208,62 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     requestDispatch(values);
   };
 
+  if (soloPicker) {
+    const seed = seedFieldValues(fields);
+    const providerField = soloPicker.modelPicker?.providerField;
+    return (
+      <div className="cvb-action">
+        <button
+          type="button"
+          id={`cvb-ap-${soloPickerPopoverId}`}
+          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
+          data-tone={item.tone}
+          disabled={sealed}
+          popoverTarget={soloPickerPopoverId}
+          aria-haspopup="dialog"
+          title={item.reason}
+        >
+          {item.glyph && (
+            <span className="cvb-action-glyph" aria-hidden="true">
+              {item.glyph}
+            </span>
+          )}
+          {item.label}
+        </button>
+        <ModelCatalogPopover
+          popoverId={soloPickerPopoverId}
+          anchorId={`cvb-ap-${soloPickerPopoverId}`}
+          value={seed[soloPicker.name] ?? ""}
+          providerValue={providerField ? (seed[providerField] ?? "") : ""}
+          emptyLabel={soloPicker.placeholder ?? "default"}
+          required={soloPicker.required === true}
+          onPick={(modelId, providerId) =>
+            requestDispatch({
+              ...seed,
+              [soloPicker.name]: modelId,
+              ...(providerField ? { [providerField]: providerId } : {}),
+            })
+          }
+        />
+        {error && <p className="cvb-action-form-error">{error}</p>}
+        <ConfirmModal
+          open={confirmOpen}
+          title={actionConfirmTitle(item)}
+          body={actionConfirmBody(item)}
+          mode={actionConfirmMode(item)}
+          confirmLabel={item.confirm?.confirmLabel ?? item.label}
+          cancelLabel={item.confirm?.cancelLabel}
+          danger
+          onConfirm={() => {
+            setConfirmOpen(false);
+            void dispatch(confirmValues);
+          }}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="cvb-action">
       {!expanded && (
@@ -228,6 +301,26 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                     value={values[f.name] ?? ""}
                     disabled={sealed}
                     onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                  />
+                ) : f.modelPicker ? (
+                  <ModelFieldPicker
+                    id={id}
+                    value={values[f.name] ?? ""}
+                    providerValue={
+                      f.modelPicker.providerField ? (values[f.modelPicker.providerField] ?? "") : ""
+                    }
+                    placeholder={f.placeholder}
+                    required={f.required === true}
+                    disabled={sealed}
+                    onPick={(modelId, providerId) =>
+                      setValues((v) => ({
+                        ...v,
+                        [f.name]: modelId,
+                        ...(f.modelPicker?.providerField
+                          ? { [f.modelPicker.providerField]: providerId }
+                          : {}),
+                      }))
+                    }
                   />
                 ) : f.options ? (
                   <select

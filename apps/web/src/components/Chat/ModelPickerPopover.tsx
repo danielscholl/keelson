@@ -5,6 +5,7 @@
 import type { ModelInfo, ProviderInfo } from "@keelson/shared";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelRef } from "../../hooks/useSettings.ts";
+import { COST_LABEL, groupByVendor, prettyVendor } from "../../lib/modelCatalog.ts";
 
 interface ModelPickerPopoverProps {
   // Element id the chip's popoverTarget attribute references. Anchoring
@@ -38,66 +39,6 @@ function makeRef(providerId: string, modelId: string): ModelRef {
 
 function refKey(ref: ModelRef): string {
   return `${ref.providerId}::${ref.modelId}`;
-}
-
-const COST_LABEL: Record<NonNullable<ModelInfo["costTier"]>, string> = {
-  free: "free",
-  low: "$",
-  mid: "$$",
-  high: "$$$",
-};
-
-// Multi-vendor providers (pi) prefix model ids as "vendor/model". The picker
-// sub-groups by that prefix so a 200-model authenticated catalog stays
-// scannable; single-vendor providers (Copilot/Claude) have no "/" and render
-// flat with no sub-header.
-function vendorOf(modelId: string): string | null {
-  const slash = modelId.indexOf("/");
-  return slash > 0 ? modelId.slice(0, slash) : null;
-}
-
-const VENDOR_LABELS: Record<string, string> = {
-  "github-copilot": "GitHub Copilot",
-  openai: "OpenAI",
-  xai: "xAI",
-  deepseek: "DeepSeek",
-  "google-vertex": "Google Vertex",
-  openrouter: "OpenRouter",
-};
-
-function prettyVendor(vendor: string): string {
-  return (
-    VENDOR_LABELS[vendor] ??
-    vendor
-      .split("-")
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ")
-  );
-}
-
-interface VendorGroup {
-  vendor: string | null;
-  models: ModelInfo[];
-}
-
-// Group only CONSECUTIVE runs of the same vendor, preserving the incoming
-// (canonical) model order. The catalog already arrives vendor-grouped, so each
-// vendor normally yields one run; keeping it order-preserving means the rendered
-// order always matches the keyboard/Enter-select order derived from the same
-// list, and an interleaved catalog shows a vendor's sub-header per run rather
-// than silently reordering rows.
-function groupByVendor(models: ModelInfo[]): VendorGroup[] {
-  const groups: VendorGroup[] = [];
-  for (const m of models) {
-    const vendor = vendorOf(m.id);
-    const last = groups[groups.length - 1];
-    if (last && last.vendor === vendor) {
-      last.models.push(m);
-      continue;
-    }
-    groups.push({ vendor, models: [m] });
-  }
-  return groups;
 }
 
 // Cost is the only metadata that differentiates rows here. Vision is
