@@ -238,6 +238,12 @@ const canvasActionFieldSchema = z
     label: z.string().min(1),
     placeholder: z.string().optional(),
     required: z.boolean().optional(),
+    // Pre-fills the control so the form opens on a current value rather than
+    // blank. For a select, it must name one of `options` (or "" to open on the
+    // empty/clear option). Without it a form always opens empty, so an idle
+    // submit dispatches nothing for this field — which a producer that reads
+    // absent-as-clear (e.g. a model pin) would treat as a wipe.
+    defaultValue: z.string().optional(),
     // Render a multi-line textarea rather than a single-line input.
     multiline: z.boolean().optional(),
     // A fixed choice set renders a <select> instead of a free-text input; the
@@ -257,7 +263,18 @@ const canvasActionFieldSchema = z
   // so duplicates make the selection ambiguous and collide React keys.
   .refine((f) => !f.options || new Set(f.options.map((o) => o.value)).size === f.options.length, {
     message: "select option values must be unique",
-  });
+  })
+  // A select can only open on a value it offers; "" opens on the empty/clear
+  // option. A non-empty default outside the option set would render nothing
+  // selected — fail closed so the producer catches it at publish, not on screen.
+  .refine(
+    (f) =>
+      f.defaultValue === undefined ||
+      f.defaultValue === "" ||
+      !f.options ||
+      f.options.some((o) => o.value === f.defaultValue),
+    { message: "a select field's defaultValue must match one of its option values" },
+  );
 export type CanvasActionField = z.infer<typeof canvasActionFieldSchema>;
 
 const canvasActionConfirmSchema = z

@@ -851,6 +851,82 @@ describe("board actions — select fields and capability gating", () => {
     );
   });
 
+  test("a select opens on its defaultValue and an idle submit re-affirms it, not a clear", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "set-model",
+              label: "Model — sonnet",
+              payload: { slug: "aria" },
+              fields: [
+                {
+                  name: "model",
+                  label: "Model",
+                  defaultValue: "sonnet",
+                  options: [
+                    { value: "opus", label: "opus" },
+                    { value: "sonnet", label: "sonnet" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Model — sonnet" }));
+    const select = container.querySelector("select.cvb-action-field-select") as HTMLSelectElement;
+    // Opens on the pinned model, not the empty "clear" option.
+    expect(select.value).toBe("sonnet");
+    // Submitting an untouched form re-affirms the pin; without the seed this would
+    // dispatch no model, which a producer reading absent-as-clear treats as a wipe.
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(calls).toEqual([{ type: "set-model", payload: { slug: "aria", model: "sonnet" } }]),
+    );
+  });
+
+  test("a text field opens pre-filled from its defaultValue", async () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "rename",
+              label: "Rename",
+              fields: [{ name: "name", label: "Name", defaultValue: "Aria" }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    expect((container.querySelector(".cvb-action-field-input") as HTMLInputElement).value).toBe(
+      "Aria",
+    );
+  });
+
   test("a disabled action item is non-clickable and carries its reason as a tooltip", async () => {
     const calls: RibAction[] = [];
     const run = async (a: RibAction): Promise<RibActionResult> => {

@@ -787,6 +787,72 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses a field defaultValue, and rejects a select default outside its options", () => {
+    // A select opens on its defaultValue…
+    const ok = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "set-model",
+              label: "Model — opus",
+              fields: [
+                {
+                  name: "model",
+                  label: "Model",
+                  defaultValue: "opus",
+                  options: [
+                    { value: "opus", label: "opus" },
+                    { value: "sonnet", label: "sonnet" },
+                  ],
+                },
+                // A free-text field carries any default.
+                { name: "provider", label: "Provider", defaultValue: "anthropic" },
+                // "" opens on the empty / clear option.
+                {
+                  name: "other",
+                  label: "Other",
+                  defaultValue: "",
+                  options: [{ value: "a", label: "A" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const board = ok as { sections?: { items?: { fields?: { defaultValue?: string }[] }[] }[] };
+    expect(board.sections?.[0]?.items?.[0]?.fields?.[0]?.defaultValue).toBe("opus");
+    // …but a non-empty default the option set doesn't offer would render nothing
+    // selected, so it's rejected at publish.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "x",
+                label: "X",
+                fields: [
+                  {
+                    name: "f",
+                    label: "F",
+                    defaultValue: "missing",
+                    options: [{ value: "a", label: "A" }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("parses a disabled action item with a reason, and rejects non-boolean disabled / empty reason / reason-without-disabled", () => {
     const ok = canvasViewSchema.parse({
       view: "board",
