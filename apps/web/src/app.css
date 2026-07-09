@@ -3346,6 +3346,24 @@ button.tab:focus-visible {
 .surface-region[data-collapsed] {
   overflow: visible;
 }
+/* Region-head ⋯ verbs (region.headActions): the card overflow menu reused in the
+   head strip. Always visible there — a head verb is the region's own control, not
+   a hover-revealed card extra — and the open menu escapes the card's clip. */
+.surface-region-head .cvb-card-overflow {
+  margin-left: 0;
+  flex: none;
+}
+.surface-region-head .cvb-card-overflow-trigger {
+  opacity: 1;
+  width: 26px;
+  height: 26px;
+}
+.surface-region-head .cvb-card-overflow-menu {
+  z-index: 30;
+}
+.surface-region:has(.surface-region-head .cvb-card-overflow.is-open) {
+  overflow: visible;
+}
 
 /* Roster peek: identity dots beside the count; hover or focus the count to reveal the
    names. The names ride the popover so an identity colour never renders without its

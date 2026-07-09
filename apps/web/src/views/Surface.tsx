@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
+  type CanvasActionItem,
   type CanvasBoardView,
   type CanvasTone,
   canvasViewSchema,
@@ -13,7 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { postRibAction } from "../api.ts";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
-import { BoardBody, Segments } from "../components/Canvas/BoardView.tsx";
+import { BoardBody, CardOverflowActions, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
@@ -45,6 +46,7 @@ type OpenSurface = (surfaceId: string, regionKey?: string) => void;
 interface Region {
   key: string;
   workflow?: string;
+  workflowArgs?: Record<string, string>;
   cadenceMs?: number;
   title?: string;
   byline?: string;
@@ -53,6 +55,7 @@ interface Region {
   collapsed?: boolean;
   live?: boolean;
   hideWhenEmpty?: boolean;
+  headActions?: CanvasActionItem[];
 }
 
 // A rib's primary surface: region-bound boards laid out as header → banner →
@@ -251,7 +254,7 @@ function SurfaceRegion({
   // The region's bound workflow re-runs on its cadence and on open while stale;
   // the new frame arrives over the live subscription. `freshness` is the head's
   // "updated Xm ago" readout — there is no manual per-region refresh control.
-  const runRefresh = useWorkflowTrigger(region.workflow);
+  const runRefresh = useWorkflowTrigger(region.workflow, region.workflowArgs);
   const busy = runRefresh.running;
   const freshness = useAutoRefresh({
     workflow: region.workflow,
@@ -497,6 +500,17 @@ function SurfaceRegion({
         >
           <span aria-hidden="true">⤢</span>
         </button>
+      )}
+      {/* Rib-supplied head verbs (region.headActions): rendered even when the
+          surface hides the HOST chrome above (hideRegionActions targets the
+          explore/select/expand controls, not the rib's own verbs) and while
+          collapsed, so a folded panel can still be retired. Dispatches through
+          the same rib-action path as board buttons; ribId-null keys render no
+          menu (there is nowhere to dispatch to). */}
+      {ribId && region.headActions && region.headActions.length > 0 && (
+        <BoardActionProvider run={actions.run} reveal={actions.reveal}>
+          <CardOverflowActions cardTitle={panelName} actions={region.headActions} />
+        </BoardActionProvider>
       )}
     </div>
   );

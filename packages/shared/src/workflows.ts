@@ -216,6 +216,14 @@ export const startWorkflowRunBodySchema = z
   });
 export type StartWorkflowRunBody = z.infer<typeof startWorkflowRunBodySchema>;
 
+// POST /api/workflows/:name/refresh request body. `inputs` carry a surface
+// region's workflowArgs to the producer re-run; the legacy empty body ("{}")
+// parses to no inputs.
+export const refreshWorkflowBodySchema = z
+  .object({ inputs: z.record(z.string(), z.string()).default({}) })
+  .strict();
+export type RefreshWorkflowBody = z.infer<typeof refreshWorkflowBodySchema>;
+
 // POST /api/workflows/:name/runs response body. `workflowName` is the canonical
 // catalog name the run started under — it differs from the request-path name on
 // a fuzzy match (POST /runs/smoketst → smoke-test). Optional for back-compat;

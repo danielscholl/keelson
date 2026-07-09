@@ -35,6 +35,10 @@ export interface DynamicRegionStore {
     declaredSurfaceIds: ReadonlySet<string>,
   ): (surfaceId: string, region: RibSurfaceRegion) => () => void;
   regionsFor(ribId: string, surfaceId: string): readonly RibSurfaceRegion[];
+  // Whether any live runtime region (any rib, any surface) declares this
+  // workflow as its refresh producer — one leg of the `/refresh` route's
+  // region-declared gate (the other walks the static manifests).
+  hasRegionWorkflow(workflowName: string): boolean;
   readonly revision: number;
 }
 
@@ -106,6 +110,14 @@ export function createDynamicRegionStore(opts: { onChange: () => void }): Dynami
     },
     regionsFor(ribId, surfaceId) {
       return byRib.get(ribId)?.get(surfaceId) ?? [];
+    },
+    hasRegionWorkflow(workflowName) {
+      for (const surfaces of byRib.values()) {
+        for (const regions of surfaces.values()) {
+          if (regions.some((r) => r.workflow === workflowName)) return true;
+        }
+      }
+      return false;
     },
     get revision() {
       return revision;

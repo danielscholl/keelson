@@ -31,6 +31,7 @@ import {
   type Project,
   type RibWorkflowRunResult,
   recallRequestSchema,
+  refreshWorkflowBodySchema,
   resumeWorkflowRunBodySchema,
   type SnapshotManager,
   startWorkflowRunBodySchema,
@@ -149,6 +150,13 @@ export interface WorkflowsHandlerOptions {
   // Optional usage ledger. When set, each node_done carrying real usage records
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  // Whether an active rib surface region (static or runtime-added) declares this
+  // workflow as its refresh producer. Widens the `/refresh` gate beyond bound
+  // producers: a region may name an UNBOUND workflow (one that republishes
+  // through the rib's own tools rather than a bound key), and the SPA's panel
+  // refresh must be able to run it. Region-declared only — an arbitrary catalog
+  // workflow still goes through /runs with an explicit target.
+  isRegionWorkflow?: (workflowName: string) => boolean;
 }
 
 // Renders the user-facing dispatch bubble that anchors the workflow run inside
@@ -1484,6 +1492,7 @@ export function workflowsRoutes(
     snapshotManager,
     ribWorkflowBindings,
     usageStore,
+    isRegionWorkflow,
   } = opts;
   const {
     promptHandler: effectivePromptHandler,
@@ -1823,12 +1832,15 @@ export function workflowsRoutes(
 
   // Re-run a rib producer workflow to repopulate its bound snapshot key — the
   // "refresh" behind a surface panel's icon. Restricted to bound producers and
-  // run in the server's default working dir: a general workflow must still go
-  // through /runs with an explicit target (so it can't silently execute against
-  // the server's install dir), but a producer's node uses absolute paths, so the
-  // server owns the nominal cwd here. The new frame fans to the bound key, which
-  // the panel's live subscription picks up.
-  app.post("/api/workflows/:name/refresh", (c) => {
+  // region-declared workflows, and run in the server's default working dir: a
+  // general workflow must still go through /runs with an explicit target (so it
+  // can't silently execute against the server's install dir), but a producer's
+  // node uses absolute paths, so the server owns the nominal cwd here. The new
+  // frame fans to the bound key, which the panel's live subscription picks up;
+  // an unbound region workflow republishes through the rib's own tools instead.
+  // Optional `inputs` carry a region's workflowArgs (e.g. the lens id a shared
+  // per-item producer is refreshing).
+  app.post("/api/workflows/:name/refresh", async (c) => {
     if (originForbidden(c)) {
       return c.json({ error: "forbidden origin" }, 403);
     }
@@ -1837,11 +1849,17 @@ export function workflowsRoutes(
     if (!workflow) {
       return c.json({ error: `No workflow named '${requested}'.` }, 404);
     }
-    if (!ribWorkflowBindings?.has(workflow)) {
+    if (!ribWorkflowBindings?.has(workflow) && !isRegionWorkflow?.(workflow.name)) {
       return c.json({ error: `workflow '${requested}' is not a refreshable producer` }, 409);
     }
     if (refreshCwd === undefined) {
       return c.json({ error: "server has no refresh working directory" }, 400);
+    }
+    // Tolerate the historical empty body ("{}" or none); reject a malformed one.
+    const body: unknown = await c.req.json().catch(() => ({}));
+    const parsedBody = refreshWorkflowBodySchema.safeParse(body);
+    if (!parsedBody.success) {
+      return c.json({ error: `invalid refresh body: ${parsedBody.error.message}` }, 400);
     }
     try {
       const { runId } = startRunCore(
@@ -1859,7 +1877,7 @@ export function workflowsRoutes(
         },
         {
           workflow,
-          inputs: {},
+          inputs: parsedBody.data.inputs,
           workingDir: refreshCwd,
           projectId: null,
           resolvedProject: null,

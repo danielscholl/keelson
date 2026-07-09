@@ -76,6 +76,7 @@ import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
 import { createProjectsStore, type ProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
+import { allRegions } from "./ribs.ts";
 import { ribsRoutes } from "./ribs-handler.ts";
 import { createScheduler, deriveSurfaceSchedules, makeBoundKeyResolver } from "./scheduler.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
@@ -497,6 +498,15 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // rib collector — its node uses absolute paths, so the cwd is nominal. Kept
     // off `defaultCwd` so the generic /runs path still rejects target-less starts.
     refreshCwd: KEELSON_HOME,
+    // The /refresh gate's region-declared leg: a workflow any active rib region
+    // names — statically in a surface layout, or at runtime via registerRegion —
+    // is refreshable even when unbound (it republishes through the rib's tools).
+    isRegionWorkflow: (workflowName) =>
+      ribs.manifests.some((manifest) =>
+        manifest.surfaces.some((surface) =>
+          allRegions(surface.layout).some((region) => region.workflow === workflowName),
+        ),
+      ) || dynamicRegionStore.hasRegionWorkflow(workflowName),
   };
   const workflowController = createWorkflowController(
     workflowHandlerOptions,

@@ -768,6 +768,113 @@ nodes:
     expect(body.error).toContain("not a refreshable producer");
   });
 
+  test("POST .../refresh carries body inputs to the producer run", async () => {
+    writeWorkflow(
+      "prod-args.yaml",
+      `name: prod-args
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const bound = catalog.get("prod-args");
+    if (!bound) throw new Error("fixture workflow missing");
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore: createConversationStore(db),
+      refreshCwd: tmpDir,
+      ribWorkflowBindings: new Map([[bound, { publish: () => {} }]]),
+    });
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/prod-args/refresh", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: { lens: "morning-brief" } }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as { inputs: Record<string, string> };
+    expect(run.inputs).toEqual({ lens: "morning-brief" });
+  });
+
+  test("POST .../refresh rejects a malformed inputs body", async () => {
+    writeWorkflow(
+      "prod-bad.yaml",
+      `name: prod-bad
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const bound = catalog.get("prod-bad");
+    if (!bound) throw new Error("fixture workflow missing");
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store: createWorkflowStore(db),
+      conversationStore: createConversationStore(db),
+      refreshCwd: tmpDir,
+      ribWorkflowBindings: new Map([[bound, { publish: () => {} }]]),
+    });
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/prod-bad/refresh", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: { n: 7 } }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("invalid refresh body");
+  });
+
+  test("POST .../refresh admits an unbound workflow a rib region declares", async () => {
+    writeWorkflow(
+      "region-owned.yaml",
+      `name: region-owned
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const app = new Hono();
+    // No bindings at all — only the region-declared leg admits it.
+    workflowsRoutes(app, {
+      catalog: bootstrapWorkflows({ workflowDir: wfDir }),
+      store: createWorkflowStore(db),
+      conversationStore: createConversationStore(db),
+      refreshCwd: tmpDir,
+      isRegionWorkflow: (name) => name === "region-owned",
+    });
+    const admitted = await app.fetch(
+      new Request("http://test/api/workflows/region-owned/refresh", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: { lens: "release-risks" } }),
+      }),
+    );
+    expect(admitted.status).toBe(200);
+    const { runId } = (await admitted.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      inputs: Record<string, string>;
+      workingDir: string;
+    };
+    expect(run.inputs).toEqual({ lens: "release-risks" });
+    expect(run.workingDir).toBe(tmpDir);
+  });
+
   test("POST .../runs rejects workingDir pointing at a file (not a directory)", async () => {
     writeWorkflow(
       "to-file.yaml",

@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
-import { canvasKindSchema, canvasToneSchema } from "./canvas.ts";
+import { canvasActionItemSchema, canvasKindSchema, canvasToneSchema } from "./canvas.ts";
 import type { MessageChunk, TokenUsage } from "./chat.ts";
 
 import type { CommandCompletion, CommandInvokeResult, RibCommandDescriptor } from "./commands.ts";
@@ -207,10 +207,12 @@ export interface RibContext {
   registerRegion?: (surfaceId: string, region: RibSurfaceRegion) => () => void;
   // Re-run THIS rib's own snapshot-bound producer workflow by name on demand;
   // fresh structured output republishes to the bound key through the same
-  // publish->recompose bridge the cadence/heartbeat refresh uses. Resolves
-  // (never throws) for an unknown name or a failed run. Optional so a rib built
-  // against an older harness degrades to cadence-only refresh, not a throw.
-  refreshWorkflow?: (workflowName: string) => Promise<void>;
+  // publish->recompose bridge the cadence/heartbeat refresh uses. Optional
+  // `inputs` ride to the run (an unbound per-item producer republishes through
+  // the rib's own tools instead of a bound key). Resolves (never throws) for an
+  // unknown name or a failed run. Optional so a rib built against an older
+  // harness degrades to cadence-only refresh, not a throw.
+  refreshWorkflow?: (workflowName: string, inputs?: Record<string, string>) => Promise<void>;
   // Execute a workflow DAG the rib hands in (an in-memory definition — the same
   // shape `contributeWorkflows` uses), with optional string `inputs`, and resolve to
   // its terminal result. The harness validates the definition against the workflow
@@ -291,6 +293,13 @@ export const surfaceRegionSchema = z
   .object({
     key: z.string().min(1),
     workflow: z.string().min(1).optional(),
+    // Inputs the refresh passes when re-running `workflow` (POST /:name/refresh
+    // and the SPA's cadence trigger both carry them), so one producer can serve
+    // many regions — e.g. a per-lens re-author workflow keyed by the lens id.
+    // Inert without `workflow`. Args-bearing regions are client-driven only: the
+    // server heartbeat skips them (see deriveSurfaceSchedules), so their cadence
+    // applies while the surface is open.
+    workflowArgs: z.record(z.string(), z.string()).optional(),
     cadenceMs: z.number().int().min(30000).optional(),
     title: z.string().min(1).optional(),
     glyph: regionGlyphSchema.optional(),
@@ -320,6 +329,14 @@ export const surfaceRegionSchema = z
     // Hide the whole region until a live snapshot has content; avoid on-demand
     // workflow regions because hiding would also hide their Load affordance.
     hideWhenEmpty: z.boolean().optional(),
+    // Rib-supplied verbs on the region head itself, rendered as a ⋯ menu and
+    // dispatched through POST /api/ribs/:id/action exactly like board actions
+    // (destructive ones confirm first). Menu-only presentation: an action's
+    // `fields`/`expanded`/`inline` are inert here. Rendered even when the
+    // surface sets hideRegionActions — that flag suppresses the HOST's chrome
+    // (explore/select/expand), not the rib's own verbs — and while collapsed,
+    // so a folded panel can still be retired.
+    headActions: z.array(canvasActionItemSchema).min(1).max(8).optional(),
   })
   .strict();
 export type RibSurfaceRegion = z.infer<typeof surfaceRegionSchema>;

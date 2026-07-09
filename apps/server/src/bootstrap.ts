@@ -314,13 +314,17 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const refreshCwd = options.refreshCwd;
   const refreshWorkflow =
     getWorkflowController && refreshCwd !== undefined
-      ? async (_ribId: string, workflowName: string): Promise<void> => {
+      ? async (
+          _ribId: string,
+          workflowName: string,
+          inputs?: Record<string, string>,
+        ): Promise<void> => {
           const controller = getWorkflowController();
           if (!controller) return;
           try {
             const result = controller.startRun({
               name: workflowName,
-              inputs: {},
+              inputs: inputs ?? {},
               workingDir: refreshCwd,
               origin: "scheduled",
             });
