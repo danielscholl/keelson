@@ -4041,7 +4041,8 @@ select.cvb-action-field-select {
   background: color-mix(in srgb, var(--danger) 9%, transparent);
   border-color: color-mix(in srgb, var(--danger) 28%, transparent);
 }
-.cvb-card-overflow-item:disabled {
+.cvb-card-overflow-item:disabled,
+.cvb-card-overflow-item[aria-disabled="true"] {
   opacity: 0.6;
   cursor: default;
 }

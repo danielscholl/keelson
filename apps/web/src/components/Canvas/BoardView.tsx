@@ -469,7 +469,11 @@ export function CardOverflowActions({
               className="cvb-card-overflow-item"
               data-destructive={action.destructive || undefined}
               tabIndex={index === activeIndex ? 0 : -1}
-              disabled={pending || action.disabled === true}
+              // A schema-disabled item stays aria-disabled (not natively
+              // disabled) so it keeps hover/focus and its `reason` tooltip
+              // actually shows; triggerAction guards the dispatch to a no-op.
+              disabled={pending}
+              aria-disabled={action.disabled === true || undefined}
               title={action.reason}
               onMouseEnter={() => setActiveIndex(index)}
               onFocus={() => setActiveIndex(index)}
