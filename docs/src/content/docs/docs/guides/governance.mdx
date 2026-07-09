@@ -10,9 +10,11 @@ import { Aside } from "@astrojs/starlight/components";
 Every tool call in keelson, whether a rib tool, a workflow `prompt` node, or the
 agent's own built-in shell and file edits, passes through one **policy engine**.
 The engine is a single ordered stack: an operator floor of builtins plus any
-policies the installed ribs contribute. It runs on all three turn paths (chat, a
-workflow `prompt` node, and a rib agent turn), so a rule you set holds wherever a
-tool runs.
+policies the installed ribs contribute. It runs on all four surfaces (chat, a
+workflow `prompt` node, a rib agent turn, and the `/api/mcp` gateway), so a rule
+you set holds wherever a tool runs. A tool call an external agent makes over
+`/api/mcp` passes the same stack (denylist, `ask_on_shell`, `redact`), so a
+governance rule covers those callers too.
 
 Out of the box the engine only enforces the operator tool denylist. Approvals,
 budgets, and redaction are **opt-in builtins**, each enabled by one environment
@@ -132,6 +134,21 @@ without opt-in, and it cannot be overridden by a node or a rib.
 KEELSON_WORKFLOW_TOOL_DENYLIST=Bash,Write keelson start
 ```
 
+## Filesystem confinement
+
+The `path_confinement` builtin is always registered, alongside the operator
+denylist. It stays inert until a **rib agent turn** declares its own working
+roots: when a turn carries `allowedDirectories`, the builtin denies any tool call
+whose file paths or shell arguments canonicalize outside those roots. It
+realpath-canonicalizes both the roots and each candidate path before comparing,
+so a symlink inside an allowed root that points elsewhere cannot be traversed to
+escape confinement.
+
+This is a rib-agent-turn capability, not a global operator toggle. Chat, workflow
+`prompt` nodes, and MCP calls declare no roots, so the builtin allows everything
+there; a rib that runs an agent turn against a scoped directory gets confinement
+for free.
+
 ## Policies from ribs
 
 A rib contributes policies through its `contributePolicies` hook. The harness
@@ -141,6 +158,17 @@ the three decisions, first-deny-wins, the ASK round-trip, and the coalescing of
 duplicate prompts. A malformed policy is dropped with a warning rather than
 crashing the boot. See [`contributePolicies`](../../reference/rib-contract/) in
 the contract for the shape.
+
+## Cross-rib grants
+
+A rib can call another rib's tool, but a cross-rib call is **default-deny**: with
+no grant, it is refused before it reaches the policy engine. The operator opts a
+caller in by naming `caller:target:tool` triples (or `caller:target:*` for every
+tool a target owns) in `KEELSON_CROSS_RIB_GRANTS`. The grant check runs first,
+ahead of the policy stack, so an ungranted call never surfaces an approval prompt
+for a call that would be denied regardless. See
+[Configuration](../configuration/) for the grant string and the cross-rib call
+timeout.
 
 ## Related
 

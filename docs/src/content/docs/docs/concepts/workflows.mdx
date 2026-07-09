@@ -94,10 +94,12 @@ agent's output into a script node at all.
 ## A run is a record
 
 Starting a workflow creates a run, and the run is durable: a row for the run,
-a row per node with its output, timing, and error, all in the harness's
-SQLite store. The watch stream you see in the CLI and the browser is the same
-event feed, emitted as each node starts, streams, and settles. The figure
-shows every state a run can occupy:
+a row per node with its output, timing, error, and the provider and model that
+node actually ran on, all in the harness's SQLite store. That last pair makes an
+otherwise-unobservable `auto` node's resolved served model visible in the run
+detail whenever the provider reports it. The watch stream you see in the CLI and
+the browser is the same event feed, emitted as each node starts, streams, and
+settles. The figure shows every state a run can occupy:
 
 <figure>
   <img
@@ -117,7 +119,9 @@ run is paused or mid-flight, boot reconciliation finds the stale run and
 marks it failed rather than pretending it can continue. Runs are durable as
 records; failed and cancelled runs are resumable: the harness re-enters the
 executor from the first incomplete node, seeding completed node outputs so
-finished work is not repeated.
+finished work is not repeated. A node marked `always_run` is the exception, it
+re-runs on resume even though it succeeded, so a gate or validation re-checks
+rather than replaying a stale pass.
 
 ## Where the agency is bounded
 

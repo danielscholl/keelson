@@ -8,10 +8,10 @@ Keelson is pre-1.0 (`0.x`) software. Security fixes land on the latest
 minor release line only. Once 1.0 ships, this policy will document a
 longer support window.
 
-| Version  | Supported          |
-|----------|--------------------|
-| 0.1.x    | :white_check_mark: |
-| < 0.1    | :x:                |
+| Version                         | Supported          |
+|---------------------------------|--------------------|
+| Latest `0.x` minor release line | :white_check_mark: |
+| Any older release               | :x:                |
 
 ## Reporting a vulnerability
 
@@ -49,7 +49,7 @@ model assumes:
 - The operator trusts their own machine and the workflows they author.
 - Hostile inputs may arrive over the network from provider responses,
   tool outputs, or fetched URLs.
-- Ribs (loaded via the embedder's manifest) run with the same privileges
+- Ribs (installed into the keelson home and discovered at boot) run with the same privileges
   as the harness — a malicious rib is equivalent to malicious local
   code and is **outside** the threat model.
 
@@ -59,7 +59,8 @@ model assumes:
   untrusted data (provider output, upstream node output, workflow YAML
   fields) into a shell, child process, or filesystem path
 - Authentication or credential leakage paths (the OS keychain store, the
-  redacted-console pipeline, the credentials drawer)
+  active `KEELSON_REDACT_PATTERN` tool-output redaction policy, the
+  credentials drawer)
 - The browser ↔ server channel: origin / WebSocket-upgrade checks
   (`isAllowedOrigin` in `apps/server/src/chat-handler.ts`) and any
   bypasses that would let a non-loopback origin reach the API
@@ -71,7 +72,7 @@ model assumes:
 ### Out of scope
 
 - Behavior under a hostile rib (treat ribs as trusted code; vet them
-  before adding to your manifest)
+  before installing them)
 - Issues that require a hostile party to already have local code-
   execution or filesystem access on the operator's machine
 - Provider-side issues (Copilot SDK, Claude Agent SDK) — please report

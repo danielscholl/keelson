@@ -8,10 +8,10 @@ sidebar:
 import { Aside } from "@astrojs/starlight/components";
 import WorkflowCards from "../../../../components/WorkflowCards.astro";
 
-Keelson ships eight workflows. They are real, runnable, and the place the
+Keelson ships nine workflows. They are real, runnable, and the place the
 [authoring recipes](../guides/authoring-workflows/) show up composed: a
 three-line approval-gate recipe is one thing, the same gate sitting inside a
-sixteen-node investigate-and-implement pipeline is where the shape clicks. This
+twenty-five-node investigate-and-implement pipeline is where the shape clicks. This
 catalog groups what ships by the job it does, and each one gets a full
 node-by-node walkthrough.
 
@@ -20,7 +20,7 @@ documentation.
 
 ## Where these come from
 
-The eight are **bundled** starters: they ship with the package and seed into
+The nine are **bundled** starters: they ship with the package and seed into
 your home (`<home>/workflows/`) on first run, so `keelson workflow list` shows
 them as `global` once seeded. Copy and edit one freely; the bundled original
 stays as a clean fallback. See [scopes](../reference/workflow-nodes/#scopes) for
@@ -34,12 +34,14 @@ keelson workflow run fix-issue --inputs ARGUMENTS="42"
 ```
 
 <Aside type="note" title="What the Copilot workflows need">
-Seven of the eight set `provider: copilot` and `model: auto`, so they need a
+Seven of the nine set `provider: copilot` and `model: auto`, so they need a
 GitHub Copilot subscription registered. The GitHub-facing ones (`fix-issue`,
 `pr-review`, `plan-act-evaluate`, `resolve-comments`) also drive the `gh` CLI, so it must be
 installed and authenticated. The approval and interactive workflows pause for a
-human, which needs a running server (`keelson start`). `smoke-test` is the
-exception: it runs provider-free on the stub, with no credentials.
+human, which needs a running server (`keelson start`). The other two pin no
+provider: `smoke-test` runs provider-free on the stub with no credentials, and
+`design-artifact` leaves the provider open so authoring tracks the strongest
+model the server offers.
 </Aside>
 
 ## Ship code
@@ -60,6 +62,13 @@ pressure-test a build by pitting a generator against an evaluator.
 ## Author workflows
 
 <WorkflowCards names={["workflow-builder"]} />
+
+## Produce artifacts
+
+Author and publish a designed, self-contained HTML page to the canvas, a report
+or briefing or chart, validated fail-closed on the way out.
+
+<WorkflowCards names={["design-artifact"]} />
 
 ## Verify the engine
 

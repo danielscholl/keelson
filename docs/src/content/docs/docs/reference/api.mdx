@@ -101,8 +101,8 @@ See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/conversations` | List conversations, including the workflow-run projection. |
-| `POST` | `/api/conversations` | Create a conversation. |
+| `GET` | `/api/conversations` | List chat conversations. Excludes workflow-run conversations (`providerId !== "workflow"`); reach those through the `/api/workflows/runs*` endpoints. |
+| `POST` | `/api/conversations` | Create a conversation. Rejects `providerId` `"workflow"` with a 400 pointing at `POST /api/workflows/:name/runs`. |
 | `GET` | `/api/conversations/:id` | One conversation with its messages. |
 | `PATCH` | `/api/conversations/:id` | Update a conversation (for example, rename). |
 | `DELETE` | `/api/conversations/:id` | Delete a conversation. |
@@ -123,6 +123,7 @@ See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
 | `POST` | `/api/workflows/runs/:runId/resume` | Resume a paused run by replying to its approval node. |
 | `POST` | `/api/workflows/runs/:runId/resume-run` | Re-start an interrupted (failed or cancelled) run from the last successfully completed node. Distinct from the approval-pause resume above. |
 | `GET` | `/api/workflows/runs/:runId/artifact` | Read a file from a run's sandboxed artifact directory. |
+| `DELETE` | `/api/workflows/runs/:runId` | Cancel an in-flight run (`{ cancelled: true }`). With `?purge=1`, purge the run and cascade its node outputs and conversation (`{ deleted: true }`). 404 for an unknown or already-completed run. Origin-gated. |
 | `POST` | `/api/workflows/runs/bulk-delete` | Delete several runs at once. |
 | `GET` | `/api/workflows/worktree-paths` | The worktree directories isolated runs created. |
 | `WS` | `/api/workflows/runs/:runId/ws` | The run event stream: node start, stream, and settle, plus the approval-pause frame. |
@@ -145,6 +146,26 @@ See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
 | `POST` | `/api/memory/writeback` | Draft a memory through the guardrail gate. |
 
 See [Memory and state](../../concepts/memory-and-state/) for the governance model.
+
+## Usage
+
+Read-only token-usage observability. These endpoints back the SPA's Usage tab
+and the live pulse widget; they report token counts, never cost, and are a local
+observability surface, not a versioned public metrics contract. All five share a
+`window` param (`24h`, `7d`, or `30d`; default `7d`) and, where noted, a `groupBy`
+(`model`, `provider`, `source`, `rib`, `workflow`, or `sourceDetail`). The live
+pulse widget subscribes to the `USAGE_PULSE_SNAPSHOT_KEY` snapshot stream (today's
+totals plus a trailing series) rather than polling these routes.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/usage/summary` | Windowed totals grouped by `groupBy` (default `model`). |
+| `GET` | `/api/usage/series` | A time series over the window. `bucket` (`hour` \| `day`) defaults to `hour` for `24h` and `day` otherwise. |
+| `GET` | `/api/usage/breakdown` | A two-dimensional split: `groupBy` (default `source`) crossed with `splitBy` (default `model`). |
+| `GET` | `/api/usage/jobs` | Per-job token rollups over the window, backing the right-size nudge. |
+| `GET` | `/api/usage/events` | The raw usage events, newest first. `limit` caps at 500; filter by `source` (`chat` \| `workflow` \| `rib`), `model`, or `status`. |
+
+See [Usage](../../concepts/usage/) for the ledger model.
 
 ## Projects
 

@@ -101,10 +101,13 @@ chat turn. The order is fixed, and knowing it makes the harness predictable:
 2. The memory recall section: a few approved, recent, relevant items.
 3. The conversation's seed prompt, when a surface primed one.
 4. Workflow guidance, when workflow tools are active for the turn.
+5. Canvas-artifact guidance, when the `canvas_publish` tool rides the turn.
+6. Docs guidance, when the `keelson_docs` tool rides the turn.
 
-Nothing else is silently added. If the agent knows something across
-sessions, it came through one of those four doors, and three of them are
-files or rows you can read.
+The last two are tool-conditional, and since both tools register at boot they
+are normally present. Everything the agent knows across sessions arrives through
+one of these sections, and the ones that carry your own state (notebook, recall,
+seed) are files or rows you can read.
 
 ## Where to go next
 

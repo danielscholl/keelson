@@ -1,0 +1,101 @@
+---
+title: design-artifact
+description: Authors and publishes a designed, self-contained HTML page to the canvas through a fail-closed palette-validation gate, on whatever model the server offers.
+sidebar:
+  order: 9
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`design-artifact` authors a designed, self-contained HTML page and publishes it
+to the canvas: a run report, an audit briefing, a chart, a small dashboard. A
+single agent node reads the canvas design guide, writes one token-themed page in
+the keelson palette from your request, and publishes it through `canvas_publish`,
+which validates any declared chart palette **fail-closed** before the page
+reaches the drawer. It is the reference shape for turning data or findings into a
+shareable page, and the smallest workflow in the catalog: one node that does the
+whole job.
+
+The two tools it uses, `canvas_publish` and `canvas_design_guide`, are core
+harness primitives, not a rib's, so the workflow runs on any registered provider
+with nothing extra installed. For live operational status a rib already renders
+as a board, open that surface instead; an artifact earns its place when the
+deliverable is a designed page someone will read, keep, or share.
+
+## Invoke it
+
+```sh
+keelson workflow run design-artifact --inputs ARGUMENTS="a briefing on this week's merged PRs"
+keelson workflow run design-artifact --inputs ARGUMENTS="chart the last 30 days of token usage by model"
+```
+
+It pins no provider, so it runs against whatever the server registered. A page's
+quality tracks the authoring model, so this is the one catalog workflow you pin
+*up*: set `provider:`/`model:` in the file (or `KEELSON_WORKFLOW_PROVIDER`) to
+author at your strongest option. Unlike the GitHub-facing workflows it needs no
+`gh` CLI, no approval gate, and no human pause; any provider with the tool
+registry can run it.
+
+<Aside type="tip" title="Canvas is a core primitive">
+`canvas_publish` and `canvas_design_guide` ship with the harness, not with a
+rib, so this workflow is useful standalone with just a provider. The
+[canvas artifacts guide](../../guides/canvas-artifacts/) covers the publishing
+contract, the design tokens, and the validation in full.
+</Aside>
+
+## The shape
+
+One node, `author`, does the whole job. There is no DAG to draw: read the guide,
+write the page, publish it, and fix-and-republish on a rejected palette all
+happen inside a single agent turn. The iteration is the model's, not the
+executor's, so the workflow is one node rather than a read, author, validate,
+retry chain of them.
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `author` | prompt | Reads `canvas_design_guide` (`page`, then `form` when the page carries a chart, then `color`), authors one self-contained token-themed HTML page from `$ARGUMENTS`, and publishes it with `canvas_publish`, retrying on a rejected palette. Capped to `canvas_publish` and `canvas_design_guide`, bounded by a five-minute idle timeout. |
+
+### The parts worth a second look
+
+**The publish gate is fail-closed.** `canvas_publish` validates any palette the
+page declares on `<body data-palette-dark="…" data-palette-light="…">`, checking
+color-vision-deficiency separation and surface contrast per theme, and rejects a
+hard failure with a per-check report. The palette is checked by computation,
+never by eyeball, so a page cannot reach the drawer with an inaccessible chart.
+
+**A rejection self-corrects, it does not abort.** The `author` node leaves
+`fail_on_tool_error` at its default (off), so a rejected palette comes back as a
+tool error the node reads and acts on: it fixes the colors, prefers the keelson
+series slots, and publishes again in the same turn. The workflow finishes green
+because the author corrected, not because the check was skipped.
+
+**One page, both themes.** The prompt requires CSS custom properties with
+keelson's dark values on `:root` and light overrides on
+`:root[data-theme="light"]`, a system font stack, and no external resources, so
+the published page re-themes with the app and renders inside the sandboxed canvas
+frame whose CSP blocks all network egress.
+
+**The provider is deliberately open.** No `provider:`/`model:` pin, because
+artifact quality tracks the authoring model. It is the mirror image of the
+review workflows, which pin *down* to a deterministic coding model; here you pin
+*up* to your strongest one, or leave it open to ride the server default.
+
+## Patterns it demonstrates
+
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: `allowed_tools: [canvas_publish, canvas_design_guide]` caps the node to exactly the two canvas tools.
+- **Fail-closed tool validation**: the palette check inside `canvas_publish` gates the output, and the unset `fail_on_tool_error` default lets the node self-correct on a rejection instead of failing the run.
+- **A single-node workflow**: when the loop is the model's own (read, author, retry), the DAG collapses to one prompt node with the right tool rail.
+
+## Adapt it
+
+- **Pin the author.** Add `provider:`/`model:` (or set `KEELSON_WORKFLOW_PROVIDER`) to route authoring at your strongest model, the one adjustment this workflow most rewards.
+- **Fold it into a bigger workflow.** Drop the `author` node, its two tools and its prompt, at the tail of another pipeline so a run publishes its own designed report from the artifacts it just produced.
+- **Restyle the page.** The page inlines keelson's design tokens; change the CSS custom-property values the prompt seeds to reskin the output. The palette validator still gates any declared chart series.
+
+## Related
+
+- [Canvas artifacts](../../guides/canvas-artifacts/): the publishing contract, the design tokens, and the fail-closed validation in full.
+- [Snapshots and surfaces](../../concepts/snapshots-and-surfaces/): the canvas surface this page publishes into, and the streaming substrate behind it.
+- [Workflow nodes](../../reference/workflow-nodes/): the `prompt` node, `allowed_tools`, and `fail_on_tool_error`.

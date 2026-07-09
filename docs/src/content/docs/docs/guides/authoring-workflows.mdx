@@ -119,7 +119,9 @@ disambiguate retries.
 approval gate: it sends the human's reply and the run continues. `keelson workflow
 resume <runId>` is for a run that has already **terminated** (failed or cancelled):
 it re-enters the executor from the last successfully completed node so finished
-work is not repeated.
+work is not repeated (a node marked `always_run` re-runs anyway). You can also
+resume a terminated run by asking the agent (the `workflow_resume` chat/MCP tool)
+or from the Workflows surface in the browser.
 </Aside>
 
 ### Loop until done

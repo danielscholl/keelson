@@ -19,12 +19,14 @@ capability, not a reimplementation, and never sees the secrets behind it.
 ## What is exposed
 
 The gateway serves the same registry the chat agent reads: every active rib's
-tools, plus `workflow_list` and `workflow_status`. By default it exposes them
-**all**: `workflow_run` and `workflow_respond`, along with a rib's mutating tools
-(an OSDU cluster suspend, say), cross alongside the read-only tools. Restrict it to
-read-only with `exposeStateChanging: false` when you want a narrower surface. A
-hidden or denied tool is reported as unknown, so the endpoint never reveals what it
-is withholding.
+tools, plus the core tools `keelson_docs`, `workflow_list`, and `workflow_status`.
+Those three are read-only and always exposed: present even with zero ribs
+installed, and unaffected by `exposeStateChanging`. By default the gateway exposes
+the mutating surface too: `workflow_run` and `workflow_respond`, along with a rib's
+mutating tools (a rib's cluster-suspend action, say), alongside the read-only
+tools. Restrict it to read-only with `exposeStateChanging: false` when you want a
+narrower surface. A hidden or denied tool is reported as unknown, so the endpoint
+never reveals what it is withholding.
 
 <Aside type="note" title="Open on loopback by default">
 A fresh endpoint serves the full registry (state-changing tools included) on
@@ -60,9 +62,9 @@ so the wiring survives a restart or a non-default port.
 
 The skill lands in each agent's own skills directory: Copilot and Codex share
 `~/.agents/skills/keelson/SKILL.md` (both read it), and Claude reads its own
-`~/.claude/skills/keelson/SKILL.md`. It names no tool or rib: it points the agent at
-`keelson_docs` and the workflow tools, so it stays correct as you install or remove
-ribs.
+`~/.claude/skills/keelson/SKILL.md`. It names no rib and no rib-specific tool: it
+points the agent at `keelson_docs` and the workflow tools, so it stays correct as
+you install or remove ribs.
 
 Prefer to commit the wiring into a repo? `keelson connect claude --local` writes the
 repo-scoped equivalents instead — a project `.mcp.json` for Claude and the skill
@@ -103,6 +105,10 @@ HTTP MCP client straight at the endpoint:
 
 The endpoint is JSON-only: it answers `POST` with a single JSON-RPC reply and
 returns 405 for `GET`, since there is no server-to-client event stream.
+
+Any client that connects receives the server's `initialize`-time instructions,
+which point it at `keelson_docs` and the workflow tools, so even a hand-wired,
+skill-less client gets baseline orientation on where to look next.
 
 ## Bridge a stdio-only client
 

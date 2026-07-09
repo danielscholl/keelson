@@ -1,0 +1,114 @@
+---
+title: Usage
+description: Every agent turn writes one row to a token-usage ledger, and six read-only views turn that ledger into what ran, where, and on which model.
+sidebar:
+  order: 4.5
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Chat and workflows tell you what an agent did. Usage tells you what each turn
+consumed: every turn the harness runs, on any surface, is written to one ledger,
+and the Usage tab renders that ledger as six read-only views. It answers a
+question the other surfaces cannot give you on their own, where the tokens went,
+and it needs no rib. A running provider is enough to start filling it.
+
+Usage measures token counts, never currency. There is no price table anywhere in
+the harness. Everything on the tab is a count of tokens, a rate, or a turn tally,
+and the one recommendation it makes is a heuristic over those counts, not a bill.
+
+## One ledger, three capture seams
+
+The backbone is a single SQLite table, the **usage_events ledger**. Every agent
+turn that carries real token spend writes exactly one row to it, recorded from
+one of three **capture seams**:
+
+| Seam | Source | Written when |
+| --- | --- | --- |
+| A chat turn | `chat` | You send a message and the agent answers. |
+| A workflow prompt node | `workflow` | A `prompt` node in a run calls the model. |
+| A rib agent turn | `rib` | A rib runs its own agent turn through the harness. |
+
+A row records the provider, the model, input and output token counts, cache read
+and write counts, the turn's duration and status, and attribution back to the
+conversation, run, node, workflow, or rib that produced it. A turn that carried
+no spend, a content-only reply or a zero-total usage report, writes nothing: an
+empty row would only distort a rollup. The UI labels the ledger's row count
+**agent turns**.
+
+## The served model, not the requested one
+
+A row names the **served model**, the model that actually ran the turn, which is
+not always the one you asked for. A provider can resolve a model alias on its
+own: Copilot's default is `auto`, and it picks a concrete model session-side per
+call. When a turn resolves to a real model, that resolved name is what the ledger
+stores, so the model roster and the ledger read as what ran rather than what was
+requested. A turn that never resolves past the alias shows the alias, which the
+roster marks plainly as unresolved.
+
+## Six views over one ledger
+
+Every view reads the same ledger through a windowed query, and none of them
+writes. The tab's overview groups the first three; the model roster, jobs, and
+ledger each get their own sub-view.
+
+| View | Shows |
+| --- | --- |
+| Pulse | Today's running totals and a trailing-hour tokens-per-minute sparkline, streamed live. |
+| Over time | A stacked bar chart of tokens by served model across the window's buckets. |
+| Source to model flow | A ribbon diagram tracing which source (a chat, a workflow, a rib) drove which model. |
+| Model roster | Per model: turns, input and output tokens, cache read rate, average tokens per turn, and share of the window. |
+| Jobs | Per recurring workflow or rib job: runs, average and p95 tokens per run, and the window total. |
+| Ledger | The raw rows, newest first, filterable by source, model, and status. |
+
+## Windows are fixed
+
+Every view runs over one of three fixed windows, 24h, 7d, or 30d. The window is
+the only time control: a caller names it and the server derives the lookback
+bound from it. There is no way to pass an arbitrary start and end, which keeps
+the window and the bound from ever disagreeing. The 24h window charts by hour and
+the wider windows by day, so a legible number of buckets fills the axis either
+way.
+
+## The pulse streams live
+
+Pulse is the one view that does not poll. It rides the same snapshot substrate
+every rib surface uses: the server registers a built-in composer under
+`USAGE_PULSE_SNAPSHOT_KEY` that returns today's running totals plus a zero-filled
+trailing-sixty-minute series, and the browser subscribes to it. A turn's burst of
+ledger writes coalesces into a single recompose before it broadcasts, so a busy
+minute lands as one frame rather than a storm. Everything else on the tab is a
+plain read of a `/api/usage` endpoint over the selected window.
+
+## Tokens, not currency
+
+Usage is observability. It records what turns did run and shows you the shape of
+it; it never stops a turn and never prices one. The one recommendation it
+surfaces, the right-size nudge, flags a recurring workflow or rib job that has run
+at least three times and averaged under five hundred tokens a run, small enough
+that a lighter model would likely keep up. That threshold is a heuristic over
+per-run token averages, not a cost estimate.
+
+Ceilings live elsewhere. The [budget gate](../../guides/governance/) is a
+separate feature that denies a turn at request time once a running token or turn
+count crosses a limit on an expensive model. That is admission control, deciding
+whether a turn may run; Usage is the record of what already did. They share a
+vocabulary of tokens and nothing else.
+
+<Aside type="note" title="Two features, one vocabulary">
+The budget gate and the usage ledger both count tokens, and it is easy to read
+them as one system. They are not. The gate is a governance builtin that shapes a
+turn before it runs; the ledger is a passive record written after a turn settles.
+Neither reads the other's state.
+</Aside>
+
+## Where to go next
+
+- [Governance](../../guides/governance/) is the budget gate, the
+  admission-control counterpart to this observability ledger.
+- [Snapshots and surfaces](../snapshots-and-surfaces/) is the substrate the live
+  pulse streams over.
+- [Chat](../chat/) is where a turn's usage also surfaces inline, on the composer
+  usage chip.
+- [The API reference](../../reference/api/) documents the read-only `/api/usage`
+  endpoints behind every view.

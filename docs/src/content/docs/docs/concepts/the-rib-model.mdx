@@ -52,9 +52,10 @@ specific place in the harness. The figure shows the main destinations:
     alt="One rib package on the left, four labeled arrows crossing a dashed harness boundary to four destinations: the tool registry, snapshot keys under the rib's namespace, the workflow catalog, and the actions and auth status probes."
   />
   <figcaption>
-    Figure 1. One rib, four destinations. Each optional hook lands its
-    contribution in a specific harness registry, and everything the rib
-    touches stays under its own namespace.
+    Figure 1. One rib, several destinations. Each optional hook lands its
+    contribution in a specific harness registry; the figure traces the four
+    core ones, and policies, docs, agents, and commands land in registries of
+    their own. Everything the rib touches stays under its own namespace.
   </figcaption>
 </figure>
 
@@ -65,6 +66,7 @@ specific place in the harness. The figure shows the main destinations:
 | `views`, `surfaces` | Static declarations of how those snapshots appear, up to a full top-level tab in the browser. |
 | `contributeWorkflows` | Workflow definitions merged into the catalog at activation, optionally bound so a run's output republishes a snapshot key. |
 | `contributePolicies` | Governance policies merged into the harness policy engine at activation, evaluated at each turn's hook points. |
+| `contributeDocs` | Documentation sources the rib folds into the harness docs catalog, listed and sliced on demand by the `keelson_docs` tool, so an installed rib extends what the agent can read about itself. |
 | `onAction` | A handler for inbound actions over the loopback API, so a board's buttons can reach the rib. |
 | `listAgents`, `resolveAgent`, `listCommands`, `invokeCommand`, `completeCommand` | Named chat agents and slash commands the rib adds to the chat composer. |
 | `authStatus` | A credential probe surfaced in the rib inventory, so the harness can report whether the rib's external system is reachable. |
