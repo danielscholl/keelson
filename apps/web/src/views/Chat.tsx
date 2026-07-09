@@ -12,7 +12,7 @@ import {
   WIRE_PROTOCOL_VERSION,
 } from "@keelson/shared";
 import type { KeyboardEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   cloneProject,
   completeRibCommand,
@@ -63,6 +63,7 @@ import { useConversation } from "../hooks/useConversation.ts";
 import { useConversations } from "../hooks/useConversations.ts";
 import { useNotebookAppend } from "../hooks/useNotebookAppend.ts";
 import { type ModelRef, useSettings } from "../hooks/useSettings.ts";
+import { resizeTextareaToContent } from "../lib/autoGrowTextarea.ts";
 import { parsePublishedArtifact, publishedCanvasResult } from "../lib/chatCanvas.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 import { formatTokens, hasSpend } from "../lib/formatTokens.ts";
@@ -537,6 +538,7 @@ export function Chat({
   // forward-declaring abortActiveStream (which depends on later state).
   const abortActiveStreamRef = useRef<(() => void) | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Don't pin a default here; hydration may have already pinned the stored
   // conversation's provider, and clobbering would mix providers in one chat.
@@ -1570,6 +1572,32 @@ export function Chat({
     }
   }, [input, slashActiveLength]);
 
+  // Keyed on `input` (not onChange) so programmatic changes resize too —
+  // clear-on-send, slash fill, seed prefill, and queue restore all bypass
+  // onChange. useLayoutEffect so a large paste lands at the right height
+  // pre-paint instead of flashing the old one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: input is the deliberate re-run trigger; the body reads the DOM via inputRef
+  useLayoutEffect(() => {
+    if (inputRef.current) resizeTextareaToContent(inputRef.current);
+  }, [input]);
+
+  // The value effect above misses width changes (sidebar collapse, window
+  // resize) that rewrap the text without touching `input` — leaving the box
+  // clipped or slack until the next keystroke. Re-fit on width change; the
+  // width guard keeps our own height write from re-triggering the observer.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let lastWidth = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === lastWidth) return;
+      lastWidth = el.clientWidth;
+      resizeTextareaToContent(el);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   // Bridge React state to the native popover element. `manual` mode means the
   // browser won't toggle it for us; we explicitly call show/hide here and on
   // Escape from the textarea below.
@@ -2224,13 +2252,14 @@ export function Chat({
 
         <div className="chat-composer">
           <textarea
+            ref={inputRef}
             className="chat-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onInputKeyDown}
             placeholder="Type a message — Enter to send, Shift+Enter for newline"
             disabled={hydrating || !selectedProviderId}
-            rows={2}
+            rows={1}
           />
           <div className="chat-composer-chips">
             <ModelChip
