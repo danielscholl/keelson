@@ -9550,20 +9550,99 @@ a.cvb-card-title::after {
   font-size: 11px;
 }
 
-.usage-signals-grid {
+/* Recommendation strip — a single accent-toned banner above Pulse, shown only
+   when a real right-size finding exists. An action, not a metric; the metrics
+   live in Pulse. */
+.usage-reco {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 12px;
+  padding: 13px 40px 13px 17px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  overflow: hidden;
 }
-.usage-signal-card {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.usage-reco::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+.usage-reco-glyph {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 9px;
+  font-size: 16px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.usage-reco-body {
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--border);
+}
+.usage-reco-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 3px;
+}
+.usage-reco-head {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.usage-reco-head .usage-mono {
+  font-weight: 700;
+}
+.usage-reco-why {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.usage-reco-act {
+  flex: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 13px;
   border-radius: 8px;
-  background: var(--bg-soft);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, transparent);
+}
+.usage-reco-act:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.usage-reco-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 5px;
+}
+.usage-reco-dismiss:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 .usage-ledger-filters {
@@ -9585,8 +9664,13 @@ a.cvb-card-title::after {
 }
 
 @media (max-width: 760px) {
-  .usage-signals-grid {
-    grid-template-columns: 1fr;
+  .usage-reco {
+    grid-template-columns: auto 1fr;
+  }
+  .usage-reco-act {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 2px;
   }
   .usage-burn-row {
     grid-template-columns: 1fr;

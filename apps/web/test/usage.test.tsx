@@ -323,7 +323,7 @@ describe("Usage page", () => {
     getUsageJobsImpl = async () => [];
   });
 
-  test("renders deterministic usage signals", async () => {
+  test("leads the overview with a recommendation strip for a right-size finding", async () => {
     getUsageSummaryImpl = async () => ({
       totals: {
         events: 1,
@@ -343,6 +343,7 @@ describe("Usage page", () => {
         },
       ],
     });
+    // runs >= 3 and avg < 500 → a real finding, so the strip fires.
     getUsageJobsImpl = async () => [
       {
         key: "standing-lens",
@@ -352,46 +353,27 @@ describe("Usage page", () => {
         p95TokensPerRun: 400,
       },
     ];
-    getUsageEventsImpl = async (query) =>
-      query.status === "error"
-        ? [
-            {
-              id: 1,
-              ts: "2026-07-01T00:00:00.000Z",
-              source: "workflow",
-              provider: "codex",
-              model: "gpt-5.5",
-              inputTokens: 100,
-              outputTokens: 50,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              durationMs: 1000,
-              status: "error",
-              conversationId: null,
-              runId: "run-1",
-              nodeId: null,
-              workflowName: "standing-lens",
-              ribId: null,
-              projectId: null,
-            },
-          ]
-        : [];
+    getUsageEventsImpl = async () => [];
 
     await act(async () => {
       await renderUsagePage();
     });
 
-    await waitFor(() => expect(screen.getAllByText("Failure burn").length).toBeGreaterThan(0));
-    expect(screen.getByText(/top: standing-lens/)).toBeDefined();
-    expect(screen.getByText("Cheaper-model candidate")).toBeDefined();
+    // The strip leads the tab: it names the job and states the evidence.
+    await waitFor(() => expect(screen.getByText(/right-size a job/)).toBeDefined());
     expect(screen.getByText("standing-lens")).toBeDefined();
-    expect(screen.getByText(/likely fine on a smaller/)).toBeDefined();
+    expect(screen.getByText(/Ran 5×/)).toBeDefined();
+    expect(screen.getByText(/well under the bar/)).toBeDefined();
+
+    // Pulse still owns the facts (cache-read share) — no longer duplicated below.
     expect(screen.getByText("250 of 1.3k input")).toBeDefined();
     expect(screen.getAllByText("20%").length).toBeGreaterThan(0);
 
+    // The share meter still renders on the Models sub-view.
     fireEvent.click(screen.getByLabelText("Models"));
     await waitFor(() => expect(screen.getByText("claude-sonnet-5")).toBeDefined());
     expect(screen.getByText("20%")).toBeDefined();
+
     getUsageSummaryImpl = async () => ({
       totals: {
         events: 0,
@@ -406,7 +388,7 @@ describe("Usage page", () => {
     getUsageEventsImpl = async () => [];
   });
 
-  test("surfaces the warming-up cheaper-model signal for a cheap job below the run bar", async () => {
+  test("hides the recommendation strip when no job qualifies", async () => {
     getUsageSummaryImpl = async () => ({
       totals: {
         events: 1,
@@ -417,6 +399,7 @@ describe("Usage page", () => {
       },
       groups: [],
     });
+    // Cheap (avg < 500) but only 2 runs — under the run bar, so not a finding.
     getUsageJobsImpl = async () => [
       {
         key: "smoke-test",
@@ -432,14 +415,10 @@ describe("Usage page", () => {
       await renderUsagePage();
     });
 
-    await waitFor(() =>
-      expect(screen.getAllByText("Cheaper-model candidate").length).toBeGreaterThan(0),
-    );
-    // Warming up = cheap (avg < 500) but under the run bar (runs < 3); asserts the
-    // remaining-run countdown and the singular "run" branch of the pluralization.
-    expect(screen.getByText("Warming up")).toBeDefined();
-    expect(screen.getByText(/smoke-test looks cheap/)).toBeDefined();
-    expect(screen.getByText(/1 more run to flag it/)).toBeDefined();
+    // Pulse leads; nothing renders where the strip would be.
+    await waitFor(() => expect(screen.getByText("Pulse")).toBeDefined());
+    expect(screen.queryByText(/right-size a job/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /View in Jobs/ })).toBeNull();
 
     getUsageSummaryImpl = async () => ({
       totals: {
@@ -451,6 +430,29 @@ describe("Usage page", () => {
       },
       groups: [],
     });
+    getUsageJobsImpl = async () => [];
+  });
+
+  test("recommendation strip action opens the Jobs sub-view", async () => {
+    getUsageJobsImpl = async () => [
+      {
+        key: "repo-triage",
+        runs: 6,
+        totalTokens: 1920,
+        avgTokensPerRun: 320,
+        p95TokensPerRun: 400,
+      },
+    ];
+
+    await act(async () => {
+      await renderUsagePage();
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /View in Jobs/ }));
+
+    await waitFor(() => expect(screen.getByText("Avg tokens/run")).toBeDefined());
+    expect(screen.getAllByText("repo-triage").length).toBeGreaterThan(0);
+
     getUsageJobsImpl = async () => [];
   });
 
