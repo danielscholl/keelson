@@ -106,15 +106,17 @@ export function ModelCatalogPopover({
       if (nowOpen) {
         reposition();
         setQuery("");
-        // A transient catalog failure retries on each open, so the popover
-        // recovers without a page reload.
-        if (!catalog) reload();
+        // Retry only an actual failure, not the ordinary in-flight load
+        // (catalog is also null before /api/providers first resolves) —
+        // reload() bumps the load token, so retrying on every open during
+        // normal loading would keep superseding the very request in flight.
+        if (failed) reload();
         queueMicrotask(() => searchInputRef.current?.focus());
       }
     };
     popoverEl.addEventListener("toggle", onToggle);
     return () => popoverEl.removeEventListener("toggle", onToggle);
-  }, [reposition, catalog, reload]);
+  }, [reposition, failed, reload]);
 
   useEffect(() => {
     const popoverEl = popoverRef.current;

@@ -121,8 +121,7 @@ let started = false;
 // capabilities.models baseline), then each provider's live model list merges
 // in independently as its own fetch settles — mirrors Chat.tsx's fan-out
 // pattern. A single slow or hung provider therefore only ever holds back its
-// OWN section; it can no longer block every other provider's catalog from
-// rendering (the prior Promise.all-gated load did exactly that).
+// own section, never every other provider's.
 async function load(): Promise<void> {
   const token = ++loadToken;
   try {

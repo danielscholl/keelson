@@ -1086,12 +1086,11 @@ describe("model picker action fields", () => {
     });
   }
 
-  // The popover body's rows now mount only while genuinely open (a
-  // lazy-mount fix for N-cards-worth of hidden DOM), and happy-dom doesn't
-  // implement the declarative Popover API well enough for a plain click to
-  // fire a real "toggle" event — so tests open a picker by dispatching that
-  // event themselves, exactly like the browser would on a real popovertarget
-  // click.
+  // The popover body's rows mount only while genuinely open, and happy-dom
+  // doesn't implement the declarative Popover API well enough for a plain
+  // click to fire a real "toggle" event — so tests open a picker by
+  // dispatching that event themselves, exactly like the browser would on a
+  // real popovertarget click.
   function openPicker(trigger: HTMLElement): HTMLElement {
     const targetId = trigger.getAttribute("popovertarget");
     if (!targetId) throw new Error("trigger has no popovertarget");
