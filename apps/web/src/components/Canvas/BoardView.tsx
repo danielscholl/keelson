@@ -381,7 +381,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           <div className="cvb-action-form-controls">
             <button
               type="submit"
-              className="cvb-action-button"
+              className={`cvb-action-button${item.disabled ? " is-disabled" : ""}`}
               data-tone={item.tone}
               disabled={nativelyDisabled}
               aria-disabled={ariaDisabled}

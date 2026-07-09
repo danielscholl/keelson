@@ -192,6 +192,7 @@ ActionItem = {
   destructive?,         // marks the action dangerous: a simple confirm
   inline?,              // surface a destructive card action as a visible button, not the overflow menu
   confirm?: Confirm,    // typed/irreversible confirm-dialog metadata, distinct from the boolean destructive
+  hint?,                // descriptive hover tooltip (WHAT it does), any state; joins with reason when disabled
   disabled?, reason?,   // gate the button (dim + seal); reason is the tooltip WHY, only with disabled: true
   expanded?,            // render fields as an always-open hero form (inert without fields)
   payload?,             // opaque rib-defined context, dispatched verbatim
@@ -244,6 +245,11 @@ precondition the state cannot satisfy fails (a capability-gated tab whose curren
 cast cannot run it). `reason` is the human explanation of why, surfaced as a
 tooltip, and is valid only alongside `disabled: true`. A producer that recomputes
 preconditions re-emits both on each recompose, so a state change flips the gate.
+
+`hint` is a short descriptive tooltip — what the action does — surfaced on hover
+whether the action is enabled or disabled, so a producer can remind the operator
+what an unfamiliar button is for. Unlike `reason` it needs no `disabled`; on a
+disabled action the host shows both, the hint then the reason.
 
 `expanded` renders `fields` as an always-open form whose submit button carries
 the action's label, glyph, and tone, for a hero action whose input is the
