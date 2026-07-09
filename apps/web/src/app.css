@@ -1002,7 +1002,9 @@ button.tab:focus-visible {
 }
 
 .chat-input {
-  flex: 1 1 0;
+  /* Auto-grow writes an inline height; flex-basis 0 would override it and
+     squeeze the box back to min-height, so the textarea must not flex. */
+  flex: 0 0 auto;
   background: transparent;
   color: var(--fg);
   border: none;
@@ -1012,8 +1014,10 @@ button.tab:focus-visible {
   font-size: 13px;
   resize: none;
   min-height: 44px;
-  /* Mirrors CHAT_INPUT_MAX_HEIGHT in lib/autoGrowTextarea.ts — change both. */
-  max-height: 320px;
+  /* 320px mirrors CHAT_INPUT_MAX_HEIGHT in lib/autoGrowTextarea.ts — change
+     both. The dvh term tightens the cap on short windows so a full composer
+     can't squeeze the transcript out. */
+  max-height: min(320px, 40dvh);
   overflow-y: auto;
   line-height: 1.5;
 }
