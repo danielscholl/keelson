@@ -83,9 +83,10 @@ interface WarmClient {
   permissionHandler: CopilotPermissionHandler;
   token: string | undefined;
   cwd: string;
-  // How many in-flight turns are streaming on this client. Eviction defers the
-  // stop() while this is > 0 so a concurrent turn (e.g. a different workspace
-  // that thrashes the single warm slot) can't kill a subprocess mid-stream.
+  // How many turns hold this client, counted from acquireClient (not from
+  // session open) through release. Eviction defers the stop() while this is
+  // > 0 so a concurrent turn (e.g. a different workspace that thrashes the
+  // single warm slot) can't kill a subprocess mid-open or mid-stream.
   inUse: number;
   // Set when eviction wanted to stop a client that was still in use; the last
   // turn to release it performs the deferred stop.
@@ -193,14 +194,24 @@ export class CopilotProvider implements IAgentProvider {
   // workspace switch) evicts the stale client first so we never serve a turn on
   // a subprocess holding the wrong token. Concurrent callers coalesce onto a
   // single in-flight spawn.
+  //
+  // The returned client carries one lease (retain), taken in the same
+  // synchronous step that hands the reference out: a concurrent turn's
+  // eviction (workspace/credential mismatch) then defers the stop() instead of
+  // disposing the subprocess while this caller's session open is still
+  // pending. Every caller owns releasing that lease exactly once.
   private async acquireClient(token: string | undefined, cwd: string): Promise<WarmClient> {
     if (this.warm && this.warm.token === token && this.warm.cwd === cwd) {
+      this.retain(this.warm);
       return this.warm;
     }
     if (this.warmCreating) {
       try {
         const inflight = await this.warmCreating;
-        if (inflight.token === token && inflight.cwd === cwd) return inflight;
+        if (inflight.token === token && inflight.cwd === cwd) {
+          this.retain(inflight);
+          return inflight;
+        }
       } catch {
         // The in-flight spawn failed; fall through and try our own.
       }
@@ -217,6 +228,7 @@ export class CopilotProvider implements IAgentProvider {
         throw new Error("Copilot provider is disposed");
       }
       this.warm = warm;
+      this.retain(warm);
       return warm;
     } finally {
       if (this.warmCreatingGen === gen) this.warmCreating = null;
@@ -285,11 +297,11 @@ export class CopilotProvider implements IAgentProvider {
   // rate-limit failures are NOT connection errors, so they surface immediately
   // rather than burning a pointless respawn.
   //
-  // The lease is taken BEFORE the first open await so a concurrent eviction
-  // (a different-workspace turn thrashing the warm slot) defers the stop()
-  // rather than killing the subprocess mid-open. On success the returned client
-  // carries that one lease, which the caller releases; on any throw the lease
-  // is released here so nothing leaks.
+  // `warm` arrives holding the lease acquireClient took, so a concurrent
+  // eviction (a different-workspace turn thrashing the warm slot) defers the
+  // stop() rather than killing the subprocess mid-open. On success the
+  // returned client carries that one lease, which the caller releases; on any
+  // throw the lease is released here so nothing leaks.
   private async openSessionWithRetry(
     warm: WarmClient,
     token: string | undefined,
@@ -297,7 +309,6 @@ export class CopilotProvider implements IAgentProvider {
     resumeSessionId: string | undefined,
     buildConfig: (handler: CopilotPermissionHandler) => unknown,
   ): Promise<{ warm: WarmClient; session: CopilotSessionLike }> {
-    this.retain(warm);
     try {
       const session = await this.openSession(
         warm,
@@ -310,11 +321,11 @@ export class CopilotProvider implements IAgentProvider {
         this.release(warm);
         throw err;
       }
-      // Hand the lease from the wedged client to a fresh respawn.
+      // Hand the lease from the wedged client to a fresh respawn — the fresh
+      // client arrives already leased by acquireClient.
       this.release(warm);
       this.discardClient(warm);
       const fresh = await this.acquireClient(token, cwd);
-      this.retain(fresh);
       try {
         const session = await this.openSession(
           fresh,
@@ -401,10 +412,12 @@ export class CopilotProvider implements IAgentProvider {
         throw err instanceof Error ? err : new Error(msg);
       }
 
-      // Abort raced the spawn: leave the client warm for the next turn rather
-      // than stopping it, and don't open a session or send. Arm the idle timer so
-      // a freshly spawned, then-abandoned client is still bounded by eviction.
+      // Abort raced the spawn: release this turn's lease and leave the client
+      // warm for the next turn rather than stopping it, and don't open a
+      // session or send. Arm the idle timer so a freshly spawned,
+      // then-abandoned client is still bounded by eviction.
       if (options?.abortSignal?.aborted) {
+        this.release(warm);
         this.armIdleTimer();
         return;
       }
@@ -504,9 +517,9 @@ export class CopilotProvider implements IAgentProvider {
         session = opened.session;
         activeWarm = opened.warm;
         // openSessionWithRetry returns the client holding one lease; we own it
-        // now and release it in the finally. The lease was taken before the
-        // open await, so a concurrent eviction defers the stop() rather than
-        // killing this subprocess mid-stream.
+        // now and release it in the finally. The lease was taken back in
+        // acquireClient, so a concurrent eviction defers the stop() rather
+        // than killing this subprocess mid-open or mid-stream.
         retained = true;
       } catch (err) {
         // Session open failed even after the connection-respawn retry — the

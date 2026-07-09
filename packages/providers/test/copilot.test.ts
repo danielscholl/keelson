@@ -1208,6 +1208,64 @@ describe("CopilotProvider — warm client (issue #327)", () => {
     expect(stops[1]).toBe(true);
   });
 
+  it("concurrent turns on different workspaces both complete without cross-eviction", async () => {
+    // Two turns contend for the one warm slot: the second turn's workspace
+    // mismatch evicts the first turn's just-spawned client. The eviction must
+    // defer until the first turn releases its lease — a hard stop here rejects
+    // the first turn's pending session open the way the real SDK's JSON-RPC
+    // layer does ("Pending response rejected since connection got disposed").
+    let instances = 0;
+    class WorkspaceClient {
+      idx: number;
+      stopped = false;
+      constructor(public readonly options: Record<string, unknown>) {
+        this.idx = instances++;
+      }
+      async start() {}
+      async stop() {
+        this.stopped = true;
+        return [];
+      }
+      async createSession(): Promise<CopilotSessionLike> {
+        if (this.stopped) throw new Error(disposedConnectionMessage);
+        return makeSessionForRun((handlers) => {
+          if (this.stopped) throw new Error(disposedConnectionMessage);
+          emitSessionEvent(handlers, "assistant.message_delta", { deltaContent: "ok" });
+          emitSessionEvent(handlers, "session.idle");
+        });
+      }
+      async resumeSession() {
+        return this.createSession();
+      }
+      async getAuthStatus() {
+        return { isAuthenticated: true };
+      }
+      async listModels() {
+        return [];
+      }
+    }
+    const module = {
+      CopilotClient: WorkspaceClient as unknown as CopilotSdkModule["CopilotClient"],
+      approveAll: (() => ({ kind: "permit" })) as unknown as CopilotSdkModule["approveAll"],
+    };
+    const provider = new CopilotProvider({
+      getCredential: async () => "tok",
+      clientFactory: new CopilotClientFactory({ sdkLoader: async () => module }),
+    });
+
+    const [a, b] = await Promise.all([
+      drain(provider.sendQuery("one", "/workspace/a")),
+      drain(provider.sendQuery("two", "/workspace/b")),
+    ]);
+
+    expect(a).toEqual([{ type: "text", content: "ok" }]);
+    expect(b).toEqual([{ type: "text", content: "ok" }]);
+    // One client per workspace — a respawn here means an eviction disposed a
+    // client out from under the turn that had just acquired it.
+    expect(instances).toBe(2);
+    await provider.dispose();
+  });
+
   it("stops an in-flight spawn that resolves after dispose()", async () => {
     let releaseLoad: () => void = () => {};
     const loadGate = new Promise<void>((r) => {
