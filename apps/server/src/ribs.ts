@@ -39,6 +39,7 @@ import {
   type RibDocsSource,
   type RibProviderInfo,
   type RibSurfaceDescriptor,
+  type RibSurfaceRegion,
   type RibViewDescriptor,
   type RibWorkflowRunResult,
   ribDisplayNameSchema,
@@ -160,7 +161,11 @@ export interface ApplyRibsOptions {
   // Backs RibContext.refreshWorkflow; rib-id-scoped for parity/future per-rib
   // scoping. Optional so unit-test rigs without a controller stay deterministic
   // — absent leaves the seam off the ctx, cadence-only.
-  readonly refreshWorkflow?: (ribId: string, workflowName: string) => Promise<void>;
+  readonly refreshWorkflow?: (
+    ribId: string,
+    workflowName: string,
+    inputs?: Record<string, string>,
+  ) => Promise<void>;
   // Backs RibContext.runWorkflow: execute an in-memory workflow definition the rib
   // hands in, at the given cwd (default: the home), returning the run result.
   // Rib-id-scoped for parity/future per-rib policy. Optional so test rigs without a
@@ -311,7 +316,10 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
         ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
         : {}),
       ...(opts.refreshWorkflow
-        ? { refreshWorkflow: (workflowName: string) => opts.refreshWorkflow!(rib.id, workflowName) }
+        ? {
+            refreshWorkflow: (workflowName: string, inputs?: Record<string, string>) =>
+              opts.refreshWorkflow!(rib.id, workflowName, inputs),
+          }
         : {}),
       ...(opts.runWorkflow
         ? {
@@ -609,9 +617,9 @@ function assertInNamespace(ribId: string, namespace: string, key: string, label:
 // Every region of a surface layout, in render order (header, banner, row
 // columns, footer). The namespace check and the heartbeat scheduler share this
 // one walk so a region slot can't be honored by one and skipped by the other.
-export function allRegions(
-  layout: RibSurfaceDescriptor["layout"],
-): readonly { key: string; workflow?: string; cadenceMs?: number }[] {
+// Typed as the full region shape (a banner's omitted fields are optional), so
+// new contract fields never need a hand-widened pick here.
+export function allRegions(layout: RibSurfaceDescriptor["layout"]): readonly RibSurfaceRegion[] {
   const { header, banner, rows, footer } = layout;
   return [
     ...(header ? [header] : []),

@@ -66,6 +66,22 @@ describe("DynamicRegionStore.registerForRib", () => {
     ]);
   });
 
+  test("hasRegionWorkflow sees live regions across ribs and forgets removed ones", () => {
+    const store = createDynamicRegionStore({ onChange: () => {} });
+    const registerX = store.registerForRib("x", new Set(["main"]));
+    const registerY = store.registerForRib("y", new Set(["main"]));
+    expect(store.hasRegionWorkflow("re-author")).toBe(false);
+    registerX("main", { key: "rib:x:lens:a" });
+    const off = registerY("main", {
+      key: "rib:y:lens:b",
+      workflow: "re-author",
+      workflowArgs: { lens: "b" },
+    });
+    expect(store.hasRegionWorkflow("re-author")).toBe(true);
+    off();
+    expect(store.hasRegionWorkflow("re-author")).toBe(false);
+  });
+
   test("bumps revision and calls onChange on add and remove, once each", () => {
     let changes = 0;
     const store = createDynamicRegionStore({ onChange: () => changes++ });

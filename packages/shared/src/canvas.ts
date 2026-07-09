@@ -279,7 +279,8 @@ const canvasActionConfirmSchema = z
 // An action button a board offers; clicking dispatches `type` to the owning
 // rib's onAction, resolved from the board's snapshot-key namespace. `type` is a
 // rib-defined verb the base never enumerates (mirrors ribActionSchema).
-const canvasActionItemSchema = z
+// Exported: surfaceRegionSchema reuses it for a region's headActions.
+export const canvasActionItemSchema = z
   .object({
     type: z.string().min(1),
     label: z.string().min(1),

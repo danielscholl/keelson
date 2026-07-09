@@ -40,16 +40,20 @@ mock.module("../src/hooks/useSnapshot.ts", () => ({
 // Stub the trigger hook (not api.ts) so refresh-run wiring is observable without
 // the api.ts module mock that other suites set process-globally.
 const triggerCalls: string[] = [];
+const triggerHookArgs: Array<Record<string, string> | undefined> = [];
 let triggerRunning = false;
 let triggerError: string | null = null;
 mock.module("../src/hooks/useWorkflowTrigger.ts", () => ({
-  useWorkflowTrigger: (name?: string) => ({
-    running: name ? triggerRunning : false,
-    error: name ? triggerError : null,
-    trigger: () => {
-      if (name) triggerCalls.push(name);
-    },
-  }),
+  useWorkflowTrigger: (name?: string, workflowArgs?: Record<string, string>) => {
+    if (name) triggerHookArgs.push(workflowArgs);
+    return {
+      running: name ? triggerRunning : false,
+      error: name ? triggerError : null,
+      trigger: () => {
+        if (name) triggerCalls.push(name);
+      },
+    };
+  },
 }));
 
 const postRibActionCalls: Array<{ ribId: string; action: unknown }> = [];
@@ -102,6 +106,7 @@ beforeEach(() => {
   for (const k of Object.keys(reloadCalls)) delete reloadCalls[k];
   useSnapshotKeys.length = 0;
   triggerCalls.length = 0;
+  triggerHookArgs.length = 0;
   triggerRunning = false;
   triggerError = null;
   postRibActionCalls.length = 0;
@@ -750,5 +755,101 @@ describe("Surface", () => {
       layout: { rows: [{ columns: [{ key: "rib:squad:run", title: "Run" }] }] },
     });
     expect(container.querySelector(".surface-region-live")).toBeNull();
+  });
+
+  test("a region's workflowArgs reach the refresh trigger hook", () => {
+    live("rib:chamber:lens:morning-brief", board("Morning Brief", "Items", 4));
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              {
+                key: "rib:chamber:lens:morning-brief",
+                title: "morning-brief",
+                workflow: "chamber-lens-refresh",
+                workflowArgs: { lens: "morning-brief" },
+                cadenceMs: 3_600_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(triggerHookArgs).toContainEqual({ lens: "morning-brief" });
+  });
+
+  test("headActions render a head ⋯ menu whose destructive verb confirms, then dispatches", async () => {
+    live("rib:chamber:lens:brief", board("Brief", "Items", 2));
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              {
+                key: "rib:chamber:lens:brief",
+                title: "brief",
+                headActions: [
+                  {
+                    type: "retire-lens",
+                    label: "Retire lens…",
+                    destructive: true,
+                    payload: { id: "brief" },
+                    confirm: {
+                      title: "Retire lens",
+                      body: "Retire brief?",
+                      confirmLabel: "Retire",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Brief actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Retire lens…" }));
+    // Destructive → the confirm dialog gates the dispatch; nothing posted yet.
+    expect(postRibActionCalls).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Retire" }));
+    await waitFor(() =>
+      expect(postRibActionCalls).toEqual([
+        { ribId: "chamber", action: { type: "retire-lens", payload: { id: "brief" } } },
+      ]),
+    );
+  });
+
+  test("headActions survive hideRegionActions and a collapsed region", () => {
+    live("rib:chamber:lens:brief", board("Brief", "Items", 2));
+    renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      hideRegionActions: true,
+      layout: {
+        rows: [
+          {
+            columns: [
+              {
+                key: "rib:chamber:lens:brief",
+                title: "brief",
+                collapsible: true,
+                collapsed: true,
+                headActions: [{ type: "retire-lens", label: "Retire lens…", destructive: true }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    // Host chrome is suppressed and the body is folded away…
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(screen.queryByText("Items")).toBeNull();
+    // …but the rib's own head verbs stay reachable.
+    expect(screen.getByRole("button", { name: "Brief actions" })).toBeDefined();
   });
 });

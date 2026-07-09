@@ -57,6 +57,15 @@ export function deriveSurfaceSchedules(
           );
           continue;
         }
+        // An args-bearing region is client-driven only: the heartbeat fires runs
+        // with empty inputs, which would race the SPA's args-bearing runs on a
+        // different de-dupe key and hand an args-expecting producer nothing.
+        if (region.workflowArgs !== undefined) {
+          warnings.push(
+            `surface region '${region.key}' sets workflowArgs; refreshing client-side only, not on the server heartbeat`,
+          );
+          continue;
+        }
         const boundKey = resolveBoundKey(region.workflow);
         if (boundKey === undefined) {
           warnings.push(

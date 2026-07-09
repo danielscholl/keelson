@@ -114,9 +114,14 @@ export interface WorkflowStore {
   // newest `keep`, paired with their linked conversation so the caller can
   // cascade-delete both. Never returns a non-terminal run (a live producer is
   // left alone). The newest `keep` rows of any status are protected.
+  // Terminal `scheduled` runs beyond the newest `keep`, oldest-ranked first.
+  // Rows with started_at >= protectSince (ISO) are protected regardless of
+  // rank: a just-finished run must outlive its panel's poll loop, or the
+  // poller 404s on a run that succeeded.
   scheduledRunsToPrune(
     workflowName: string,
     keep: number,
+    protectSince?: string,
   ): Array<{ runId: string; conversationId: string | null }>;
   // Drives the Workflows-nav badge: caller polls for `paused` rows so other
   // tabs can show a pending-input count without subscribing to every run's WS.
@@ -412,20 +417,26 @@ export function createWorkflowStore(db: Database): WorkflowStore {
       const rows = db.query(sql).all(...params) as RunRow[];
       return rows.map(rowToRunSummary);
     },
-    scheduledRunsToPrune(workflowName, keep) {
+    scheduledRunsToPrune(workflowName, keep, protectSince) {
       const rows = db
         .query(
-          `SELECT id, conversation_id, status FROM workflow_runs
+          `SELECT id, conversation_id, status, started_at FROM workflow_runs
              WHERE workflow_name = ? AND origin = 'scheduled'
              ORDER BY started_at DESC, rowid DESC`,
         )
-        .all(workflowName) as { id: string; conversation_id: string | null; status: string }[];
+        .all(workflowName) as {
+        id: string;
+        conversation_id: string | null;
+        status: string;
+        started_at: string;
+      }[];
       const out: Array<{ runId: string; conversationId: string | null }> = [];
       const protectedCount = Math.max(0, Math.floor(keep));
       for (const r of rows.slice(protectedCount)) {
-        if (TERMINAL_RUN_STATUSES.includes(r.status as WorkflowRunStatus)) {
-          out.push({ runId: r.id, conversationId: r.conversation_id });
-        }
+        if (!TERMINAL_RUN_STATUSES.includes(r.status as WorkflowRunStatus)) continue;
+        // ISO-8601 with a fixed layout compares lexicographically.
+        if (protectSince !== undefined && r.started_at >= protectSince) continue;
+        out.push({ runId: r.id, conversationId: r.conversation_id });
       }
       return out;
     },

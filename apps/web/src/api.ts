@@ -421,15 +421,17 @@ export async function startWorkflowRun(
 }
 
 // Re-run a rib producer workflow to repopulate its bound snapshot key (a surface
-// panel's refresh). The server owns the working dir, so no body is needed.
+// panel's refresh). The server owns the working dir; optional `inputs` carry a
+// region's workflowArgs (e.g. which lens a shared per-item producer refreshes).
 export async function refreshWorkflow(
   workflowName: string,
+  inputs?: Record<string, string>,
 ): Promise<{ runId: string; workflowName?: string }> {
   return startWorkflowRunResponseSchema.parse(
     await apiRequest<unknown>(`/api/workflows/${encodeURIComponent(workflowName)}/refresh`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(inputs ? { inputs } : {}),
       errorBody: "json-error",
       label: `/api/workflows/${workflowName}/refresh`,
     }),

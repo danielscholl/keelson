@@ -4,16 +4,16 @@
 
 import {
   type CanvasBoardView,
-  type CanvasTone,
   canvasViewSchema,
   type OpenChatSeed,
   type RibSurfaceDescriptor,
+  type RibSurfaceRegion,
   ribIdFromKey,
 } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { postRibAction } from "../api.ts";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
-import { BoardBody, Segments } from "../components/Canvas/BoardView.tsx";
+import { BoardBody, CardOverflowActions, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
 import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
@@ -42,18 +42,9 @@ type LaunchWorkflow = (
 ) => void | Promise<void>;
 type OpenSurface = (surfaceId: string, regionKey?: string) => void;
 
-interface Region {
-  key: string;
-  workflow?: string;
-  cadenceMs?: number;
-  title?: string;
-  byline?: string;
-  glyph?: { char: string; tone?: CanvasTone };
-  collapsible?: boolean;
-  collapsed?: boolean;
-  live?: boolean;
-  hideWhenEmpty?: boolean;
-}
+// The shared contract type directly — a hand-mirrored interface here would
+// silently drop any field the schema gains next.
+type Region = RibSurfaceRegion;
 
 // A rib's primary surface: region-bound boards laid out as header → banner →
 // rows(columns) → footer. Each region owns an independent snapshot subscription
@@ -251,7 +242,7 @@ function SurfaceRegion({
   // The region's bound workflow re-runs on its cadence and on open while stale;
   // the new frame arrives over the live subscription. `freshness` is the head's
   // "updated Xm ago" readout — there is no manual per-region refresh control.
-  const runRefresh = useWorkflowTrigger(region.workflow);
+  const runRefresh = useWorkflowTrigger(region.workflow, region.workflowArgs);
   const busy = runRefresh.running;
   const freshness = useAutoRefresh({
     workflow: region.workflow,
@@ -309,6 +300,17 @@ function SurfaceRegion({
   // always available here, so onOpenCanvas wires unconditionally.
   const actions = useRibActionDispatch(ribId, {
     onSuccess,
+    onOpenChat: onExplore ? onOpenChat : undefined,
+    ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+    onOpenCanvas,
+    ...(onOpenSurface ? { onOpenSurface } : {}),
+  });
+  // Head verbs get a reload-only success path: a destructive head action often
+  // removes the region's own backing item, and re-running the refresh workflow
+  // for it would revive a just-deleted producer run (or 409 once the region's
+  // workflow declaration is gone with it).
+  const headActionApi = useRibActionDispatch(ribId, {
+    onSuccess: reload,
     onOpenChat: onExplore ? onOpenChat : undefined,
     ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
     onOpenCanvas,
@@ -497,6 +499,14 @@ function SurfaceRegion({
         >
           <span aria-hidden="true">⤢</span>
         </button>
+      )}
+      {/* Rib head verbs render outside the hideActions gate (that flag hides
+          host chrome, not the rib's own verbs) and while collapsed, so a
+          folded panel can still be retired. */}
+      {ribId && region.headActions && (
+        <BoardActionProvider run={headActionApi.run} reveal={headActionApi.reveal}>
+          <CardOverflowActions cardTitle={panelName} actions={region.headActions} />
+        </BoardActionProvider>
       )}
     </div>
   );

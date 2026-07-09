@@ -7,7 +7,13 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Rib, RibContext, RibSurfaceDescriptor, SnapshotManager } from "@keelson/shared";
+import type {
+  Rib,
+  RibContext,
+  RibSurfaceDescriptor,
+  RibSurfaceRegion,
+  SnapshotManager,
+} from "@keelson/shared";
 import type { WorkflowDefinition } from "@keelson/workflows";
 import { bootstrapRibs } from "../src/bootstrap.ts";
 import type { RibManifest } from "../src/ribs.ts";
@@ -19,7 +25,7 @@ import {
 } from "../src/scheduler.ts";
 import type { WorkflowController } from "../src/workflows-handler.ts";
 
-type Region = { key: string; workflow?: string; cadenceMs?: number };
+type Region = RibSurfaceRegion;
 
 function surface(id: string, columns: Region[]): RibSurfaceDescriptor {
   return { id, title: id, layout: { rows: [{ columns }] } };
@@ -88,6 +94,27 @@ describe("deriveSurfaceSchedules", () => {
     );
     expect(schedules).toEqual([]);
     expect(warnings[0]).toContain("has no workflow");
+  });
+
+  test("warns and skips an args-bearing region (client-driven only)", () => {
+    const { schedules, warnings } = deriveSurfaceSchedules(
+      [
+        manifest([
+          surface("s", [
+            {
+              key: "rib:osdu:lens:a",
+              workflow: "re-author",
+              workflowArgs: { lens: "a" },
+              cadenceMs: 600_000,
+            },
+          ]),
+        ]),
+      ],
+      keyResolver({ "re-author": "rib:osdu:lens:a" }),
+    );
+    expect(schedules).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("client-side only");
   });
 
   test("silently leaves a region without a cadence unscheduled", () => {
@@ -406,6 +433,29 @@ describe("bootstrapRibs refreshWorkflow resolver", () => {
     expect(calls[0]).toMatchObject({
       name: "chamber-roster",
       inputs: {},
+      workingDir: REFRESH_CWD,
+      origin: "scheduled",
+    });
+  });
+
+  test("optional inputs ride to the run (a per-item producer's args)", async () => {
+    isolateRibsEnv();
+    const sink: { ctx?: RibContext } = {};
+    const { calls, controller } = recordingController(({ name }) => ({
+      ok: true,
+      runId: `r-${name}`,
+      conversationId: "c",
+    }));
+    await bootstrapRibs({
+      available: { chamber: capturingRib(sink) },
+      getWorkflowController: () => controller,
+      refreshCwd: REFRESH_CWD,
+    });
+    await sink.ctx?.refreshWorkflow?.("chamber-lens-refresh", { lens: "morning-brief" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      name: "chamber-lens-refresh",
+      inputs: { lens: "morning-brief" },
       workingDir: REFRESH_CWD,
       origin: "scheduled",
     });

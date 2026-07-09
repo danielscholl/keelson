@@ -76,6 +76,7 @@ import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
 import { createProjectsStore, type ProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
+import { allRegions } from "./ribs.ts";
 import { ribsRoutes } from "./ribs-handler.ts";
 import { createScheduler, deriveSurfaceSchedules, makeBoundKeyResolver } from "./scheduler.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
@@ -478,6 +479,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     },
   });
 
+  const staticRegionWorkflows = new Set(
+    ribs.manifests.flatMap((manifest) =>
+      manifest.surfaces.flatMap((surface) =>
+        allRegions(surface.layout).flatMap((region) => (region.workflow ? [region.workflow] : [])),
+      ),
+    ),
+  );
   // Shared handler options so the HTTP routes and the in-process WorkflowController
   // drive runs through the identical wiring. The controller + chat tools are built
   // here (after the workflow subsystem exists, and NOT via the rib path which
@@ -497,6 +505,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // rib collector — its node uses absolute paths, so the cwd is nominal. Kept
     // off `defaultCwd` so the generic /runs path still rejects target-less starts.
     refreshCwd: KEELSON_HOME,
+    // The /refresh gate's region-declared leg: a workflow any active rib region
+    // names — statically in a surface layout, or at runtime via registerRegion —
+    // is refreshable even when unbound (it republishes through the rib's tools).
+    // Static manifests are frozen after boot, so their names hoist into a set;
+    // only the runtime-region check stays live.
+    isRegionWorkflow: (workflowName) =>
+      staticRegionWorkflows.has(workflowName) || dynamicRegionStore.hasRegionWorkflow(workflowName),
   };
   const workflowController = createWorkflowController(
     workflowHandlerOptions,

@@ -768,6 +768,142 @@ nodes:
     expect(body.error).toContain("not a refreshable producer");
   });
 
+  // A refresh-route rig: a RIB-CONTRIBUTED workflow (the region gate checks
+  // catalog provenance, so a plain filesystem fixture would 409) plus an
+  // optional binding, with regions declaring the given workflow names.
+  function makeRefreshRig(opts: {
+    name: string;
+    bound?: boolean;
+    regionWorkflows?: readonly string[];
+    sleepSeconds?: number;
+  }) {
+    const definition = {
+      name: opts.name,
+      description: "bash",
+      nodes: [{ id: "x", bash: opts.sleepSeconds ? `sleep ${opts.sleepSeconds}` : "echo hi" }],
+    };
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      extra: [definition as never],
+      ribProvenance: new Map([[opts.name, { ribId: "chamber", background: opts.bound === true }]]),
+    });
+    const contributed = catalog.get(opts.name);
+    if (!contributed) throw new Error("fixture workflow missing");
+    const db = openDatabase({ path: dbPath });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store: createWorkflowStore(db),
+      conversationStore: createConversationStore(db),
+      refreshCwd: tmpDir,
+      ...(opts.bound
+        ? { ribWorkflowBindings: new Map([[contributed, { publish: () => {} }]]) }
+        : {}),
+      isRegionWorkflow: (name) => (opts.regionWorkflows ?? []).includes(name),
+    });
+    return { app };
+  }
+
+  function postRefresh(app: Hono, name: string, body?: string) {
+    return app.fetch(
+      new Request(`http://test/api/workflows/${name}/refresh`, {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        ...(body === undefined ? {} : { body }),
+      }),
+    );
+  }
+
+  test("POST .../refresh admits a region-declared rib workflow and carries its inputs", async () => {
+    const { app } = makeRefreshRig({ name: "region-owned", regionWorkflows: ["region-owned"] });
+    const res = await postRefresh(
+      app,
+      "region-owned",
+      JSON.stringify({ inputs: { lens: "release-risks" } }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      inputs: Record<string, string>;
+      workingDir: string;
+    };
+    expect(run.inputs).toEqual({ lens: "release-risks" });
+    expect(run.workingDir).toBe(tmpDir);
+  });
+
+  test("POST .../refresh 409s a region-declared name shadowed by a filesystem workflow", async () => {
+    // The filesystem copy wins name resolution (non-rib provenance), so the
+    // region leg must refuse it — running the shadow would execute an
+    // operator's general workflow in the server home with no explicit target.
+    writeWorkflow(
+      "shadowed.yaml",
+      `name: shadowed
+description: bash
+nodes:
+  - id: x
+    bash: echo hi
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog: bootstrapWorkflows({ workflowDir: wfDir }),
+      store: createWorkflowStore(db),
+      conversationStore: createConversationStore(db),
+      refreshCwd: tmpDir,
+      isRegionWorkflow: (name) => name === "shadowed",
+    });
+    const res = await postRefresh(app, "shadowed");
+    expect(res.status).toBe(409);
+  });
+
+  test("POST .../refresh rejects inputs for a bound producer", async () => {
+    const { app } = makeRefreshRig({ name: "prod-bound", bound: true });
+    const res = await postRefresh(app, "prod-bound", JSON.stringify({ inputs: { lens: "x" } }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("takes no inputs");
+  });
+
+  test("POST .../refresh rejects malformed inputs and unparseable JSON, keeps empty bodies", async () => {
+    const { app } = makeRefreshRig({ name: "prod-shape", regionWorkflows: ["prod-shape"] });
+    const badShape = await postRefresh(app, "prod-shape", JSON.stringify({ inputs: { n: 7 } }));
+    expect(badShape.status).toBe(400);
+    // Truncated JSON must NOT fold to {} and run with silently-dropped inputs.
+    const truncated = await postRefresh(app, "prod-shape", '{"inputs":{"lens":"brief"}');
+    expect(truncated.status).toBe(400);
+    const empty = await postRefresh(app, "prod-shape");
+    expect(empty.status).toBe(200);
+  });
+
+  test("concurrent identical refreshes of an unbound region workflow collapse onto one run", async () => {
+    const { app } = makeRefreshRig({
+      name: "region-slow",
+      regionWorkflows: ["region-slow"],
+      sleepSeconds: 2,
+    });
+    const body = JSON.stringify({ inputs: { lens: "brief" } });
+    const first = await postRefresh(app, "region-slow", body);
+    expect(first.status).toBe(200);
+    const { runId: firstRun } = (await first.json()) as { runId: string };
+    // The two-tabs race: an identical (workflow, cwd, inputs) start while the
+    // first run is live must hand back the same run, not double the spend.
+    const second = await postRefresh(app, "region-slow", body);
+    expect(second.status).toBe(200);
+    const { runId: secondRun } = (await second.json()) as { runId: string };
+    expect(secondRun).toBe(firstRun);
+    // Different inputs are a different item — a fresh run.
+    const other = await postRefresh(
+      app,
+      "region-slow",
+      JSON.stringify({ inputs: { lens: "other" } }),
+    );
+    const { runId: otherRun } = (await other.json()) as { runId: string };
+    expect(otherRun).not.toBe(firstRun);
+    await pollUntilTerminal(app, firstRun, 15000);
+    await pollUntilTerminal(app, otherRun, 15000);
+  });
+
   test("POST .../runs rejects workingDir pointing at a file (not a directory)", async () => {
     writeWorkflow(
       "to-file.yaml",

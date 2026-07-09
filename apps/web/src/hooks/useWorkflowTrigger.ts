@@ -21,7 +21,12 @@ export interface WorkflowTriggerState {
 // server-side; the caller's own snapshot subscription swaps in the new frame —
 // this hook only owns the in-flight signal, not the data. `workflowName`
 // undefined makes `trigger` a no-op (a region with no refresh workflow).
-export function useWorkflowTrigger(workflowName: string | undefined): WorkflowTriggerState {
+// `workflowArgs` (a region's declared inputs) ride each run so a shared
+// per-item producer knows which item this region refreshes.
+export function useWorkflowTrigger(
+  workflowName: string | undefined,
+  workflowArgs?: Record<string, string>,
+): WorkflowTriggerState {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
@@ -39,7 +44,7 @@ export function useWorkflowTrigger(workflowName: string | undefined): WorkflowTr
     setError(null);
     void (async () => {
       try {
-        const { runId } = await refreshWorkflow(workflowName);
+        const { runId } = await refreshWorkflow(workflowName, workflowArgs);
         let settled = false;
         for (let i = 0; i < MAX_POLLS; i++) {
           await new Promise((r) => setTimeout(r, POLL_MS));
@@ -66,7 +71,7 @@ export function useWorkflowTrigger(workflowName: string | undefined): WorkflowTr
         if (!cancelledRef.current) setRunning(false);
       }
     })();
-  }, [workflowName, running]);
+  }, [workflowName, workflowArgs, running]);
 
   return { running, error, trigger };
 }

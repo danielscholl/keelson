@@ -290,7 +290,15 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   );
 }
 
-function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; actions: ActionItem[] }) {
+// Exported for the surface region head's ⋯ menu (region.headActions), which
+// dispatches through the same board-action context as a card's overflow.
+export function CardOverflowActions({
+  cardTitle,
+  actions,
+}: {
+  cardTitle: string;
+  actions: ActionItem[];
+}) {
   const ctx = useBoardActions();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -351,6 +359,7 @@ function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; action
   };
 
   const triggerAction = (item: ActionItem) => {
+    if (item.disabled === true) return;
     if (item.destructive) {
       setOpen(false);
       setConfirming(item);
@@ -447,7 +456,7 @@ function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; action
           role="menu"
           className="cvb-card-overflow-menu"
           onKeyDown={onMenuKeyDown}
-          aria-label={`${cardTitle} destructive actions`}
+          aria-label={`${cardTitle} actions`}
         >
           {actions.map((action, index) => (
             <button
@@ -458,8 +467,14 @@ function CardOverflowActions({ cardTitle, actions }: { cardTitle: string; action
               type="button"
               role="menuitem"
               className="cvb-card-overflow-item"
+              data-destructive={action.destructive || undefined}
               tabIndex={index === activeIndex ? 0 : -1}
+              // A schema-disabled item stays aria-disabled (not natively
+              // disabled) so it keeps hover/focus and its `reason` tooltip
+              // actually shows; triggerAction guards the dispatch to a no-op.
               disabled={pending}
+              aria-disabled={action.disabled === true || undefined}
+              title={action.reason}
               onMouseEnter={() => setActiveIndex(index)}
               onFocus={() => setActiveIndex(index)}
               onClick={() => triggerAction(action)}

@@ -195,6 +195,10 @@ export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>;
 export const isolationOverrideSchema = z.enum(["worktree", "none"]);
 export type IsolationOverride = z.infer<typeof isolationOverrideSchema>;
 
+// One inputs shape for every run-start body — /runs and /refresh feed the same
+// executor slot, so the two contracts must not drift.
+const workflowRunInputsSchema = z.record(z.string(), z.string()).default({});
+
 // POST /api/workflows/:name/runs request body.
 //
 // At least one of `projectId` / `workingDir` must be provided: the server
@@ -204,7 +208,7 @@ export type IsolationOverride = z.infer<typeof isolationOverrideSchema>;
 // are given, `workingDir` wins and `projectId` is recorded for display only.
 export const startWorkflowRunBodySchema = z
   .object({
-    inputs: z.record(z.string(), z.string()).default({}),
+    inputs: workflowRunInputsSchema,
     projectId: z.string().optional(),
     workingDir: z.string().optional(),
     isolation: isolationOverrideSchema.optional(),
@@ -215,6 +219,12 @@ export const startWorkflowRunBodySchema = z
     path: ["projectId"],
   });
 export type StartWorkflowRunBody = z.infer<typeof startWorkflowRunBodySchema>;
+
+// POST /api/workflows/:name/refresh request body. `inputs` carry a surface
+// region's workflowArgs to the producer re-run; the legacy empty body ("{}")
+// parses to no inputs.
+export const refreshWorkflowBodySchema = z.object({ inputs: workflowRunInputsSchema }).strict();
+export type RefreshWorkflowBody = z.infer<typeof refreshWorkflowBodySchema>;
 
 // POST /api/workflows/:name/runs response body. `workflowName` is the canonical
 // catalog name the run started under — it differs from the request-path name on

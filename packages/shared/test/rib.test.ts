@@ -167,6 +167,113 @@ describe("rib surface descriptor schema", () => {
     expect(s.layout.rows[0]?.columns[0]?.cadenceMs).toBe(7_200_000);
   });
 
+  it("carries optional workflowArgs alongside a region's workflow", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              {
+                key: "rib:chamber:lens:morning-brief",
+                workflow: "chamber-lens-refresh",
+                workflowArgs: { lens: "morning-brief" },
+                cadenceMs: 3_600_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(s.layout.rows[0]?.columns[0]?.workflowArgs).toEqual({ lens: "morning-brief" });
+  });
+
+  it("rejects non-string workflowArgs values", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "chamber",
+        title: "Chamber",
+        layout: {
+          rows: [
+            { columns: [{ key: "rib:chamber:lens:a", workflow: "w", workflowArgs: { n: 7 } }] },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("carries headActions shaped like board actions, confirm included", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              {
+                key: "rib:chamber:lens:a",
+                headActions: [
+                  {
+                    type: "retire-lens",
+                    label: "Retire lens…",
+                    glyph: "✕",
+                    tone: "warn",
+                    destructive: true,
+                    payload: { id: "a" },
+                    confirm: { title: "Retire lens", body: "Retire a?", confirmLabel: "Retire" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(s.layout.rows[0]?.columns[0]?.headActions?.[0]?.type).toBe("retire-lens");
+  });
+
+  it("rejects an empty, malformed, or over-cap headActions list", () => {
+    const region = (headActions: unknown) => ({
+      id: "chamber",
+      title: "Chamber",
+      layout: { rows: [{ columns: [{ key: "rib:chamber:lens:a", headActions }] }] },
+    });
+    expect(ribSurfaceDescriptorSchema.safeParse(region([])).success).toBe(false);
+    expect(ribSurfaceDescriptorSchema.safeParse(region([{ label: "no type" }])).success).toBe(
+      false,
+    );
+    expect(
+      ribSurfaceDescriptorSchema.safeParse(
+        region(Array.from({ length: 9 }, () => ({ type: "t", label: "L" }))),
+      ).success,
+    ).toBe(false);
+  });
+
+  it("rejects headActions carrying the board-card affordances", () => {
+    const region = (extra: Record<string, unknown>) => ({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:chamber:lens:a", headActions: [{ type: "t", label: "L", ...extra }] },
+            ],
+          },
+        ],
+      },
+    });
+    // A menu has no form: a field-collecting action would dispatch with its
+    // fields silently absent, so the schema refuses the shape outright.
+    expect(
+      ribSurfaceDescriptorSchema.safeParse(region({ fields: [{ name: "note", label: "Note" }] }))
+        .success,
+    ).toBe(false);
+    expect(ribSurfaceDescriptorSchema.safeParse(region({ expanded: true })).success).toBe(false);
+    expect(ribSurfaceDescriptorSchema.safeParse(region({ inline: true })).success).toBe(false);
+  });
+
   it("carries an optional live flag on header, banner, and column regions", () => {
     const s = ribSurfaceDescriptorSchema.parse({
       id: "squad",

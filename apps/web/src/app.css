@@ -3346,6 +3346,24 @@ button.tab:focus-visible {
 .surface-region[data-collapsed] {
   overflow: visible;
 }
+/* Region-head ⋯ verbs (region.headActions): the card overflow menu reused in the
+   head strip. Always visible there — a head verb is the region's own control, not
+   a hover-revealed card extra — and the open menu escapes the card's clip. */
+.surface-region-head .cvb-card-overflow {
+  margin-left: 0;
+  flex: none;
+}
+.surface-region-head .cvb-card-overflow-trigger {
+  opacity: 1;
+  width: 26px;
+  height: 26px;
+}
+.surface-region-head .cvb-card-overflow-menu {
+  z-index: 30;
+}
+.surface-region:has(.surface-region-head .cvb-card-overflow.is-open) {
+  overflow: visible;
+}
 
 /* Roster peek: identity dots beside the count; hover or focus the count to reveal the
    names. The names ride the popover so an identity colour never renders without its
@@ -3996,11 +4014,13 @@ select.cvb-action-field-select {
   background: var(--bg-soft);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 78%, transparent);
 }
+/* Danger tone rides the action's own destructive flag, not the menu context —
+   region headActions put non-destructive verbs in this same menu. */
 .cvb-card-overflow-item {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--danger);
+  color: var(--fg);
   text-align: left;
   padding: 6px 8px;
   font-size: 12px;
@@ -4009,11 +4029,20 @@ select.cvb-action-field-select {
 }
 .cvb-card-overflow-item:hover,
 .cvb-card-overflow-item:focus-visible {
-  background: color-mix(in srgb, var(--danger) 9%, transparent);
-  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 28%, transparent);
   outline: none;
 }
-.cvb-card-overflow-item:disabled {
+.cvb-card-overflow-item[data-destructive] {
+  color: var(--danger);
+}
+.cvb-card-overflow-item[data-destructive]:hover,
+.cvb-card-overflow-item[data-destructive]:focus-visible {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.cvb-card-overflow-item:disabled,
+.cvb-card-overflow-item[aria-disabled="true"] {
   opacity: 0.6;
   cursor: default;
 }

@@ -31,6 +31,7 @@ import {
   type Project,
   type RibWorkflowRunResult,
   recallRequestSchema,
+  refreshWorkflowBodySchema,
   resumeWorkflowRunBodySchema,
   type SnapshotManager,
   startWorkflowRunBodySchema,
@@ -149,6 +150,13 @@ export interface WorkflowsHandlerOptions {
   // Optional usage ledger. When set, each node_done carrying real usage records
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  // Whether an active rib surface region (static or runtime-added) declares this
+  // workflow as its refresh producer. Widens the `/refresh` gate beyond bound
+  // producers: a region may name an UNBOUND workflow (one that republishes
+  // through the rib's own tools rather than a bound key), and the SPA's panel
+  // refresh must be able to run it. Region-declared only — an arbitrary catalog
+  // workflow still goes through /runs with an explicit target.
+  isRegionWorkflow?: (workflowName: string) => boolean;
 }
 
 // Renders the user-facing dispatch bubble that anchors the workflow run inside
@@ -215,8 +223,11 @@ function ribIdFor(
 // Producer runs are refresh machinery, not history: keep only the newest few
 // terminal `scheduled` runs per workflow (the snapshot is the durable output),
 // cascading their linked conversations. Best-effort — a prune failure must never
-// break the run that triggered it.
+// break the run that triggered it. Recent runs are protected outright: many
+// per-item refreshes can share one workflow name, and a just-finished run must
+// outlive its panel's poll loop (useWorkflowTrigger polls up to ~6 minutes).
 const SCHEDULED_RUN_RETENTION = 5;
+const SCHEDULED_RUN_PRUNE_MIN_AGE_MS = 10 * 60_000;
 function pruneScheduledRuns(
   store: WorkflowStore,
   conversationStore: ConversationStore,
@@ -225,6 +236,7 @@ function pruneScheduledRuns(
   for (const { runId, conversationId } of store.scheduledRunsToPrune(
     workflowName,
     SCHEDULED_RUN_RETENTION,
+    new Date(Date.now() - SCHEDULED_RUN_PRUNE_MIN_AGE_MS).toISOString(),
   )) {
     // Conversation first (FK SET NULLs the run pointer), then the run row — so a
     // conversation-delete failure leaves both intact (no orphan) and the next
@@ -331,8 +343,13 @@ export interface ActiveRunEntry {
   artifactsDir?: string;
   // Identity for the run-start de-dup lookup: a concurrent start with the same
   // (workflow, workingDir, inputs) collapses onto this run. The heartbeat and a
-  // client refresh both target (collector, REPO_ROOT, {}). See runDedupeKey.
+  // bound producer's client refresh both target (collector, REPO_ROOT, {});
+  // args-bearing region refreshes collapse per input set. See runDedupeKey.
   dedupeKey: string;
+  // The resolved definition this run executes. The de-dup key is name-based,
+  // but one name can resolve differently per scope/origin (a project shadow vs
+  // the global copy), so a collapse must also match the definition itself.
+  definition?: WorkflowDefinition;
   conversationId: string;
 }
 
@@ -341,7 +358,9 @@ export interface ActiveRuns {
   get(runId: string): ActiveRunEntry | undefined;
   // The live run matching `dedupeKey`, or undefined. Backs the run-start de-dup
   // so an identical (workflow, workingDir, inputs) can't run twice concurrently.
-  findActive(dedupeKey: string): { runId: string; conversationId: string } | undefined;
+  findActive(
+    dedupeKey: string,
+  ): { runId: string; conversationId: string; definition?: WorkflowDefinition } | undefined;
   delete(runId: string): void;
   size(): number;
   abortAll(): Promise<void>;
@@ -423,10 +442,16 @@ class ActiveRunRegistry implements ActiveRuns {
     return this.runs.get(runId);
   }
 
-  findActive(dedupeKey: string): { runId: string; conversationId: string } | undefined {
+  findActive(
+    dedupeKey: string,
+  ): { runId: string; conversationId: string; definition?: WorkflowDefinition } | undefined {
     for (const [runId, entry] of this.runs) {
       if (entry.dedupeKey === dedupeKey) {
-        return { runId, conversationId: entry.conversationId };
+        return {
+          runId,
+          conversationId: entry.conversationId,
+          ...(entry.definition ? { definition: entry.definition } : {}),
+        };
       }
     }
     return undefined;
@@ -746,18 +771,24 @@ function startRunCore(
   );
   const name = workflow.name;
   const dedupeKey = runDedupeKey(name, workingDir, inputs);
-  // De-dup only non-isolated producer refreshes (rib collectors fired by the
-  // heartbeat, /refresh, and client SWR): a concurrent start with an identical
-  // (workflow, workingDir, inputs) already live returns that run, serializing
-  // the cold-boot client-open vs server-tick race. Arbitrary /runs and chat
-  // starts aren't collapsed, so their inputs are untouched. Isolated runs are
-  // excluded because they linger in activeRuns through an awaited worktree
+  // De-dup only non-isolated producer refreshes — bound producers AND any
+  // scheduled-origin start (the heartbeat, /refresh, a rib's ctx.refreshWorkflow),
+  // which covers unbound region workflows too: a concurrent start with an
+  // identical (workflow, workingDir, inputs) already live returns that run,
+  // serializing the two-tabs / client-open vs server-tick races. The live run
+  // must also be executing the SAME resolved definition — the key is name-based
+  // and one name can resolve differently per scope/origin (a manual run of a
+  // project shadow vs a scheduled run of the global copy). Arbitrary /runs and
+  // chat starts aren't collapsed, so their inputs are untouched. Isolated runs
+  // are excluded because they linger in activeRuns through an awaited worktree
   // teardown after `run_done` — de-duping them could hand back a terminal run.
   // A non-isolated run is gone by `run_done` (prompt delete), so the live run
   // matched here is never terminal.
-  if (ribWorkflowBindings?.has(workflow) && !isolationOn) {
+  if ((origin === "scheduled" || ribWorkflowBindings?.has(workflow)) && !isolationOn) {
     const existing = activeRuns.findActive(dedupeKey);
-    if (existing) return existing;
+    if (existing && existing.definition === workflow) {
+      return { runId: existing.runId, conversationId: existing.conversationId };
+    }
   }
   const runId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
@@ -839,6 +870,7 @@ function startRunCore(
     done,
     pendingApprovals,
     dedupeKey,
+    definition: workflow,
     conversationId: conversation.id,
   });
   // Retention is a creation-time invariant of scheduled runs, so it covers the
@@ -968,6 +1000,7 @@ function resumeRunCore(
     done,
     pendingApprovals,
     dedupeKey: runDedupeKey(workflow.name, run.workingDir, run.inputs),
+    definition: workflow,
     conversationId: run.conversationId,
   });
 
@@ -1484,6 +1517,7 @@ export function workflowsRoutes(
     snapshotManager,
     ribWorkflowBindings,
     usageStore,
+    isRegionWorkflow,
   } = opts;
   const {
     promptHandler: effectivePromptHandler,
@@ -1823,12 +1857,20 @@ export function workflowsRoutes(
 
   // Re-run a rib producer workflow to repopulate its bound snapshot key — the
   // "refresh" behind a surface panel's icon. Restricted to bound producers and
-  // run in the server's default working dir: a general workflow must still go
-  // through /runs with an explicit target (so it can't silently execute against
-  // the server's install dir), but a producer's node uses absolute paths, so the
-  // server owns the nominal cwd here. The new frame fans to the bound key, which
-  // the panel's live subscription picks up.
-  app.post("/api/workflows/:name/refresh", (c) => {
+  // rib-contributed workflows a rib region declares, and run in the server's
+  // default working dir: a general workflow must still go through /runs with an
+  // explicit target (so it can't silently execute against the server's install
+  // dir), but a producer's node uses absolute paths, so the server owns the
+  // nominal cwd here. The region leg checks catalog provenance, not just the
+  // name — a filesystem workflow shadowing a region-declared rib name resolves
+  // to non-rib provenance and stays 409, mirroring makeBoundKeyResolver's
+  // object-identity rule. The new frame fans to the bound key, which the
+  // panel's live subscription picks up; an unbound region workflow republishes
+  // through the rib's own tools instead. Optional `inputs` carry a region's
+  // workflowArgs (e.g. the lens id a shared per-item producer is refreshing) —
+  // region-leg only, since a bound producer's single key would make concurrent
+  // per-input runs clobber each other.
+  app.post("/api/workflows/:name/refresh", async (c) => {
     if (originForbidden(c)) {
       return c.json({ error: "forbidden origin" }, 403);
     }
@@ -1837,11 +1879,36 @@ export function workflowsRoutes(
     if (!workflow) {
       return c.json({ error: `No workflow named '${requested}'.` }, 404);
     }
-    if (!ribWorkflowBindings?.has(workflow)) {
+    const bound = ribWorkflowBindings?.has(workflow) === true;
+    const regionDeclared =
+      isRegionWorkflow?.(workflow.name) === true && ribIdFor(catalog, workflow.name) !== null;
+    if (!bound && !regionDeclared) {
       return c.json({ error: `workflow '${requested}' is not a refreshable producer` }, 409);
     }
     if (refreshCwd === undefined) {
       return c.json({ error: "server has no refresh working directory" }, 400);
+    }
+    // The historical body was empty/absent; that still means no inputs. A
+    // NON-EMPTY body must parse — folding malformed JSON to {} would run the
+    // producer with silently-dropped inputs and report success.
+    const rawBody = await c.req.text();
+    let body: unknown = {};
+    if (rawBody.trim().length > 0) {
+      try {
+        body = JSON.parse(rawBody);
+      } catch {
+        return c.json({ error: "invalid refresh body: not JSON" }, 400);
+      }
+    }
+    const parsedBody = refreshWorkflowBodySchema.safeParse(body);
+    if (!parsedBody.success) {
+      return c.json({ error: `invalid refresh body: ${parsedBody.error.message}` }, 400);
+    }
+    if (bound && Object.keys(parsedBody.data.inputs).length > 0) {
+      return c.json(
+        { error: `workflow '${requested}' is a bound producer — refresh takes no inputs` },
+        400,
+      );
     }
     try {
       const { runId } = startRunCore(
@@ -1859,7 +1926,7 @@ export function workflowsRoutes(
         },
         {
           workflow,
-          inputs: {},
+          inputs: parsedBody.data.inputs,
           workingDir: refreshCwd,
           projectId: null,
           resolvedProject: null,

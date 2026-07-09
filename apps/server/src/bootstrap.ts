@@ -314,13 +314,34 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const refreshCwd = options.refreshCwd;
   const refreshWorkflow =
     getWorkflowController && refreshCwd !== undefined
-      ? async (_ribId: string, workflowName: string): Promise<void> => {
+      ? async (
+          _ribId: string,
+          workflowName: string,
+          inputs?: Record<string, string>,
+        ): Promise<void> => {
           const controller = getWorkflowController();
           if (!controller) return;
+          // The TS signature can't bind a plain-JS rib: a non-record shape or a
+          // non-string value would persist into the run row and 500 every
+          // run-detail read, so skip the run rather than start it with
+          // silently-wrong inputs. (A bare string passes an Object.values check
+          // — its characters are strings — hence the full shape guard.)
+          if (
+            inputs !== undefined &&
+            (typeof inputs !== "object" ||
+              inputs === null ||
+              Array.isArray(inputs) ||
+              Object.values(inputs).some((v) => typeof v !== "string"))
+          ) {
+            console.warn(
+              `[keelson] refreshWorkflow '${workflowName}': inputs must be a string record; skipping`,
+            );
+            return;
+          }
           try {
             const result = controller.startRun({
               name: workflowName,
-              inputs: {},
+              inputs: inputs ?? {},
               workingDir: refreshCwd,
               origin: "scheduled",
             });
