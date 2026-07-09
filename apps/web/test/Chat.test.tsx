@@ -204,3 +204,21 @@ describe("Chat conversation switch", () => {
     expect(await screen.findByText("Second answer here")).toBeDefined();
   });
 });
+
+describe("Chat composer auto-grow", () => {
+  test("clamps the composer height to the cap on a multi-line change", async () => {
+    renderChat();
+    const textarea = (await screen.findByPlaceholderText(
+      "Type a message — Enter to send, Shift+Enter for newline",
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(textarea.disabled).toBe(false));
+
+    // happy-dom does no layout, so scrollHeight is 0; stub it above the cap so
+    // the effect measures a real over-cap value. The deterministic guarantee
+    // lives in autoGrowTextarea.test.ts.
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 500 });
+    fireEvent.change(textarea, { target: { value: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj" } });
+
+    expect(textarea.style.height).toBe("320px");
+  });
+});

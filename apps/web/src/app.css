@@ -1012,7 +1012,9 @@ button.tab:focus-visible {
   font-size: 13px;
   resize: none;
   min-height: 44px;
-  max-height: 140px;
+  /* Mirrors CHAT_INPUT_MAX_HEIGHT in lib/autoGrowTextarea.ts — change both. */
+  max-height: 320px;
+  overflow-y: auto;
   line-height: 1.5;
 }
 
