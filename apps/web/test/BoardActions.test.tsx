@@ -642,7 +642,7 @@ describe("board layout primitives", () => {
 
     const trigger = screen.getByRole("button", { name: "PostgreSQL actions" });
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    const menu = screen.getByRole("menu", { name: "PostgreSQL destructive actions" });
+    const menu = screen.getByRole("menu", { name: "PostgreSQL actions" });
     const item = within(menu).getByRole("menuitem", { name: "Delete" });
     fireEvent.click(item);
 
@@ -716,7 +716,7 @@ describe("inline card actions", () => {
     expect(container.querySelector(".cvb-card-actions")).toBeNull();
     const trigger = screen.getByRole("button", { name: "Aurora actions" });
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    const menu = screen.getByRole("menu", { name: "Aurora destructive actions" });
+    const menu = screen.getByRole("menu", { name: "Aurora actions" });
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
 
     const dialog = screen.getByRole("dialog");

@@ -4014,11 +4014,13 @@ select.cvb-action-field-select {
   background: var(--bg-soft);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 78%, transparent);
 }
+/* Danger tone rides the action's own destructive flag, not the menu context —
+   region headActions put non-destructive verbs in this same menu. */
 .cvb-card-overflow-item {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--danger);
+  color: var(--fg);
   text-align: left;
   padding: 6px 8px;
   font-size: 12px;
@@ -4027,9 +4029,17 @@ select.cvb-action-field-select {
 }
 .cvb-card-overflow-item:hover,
 .cvb-card-overflow-item:focus-visible {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 28%, transparent);
+  outline: none;
+}
+.cvb-card-overflow-item[data-destructive] {
+  color: var(--danger);
+}
+.cvb-card-overflow-item[data-destructive]:hover,
+.cvb-card-overflow-item[data-destructive]:focus-visible {
   background: color-mix(in srgb, var(--danger) 9%, transparent);
   border-color: color-mix(in srgb, var(--danger) 28%, transparent);
-  outline: none;
 }
 .cvb-card-overflow-item:disabled {
   opacity: 0.6;

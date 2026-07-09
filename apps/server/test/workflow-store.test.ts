@@ -604,6 +604,12 @@ describe("SQLite WorkflowStore", () => {
     expect(store.scheduledRunsToPrune("producer", 2).every((r) => r.conversationId !== null)).toBe(
       true,
     );
+    // protectSince shields recent rows regardless of rank: a burst of per-item
+    // refreshes must not prune a just-finished run out from under its poller.
+    expect(
+      store.scheduledRunsToPrune("producer", 2, "2025-01-01T00:00:01.000Z").map((r) => r.runId),
+    ).toEqual(["p0"]);
+    expect(store.scheduledRunsToPrune("producer", 2, "2025-01-01T00:00:00.000Z")).toEqual([]);
   });
 });
 

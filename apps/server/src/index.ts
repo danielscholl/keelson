@@ -479,6 +479,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     },
   });
 
+  const staticRegionWorkflows = new Set(
+    ribs.manifests.flatMap((manifest) =>
+      manifest.surfaces.flatMap((surface) =>
+        allRegions(surface.layout).flatMap((region) => (region.workflow ? [region.workflow] : [])),
+      ),
+    ),
+  );
   // Shared handler options so the HTTP routes and the in-process WorkflowController
   // drive runs through the identical wiring. The controller + chat tools are built
   // here (after the workflow subsystem exists, and NOT via the rib path which
@@ -501,12 +508,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // The /refresh gate's region-declared leg: a workflow any active rib region
     // names — statically in a surface layout, or at runtime via registerRegion —
     // is refreshable even when unbound (it republishes through the rib's tools).
+    // Static manifests are frozen after boot, so their names hoist into a set;
+    // only the runtime-region check stays live.
     isRegionWorkflow: (workflowName) =>
-      ribs.manifests.some((manifest) =>
-        manifest.surfaces.some((surface) =>
-          allRegions(surface.layout).some((region) => region.workflow === workflowName),
-        ),
-      ) || dynamicRegionStore.hasRegionWorkflow(workflowName),
+      staticRegionWorkflows.has(workflowName) || dynamicRegionStore.hasRegionWorkflow(workflowName),
   };
   const workflowController = createWorkflowController(
     workflowHandlerOptions,

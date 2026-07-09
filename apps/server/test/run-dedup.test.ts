@@ -27,12 +27,17 @@ import {
 } from "../src/workflows-handler.ts";
 import { rmTemp } from "./temp.ts";
 
-function liveEntry(dedupeKey: string, conversationId: string): ActiveRunEntry {
+function liveEntry(
+  dedupeKey: string,
+  conversationId: string,
+  definition?: WorkflowDefinition,
+): ActiveRunEntry {
   return {
     abort: new AbortController(),
     done: Promise.resolve(),
     pendingApprovals: new Map(),
     dedupeKey,
+    ...(definition ? { definition } : {}),
     conversationId,
   };
 }
@@ -117,15 +122,19 @@ nodes:
       activeRuns,
       createWorkflowSubscribers(),
     );
-    return { db, store, activeRuns, controller };
+    return { db, store, activeRuns, controller, catalog };
   }
 
   test("a concurrent start of a live bound producer returns the existing run", () => {
-    const { db, store, activeRuns, controller } = makeRig(true);
+    const { db, store, activeRuns, controller, catalog } = makeRig(true);
     try {
       activeRuns.register(
         "pre-run",
-        liveEntry(runDedupeKey("collect", canonicalPath(tmpDir), {}), "pre-conv"),
+        liveEntry(
+          runDedupeKey("collect", canonicalPath(tmpDir), {}),
+          "pre-conv",
+          catalog.get("collect"),
+        ),
       );
 
       const result = controller.startRun({ name: "collect", inputs: {}, workingDir: tmpDir });
@@ -134,6 +143,27 @@ nodes:
       // No second run row, no second registration — the start short-circuited.
       expect(activeRuns.size()).toBe(1);
       expect(store.listRuns()).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a live run of a DIFFERENT resolved definition never absorbs the start", async () => {
+    // Same name + cwd + inputs, but the live entry executes another definition
+    // (a project shadow vs the global copy) — collapsing would hand back a run
+    // of the wrong workflow.
+    const { db, store, activeRuns, controller } = makeRig(true);
+    try {
+      activeRuns.register(
+        "pre-run",
+        liveEntry(runDedupeKey("collect", canonicalPath(tmpDir), {}), "pre-conv"),
+      );
+      const result = controller.startRun({ name: "collect", inputs: {}, workingDir: tmpDir });
+      if (!result.ok) throw new Error(result.message);
+      expect(result.runId).not.toBe("pre-run");
+      expect(store.listRuns()).toHaveLength(1);
+      // Drain the spawned run so it doesn't write to a closed db.
+      await activeRuns.get(result.runId)?.done;
     } finally {
       db.close();
     }

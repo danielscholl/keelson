@@ -39,6 +39,7 @@ import {
   type RibDocsSource,
   type RibProviderInfo,
   type RibSurfaceDescriptor,
+  type RibSurfaceRegion,
   type RibViewDescriptor,
   type RibWorkflowRunResult,
   ribDisplayNameSchema,
@@ -616,12 +617,9 @@ function assertInNamespace(ribId: string, namespace: string, key: string, label:
 // Every region of a surface layout, in render order (header, banner, row
 // columns, footer). The namespace check and the heartbeat scheduler share this
 // one walk so a region slot can't be honored by one and skipped by the other.
-export function allRegions(layout: RibSurfaceDescriptor["layout"]): readonly {
-  key: string;
-  workflow?: string;
-  workflowArgs?: Record<string, string>;
-  cadenceMs?: number;
-}[] {
+// Typed as the full region shape (a banner's omitted fields are optional), so
+// new contract fields never need a hand-widened pick here.
+export function allRegions(layout: RibSurfaceDescriptor["layout"]): readonly RibSurfaceRegion[] {
   const { header, banner, rows, footer } = layout;
   return [
     ...(header ? [header] : []),

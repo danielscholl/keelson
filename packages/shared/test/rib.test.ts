@@ -250,6 +250,30 @@ describe("rib surface descriptor schema", () => {
     ).toBe(false);
   });
 
+  it("rejects headActions carrying the board-card affordances", () => {
+    const region = (extra: Record<string, unknown>) => ({
+      id: "chamber",
+      title: "Chamber",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:chamber:lens:a", headActions: [{ type: "t", label: "L", ...extra }] },
+            ],
+          },
+        ],
+      },
+    });
+    // A menu has no form: a field-collecting action would dispatch with its
+    // fields silently absent, so the schema refuses the shape outright.
+    expect(
+      ribSurfaceDescriptorSchema.safeParse(region({ fields: [{ name: "note", label: "Note" }] }))
+        .success,
+    ).toBe(false);
+    expect(ribSurfaceDescriptorSchema.safeParse(region({ expanded: true })).success).toBe(false);
+    expect(ribSurfaceDescriptorSchema.safeParse(region({ inline: true })).success).toBe(false);
+  });
+
   it("carries an optional live flag on header, banner, and column regions", () => {
     const s = ribSurfaceDescriptorSchema.parse({
       id: "squad",

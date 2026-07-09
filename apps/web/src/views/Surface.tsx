@@ -3,12 +3,11 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import {
-  type CanvasActionItem,
   type CanvasBoardView,
-  type CanvasTone,
   canvasViewSchema,
   type OpenChatSeed,
   type RibSurfaceDescriptor,
+  type RibSurfaceRegion,
   ribIdFromKey,
 } from "@keelson/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -43,20 +42,9 @@ type LaunchWorkflow = (
 ) => void | Promise<void>;
 type OpenSurface = (surfaceId: string, regionKey?: string) => void;
 
-interface Region {
-  key: string;
-  workflow?: string;
-  workflowArgs?: Record<string, string>;
-  cadenceMs?: number;
-  title?: string;
-  byline?: string;
-  glyph?: { char: string; tone?: CanvasTone };
-  collapsible?: boolean;
-  collapsed?: boolean;
-  live?: boolean;
-  hideWhenEmpty?: boolean;
-  headActions?: CanvasActionItem[];
-}
+// The shared contract type directly — a hand-mirrored interface here would
+// silently drop any field the schema gains next.
+type Region = RibSurfaceRegion;
 
 // A rib's primary surface: region-bound boards laid out as header → banner →
 // rows(columns) → footer. Each region owns an independent snapshot subscription
@@ -317,6 +305,17 @@ function SurfaceRegion({
     onOpenCanvas,
     ...(onOpenSurface ? { onOpenSurface } : {}),
   });
+  // Head verbs get a reload-only success path: a destructive head action often
+  // removes the region's own backing item, and re-running the refresh workflow
+  // for it would revive a just-deleted producer run (or 409 once the region's
+  // workflow declaration is gone with it).
+  const headActionApi = useRibActionDispatch(ribId, {
+    onSuccess: reload,
+    onOpenChat: onExplore ? onOpenChat : undefined,
+    ...(onLaunchWorkflow ? { onLaunchWorkflow } : {}),
+    onOpenCanvas,
+    ...(onOpenSurface ? { onOpenSurface } : {}),
+  });
 
   const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
@@ -501,14 +500,11 @@ function SurfaceRegion({
           <span aria-hidden="true">⤢</span>
         </button>
       )}
-      {/* Rib-supplied head verbs (region.headActions): rendered even when the
-          surface hides the HOST chrome above (hideRegionActions targets the
-          explore/select/expand controls, not the rib's own verbs) and while
-          collapsed, so a folded panel can still be retired. Dispatches through
-          the same rib-action path as board buttons; ribId-null keys render no
-          menu (there is nowhere to dispatch to). */}
-      {ribId && region.headActions && region.headActions.length > 0 && (
-        <BoardActionProvider run={actions.run} reveal={actions.reveal}>
+      {/* Rib head verbs render outside the hideActions gate (that flag hides
+          host chrome, not the rib's own verbs) and while collapsed, so a
+          folded panel can still be retired. */}
+      {ribId && region.headActions && (
+        <BoardActionProvider run={headActionApi.run} reveal={headActionApi.reveal}>
           <CardOverflowActions cardTitle={panelName} actions={region.headActions} />
         </BoardActionProvider>
       )}

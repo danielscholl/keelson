@@ -359,6 +359,7 @@ export function CardOverflowActions({
   };
 
   const triggerAction = (item: ActionItem) => {
+    if (item.disabled === true) return;
     if (item.destructive) {
       setOpen(false);
       setConfirming(item);
@@ -455,7 +456,7 @@ export function CardOverflowActions({
           role="menu"
           className="cvb-card-overflow-menu"
           onKeyDown={onMenuKeyDown}
-          aria-label={`${cardTitle} destructive actions`}
+          aria-label={`${cardTitle} actions`}
         >
           {actions.map((action, index) => (
             <button
@@ -466,8 +467,10 @@ export function CardOverflowActions({
               type="button"
               role="menuitem"
               className="cvb-card-overflow-item"
+              data-destructive={action.destructive || undefined}
               tabIndex={index === activeIndex ? 0 : -1}
-              disabled={pending}
+              disabled={pending || action.disabled === true}
+              title={action.reason}
               onMouseEnter={() => setActiveIndex(index)}
               onFocus={() => setActiveIndex(index)}
               onClick={() => triggerAction(action)}
