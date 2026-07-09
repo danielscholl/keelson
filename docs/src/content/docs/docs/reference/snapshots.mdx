@@ -200,14 +200,33 @@ ActionItem = {
 ```
 
 An `ActionField` is `{ name, label, placeholder?, required?, multiline?,
-options?, defaultValue? }`. When a button declares `fields`, clicking it opens a
-small form, and the collected `{ name: value }` map is merged into the dispatched
-payload. Field names must be unique within an action. `options` (an array of
-`{ value, label }`) renders a select instead of a text input: the dispatched
-value is the chosen option's `value`, a non-required select offers `placeholder`
-as an empty "none" option, and the option values must be unique. It is mutually
-exclusive with `multiline`. `defaultValue` pre-fills the control; for a select it
-must name an option value or `""`.
+options?, modelPicker?, defaultValue? }`. When a button declares `fields`,
+clicking it opens a small form, and the collected `{ name: value }` map is merged
+into the dispatched payload. Field names must be unique within an action.
+`options` (an array of `{ value, label }`) renders a select instead of a text
+input: the dispatched value is the chosen option's `value`, a non-required select
+offers `placeholder` as an empty "none" option, and the option values must be
+unique. It is mutually exclusive with `multiline`. `defaultValue` pre-fills the
+control; for a select it must name an option value or `""`.
+
+`modelPicker` (`{ providerField?, providerDefault? }`) renders the host's live
+provider/model catalog as a searchable picker instead of a producer-supplied
+choice set, so a board never hardcodes a model list. The dispatched value is the
+chosen model id; `providerField` names a companion payload key that carries the
+chosen model's provider id, and `providerDefault` seeds that key so an untouched
+submit re-affirms the current provider/model pair rather than clearing it. A
+non-required picker offers `placeholder` as its clear row (dispatching `""` for
+both keys), and `defaultValue` may be any model id — on- or off-catalog — so a
+hand-pinned model stays visible. It is mutually exclusive with `multiline` and
+`options`. `providerField` must not collide with the field's own `name`, any
+sibling field's `name`, or another `modelPicker` field's `providerField` — every
+one of those lands in the same dispatched payload map, so a collision would
+silently overwrite a value; the schema rejects it at publish. When the picker is
+the action's **only** field and the action is not `expanded`, the host skips the
+intermediate form: the action button opens the catalog directly and picking
+dispatches immediately (dismissing the popover is the cancel). An `expanded`
+action always renders its always-open form and requires submit, even with a
+single picker field.
 
 `inline` surfaces a destructive card action as a visible, still-confirm-guarded
 button on the card instead of hiding it in the card's overflow (⋯) menu. It is

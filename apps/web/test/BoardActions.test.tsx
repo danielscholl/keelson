@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { CanvasBoardView, RibAction, RibActionResult } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BoardActionProvider } from "../src/components/Canvas/BoardActionContext.tsx";
 import { BoardView } from "../src/components/Canvas/BoardView.tsx";
+import { configureModelCatalog } from "../src/lib/modelCatalog.ts";
 
 // Dispatch is injected at the provider, so these tests never touch api.ts —
 // sidestepping bun's process-global mock.module leakage that other web suites
@@ -1045,5 +1046,219 @@ describe("board actions — select fields and capability gating", () => {
     fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
     await Promise.resolve();
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("model picker action fields", () => {
+  // The catalog is injected through configureModelCatalog rather than
+  // mock.module(api.ts) — several suites mock that module process-globally,
+  // and this seam keeps these tests hermetic regardless of file order.
+  beforeEach(() => {
+    stubCatalog();
+  });
+  afterEach(() => {
+    configureModelCatalog();
+  });
+
+  function stubCatalog() {
+    configureModelCatalog({
+      fetchProviders: async () => ({
+        providers: [
+          {
+            id: "pi",
+            displayName: "Pi (community)",
+            capabilities: {
+              sessionResume: false,
+              streaming: true,
+              tools: false,
+              models: [],
+              defaultModel: "",
+            },
+            builtIn: true,
+          },
+        ],
+        defaultProvider: null,
+      }),
+      fetchProviderModels: async () => [
+        { id: "anthropic/claude-opus-4.5", displayName: "Claude Opus 4.5" },
+        { id: "google/gemini-2.5-pro", displayName: "Gemini 2.5 Pro" },
+      ],
+    });
+  }
+
+  // The popover body's rows mount only while genuinely open, and happy-dom
+  // doesn't implement the declarative Popover API well enough for a plain
+  // click to fire a real "toggle" event — so tests open a picker by
+  // dispatching that event themselves, exactly like the browser would on a
+  // real popovertarget click.
+  function openPicker(trigger: HTMLElement): HTMLElement {
+    const targetId = trigger.getAttribute("popovertarget");
+    if (!targetId) throw new Error("trigger has no popovertarget");
+    const popoverEl = document.getElementById(targetId);
+    if (!popoverEl) throw new Error(`no element with id ${targetId}`);
+    const evt = new Event("toggle");
+    Object.defineProperty(evt, "newState", { value: "open", configurable: true });
+    act(() => {
+      popoverEl.dispatchEvent(evt);
+    });
+    return popoverEl;
+  }
+
+  function soloPickerItem(slug: string, defaults?: { model?: string; provider?: string }) {
+    return {
+      type: "set-model",
+      label: `Model — ${defaults?.model ?? "default"} (${slug})`,
+      payload: { slug },
+      fields: [
+        {
+          name: "model",
+          label: "Model",
+          placeholder: "default (inherit)",
+          modelPicker: {
+            providerField: "provider",
+            ...(defaults?.provider ? { providerDefault: defaults.provider } : {}),
+          },
+          ...(defaults?.model ? { defaultValue: defaults.model } : {}),
+        },
+      ],
+    };
+  }
+
+  test("an action whose only field is a picker skips the form and dispatches model + provider on pick", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={actionsBoard([soloPickerItem("ada") as never])} />
+      </BoardActionProvider>,
+    );
+    // No intermediate form renders — the button is the picker trigger.
+    expect(container.querySelector(".cvb-action-form")).toBeNull();
+    // Rows lazy-mount only while the popover is open — nothing to find yet.
+    expect(screen.queryByText("Claude Opus 4.5")).toBeNull();
+    openPicker(screen.getByRole("button", { name: "Model — default (ada)" }));
+    fireEvent.click(await screen.findByText("Claude Opus 4.5"));
+    await waitFor(() =>
+      expect(calls).toEqual([
+        {
+          type: "set-model",
+          payload: { slug: "ada", model: "anthropic/claude-opus-4.5", provider: "pi" },
+        },
+      ]),
+    );
+  });
+
+  test("the clear row dispatches empty model and provider over the seeded defaults", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView
+          view={actionsBoard([
+            soloPickerItem("ada", { model: "anthropic/claude-opus-4.5", provider: "pi" }) as never,
+          ])}
+        />
+      </BoardActionProvider>,
+    );
+    openPicker(screen.getByRole("button", { name: "Model — anthropic/claude-opus-4.5 (ada)" }));
+    fireEvent.click(await screen.findByText("default (inherit)"));
+    await waitFor(() =>
+      expect(calls).toEqual([
+        { type: "set-model", payload: { slug: "ada", model: "", provider: "" } },
+      ]),
+    );
+  });
+
+  test("repeated picker actions anchor and dispatch per card, with unique popover ids", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView
+          view={actionsBoard([soloPickerItem("ada") as never, soloPickerItem("bo") as never])}
+        />
+      </BoardActionProvider>,
+    );
+    const anchors = [...container.querySelectorAll(".cvb-action-button[popovertarget]")];
+    const targets = anchors.map((a) => a.getAttribute("popovertarget"));
+    expect(targets).toHaveLength(2);
+    expect(new Set(targets).size).toBe(2);
+    // Nothing is mounted before either popover opens.
+    expect(screen.queryByText("Gemini 2.5 Pro")).toBeNull();
+    // Opening the SECOND card's popover surfaces only its own row (proof the
+    // unique ids actually anchor each card to its own catalog, not a shared
+    // or the first card's), and picking it dispatches the second card's payload.
+    openPicker(screen.getByRole("button", { name: "Model — default (bo)" }));
+    const rows = await screen.findAllByText("Gemini 2.5 Pro");
+    expect(rows).toHaveLength(1);
+    fireEvent.click(rows[0] as HTMLElement);
+    await waitFor(() =>
+      expect(calls).toEqual([
+        {
+          type: "set-model",
+          payload: { slug: "bo", model: "google/gemini-2.5-pro", provider: "pi" },
+        },
+      ]),
+    );
+  });
+
+  test("a picker alongside another field keeps the form, and an untouched submit re-affirms the defaults", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "set-model",
+              label: "Configure",
+              payload: { slug: "ada" },
+              fields: [
+                {
+                  name: "model",
+                  label: "Model",
+                  defaultValue: "anthropic/claude-opus-4.5",
+                  modelPicker: { providerField: "provider", providerDefault: "pi" },
+                },
+                { name: "note", label: "Note" },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
+    const form = container.querySelector(".cvb-action-form") as HTMLFormElement;
+    expect(form).not.toBeNull();
+    fireEvent.submit(form);
+    // The provider companion seeds from providerDefault, so an idle submit
+    // re-affirms the current provider/model pair instead of wiping the pin.
+    await waitFor(() =>
+      expect(calls).toEqual([
+        {
+          type: "set-model",
+          payload: { slug: "ada", model: "anthropic/claude-opus-4.5", provider: "pi" },
+        },
+      ]),
+    );
   });
 });

@@ -254,10 +254,40 @@ const canvasActionFieldSchema = z
       .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
       .min(1)
       .optional(),
+    // Render the host's live provider/model catalog picker (searchable, grouped
+    // by provider) instead of a producer-supplied choice set — so a board never
+    // hardcodes a model list. The dispatched value is the chosen model id;
+    // `providerField`, when set, names a companion payload key that carries the
+    // chosen model's provider id (and is seeded from `providerDefault` so an
+    // untouched submit re-affirms the current provider rather than clearing it).
+    // A non-required picker offers `placeholder` as its clear row, dispatching ""
+    // (and "" for `providerField`). `defaultValue` may be any model id, on- or
+    // off-catalog — a hand-pinned model stays visible rather than clearing.
+    // Mutually exclusive with `multiline` and `options`.
+    modelPicker: z
+      .object({
+        providerField: z.string().min(1).optional(),
+        providerDefault: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine((f) => !(f.multiline && f.options), {
     message: "a field is either multiline or a select, not both",
+  })
+  .refine((f) => !(f.modelPicker && (f.multiline || f.options)), {
+    message: "a modelPicker field carries neither multiline nor options",
+  })
+  // providerDefault seeds the companion key, so without providerField it has
+  // nowhere to land — reject at publish rather than silently dropping it.
+  .refine((f) => !(f.modelPicker?.providerDefault && !f.modelPicker.providerField), {
+    message: "modelPicker.providerDefault requires modelPicker.providerField",
+  })
+  // The companion key rides the same dispatched payload as the field's own
+  // value; sharing the name would make one overwrite the other.
+  .refine((f) => f.modelPicker?.providerField !== f.name, {
+    message: "modelPicker.providerField must differ from the field's own name",
   })
   // An option's `value` is both the dispatched value and the renderer's list key,
   // so duplicates make the selection ambiguous and collide React keys.
@@ -323,6 +353,24 @@ export const canvasActionItemSchema = z
       .refine((f) => new Set(f.map((x) => x.name)).size === f.length, {
         message: "action field names must be unique",
       })
+      // A picker's companion key lands in the same dispatched map as every
+      // field's own value, so it must not shadow a sibling field's name or
+      // another picker's companion — either would silently overwrite on pick.
+      .refine(
+        (f) => {
+          const taken = new Set(f.map((x) => x.name));
+          for (const x of f) {
+            const companion = x.modelPicker?.providerField;
+            if (companion === undefined) continue;
+            if (taken.has(companion)) return false;
+            taken.add(companion);
+          }
+          return true;
+        },
+        {
+          message: "a modelPicker providerField must not collide with any field name or companion",
+        },
+      )
       .optional(),
     // Render `fields` as an always-open form whose submit button carries the
     // action's label/glyph/tone — no disclosure click — for a hero action whose

@@ -3822,6 +3822,36 @@ textarea.cvb-action-field-input {
 select.cvb-action-field-select {
   cursor: pointer;
 }
+/* The modelPicker trigger — an input-shaped button whose popover holds the
+   live catalog. Inherits the input skin; the caret hugs the right edge. */
+button.cvb-action-field-model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+button.cvb-action-field-model:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.cvb-action-field-model-caret {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dim);
+}
+.cvb-action-field-model-empty {
+  color: var(--dim);
+}
+.model-picker-popover-retry {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
 .cvb-action-form-error {
   margin: 0;
   font-size: 11px;
