@@ -54,7 +54,7 @@ export function ModelCatalogPopover({
   required,
   onPick,
 }: ModelCatalogPopoverProps) {
-  const catalog = useModelCatalog();
+  const { catalog, failed, reload } = useModelCatalog();
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
@@ -99,12 +99,15 @@ export function ModelCatalogPopover({
       if (evt.newState === "open") {
         reposition();
         setQuery("");
+        // A transient catalog failure retries on each open, so the popover
+        // recovers without a page reload.
+        if (!catalog) reload();
         queueMicrotask(() => searchInputRef.current?.focus());
       }
     };
     popoverEl.addEventListener("toggle", onToggle);
     return () => popoverEl.removeEventListener("toggle", onToggle);
-  }, [reposition]);
+  }, [reposition, catalog, reload]);
 
   useEffect(() => {
     const popoverEl = popoverRef.current;
@@ -145,7 +148,7 @@ export function ModelCatalogPopover({
   const pick = useCallback(
     (modelId: string, providerId: string) => {
       onPick(modelId, providerId);
-      popoverRef.current?.hidePopover();
+      popoverRef.current?.hidePopover?.();
     },
     [onPick],
   );
@@ -276,7 +279,18 @@ export function ModelCatalogPopover({
         })}
         {flatVisible.length === 0 && (
           <div className="model-picker-popover-empty">
-            {catalog ? "No models match." : "Loading models…"}
+            {catalog ? (
+              "No models match."
+            ) : failed ? (
+              <>
+                Couldn’t load the model catalog.{" "}
+                <button type="button" className="model-picker-popover-retry" onClick={reload}>
+                  Retry
+                </button>
+              </>
+            ) : (
+              "Loading models…"
+            )}
           </div>
         )}
       </div>
@@ -308,7 +322,7 @@ export function ModelFieldPicker({
   disabled,
   onPick,
 }: ModelFieldPickerProps) {
-  const catalog = useModelCatalog();
+  const { catalog } = useModelCatalog();
   const popoverId = `${useId()}-models`;
   const emptyLabel = placeholder ?? "default";
   const active = useMemo(

@@ -353,6 +353,24 @@ export const canvasActionItemSchema = z
       .refine((f) => new Set(f.map((x) => x.name)).size === f.length, {
         message: "action field names must be unique",
       })
+      // A picker's companion key lands in the same dispatched map as every
+      // field's own value, so it must not shadow a sibling field's name or
+      // another picker's companion — either would silently overwrite on pick.
+      .refine(
+        (f) => {
+          const taken = new Set(f.map((x) => x.name));
+          for (const x of f) {
+            const companion = x.modelPicker?.providerField;
+            if (companion === undefined) continue;
+            if (taken.has(companion)) return false;
+            taken.add(companion);
+          }
+          return true;
+        },
+        {
+          message: "a modelPicker providerField must not collide with any field name or companion",
+        },
+      )
       .optional(),
     // Render `fields` as an always-open form whose submit button carries the
     // action's label/glyph/tone — no disclosure click — for a hero action whose

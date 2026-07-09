@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { ModelInfo, ProviderInfo } from "@keelson/shared";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchProviderModels, fetchProviders } from "../api.ts";
 
 // The provider/model catalog every model picker walks: providers in registry
@@ -79,15 +79,30 @@ export const COST_LABEL: Record<NonNullable<ModelInfo["costTier"]>, string> = {
 // clears the cache so a later mount retries instead of pinning the failure.
 let catalogPromise: Promise<ModelCatalog> | null = null;
 
+interface CatalogFetchers {
+  fetchProviders: typeof fetchProviders;
+  fetchProviderModels: typeof fetchProviderModels;
+}
+let fetchers: CatalogFetchers = { fetchProviders, fetchProviderModels };
+
+// Test seam: swap the fetchers and drop the cache, so picker suites stay
+// hermetic under bun's process-global module registry (other suites
+// mock.module api.ts, which would otherwise poison this loader); call with no
+// argument to restore the real api fetchers.
+export function configureModelCatalog(next?: CatalogFetchers): void {
+  fetchers = next ?? { fetchProviders, fetchProviderModels };
+  catalogPromise = null;
+}
+
 function loadCatalog(): Promise<ModelCatalog> {
   if (catalogPromise) return catalogPromise;
   catalogPromise = (async () => {
-    const { providers } = await fetchProviders();
+    const { providers } = await fetchers.fetchProviders();
     const modelsByProvider: Record<string, ModelInfo[]> = {};
     await Promise.all(
       providers.map(async (p) => {
         try {
-          modelsByProvider[p.id] = await fetchProviderModels(p.id);
+          modelsByProvider[p.id] = await fetchers.fetchProviderModels(p.id);
         } catch {
           modelsByProvider[p.id] = (p.capabilities.models ?? []).map((id) => ({ id }));
         }
@@ -101,21 +116,39 @@ function loadCatalog(): Promise<ModelCatalog> {
   return catalogPromise;
 }
 
-// Null until the catalog resolves; stays null on a failed load (the picker
-// degrades to a raw-id display rather than an empty popover that lies).
-export function useModelCatalog(): ModelCatalog | null {
+export interface ModelCatalogState {
+  catalog: ModelCatalog | null;
+  // True after a load failed and nothing has succeeded since — lets a picker
+  // say "couldn't load" instead of an eternal "loading". `reload` clears it
+  // and retries (the failed promise is already evicted from the cache), so a
+  // popover can re-attempt on each open after a transient API failure.
+  failed: boolean;
+  reload: () => void;
+}
+
+export function useModelCatalog(): ModelCatalogState {
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [failed, setFailed] = useState(false);
+  const reload = useCallback(() => {
+    setFailed(false);
+    loadCatalog().then(
+      (c) => setCatalog(c),
+      () => setFailed(true),
+    );
+  }, []);
   useEffect(() => {
     let cancelled = false;
     loadCatalog().then(
       (c) => {
         if (!cancelled) setCatalog(c);
       },
-      () => {},
+      () => {
+        if (!cancelled) setFailed(true);
+      },
     );
     return () => {
       cancelled = true;
     };
   }, []);
-  return catalog;
+  return { catalog, failed, reload };
 }

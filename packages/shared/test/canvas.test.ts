@@ -897,6 +897,37 @@ describe("canvasViewSchema", () => {
         wrap({ name: "model", label: "Model", modelPicker: { providerField: "model" } }),
       ),
     ).toThrow();
+    // …nor with a SIBLING field's name or another picker's companion — all of
+    // them land in the one dispatched payload map.
+    const wrapFields = (fields: Record<string, unknown>[]) => ({
+      view: "board",
+      sections: [{ kind: "actions", items: [{ type: "x", label: "X", fields }] }],
+    });
+    expect(() =>
+      canvasViewSchema.parse(
+        wrapFields([
+          { name: "model", label: "Model", modelPicker: { providerField: "provider" } },
+          { name: "provider", label: "Provider" },
+        ]),
+      ),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse(
+        wrapFields([
+          { name: "a", label: "A", modelPicker: { providerField: "provider" } },
+          { name: "b", label: "B", modelPicker: { providerField: "provider" } },
+        ]),
+      ),
+    ).toThrow();
+    // Distinct companions beside unrelated fields stay valid.
+    expect(
+      canvasViewSchema.parse(
+        wrapFields([
+          { name: "model", label: "Model", modelPicker: { providerField: "provider" } },
+          { name: "note", label: "Note" },
+        ]),
+      ).view,
+    ).toBe("board");
   });
 
   it("parses a disabled action item with a reason, and rejects non-boolean disabled / empty reason / reason-without-disabled", () => {

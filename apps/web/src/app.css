@@ -3843,6 +3843,15 @@ button.cvb-action-field-model:disabled {
 .cvb-action-field-model-empty {
   color: var(--dim);
 }
+.model-picker-popover-retry {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
 .cvb-action-form-error {
   margin: 0;
   font-size: 11px;

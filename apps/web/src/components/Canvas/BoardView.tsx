@@ -141,7 +141,11 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   // immediately — a form whose one control is the picker would just add a
   // redundant submit step. Light-dismiss on the popover is the cancel.
   const soloPicker = !expanded && fields.length === 1 && fields[0]?.modelPicker ? fields[0] : null;
-  const soloPickerPopoverId = useId();
+  // Scopes every DOM id this instance mints (field inputs, the solo-picker
+  // popover and its anchor): the same action type repeats across cards, and the
+  // picker anchors via getElementById, so a shared id would anchor every card's
+  // popover to the first card's trigger.
+  const instanceId = useId();
   const [pending, setPending] = useState(false);
   const [localOpen, setLocalOpen] = useState(false);
   const open = controlledOpen ?? localOpen;
@@ -215,11 +219,11 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       <div className="cvb-action">
         <button
           type="button"
-          id={`cvb-ap-${soloPickerPopoverId}`}
+          id={`cvb-ap-${instanceId}`}
           className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
           data-tone={item.tone}
           disabled={sealed}
-          popoverTarget={soloPickerPopoverId}
+          popoverTarget={instanceId}
           aria-haspopup="dialog"
           title={item.reason}
         >
@@ -231,8 +235,8 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           {item.label}
         </button>
         <ModelCatalogPopover
-          popoverId={soloPickerPopoverId}
-          anchorId={`cvb-ap-${soloPickerPopoverId}`}
+          popoverId={instanceId}
+          anchorId={`cvb-ap-${instanceId}`}
           value={seed[soloPicker.name] ?? ""}
           providerValue={providerField ? (seed[providerField] ?? "") : ""}
           emptyLabel={soloPicker.placeholder ?? "default"}
@@ -287,7 +291,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       {hasFields && (expanded || open) && (
         <form className="cvb-action-form" onSubmit={onSubmit}>
           {fields.map((f) => {
-            const id = `cvb-af-${item.type}-${f.name}`;
+            const id = `cvb-af-${instanceId}-${f.name}`;
             return (
               <div key={f.name} className="cvb-action-field">
                 <label className="cvb-action-field-label" htmlFor={id}>
