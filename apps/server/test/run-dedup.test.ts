@@ -150,13 +150,16 @@ nodes:
 
   test("a live run of a DIFFERENT resolved definition never absorbs the start", async () => {
     // Same name + cwd + inputs, but the live entry executes another definition
-    // (a project shadow vs the global copy) — collapsing would hand back a run
-    // of the wrong workflow.
-    const { db, store, activeRuns, controller } = makeRig(true);
+    // OBJECT (a project shadow vs the global copy) — collapsing would hand back
+    // a run of the wrong workflow.
+    const { db, store, activeRuns, controller, catalog } = makeRig(true);
     try {
+      const resolved = catalog.get("collect");
+      if (!resolved) throw new Error("collect workflow missing from catalog");
+      const shadow = { ...resolved } as WorkflowDefinition;
       activeRuns.register(
         "pre-run",
-        liveEntry(runDedupeKey("collect", canonicalPath(tmpDir), {}), "pre-conv"),
+        liveEntry(runDedupeKey("collect", canonicalPath(tmpDir), {}), "pre-conv", shadow),
       );
       const result = controller.startRun({ name: "collect", inputs: {}, workingDir: tmpDir });
       if (!result.ok) throw new Error(result.message);
