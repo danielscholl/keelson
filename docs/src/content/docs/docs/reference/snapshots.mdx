@@ -218,10 +218,15 @@ submit re-affirms the current provider/model pair rather than clearing it. A
 non-required picker offers `placeholder` as its clear row (dispatching `""` for
 both keys), and `defaultValue` may be any model id — on- or off-catalog — so a
 hand-pinned model stays visible. It is mutually exclusive with `multiline` and
-`options`, and `providerField` must differ from the field's own `name`. When the
-picker is the action's **only** field, the host skips the intermediate form: the
-action button opens the catalog directly and picking dispatches immediately
-(dismissing the popover is the cancel).
+`options`. `providerField` must not collide with the field's own `name`, any
+sibling field's `name`, or another `modelPicker` field's `providerField` — every
+one of those lands in the same dispatched payload map, so a collision would
+silently overwrite a value; the schema rejects it at publish. When the picker is
+the action's **only** field and the action is not `expanded`, the host skips the
+intermediate form: the action button opens the catalog directly and picking
+dispatches immediately (dismissing the popover is the cancel). An `expanded`
+action always renders its always-open form and requires submit, even with a
+single picker field.
 
 `inline` surfaces a destructive card action as a visible, still-confirm-guarded
 button on the card instead of hiding it in the card's overflow (⋯) menu. It is

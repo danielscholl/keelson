@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { CanvasBoardView, RibAction, RibActionResult } from "@keelson/shared";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BoardActionProvider } from "../src/components/Canvas/BoardActionContext.tsx";
 import { BoardView } from "../src/components/Canvas/BoardView.tsx";
 import { configureModelCatalog } from "../src/lib/modelCatalog.ts";
@@ -1086,6 +1086,25 @@ describe("model picker action fields", () => {
     });
   }
 
+  // The popover body's rows now mount only while genuinely open (a
+  // lazy-mount fix for N-cards-worth of hidden DOM), and happy-dom doesn't
+  // implement the declarative Popover API well enough for a plain click to
+  // fire a real "toggle" event — so tests open a picker by dispatching that
+  // event themselves, exactly like the browser would on a real popovertarget
+  // click.
+  function openPicker(trigger: HTMLElement): HTMLElement {
+    const targetId = trigger.getAttribute("popovertarget");
+    if (!targetId) throw new Error("trigger has no popovertarget");
+    const popoverEl = document.getElementById(targetId);
+    if (!popoverEl) throw new Error(`no element with id ${targetId}`);
+    const evt = new Event("toggle");
+    Object.defineProperty(evt, "newState", { value: "open", configurable: true });
+    act(() => {
+      popoverEl.dispatchEvent(evt);
+    });
+    return popoverEl;
+  }
+
   function soloPickerItem(slug: string, defaults?: { model?: string; provider?: string }) {
     return {
       type: "set-model",
@@ -1119,6 +1138,9 @@ describe("model picker action fields", () => {
     );
     // No intermediate form renders — the button is the picker trigger.
     expect(container.querySelector(".cvb-action-form")).toBeNull();
+    // Rows lazy-mount only while the popover is open — nothing to find yet.
+    expect(screen.queryByText("Claude Opus 4.5")).toBeNull();
+    openPicker(screen.getByRole("button", { name: "Model — default (ada)" }));
     fireEvent.click(await screen.findByText("Claude Opus 4.5"));
     await waitFor(() =>
       expect(calls).toEqual([
@@ -1145,6 +1167,7 @@ describe("model picker action fields", () => {
         />
       </BoardActionProvider>,
     );
+    openPicker(screen.getByRole("button", { name: "Model — anthropic/claude-opus-4.5 (ada)" }));
     fireEvent.click(await screen.findByText("default (inherit)"));
     await waitFor(() =>
       expect(calls).toEqual([
@@ -1170,10 +1193,15 @@ describe("model picker action fields", () => {
     const targets = anchors.map((a) => a.getAttribute("popovertarget"));
     expect(targets).toHaveLength(2);
     expect(new Set(targets).size).toBe(2);
-    // Picking in the SECOND card's popover dispatches the second card's payload.
+    // Nothing is mounted before either popover opens.
+    expect(screen.queryByText("Gemini 2.5 Pro")).toBeNull();
+    // Opening the SECOND card's popover surfaces only its own row (proof the
+    // unique ids actually anchor each card to its own catalog, not a shared
+    // or the first card's), and picking it dispatches the second card's payload.
+    openPicker(screen.getByRole("button", { name: "Model — default (bo)" }));
     const rows = await screen.findAllByText("Gemini 2.5 Pro");
-    expect(rows).toHaveLength(2);
-    fireEvent.click(rows[1] as HTMLElement);
+    expect(rows).toHaveLength(1);
+    fireEvent.click(rows[0] as HTMLElement);
     await waitFor(() =>
       expect(calls).toEqual([
         {

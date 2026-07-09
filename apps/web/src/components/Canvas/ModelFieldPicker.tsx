@@ -58,6 +58,11 @@ export function ModelCatalogPopover({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
+  // The body's provider/model rows mount only while the popover is actually
+  // open — an idle roster of N cards each holding a 200-model catalog would
+  // otherwise sit on N×200 hidden buttons at all times (the popover's own
+  // `display: none` when closed hides them visually but not from the DOM).
+  const [isOpen, setIsOpen] = useState(false);
 
   const active = useMemo(
     () => findInfo(catalog, value, providerValue),
@@ -96,7 +101,9 @@ export function ModelCatalogPopover({
     if (!popoverEl) return;
     const onToggle = (e: Event) => {
       const evt = e as ToggleEvent;
-      if (evt.newState === "open") {
+      const nowOpen = evt.newState === "open";
+      setIsOpen(nowOpen);
+      if (nowOpen) {
         reposition();
         setQuery("");
         // A transient catalog failure retries on each open, so the popover
@@ -186,112 +193,119 @@ export function ModelCatalogPopover({
         />
       </div>
       <div className="model-picker-popover-body">
-        {!required && !query && (
-          <div className={`model-picker-popover-row${value === "" ? " active" : ""}`}>
-            <button
-              type="button"
-              className="model-picker-popover-pick"
-              onClick={() => pick("", "")}
-              popoverTarget={popoverId}
-              popoverTargetAction="hide"
-            >
-              <span className="model-picker-popover-pick-id cvb-action-field-model-empty">
-                {emptyLabel}
-              </span>
-            </button>
-          </div>
-        )}
-        {providers.map((provider) => {
-          const visible = (modelsByProvider[provider.id] ?? []).filter((info) =>
-            filterMatches(provider.id, info),
-          );
-          if (visible.length === 0) return null;
-          const renderRow = (info: ModelInfo) => {
-            const isActive =
-              value !== "" && active?.providerId === provider.id && active.info.id === info.id;
-            const showRawId = Boolean(info.displayName) && info.displayName !== info.id;
-            const parts: string[] = [];
-            if (showRawId) parts.push(info.id);
-            if (info.description) parts.push(info.description);
-            return (
-              <div key={info.id} className={`model-picker-popover-row${isActive ? " active" : ""}`}>
+        {isOpen && (
+          <>
+            {!required && !query && (
+              <div className={`model-picker-popover-row${value === "" ? " active" : ""}`}>
                 <button
                   type="button"
                   className="model-picker-popover-pick"
-                  onClick={() => pick(info.id, provider.id)}
+                  onClick={() => pick("", "")}
                   popoverTarget={popoverId}
                   popoverTargetAction="hide"
-                  title={parts.length > 0 ? parts.join(" — ") : undefined}
                 >
-                  <span className="model-picker-popover-pick-id">
-                    {info.displayName ?? info.id}
+                  <span className="model-picker-popover-pick-id cvb-action-field-model-empty">
+                    {emptyLabel}
                   </span>
-                  {(info.costTier || info.billing === "metered") && (
-                    <span className="model-picker-popover-pick-meta">
-                      {info.costTier && (
-                        <span
-                          className={`model-picker-popover-pick-cost cost-${info.costTier}`}
-                          role="img"
-                          aria-label={`Cost tier: ${info.costTier}`}
-                        >
-                          {COST_LABEL[info.costTier]}
-                        </span>
-                      )}
-                      {info.billing === "metered" && (
-                        <span
-                          className="model-picker-popover-pick-billing"
-                          role="img"
-                          title="Metered — billed per token via an API key"
-                          aria-label="Metered: billed per token via an API key"
-                        >
-                          API
-                        </span>
-                      )}
-                    </span>
-                  )}
                 </button>
               </div>
-            );
-          };
-          return (
-            <div key={provider.id} className="model-picker-popover-section">
-              <div className="model-picker-popover-section-title">
-                <span>{provider.displayName}</span>
-                <span className="model-picker-popover-section-count">{visible.length}</span>
-              </div>
-              <div className="model-picker-popover-section-rows">
-                {groupByVendor(visible).map((group) => (
-                  <Fragment key={group.models[0]?.id ?? group.vendor ?? "vendor"}>
-                    {group.vendor && (
-                      <div className="model-picker-popover-vendor-title">
-                        <span>{prettyVendor(group.vendor)}</span>
-                        <span className="model-picker-popover-vendor-count">
-                          {group.models.length}
-                        </span>
-                      </div>
-                    )}
-                    {group.models.map(renderRow)}
-                  </Fragment>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-        {flatVisible.length === 0 && (
-          <div className="model-picker-popover-empty">
-            {catalog ? (
-              "No models match."
-            ) : failed ? (
-              <>
-                Couldn’t load the model catalog.{" "}
-                <button type="button" className="model-picker-popover-retry" onClick={reload}>
-                  Retry
-                </button>
-              </>
-            ) : (
-              "Loading models…"
             )}
-          </div>
+            {providers.map((provider) => {
+              const visible = (modelsByProvider[provider.id] ?? []).filter((info) =>
+                filterMatches(provider.id, info),
+              );
+              if (visible.length === 0) return null;
+              const renderRow = (info: ModelInfo) => {
+                const isActive =
+                  value !== "" && active?.providerId === provider.id && active.info.id === info.id;
+                const showRawId = Boolean(info.displayName) && info.displayName !== info.id;
+                const parts: string[] = [];
+                if (showRawId) parts.push(info.id);
+                if (info.description) parts.push(info.description);
+                return (
+                  <div
+                    key={info.id}
+                    className={`model-picker-popover-row${isActive ? " active" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="model-picker-popover-pick"
+                      onClick={() => pick(info.id, provider.id)}
+                      popoverTarget={popoverId}
+                      popoverTargetAction="hide"
+                      title={parts.length > 0 ? parts.join(" — ") : undefined}
+                    >
+                      <span className="model-picker-popover-pick-id">
+                        {info.displayName ?? info.id}
+                      </span>
+                      {(info.costTier || info.billing === "metered") && (
+                        <span className="model-picker-popover-pick-meta">
+                          {info.costTier && (
+                            <span
+                              className={`model-picker-popover-pick-cost cost-${info.costTier}`}
+                              role="img"
+                              aria-label={`Cost tier: ${info.costTier}`}
+                            >
+                              {COST_LABEL[info.costTier]}
+                            </span>
+                          )}
+                          {info.billing === "metered" && (
+                            <span
+                              className="model-picker-popover-pick-billing"
+                              role="img"
+                              title="Metered — billed per token via an API key"
+                              aria-label="Metered: billed per token via an API key"
+                            >
+                              API
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                );
+              };
+              return (
+                <div key={provider.id} className="model-picker-popover-section">
+                  <div className="model-picker-popover-section-title">
+                    <span>{provider.displayName}</span>
+                    <span className="model-picker-popover-section-count">{visible.length}</span>
+                  </div>
+                  <div className="model-picker-popover-section-rows">
+                    {groupByVendor(visible).map((group) => (
+                      <Fragment key={group.models[0]?.id ?? group.vendor ?? "vendor"}>
+                        {group.vendor && (
+                          <div className="model-picker-popover-vendor-title">
+                            <span>{prettyVendor(group.vendor)}</span>
+                            <span className="model-picker-popover-vendor-count">
+                              {group.models.length}
+                            </span>
+                          </div>
+                        )}
+                        {group.models.map(renderRow)}
+                      </Fragment>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {flatVisible.length === 0 && (
+              <div className="model-picker-popover-empty">
+                {catalog ? (
+                  "No models match."
+                ) : failed ? (
+                  <>
+                    Couldn’t load the model catalog.{" "}
+                    <button type="button" className="model-picker-popover-retry" onClick={reload}>
+                      Retry
+                    </button>
+                  </>
+                ) : (
+                  "Loading models…"
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

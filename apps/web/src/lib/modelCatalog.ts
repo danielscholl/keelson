@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type { ModelInfo, ProviderInfo } from "@keelson/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { fetchProviderModels, fetchProviders } from "../api.ts";
 
 // The provider/model catalog every model picker walks: providers in registry
@@ -74,81 +74,117 @@ export const COST_LABEL: Record<NonNullable<ModelInfo["costTier"]>, string> = {
   high: "$$$",
 };
 
-// One shared in-flight promise so a board with many picker fields (e.g. one per
-// roster card) fetches the catalog once, not once per field. A failed load
-// clears the cache so a later mount retries instead of pinning the failure.
-let catalogPromise: Promise<ModelCatalog> | null = null;
-
 interface CatalogFetchers {
   fetchProviders: typeof fetchProviders;
   fetchProviderModels: typeof fetchProviderModels;
 }
 let fetchers: CatalogFetchers = { fetchProviders, fetchProviderModels };
 
-// Test seam: swap the fetchers and drop the cache, so picker suites stay
+export interface ModelCatalogState {
+  catalog: ModelCatalog | null;
+  // True after a load failed and nothing has succeeded since — lets a picker
+  // say "couldn't load" instead of an eternal "loading".
+  failed: boolean;
+}
+
+// Module-level store, not per-component state: every ModelFieldPicker trigger
+// AND its nested ModelCatalogPopover call useModelCatalog(), and they must
+// observe the identical catalog — otherwise a reload the popover triggers
+// (e.g. its Retry button) would recover the popover's own view but leave the
+// trigger's separate copy stuck on `catalog: null`, permanently rendering a
+// raw model id instead of the catalog's display name. useSyncExternalStore
+// makes every subscriber re-render off the one shared snapshot.
+let state: ModelCatalogState = { catalog: null, failed: false };
+const listeners = new Set<() => void>();
+
+function setState(next: ModelCatalogState): void {
+  state = next;
+  for (const l of listeners) l();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function getSnapshot(): ModelCatalogState {
+  return state;
+}
+
+// Bumped by configureModelCatalog/reloadModelCatalog so a still-in-flight
+// request from a superseded load can't clobber a newer one's results after it
+// resolves out of order.
+let loadToken = 0;
+let started = false;
+
+// Providers publish immediately (each seeded with its curated
+// capabilities.models baseline), then each provider's live model list merges
+// in independently as its own fetch settles — mirrors Chat.tsx's fan-out
+// pattern. A single slow or hung provider therefore only ever holds back its
+// OWN section; it can no longer block every other provider's catalog from
+// rendering (the prior Promise.all-gated load did exactly that).
+async function load(): Promise<void> {
+  const token = ++loadToken;
+  try {
+    const { providers } = await fetchers.fetchProviders();
+    if (token !== loadToken) return;
+    const modelsByProvider: Record<string, ModelInfo[]> = {};
+    for (const p of providers) {
+      modelsByProvider[p.id] = (p.capabilities.models ?? []).map((id) => ({ id }));
+    }
+    setState({ catalog: { providers, modelsByProvider }, failed: false });
+    await Promise.all(
+      providers.map(async (p) => {
+        try {
+          const models = await fetchers.fetchProviderModels(p.id);
+          if (token !== loadToken || !state.catalog) return;
+          setState({
+            catalog: {
+              providers,
+              modelsByProvider: { ...state.catalog.modelsByProvider, [p.id]: models },
+            },
+            failed: false,
+          });
+        } catch {
+          // Non-fatal — that provider's section keeps its curated baseline.
+        }
+      }),
+    );
+  } catch {
+    if (token !== loadToken) return;
+    setState({ catalog: null, failed: true });
+  }
+}
+
+function ensureLoaded(): void {
+  if (started) return;
+  started = true;
+  void load();
+}
+
+// Forces a fresh load regardless of `started` — the popover's Retry button
+// and its retry-on-reopen-while-failed path call this.
+function reload(): void {
+  started = true;
+  void load();
+}
+
+// Test seam: swap the fetchers and reset the store, so picker suites stay
 // hermetic under bun's process-global module registry (other suites
 // mock.module api.ts, which would otherwise poison this loader); call with no
 // argument to restore the real api fetchers.
 export function configureModelCatalog(next?: CatalogFetchers): void {
   fetchers = next ?? { fetchProviders, fetchProviderModels };
-  catalogPromise = null;
+  loadToken++;
+  started = false;
+  setState({ catalog: null, failed: false });
 }
 
-function loadCatalog(): Promise<ModelCatalog> {
-  if (catalogPromise) return catalogPromise;
-  catalogPromise = (async () => {
-    const { providers } = await fetchers.fetchProviders();
-    const modelsByProvider: Record<string, ModelInfo[]> = {};
-    await Promise.all(
-      providers.map(async (p) => {
-        try {
-          modelsByProvider[p.id] = await fetchers.fetchProviderModels(p.id);
-        } catch {
-          modelsByProvider[p.id] = (p.capabilities.models ?? []).map((id) => ({ id }));
-        }
-      }),
-    );
-    return { providers, modelsByProvider };
-  })();
-  catalogPromise.catch(() => {
-    catalogPromise = null;
-  });
-  return catalogPromise;
-}
-
-export interface ModelCatalogState {
-  catalog: ModelCatalog | null;
-  // True after a load failed and nothing has succeeded since — lets a picker
-  // say "couldn't load" instead of an eternal "loading". `reload` clears it
-  // and retries (the failed promise is already evicted from the cache), so a
-  // popover can re-attempt on each open after a transient API failure.
-  failed: boolean;
-  reload: () => void;
-}
-
-export function useModelCatalog(): ModelCatalogState {
-  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
-  const [failed, setFailed] = useState(false);
-  const reload = useCallback(() => {
-    setFailed(false);
-    loadCatalog().then(
-      (c) => setCatalog(c),
-      () => setFailed(true),
-    );
-  }, []);
+export function useModelCatalog(): ModelCatalogState & { reload: () => void } {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   useEffect(() => {
-    let cancelled = false;
-    loadCatalog().then(
-      (c) => {
-        if (!cancelled) setCatalog(c);
-      },
-      () => {
-        if (!cancelled) setFailed(true);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
+    ensureLoaded();
   }, []);
-  return { catalog, failed, reload };
+  const boundReload = useCallback(() => reload(), []);
+  return { ...snapshot, reload: boundReload };
 }
