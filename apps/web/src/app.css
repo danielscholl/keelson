@@ -3332,15 +3332,29 @@ button.tab:focus-visible {
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
-/* Gradient lane head: a top-lit strip carrying the region's identity + controls. */
+/* Gradient lane head: a top-lit strip carrying the region's identity + controls,
+   stacked as a control bar over an optional pulse row. */
 .surface-region-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
+}
+/* Row 1: identity + status/scope + the region's controls, wrapping among
+   themselves only when a column is truly out of room. */
+.surface-region-head-bar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  padding: 12px 16px 10px;
-  border-bottom: 1px solid var(--border-soft);
-  background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
+}
+/* Row 2: the board's pulse segments, dropped below the bar so the controls hold
+   a stable spot in a narrow column. Not rendered when a board has no segments. */
+.surface-region-head-meta {
+  display: flex;
+  align-items: center;
 }
 .surface-region[data-collapsed] .surface-region-head {
   border-bottom: none;
