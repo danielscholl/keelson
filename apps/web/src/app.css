@@ -3751,7 +3751,7 @@ button.tab:focus-visible {
   padding: 7px 12px; font-size: 12px; font-family: inherit; cursor: pointer;
   display: inline-flex; align-items: center; gap: 8px; justify-content: flex-start;
 }
-.cvb-action-button:hover:not(:disabled) { background: var(--card-2); }
+.cvb-action-button:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--card-2); }
 .cvb-action-button:disabled { opacity: 0.6; cursor: default; }
 /* A capability-gated action (a room shape the current cast can't run): dimmed
    past the plain disabled state, and not-allowed so the block reads as a
@@ -3765,7 +3765,7 @@ button.tab:focus-visible {
   color: #fff;
   font-weight: 600;
 }
-.cvb-action-button[data-tone="brand"]:hover:not(:disabled) {
+.cvb-action-button[data-tone="brand"]:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--accent);
   filter: brightness(1.1);
 }
@@ -5053,7 +5053,7 @@ a.cvb-card-title::after {
   border-color: color-mix(in srgb, var(--id-tone) 40%, transparent);
   background: color-mix(in srgb, var(--id-tone) 12%, transparent);
 }
-.cvb-action-button[data-tone^="id-"]:hover:not(:disabled) {
+.cvb-action-button[data-tone^="id-"]:hover:not(:disabled):not([aria-disabled="true"]) {
   background: color-mix(in srgb, var(--id-tone) 20%, transparent);
 }
 .cvb-action-button[data-tone^="id-"]::before {

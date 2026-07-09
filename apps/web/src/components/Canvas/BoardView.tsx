@@ -116,6 +116,16 @@ function actionConfirmBody(item: ActionItem): string {
   );
 }
 
+// The hover tooltip for an action: its descriptive `hint` and, when disabled, the
+// `reason` it can't run — joined so a gated action tells the operator both what it
+// does and why it's unavailable right now. Undefined when neither applies.
+function actionTooltip(item: ActionItem): string | undefined {
+  const parts = [item.hint, item.disabled === true ? item.reason : undefined].filter(
+    (p): p is string => typeof p === "string" && p.length > 0,
+  );
+  return parts.length > 0 ? parts.join(" — ") : undefined;
+}
+
 // One action button. With no `fields` it dispatches on click (confirming first
 // when destructive). With `fields` it toggles an inline form and dispatches the
 // collected values on submit, so a payload-carrying action can gather its input —
@@ -153,6 +163,14 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   // "sealed": its button, its form controls, and its submit path all refuse, so an
   // already-open form can't dispatch via the Enter key or a programmatic submit.
   const sealed = !ctx || pending || item.disabled === true;
+  // Native `disabled` on a button suppresses hover, so a schema-gated action's
+  // `reason`/`hint` tooltip never surfaces. Keep the schema-disabled case
+  // interactive-but-inert via `aria-disabled` (dispatch stays guarded by `sealed`)
+  // so the tooltip shows, mirroring CardOverflowActions; only truly-inert states
+  // (no provider ctx, a dispatch in flight) natively disable.
+  const nativelyDisabled = !ctx || pending;
+  const ariaDisabled = item.disabled === true || undefined;
+  const tooltip = actionTooltip(item);
   const setOpen = (next: boolean) => {
     if (onOpenChange) onOpenChange(next);
     else setLocalOpen(next);
@@ -222,10 +240,11 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           id={`cvb-ap-${instanceId}`}
           className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
           data-tone={item.tone}
-          disabled={sealed}
-          popoverTarget={instanceId}
+          disabled={nativelyDisabled}
+          aria-disabled={ariaDisabled}
+          popoverTarget={item.disabled === true ? undefined : instanceId}
           aria-haspopup="dialog"
-          title={item.reason}
+          title={tooltip}
         >
           {item.glyph && (
             <span className="cvb-action-glyph" aria-hidden="true">
@@ -275,9 +294,10 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           type="button"
           className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
           data-tone={item.tone}
-          disabled={sealed}
+          disabled={nativelyDisabled}
+          aria-disabled={ariaDisabled}
           aria-expanded={hasFields ? open : undefined}
-          title={item.reason}
+          title={tooltip}
           onClick={onButtonClick}
         >
           {item.glyph && (
@@ -361,10 +381,11 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           <div className="cvb-action-form-controls">
             <button
               type="submit"
-              className="cvb-action-button"
+              className={`cvb-action-button${item.disabled ? " is-disabled" : ""}`}
               data-tone={item.tone}
-              disabled={sealed}
-              title={item.reason}
+              disabled={nativelyDisabled}
+              aria-disabled={ariaDisabled}
+              title={tooltip}
             >
               {expanded && item.glyph && (
                 <span className="cvb-action-glyph" aria-hidden="true">
@@ -579,11 +600,11 @@ export function CardOverflowActions({
               data-destructive={action.destructive || undefined}
               tabIndex={index === activeIndex ? 0 : -1}
               // A schema-disabled item stays aria-disabled (not natively
-              // disabled) so it keeps hover/focus and its `reason` tooltip
+              // disabled) so it keeps hover/focus and its `reason`/`hint` tooltip
               // actually shows; triggerAction guards the dispatch to a no-op.
               disabled={pending}
               aria-disabled={action.disabled === true || undefined}
-              title={action.reason}
+              title={actionTooltip(action)}
               onMouseEnter={() => setActiveIndex(index)}
               onFocus={() => setActiveIndex(index)}
               onClick={() => triggerAction(action)}

@@ -379,6 +379,12 @@ export const canvasActionItemSchema = z
     // Confirmation presentation metadata. `destructive` still marks dangerous
     // actions; this only controls whether the confirm dialog is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),
+    // A short descriptive hover tooltip — what the action does — surfaced
+    // regardless of enabled/disabled state, so a producer can remind the operator
+    // what an unfamiliar action is for. Distinct from `reason` (which explains why
+    // a disabled action can't run): on a disabled action the UI shows both, the
+    // hint then the reason.
+    hint: z.string().min(1).optional(),
     // Render the action non-interactive — dimmed and unclickable, its form sealed
     // — when a precondition the state can't satisfy fails (a capability-gated tab
     // whose current cast can't run it). `reason` is the human explanation of WHY

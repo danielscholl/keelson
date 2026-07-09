@@ -1001,7 +1001,10 @@ describe("board actions — select fields and capability gating", () => {
       </BoardActionProvider>,
     );
     const debate = screen.getByRole("button", { name: "Debate" });
-    expect(debate).toHaveProperty("disabled", true);
+    // aria-disabled (not native disabled) so hover survives and the reason tooltip
+    // actually shows in a real browser; the dispatch stays guarded to a no-op.
+    expect(debate).toHaveProperty("disabled", false);
+    expect(debate.getAttribute("aria-disabled")).toBe("true");
     expect(debate.getAttribute("title")).toBe("Free a Mind to chair.");
     fireEvent.click(debate);
     await Promise.resolve();
@@ -1009,6 +1012,41 @@ describe("board actions — select fields and capability gating", () => {
     // The enabled sibling still dispatches on click.
     fireEvent.click(screen.getByRole("button", { name: "Discussion" }));
     await waitFor(() => expect(calls).toEqual([{ type: "convene" }]));
+  });
+
+  test("an action `hint` renders as a hover tooltip; a disabled action shows hint then reason", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            { type: "convene", label: "Review", hint: "Two-Mind cross-vendor critique." },
+            {
+              type: "convene",
+              label: "Debate",
+              hint: "Chaired multi-Mind debate.",
+              disabled: true,
+              reason: "Free a Mind to chair.",
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    // An enabled action carries only its hint.
+    expect(screen.getByRole("button", { name: "Review" }).getAttribute("title")).toBe(
+      "Two-Mind cross-vendor critique.",
+    );
+    // A disabled action joins the hint (what it does) with the reason (why it can't run).
+    expect(screen.getByRole("button", { name: "Debate" }).getAttribute("title")).toBe(
+      "Chaired multi-Mind debate. — Free a Mind to chair.",
+    );
   });
 
   test("a sealed (disabled) action's open form can't dispatch — controls disabled, submit guarded", async () => {

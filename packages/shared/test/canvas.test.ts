@@ -966,6 +966,39 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses an action `hint` on both enabled and disabled items, and rejects an empty one", () => {
+    const parsed = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            // hint stands alone on an enabled action (unlike reason, which needs disabled).
+            { type: "convene", label: "Review", hint: "Two-Mind cross-vendor critique." },
+            {
+              type: "convene",
+              label: "Debate",
+              hint: "Chaired multi-Mind debate.",
+              disabled: true,
+              reason: "Free a Mind to chair.",
+            },
+          ],
+        },
+      ],
+    });
+    const section = parsed.view === "board" ? parsed.sections[0] : undefined;
+    const items = section?.kind === "actions" ? section.items : [];
+    expect(items[0]?.hint).toBe("Two-Mind cross-vendor critique.");
+    expect(items[1]?.hint).toBe("Chaired multi-Mind debate.");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "x", label: "X", hint: "" }] }],
+      }),
+    ).toThrow();
+  });
+
   it("parses an action item with a glyph and an opaque payload", () => {
     const v = canvasViewSchema.parse({
       view: "board",
