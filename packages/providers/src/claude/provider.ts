@@ -29,29 +29,39 @@ import {
 
 export const CLAUDE_CREDENTIAL_SERVICE_ID = "claude" as const;
 
-// SDK has no listModels endpoint; curated. Update when a new haiku ships.
-export const CLAUDE_DEFAULT_MODEL = "claude-haiku-4-5-20251001" as const;
+// SDK has no listModels endpoint; curated. Update when the Claude Code lineup shifts.
+export const CLAUDE_DEFAULT_MODEL = "claude-opus-4-8" as const;
 
-// Hand-maintained — Agent SDK has no programmatic models.list().
+// Hand-maintained — the Agent SDK has no programmatic models.list(), and the Messages
+// API /v1/models endpoint returns bare API ids, not the family aliases the Claude Code
+// CLI exposes. Mirror the CLI's picker. costTier is a coarse 3-level signal: Fable is the
+// priciest tier (above Opus), so Opus and Sonnet — the closest-priced pair — share mid.
 const CLAUDE_MODEL_CATALOG: readonly ModelInfo[] = [
   {
-    id: "claude-opus-4-7",
-    displayName: "Claude Opus 4.7",
-    description: "Most capable Claude — deep reasoning, long planning.",
+    id: "claude-fable-5",
+    displayName: "Fable",
+    description: "Most capable — hardest and longest-running tasks.",
     costTier: "high",
     supports: { vision: true, tools: true, thinking: true },
   },
   {
-    id: "claude-sonnet-4-6",
-    displayName: "Claude Sonnet 4.6",
-    description: "Balanced cost and capability.",
+    id: CLAUDE_DEFAULT_MODEL,
+    displayName: "Opus",
+    description: "Highly capable — deep reasoning and long-horizon agentic work.",
     costTier: "mid",
     supports: { vision: true, tools: true, thinking: true },
   },
   {
-    id: CLAUDE_DEFAULT_MODEL,
-    displayName: "Claude Haiku 4.5",
-    description: "Fast, low-cost; default for short turns.",
+    id: "claude-sonnet-5",
+    displayName: "Sonnet",
+    description: "Balanced cost and capability; efficient for routine tasks.",
+    costTier: "mid",
+    supports: { vision: true, tools: true, thinking: true },
+  },
+  {
+    id: "claude-haiku-4-5",
+    displayName: "Haiku",
+    description: "Fastest and lowest-cost, for quick answers.",
     costTier: "low",
     supports: { vision: true, tools: true, thinking: true },
   },
