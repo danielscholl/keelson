@@ -76,9 +76,12 @@ than guessing.
 **Minimal privilege for untrusted input.** The artifact can carry
 prompt-injection, so the reviewers and the synthesizer run with **no tools at
 all** — it reaches them inlined as `$intake.output`, so no prompt node reads it
-from disk and injected text has nothing to act on. The deterministic `intake`
-bash node reads a user-supplied path; only `verify` holds filesystem tools, and
-only to check source claims — the one node where reading the repo is the point.
+from disk. No-tools removes the *side-effect* surface (injected text can't write
+files or run shell), but it does not stop the artifact from trying to steer a
+verdict, so every prompt also frames the artifact as untrusted data to review,
+not instructions to follow. The deterministic `intake` bash node reads a
+user-supplied path; only `verify` holds filesystem tools, and only to check
+source claims — the one node where reading the repo is the point.
 
 **The verdict is weighted to evidence.** Synthesis is told to weight the verifier
 over the reviewers wherever they conflict, and to surface dissent rather than
