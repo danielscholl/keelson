@@ -1,0 +1,101 @@
+---
+title: adversarial-review
+description: Stress-tests an arbitrary artifact — a claim, design, analysis, plan, or diff. Three adversarial reviewers attack it in parallel, an independent node re-verifies their load-bearing claims against source, and a synthesizer issues one consensus verdict.
+sidebar:
+  order: 10
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`adversarial-review` takes an artifact you hand it — a claim, a design doc, a
+root-cause analysis, a plan, a spec, a diff — and drives it to a consensus
+verdict. Three **adversarial reviewers** attack it in parallel from distinct
+lenses (logic, evidence, risk), an independent **verifier** re-checks their
+load-bearing claims against source, and a **synthesizer** issues one verdict:
+`CONFIRMED`, `CONFIRMED-WITH-CHANGES`, or `REFUTED` — with the surviving claims,
+the dissent, and what stays unverified.
+
+It is a *reviewer*, not a builder: distinct from
+[adversarial-build](../adversarial-build/) (which writes an app) and
+[pr-review](../pr-review/) (which posts to GitHub). Its shape encodes a lesson
+from running the pattern by hand — parallel independent reviewers can't take
+turns clearing their throats, and a separate verifier is needed because a
+debate's own citations are often wrong.
+
+## Invoke it
+
+```sh
+keelson workflow run adversarial-review --arguments "$(cat docs/design/some-proposal.md)"
+```
+
+The argument is either a path to a file or the artifact text itself. Run it from
+the repository the artifact is about, so `verify` can read the source it cites.
+It needs a Copilot subscription; the verdict is printed at the end and persisted
+to `$ARTIFACTS_DIR/verdict.md`.
+
+## The shape
+
+Seven nodes in three tiers: `intake` captures the artifact, three reviewers fan
+out in parallel over it, `verify` converges on their claims and checks them,
+`synthesize` issues the verdict, and `report` persists it. The reviewers never
+see each other's work; the only thing that crosses between tiers is each node's
+output.
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `intake` | bash | Captures the artifact (file path or inline text) to `artifact.md`; rejects empty input. |
+| `reviewer-logic` | prompt | Attacks internal soundness — does the conclusion follow, what is assumed — with a per-claim verdict. Read-only. |
+| `reviewer-evidence` | prompt | Separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. Read-only. |
+| `reviewer-risk` | prompt | Assumes the artifact is adopted and finds what breaks — edge cases, omissions, the riskiest step. Read-only. |
+| `verify` | prompt | Re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. |
+| `synthesize` | prompt | Weighs the lenses against the verification and issues the verdict with dissent. Read-only. |
+| `report` | bash | Persists the synthesized verdict verbatim to `verdict.md`. |
+
+### The parts worth a second look
+
+**Parallel, not turn-taking.** The three reviewers run with `context: fresh`, so
+none sees another's take. Independence is the point: it removes the
+throat-clearing a turn-based debate produces and gets three genuinely separate
+attacks instead of a conversation that converges too early.
+
+**The verifier trusts no one.** `verify` re-derives the checkable claims from
+source rather than relaying the reviewers' — or the artifact's — citations. It is
+the load-bearing node: a debate's participants are confidently wrong often
+enough that an independent source check is what separates a verdict from a
+vibe. Claims it cannot check with its tools it marks `UNVERIFIABLE-HERE` rather
+than guessing.
+
+**Read-only by rail.** The artifact is untrusted input — it can carry
+prompt-injection. So every AI lane pins the exact capability it needs
+(`allowed_tools: [Read]` for the reviewers, search tools for `verify`), and
+synthesis holds no write capability at all. The single file write is a
+deterministic `report` bash node, so injected text never reaches a write-capable
+agent.
+
+**The verdict is weighted to evidence.** Synthesis is told to weight the verifier
+over the reviewers wherever they conflict, and to surface dissent rather than
+smooth it over — a split panel reads as a split verdict, not a false consensus.
+
+## Patterns it demonstrates
+
+- **Fan-out then converge**: three independent lanes over one input, a converge node that references each lane's `$nodeId.output`. The same skeleton as [pr-review](../pr-review/).
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: every lane is read-only; the one write is isolated to a bash node.
+- **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: `report` writes `$synthesize.output` through the env channel, never spliced into the shell body.
+
+## Adapt it
+
+- **Add a lens.** A fourth reviewer is one more node `depends_on: [intake]` with
+  `allowed_tools: [Read]`; add it to `verify`'s and `synthesize`'s references.
+- **Cross-vendor tension.** Pin a different `provider:` / `model:` per reviewer
+  for genuine diversity — the same rule the Chamber's review strategy enforces.
+- **A stronger judge.** Pin a stronger `model:` on `synthesize` when the verdict
+  needs to hold more weight than the reviewers.
+
+## Related
+
+- [adversarial-build](../adversarial-build/): the builder cousin — a generator against an evaluator.
+- [pr-review](../pr-review/): the fan-out → synthesize sibling that posts to GitHub.
+- [Authoring workflows](../../guides/authoring-workflows/): the read-only rail and safe-output recipes.
+- [Workflow nodes](../../reference/workflow-nodes/): `depends_on`, `trigger_rule`, `allowed_tools`, and `$nodeId.output`.

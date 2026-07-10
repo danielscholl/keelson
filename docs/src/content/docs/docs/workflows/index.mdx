@@ -8,7 +8,7 @@ sidebar:
 import { Aside } from "@astrojs/starlight/components";
 import WorkflowCards from "../../../../components/WorkflowCards.astro";
 
-Keelson ships nine workflows. They are real, runnable, and the place the
+Keelson ships ten workflows. They are real, runnable, and the place the
 [authoring recipes](../guides/authoring-workflows/) show up composed: a
 three-line approval-gate recipe is one thing, the same gate sitting inside a
 twenty-five-node investigate-and-implement pipeline is where the shape clicks. This
@@ -20,7 +20,7 @@ documentation.
 
 ## Where these come from
 
-The nine are **bundled** starters: they ship with the package and seed into
+The ten are **bundled** starters: they ship with the package and seed into
 your home (`<home>/workflows/`) on first run, so `keelson workflow list` shows
 them as `global` once seeded. Copy and edit one freely; the bundled original
 stays as a clean fallback. See [scopes](../reference/workflow-nodes/#scopes) for
@@ -34,7 +34,7 @@ keelson workflow run fix-issue --inputs ARGUMENTS="42"
 ```
 
 <Aside type="note" title="What the Copilot workflows need">
-Seven of the nine set `provider: copilot` and `model: auto`, so they need a
+Eight of the ten set `provider: copilot` and `model: auto`, so they need a
 GitHub Copilot subscription registered. The GitHub-facing ones (`fix-issue`,
 `pr-review`, `plan-act-evaluate`, `resolve-comments`) also drive the `gh` CLI, so it must be
 installed and authenticated. The approval and interactive workflows pause for a
@@ -54,10 +54,11 @@ loops, and branches into a real pipeline, and each has a full walkthrough.
 
 ## Plan and shape
 
-Exploration workflows: turn a fuzzy idea into a validated requirements doc, or
-pressure-test a build by pitting a generator against an evaluator.
+Exploration workflows: turn a fuzzy idea into a validated requirements doc,
+pressure-test a build by pitting a generator against an evaluator, or stress-test
+any artifact — a claim, design, or plan — to a consensus verdict.
 
-<WorkflowCards names={["interactive-prd", "adversarial-build"]} />
+<WorkflowCards names={["interactive-prd", "adversarial-build", "adversarial-review"]} />
 
 ## Author workflows
 

@@ -11,11 +11,19 @@
 # node exists because a debate's own citations are often wrong — it re-derives
 # the checkable claims from source rather than trusting any reviewer.
 #
-# Portability: `model: auto` and no hard provider pins so the workflow runs on
-# any account. For sharper tension, an operator can pin a different `provider:`
-# / `model:` per reviewer (genuine cross-vendor diversity) and a stronger judge
-# model on `synthesize`. Running from the repo the artifact is about lets
-# `verify` actually read the source it cites.
+# Every lane is read-only by harness rail: the artifact is untrusted input, so a
+# reviewer with no `allowed_tools` would inherit the provider's Write/Edit/Bash
+# built-ins and a prompt-injected artifact could write or run in the caller's
+# repo. Each AI node pins the exact capability it needs — reviewers read only the
+# artifact, `verify` may search source, and synthesis stays read-only while a
+# deterministic `report` bash node owns the one file write.
+#
+# Portability: `model: auto` avoids hard-pinning a model id; like the other
+# bundled workflows it sets `provider: copilot`, so it needs a configured Copilot
+# subscription. For sharper tension, an operator can pin a different `provider:` /
+# `model:` per reviewer (genuine cross-vendor diversity) and a stronger judge on
+# `synthesize`. Running from the repo the artifact is about lets `verify` read the
+# source it cites.
 
 name: adversarial-review
 provider: copilot
@@ -53,7 +61,12 @@ nodes:
       RAW="$KEELSON_ARGUMENTS"
       TRIMMED=$(printf '%s' "$RAW" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
-      if [ -n "$TRIMMED" ] && [ -f "$TRIMMED" ]; then
+      if [ -z "$TRIMMED" ]; then
+        echo "No artifact provided — pass text or a file path as the argument." >&2
+        exit 1
+      fi
+
+      if [ -f "$TRIMMED" ]; then
         cp "$TRIMMED" "$DEST"
         echo "Artifact loaded from file: $TRIMMED"
       else
@@ -62,7 +75,7 @@ nodes:
       fi
 
       if [ ! -s "$DEST" ]; then
-        echo "No artifact provided — pass text or a file path as the argument." >&2
+        echo "Artifact is empty after capture — nothing to review." >&2
         exit 1
       fi
 
@@ -82,6 +95,7 @@ nodes:
   - id: reviewer-logic
     depends_on: [intake]
     context: fresh
+    allowed_tools: [Read]
     prompt: |
       You are an adversarial reviewer on a LOGIC lens. Your job is to find where
       the artifact's reasoning fails — not to praise it. Default to skeptical.
@@ -110,6 +124,7 @@ nodes:
   - id: reviewer-evidence
     depends_on: [intake]
     context: fresh
+    allowed_tools: [Read]
     prompt: |
       You are an adversarial reviewer on an EVIDENCE lens. Your job is to
       separate what the artifact SHOWS from what it merely ASSERTS. Default to
@@ -139,6 +154,7 @@ nodes:
   - id: reviewer-risk
     depends_on: [intake]
     context: fresh
+    allowed_tools: [Read]
     prompt: |
       You are an adversarial reviewer on a RISK / FEASIBILITY lens. Assume the
       artifact's proposal or conclusion is adopted as-is. Your job is to find
@@ -225,13 +241,14 @@ nodes:
   # ───────────────────────────────────────────────────────────────────────────
   # PHASE 4: SYNTHESIS -> CONSENSUS VERDICT
   # Weighs the three lenses AGAINST the independent verification, then issues one
-  # verdict. Surfaces dissent rather than smoothing it. Writes verdict.md and
-  # prints the verdict so the operator sees it directly.
+  # verdict. Surfaces dissent rather than smoothing it. Read-only: the artifact
+  # and reviewer text are untrusted, so synthesis never holds a write capability;
+  # the deterministic `report` node below persists its output.
   # ───────────────────────────────────────────────────────────────────────────
   - id: synthesize
     depends_on: [verify]
     context: fresh
-    allowed_tools: [Read, Write]
+    allowed_tools: [Read]
     prompt: |
       You are the presiding synthesizer. Three adversarial reviewers and one
       independent verifier examined an artifact. Reach a consensus verdict —
@@ -272,5 +289,20 @@ nodes:
       6. **If CONFIRMED-WITH-CHANGES or REFUTED**: the shortest list of concrete
          changes that would move it to CONFIRMED.
 
-      Write this to `$ARTIFACTS_DIR/verdict.md` with the Write tool AND print it
-      as your response so the operator sees it directly.
+      Print the full verdict as your response so the operator sees it directly —
+      a downstream node persists it to a file. Do not use any tool to write it.
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PHASE 5: PERSIST (deterministic)
+  # A no-agent step so untrusted artifact/reviewer content never reaches a
+  # write-capable agent. Writes the synthesized verdict verbatim to verdict.md.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: report
+    depends_on: [synthesize]
+    timeout: 30000
+    bash: |
+      set -uo pipefail
+      ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
+      DEST="$ARTIFACTS/verdict.md"
+      printf '%s\n' "$KEELSON_NODE_synthesize_OUTPUT" > "$DEST"
+      echo "Verdict written to: $DEST"
