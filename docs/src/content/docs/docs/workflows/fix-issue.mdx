@@ -77,7 +77,7 @@ only when the pushed PR's checks pass.
 | | `plan` | prompt | **`when: issue_type != 'bug'`**, **`model: claude-opus-4.8`**: an implementation plan into the *same* `plan.md`. |
 | | `plan-ready` | bash | Funnel (`trigger_rule: one_success`): asserts `plan.md` exists and has tasks, then prints it. |
 | Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. |
-| Implement | `implement` | prompt | **`model: gpt-5.5`**: Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
+| Implement | `implement` | prompt | **`model: gpt-5.6-terra`**: Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
 | Validate | `validate` | bash | Runs `verify.sh` fail-fast. **Exits 0** and reports `VALIDATION_STATUS` so the fixer can read it. |
 | | `fix-validation` | prompt | If it failed, fixes only what broke and commits; if it passed, stops. |
 | | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
@@ -137,7 +137,7 @@ review's wall-clock), and a `triage` judge keeps only high-confidence
 CRITICAL/HIGH findings, dropping the false positives a lone self-review acts on.
 `apply-fixes` fixes exactly those, and `re-review` confirms the loop closed. The
 reasoning nodes (`investigate`, `plan`, `triage`, `triage-ci`) are pinned to
-`claude-opus-4.8`, and `implement` is pinned to `gpt-5.5`, the node doing the
+`claude-opus-4.8`, and `implement` is pinned to `gpt-5.6-terra`, the node doing the
 actual edits, where a deterministic coding model matters most.
 
 **The CI gate fixes only its own mess.** Once the PR is pushed, its real CI
@@ -169,7 +169,7 @@ fails.
   for a cheaper run, or drop it so `create-pr` is the last step. Spend *more* by
   pinning the review lenses to a stronger model too, or change the pinned
   `claude-opus-4.8` to whatever your Copilot account exposes. `implement`
-  carries a separate `model: gpt-5.5` pin for the same reason: it is also
+  carries a separate `model: gpt-5.6-terra` pin for the same reason: it is also
   account-dependent; swap it or drop it to `auto` if that id does not appear in
   your Copilot model list.
 - **Swap the gate for autonomy.** Remove `approve-plan` (and point `implement`
