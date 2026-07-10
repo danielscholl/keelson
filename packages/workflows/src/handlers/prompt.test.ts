@@ -389,6 +389,59 @@ describe("makePromptHandler", () => {
     expect(seenProvider).toBe("claude");
   });
 
+  test("threads the workflow name + node id to the policy gates", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
+    const expectedMeta = { workflowName: "test", nodeId: "verdict" };
+    let responseMeta: { workflowName?: string; nodeId?: string } | undefined;
+    let projectMeta: { workflowName?: string; nodeId?: string } | undefined;
+    let requestCtx: { runId: string; nodeId: string; workflowName?: string } | undefined;
+    let toolCallMeta: { workflowName?: string; nodeId?: string } | undefined;
+    let toolResultMeta: { workflowName?: string; nodeId?: string } | undefined;
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "keep" }],
+      projectTools: async (candidates, _prov, meta) => {
+        projectMeta = meta;
+        return candidates;
+      },
+      requestGate: async (ctx) => {
+        requestCtx = ctx;
+        return { outcome: "allow" };
+      },
+      evaluateToolCall: async (_call, _prov, _signal, meta) => {
+        toolCallMeta = meta;
+        return { outcome: "allow" };
+      },
+      evaluateToolResult: async (_call, _prov, meta) => {
+        toolResultMeta = meta;
+        return { outcome: "allow" };
+      },
+      evaluateResponse: async (_text, _prov, meta) => {
+        responseMeta = meta;
+        return { outcome: "allow" };
+      },
+    });
+    const node = { id: "verdict", prompt: "" } as unknown as DagNode;
+    const result = await handler.handle(
+      node,
+      buildCtx({ resolvedBody: "review", nodeId: "verdict" }),
+    );
+    expect(result.status).toBe("succeeded");
+    // buildCtx names the workflow "test"; the node id rides ctx.nodeId.
+    expect(projectMeta).toEqual(expectedMeta);
+    expect(responseMeta).toEqual(expectedMeta);
+    expect(requestCtx).toMatchObject(expectedMeta);
+    // The per-call / per-result gates are bound to the provider with provider +
+    // signal stripped; invoking the bound thunks proves nodeMeta is forwarded.
+    const opts = calls[0]?.options;
+    await opts?.evaluateToolCall?.({ tool: "x" });
+    await opts?.evaluateToolResult?.({ tool: "x", result: "y" });
+    expect(toolCallMeta).toEqual(expectedMeta);
+    expect(toolResultMeta).toEqual(expectedMeta);
+  });
+
   test("evaluateResponse deny fails the node with the policy's reason", async () => {
     const { provider } = makeSpyProvider({
       chunks: [{ type: "text", content: "forbidden output" }, { type: "done" }],

@@ -193,6 +193,13 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
    `deny` with a reason, or `ask`, and the harness composes rib policies with its
    builtins behind one engine evaluated at each turn's hook points (tool call,
    tool result, request, response) across the chat, workflow, and rib surfaces.
+   On the `workflow` surface the `ctx` also carries `workflowName` and `nodeId`,
+   so a rib policy can scope a decision to its **own** workflow's node rather than
+   firing on every workflow-surface turn (which is all `ctx.surface === "workflow"`
+   tells it). Both are absent on other surfaces and on an older harness that
+   doesn't populate them, where they read as `undefined` — a scope check such as
+   `ctx.workflowName === "x"` then simply stops matching, so a policy that must
+   stay correct against an older harness chooses its own absent-field fallback.
 
 8. **`onAction(action, ctx)`** handles inbound actions over
    `POST /api/ribs/:id/action`. `action` is `{ type, payload?, origin? }`:

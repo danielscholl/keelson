@@ -36,6 +36,11 @@ interface PolicyScopeBase {
   provider?: string;
   cwd?: string;
   allowedDirectories?: readonly string[];
+  // Workflow-surface identity — the running workflow's name and the prompt node
+  // id under evaluation. Populated by the workflow prompt-node seams so a policy
+  // can scope to its own workflow/node; absent on other surfaces.
+  workflowName?: string;
+  nodeId?: string;
 }
 
 export interface PolicyEngineOptions {
@@ -126,6 +131,8 @@ export interface PolicyEngine {
     usage?: SessionUsage;
     prompt?: string;
     signal?: AbortSignal;
+    workflowName?: string;
+    nodeId?: string;
   }): Promise<ToolCallDecision>;
   // True when at least one policy in the stack can match a `request` event (a
   // budget builtin, or a self-selecting rib policy). Lets a seam skip the
@@ -151,6 +158,8 @@ export interface PolicyEngine {
     cwd?: string;
     allowedDirectories?: readonly string[];
     text: string;
+    workflowName?: string;
+    nodeId?: string;
   }): Promise<ResultDecision>;
   // True when at least one policy can match a `tool_result` event. Lets a seam
   // skip wiring the per-result gate into the provider when nothing consumes it.
@@ -715,6 +724,8 @@ export function createPolicyEngine(opts: PolicyEngineOptions = {}): PolicyEngine
     ...(base.allowedDirectories !== undefined
       ? { allowedDirectories: base.allowedDirectories }
       : {}),
+    ...(base.workflowName !== undefined ? { workflowName: base.workflowName } : {}),
+    ...(base.nodeId !== undefined ? { nodeId: base.nodeId } : {}),
   });
 
   const toolCallEvent = (
