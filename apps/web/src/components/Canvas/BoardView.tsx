@@ -116,9 +116,6 @@ function actionConfirmBody(item: ActionItem): string {
   );
 }
 
-// The hover tooltip for an action: its descriptive `hint` and, when disabled, the
-// `reason` it can't run — joined so a gated action tells the operator both what it
-// does and why it's unavailable right now. Undefined when neither applies.
 function actionTooltip(item: ActionItem): string | undefined {
   const parts = [item.hint, item.disabled === true ? item.reason : undefined].filter(
     (p): p is string => typeof p === "string" && p.length > 0,
