@@ -46,14 +46,16 @@ description: |
 nodes:
   # ───────────────────────────────────────────────────────────────────────────
   # PHASE 1: INTAKE
-  # Capture the artifact to a file every reviewer reads, so a large artifact is
-  # not re-substituted into three prompts (and dodges the env-channel cap). The
-  # argument is either a path to an existing file or the artifact text itself.
+  # Capture the artifact to a file every reviewer reads (a file, not prompt
+  # substitution, so the reviewers themselves face no size limit). A file-path
+  # argument is copied whole; inline text arrives through the bash env channel,
+  # which head/tail-truncates at 16 KiB — so a large inline artifact is rejected
+  # with a path instead of silently reviewed in corrupted form.
   # ───────────────────────────────────────────────────────────────────────────
   - id: intake
     timeout: 30000
     bash: |
-      set -uo pipefail
+      set -euo pipefail
       ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
       mkdir -p "$ARTIFACTS"
       DEST="$ARTIFACTS/artifact.md"
@@ -70,6 +72,14 @@ nodes:
         cp "$TRIMMED" "$DEST"
         echo "Artifact loaded from file: $TRIMMED"
       else
+        # The env channel head/tail-truncates at 16 KiB and marks the seam; a
+        # truncated inline artifact would be reviewed as corrupted, so reject it
+        # and point at the unlimited file-path route.
+        if printf '%s' "$RAW" | grep -q '\[keelson: input truncated'; then
+          echo "Inline artifact exceeded the 16 KiB argument limit and was truncated." >&2
+          echo "Pass a file path instead: --arguments /path/to/artifact.md" >&2
+          exit 1
+        fi
         printf '%s\n' "$RAW" > "$DEST"
         echo "Artifact captured from inline text"
       fi
@@ -301,8 +311,19 @@ nodes:
     depends_on: [synthesize]
     timeout: 30000
     bash: |
-      set -uo pipefail
+      set -euo pipefail
       ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
       DEST="$ARTIFACTS/verdict.md"
-      printf '%s\n' "$KEELSON_NODE_synthesize_OUTPUT" > "$DEST"
+
+      # The inline env var is head/tail-truncated at 16 KiB; when the verdict is
+      # larger the executor spills the full text to <var>_FILE. Prefer the spill
+      # so a long verdict persists whole; set -e fails the node on a write error.
+      if [ -n "${KEELSON_NODE_synthesize_OUTPUT_FILE:-}" ] && [ -f "$KEELSON_NODE_synthesize_OUTPUT_FILE" ]; then
+        cp "$KEELSON_NODE_synthesize_OUTPUT_FILE" "$DEST"
+      else
+        printf '%s\n' "$KEELSON_NODE_synthesize_OUTPUT" > "$DEST"
+      fi
+
       echo "Verdict written to: $DEST"
+      echo ""
+      cat "$DEST"

@@ -25,21 +25,26 @@ debate's own citations are often wrong.
 ## Invoke it
 
 ```sh
-keelson workflow run adversarial-review --arguments "$(cat docs/design/some-proposal.md)"
+# A file path — no size limit:
+keelson workflow run adversarial-review --arguments docs/design/some-proposal.md
+
+# …or inline text, for something short:
+keelson workflow run adversarial-review --arguments "Claim: dropping detached on Windows fixes the console flashing."
 ```
 
-The argument is either a path to a file or the artifact text itself. Run it from
-the repository the artifact is about, so `verify` can read the source it cites.
-It needs a Copilot subscription; the verdict is printed at the end and persisted
-to `$ARTIFACTS_DIR/verdict.md`.
+The argument is either a path to a file or the artifact text itself. Inline text
+travels the argument channel, which caps at 16 KiB — for anything larger pass a
+path, which is read whole. Run it from the repository the artifact is about, so
+`verify` can read the source it cites. It needs a Copilot subscription; the
+verdict is printed at the end and persisted to `$ARTIFACTS_DIR/verdict.md`.
 
 ## The shape
 
-Seven nodes in three tiers: `intake` captures the artifact, three reviewers fan
-out in parallel over it, `verify` converges on their claims and checks them,
-`synthesize` issues the verdict, and `report` persists it. The reviewers never
-see each other's work; the only thing that crosses between tiers is each node's
-output.
+Seven nodes: `intake` captures the artifact, three reviewers fan out in parallel
+over it, `verify` converges on their claims and checks them, `synthesize` issues
+the verdict, and `report` persists it. Only the reviewers run concurrently — the
+rest is sequential. The reviewers never see each other's work; the only thing
+that crosses between stages is each node's output.
 
 ## Node by node
 
