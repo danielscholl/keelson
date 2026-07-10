@@ -128,6 +128,7 @@ async function runBun(args: string[], home: string, quiet: boolean): Promise<num
     cwd: home,
     stdout: quiet ? "ignore" : "inherit",
     stderr: quiet ? "ignore" : "inherit",
+    windowsHide: true,
   });
   return await proc.exited;
 }

@@ -104,6 +104,7 @@ async function runGit(args: string[], cwd?: string): Promise<GitOutcome> {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
+      windowsHide: true,
     });
   } catch (err) {
     // Bun.spawn throws synchronously when the exec fails before the child
@@ -138,6 +139,7 @@ async function runBun(args: string[], cwd: string, abortSignal?: AbortSignal): P
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
+      windowsHide: true,
     });
   } catch (err) {
     // See runGit: a synchronous spawn throw (e.g. cwd removed mid-flight)

@@ -98,6 +98,9 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",
+      // The backgrounded server has no console on Windows (detached launch), so
+      // an unhidden console child would flash a visible window on every spawn.
+      windowsHide: true,
       // POSIX-only: a new process group lets the kill-group dance below reap a
       // daemonizing grandchild that escapes the immediate child. Windows has no
       // POSIX process groups, and Bun's `detached` there suppresses stdout/stderr
@@ -122,7 +125,11 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
       try {
         const args = ["/pid", String(proc.pid), "/t"];
         if (signal === "SIGKILL") args.push("/f");
-        Bun.spawnSync(["taskkill", ...args], { stdout: "ignore", stderr: "ignore" });
+        Bun.spawnSync(["taskkill", ...args], {
+          stdout: "ignore",
+          stderr: "ignore",
+          windowsHide: true,
+        });
       } catch {
         // taskkill unavailable or the pid is already gone
       }

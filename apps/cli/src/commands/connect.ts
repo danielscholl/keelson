@@ -44,7 +44,12 @@ export type CommandRunner = (command: string, args: string[]) => CommandResult;
 // so a connect for one target failing is reported, not fatal to the process.
 function defaultRunCommand(command: string, args: string[]): CommandResult {
   try {
-    const res = Bun.spawnSync({ cmd: [command, ...args], stdout: "pipe", stderr: "pipe" });
+    const res = Bun.spawnSync({
+      cmd: [command, ...args],
+      stdout: "pipe",
+      stderr: "pipe",
+      windowsHide: true,
+    });
     return { code: res.exitCode, stdout: res.stdout.toString(), stderr: res.stderr.toString() };
   } catch (err) {
     return { code: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };

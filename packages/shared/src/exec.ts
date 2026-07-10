@@ -50,6 +50,7 @@ export async function runText(
       stderr: "pipe",
       cwd: opts.cwd,
       signal: ctrl.signal,
+      windowsHide: true,
     });
     const [stdout, stderr, code] = await Promise.all([
       new Response(proc.stdout).text(),

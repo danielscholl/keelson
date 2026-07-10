@@ -46,6 +46,7 @@ async function runBunPm(args: string[], home: string, quiet: boolean): Promise<n
     cwd: home,
     stdout: quiet ? "ignore" : "inherit",
     stderr: quiet ? "ignore" : "inherit",
+    windowsHide: true,
   });
   return await proc.exited;
 }
@@ -59,6 +60,7 @@ async function runBunPmCaptured(
     cwd: home,
     stdout: quiet ? "ignore" : "inherit",
     stderr: "pipe",
+    windowsHide: true,
   });
   const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
   if (!quiet && stderr.length > 0) process.stderr.write(stderr);
