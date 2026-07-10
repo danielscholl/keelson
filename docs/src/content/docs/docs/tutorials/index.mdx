@@ -18,6 +18,13 @@ Ride it in order. Each stop uses the harness for something real and leaves you
 ready for the next, and the closing field exercise puts all of it to work on a
 multi-model build.
 
+One caution before you start: real means not reproducible. The outputs printed
+on these pages show you the *shape* of what a stop produces, but a live agent
+will not match them word for word, and the field exercise will build you a
+different app than it built us. That is the point, not a defect. Treat each
+stop as a lab, not a script: run the step, read what actually came back, and
+when a page says "try it", try your own variation before moving on.
+
 The whole rail is five stops:
 
 <figure>
@@ -57,3 +64,26 @@ The whole rail is five stops:
   href="frontend-mix/"
   description="The field exercise: clone a template project, run a real app build that routes each phase to a different model, then swap one and compare."
 />
+
+## Where the rail continues
+
+The five stops complete the harness rail: everything they teach ships with
+keelson alone. But the project you build at stop 5 is designed to keep going.
+Your clone of the template carries a
+[backlog](https://github.com/danielscholl/keelson-sample/blob/main/backlog.md)
+of scoped improvements to the app the run built, and two installable
+[ribs](../concepts/the-rib-model/) pick up that same project in their own
+tutorial rails:
+
+- **[Chamber](https://danielscholl.github.io/keelson-rib-chamber/tutorials/)**
+  (multi-agent rooms) convenes a panel to red-team the very plan your build
+  trusted end to end, then puts a coding room on the backlog so agents that
+  argued about the plan go on to change the code.
+- **[Squad](https://danielscholl.github.io/keelson-rib-squad/tutorials/)** (a
+  persistent, project-scoped team) casts a team from a scan of your clone and
+  works the backlog with review gates, verification, and a memory that
+  compounds across runs.
+
+Same app, same harness, three rails: build it, argue about it, staff it. Each
+rib rail assumes the stop-5 project but stands alone if you bring any real
+repository instead.

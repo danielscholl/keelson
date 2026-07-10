@@ -260,6 +260,12 @@ test bench. From here you can take it further:
   to compare vendor against vendor instead of model against model.
 - **Rewrite the spec.** `spec.md` is a content-and-intent brief, not a
   wireframe. Describe your own app and the same pipeline builds it.
+- **Work the backlog.** Your clone ships `backlog.md`: six scoped
+  improvements to the app the run just built, written against the spec rather
+  than any one build, since yours differs from everyone else's. Hand one to a
+  chat session, or capture it as a run with the bundled
+  [plan-act-evaluate](../../workflows/plan-act-evaluate/) or
+  [fix-issue](../../workflows/fix-issue/) workflows.
 - **Drive it by hand.** The same repo ships `.agents/skills/frontend-mix-*`
   skills that walk this chain one step at a time from a chat session, so you
   switch models between steps and inspect each handoff yourself. The sample's
@@ -278,3 +284,20 @@ The [authoring workflows guide](../../guides/authoring-workflows/) covers
 the full node vocabulary when you are ready to encode a pipeline of your
 own, and [Workflows](../../concepts/workflows/) explains the engine
 underneath this page.
+
+## Where the rail continues
+
+This is the last stop on the harness rail, but not the end of the project.
+Two things ride out of this page: an app in your working tree with a
+[backlog](https://github.com/danielscholl/keelson-sample/blob/main/backlog.md)
+waiting on it, and an observation the pipeline could not act on, that no
+phase ever questioned the plan every later phase trusted.
+
+Both are picked up by installable ribs, each with its own tutorial rail on
+the same project. The [Chamber rail](https://danielscholl.github.io/keelson-rib-chamber/tutorials/)
+convenes a review panel on this build's own plan and watches it catch what
+the straight line shipped, then puts agents in a coding room on your
+backlog. The [Squad rail](https://danielscholl.github.io/keelson-rib-squad/tutorials/)
+casts a persistent team from a scan of your clone and works the backlog
+with review gates and a memory that compounds across runs. The harness you
+just proved carries both; the ribs only add the crew.
