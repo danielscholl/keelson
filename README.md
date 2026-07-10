@@ -254,6 +254,14 @@ Keelson does not store provider secrets in the home directory. Provider keys and
 - [CONTRIBUTING.md](CONTRIBUTING.md): local setup and required checks.
 - [SECURITY.md](SECURITY.md): threat model and reporting process.
 
+## Acknowledgments
+
+Keelson's workflow engine borrows its schema and DAG concepts from
+[Archon](https://github.com/coleam00/Archon) (MIT, by Cole Medin) — a
+well-thought-out project; go support his
+[channel](https://www.youtube.com/@ColeMedin). Full attribution lives in
+[NOTICE](NOTICE).
+
 ## License
 
 Keelson is licensed under the [Apache License 2.0](LICENSE). Third-party attribution lives in [NOTICE](NOTICE).
