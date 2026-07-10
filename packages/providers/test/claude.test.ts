@@ -1150,10 +1150,16 @@ describe("ClaudeProvider — additional error paths", () => {
 });
 
 describe("ClaudeProvider — defaultModel + listModels", () => {
-  it("capabilities pin the haiku model as the default", () => {
-    expect(CLAUDE_DEFAULT_MODEL).toBe("claude-haiku-4-5-20251001");
+  it("capabilities pin the opus model as the default over the family catalog", () => {
+    expect(CLAUDE_DEFAULT_MODEL).toBe("claude-opus-4-8");
     expect(CLAUDE_CAPABILITIES.defaultModel).toBe(CLAUDE_DEFAULT_MODEL);
     expect(CLAUDE_CAPABILITIES.models).toContain(CLAUDE_DEFAULT_MODEL);
+    expect([...CLAUDE_CAPABILITIES.models]).toEqual([
+      "claude-fable-5",
+      "claude-opus-4-8",
+      "claude-sonnet-5",
+      "claude-haiku-4-5",
+    ]);
   });
 
   it("listModels() returns the curated catalog with metadata", async () => {
