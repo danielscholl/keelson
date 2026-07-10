@@ -1,0 +1,276 @@
+# Adversarial review of an arbitrary artifact — a claim, design, root-cause
+# analysis, plan, spec, or diff. The fan-out -> synthesize DAG skeleton is
+# adapted from Archon's parallel-review workflows (MIT, see NOTICE), but the
+# job is inverted: instead of specialist reviewers finding issues in a PR, three
+# adversarial reviewers attack any artifact from distinct lenses, an independent
+# node re-verifies their load-bearing claims against source, and a synthesizer
+# issues one consensus verdict that surfaces (not papers over) disagreement.
+#
+# The shape encodes lessons from running this by hand: parallel independent
+# reviewers can't take turns clearing their throats, and the separate `verify`
+# node exists because a debate's own citations are often wrong — it re-derives
+# the checkable claims from source rather than trusting any reviewer.
+#
+# Portability: `model: auto` and no hard provider pins so the workflow runs on
+# any account. For sharper tension, an operator can pin a different `provider:`
+# / `model:` per reviewer (genuine cross-vendor diversity) and a stronger judge
+# model on `synthesize`. Running from the repo the artifact is about lets
+# `verify` actually read the source it cites.
+
+name: adversarial-review
+provider: copilot
+model: auto
+description: |
+  Use when: User wants an artifact stress-tested by independent agents that
+            debate it and reach a consensus verdict — a claim, design doc,
+            root-cause analysis, plan, spec, or diff.
+  Triggers: "adversarial review", "pressure-test this", "debate this",
+            "poke holes in", "review this and reach consensus", "have agents
+            argue about".
+  Does: Captures the artifact, runs three adversarial reviewers in parallel
+        (logic, evidence, risk lenses), independently re-verifies their
+        load-bearing claims against source, then synthesizes one verdict —
+        CONFIRMED / CONFIRMED-WITH-CHANGES / REFUTED — with the surviving
+        claims, the dissent, and what is still unverified.
+  NOT for: Building or fixing code (use adversarial-build / fix-issue), posting
+           a GitHub PR review (use pr-review), or generating something new.
+
+nodes:
+  # ───────────────────────────────────────────────────────────────────────────
+  # PHASE 1: INTAKE
+  # Capture the artifact to a file every reviewer reads, so a large artifact is
+  # not re-substituted into three prompts (and dodges the env-channel cap). The
+  # argument is either a path to an existing file or the artifact text itself.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: intake
+    timeout: 30000
+    bash: |
+      set -uo pipefail
+      ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
+      mkdir -p "$ARTIFACTS"
+      DEST="$ARTIFACTS/artifact.md"
+
+      RAW="$KEELSON_ARGUMENTS"
+      TRIMMED=$(printf '%s' "$RAW" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+      if [ -n "$TRIMMED" ] && [ -f "$TRIMMED" ]; then
+        cp "$TRIMMED" "$DEST"
+        echo "Artifact loaded from file: $TRIMMED"
+      else
+        printf '%s\n' "$RAW" > "$DEST"
+        echo "Artifact captured from inline text"
+      fi
+
+      if [ ! -s "$DEST" ]; then
+        echo "No artifact provided — pass text or a file path as the argument." >&2
+        exit 1
+      fi
+
+      echo "Bytes: $(wc -c < "$DEST" | tr -d ' ')"
+      echo "Artifact ready at: $DEST"
+      echo ""
+      echo "--- preview (first 40 lines) ---"
+      head -40 "$DEST"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PHASE 2: ADVERSARIAL PANEL (parallel, independent)
+  # Three reviewers, each with `context: fresh` so none sees another's take.
+  # Every reviewer defaults to skeptical and renders a per-claim verdict so the
+  # synthesizer inherits the discipline instead of having to impose it.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - id: reviewer-logic
+    depends_on: [intake]
+    context: fresh
+    prompt: |
+      You are an adversarial reviewer on a LOGIC lens. Your job is to find where
+      the artifact's reasoning fails — not to praise it. Default to skeptical.
+
+      Read the artifact at `$ARTIFACTS_DIR/artifact.md`.
+
+      Attack it on internal soundness:
+      - What are its load-bearing claims and the conclusion resting on them?
+      - Does the conclusion actually follow, or is there a gap / leap?
+      - What assumptions are unstated, and would the argument collapse if one is
+        false?
+      - Is there an alternative explanation the artifact dismisses too fast?
+      - Any internal contradiction, circular reasoning, or equivocation?
+
+      ## Output (markdown)
+
+      A short list. For EACH load-bearing claim:
+      - **Claim**: quote or paraphrase it in one line.
+      - **Verdict**: HOLDS · DUBIOUS · REFUTED
+      - **Why**: one or two sentences — the specific logical flaw, or why it holds.
+      - **What would settle it**: the evidence or check that would resolve it.
+
+      End with a one-line **Lens lean**: does the artifact's core hold on logic
+      alone, hold-with-changes, or fail?
+
+  - id: reviewer-evidence
+    depends_on: [intake]
+    context: fresh
+    prompt: |
+      You are an adversarial reviewer on an EVIDENCE lens. Your job is to
+      separate what the artifact SHOWS from what it merely ASSERTS. Default to
+      skeptical: an unsupported claim is dubious until evidenced.
+
+      Read the artifact at `$ARTIFACTS_DIR/artifact.md`.
+
+      For every factual, technical, or empirical claim:
+      - Is it backed by concrete evidence (a citation, a file:line, a command
+        output, a measurement) — or just asserted with confidence?
+      - Are cited sources actually load-bearing, or decorative?
+      - Which claims are externally checkable (against source code, a spec, a
+        standard, a benchmark) and therefore MUST be verified before trust?
+
+      ## Output (markdown)
+
+      A short list. For EACH claim that carries weight:
+      - **Claim**: one line.
+      - **Verdict**: SHOWN · ASSERTED · CONTRADICTED-BY-COMMON-KNOWLEDGE
+      - **Why**: what evidence exists or is missing.
+      - **Needs verification**: YES/NO — and if YES, exactly what a verifier
+        should check (name the file, symbol, spec, or fact).
+
+      End with a **Claims to verify** section: a plain bullet list of the
+      specific checkable claims the next node must independently confirm.
+
+  - id: reviewer-risk
+    depends_on: [intake]
+    context: fresh
+    prompt: |
+      You are an adversarial reviewer on a RISK / FEASIBILITY lens. Assume the
+      artifact's proposal or conclusion is adopted as-is. Your job is to find
+      what breaks. Default to skeptical.
+
+      Read the artifact at `$ARTIFACTS_DIR/artifact.md`.
+
+      Attack it on consequences and completeness:
+      - If this is acted on, what breaks in practice? Edge cases, failure modes,
+        second-order effects the artifact ignores?
+      - What does it OMIT — a case, a platform, a constraint, a dependency, a
+        rollback path?
+      - For a plan/fix/design: where is it under-specified enough to go wrong on
+        implementation? What is the riskiest step?
+      - Is the scope right — over-built, or missing a load-bearing piece?
+
+      ## Output (markdown)
+
+      A short list. For EACH risk or gap:
+      - **Issue**: one line.
+      - **Severity**: BLOCKING · MAJOR · MINOR
+      - **Why**: the concrete failure it leads to.
+      - **Mitigation**: the change that would neutralize it.
+
+      End with a one-line **Lens lean**: safe to adopt, adopt-with-changes, or
+      do not adopt.
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PHASE 3: INDEPENDENT VERIFICATION
+  # The load-bearing node. It does NOT trust the reviewers' or the artifact's
+  # citations — it re-derives the checkable claims from source. `one_success`
+  # so a single failed reviewer lane doesn't sink the run.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: verify
+    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk]
+    trigger_rule: one_success
+    context: fresh
+    allowed_tools: [Read, Glob, Grep]
+    prompt: |
+      You are an independent verifier. Three reviewers flagged claims in an
+      artifact; your mandate is to CHECK the checkable ones against ground truth,
+      trusting no one — not the artifact, not the reviewers. Reviewers' own
+      citations are frequently wrong; re-derive, don't relay.
+
+      ## The artifact
+      Read `$ARTIFACTS_DIR/artifact.md`.
+
+      ## What the reviewers flagged to verify
+      $reviewer-evidence.output
+
+      Additional load-bearing claims from the other lenses (a section may be
+      empty if that reviewer failed):
+
+      ### Logic lens
+      $reviewer-logic.output
+
+      ### Risk lens
+      $reviewer-risk.output
+
+      ## Task
+
+      Pick the claims that are actually checkable here — those that resolve
+      against source code, files, a config, or a well-established fact. For each,
+      go look: use Read/Glob/Grep to inspect the real source (you are running in
+      the caller's working directory — if it is the repo the artifact concerns,
+      the files are here).
+
+      Do NOT accept a claim because it sounds right or because two reviewers
+      agree. Find the actual line. If a claim depends on something not present in
+      this working directory or on an external fact you cannot check with these
+      tools, mark it UNVERIFIABLE-HERE rather than guessing.
+
+      ## Output (markdown)
+
+      For EACH claim you checked:
+      - **Claim**: one line.
+      - **Result**: CONFIRMED · REFUTED · UNVERIFIABLE-HERE
+      - **Evidence**: the specific `file:line` / symbol / fact you found, or why
+        it could not be checked. Quote the decisive snippet when you refute.
+
+      End with **Corrections**: any claim in the artifact or a reviewer's output
+      that your check proved wrong — stated plainly.
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PHASE 4: SYNTHESIS -> CONSENSUS VERDICT
+  # Weighs the three lenses AGAINST the independent verification, then issues one
+  # verdict. Surfaces dissent rather than smoothing it. Writes verdict.md and
+  # prints the verdict so the operator sees it directly.
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: synthesize
+    depends_on: [verify]
+    context: fresh
+    allowed_tools: [Read, Write]
+    prompt: |
+      You are the presiding synthesizer. Three adversarial reviewers and one
+      independent verifier examined an artifact. Reach a consensus verdict —
+      weighting the VERIFIER over the reviewers wherever they conflict, because
+      the verifier checked source and the reviewers reasoned from the text.
+
+      ## Artifact
+      Read `$ARTIFACTS_DIR/artifact.md`.
+
+      ## Logic lens
+      $reviewer-logic.output
+
+      ## Evidence lens
+      $reviewer-evidence.output
+
+      ## Risk lens
+      $reviewer-risk.output
+
+      ## Independent verification (authoritative on facts)
+      $verify.output
+
+      ## Task
+
+      1. State the artifact's central claim/proposal in one line.
+      2. Give the **verdict**: CONFIRMED · CONFIRMED-WITH-CHANGES · REFUTED.
+         - CONFIRMED: core holds; verification found nothing that breaks it.
+         - CONFIRMED-WITH-CHANGES: core survives but named claims must be fixed,
+           or named risks addressed, before it is sound.
+         - REFUTED: a load-bearing claim failed verification or logic.
+      3. **Per-claim table**: each load-bearing claim → HOLDS / FIX / FAILS, with
+         the one fact or argument that decided it (cite the verifier when it ran
+         the check). If the verifier corrected the artifact, the correction wins.
+      4. **Dissent**: where the reviewers genuinely split, or where a lens
+         disagrees with the verdict — name it, don't smooth it over. If there is
+         no real disagreement, say so.
+      5. **Open questions**: what remains UNVERIFIABLE-HERE and would need a
+         human, a different tool, or a live check to settle.
+      6. **If CONFIRMED-WITH-CHANGES or REFUTED**: the shortest list of concrete
+         changes that would move it to CONFIRMED.
+
+      Write this to `$ARTIFACTS_DIR/verdict.md` with the Write tool AND print it
+      as your response so the operator sees it directly.
