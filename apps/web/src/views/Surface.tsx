@@ -509,8 +509,8 @@ function SurfaceRegion({
       </div>
       {/* The pulse rides its own row so the chrome (explore/select/expand + freshness)
           holds a fixed spot on the title bar even in a narrow column. Gate on a
-          positive segment: Segments drops zero counts and renders null for an
-          all-zero pulse, so an unguarded wrapper would add a blank row. */}
+          positive segment: Segments keeps only n > 0 and renders null when none
+          remain, so an unguarded wrapper would add a blank row for an empty pulse. */}
       {board?.header?.segments?.some((s) => s.n > 0) && (
         <div className="surface-region-head-meta">
           <Segments items={board.header.segments} />
