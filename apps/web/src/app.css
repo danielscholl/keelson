@@ -3342,6 +3342,19 @@ button.tab:focus-visible {
   border-bottom: 1px solid var(--border-soft);
   background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
 }
+/* Bar and pulse each claim a full row inside the wrapping head, so the controls
+   keep a fixed spot while the pulse drops below them in a narrow column. Scoped
+   to these children so the head's other consumers (Usage) keep their single row. */
+.surface-region-head-bar,
+.surface-region-head-meta {
+  display: flex;
+  align-items: center;
+  flex: 1 1 100%;
+}
+.surface-region-head-bar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .surface-region[data-collapsed] .surface-region-head {
   border-bottom: none;
   /* Collapsed = head only; round it to sit cleanly inside the card border now that

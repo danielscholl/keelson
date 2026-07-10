@@ -370,143 +370,151 @@ function SurfaceRegion({
   // plus the board's live status/scope/pulse, and the region's own controls.
   const head = (
     <div className="surface-region-head">
-      {collapsible && (
-        <button
-          type="button"
-          className="surface-region-toggle"
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? "Expand region" : "Collapse region"}
-          onClick={() => {
-            manuallyToggled.current = true;
-            setCollapsed((c) => !c);
-          }}
-        >
-          {collapsed ? "▸" : "▾"}
-        </button>
-      )}
-      {region.glyph && (
-        <span
-          className="surface-region-glyph-chip"
-          data-tone={region.glyph.tone}
-          aria-hidden="true"
-        >
-          {region.glyph.char}
-        </span>
-      )}
-      {(region.title ?? board?.title) && (
-        <span className="surface-region-identity">
-          <span className="surface-region-title">{region.title ?? board?.title}</span>
-          {region.byline && <span className="surface-region-byline">{region.byline}</span>}
-        </span>
-      )}
-      {board?.header?.status &&
-        (board.header.people && board.header.people.length > 0 ? (
-          // The count carries the roster: identity dots inline, names on hover/focus.
-          <span
-            className="surface-region-roster"
-            role="img"
-            aria-label={`${board.header.status.label}: ${board.header.people.map((p) => p.name).join(", ")}`}
+      <div className="surface-region-head-bar">
+        {collapsible && (
+          <button
+            type="button"
+            className="surface-region-toggle"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Expand region" : "Collapse region"}
+            onClick={() => {
+              manuallyToggled.current = true;
+              setCollapsed((c) => !c);
+            }}
           >
+            {collapsed ? "▸" : "▾"}
+          </button>
+        )}
+        {region.glyph && (
+          <span
+            className="surface-region-glyph-chip"
+            data-tone={region.glyph.tone}
+            aria-hidden="true"
+          >
+            {region.glyph.char}
+          </span>
+        )}
+        {(region.title ?? board?.title) && (
+          <span className="surface-region-identity">
+            <span className="surface-region-title">{region.title ?? board?.title}</span>
+            {region.byline && <span className="surface-region-byline">{region.byline}</span>}
+          </span>
+        )}
+        {board?.header?.status &&
+          (board.header.people && board.header.people.length > 0 ? (
+            // The count carries the roster: identity dots inline, names on hover/focus.
+            <span
+              className="surface-region-roster"
+              role="img"
+              aria-label={`${board.header.status.label}: ${board.header.people.map((p) => p.name).join(", ")}`}
+            >
+              <span className="cvb-header-status" data-tone={board.header.status.tone}>
+                {board.header.status.label}
+              </span>
+              <span className="surface-region-roster-dots" aria-hidden="true">
+                {board.header.people.map((person) => (
+                  <span
+                    key={person.name}
+                    className="surface-region-roster-dot"
+                    data-tone={person.tone}
+                  />
+                ))}
+              </span>
+              <span className="surface-region-roster-pop" aria-hidden="true">
+                {board.header.people.map((person) => (
+                  <span
+                    key={person.name}
+                    className="surface-region-roster-pop-row"
+                    data-tone={person.tone}
+                  >
+                    {person.name}
+                  </span>
+                ))}
+              </span>
+            </span>
+          ) : (
             <span className="cvb-header-status" data-tone={board.header.status.tone}>
               {board.header.status.label}
             </span>
-            <span className="surface-region-roster-dots" aria-hidden="true">
-              {board.header.people.map((person) => (
-                <span
-                  key={person.name}
-                  className="surface-region-roster-dot"
-                  data-tone={person.tone}
-                />
-              ))}
-            </span>
-            <span className="surface-region-roster-pop" aria-hidden="true">
-              {board.header.people.map((person) => (
-                <span
-                  key={person.name}
-                  className="surface-region-roster-pop-row"
-                  data-tone={person.tone}
-                >
-                  {person.name}
-                </span>
-              ))}
-            </span>
+          ))}
+        {board?.header?.chip && (
+          <span className="cvb-chip surface-region-scope">{board.header.chip}</span>
+        )}
+        <span className="surface-region-spacer" />
+        {region.live && (
+          <span
+            className="surface-region-live"
+            role="img"
+            data-streaming={streaming || undefined}
+            title={streaming ? "Live — streaming now" : "Live region"}
+            aria-label={streaming ? "Live, streaming now" : "Live region, idle"}
+          />
+        )}
+        {freshness.label && (
+          <span
+            className="surface-region-freshness"
+            data-tone={freshness.tone ?? undefined}
+            title={runRefresh.error ?? undefined}
+          >
+            {freshness.label}
           </span>
-        ) : (
-          <span className="cvb-header-status" data-tone={board.header.status.tone}>
-            {board.header.status.label}
-          </span>
-        ))}
-      {board?.header?.chip && (
-        <span className="cvb-chip surface-region-scope">{board.header.chip}</span>
-      )}
-      {board?.header?.segments && board.header.segments.length > 0 && (
-        <Segments items={board.header.segments} />
-      )}
-      <span className="surface-region-spacer" />
-      {region.live && (
-        <span
-          className="surface-region-live"
-          role="img"
-          data-streaming={streaming || undefined}
-          title={streaming ? "Live — streaming now" : "Live region"}
-          aria-label={streaming ? "Live, streaming now" : "Live region, idle"}
-        />
-      )}
-      {freshness.label && (
-        <span
-          className="surface-region-freshness"
-          data-tone={freshness.tone ?? undefined}
-          title={runRefresh.error ?? undefined}
-        >
-          {freshness.label}
-        </span>
-      )}
-      {!hideActions && snap.status === "live" && onExplore && (
-        <button
-          type="button"
-          className="surface-region-action surface-region-icon"
-          onClick={() => onExplore(buildExploreSeedForPanel(panelName, snap.data))}
-          aria-label="Explore in chat"
-          title="Explore this in chat"
-        >
-          <span aria-hidden="true">✦</span>
-        </button>
-      )}
-      {!hideActions && (snap.status === "live" || selected) && onToggleSelect && (
-        <input
-          type="checkbox"
-          className="surface-region-action surface-region-select"
-          checked={selected ?? false}
-          onChange={(event) =>
-            onToggleSelect(
-              region.key,
-              event.currentTarget.checked && snap.status === "live"
-                ? { name: panelName, data: snap.data }
-                : null,
-            )
-          }
-          aria-label="Select panel for multi-panel explore"
-          title="Select for multi-panel explore"
-        />
-      )}
-      {!hideActions && (
-        <button
-          type="button"
-          className="surface-region-action surface-region-icon"
-          onClick={expand}
-          aria-label="Expand"
-          title="Open full view"
-        >
-          <span aria-hidden="true">⤢</span>
-        </button>
-      )}
-      {/* Rib head verbs render outside the hideActions gate (that flag hides
+        )}
+        {!hideActions && snap.status === "live" && onExplore && (
+          <button
+            type="button"
+            className="surface-region-action surface-region-icon"
+            onClick={() => onExplore(buildExploreSeedForPanel(panelName, snap.data))}
+            aria-label="Explore in chat"
+            title="Explore this in chat"
+          >
+            <span aria-hidden="true">✦</span>
+          </button>
+        )}
+        {!hideActions && (snap.status === "live" || selected) && onToggleSelect && (
+          <input
+            type="checkbox"
+            className="surface-region-action surface-region-select"
+            checked={selected ?? false}
+            onChange={(event) =>
+              onToggleSelect(
+                region.key,
+                event.currentTarget.checked && snap.status === "live"
+                  ? { name: panelName, data: snap.data }
+                  : null,
+              )
+            }
+            aria-label="Select panel for multi-panel explore"
+            title="Select for multi-panel explore"
+          />
+        )}
+        {!hideActions && (
+          <button
+            type="button"
+            className="surface-region-action surface-region-icon"
+            onClick={expand}
+            aria-label="Expand"
+            title="Open full view"
+          >
+            <span aria-hidden="true">⤢</span>
+          </button>
+        )}
+        {/* Rib head verbs render outside the hideActions gate (that flag hides
           host chrome, not the rib's own verbs) and while collapsed, so a
           folded panel can still be retired. */}
-      {ribId && region.headActions && (
-        <BoardActionProvider run={headActionApi.run} reveal={headActionApi.reveal}>
-          <CardOverflowActions cardTitle={panelName} actions={region.headActions} />
-        </BoardActionProvider>
+        {ribId && region.headActions && (
+          <BoardActionProvider run={headActionApi.run} reveal={headActionApi.reveal}>
+            <CardOverflowActions cardTitle={panelName} actions={region.headActions} />
+          </BoardActionProvider>
+        )}
+      </div>
+      {/* The pulse rides its own row so the chrome (explore/select/expand + freshness)
+          holds a fixed spot on the title bar even in a narrow column. Gate on a
+          positive segment: Segments keeps only n > 0 and renders null when none
+          remain, so an unguarded wrapper would add a blank row for an empty pulse. */}
+      {board?.header?.segments?.some((s) => s.n > 0) && (
+        <div className="surface-region-head-meta">
+          <Segments items={board.header.segments} />
+        </div>
       )}
     </div>
   );
