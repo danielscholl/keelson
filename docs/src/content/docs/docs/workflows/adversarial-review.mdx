@@ -25,7 +25,7 @@ debate's own citations are often wrong.
 ## Invoke it
 
 ```sh
-# A file path — no size limit:
+# A file path — no argument-channel limit:
 keelson workflow run adversarial-review --arguments docs/design/some-proposal.md
 
 # …or inline text, for something short:
@@ -34,29 +34,29 @@ keelson workflow run adversarial-review --arguments "Claim: dropping detached on
 
 The argument is either a path to a file or the artifact text itself. Inline text
 travels the argument channel, which caps at 16 KiB — for anything larger pass a
-path, which is read whole. Run it from the repository the artifact is about, so
-`verify` can read the source it cites. It needs a Copilot subscription; the
-verdict is printed at the end and persisted to `$ARTIFACTS_DIR/verdict.md`.
+path, which is read whole (a very large file is still bounded by the reviewers'
+model context). Run it from the repository the artifact is about, so `verify` can
+read the source it cites. It needs a Copilot subscription; the verdict is the
+final node's printed output — it lands in the run record.
 
 ## The shape
 
-Seven nodes: `intake` captures the artifact, three reviewers fan out in parallel
-over it, `verify` converges on their claims and checks them, `synthesize` issues
-the verdict, and `report` persists it. Only the reviewers run concurrently — the
-rest is sequential. The reviewers never see each other's work; the only thing
-that crosses between stages is each node's output.
+Six nodes: `intake` captures the artifact, three reviewers fan out in parallel
+over it, `verify` converges on their claims and checks them against source, and
+`synthesize` issues the verdict. Only the reviewers run concurrently — the rest
+is sequential. The reviewers never see each other's work; the only thing that
+crosses between stages is each node's output.
 
 ## Node by node
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `intake` | bash | Captures the artifact (file path or inline text) to `artifact.md`; rejects empty input. |
-| `reviewer-logic` | prompt | Attacks internal soundness — does the conclusion follow, what is assumed — with a per-claim verdict. Read-only. |
-| `reviewer-evidence` | prompt | Separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. Read-only. |
-| `reviewer-risk` | prompt | Assumes the artifact is adopted and finds what breaks — edge cases, omissions, the riskiest step. Read-only. |
+| `intake` | bash | Captures the artifact (file path or inline text), rejects empty or truncated input, and emits it as its output for the rest to inline. |
+| `reviewer-logic` | prompt | Attacks internal soundness — does the conclusion follow, what is assumed — with a per-claim verdict. No tools. |
+| `reviewer-evidence` | prompt | Separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
+| `reviewer-risk` | prompt | Assumes the artifact is adopted and finds what breaks — edge cases, omissions, the riskiest step. No tools. |
 | `verify` | prompt | Re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. |
-| `synthesize` | prompt | Weighs the lenses against the verification and issues the verdict with dissent. Read-only. |
-| `report` | bash | Persists the synthesized verdict verbatim to `verdict.md`. |
+| `synthesize` | prompt | Weighs the lenses against the verification and issues the verdict with dissent. No tools. |
 
 ### The parts worth a second look
 
@@ -72,12 +72,12 @@ enough that an independent source check is what separates a verdict from a
 vibe. Claims it cannot check with its tools it marks `UNVERIFIABLE-HERE` rather
 than guessing.
 
-**Read-only by rail.** The artifact is untrusted input — it can carry
-prompt-injection. So every AI lane pins the exact capability it needs
-(`allowed_tools: [Read]` for the reviewers, search tools for `verify`), and
-synthesis holds no write capability at all. The single file write is a
-deterministic `report` bash node, so injected text never reaches a write-capable
-agent.
+**Minimal privilege for untrusted input.** The artifact can carry
+prompt-injection, so the reviewers and the synthesizer run with **no tools at
+all** — the artifact reaches them inlined as `$intake.output`, never through a
+file read, so injected text has nothing to act on. Only `verify` holds
+filesystem tools, and only to check source claims — the one node where reading
+the repo is the point.
 
 **The verdict is weighted to evidence.** Synthesis is told to weight the verifier
 over the reviewers wherever they conflict, and to surface dissent rather than
@@ -86,13 +86,12 @@ smooth it over — a split panel reads as a split verdict, not a false consensus
 ## Patterns it demonstrates
 
 - **Fan-out then converge**: three independent lanes over one input, a converge node that references each lane's `$nodeId.output`. The same skeleton as [pr-review](../pr-review/).
-- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: every lane is read-only; the one write is isolated to a bash node.
-- **[Feed agent output into a script safely](../../guides/authoring-workflows/#feed-agent-output-into-a-script-safely)**: `report` writes `$synthesize.output` through the env channel, never spliced into the shell body.
+- **[Bound an agent's reach](../../guides/authoring-workflows/#bound-an-agents-reach)**: the reviewers and synthesizer get no tools; only `verify` can touch the filesystem.
 
 ## Adapt it
 
 - **Add a lens.** A fourth reviewer is one more node `depends_on: [intake]` with
-  `allowed_tools: [Read]`; add it to `verify`'s and `synthesize`'s references.
+  `allowed_tools: []`; add it to `verify`'s and `synthesize`'s references.
 - **Cross-vendor tension.** Pin a different `provider:` / `model:` per reviewer
   for genuine diversity — the same rule the Chamber's review strategy enforces.
 - **A stronger judge.** Pin a stronger `model:` on `synthesize` when the verdict

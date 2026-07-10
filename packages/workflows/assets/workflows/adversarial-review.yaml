@@ -1,29 +1,14 @@
-# Adversarial review of an arbitrary artifact — a claim, design, root-cause
-# analysis, plan, spec, or diff. The fan-out -> synthesize DAG skeleton is
-# adapted from Archon's parallel-review workflows (MIT, see NOTICE), but the
-# job is inverted: instead of specialist reviewers finding issues in a PR, three
-# adversarial reviewers attack any artifact from distinct lenses, an independent
-# node re-verifies their load-bearing claims against source, and a synthesizer
-# issues one consensus verdict that surfaces (not papers over) disagreement.
+# Adversarial review of an arbitrary artifact (a claim, design, analysis, plan,
+# or diff): three reviewers attack it in parallel, `verify` re-checks their
+# claims against source, and `synthesize` issues one consensus verdict. Fan-out
+# -> synthesize skeleton adapted from Archon's parallel-review workflows (MIT,
+# see NOTICE).
 #
-# The shape encodes lessons from running this by hand: parallel independent
-# reviewers can't take turns clearing their throats, and the separate `verify`
-# node exists because a debate's own citations are often wrong — it re-derives
-# the checkable claims from source rather than trusting any reviewer.
-#
-# Every lane is read-only by harness rail: the artifact is untrusted input, so a
-# reviewer with no `allowed_tools` would inherit the provider's Write/Edit/Bash
-# built-ins and a prompt-injected artifact could write or run in the caller's
-# repo. Each AI node pins the exact capability it needs — reviewers read only the
-# artifact, `verify` may search source, and synthesis stays read-only while a
-# deterministic `report` bash node owns the one file write.
-#
-# Portability: `model: auto` avoids hard-pinning a model id; like the other
-# bundled workflows it sets `provider: copilot`, so it needs a configured Copilot
-# subscription. For sharper tension, an operator can pin a different `provider:` /
-# `model:` per reviewer (genuine cross-vendor diversity) and a stronger judge on
-# `synthesize`. Running from the repo the artifact is about lets `verify` read the
-# source it cites.
+# The artifact is untrusted input, so the reviewers and the synthesizer run with
+# no tools at all — the artifact is passed inline via `$intake.output`, never
+# read from disk — and only `verify` holds filesystem tools, solely to check
+# source claims. `model: auto` avoids pinning a model id; like the other bundled
+# workflows it sets `provider: copilot`.
 
 name: adversarial-review
 provider: copilot
@@ -44,22 +29,10 @@ description: |
            a GitHub PR review (use pr-review), or generating something new.
 
 nodes:
-  # ───────────────────────────────────────────────────────────────────────────
-  # PHASE 1: INTAKE
-  # Capture the artifact to a file every reviewer reads (a file, not prompt
-  # substitution, so the reviewers themselves face no size limit). A file-path
-  # argument is copied whole; inline text arrives through the bash env channel,
-  # which head/tail-truncates at 16 KiB — so a large inline artifact is rejected
-  # with a path instead of silently reviewed in corrupted form.
-  # ───────────────────────────────────────────────────────────────────────────
   - id: intake
     timeout: 30000
     bash: |
       set -euo pipefail
-      ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
-      mkdir -p "$ARTIFACTS"
-      DEST="$ARTIFACTS/artifact.md"
-
       RAW="$KEELSON_ARGUMENTS"
       TRIMMED=$(printf '%s' "$RAW" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
@@ -68,49 +41,40 @@ nodes:
         exit 1
       fi
 
+      # Status goes to stderr so stdout carries only the artifact — that stdout
+      # is this node's output, which the downstream nodes inline (no file read).
       if [ -f "$TRIMMED" ]; then
-        cp "$TRIMMED" "$DEST"
-        echo "Artifact loaded from file: $TRIMMED"
+        if [ ! -s "$TRIMMED" ]; then
+          echo "Artifact file is empty: $TRIMMED" >&2
+          exit 1
+        fi
+        echo "Artifact loaded from file: $TRIMMED ($(wc -c < "$TRIMMED" | tr -d ' ') bytes)" >&2
+        cat "$TRIMMED"
       else
-        # The env channel head/tail-truncates at 16 KiB and marks the seam; a
-        # truncated inline artifact would be reviewed as corrupted, so reject it
-        # and point at the unlimited file-path route.
+        # Inline text rides the bash env channel, which head/tail-truncates at
+        # 16 KiB and marks the seam; reject a truncated artifact rather than
+        # review it corrupted, and point at the unlimited file-path route.
         if printf '%s' "$RAW" | grep -q '\[keelson: input truncated'; then
           echo "Inline artifact exceeded the 16 KiB argument limit and was truncated." >&2
           echo "Pass a file path instead: --arguments /path/to/artifact.md" >&2
           exit 1
         fi
-        printf '%s\n' "$RAW" > "$DEST"
-        echo "Artifact captured from inline text"
+        echo "Artifact captured from inline text ($(printf '%s' "$RAW" | wc -c | tr -d ' ') bytes)" >&2
+        printf '%s\n' "$RAW"
       fi
 
-      if [ ! -s "$DEST" ]; then
-        echo "Artifact is empty after capture — nothing to review." >&2
-        exit 1
-      fi
-
-      echo "Bytes: $(wc -c < "$DEST" | tr -d ' ')"
-      echo "Artifact ready at: $DEST"
-      echo ""
-      echo "--- preview (first 40 lines) ---"
-      head -40 "$DEST"
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # PHASE 2: ADVERSARIAL PANEL (parallel, independent)
-  # Three reviewers, each with `context: fresh` so none sees another's take.
-  # Every reviewer defaults to skeptical and renders a per-claim verdict so the
-  # synthesizer inherits the discipline instead of having to impose it.
-  # ───────────────────────────────────────────────────────────────────────────
-
+  # Three reviewers run in parallel with `context: fresh` so none sees another's
+  # take, and with no tools — they reason over the inlined artifact alone.
   - id: reviewer-logic
     depends_on: [intake]
     context: fresh
-    allowed_tools: [Read]
+    allowed_tools: []
     prompt: |
       You are an adversarial reviewer on a LOGIC lens. Your job is to find where
       the artifact's reasoning fails — not to praise it. Default to skeptical.
 
-      Read the artifact at `$ARTIFACTS_DIR/artifact.md`.
+      ## Artifact
+      $intake.output
 
       Attack it on internal soundness:
       - What are its load-bearing claims and the conclusion resting on them?
@@ -134,13 +98,14 @@ nodes:
   - id: reviewer-evidence
     depends_on: [intake]
     context: fresh
-    allowed_tools: [Read]
+    allowed_tools: []
     prompt: |
       You are an adversarial reviewer on an EVIDENCE lens. Your job is to
       separate what the artifact SHOWS from what it merely ASSERTS. Default to
       skeptical: an unsupported claim is dubious until evidenced.
 
-      Read the artifact at `$ARTIFACTS_DIR/artifact.md`.
+      ## Artifact
+      $intake.output
 
       For every factual, technical, or empirical claim:
       - Is it backed by concrete evidence (a citation, a file:line, a command
@@ -164,13 +129,14 @@ nodes:
   - id: reviewer-risk
     depends_on: [intake]
     context: fresh
-    allowed_tools: [Read]
+    allowed_tools: []
     prompt: |
       You are an adversarial reviewer on a RISK / FEASIBILITY lens. Assume the
       artifact's proposal or conclusion is adopted as-is. Your job is to find
       what breaks. Default to skeptical.
 
-      Read the artifact at `$ARTIFACTS_DIR/artifact.md`.
+      ## Artifact
+      $intake.output
 
       Attack it on consequences and completeness:
       - If this is acted on, what breaks in practice? Edge cases, failure modes,
@@ -192,15 +158,11 @@ nodes:
       End with a one-line **Lens lean**: safe to adopt, adopt-with-changes, or
       do not adopt.
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # PHASE 3: INDEPENDENT VERIFICATION
-  # The load-bearing node. It does NOT trust the reviewers' or the artifact's
-  # citations — it re-derives the checkable claims from source. `one_success`
-  # so a single failed reviewer lane doesn't sink the run.
-  # ───────────────────────────────────────────────────────────────────────────
+  # The load-bearing node: it re-derives the checkable claims from source rather
+  # than relaying any reviewer's citation. Default trigger_rule (all_success) —
+  # a consensus verdict is not issued on a panel where a lane failed.
   - id: verify
     depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk]
-    trigger_rule: one_success
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
@@ -210,13 +172,12 @@ nodes:
       citations are frequently wrong; re-derive, don't relay.
 
       ## The artifact
-      Read `$ARTIFACTS_DIR/artifact.md`.
+      $intake.output
 
       ## What the reviewers flagged to verify
       $reviewer-evidence.output
 
-      Additional load-bearing claims from the other lenses (a section may be
-      empty if that reviewer failed):
+      Additional load-bearing claims from the other lenses:
 
       ### Logic lens
       $reviewer-logic.output
@@ -248,17 +209,13 @@ nodes:
       End with **Corrections**: any claim in the artifact or a reviewer's output
       that your check proved wrong — stated plainly.
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # PHASE 4: SYNTHESIS -> CONSENSUS VERDICT
-  # Weighs the three lenses AGAINST the independent verification, then issues one
-  # verdict. Surfaces dissent rather than smoothing it. Read-only: the artifact
-  # and reviewer text are untrusted, so synthesis never holds a write capability;
-  # the deterministic `report` node below persists its output.
-  # ───────────────────────────────────────────────────────────────────────────
+  # Read-only: the artifact and reviewer text are untrusted, so synthesis holds
+  # no tools. Its printed verdict is the workflow's output (it lands in the run
+  # record; the scratch $ARTIFACTS_DIR does not survive the run).
   - id: synthesize
     depends_on: [verify]
     context: fresh
-    allowed_tools: [Read]
+    allowed_tools: []
     prompt: |
       You are the presiding synthesizer. Three adversarial reviewers and one
       independent verifier examined an artifact. Reach a consensus verdict —
@@ -266,7 +223,7 @@ nodes:
       the verifier checked source and the reviewers reasoned from the text.
 
       ## Artifact
-      Read `$ARTIFACTS_DIR/artifact.md`.
+      $intake.output
 
       ## Logic lens
       $reviewer-logic.output
@@ -299,31 +256,4 @@ nodes:
       6. **If CONFIRMED-WITH-CHANGES or REFUTED**: the shortest list of concrete
          changes that would move it to CONFIRMED.
 
-      Print the full verdict as your response so the operator sees it directly —
-      a downstream node persists it to a file. Do not use any tool to write it.
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # PHASE 5: PERSIST (deterministic)
-  # A no-agent step so untrusted artifact/reviewer content never reaches a
-  # write-capable agent. Writes the synthesized verdict verbatim to verdict.md.
-  # ───────────────────────────────────────────────────────────────────────────
-  - id: report
-    depends_on: [synthesize]
-    timeout: 30000
-    bash: |
-      set -euo pipefail
-      ARTIFACTS="$KEELSON_ARTIFACTS_DIR"
-      DEST="$ARTIFACTS/verdict.md"
-
-      # The inline env var is head/tail-truncated at 16 KiB; when the verdict is
-      # larger the executor spills the full text to <var>_FILE. Prefer the spill
-      # so a long verdict persists whole; set -e fails the node on a write error.
-      if [ -n "${KEELSON_NODE_synthesize_OUTPUT_FILE:-}" ] && [ -f "$KEELSON_NODE_synthesize_OUTPUT_FILE" ]; then
-        cp "$KEELSON_NODE_synthesize_OUTPUT_FILE" "$DEST"
-      else
-        printf '%s\n' "$KEELSON_NODE_synthesize_OUTPUT" > "$DEST"
-      fi
-
-      echo "Verdict written to: $DEST"
-      echo ""
-      cat "$DEST"
+      Print the full verdict as your response — it is this workflow's output.
