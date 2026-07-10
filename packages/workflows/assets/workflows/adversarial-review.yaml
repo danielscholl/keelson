@@ -46,11 +46,19 @@ nodes:
       # Status goes to stderr so stdout carries only the artifact — that stdout
       # is this node's output, which the downstream nodes inline (no file read).
       if [ -f "$TRIMMED" ]; then
-        if [ ! -s "$TRIMMED" ]; then
+        FSIZE=$(wc -c < "$TRIMMED" | tr -d ' ')
+        if [ "$FSIZE" -eq 0 ]; then
           echo "Artifact file is empty: $TRIMMED" >&2
           exit 1
         fi
-        echo "Artifact loaded from file: $TRIMMED ($(wc -c < "$TRIMMED" | tr -d ' ') bytes)" >&2
+        # The executor caps a node's captured stdout at ~1 MB, so a larger file
+        # would be reviewed only in part. Reject rather than silently truncate.
+        if [ "$FSIZE" -gt 1000000 ]; then
+          echo "Artifact file is ${FSIZE} bytes; the workflow reviews at most ~1 MB and would otherwise see only a prefix." >&2
+          echo "Review a specific section, or split the artifact." >&2
+          exit 1
+        fi
+        echo "Artifact loaded from file: $TRIMMED (${FSIZE} bytes)" >&2
         # `--` so a path beginning with `-` is not read as a cat option.
         cat -- "$TRIMMED"
       else

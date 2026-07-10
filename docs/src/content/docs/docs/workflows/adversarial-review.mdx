@@ -34,7 +34,8 @@ keelson workflow run adversarial-review --arguments "Claim: dropping detached on
 
 The argument is either a path to a file or the artifact text itself. Inline text
 travels the argument channel, which caps at 16 KiB — for anything larger pass a
-path, which is read whole (a very large file is still bounded by the reviewers'
+path, which is read up to a ~1 MB limit (`intake` rejects a larger file rather
+than review only a prefix, and a large file is also bounded by the reviewers'
 model context). Run it from the repository the artifact is about, so `verify` can
 read the source it cites. It needs a Copilot subscription; the verdict is the
 final node's printed output — it lands in the run record.
