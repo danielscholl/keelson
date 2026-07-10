@@ -29,7 +29,7 @@ description: |
 # the resolved-model chunk), so an `auto` node's actual model is unobservable —
 # pinning is the only way to know what ran. This is an account-dependent id: it
 # must appear in the account's live Copilot list (GET /api/providers/copilot/
-# models). If it isn't available, swap it for another frontier id (e.g. `gpt-5.5`)
+# models). If it isn't available, swap it for another frontier id (e.g. `gpt-5.6-terra`)
 # or drop the node's `model:` back to `auto`. Resolution order: node.model →
 # workflow.model → provider.defaultModel.
 
@@ -292,7 +292,7 @@ nodes:
     # this node does the actual edits, and pinning makes the model deterministic
     # (Copilot never reports what `auto` resolved). Account-dependent id — must
     # appear in the live Copilot list; swap or drop to `auto` if unavailable.
-    model: gpt-5.5
+    model: gpt-5.6-terra
     # Large changes run many edit+check cycles; a tight cap kills a run mid-task
     # and loses uncommitted work. Generous here; the per-task checks stay scoped
     # (below) so this budget is for real work, not full-suite thrash.
