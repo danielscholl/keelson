@@ -49,12 +49,15 @@ nodes:
           exit 1
         fi
         echo "Artifact loaded from file: $TRIMMED ($(wc -c < "$TRIMMED" | tr -d ' ') bytes)" >&2
-        cat "$TRIMMED"
+        # `--` so a path beginning with `-` is not read as a cat option.
+        cat -- "$TRIMMED"
       else
         # Inline text rides the bash env channel, which head/tail-truncates at
-        # 16 KiB and marks the seam; reject a truncated artifact rather than
-        # review it corrupted, and point at the unlimited file-path route.
-        if printf '%s' "$RAW" | grep -q '\[keelson: input truncated'; then
+        # 16 KiB and marks the seam. Gate the marker check on near-cap size so an
+        # ordinary artifact that merely quotes the marker text (this workflow
+        # reviewing itself, say) is not mistaken for a truncated one.
+        BYTES=$(printf '%s' "$RAW" | wc -c | tr -d ' ')
+        if [ "$BYTES" -gt 16384 ] && printf '%s' "$RAW" | grep -q '\[keelson: input truncated'; then
           echo "Inline artifact exceeded the 16 KiB argument limit and was truncated." >&2
           echo "Pass a file path instead: --arguments /path/to/artifact.md" >&2
           exit 1
