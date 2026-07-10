@@ -130,6 +130,14 @@ export interface PolicyContext {
   readonly model?: ModelCostHint;
   // Accumulated session spend — present at the `request` seam for budget gating.
   readonly usage?: SessionUsage;
+  // Present only on the `workflow` surface: the running workflow's name and the
+  // prompt node id under evaluation, so a policy can scope a decision to a
+  // specific workflow/node instead of "every workflow-surface turn" (which is
+  // all `surface === "workflow"` tells it). Absent on other surfaces, and on an
+  // older engine that doesn't populate them — a policy that reads them degrades
+  // to today's unscoped behavior.
+  readonly workflowName?: string;
+  readonly nodeId?: string;
 }
 
 export interface Policy {

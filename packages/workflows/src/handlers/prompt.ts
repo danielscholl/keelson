@@ -99,14 +99,25 @@ export interface PromptHandlerLifecycle {
   afterNode?: (ctx: { runId: string; nodeId: string }, result: NodeResult) => void | Promise<void>;
 }
 
+// Identity of the workflow/node a prompt-node policy gate is evaluating,
+// threaded so a workflow-surface policy can scope a decision to its own
+// workflow/node rather than "every workflow-surface turn". Both optional so a
+// standalone caller wiring a gate outside a running workflow degrades cleanly.
+export interface WorkflowNodeMeta {
+  readonly workflowName?: string;
+  readonly nodeId?: string;
+}
+
 // Final global tool gate applied after node-level resolution. The harness backs
 // it with the unified policy engine; `provider` is the node's effective provider
 // id (best-effort, undefined when the workflow relies on the default) so a
-// provider-scoped policy can match. Exported so the composition root and the
-// handler share one signature rather than re-spelling it.
+// provider-scoped policy can match. `meta` carries the workflow/node identity so
+// a workflow-surface policy can scope by name. Exported so the composition root
+// and the handler share one signature rather than re-spelling it.
 export type PromptToolGate = (
   candidates: readonly { name: string; [k: string]: unknown }[],
   provider?: string,
+  meta?: WorkflowNodeMeta,
 ) => Promise<readonly { name: string; [k: string]: unknown }[]>;
 
 // Per-call tool gate the harness backs with the unified policy engine. `provider`
@@ -120,6 +131,7 @@ export type PromptToolCallGate = (
   call: { tool: string; args?: unknown },
   provider?: string,
   signal?: AbortSignal,
+  meta?: WorkflowNodeMeta,
 ) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
 
 // Per-result tool-result gate forwarded to the provider (structural mirror of
@@ -130,6 +142,7 @@ export type PromptToolCallGate = (
 export type PromptToolResultGate = (
   call: { tool: string; result: unknown },
   provider?: string,
+  meta?: WorkflowNodeMeta,
 ) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
 
 // Response-phase gate run once on the node's COMPLETE assembled text, after the
@@ -140,6 +153,7 @@ export type PromptToolResultGate = (
 export type PromptResponseGate = (
   text: string,
   provider?: string,
+  meta?: WorkflowNodeMeta,
 ) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
 
 // Request-phase gate run once before the node opens its provider session. The
@@ -149,7 +163,7 @@ export type PromptResponseGate = (
 // model's cost tier; a deny fails the node with the policy's reason. Absent →
 // the node always runs (standalone / no-engine path).
 export type PromptRequestGate = (
-  ctx: { runId: string; nodeId: string },
+  ctx: { runId: string; nodeId: string; workflowName?: string },
   model?: string,
   provider?: string,
 ) => Promise<{ outcome: "allow" } | { outcome: "deny"; reason: string }>;
@@ -297,6 +311,13 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       const allTools = opts.getRegisteredTools();
 
+      // Workflow/node identity forwarded to each policy gate so a workflow-surface
+      // policy can scope to its own workflow/node (see WorkflowNodeMeta).
+      const nodeMeta: WorkflowNodeMeta = {
+        workflowName: ctx.workflow.name,
+        nodeId: ctx.nodeId,
+      };
+
       // Per-node fields from the vendored schema if present. Cast through
       // `unknown`-shaped accessors because the executor's DagNode is a
       // discriminated union and these fields live on the prompt-shaped
@@ -432,7 +453,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // keep the node-resolved tools (fail open) and warn rather than failing the node.
       if (opts.projectTools) {
         try {
-          filteredTools = await opts.projectTools(filteredTools, effectiveProviderId);
+          filteredTools = await opts.projectTools(filteredTools, effectiveProviderId, nodeMeta);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(`[workflows] tool gate threw for node '${ctx.nodeId}': ${msg}`);
@@ -445,11 +466,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const perCallGate = opts.evaluateToolCall;
       const boundToolCallGate = perCallGate
         ? (call: { tool: string; args?: unknown }) =>
-            perCallGate(call, effectiveProviderId, handlerExit.signal)
+            perCallGate(call, effectiveProviderId, handlerExit.signal, nodeMeta)
         : undefined;
       const perResultGate = opts.evaluateToolResult;
       const boundToolResultGate = perResultGate
-        ? (call: { tool: string; result: unknown }) => perResultGate(call, effectiveProviderId)
+        ? (call: { tool: string; result: unknown }) =>
+            perResultGate(call, effectiveProviderId, nodeMeta)
         : undefined;
 
       let assistantText = "";
@@ -526,7 +548,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           // NodeResult; returning here skips the stream entirely.
           if (opts.requestGate) {
             const decision = await opts.requestGate(
-              { runId: ctx.runId, nodeId: ctx.nodeId },
+              { runId: ctx.runId, nodeId: ctx.nodeId, workflowName: ctx.workflow.name },
               model,
               effectiveProviderId,
             );
@@ -658,7 +680,11 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // on a gate fault — a response-gate bug must not take the node down.
       if (opts.evaluateResponse && !cancelled && !timedOut && providerError === null) {
         try {
-          const decision = await opts.evaluateResponse(assistantText, effectiveProviderId);
+          const decision = await opts.evaluateResponse(
+            assistantText,
+            effectiveProviderId,
+            nodeMeta,
+          );
           if (decision.outcome === "deny") {
             providerError = decision.reason;
             // Drop the forbidden text — the failed NodeResult below records it as

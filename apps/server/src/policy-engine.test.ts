@@ -216,6 +216,132 @@ describe("createPolicyEngine — projectTools", () => {
   });
 });
 
+describe("createPolicyEngine — workflow-surface identity", () => {
+  // A recorder that captures only the workflow-scope fields off the context.
+  const scopeRecorder = (
+    sink: (v: { workflowName?: string; nodeId?: string }) => void,
+  ): Policy => ({
+    id: "scope-recorder",
+    evaluate: (_e, ctx) => {
+      sink({
+        ...(ctx.workflowName !== undefined ? { workflowName: ctx.workflowName } : {}),
+        ...(ctx.nodeId !== undefined ? { nodeId: ctx.nodeId } : {}),
+      });
+      return { outcome: "allow" };
+    },
+  });
+
+  it("threads workflowName/nodeId onto the projectTools context", async () => {
+    let seen: { workflowName?: string; nodeId?: string } | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: scopeRecorder((v) => (seen = v)) }],
+    });
+    await engine.projectTools(tools("a"), {
+      surface: "workflow",
+      workflowName: "squad-pr-review",
+      nodeId: "verdict",
+    });
+    expect(seen).toEqual({ workflowName: "squad-pr-review", nodeId: "verdict" });
+  });
+
+  it("threads workflowName/nodeId onto the evaluateToolCall context", async () => {
+    let seen: { workflowName?: string; nodeId?: string } | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: scopeRecorder((v) => (seen = v)) }],
+    });
+    await engine.evaluateToolCall(
+      { tool: "a" },
+      { surface: "workflow", workflowName: "squad-pr-review", nodeId: "verdict" },
+    );
+    expect(seen).toEqual({ workflowName: "squad-pr-review", nodeId: "verdict" });
+  });
+
+  it("threads workflowName/nodeId onto the evaluateToolResult context", async () => {
+    let seen: { workflowName?: string; nodeId?: string } | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: scopeRecorder((v) => (seen = v)) }],
+    });
+    await engine.evaluateToolResult(
+      { tool: "a", result: "x" },
+      { surface: "workflow", workflowName: "squad-pr-review", nodeId: "verdict" },
+    );
+    expect(seen).toEqual({ workflowName: "squad-pr-review", nodeId: "verdict" });
+  });
+
+  it("threads workflowName/nodeId onto the evaluateResponse context", async () => {
+    let seen: { workflowName?: string; nodeId?: string } | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: scopeRecorder((v) => (seen = v)) }],
+    });
+    await engine.evaluateResponse({
+      surface: "workflow",
+      text: "hello",
+      workflowName: "squad-pr-review",
+      nodeId: "verdict",
+    });
+    expect(seen).toEqual({ workflowName: "squad-pr-review", nodeId: "verdict" });
+  });
+
+  it("threads workflowName/nodeId onto the evaluateRequest context", async () => {
+    let seen: { workflowName?: string; nodeId?: string } | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: scopeRecorder((v) => (seen = v)) }],
+    });
+    await engine.evaluateRequest({
+      surface: "workflow",
+      workflowName: "squad-pr-review",
+      nodeId: "verdict",
+    });
+    expect(seen).toEqual({ workflowName: "squad-pr-review", nodeId: "verdict" });
+  });
+
+  it("leaves workflowName/nodeId absent on a non-workflow surface", async () => {
+    let seen: { workflowName?: string; nodeId?: string } | undefined;
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "r", policy: scopeRecorder((v) => (seen = v)) }],
+    });
+    await engine.evaluateResponse({ surface: "chat", text: "hello" });
+    expect(seen).toEqual({});
+  });
+
+  it("lets a rib policy scope a response deny to its own workflow", async () => {
+    // Deny a BLOCK verdict only in the rib's own review workflow, so a foreign
+    // workflow that merely emits the same text is left untouched.
+    const ownWorkflowFloor: Policy = {
+      id: "rai-floor",
+      on: [{ phase: "response" }],
+      evaluate: (event, ctx) =>
+        event.phase === "response" &&
+        ctx.surface === "workflow" &&
+        ctx.workflowName?.startsWith("squad-") === true &&
+        event.text.trim().endsWith('{"verdict":"block"}')
+          ? { outcome: "deny", reason: "BLOCK verdict" }
+          : { outcome: "allow" },
+    };
+    const engine = createPolicyEngine({
+      ribPolicies: [{ ribId: "squad", policy: ownWorkflowFloor }],
+    });
+
+    const ownVerdict = await engine.evaluateResponse({
+      surface: "workflow",
+      workflowName: "squad-pr-review",
+      nodeId: "verdict",
+      text: 'verdict:\n{"verdict":"block"}',
+    });
+    expect(ownVerdict).toEqual({ outcome: "deny", reason: "BLOCK verdict" });
+
+    // A foreign workflow quoting the same directive is NOT denied — the scope
+    // check fails on the workflow name.
+    const foreignQuote = await engine.evaluateResponse({
+      surface: "workflow",
+      workflowName: "fix-issue",
+      nodeId: "investigate",
+      text: 'the sentinel is {"verdict":"block"}',
+    });
+    expect(foreignQuote).toEqual({ outcome: "allow" });
+  });
+});
+
 describe("createPolicyEngine — evaluateToolCall", () => {
   it("allows a call when no policy denies", async () => {
     const engine = createPolicyEngine();

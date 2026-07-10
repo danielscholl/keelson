@@ -405,6 +405,16 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // (which subscribe/unsubscribe sockets). Constructed once so the POST handler
   // and the WS upgrade route see the same map.
   const workflowSubscribers = createWorkflowSubscribers();
+  // Fold a prompt node's workflow/node identity into a policy scope, dropping
+  // empty/absent parts so the non-workflow surfaces (and an older gate call that
+  // passes none) stay unchanged. Populates PolicyContext.workflowName/nodeId so a
+  // workflow-surface policy can scope to its own workflow.
+  const workflowNodeScope = (
+    meta: { workflowName?: string; nodeId?: string } | undefined,
+  ): { workflowName?: string; nodeId?: string } => ({
+    ...(meta?.workflowName ? { workflowName: meta.workflowName } : {}),
+    ...(meta?.nodeId ? { nodeId: meta.nodeId } : {}),
+  });
   // Constructed AFTER bootstrapProviders/bootstrapRibs so the prompt handler's
   // getProvider/getRegisteredTools closures resolve against populated registries.
   // Undefined when no providers are registered — workflowsRoutes falls back to
@@ -414,12 +424,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     defaultOffTools: ribs.tools.map((t) => t.name),
     // Final global gate for workflow prompt nodes — the engine owns the operator
     // denylist + rib policies here, so the handler's own floor stands down.
-    projectTools: (candidates, provider) =>
+    projectTools: (candidates, provider, meta) =>
       policyEngine
         ? policyEngine
             .projectTools(candidates, {
               surface: "workflow",
               ...(provider !== undefined ? { provider } : {}),
+              ...workflowNodeScope(meta),
             })
             .then((r) => r.allowed)
         : Promise.resolve(candidates),
@@ -427,12 +438,13 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // for each individual tool call with its args (a tool cleared into the
     // projection above can still be denied here on the strength of its args).
     // Forward the node's teardown signal so a pending `ask` cancels with the run.
-    evaluateToolCall: (call, provider, signal) =>
+    evaluateToolCall: (call, provider, signal, meta) =>
       policyEngine
         ? policyEngine.evaluateToolCall(call, {
             surface: "workflow",
             ...(provider !== undefined ? { provider } : {}),
             ...(signal !== undefined ? { signal } : {}),
+            ...workflowNodeScope(meta),
           })
         : Promise.resolve({ outcome: "allow" as const }),
     // Per-result gate for prompt nodes — runs the `tool_result` phase on each
@@ -440,10 +452,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // the phase, so the default path runs no per-result evaluation.
     evaluateToolResult:
       policyEngine?.resultPhaseActive === true
-        ? (call, provider) =>
+        ? (call, provider, meta) =>
             policyEngine.evaluateToolResult(call, {
               surface: "workflow",
               ...(provider !== undefined ? { provider } : {}),
+              ...workflowNodeScope(meta),
             })
         : undefined,
     // Response gate — runs the `response` phase on the node's complete output
@@ -451,18 +464,19 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // the phase. A deny fails the node; an allow+data substitutes the output.
     evaluateResponse:
       policyEngine?.responsePhaseActive === true
-        ? (text, provider) =>
+        ? (text, provider, meta) =>
             policyEngine.evaluateResponse({
               surface: "workflow",
               text,
               ...(provider !== undefined ? { provider } : {}),
+              ...workflowNodeScope(meta),
             })
         : undefined,
     // Request-phase budget gate for prompt nodes: before a node opens its
     // provider session, check the run's accumulated spend against the budget
     // builtins. Skipped (no usage/model lookups) when no policy reads the
     // request phase, so the default no-budget path stays free.
-    requestGate: async ({ runId }, model, provider) => {
+    requestGate: async ({ runId, nodeId, workflowName }, model, provider) => {
       const engine = policyEngine;
       if (!engine?.requestPhaseActive) return { outcome: "allow" as const };
       const usage = workflowStore.getRunUsageTotals(runId);
@@ -475,6 +489,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         ...(provider !== undefined ? { provider } : {}),
         ...(hint !== undefined ? { model: hint } : {}),
         usage,
+        ...workflowNodeScope({ workflowName, nodeId }),
       });
     },
   });
