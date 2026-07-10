@@ -203,9 +203,9 @@ validation-summary.md
 ```
 
 Your trail may run a file or two shorter. Each phase is told to leave a
-summary, but a model can end its turn without the Write, and nothing gates
-on the file existing yet. The two that matter for reading the run are the
-plan and the smoke verdict.
+summary, but a model can end its turn without ever calling the `Write` tool,
+and nothing gates on the file existing yet. The two that matter for reading
+the run are the plan and the smoke verdict.
 
 Open `plan.md` first. The strong-reasoning model wrote the actual headlines
 and button labels the UI model built from (SECTION A), the integration scope
