@@ -104,6 +104,7 @@ async function gitClone(
     cmd: ["git", "clone", "--", url, dest],
     stdout: "pipe",
     stderr: "pipe",
+    windowsHide: true,
     env: ensureSpawnPath({
       ...process.env,
       GIT_TERMINAL_PROMPT: "0",

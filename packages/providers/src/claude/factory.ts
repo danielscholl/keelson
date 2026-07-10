@@ -379,6 +379,7 @@ const defaultClaudeCliRunner: ClaudeCliRunner = async (env) => {
   const proc = Bun.spawn(["claude", "auth", "status", "--json"], {
     stdout: "pipe",
     stderr: "pipe",
+    windowsHide: true,
     ...(env ? { env } : {}),
   });
   const [stdout, stderr] = await Promise.all([

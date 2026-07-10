@@ -72,6 +72,7 @@ function repairWorktree(repoRoot: string, worktreePath: string): void {
       cmd: ["git", "-C", repoRoot, "worktree", "repair", worktreePath],
       stdout: "pipe",
       stderr: "pipe",
+      windowsHide: true,
     });
     if (res.exitCode !== 0) {
       console.warn(

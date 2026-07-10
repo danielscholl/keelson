@@ -116,6 +116,7 @@ export function detectGitRoot(cwd: string): string | null {
     cwd,
     stdout: "pipe",
     stderr: "ignore",
+    windowsHide: true,
   });
   if (res.exitCode !== 0) return null;
   const root = res.stdout.toString().trim();
@@ -127,6 +128,7 @@ export function detectGitBranch(cwd: string): string | null {
     cwd,
     stdout: "pipe",
     stderr: "ignore",
+    windowsHide: true,
   });
   if (res.exitCode !== 0) return null;
   const branch = res.stdout.toString().trim();
