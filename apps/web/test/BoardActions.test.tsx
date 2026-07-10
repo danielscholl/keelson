@@ -1039,11 +1039,9 @@ describe("board actions — select fields and capability gating", () => {
         <BoardView view={view} />
       </BoardActionProvider>,
     );
-    // An enabled action carries only its hint.
     expect(screen.getByRole("button", { name: "Review" }).getAttribute("title")).toBe(
       "Two-Mind cross-vendor critique.",
     );
-    // A disabled action joins the hint (what it does) with the reason (why it can't run).
     expect(screen.getByRole("button", { name: "Debate" }).getAttribute("title")).toBe(
       "Chaired multi-Mind debate. — Free a Mind to chair.",
     );
@@ -1066,6 +1064,7 @@ describe("board actions — select fields and capability gating", () => {
               label: "Build",
               expanded: true,
               disabled: true,
+              hint: "Manager-led build.",
               reason: "Free a Mind to manage.",
               fields: [{ name: "topic", label: "Topic" }],
             },
@@ -1080,8 +1079,58 @@ describe("board actions — select fields and capability gating", () => {
     );
     const input = container.querySelector(".cvb-action-field-input") as HTMLInputElement;
     expect(input.disabled).toBe(true);
+    const submit = screen.getByRole("button", { name: "Build" });
+    expect(submit).toHaveProperty("disabled", false);
+    expect(submit.getAttribute("aria-disabled")).toBe("true");
+    expect(submit.classList.contains("is-disabled")).toBe(true);
+    expect(submit.getAttribute("title")).toBe("Manager-led build. — Free a Mind to manage.");
     // An Enter-key / programmatic submit on the open form is guarded — nothing dispatches.
     fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await Promise.resolve();
+    expect(calls).toHaveLength(0);
+  });
+
+  test("a disabled card overflow action carries its combined tooltip and stays inert", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          items: [
+            {
+              title: "PostgreSQL",
+              actions: [
+                {
+                  type: "delete",
+                  label: "Delete",
+                  destructive: true,
+                  hint: "Drop the cluster.",
+                  disabled: true,
+                  reason: "Cluster is suspended.",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const trigger = screen.getByRole("button", { name: "PostgreSQL actions" });
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    const menu = screen.getByRole("menu", { name: "PostgreSQL actions" });
+    const item = within(menu).getByRole("menuitem", { name: "Delete" });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.getAttribute("title")).toBe("Drop the cluster. — Cluster is suspended.");
+    fireEvent.click(item);
     await Promise.resolve();
     expect(calls).toHaveLength(0);
   });
