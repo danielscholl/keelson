@@ -133,9 +133,11 @@ export interface PolicyContext {
   // Present only on the `workflow` surface: the running workflow's name and the
   // prompt node id under evaluation, so a policy can scope a decision to a
   // specific workflow/node instead of "every workflow-surface turn" (which is
-  // all `surface === "workflow"` tells it). Absent on other surfaces, and on an
-  // older engine that doesn't populate them — a policy that reads them degrades
-  // to today's unscoped behavior.
+  // all `surface === "workflow"` tells it). Absent on other surfaces and on an
+  // older engine that doesn't populate them, where they read as `undefined` — so
+  // a scope check like `workflowName === "x"` simply stops matching there. A
+  // policy that must stay correct against an older harness owns choosing whether
+  // an absent name should fail open or closed for its rule.
   readonly workflowName?: string;
   readonly nodeId?: string;
 }

@@ -311,8 +311,6 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       const allTools = opts.getRegisteredTools();
 
-      // Workflow/node identity forwarded to each policy gate so a workflow-surface
-      // policy can scope to its own workflow/node (see WorkflowNodeMeta).
       const nodeMeta: WorkflowNodeMeta = {
         workflowName: ctx.workflow.name,
         nodeId: ctx.nodeId,

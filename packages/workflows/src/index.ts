@@ -78,6 +78,7 @@ export {
   type PromptToolCallGate,
   type PromptToolGate,
   type PromptToolResultGate,
+  type WorkflowNodeMeta,
 } from "./handlers/prompt.ts";
 export {
   type MakeScriptHandlerOptions,

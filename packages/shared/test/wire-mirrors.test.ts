@@ -46,4 +46,29 @@ describe("@keelson/workflows mirrors of shared wire constants", () => {
     const mirrored = Array.from(body.matchAll(/["']([^"']+)["']/g), (m) => m[1] ?? "");
     expect(mirrored).toEqual([...memoryTypeSchema.options]);
   });
+
+  // WorkflowNodeMeta (in @keelson/workflows) is a dep-free structural mirror of
+  // PolicyContext's workflowName/nodeId (here) — the workflow prompt-node gate
+  // reads the former and the policy engine populates the latter, so a rename or
+  // retype in either would silently stop one field reaching a policy.
+  test("WorkflowNodeMeta mirrors PolicyContext.workflowName/nodeId", () => {
+    const metaBlock =
+      readWorkflowsSource("handlers/prompt.ts").match(
+        /export interface WorkflowNodeMeta \{([\s\S]*?)\}/,
+      )?.[1] ?? "";
+    const metaFields = Array.from(
+      metaBlock.matchAll(/readonly (workflowName|nodeId)\?: (\w+);/g),
+      (m) => `${m[1]}?: ${m[2]}`,
+    );
+    const policyBlock =
+      readFileSync(join(import.meta.dir, "..", "src", "policy.ts"), "utf8").match(
+        /export interface PolicyContext \{([\s\S]*?)\n\}/,
+      )?.[1] ?? "";
+    const policyFields = Array.from(
+      policyBlock.matchAll(/readonly (workflowName|nodeId)\?: (\w+);/g),
+      (m) => `${m[1]}?: ${m[2]}`,
+    );
+    expect(metaFields).toEqual(["workflowName?: string", "nodeId?: string"]);
+    expect(policyFields).toEqual(metaFields);
+  });
 });
