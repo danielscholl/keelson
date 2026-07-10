@@ -5,10 +5,12 @@
 # see NOTICE).
 #
 # The artifact is untrusted input, so the reviewers and the synthesizer run with
-# no tools at all — the artifact is passed inline via `$intake.output`, never
-# read from disk — and only `verify` holds filesystem tools, solely to check
-# source claims. `model: auto` avoids pinning a model id; like the other bundled
-# workflows it sets `provider: copilot`.
+# no tools at all — they receive it inlined as the intake node's output, so no
+# prompt node reads it from disk and injected text has nothing to act on. Only
+# the deterministic `intake` bash node reads a user-supplied file path, and only
+# `verify` holds filesystem tools, solely to check source claims. `model: auto`
+# avoids pinning a model id; like the other bundled workflows it sets
+# `provider: copilot`.
 
 name: adversarial-review
 provider: copilot
