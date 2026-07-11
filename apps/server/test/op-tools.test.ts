@@ -270,6 +270,24 @@ describe("op tools — native ops", () => {
     expect(doneAt).toBeGreaterThan(steerAt);
   });
 
+  test("onSteer that settles then throws does not append a log after the terminal frame", async () => {
+    let h: OpHandle | undefined;
+    h = registry.register("rib:squad", {
+      kind: "squad_coordinate",
+      onSteer: () => {
+        h?.done({ acked: true });
+        throw new Error("boom");
+      },
+    });
+    const res = await run("run_steer", { id: h.id, note: "wrap up" });
+    expect(res.isError).toBe(true);
+    const events = await run("run_events", { id: h.id, cursor: 0 });
+    // The op settled inside onSteer, so `done` is the last frame — the failure
+    // diagnostic is dropped rather than written after the terminal frame.
+    expect(events.content).toContain("] done");
+    expect(events.content).not.toContain("steer callback failed");
+  });
+
   test("register creates the row before publishing the controller (no stranded op on FK failure)", () => {
     // A nonexistent projectId violates the ops FK, so create throws before live.set.
     expect(() =>
@@ -403,6 +421,32 @@ describe("op tools — workflow projection", () => {
     };
     const paused = await run("run_status", { id: "wf:rp" });
     expect(paused.content).toContain("status running"); // paused projects to running
+  });
+
+  test("a failed workflow node projects as a progress frame, not a terminal error", async () => {
+    fakeDetails.rf2 = {
+      workflowName: "fix-issue",
+      status: "failed",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:03:00.000Z",
+      error: "boom",
+      nodes: [
+        {
+          nodeId: "impl",
+          status: "failed",
+          completedAt: "2026-01-01T00:02:00.000Z",
+          outputText: null,
+          startedAt: null,
+          error: "boom",
+        },
+      ],
+    };
+    const events = await run("run_events", { id: "wf:rf2", cursor: 0 });
+    // A failed node is not terminal (rescue nodes may follow), so its frame is
+    // `progress` carrying `failed`; only the terminal run frame is `error`.
+    expect(events.content).toContain("progress [impl] failed");
+    expect(events.content).not.toContain("error [impl]");
+    expect(events.content).toContain("error run failed: boom");
   });
 
   test("run_events returns a resume-safe full snapshot for a workflow op (cursor-independent)", async () => {

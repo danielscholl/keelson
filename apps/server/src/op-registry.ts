@@ -124,7 +124,11 @@ function workflowFrames(detail: WorkflowRunDetail): OpEventView[] {
     });
   const frames: OpEventView[] = completed.map((node, i) => ({
     seq: i + 1,
-    kind: node.status === "failed" ? "error" : "progress",
+    // A failed node is NOT terminal — downstream one_success/all_done rescue nodes
+    // can still continue and even make the run succeed — so a per-node frame is
+    // always `progress` (the message carries `failed`); only the terminal run
+    // frame below settles the op with `done`/`error`.
+    kind: "progress",
     message: `[${node.nodeId}] ${node.status}`,
     data: null,
     createdAt: node.completedAt as string,
@@ -406,10 +410,13 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
         ctl.onSteer(note);
       } catch (err) {
         // A rib's onSteer is untrusted code; a throw surfaces as a typed failure
-        // (the return value), recorded as a non-terminal `log` frame — the op is
-        // still running, so an `error` frame would let a poller read it as settled.
+        // (the return value). Record it as a non-terminal `log` frame ONLY if the op
+        // is still live: onSteer may settle the op (done/error) and then throw, and a
+        // log after that terminal frame would break the terminal-last order pollers rely on.
         const msg = err instanceof Error ? err.message : String(err);
-        store.appendEvent(id, { kind: "log", message: `steer callback failed: ${msg}` }, now());
+        if (live.has(id)) {
+          store.appendEvent(id, { kind: "log", message: `steer callback failed: ${msg}` }, now());
+        }
         return { ok: false, message: `steer callback for op ${id} threw: ${msg}` };
       }
       return { ok: true, message: `steer delivered to op ${id}` };
