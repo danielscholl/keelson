@@ -5,13 +5,13 @@
  * specification credited in the repo NOTICE.
  */
 import { z } from "zod";
+import { convergeConfigSchema } from "./converge.ts";
 import {
   dagNodeSchema,
   effortLevelSchema,
   sandboxSettingsSchema,
   thinkingConfigSchema,
 } from "./dag-node.ts";
-import { convergeConfigSchema } from "./converge.ts";
 
 // ---------------------------------------------------------------------------
 // Shared enum schemas

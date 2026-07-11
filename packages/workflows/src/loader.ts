@@ -628,7 +628,11 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     return {
       workflow: null,
       warnings,
-      error: { filename, error: `Invalid converge config: ${message}`, errorType: "validation_error" },
+      error: {
+        filename,
+        error: `Invalid converge config: ${message}`,
+        errorType: "validation_error",
+      },
     };
   }
   const converge = convergeResult?.data;

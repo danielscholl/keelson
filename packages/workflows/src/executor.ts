@@ -732,7 +732,9 @@ async function runConvergeExhaustApproval(
     state: "completed",
     output: approvalOutput.output,
     ...(approvalOutput.startedAt !== undefined ? { startedAt: approvalOutput.startedAt } : {}),
-    ...(approvalOutput.completedAt !== undefined ? { completedAt: approvalOutput.completedAt } : {}),
+    ...(approvalOutput.completedAt !== undefined
+      ? { completedAt: approvalOutput.completedAt }
+      : {}),
     ...(approvalOutput.durationMs !== undefined ? { durationMs: approvalOutput.durationMs } : {}),
   });
   return true;

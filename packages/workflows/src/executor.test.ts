@@ -1613,10 +1613,7 @@ nodes:
     const gateResolved = calls
       .filter((call) => call.nodeId === "gate")
       .map((call) => call.resolvedBody);
-    expect(gateResolved).toEqual([
-      "gate sees prepare-1 round=1",
-      "gate sees prepare-2 round=2",
-    ]);
+    expect(gateResolved).toEqual(["gate sees prepare-1 round=1", "gate sees prepare-2 round=2"]);
     const afterCalls = calls.filter((call) => call.nodeId === "after");
     expect(afterCalls).toHaveLength(1);
     expect(afterCalls[0].resolvedBody).toBe("after gate=gate-2 round=");
@@ -1686,15 +1683,18 @@ nodes:
     const summary = await runWorkflow({
       ...baseOpts(workflow),
       handlers: new Map<string, NodeHandler>([
-        ["bash", {
-          type: "bash",
-          async handle(node, ctx) {
-            if (node.id === "gate") {
-              return { status: "failed", output: { kind: "text", text: "" }, error: "not ready" };
-            }
-            return bash.handle(node, ctx);
+        [
+          "bash",
+          {
+            type: "bash",
+            async handle(node, ctx) {
+              if (node.id === "gate") {
+                return { status: "failed", output: { kind: "text", text: "" }, error: "not ready" };
+              }
+              return bash.handle(node, ctx);
+            },
           },
-        }],
+        ],
         ["approval", approval],
       ]),
     });

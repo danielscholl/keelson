@@ -9,12 +9,12 @@ import {
   authoringGuideSection,
   WORKFLOW_AUTHORING_GUIDE,
 } from "../src/authoring-guide.ts";
+import type { ConvergeConfig } from "../src/schema/converge.ts";
 import {
   approvalOnRejectSchema,
   dagNodeBaseSchema,
   triggerRuleSchema,
 } from "../src/schema/dag-node.ts";
-import type { ConvergeConfig } from "../src/schema/converge.ts";
 import type { LoopNodeConfig } from "../src/schema/loop.ts";
 import { stepRetryConfigSchema } from "../src/schema/retry.ts";
 
