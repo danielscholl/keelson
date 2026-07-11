@@ -109,6 +109,8 @@ export interface NodeContext {
   // Handlers that re-resolve nested bodies must forward this to `resolveBody` so $memory.recall.* substitutes
   // against the recalled values rather than defaults.
   memoryRecall?: MemoryRecallContext;
+  /** Current converge round for handlers that re-resolve nested bodies. */
+  convergeRound?: number;
 }
 
 /**
@@ -287,7 +289,7 @@ function nodeBodyOf(node: DagNode): string {
 // must exclude all of those — falling through to the node-output alt
 // where the full id is captured (subject to the loader's reserved-id check).
 const SUB_PATTERN =
-  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
+  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|(converge\.round)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
 
 /**
  * Per-node memory recall context — populated by the executor before
@@ -317,7 +319,7 @@ export function resolveBody(
   rawBody: string,
   inputs: Readonly<Record<string, string>>,
   nodeOutputs: ReadonlyMap<string, NodeOutput>,
-  options?: { artifactsDir?: string; memoryRecall?: MemoryRecallContext },
+  options?: { artifactsDir?: string; memoryRecall?: MemoryRecallContext; convergeRound?: number },
 ): string {
   return rawBody.replace(
     SUB_PATTERN,
@@ -326,6 +328,7 @@ export function resolveBody(
       backslash: string | undefined,
       argsMarker: string | undefined,
       artifactsMarker: string | undefined,
+      convergeRoundMarker: string | undefined,
       memoryField: string | undefined,
       inputKey: string | undefined,
       nodeId: string | undefined,
@@ -340,6 +343,9 @@ export function resolveBody(
       // input. Authors who require an artifacts dir should check inside
       // the script body (`if [ -z "$KEELSON_ARTIFACTS_DIR" ] ...`).
       if (artifactsMarker !== undefined) return options?.artifactsDir ?? "";
+      if (convergeRoundMarker !== undefined) {
+        return options?.convergeRound !== undefined ? String(options.convergeRound) : "";
+      }
       if (memoryField !== undefined) {
         const recall = options?.memoryRecall;
         if (memoryField === "items") return recall ? JSON.stringify(recall.items) : "[]";
@@ -572,6 +578,8 @@ interface RunCtx {
   projectId?: string;
   /** Project-notebook handle (read + contribute) — see RunOptions.notebook. */
   notebook?: NotebookAdapter;
+  /** Current converge round when a node runs inside a converge subgraph. */
+  convergeRound?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -787,6 +795,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
   const resolvedBody = resolveBody(rawBody, ctx.inputs, nodeOutputs, {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   });
 
   // 5. dispatch
@@ -814,6 +823,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     ...(ctx.notebook !== undefined ? { notebook: ctx.notebook } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
     ...(ctx.memoryTools !== undefined ? { memory: ctx.memoryTools } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   };
   emit({ type: "node_started", nodeId: node.id });
   const startedAtMs = Date.now();
@@ -982,6 +992,7 @@ async function runPreRecall(
   // exist yet at this hook).
   const resolvedQuery = resolveBody(memBlock.recall.query, ctx.inputs, nodeOutputs, {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   });
 
   const req = {
@@ -1050,6 +1061,7 @@ async function runPostWriteback(
   const resolveOpts = {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   };
 
   const summary = resolveBody(wb.summary, ctx.inputs, outputsWithSelf, resolveOpts);
@@ -1136,6 +1148,7 @@ async function runNotebookContribute(
   const entry = resolveBody(block.append, ctx.inputs, outputsWithSelf, {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   });
 
   // Contribution is best-effort: a thrown adapter (e.g. the project was deleted

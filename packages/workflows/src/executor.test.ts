@@ -2611,6 +2611,13 @@ describe("resolveBody — structured $nodeId.output addressing", () => {
     ]);
     expect(resolveBody("v=$c.output.__proto__", {}, own)).toBe("v=5");
   });
+
+  test("$converge.round resolves only when a converge round is present", () => {
+    expect(resolveBody("round=$converge.round", {}, new Map(), { convergeRound: 2 })).toBe(
+      "round=2",
+    );
+    expect(resolveBody("round=$converge.round", {}, new Map())).toBe("round=");
+  });
 });
 
 describe("runWorkflow — output_schema validation (fail-closed)", () => {
