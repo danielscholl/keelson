@@ -751,7 +751,12 @@ nodes:
       ## Inputs
 
       - PR number: `$ARTIFACTS_DIR/.pr-number`
-      - Handled ledger: `$ARTIFACTS_DIR/handled.json`
+      - Handled ledger: `$ARTIFACTS_DIR/handled.json` — each entry carries
+        `replied` (bool) and `resolved` (bool). `resolved` is the authoritative
+        signal: a `fixed` thread whose `resolveReviewThread` call failed is
+        recorded with `resolved: false`, so it is still open on GitHub even
+        though `action == "fixed"`. Count resolutions from `resolved`, never from
+        `action`.
       - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
       - Post-CI new-thread set: `$ARTIFACTS_DIR/post-ci-threads.json`
       - Pending resolve-retries: `$ARTIFACTS_DIR/post-ci-retry.json`
@@ -771,15 +776,20 @@ nodes:
       ### Summary
 
       - Rounds completed: <count or latest round>
-      - Threads replied to: <count from handled.json>
-      - Threads resolved: <count where action == fixed>
-      - Threads left open after reply: <count where action != fixed>
+      - Threads replied to: <count of handled.json entries with replied == true>
+      - Threads resolved: <count of handled.json entries with resolved == true>
+      - Threads left open after reply: <count of handled.json entries with
+        replied == true and resolved != true — includes wontfix / question /
+        already-addressed / invalid replies AND any fixed thread whose resolve
+        has not yet succeeded>
       - Latest CI: PASS / FAIL / UNKNOWN
 
       ### Notes
 
-      <Anything the operator needs to know, including exhaust approval if this
-      report ran after a human override.>
+      <Anything the operator needs to know. Call out any fixed-but-unresolved
+      threads (replied == true, resolved == false, action == "fixed") — these
+      still need a resolve — and any exhaust approval if this report ran after a
+      human override.>
       ```
 
       Print this report and also write it to `$ARTIFACTS_DIR/report.md`.

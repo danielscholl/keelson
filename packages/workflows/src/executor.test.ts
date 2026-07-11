@@ -1,7 +1,7 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -2218,11 +2218,12 @@ import { makeLoopHandler } from "./handlers/loop.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
 
 // ---------------------------------------------------------------------------
-// converge-pr — the real converge loop with its jq gates (triage-gate,
-// reply-gate, converge-check) run for real and the gh/git nodes canned, mirroring
-// the resolve-comments gate suite above. Exercises Fix 1 (converge-check gates on
-// the post-CI re-fetch), the has_new fan-out, fork cancellation, and round-cap
-// exhaustion.
+// converge-pr — drives the real converge loop with its deterministic jq gates
+// (triage-gate, reply-gate, converge-check) run for real and the gh/git/CI nodes
+// canned. Covers: the converge gate reading the post-CI re-fetch rather than the
+// start-of-round thread set, the has_new fan-out into fix/reply, resolve-retry
+// re-resolving a fixed-but-unresolved thread without re-replying, fork
+// cancellation, and round-cap exhaustion.
 // ---------------------------------------------------------------------------
 
 describe.skipIf(!hasJq)("runWorkflow — converge-pr converge loop gates", () => {
@@ -2259,6 +2260,10 @@ describe.skipIf(!hasJq)("runWorkflow — converge-pr converge loop gates", () =>
     postCiThreads?: unknown[];
     postCiRetry?: unknown[];
     handled?: unknown[];
+    resolveRetry?: Thread[];
+    // Node ids to run through the real bash handler in addition to the jq gates
+    // (e.g. "resolve-retry" when the test supplies a fake `gh` on PATH).
+    realBashExtra?: string[];
   }
 
   // Seeds the artifacts a real round would have produced, cans the gh/git/CI bash
@@ -2275,7 +2280,7 @@ describe.skipIf(!hasJq)("runWorkflow — converge-pr converge loop gates", () =>
     write("threads.json", threadRows(threads));
     write("all-unresolved-threads.json", threadRows(threads));
     write("handled.json", opts.handled ?? []);
-    write("resolve-retry.json", []);
+    write("resolve-retry.json", threadRows(opts.resolveRetry ?? []));
     write("post-ci-threads.json", opts.postCiThreads ?? []);
     write("post-ci-retry.json", opts.postCiRetry ?? []);
     if (opts.triage) {
@@ -2310,7 +2315,12 @@ describe.skipIf(!hasJq)("runWorkflow — converge-pr converge loop gates", () =>
       status: "succeeded" as const,
       output: { kind: "text" as const, text: "ok" },
     };
-    const realBashIds = new Set(["triage-gate", "reply-gate", "converge-check"]);
+    const realBashIds = new Set([
+      "triage-gate",
+      "reply-gate",
+      "converge-check",
+      ...(opts.realBashExtra ?? []),
+    ]);
     const prompt: NodeHandler = { type: "prompt", handle: async () => canned };
     const bash: NodeHandler = {
       type: "bash",
@@ -2352,7 +2362,7 @@ describe.skipIf(!hasJq)("runWorkflow — converge-pr converge loop gates", () =>
         ["cancel", cancel],
       ]),
     });
-    return { run, approvalCalls, convergeCheckCalls: () => convergeCheckCalls };
+    return { run, approvalCalls, convergeCheckCalls: () => convergeCheckCalls, artifactsDir };
   }
 
   test("a new-thread round drives the fix/reply subgraph then converges", async () => {
@@ -2444,6 +2454,65 @@ describe.skipIf(!hasJq)("runWorkflow — converge-pr converge loop gates", () =>
     expect(approvalCalls).toContain("converge-check__converge_exhaust");
     expect(summary.status).toBe("succeeded");
     expect(summary.nodes.report.state).toBe("completed");
+  });
+
+  test("a fixed-but-unresolved thread is re-resolved without a second reply", async () => {
+    // A prior round posted the reply and committed the fix, but resolveReviewThread
+    // failed, so the ledger holds { replied: true, resolved: false }. This round
+    // must retry the resolve only — never re-triage or re-reply the thread — and
+    // flip the ledger once the resolve succeeds. resolve-retry runs for real; a
+    // fake `gh` (exit 0) on a PATH-injecting bash wrapper stands in for the live
+    // GraphQL resolve so the node's own retry + ledger-flip logic executes.
+    const binDir = mkdtempSync(join(tmpdir(), "cpr-bin-"));
+    writeFileSync(join(binDir, "gh"), "#!/usr/bin/env bash\nexit 0\n");
+    chmodSync(join(binDir, "gh"), 0o755);
+    const wrapper = join(binDir, "bashwrap");
+    writeFileSync(wrapper, `#!/usr/bin/env bash\nexport PATH="${binDir}:$PATH"\nexec bash "$@"\n`);
+    chmodSync(wrapper, 0o755);
+
+    const prevBash = process.env.KEELSON_BASH;
+    process.env.KEELSON_BASH = wrapper;
+    try {
+      const { run, approvalCalls, artifactsDir } = convergeRun({
+        hasNew: false,
+        ciStatus: "PASS",
+        threads: [],
+        postCiThreads: [],
+        postCiRetry: [],
+        resolveRetry: [{ threadId: "T_fix", commentId: 7 }],
+        handled: [
+          {
+            threadId: "T_fix",
+            commentId: 7,
+            action: "fixed",
+            decision: "actionable-code-change",
+            commit: "c9",
+            reply: "done",
+            replied: true,
+            resolved: false,
+            round: 1,
+          },
+        ],
+        realBashExtra: ["resolve-retry"],
+      });
+      const summary = await run;
+      expect(summary.status).toBe("succeeded");
+      // A retry thread has a ledger entry, so it is not "new": the triage/reply
+      // path never runs for it — no duplicate public comment.
+      expect(approvalCalls).toEqual([]);
+      expect(summary.nodes.triage.state).toBe("skipped");
+      expect(summary.nodes["reply-resolve"].state).toBe("skipped");
+      // resolve-retry re-attempted the resolve and, on success, flipped the ledger.
+      expect(summary.nodes["resolve-retry"].state).toBe("completed");
+      const ledger = JSON.parse(readFileSync(join(artifactsDir, "handled.json"), "utf8")) as Array<{
+        threadId: string;
+        resolved: boolean;
+      }>;
+      expect(ledger.find((e) => e.threadId === "T_fix")?.resolved).toBe(true);
+    } finally {
+      if (prevBash === undefined) delete process.env.KEELSON_BASH;
+      else process.env.KEELSON_BASH = prevBash;
+    }
   });
 });
 
