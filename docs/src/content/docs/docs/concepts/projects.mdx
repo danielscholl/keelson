@@ -54,6 +54,25 @@ A chat agent edits the project directory **in place**. There is no isolation: wh
 the model writes a file, the file changes under you, exactly as if you had edited
 it. For interactive work that is usually what you want.
 
+## Live-checkout mutation lock
+
+Keelson also guards its own unleased writes to a project's live checkout
+(`Project.rootPath`). When a mutating workflow runs without worktree isolation,
+the server holds a per-project mutation lock until that run settles. A second
+live-checkout mutator on the same project fails fast and names the current holder
+and purpose, so the next run does not quietly clobber the first one's checkout.
+
+Worktree-isolated runs do not take this lock. They already run in a separate
+checkout, and workspace leases represent real on-disk worktrees that can be
+inspected or pruned later. The mutation lock is different: it is process-local,
+has no on-disk artifact, and is empty after a server restart. Boot therefore
+clears stale live locks by construction.
+
+Ribs that mutate a project root directly should use
+[`acquireMutationLock`](../../reference/rib-contract/#the-context-the-harness-injects)
+or lease a worktree instead. `KEELSON_DISABLE_MUTATION_LOCK` disables enforcement
+for emergency operator recovery. Treat it as a bypass, not normal coordination.
+
 ## Worktree isolation for runs
 
 A workflow run that mutates code is a different story. You often want the run to
