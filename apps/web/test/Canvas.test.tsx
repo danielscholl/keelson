@@ -798,8 +798,8 @@ describe("CanvasProvider / useCanvas", () => {
     );
     fireEvent.click(screen.getByText("open"));
     const dialog = screen.getByRole("dialog");
-    const barLink = dialog.querySelector('a.cvb-bar-label[href="https://sonar.test/bar"]');
-    expect(barLink?.textContent).toBe("keycloak");
+    const barLink = dialog.querySelector('a.cvb-bar[href="https://sonar.test/bar"]');
+    expect(barLink?.textContent).toContain("keycloak");
     const cellLink = dialog.querySelector('a.cvb-link[href="https://sonar.test/cell"]');
     expect(cellLink?.textContent?.trim()).toBe("A");
   });
