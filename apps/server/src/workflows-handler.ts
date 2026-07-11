@@ -1027,7 +1027,7 @@ export type ResumeRunResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "not_found" | "not_terminal";
+      reason: "not_found" | "not_terminal" | "locked";
       message: string;
     };
 
@@ -1120,7 +1120,10 @@ function resumeRunCore(
         : undefined;
   } catch (err) {
     if (err instanceof MutationLockConflictError) {
-      return { ok: false, reason: "not_terminal", message: err.message };
+      // A lock conflict is NOT a terminal-state problem — the run is resumable, but
+      // another run holds the project lock. Distinct reason so the 409 mapping and
+      // the resume-tool hint don't misreport it as "only failed/cancelled can resume".
+      return { ok: false, reason: "locked", message: err.message };
     }
     throw err;
   }
