@@ -21,7 +21,7 @@
  * `buildSubprocessEnv` populates — same contract the bash handler uses.
  */
 
-import type { NodeHandler, NodeResult } from "../executor.ts";
+import { resolveConvergeRound, type NodeHandler, type NodeResult } from "../executor.ts";
 import { resolveScript, type ScriptRuntime } from "./discovery.ts";
 import { failed, formatSubprocessFailure, isInlineScript } from "./helpers.ts";
 import {
@@ -82,7 +82,9 @@ export function makeScriptHandler(opts: MakeScriptHandlerOptions = {}): NodeHand
           : factoryTimeoutMs;
 
       // rawBody — see file header for the injection trade-off.
-      const scriptBody = ctx.rawBody.trim();
+      const scriptBody = resolveConvergeRound(ctx.rawBody, {
+        ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
+      }).trim();
       if (!scriptBody) {
         return failed(`Script node '${node.id}': empty script body`);
       }

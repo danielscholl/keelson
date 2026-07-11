@@ -17,7 +17,7 @@
  * output executable when bash parses the body.
  */
 
-import type { NodeHandler, NodeResult } from "../executor.ts";
+import { resolveConvergeRound, type NodeHandler, type NodeResult } from "../executor.ts";
 import { prependPath, resolveBash } from "./shell.ts";
 import {
   buildSubprocessEnv,
@@ -45,9 +45,12 @@ export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler 
       let outcome: SubprocessOutcome;
       try {
         const bash = resolveBash();
+        const shellBody = resolveConvergeRound(ctx.rawBody, {
+          ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
+        });
         outcome = await runSubprocess({
           cmd: bash.cmd,
-          args: ["-c", ctx.rawBody],
+          args: ["-c", shellBody],
           cwd: ctx.cwd,
           env: prependPath(
             buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {

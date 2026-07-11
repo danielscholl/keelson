@@ -290,6 +290,7 @@ function nodeBodyOf(node: DagNode): string {
 // where the full id is captured (subject to the loader's reserved-id check).
 const SUB_PATTERN =
   /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|(converge\.round)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
+const CONVERGE_ROUND_PATTERN = /(\\)?\$(converge\.round)(?![a-zA-Z0-9_-])/g;
 
 /**
  * Per-node memory recall context — populated by the executor before
@@ -384,6 +385,19 @@ export function resolveBody(
       }
       // Bare `$` with no marker (e.g. `unit $`, or `$1`/`$5.00`): leave as-is.
       return match;
+    },
+  );
+}
+
+export function resolveConvergeRound(
+  rawBody: string,
+  options?: { convergeRound?: number },
+): string {
+  return rawBody.replace(
+    CONVERGE_ROUND_PATTERN,
+    (match, backslash: string | undefined, _marker: string | undefined) => {
+      if (backslash !== undefined) return match.slice(1);
+      return options?.convergeRound !== undefined ? String(options.convergeRound) : "";
     },
   );
 }

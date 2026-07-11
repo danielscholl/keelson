@@ -19,6 +19,7 @@ interface BuildCtxOptions {
   upstream?: Map<string, NodeOutput>;
   abortSignal?: AbortSignal;
   onEvent?: (event: NodeStreamEvent) => void;
+  convergeRound?: number;
 }
 
 function buildCtx(opts: BuildCtxOptions): NodeContext {
@@ -33,6 +34,7 @@ function buildCtx(opts: BuildCtxOptions): NodeContext {
     resolvedBody: opts.resolvedBody,
     rawBody: opts.resolvedBody,
     workflow: { name: "test", description: "", nodes: [] } as unknown as WorkflowDefinition,
+    ...(opts.convergeRound !== undefined ? { convergeRound: opts.convergeRound } : {}),
   };
 }
 
@@ -95,6 +97,19 @@ describe("bashHandler", () => {
     const text = result.output.kind === "text" ? result.output.text : "";
     expect(text).toContain("SAFE");
     expect(text).not.toContain("INJECTED");
+  });
+
+  test("replaces $converge.round in rawBody before launching bash", async () => {
+    const result = await bashHandler.handle(
+      stubNode,
+      buildCtx({
+        resolvedBody: 'echo "round=$converge.round"',
+        convergeRound: 3,
+      }),
+    );
+    expect(result.status).toBe("succeeded");
+    const text = result.output.kind === "text" ? result.output.text : "";
+    expect(text).toContain("round=3");
   });
 
   test("drain is bounded even if a child escapes the process group (setsid)", async () => {

@@ -17,6 +17,7 @@ function buildCtx(opts: {
   inputs?: Record<string, string>;
   abortSignal?: AbortSignal;
   emit?: (e: { type: string; line?: string }) => void;
+  convergeRound?: number;
 }): NodeContext {
   return {
     runId: "run-script",
@@ -29,6 +30,7 @@ function buildCtx(opts: {
     resolvedBody: opts.resolvedBody ?? opts.body,
     rawBody: opts.body,
     workflow: { name: "t", description: "", nodes: [] } as unknown as WorkflowDefinition,
+    ...(opts.convergeRound !== undefined ? { convergeRound: opts.convergeRound } : {}),
   };
 }
 
@@ -53,6 +55,20 @@ describe("makeScriptHandler — inline bun", () => {
     const result = await handler.handle(node, ctx);
     expect(result.status).toBe("succeeded");
     expect(result.output).toEqual({ kind: "text", text: "hello-bun" });
+  });
+
+  test("replaces $converge.round in inline script rawBody", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "keelson-script-"));
+    const handler = makeScriptHandler();
+    const node = { id: "s", runtime: "bun" } as unknown as DagNode;
+    const ctx = buildCtx({
+      cwd,
+      body: "console.log('round=$converge.round')",
+      convergeRound: 4,
+    });
+    const result = await handler.handle(node, ctx);
+    expect(result.status).toBe("succeeded");
+    expect(result.output).toEqual({ kind: "text", text: "round=4" });
   });
 
   test("surfaces non-zero exit with truncated stderr tail", async () => {
