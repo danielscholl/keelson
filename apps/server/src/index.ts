@@ -104,7 +104,10 @@ import {
   workflowRunWebSocketHandlers,
   workflowsRoutes,
 } from "./workflows-handler.ts";
+import { createWorkspaceLeaseStore } from "./workspace-lease-store.ts";
+import { createWorkspaceManager, type WorkspaceManager } from "./workspace-manager.ts";
 import { migrateLegacyProjectsLayout } from "./workspace-migration.ts";
+import { createWorkspaceTools } from "./workspace-tools.ts";
 
 const WORKFLOW_RUN_WS_RE = /^\/api\/workflows\/runs\/([^/]+)\/ws$/;
 const SNAPSHOT_WS_RE = /^\/api\/snapshots\/([^/]+)\/ws$/;
@@ -278,6 +281,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // below), but the default runAgentTurn seam records a rib usage event lazily
   // at turn-settle time, by which point boot is done.
   let usageStoreRef: UsageStore | undefined;
+  // Late-bound like the refs above: the manager needs the database and project
+  // store, but RibContext.acquireWorkspace reads it lazily when a rib requests a lease.
+  let workspaceManagerRef: WorkspaceManager | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
@@ -289,6 +295,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     getPolicyEngine: () => policyEngine,
     getWorkflowController: () => workflowControllerRef,
     getMemoryStore: () => memoryStoreRef,
+    getWorkspaceManager: () => workspaceManagerRef,
     getUsageStore: () => usageStoreRef,
     // Same cwd the heartbeat scheduler uses (repoRoot below), so a rib refresh
     // collapses onto an in-flight heartbeat run instead of racing it.
@@ -369,6 +376,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   usageStoreRef = usageStore;
   const projectsStore = createProjectsStore(db);
   projectsStoreRef = projectsStore;
+  const workspaceLeaseStore = createWorkspaceLeaseStore(db);
+  const workspaceManager = createWorkspaceManager({ store: workspaceLeaseStore, projectsStore });
+  workspaceManagerRef = workspaceManager;
+  await workspaceManager.reconcile();
   const projectNotebookStore = createProjectNotebookStore(db);
   migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: WORKSPACE_ROOT });
   const existingDefault = projectsStore.getByName(DEFAULT_PROJECT_NAME);
@@ -515,6 +526,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     projectNotebookStore,
     snapshotManager,
     usageStore,
+    workspaceManager,
     ribWorkflowBindings: ribWorkflows.bindings,
     // Working dir for surface-panel refreshes (POST /:name/refresh) re-running a
     // rib collector — its node uses absolute paths, so the cwd is nominal. Kept
@@ -541,6 +553,8 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     catalog: workflowCatalog,
     projectsStore,
   });
+  const workspaceTools = createWorkspaceTools({ manager: workspaceManager, projectsStore });
+  const harnessTools = [...workflowTools, ...workspaceTools];
   // Built here (not in chat-handler) so the save target stays pinned to the
   // same resolved workflowsDir the catalog scans.
   const workflowAuthoringTools = (project: { id: string; rootPath: string } | null) =>
@@ -672,7 +686,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     {
       projectsStore,
       ...(bootstrap.defaultProvider ? { defaultProvider: bootstrap.defaultProvider } : {}),
-      workflowTools,
+      workflowTools: harnessTools,
       workflowAuthoringTools,
     },
   );
@@ -738,7 +752,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
         // Workflow chat tools live on the chat path, not the registry; inject
         // them so MCP clients see workflow_list/status (and, when
         // exposeStateChanging is set, workflow_run/respond — both state-changing).
-        extraTools: workflowTools,
+        extraTools: harnessTools,
         ...(config.mcpToken !== undefined ? { token: config.mcpToken } : {}),
         // Same policy stack the chat/workflow surfaces use, so MCP-invoked tools
         // honor the operator denylist, ask_on_shell, and redaction floor.
@@ -761,7 +775,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     memoryStore,
     projectsStore,
     projectNotebookStore,
-    workflowTools,
+    workflowTools: harnessTools,
     workflowCatalog,
     workflowAuthoringTools,
     usageStore,

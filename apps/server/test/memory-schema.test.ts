@@ -116,10 +116,10 @@ function insertMemory(db: Database, row: MemoryRow): void {
 }
 
 describe("Memory layer schema (baseline)", () => {
-  test("migrations apply cleanly and schema_version reaches 7", () => {
+  test("migrations apply cleanly and schema_version reaches 8", () => {
     const db = openDatabase({ path: dbPath });
     const row = db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number };
-    expect(row.v).toBe(7);
+    expect(row.v).toBe(8);
     db.close();
   });
 
@@ -346,7 +346,7 @@ describe("Memory layer schema (baseline)", () => {
     const versionRow = db.query("SELECT MAX(version) AS v FROM schema_version").get() as {
       v: number;
     };
-    expect(versionRow.v).toBe(7);
+    expect(versionRow.v).toBe(8);
 
     const conv = db
       .query<{ id: string }, []>("SELECT id FROM conversations WHERE id = 'conv-1'")
