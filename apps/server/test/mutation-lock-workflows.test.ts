@@ -461,4 +461,179 @@ nodes:
       db.close();
     }
   });
+
+  test("resume of a failed live-checkout run conflicts on a held lock, then succeeds once released", async () => {
+    writeWorkflow(
+      "failing.yaml",
+      `name: failing
+description: fails fast so the run becomes resumable
+nodes:
+  - id: boom
+    bash: exit 1
+`,
+    );
+    writeWorkflow(
+      "guarded-hold.yaml",
+      `name: guarded-hold
+description: holds the project mutation lock at an approval
+nodes:
+  - id: review
+    approval:
+      message: hold the lock
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "repo", rootPath: tmpDir });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, mutationLockManager },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      // A first run fails, leaving a resumable failed run (its lock released on settle).
+      const failRes = await app.fetch(
+        postJson("http://test/api/workflows/failing/runs", { inputs: {}, projectId: project.id }),
+      );
+      const failed = (await failRes.json()) as { runId: string };
+      await pollUntilTerminal(store, failed.runId);
+      expect(store.getRun(failed.runId)?.status).toBe("failed");
+
+      // Hold the project lock with a paused approval run.
+      const holdRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-hold/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      const hold = (await holdRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, hold.runId, (status) => status === "paused");
+
+      // Resuming the failed run now conflicts on the held lock — a distinct 409 with
+      // the lock-holder message, NOT the "only failed/cancelled can resume" error.
+      const conflictRes = await app.fetch(
+        postJson(`http://test/api/workflows/runs/${failed.runId}/resume-run`, {}),
+      );
+      expect(conflictRes.status).toBe(409);
+      const conflict = (await conflictRes.json()) as { error: string };
+      expect(conflict.error).toContain(`project ${project.id} is locked by workflow:`);
+
+      // Release the lock; the resumed run then holds it and releases it on settle.
+      await app.fetch(
+        postJson(`http://test/api/workflows/runs/${hold.runId}/resume`, {
+          nodeId: "review",
+          text: "approve",
+        }),
+      );
+      await pollUntilTerminal(store, hold.runId);
+
+      const okRes = await app.fetch(
+        postJson(`http://test/api/workflows/runs/${failed.runId}/resume-run`, {}),
+      );
+      expect(okRes.status).toBe(200);
+      // The resumed run released the project lock once it settled.
+      const releaseDeadline = Date.now() + 2000;
+      while (
+        Date.now() < releaseDeadline &&
+        mutationLockStore.getByProject(project.id) !== undefined
+      ) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(mutationLockStore.getByProject(project.id)).toBeUndefined();
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
+
+  test("resume of a failed worktree-isolated run is exempt from a held project lock", async () => {
+    const repo = join(tmpDir, "iso-resume-repo");
+    mkdirSync(repo);
+    await initRepo(repo);
+    writeWorkflow(
+      "iso-boom.yaml",
+      `name: iso-boom
+description: fails inside an isolated worktree
+worktree:
+  enabled: true
+nodes:
+  - id: boom
+    bash: exit 1
+`,
+    );
+    writeWorkflow(
+      "guarded-hold.yaml",
+      `name: guarded-hold
+description: holds the project mutation lock at an approval
+nodes:
+  - id: review
+    approval:
+      message: hold the lock
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "iso-resume-repo", rootPath: repo });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, mutationLockManager },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      // A failed worktree run keeps its worktree on disk (worktreePath set).
+      const failRes = await app.fetch(
+        postJson("http://test/api/workflows/iso-boom/runs", {
+          inputs: {},
+          projectId: project.id,
+          isolation: "worktree",
+        }),
+      );
+      const failed = (await failRes.json()) as { runId: string };
+      await pollUntilTerminal(store, failed.runId);
+      expect(store.getRun(failed.runId)?.status).toBe("failed");
+      expect(store.getRun(failed.runId)?.worktreePath).not.toBeNull();
+
+      // Hold the project lock.
+      const holdRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-hold/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      const hold = (await holdRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, hold.runId, (status) => status === "paused");
+
+      // The resumed run re-enters its worktree, so it never takes the project lock:
+      // resume succeeds despite the held lock (the worktree-resume exemption).
+      const resumeRes = await app.fetch(
+        postJson(`http://test/api/workflows/runs/${failed.runId}/resume-run`, {}),
+      );
+      expect(resumeRes.status).toBe(200);
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
 });

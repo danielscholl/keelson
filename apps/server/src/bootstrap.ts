@@ -454,6 +454,13 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ? async (ribId: string, req: AcquireMutationLockRequest): Promise<MutationLock> => {
         const manager = getMutationLockManager();
         if (!manager) throw new Error("mutation lock manager unavailable");
+        // Reject a phantom projectId (the same guard WorkspaceManager.acquire
+        // enforces): a lock under a non-existent key gives the rib false exclusion
+        // while a workflow locks the real project and mutates the real checkout.
+        const projects = options.getProjects?.();
+        if (projects && !projects.some((p) => p.id === req.projectId)) {
+          throw new Error(`unknown project '${req.projectId}'`);
+        }
         const handle = manager.acquire({
           projectId: req.projectId,
           purpose: req.purpose,
