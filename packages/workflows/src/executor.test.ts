@@ -1563,7 +1563,11 @@ describe("loadBundled — resolve-comments schema validation", () => {
   });
 });
 
-describe("runWorkflow — resolve-comments conditional approval gate", () => {
+// The gate-check node's real bash script shells out to jq, which the minimal
+// supported Windows setup (Git Bash) does not ship — skip rather than fail there.
+const hasJq = Bun.which("jq") !== null;
+
+describe.skipIf(!hasJq)("runWorkflow — resolve-comments conditional approval gate", () => {
   function threadEntry(id: string) {
     return {
       threadId: id,
