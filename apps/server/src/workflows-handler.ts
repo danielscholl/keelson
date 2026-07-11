@@ -2424,6 +2424,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     branch: string;
     dest: string;
     base: string | null;
+    onCreated?: (worktreePath: string) => void;
   }) => {
     if (workspaceManager !== undefined) {
       return workspaceManager.prepareWorktree({
@@ -2431,6 +2432,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         branch: opts.branch,
         dest: opts.dest,
         ...(opts.base !== null ? { base: opts.base } : {}),
+        ...(opts.onCreated !== undefined ? { onCreated: opts.onCreated } : {}),
         abortSignal: abort.signal,
       });
     }
@@ -2440,6 +2442,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       dest: opts.dest,
       ...(opts.base !== null ? { base: opts.base } : {}),
     });
+    opts.onCreated?.(created.worktreePath);
     const deps = await ensureWorktreeDeps({
       worktreePath: created.worktreePath,
       abortSignal: abort.signal,
