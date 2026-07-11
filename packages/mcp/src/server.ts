@@ -91,7 +91,10 @@ function toInputJsonSchema(tool: ToolDefinition): Record<string, unknown> {
   const def = (tool.inputSchema as { _def?: { type?: string } })._def;
   if (def?.type !== "object") return { type: "object", additionalProperties: true };
   try {
-    const json = z.toJSONSchema(tool.inputSchema as z.ZodType) as Record<string, unknown>;
+    const json = z.toJSONSchema(tool.inputSchema as z.ZodType, { reused: "ref" }) as Record<
+      string,
+      unknown
+    >;
     delete json.$schema;
     if (json.type === undefined) json.type = "object";
     return json;
