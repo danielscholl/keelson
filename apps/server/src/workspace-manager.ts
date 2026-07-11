@@ -61,6 +61,9 @@ export interface PrepareWorktreeRequest {
   base?: string | null;
   abortSignal?: AbortSignal;
   rejectAdopted?: boolean;
+  /** Fires after `git worktree add`, before dependency preparation — so a
+   * caller can persist the path ahead of the slow install window. */
+  onCreated?: (worktreePath: string) => void;
 }
 
 export interface PreparedWorktree {
@@ -150,6 +153,7 @@ export function createWorkspaceManager({
           `workspace destination already exists at ${req.dest} — refusing to adopt another owner's checkout`,
         );
       }
+      req.onCreated?.(created.worktreePath);
       try {
         const deps = await manager.prepareDeps({
           worktreePath: created.worktreePath,
@@ -343,7 +347,7 @@ export function createWorkspaceManager({
           }
           const repoPath = resolveRepoPath(record);
           if (repoPath === null) {
-            store.delete(record.id);
+            console.warn(`[workspace] cannot resolve repo for lease ${record.id}; keeping its row`);
             continue;
           }
           const listed = await listWorktreesWithStatus(repoPath);

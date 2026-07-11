@@ -2529,19 +2529,24 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           branch,
           dest,
           base,
+          // Persist before the slow dependency install so a crash mid-install
+          // leaves a resumable run pointing at its (registered) worktree.
+          onCreated: (worktreePath) => {
+            effectiveCwd = worktreePath;
+            worktreePathForCleanup = worktreePath;
+            cleanupOnSuccessOnly = true;
+            try {
+              store.setRunWorktreePath(runId, worktreePath);
+            } catch (err) {
+              console.warn(
+                `[workflows] failed to persist worktree path for ${runId}: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+          },
         });
         effectiveCwd = created.worktreePath;
-        worktreePathForCleanup = created.worktreePath;
-        cleanupOnSuccessOnly = true;
-        try {
-          store.setRunWorktreePath(runId, created.worktreePath);
-        } catch (err) {
-          console.warn(
-            `[workflows] failed to persist worktree path for ${runId}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
         if (created.depsError !== null) {
           subscribers.broadcast(runId, {
             type: "run_warning",
