@@ -316,12 +316,22 @@ export function createWorkspaceManager({
           if (record.status === "pending") {
             if (existsSync(record.worktreePath)) {
               const repoPath = resolveRepoPath(record);
-              if (repoPath !== null) {
-                await manager.removeWorktree({
-                  repoPath,
-                  dest: record.worktreePath,
-                  force: true,
-                });
+              if (repoPath === null) {
+                console.warn(
+                  `[workspace] cannot resolve repo for pending lease ${record.id}; keeping its row`,
+                );
+                continue;
+              }
+              const out = await manager.removeWorktree({
+                repoPath,
+                dest: record.worktreePath,
+                force: true,
+              });
+              if (out.warning !== null) {
+                console.warn(
+                  `[workspace] failed to remove pending lease worktree ${record.id}; keeping its row: ${out.warning}`,
+                );
+                continue;
               }
             }
             store.delete(record.id);

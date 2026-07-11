@@ -455,6 +455,29 @@ describe("WorkspaceManager", () => {
     expect(existsSync(dest)).toBe(false);
   });
 
+  test("pending reconcile keeps the row when worktree removal fails", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const dest = join(repoDir, ".worktrees", "stuck");
+    await git(["worktree", "add", "-b", "keelson/lease/stuck", dest], repoDir);
+    leaseStore.insert({
+      id: "stuck",
+      projectId: project.id,
+      purpose: "stuck",
+      owner: "tool",
+      branch: "keelson/lease/stuck",
+      worktreePath: dest,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      status: "pending",
+    });
+    manager.removeWorktree = async () => ({ removed: false, warning: "locked" });
+
+    await manager.reconcile();
+
+    expect(leaseStore.get("stuck")).toBeDefined();
+    rmSync(dest, { recursive: true, force: true });
+  });
+
   test("reconcile refreshes the stored branch instead of dropping a switched lease", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });
