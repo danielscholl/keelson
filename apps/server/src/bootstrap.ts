@@ -23,6 +23,7 @@ import {
   registerWorkflowProvider,
 } from "@keelson/providers";
 import type {
+  AcquireMutationLockRequest,
   AcquireWorkspaceRequest,
   AgentSummary,
   ApprovalDecision,
@@ -32,6 +33,7 @@ import type {
   CommandInvokeResult,
   MemoryTools,
   MessageChunk,
+  MutationLock,
   OpenChatSeed,
   OpHandle,
   Project,
@@ -447,6 +449,19 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         return registry.register(`rib:${ribId}`, req);
       }
     : undefined;
+  const getMutationLockManager = options.getMutationLockManager;
+  const acquireMutationLockSeam = getMutationLockManager
+    ? async (ribId: string, req: AcquireMutationLockRequest): Promise<MutationLock> => {
+        const manager = getMutationLockManager();
+        if (!manager) throw new Error("mutation lock manager unavailable");
+        const handle = manager.acquire({
+          projectId: req.projectId,
+          purpose: req.purpose,
+          owner: `rib:${ribId}`,
+        });
+        return { id: handle.id, release: async () => handle.release() };
+      }
+    : undefined;
   // RibContext.getProviders resolver: the registered-provider list (id + label) so a
   // rib can make availability-aware provider choices (e.g. assign a member's vendor at
   // cast). Read-only; grants nothing beyond the existing runAgentTurn routing. Tests
@@ -585,6 +600,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(getMemory ? { getMemory } : {}),
     ...(acquireWorkspaceSeam ? { acquireWorkspace: acquireWorkspaceSeam } : {}),
     ...(registerOpSeam ? { registerOp: registerOpSeam } : {}),
+    ...(acquireMutationLockSeam ? { acquireMutationLock: acquireMutationLockSeam } : {}),
     getProviders,
     callTool,
   });
