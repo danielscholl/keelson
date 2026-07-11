@@ -783,7 +783,7 @@ describe("CanvasProvider / useCanvas", () => {
               rows: [
                 {
                   svc: "alpha",
-                  rating: { value: "A", tone: "ok", href: "https://sonar.test/cell" },
+                  rating: { value: "A", tone: "error", href: "https://sonar.test/cell" },
                 },
               ],
             },
@@ -802,6 +802,8 @@ describe("CanvasProvider / useCanvas", () => {
     expect(barLink?.textContent).toContain("keycloak");
     const cellLink = dialog.querySelector('a.cvb-link[href="https://sonar.test/cell"]');
     expect(cellLink?.textContent?.trim()).toBe("A");
+    // A toned linked cell keeps its status color: the tone rides the anchor as data-tone.
+    expect(cellLink?.getAttribute("data-tone")).toBe("error");
   });
 
   test("board collapses unsafe href schemes to plain text (no anchor)", () => {

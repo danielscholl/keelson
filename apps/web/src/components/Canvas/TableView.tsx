@@ -76,7 +76,13 @@ export function TableView({ view }: { view: CanvasTableView }) {
               {view.columns.map((col) => {
                 const { display, tone, badges, href } = normalizeCell(row[col.key]);
                 const displayNode = isSafeLinkScheme(href) ? (
-                  <a className="cvb-link" href={href} target="_blank" rel="noopener noreferrer">
+                  <a
+                    className="cvb-link"
+                    data-tone={tone}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     {display}
                   </a>
                 ) : (
