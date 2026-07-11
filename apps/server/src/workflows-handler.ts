@@ -100,8 +100,8 @@ import type { MemoryStore } from "./memory-store.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
 import type { UsageStore } from "./usage-store.ts";
-import type { WorkspaceManager } from "./workspace-manager.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
+import type { WorkspaceManager } from "./workspace-manager.ts";
 
 export interface WorkflowsHandlerOptions {
   catalog: WorkflowCatalog;
@@ -2441,7 +2441,8 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         subscribers.broadcast(runId, {
           type: "run_warning",
           nodeId: null,
-          message: "worktree isolation requested but workspace manager is unavailable; running in place",
+          message:
+            "worktree isolation requested but workspace manager is unavailable; running in place",
         });
       } else {
         const branch = resolveBranchTemplate(isolation.branchTemplate, {
@@ -2886,7 +2887,9 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       // The worktree is ephemeral; if the author wanted the changes they
       // should have committed-and-pushed.
       if (workspaceManager === undefined) {
-        console.warn(`[workflows] worktree cleanup for ${runId} skipped: workspace manager unavailable`);
+        console.warn(
+          `[workflows] worktree cleanup for ${runId} skipped: workspace manager unavailable`,
+        );
       } else {
         const out = await workspaceManager.removeWorktree({
           repoPath: cwd,

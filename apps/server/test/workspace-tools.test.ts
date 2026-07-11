@@ -64,7 +64,12 @@ function toolByName(tools: ToolDefinition[], name: string): ToolDefinition {
 
 function fakeManager(overrides: Partial<WorkspaceManager> = {}): WorkspaceManager {
   return {
-    prepareDeps: async () => ({ installed: false, skipped: "no-manifest", error: null, durationMs: 0 }),
+    prepareDeps: async () => ({
+      installed: false,
+      skipped: "no-manifest",
+      error: null,
+      durationMs: 0,
+    }),
     prepareWorktree: async () => {
       throw new Error("not used");
     },

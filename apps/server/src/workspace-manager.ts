@@ -10,17 +10,17 @@ import { existsSync, realpathSync } from "node:fs";
 import type { WorkspaceLease } from "@keelson/shared";
 import {
   createWorktree,
+  type EnsureWorktreeDepsResult,
   ensureWorktreeDeps,
   isGitRepo,
   listWorktrees,
+  type RemoveWorktreeOptions,
+  type RemoveWorktreeResult,
   removeWorktree,
   repoPathFromWorktree,
   resolveBranchTemplate,
   resolveDefaultBranch,
   worktreePathForRepoLocal,
-  type EnsureWorktreeDepsResult,
-  type RemoveWorktreeOptions,
-  type RemoveWorktreeResult,
 } from "@keelson/workflows";
 import type { ProjectsStore } from "./projects-store.ts";
 import type { WorkspaceLeaseRecord, WorkspaceLeaseStore } from "./workspace-lease-store.ts";
@@ -81,7 +81,10 @@ export interface AcquireWorkspaceManagerRequest {
 export type WorkspaceLeaseSummary = WorkspaceLeaseRecord;
 
 export interface WorkspaceManager {
-  prepareDeps(opts: { worktreePath: string; abortSignal?: AbortSignal }): Promise<EnsureWorktreeDepsResult>;
+  prepareDeps(opts: {
+    worktreePath: string;
+    abortSignal?: AbortSignal;
+  }): Promise<EnsureWorktreeDepsResult>;
   prepareWorktree(req: PrepareWorktreeRequest): Promise<PreparedWorktree>;
   removeWorktree(opts: RemoveWorktreeOptions): Promise<RemoveWorktreeResult>;
   acquire(req: AcquireWorkspaceManagerRequest): Promise<WorkspaceLease>;
@@ -94,7 +97,9 @@ function sameWorktreePath(a: string, b: string): boolean {
   try {
     const left = realpathSync.native(a);
     const right = realpathSync.native(b);
-    return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    return process.platform === "win32"
+      ? left.toLowerCase() === right.toLowerCase()
+      : left === right;
   } catch {
     return a === b;
   }
@@ -186,7 +191,9 @@ export function createWorkspaceManager({
             force: true,
           });
           if (out.warning !== null) {
-            console.warn(`[workspace] failed to clean up unrecorded lease worktree: ${out.warning}`);
+            console.warn(
+              `[workspace] failed to clean up unrecorded lease worktree: ${out.warning}`,
+            );
           }
         }
         throw err;
@@ -205,7 +212,10 @@ export function createWorkspaceManager({
       if (existsSync(record.worktreePath)) {
         const repoPath = resolveRepoPath(record);
         if (repoPath === null) {
-          throw new WorkspaceLeaseReleaseError(id, `could not resolve source repo for ${record.worktreePath}`);
+          throw new WorkspaceLeaseReleaseError(
+            id,
+            `could not resolve source repo for ${record.worktreePath}`,
+          );
         }
         const out = await manager.removeWorktree({
           repoPath,

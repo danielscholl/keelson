@@ -706,7 +706,9 @@ describe("bootstrapRibs", () => {
     await expect(
       acquireWorkspace?.({ projectId: "p1", purpose: "fix", branch: "custom" }),
     ).resolves.toBe(lease);
-    expect(calls).toEqual([{ projectId: "p1", purpose: "fix", branch: "custom", owner: "rib:alpha" }]);
+    expect(calls).toEqual([
+      { projectId: "p1", purpose: "fix", branch: "custom", owner: "rib:alpha" },
+    ]);
   });
 
   test("RibContext.acquireWorkspace is absent when no workspace manager source is supplied", async () => {
@@ -894,14 +896,23 @@ describe("bootstrapRibs", () => {
 
 describe("bootstrapProviders", () => {
   const envBefore = process.env.KEELSON_PROVIDERS;
+  const configBefore = process.env.KEELSON_CONFIG;
   const noCredential = async () => undefined;
   const ids = () => getProviderInfoList().map((p) => p.id);
 
-  beforeEach(() => clearProviderRegistry());
+  beforeEach(() => {
+    clearProviderRegistry();
+    process.env.KEELSON_CONFIG = join(
+      tmpdir(),
+      `keelson-bootstrap-config-${process.pid}-${Math.random().toString(36).slice(2)}.json`,
+    );
+  });
   afterEach(() => {
     clearProviderRegistry();
     if (envBefore === undefined) delete process.env.KEELSON_PROVIDERS;
     else process.env.KEELSON_PROVIDERS = envBefore;
+    if (configBefore === undefined) delete process.env.KEELSON_CONFIG;
+    else process.env.KEELSON_CONFIG = configBefore;
   });
 
   test("default set registers copilot only (stub, claude opt-in) and defaults to copilot", () => {

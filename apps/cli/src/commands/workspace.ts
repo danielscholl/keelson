@@ -3,8 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { EXIT_FAIL, EXIT_NO_SERVER, EXIT_OK } from "../exit.ts";
-import { listWorkspaceLeases } from "../http/workspace-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
+import { listWorkspaceLeases } from "../http/workspace-client.ts";
 import { emit } from "../output.ts";
 import { defaultServerBaseUrl } from "../server-probe.ts";
 

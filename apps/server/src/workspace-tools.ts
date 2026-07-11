@@ -9,8 +9,8 @@
 import type { Project, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import type { ProjectsStore } from "./projects-store.ts";
-import type { WorkspaceManager } from "./workspace-manager.ts";
 import { emitResult } from "./workflow-tools.ts";
+import type { WorkspaceManager } from "./workspace-manager.ts";
 
 export interface CreateWorkspaceToolsDeps {
   manager: WorkspaceManager;
@@ -51,7 +51,10 @@ function resolveProjectSelection(
   };
 }
 
-export function createWorkspaceTools({ manager, projectsStore }: CreateWorkspaceToolsDeps): ToolDefinition[] {
+export function createWorkspaceTools({
+  manager,
+  projectsStore,
+}: CreateWorkspaceToolsDeps): ToolDefinition[] {
   const workspaceLease: ToolDefinition = {
     name: "workspace_lease",
     description:
@@ -86,7 +89,11 @@ export function createWorkspaceTools({ manager, projectsStore }: CreateWorkspace
           ].join("\n"),
         );
       } catch (err) {
-        emitResult(ctx, `workspace lease failed: ${err instanceof Error ? err.message : String(err)}`, true);
+        emitResult(
+          ctx,
+          `workspace lease failed: ${err instanceof Error ? err.message : String(err)}`,
+          true,
+        );
       }
     },
   };
@@ -107,7 +114,11 @@ export function createWorkspaceTools({ manager, projectsStore }: CreateWorkspace
         await manager.release(parsed.data.id);
         emitResult(ctx, `Workspace lease ${parsed.data.id} released.`);
       } catch (err) {
-        emitResult(ctx, `workspace release failed: ${err instanceof Error ? err.message : String(err)}`, true);
+        emitResult(
+          ctx,
+          `workspace release failed: ${err instanceof Error ? err.message : String(err)}`,
+          true,
+        );
       }
     },
   };

@@ -47,9 +47,9 @@ import type {
   SnapshotManager,
   ToolContext,
   ToolDefinition,
-  WorkspaceLease,
   WorkflowDiscoveryNotice,
   WorkflowSource,
+  WorkspaceLease,
 } from "@keelson/shared";
 import { recallRequestSchema, writebackRequestSchema } from "@keelson/shared";
 import {
@@ -95,10 +95,10 @@ import {
   type RibWorkflowContribution,
 } from "./ribs.ts";
 import type { UsageStore } from "./usage-store.ts";
-import type { WorkspaceManager } from "./workspace-manager.ts";
 // Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
 // import direction is not turned into a runtime cycle.
 import type { WorkflowController } from "./workflows-handler.ts";
+import type { WorkspaceManager } from "./workspace-manager.ts";
 
 // A bound rib workflow ready to feed the run path: the workflow name plus the
 // callback that republishes a structured run output to the rib's snapshot key.

@@ -19,10 +19,10 @@ import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
-import { createWorkspaceLeaseStore } from "../src/workspace-lease-store.ts";
-import { createWorkspaceManager } from "../src/workspace-manager.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { workflowsRoutes } from "../src/workflows-handler.ts";
+import { createWorkspaceLeaseStore } from "../src/workspace-lease-store.ts";
+import { createWorkspaceManager } from "../src/workspace-manager.ts";
 import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;

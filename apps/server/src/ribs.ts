@@ -341,8 +341,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.getMemory ? { getMemory: () => opts.getMemory!(rib.id) } : {}),
       ...(opts.acquireWorkspace
         ? {
-            acquireWorkspace: (req: AcquireWorkspaceRequest) =>
-              opts.acquireWorkspace!(rib.id, req),
+            acquireWorkspace: (req: AcquireWorkspaceRequest) => opts.acquireWorkspace!(rib.id, req),
           }
         : {}),
       // Normalize to the minimal {id, displayName} shape at the boundary so a richer
