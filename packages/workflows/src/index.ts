@@ -120,6 +120,8 @@ export {
   headDivergesFrom,
   isGitRepo,
   listWorktrees,
+  type ListWorktreesWithStatusResult,
+  listWorktreesWithStatus,
   NotAGitRepoError,
   type RemoveWorktreeOptions,
   type RemoveWorktreeResult,

@@ -13,7 +13,7 @@ import {
   type EnsureWorktreeDepsResult,
   ensureWorktreeDeps,
   isGitRepo,
-  listWorktrees,
+  listWorktreesWithStatus,
   type RemoveWorktreeOptions,
   type RemoveWorktreeResult,
   removeWorktree,
@@ -105,6 +105,14 @@ function sameWorktreePath(a: string, b: string): boolean {
   }
 }
 
+function slugPurposeForBranch(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug.length > 0 ? slug : "workspace";
+}
+
 export function createWorkspaceManager({
   store,
   projectsStore,
@@ -157,34 +165,50 @@ export function createWorkspaceManager({
       const branch =
         req.branch ??
         resolveBranchTemplate(DEFAULT_LEASE_BRANCH_TEMPLATE, {
-          workflow: req.purpose,
+          workflow: slugPurposeForBranch(req.purpose),
           runId: id,
         });
       const dest = worktreePathForRepoLocal({
         projectRootPath: project.rootPath,
         branch,
       });
-      const base = await resolveDefaultBranch(project.rootPath);
-      const prepared = await manager.prepareWorktree({
-        repoPath: project.rootPath,
+      const createdAt = new Date().toISOString();
+
+      store.insert({
+        id,
+        projectId: project.id,
+        purpose: req.purpose,
+        owner: req.owner,
         branch,
-        dest,
-        base,
-        ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
+        worktreePath: dest,
+        createdAt,
       });
 
+      let prepared: PreparedWorktree | null = null;
+
       try {
-        store.insert({
-          id,
-          projectId: project.id,
-          purpose: req.purpose,
-          owner: req.owner,
+        const base = await resolveDefaultBranch(project.rootPath);
+        prepared = await manager.prepareWorktree({
+          repoPath: project.rootPath,
           branch,
-          worktreePath: prepared.worktreePath,
-          createdAt: new Date().toISOString(),
+          dest,
+          base,
+          ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
         });
+        if (prepared.depsError !== null) {
+          throw new Error(`workspace dependency install failed: ${prepared.depsError}`);
+        }
       } catch (err) {
-        if (!prepared.adopted) {
+        try {
+          store.delete(id);
+        } catch (cleanupErr) {
+          console.warn(
+            `[workspace] failed to delete lease row ${id} after acquisition failure: ${
+              cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+            }`,
+          );
+        }
+        if (prepared !== null && !prepared.adopted) {
           const out = await manager.removeWorktree({
             repoPath: project.rootPath,
             dest: prepared.worktreePath,
@@ -192,7 +216,7 @@ export function createWorkspaceManager({
           });
           if (out.warning !== null) {
             console.warn(
-              `[workspace] failed to clean up unrecorded lease worktree: ${out.warning}`,
+              `[workspace] failed to clean up lease worktree ${id}: ${out.warning}`,
             );
           }
         }
@@ -243,7 +267,11 @@ export function createWorkspaceManager({
             store.delete(record.id);
             continue;
           }
-          const registered = (await listWorktrees(repoPath)).some((worktree) => {
+          const listed = await listWorktreesWithStatus(repoPath);
+          if (listed.error !== null) {
+            throw new Error(`could not determine worktree registration: ${listed.error}`);
+          }
+          const registered = listed.worktrees.some((worktree) => {
             if (worktree.branch !== null && worktree.branch !== record.branch) return false;
             return sameWorktreePath(worktree.path, record.worktreePath);
           });

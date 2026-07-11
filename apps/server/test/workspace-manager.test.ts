@@ -118,6 +118,87 @@ describe("WorkspaceManager", () => {
     expect(leaseStore.get(lease.id)).toBeUndefined();
   });
 
+  test("acquire slugifies free-text purpose for derived branch names", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+
+    const lease = await manager.acquire({
+      projectId: project.id,
+      purpose: "fix issue #525",
+      owner: "tool",
+    });
+
+    expect(lease.branch).toMatch(/^keelson\/lease\/fix-issue-525\//);
+    expect(leaseStore.get(lease.id)?.purpose).toBe("fix issue #525");
+    await manager.release(lease.id);
+  });
+
+  test("acquire persists the lease row before worktree preparation", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    let rowsSeenDuringPrepare = leaseStore.list();
+    let branchSeenDuringPrepare = "";
+    let destSeenDuringPrepare = "";
+
+    manager.prepareWorktree = async (req) => {
+      rowsSeenDuringPrepare = leaseStore.list();
+      branchSeenDuringPrepare = req.branch;
+      destSeenDuringPrepare = req.dest;
+      throw new Error("prepare failed");
+    };
+
+    await expect(
+      manager.acquire({
+        projectId: project.id,
+        purpose: "hydrate row first",
+        owner: "tool",
+      }),
+    ).rejects.toThrow("prepare failed");
+
+    expect(rowsSeenDuringPrepare).toHaveLength(1);
+    expect(rowsSeenDuringPrepare[0]?.branch).toBe(branchSeenDuringPrepare);
+    expect(rowsSeenDuringPrepare[0]?.worktreePath).toBe(destSeenDuringPrepare);
+    expect(leaseStore.list()).toEqual([]);
+  });
+
+  test("acquire fails and cleans up when dependency install fails", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const removeCalls: Array<{ repoPath: string; dest: string; force?: boolean }> = [];
+
+    manager.prepareWorktree = async (req) => ({
+      worktreePath: req.dest,
+      adopted: false,
+      branchCreated: true,
+      deps: {
+        installed: false,
+        skipped: null,
+        error: "bun install failed (exit 1): lock mismatch",
+        durationMs: 1,
+      },
+      depsError: "bun install failed (exit 1): lock mismatch",
+    });
+    manager.removeWorktree = async (opts) => {
+      removeCalls.push(opts);
+      return { removed: true, warning: null };
+    };
+
+    await expect(
+      manager.acquire({
+        projectId: project.id,
+        purpose: "deps",
+        owner: "tool",
+      }),
+    ).rejects.toThrow("workspace dependency install failed");
+
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toMatchObject({
+      repoPath: repoDir,
+      force: true,
+    });
+    expect(leaseStore.list()).toEqual([]);
+  });
+
   test("acquire honors an explicit branch", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });
@@ -206,5 +287,24 @@ describe("WorkspaceManager", () => {
 
     expect(leaseStore.get("unregistered")).toBeUndefined();
     rmSync(unregistered, { recursive: true, force: true });
+  });
+
+  test("reconcile keeps rows when registration cannot be determined", async () => {
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const pending = join(repoDir, ".worktrees", "indeterminate");
+    mkdirSync(pending, { recursive: true });
+    leaseStore.insert({
+      id: "indeterminate",
+      projectId: project.id,
+      purpose: "keep",
+      owner: "tool",
+      branch: "keelson/lease/keep",
+      worktreePath: pending,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await manager.reconcile();
+
+    expect(leaseStore.get("indeterminate")).toBeDefined();
   });
 });
