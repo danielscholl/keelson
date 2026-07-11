@@ -27,8 +27,10 @@ import {
   type CommandInvokeResult,
   type MemoryTools,
   type OpenChatSeed,
+  type OpHandle,
   type Policy,
   type Project,
+  type RegisterOpRequest,
   type Rib,
   type RibAction,
   type RibActionResult,
@@ -188,6 +190,9 @@ export interface ApplyRibsOptions {
     ribId: string,
     req: AcquireWorkspaceRequest,
   ) => Promise<WorkspaceLease>;
+  // Backs RibContext.registerOp: register a long op on the durable registry,
+  // stamping the owning rib id. Optional so older/test hosts omit the seam.
+  readonly registerOp?: (ribId: string, req: RegisterOpRequest) => OpHandle;
   // Backs RibContext.getProviders: a read-only list of the registered providers, so a
   // rib can make availability-aware provider choices. Optional so applyRibs unit tests
   // stay deterministic without the provider registry.
@@ -342,6 +347,11 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.acquireWorkspace
         ? {
             acquireWorkspace: (req: AcquireWorkspaceRequest) => opts.acquireWorkspace!(rib.id, req),
+          }
+        : {}),
+      ...(opts.registerOp
+        ? {
+            registerOp: (req: RegisterOpRequest) => opts.registerOp!(rib.id, req),
           }
         : {}),
       // Normalize to the minimal {id, displayName} shape at the boundary so a richer

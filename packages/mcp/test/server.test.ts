@@ -98,6 +98,40 @@ describe("createKeelsonMcpServer", () => {
     expect((t?.inputSchema.properties as Record<string, unknown>).project).toBeDefined();
   });
 
+  test("run_* op tools gate read-vs-state-changing at the MCP boundary", async () => {
+    const opTool = (name: string, stateChanging = false): ToolDefinition => ({
+      name,
+      description: `op tool ${name}`,
+      inputSchema: z.object({ id: z.string().optional() }),
+      ...(stateChanging ? { state_changing: true } : {}),
+      execute: async (_input, ctx) => {
+        ctx.emit({ type: "tool_result", toolUseId: "", content: name });
+      },
+    });
+    const opTools = [
+      opTool("run_list"),
+      opTool("run_status"),
+      opTool("run_events"),
+      opTool("run_cancel", true),
+      opTool("run_steer", true),
+    ];
+
+    const readOnly = (await (await connect({ extraTools: opTools })).listTools()).tools.map(
+      (t) => t.name,
+    );
+    expect(readOnly).toContain("run_list");
+    expect(readOnly).toContain("run_status");
+    expect(readOnly).toContain("run_events");
+    expect(readOnly).not.toContain("run_cancel");
+    expect(readOnly).not.toContain("run_steer");
+
+    const exposed = (
+      await (await connect({ exposeStateChanging: true, extraTools: opTools })).listTools()
+    ).tools.map((t) => t.name);
+    expect(exposed).toContain("run_cancel");
+    expect(exposed).toContain("run_steer");
+  });
+
   test("denylisted tools are hidden and not callable", async () => {
     readTool("osdu_read", "rows");
     const client = await connect({ toolDenylist: ["osdu_read"] });

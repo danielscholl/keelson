@@ -70,6 +70,9 @@ import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore, type MemoryStore } from "./memory-store.ts";
 import { resolveModelCostHint } from "./model-cost-hint.ts";
+import { createOpRegistry, type OpRegistry } from "./op-registry.ts";
+import { createOpStore } from "./op-store.ts";
+import { createOpTools } from "./op-tools.ts";
 import type { PolicyEngine } from "./policy-engine.ts";
 import { projectNotebookRoutes } from "./project-notebook-handler.ts";
 import { createProjectNotebookStore } from "./project-notebook-store.ts";
@@ -95,6 +98,7 @@ import { createWorkflowAuthoringTools } from "./workflow-authoring-tools.ts";
 import { createWorkflowStore } from "./workflow-store.ts";
 import { createWorkflowChatTools } from "./workflow-tools.ts";
 import {
+  cancelActiveRun,
   createActiveRuns,
   createWorkflowController,
   createWorkflowSubscribers,
@@ -285,6 +289,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // Late-bound like the refs above: the manager needs the database and project
   // store, but RibContext.acquireWorkspace reads it lazily when a rib requests a lease.
   let workspaceManagerRef: WorkspaceManager | undefined;
+  // Late-bound like the manager above: the registry needs the db-backed OpStore
+  // and the workflow controller, both created after bootstrapRibs returns.
+  let opRegistryRef: OpRegistry | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
@@ -297,6 +304,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     getWorkflowController: () => workflowControllerRef,
     getMemoryStore: () => memoryStoreRef,
     getWorkspaceManager: () => workspaceManagerRef,
+    getOpRegistry: () => opRegistryRef,
     getUsageStore: () => usageStoreRef,
     // Same cwd the heartbeat scheduler uses (repoRoot below), so a rib refresh
     // collapses onto an in-flight heartbeat run instead of racing it.
@@ -380,6 +388,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const workspaceLeaseStore = createWorkspaceLeaseStore(db);
   const workspaceManager = createWorkspaceManager({ store: workspaceLeaseStore, projectsStore });
   workspaceManagerRef = workspaceManager;
+  // Constructed here so its boot-time reconcile (running ops -> orphaned) runs
+  // early; the registry that wraps it is built once the workflow controller exists.
+  const opStore = createOpStore(db);
   const projectNotebookStore = createProjectNotebookStore(db);
   migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: WORKSPACE_ROOT });
   // Reconcile only after the legacy-layout migration: it moves worktrees on
@@ -551,13 +562,29 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // Publish the late-bound ref the refreshWorkflow resolver reads; boot is
   // complete here, so a rib's refresh resolves the controller, not undefined.
   workflowControllerRef = workflowController;
+  // The op registry projects live workflow runs as ops (read-side, no double-write)
+  // and delegates run_cancel on a workflow op to the abort-only path (keeps the
+  // cancelled row for retrieval). Published to the late-bound ref so a rib's
+  // registerOp seam resolves it.
+  const opRegistry = createOpRegistry({
+    store: opStore,
+    getWorkflowController: () => workflowController,
+    cancelWorkflowRun: (runId) => {
+      const entry = activeWorkflowRuns.get(runId);
+      if (!entry) return false;
+      cancelActiveRun(entry);
+      return true;
+    },
+  });
+  opRegistryRef = opRegistry;
   const workflowTools = createWorkflowChatTools({
     controller: workflowController,
     catalog: workflowCatalog,
     projectsStore,
   });
   const workspaceTools = createWorkspaceTools({ manager: workspaceManager, projectsStore });
-  const harnessTools = [...workflowTools, ...workspaceTools];
+  const opTools = createOpTools({ registry: opRegistry });
+  const harnessTools = [...workflowTools, ...workspaceTools, ...opTools];
   // Built here (not in chat-handler) so the save target stays pinned to the
   // same resolved workflowsDir the catalog scans.
   const workflowAuthoringTools = (project: { id: string; rootPath: string } | null) =>
@@ -611,6 +638,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[keelson] workflow run drain during shutdown failed: ${msg}`);
+    }
+    // Abort live native rib ops and settle their rows BEFORE ribs.disposeAll() and
+    // db.close(), so a detached op can't write through a closed database.
+    try {
+      opRegistry.drain();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] op registry drain during shutdown failed: ${msg}`);
     }
     if (mcpRoutes) {
       try {
