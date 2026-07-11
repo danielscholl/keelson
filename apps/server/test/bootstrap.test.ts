@@ -832,15 +832,27 @@ describe("bootstrapRibs", () => {
 });
 
 describe("bootstrapProviders", () => {
-  const envBefore = process.env.KEELSON_PROVIDERS;
+  const envBeforeProviders = process.env.KEELSON_PROVIDERS;
+  const envBeforeConfig = process.env.KEELSON_CONFIG;
   const noCredential = async () => undefined;
   const ids = () => getProviderInfoList().map((p) => p.id);
+  let tempConfigDir: string | undefined;
 
-  beforeEach(() => clearProviderRegistry());
-  afterEach(() => {
+  beforeEach(async () => {
     clearProviderRegistry();
-    if (envBefore === undefined) delete process.env.KEELSON_PROVIDERS;
-    else process.env.KEELSON_PROVIDERS = envBefore;
+    tempConfigDir = await mkdtemp(join(tmpdir(), "keelson-bootstrap-providers-"));
+    process.env.KEELSON_CONFIG = join(tempConfigDir, "config.json");
+  });
+  afterEach(async () => {
+    clearProviderRegistry();
+    if (tempConfigDir) {
+      await rm(tempConfigDir, { recursive: true, force: true });
+      tempConfigDir = undefined;
+    }
+    if (envBeforeProviders === undefined) delete process.env.KEELSON_PROVIDERS;
+    else process.env.KEELSON_PROVIDERS = envBeforeProviders;
+    if (envBeforeConfig === undefined) delete process.env.KEELSON_CONFIG;
+    else process.env.KEELSON_CONFIG = envBeforeConfig;
   });
 
   test("default set registers copilot only (stub, claude opt-in) and defaults to copilot", () => {
