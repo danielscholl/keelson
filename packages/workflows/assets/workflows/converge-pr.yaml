@@ -1,0 +1,597 @@
+name: converge-pr
+provider: copilot
+model: auto
+description: |
+  Use when: User wants to drive an existing same-repo PR to CI-green with no
+            unhandled unresolved review threads.
+  Triggers: "converge pr", "finish PR #123", "get this PR green",
+            "drive PR to green", "handle bot review until clean".
+  Does: Fetches unresolved review threads each round via GraphQL -> filters out
+        threads already handled by this run -> triages new threads -> pauses for
+        approval on judgment calls -> fixes actionable threads -> validates and
+        pushes -> replies on every handled thread -> resolves ONLY fixed threads
+        -> waits for CI -> repeats until CI passes and a clean round observes no
+        new threads, or escalates at the round cap.
+  NOT for: Fork PRs, which cannot be pushed safely by this workflow.
+           One-shot comment resolution without a CI convergence loop (use
+           resolve-comments).
+           Creating a PR from an issue (use fix-issue).
+
+requiresProject: true
+worktree:
+  enabled: true
+
+converge:
+  gate: converge-check
+  max_rounds: 8
+  on_exhaust: approval
+
+nodes:
+  - id: extract-pr
+    model: auto
+    prompt: |
+      Find the GitHub PR number for this request.
+
+      Request: $ARGUMENTS
+
+      Rules:
+      - If the message contains an explicit PR number ("#42", "PR 42", "42"),
+        extract it.
+      - If the message is ambiguous, return the literal string CURRENT; the next
+        node will resolve it from the current branch.
+
+      Output ONLY the bare integer, or the literal CURRENT. No quotes, no
+      markdown, no explanation.
+
+  - id: fetch-state
+    depends_on: [extract-pr]
+    bash: |
+      set -euo pipefail
+
+      ROUND="$converge.round"
+      RAW=$(printf '%s' "$KEELSON_NODE_extract_pr_OUTPUT" | tr -d "'\"\`\n " )
+      if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
+        PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
+      else
+        PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
+      fi
+
+      if [ -z "$PR_NUM" ]; then
+        echo "Could not resolve a PR number; pass one like 'converge pr 42' or run from a PR branch." >&2
+        exit 1
+      fi
+
+      echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
+      echo "Round $ROUND: fetching PR #$PR_NUM state" >&2
+
+      IS_FORK=$(gh pr view "$PR_NUM" --json isCrossRepository -q '.isCrossRepository')
+      if [ "$IS_FORK" = "true" ]; then
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/threads.json"
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json"
+        jq -cn --arg is_fork "$IS_FORK" \
+          '{is_fork: $is_fork, has_new: "false", new_count: 0, open_count: 0}'
+        exit 0
+      fi
+
+      gh pr view "$PR_NUM" --json headRefName -q '.headRefName' \
+        > "$KEELSON_ARTIFACTS_DIR/.pr-head-ref"
+      if [ "$ROUND" = "1" ] || [ ! -f "$KEELSON_ARTIFACTS_DIR/.checked-out-pr" ]; then
+        gh pr checkout "$PR_NUM" --detach >&2
+        printf '%s\n' "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.checked-out-pr"
+      fi
+
+      HANDLED="$KEELSON_ARTIFACTS_DIR/handled.json"
+      if [ ! -f "$HANDLED" ]; then
+        printf '[]\n' > "$HANDLED"
+      fi
+      if ! jq -e 'type == "array"' "$HANDLED" >/dev/null; then
+        echo "handled.json must be a JSON array; refusing to risk duplicate replies." >&2
+        exit 1
+      fi
+
+      REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+      OWNER=$(echo "$REPO" | cut -d/ -f1)
+      REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
+
+      PAGES="$KEELSON_ARTIFACTS_DIR/raw-thread-pages.ndjson"
+      : > "$PAGES"
+      CURSOR=""
+      while :; do
+        if [ -z "$CURSOR" ]; then
+          gh api graphql -f query='
+            query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $pr) {
+                  reviewThreads(first: 100, after: $cursor) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      id
+                      isResolved
+                      path
+                      line
+                      comments(first: 50) {
+                        nodes {
+                          databaseId
+                          body
+                          author { login }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ' -f owner="$OWNER" -f repo="$REPO_NAME" -F pr="$PR_NUM" >> "$PAGES"
+        else
+          gh api graphql -f query='
+            query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $pr) {
+                  reviewThreads(first: 100, after: $cursor) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      id
+                      isResolved
+                      path
+                      line
+                      comments(first: 50) {
+                        nodes {
+                          databaseId
+                          body
+                          author { login }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ' -f owner="$OWNER" -f repo="$REPO_NAME" -F pr="$PR_NUM" -f cursor="$CURSOR" >> "$PAGES"
+        fi
+
+        HAS_NEXT=$(tail -n 1 "$PAGES" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+        CURSOR=$(tail -n 1 "$PAGES" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')
+        if [ "$HAS_NEXT" != "true" ]; then
+          break
+        fi
+      done
+
+      jq -s '{data: {repository: {pullRequest: {reviewThreads: {nodes: [.[].data.repository.pullRequest.reviewThreads.nodes[]]}}}}}' \
+        "$PAGES" > "$KEELSON_ARTIFACTS_DIR/raw-threads.json"
+
+      jq --slurpfile handled "$HANDLED" '
+        ([($handled[0] // [])[]?.threadId] | unique) as $handledIds
+        | .data.repository.pullRequest.reviewThreads.nodes
+        | map(select(.isResolved == false))
+        | map({
+            threadId: .id,
+            path: .path,
+            line: (.line // null),
+            commentId: (.comments.nodes[0].databaseId // null),
+            body: ([.comments.nodes[].body] | join("\n\n---\n\n")),
+            author: (.comments.nodes[0].author.login // "unknown"),
+            replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
+          })
+        | . as $open
+        | {
+            open: $open,
+            new: ($open | map(select((.threadId as $id | $handledIds | index($id)) == null)))
+          }
+      ' "$KEELSON_ARTIFACTS_DIR/raw-threads.json" > "$KEELSON_ARTIFACTS_DIR/thread-state.json"
+
+      jq '.open' "$KEELSON_ARTIFACTS_DIR/thread-state.json" \
+        > "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json"
+      jq '.new' "$KEELSON_ARTIFACTS_DIR/thread-state.json" \
+        > "$KEELSON_ARTIFACTS_DIR/threads.json"
+
+      OPEN_COUNT=$(jq '.open | length' "$KEELSON_ARTIFACTS_DIR/thread-state.json")
+      NEW_COUNT=$(jq '.new | length' "$KEELSON_ARTIFACTS_DIR/thread-state.json")
+      HAS_NEW=false
+      if [ "$NEW_COUNT" -gt 0 ]; then
+        HAS_NEW=true
+      fi
+
+      echo "Round $ROUND: $OPEN_COUNT unresolved threads, $NEW_COUNT new for this run." >&2
+      jq -cn \
+        --arg is_fork "$IS_FORK" \
+        --arg has_new "$HAS_NEW" \
+        --argjson new_count "$NEW_COUNT" \
+        --argjson open_count "$OPEN_COUNT" \
+        '{is_fork: $is_fork, has_new: $has_new, new_count: $new_count, open_count: $open_count}'
+
+  - id: refuse-fork
+    depends_on: [fetch-state]
+    when: "$fetch-state.output.is_fork == 'true'"
+    cancel: |
+      converge-pr only supports same-repo PRs because it pushes commits back to
+      the PR head branch. Fork PRs must be handled manually or by a workflow
+      with explicit fork-remote credentials.
+
+  - id: triage
+    depends_on: [fetch-state]
+    when: "$fetch-state.output.has_new == 'true'"
+    context: fresh
+    model: claude-opus-4.8
+    output_format:
+      type: object
+      required: [threads]
+      properties:
+        threads:
+          type: array
+          items:
+            type: object
+            required: [threadId, path, decision, reasoning, reply_hint]
+            properties:
+              threadId: { type: string }
+              path: { type: string }
+              line: { type: ["integer", "null"] }
+              decision:
+                type: string
+                enum:
+                  [
+                    actionable-code-change,
+                    question,
+                    wontfix,
+                    already-addressed,
+                    invalid,
+                  ]
+              reasoning: { type: string }
+              reply_hint: { type: string }
+    prompt: |
+      You are triaging only the new unresolved PR review threads for round
+      $converge.round.
+
+      Full thread data is in `$ARTIFACTS_DIR/threads.json`; do not triage any
+      thread absent from that file.
+
+      ## Decision enum
+
+      | Decision | When to use |
+      |----------|-------------|
+      | actionable-code-change | Reviewer is asking for a real code change we should make. |
+      | question | Reviewer is asking a question; a reply explaining the decision is enough. |
+      | wontfix | We disagree or the change is out of scope; we'll explain why. |
+      | already-addressed | The concern was already fixed in a later commit or is moot. |
+      | invalid | The finding is factually wrong; we'll reply with evidence and change nothing. |
+
+      ## Verify before you classify
+
+      The worktree is on the PR's head commit. Read the actual code at each
+      thread's `path:line` before deciding. Reviewers, especially bots, can post
+      confident findings the code contradicts. If a claim is wrong, classify it
+      `invalid`, put the evidence in `reasoning` / `reply_hint`, and never
+      change code to satisfy it.
+
+      ## Output
+
+      For each thread, fill `threadId`, `path`, `line` (null if absent),
+      `decision`, `reasoning` (one sentence), and `reply_hint` (the gist of the
+      reply).
+
+      Write the triage JSON to `$ARTIFACTS_DIR/triage.json` and print it.
+
+  - id: triage-gate
+    depends_on: [triage]
+    trigger_rule: none_failed_min_one_success
+    bash: |
+      set -euo pipefail
+      FETCHED=$(jq -cS '[.[].threadId] | sort' "$KEELSON_ARTIFACTS_DIR/threads.json")
+      TRIAGED=$(jq -cS '[.threads[].threadId] | sort' "$KEELSON_ARTIFACTS_DIR/triage.json")
+      if [ "$FETCHED" != "$TRIAGED" ]; then
+        echo "triage.json thread ids do not match threads.json; refusing to continue with incomplete triage." >&2
+        echo "fetched: $FETCHED" >&2
+        echo "triaged: $TRIAGED" >&2
+        exit 1
+      fi
+      jq -c --slurpfile fetched "$KEELSON_ARTIFACTS_DIR/threads.json" '
+        ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
+        | {
+            contentious: $n,
+            needs_review: (if $n > 0 then "true" else "false" end),
+            has_new: (if ($fetched[0] | length) > 0 then "true" else "false" end)
+          }
+      ' "$KEELSON_ARTIFACTS_DIR/triage.json"
+
+  - id: approve
+    depends_on: [triage-gate]
+    when: "$triage-gate.output.needs_review == 'true'"
+    approval:
+      message: |
+        Round $converge.round triage contains judgment calls (question /
+        wontfix / already-addressed / invalid). Review before any branch
+        mutation or public reply.
+
+        Triage file: $ARTIFACTS_DIR/triage.json
+      capture_response: true
+
+  - id: fix
+    depends_on: [triage-gate, approve]
+    trigger_rule: none_failed_min_one_success
+    when: "$triage-gate.output.has_new == 'true'"
+    context: fresh
+    model: gpt-5.6-sol
+    idle_timeout: 1800000
+    prompt: |
+      You are fixing the round $converge.round actionable PR review threads.
+
+      ## Approval feedback
+
+      $approve.output
+
+      ## Triage
+
+      $triage.output
+
+      Full triage data: `$ARTIFACTS_DIR/triage.json`
+      Thread data:      `$ARTIFACTS_DIR/threads.json`
+
+      ## Setup - verify.sh
+
+      First, discover this project's checks and write them to
+      `$ARTIFACTS_DIR/verify.sh` with `set -euo pipefail` at the top so the
+      first failing check aborts. Read whichever of `CLAUDE.md`, `AGENTS.md`,
+      `CONTRIBUTING.md`, `README.md`, plus build config files exist.
+
+      ## Rules
+
+      - The worktree is at the PR head as a detached HEAD. Commit directly onto
+        it; do not create, switch to, or reset a branch.
+      - Apply operator adjustments from the approval feedback before writing
+        code or composing replies.
+      - Process only threads in `$ARTIFACTS_DIR/threads.json`.
+      - Apply code changes only for triage entries with
+        `decision == "actionable-code-change"`.
+      - For each actionable thread, read the target file before editing and run
+        the narrowest check covering the change after editing.
+      - Stage edited files by name. Never `git add -A`, `git add .`, or
+        `git add -u`. Never commit anything under `$ARTIFACTS_DIR`.
+      - Commit per thread or per logical group with a conventional message.
+      - For `question`, `wontfix`, `already-addressed`, and `invalid`, make no
+        code change; compose a factual reply only.
+
+      ## Results file
+
+      After processing all new threads, write `$ARTIFACTS_DIR/results.json` as a
+      JSON array, one entry per thread:
+
+      ```json
+      [
+        {
+          "threadId": "<graphql thread id>",
+          "commentId": <database id for replies>,
+          "action": "fixed",
+          "decision": "actionable-code-change",
+          "commit": "<sha or null>",
+          "reply": "<the reply text to post>"
+        },
+        {
+          "threadId": "...",
+          "commentId": 123,
+          "action": "replied-only",
+          "decision": "invalid",
+          "commit": null,
+          "reply": "..."
+        }
+      ]
+      ```
+
+      `action` is `"fixed"` only when an actual code change was committed for
+      that thread. Everything else is `"replied-only"`.
+
+      Print a summary when done.
+
+  - id: validate
+    depends_on: [fix]
+    timeout: 1200000
+    bash: |
+      set +e
+      VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
+      if [ ! -f "$VERIFY" ]; then
+        echo "No verify.sh recorded by the fix step; cannot verify the change."
+        echo "VALIDATION_STATUS: FAIL"
+        exit 0
+      fi
+
+      echo "=== PROJECT CHECKS ==="
+      bash -e -o pipefail "$VERIFY" 2>&1
+      STATUS=$?
+
+      echo ""
+      if [ $STATUS -eq 0 ]; then
+        echo "VALIDATION_STATUS: PASS"
+      else
+        echo "VALIDATION_STATUS: FAIL"
+      fi
+      exit 0
+
+  - id: fix-validation
+    depends_on: [validate]
+    context: fresh
+    model: gpt-5.6-sol
+    idle_timeout: 1800000
+    prompt: |
+      Review the validation output below.
+
+      ## Validation
+
+      $validate.output
+
+      ## Instructions
+
+      - If the output ends with `VALIDATION_STATUS: PASS`, respond with
+        "All checks passed - no fixes needed." and stop.
+      - If no `verify.sh` was recorded, discover this project's checks now,
+        write `$ARTIFACTS_DIR/verify.sh`, and run it.
+      - Otherwise, fix only what is broken. Do not add scope.
+      - Stage edited files by name. Never `git add -A`, `git add .`, or
+        `git add -u`. Never commit anything under `$ARTIFACTS_DIR`.
+      - After each fix, re-run `bash $ARTIFACTS_DIR/verify.sh` to confirm.
+      - Commit the fixes before handing off:
+        `git add <files>; git commit -m "fix: address validation failures"`.
+
+  - id: revalidate
+    depends_on: [fix-validation]
+    timeout: 1200000
+    bash: |
+      set -euo pipefail
+      VERIFY="$KEELSON_ARTIFACTS_DIR/verify.sh"
+      if [ ! -f "$VERIFY" ]; then
+        echo "VALIDATION_STATUS: FAIL - no verify.sh recorded; refusing to push unverified changes"
+        exit 1
+      fi
+
+      echo "=== PROJECT CHECKS ==="
+      bash -e -o pipefail "$VERIFY" 2>&1
+      echo "VALIDATION_STATUS: PASS"
+
+  - id: push
+    depends_on: [revalidate]
+    when: "$triage-gate.output.has_new == 'true'"
+    bash: |
+      set -euo pipefail
+      HEAD_REF=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-head-ref" 2>/dev/null || true)
+      if [ -z "$HEAD_REF" ]; then
+        echo "No PR head ref recorded by fetch-state; cannot push." >&2
+        exit 1
+      fi
+      git push origin "HEAD:refs/heads/$HEAD_REF"
+      echo "Pushed to origin/$HEAD_REF."
+
+  - id: reply-resolve
+    depends_on: [push]
+    context: fresh
+    model: auto
+    prompt: |
+      Post replies, resolve only fixed threads, and update the handled ledger for
+      round $converge.round.
+
+      ## Invariant
+
+      - Post a reply on every entry in `$ARTIFACTS_DIR/results.json`.
+      - Call `resolveReviewThread` only for entries where `action == "fixed"`.
+      - Never resolve a `replied-only` thread.
+      - Append every successfully replied thread to `$ARTIFACTS_DIR/handled.json`
+        so later rounds never re-triage or re-reply to it.
+
+      ## Steps
+
+      1. Read `$ARTIFACTS_DIR/results.json`, `$ARTIFACTS_DIR/triage.json`,
+         `$ARTIFACTS_DIR/threads.json`, and `$ARTIFACTS_DIR/.pr-number`.
+      2. Determine the repo:
+         `gh repo view --json nameWithOwner -q '.nameWithOwner'`
+      3. For each result entry, post a reply via REST:
+         `gh api -X POST repos/{owner}/{repo}/pulls/{prNumber}/comments/{commentId}/replies -f body="{reply text}"`
+      4. For each entry where `action == "fixed"`, resolve via GraphQL:
+         `resolveReviewThread(input: {threadId: "{threadId}"})`.
+      5. Write `$ARTIFACTS_DIR/outcome.json`:
+         `{ "replied": [...], "resolved": [...], "left_open": [...] }`
+      6. Append the replied result entries to `$ARTIFACTS_DIR/handled.json`,
+         preserving existing entries and recording at least `threadId`,
+         `commentId`, `action`, `decision`, `commit`, `reply`, and
+         `round: $converge.round`.
+      7. Print a summary: how many replied, resolved, left open, and newly
+         recorded in handled.json.
+
+  - id: await-ci
+    depends_on: [reply-resolve, fetch-state]
+    trigger_rule: none_failed_min_one_success
+    timeout: 1500000
+    bash: |
+      set -uo pipefail
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
+      if [ -z "$PR_NUM" ]; then
+        echo "CI_STATUS: UNKNOWN - no .pr-number recorded; cannot watch CI"
+        exit 0
+      fi
+      if [ "$(gh pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
+        echo "CI_STATUS: UNKNOWN - no CI checks present for PR #$PR_NUM; nothing to gate on"
+        exit 0
+      fi
+      echo "Watching CI for PR #$PR_NUM ..."
+      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-1.txt" 2>&1; then
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
+        echo "CI_STATUS: PASS"
+        exit 0
+      fi
+      echo "=== CI failed on first pass ==="
+      cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
+      echo "Rerunning failed jobs once to rule out flakes ..."
+      HEAD_SHA=$(git rev-parse HEAD)
+      HEAD_REF=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-head-ref" 2>/dev/null || true)
+      if [ -n "$HEAD_REF" ]; then
+        gh run list --branch "$HEAD_REF" --limit 20 \
+          --json databaseId,headSha,conclusion \
+          -q ".[] | select(.headSha==\"$HEAD_SHA\" and .conclusion==\"failure\") | .databaseId" \
+          | while read -r RID; do [ -n "$RID" ] && gh run rerun "$RID" --failed || true; done
+      fi
+      sleep 20
+      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-2.txt" 2>&1; then
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-2.txt"
+        echo "CI_STATUS: PASS"
+        exit 0
+      fi
+      echo "=== CI still failing after one rerun ==="
+      cat "$KEELSON_ARTIFACTS_DIR/.ci-2.txt"
+      echo "CI_STATUS: FAIL"
+      exit 0
+
+  - id: converge-check
+    depends_on: [await-ci]
+    bash: |
+      set -euo pipefail
+      NEW_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/threads.json" 2>/dev/null || echo 0)
+      OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json" 2>/dev/null || echo 0)
+      CI_STATUS=$(cat <<'EOF' | awk -F'CI_STATUS: ' '/CI_STATUS: / {print $2}' | tail -1 | awk '{print $1}'
+      $await-ci.output
+      EOF
+      )
+
+      if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ]; then
+        echo "Converged: CI passed and this round found no new unresolved threads."
+        exit 0
+      fi
+
+      echo "Not converged: CI_STATUS=${CI_STATUS:-UNKNOWN}, new_threads=$NEW_COUNT, open_threads=$OPEN_COUNT"
+      exit 1
+
+  - id: report
+    depends_on: [converge-check]
+    context: fresh
+    model: auto
+    prompt: |
+      Produce the final converge-pr summary.
+
+      ## Inputs
+
+      - PR number: `$ARTIFACTS_DIR/.pr-number`
+      - Handled ledger: `$ARTIFACTS_DIR/handled.json`
+      - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
+      - Latest new-thread set: `$ARTIFACTS_DIR/threads.json`
+      - Latest CI result:
+
+        $await-ci.output
+
+      - Converge gate:
+
+        $converge-check.output
+
+      ## Output format
+
+      ```
+      ## converge-pr - PR #<N>
+
+      ### Summary
+
+      - Rounds completed: <count or latest round>
+      - Threads replied to: <count from handled.json>
+      - Threads resolved: <count where action == fixed>
+      - Threads left open after reply: <count where action != fixed>
+      - Latest CI: PASS / FAIL / UNKNOWN
+
+      ### Notes
+
+      <Anything the operator needs to know, including exhaust approval if this
+      report ran after a human override.>
+      ```
+
+      Print this report and also write it to `$ARTIFACTS_DIR/report.md`.
