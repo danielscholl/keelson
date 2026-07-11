@@ -54,10 +54,8 @@ import {
   type AwaitApproval,
   type AwaitInteraction,
   bashHandler,
-  createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
-  ensureWorktreeDeps,
   headDivergesFrom,
   isGitRepo,
   type MemoryTools,
@@ -73,7 +71,6 @@ import {
   type RequestCancel,
   type RunStreamEvent,
   type RunSummary,
-  removeWorktree,
   resolveBranchTemplate,
   resolveDefaultBranch,
   runWorkflow,
@@ -103,6 +100,7 @@ import type { MemoryStore } from "./memory-store.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
 import type { UsageStore } from "./usage-store.ts";
+import type { WorkspaceManager } from "./workspace-manager.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
 
 export interface WorkflowsHandlerOptions {
@@ -150,6 +148,9 @@ export interface WorkflowsHandlerOptions {
   // Optional usage ledger. When set, each node_done carrying real usage records
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  // Shared workspace lifecycle service. Production wires this so workflow
+  // worktrees use the same prepare/remove primitives as workspace leases.
+  workspaceManager?: WorkspaceManager;
   // Whether an active rib surface region (static or runtime-added) declares this
   // workflow as its refresh producer. Widens the `/refresh` gate beyond bound
   // producers: a region may name an UNBOUND workflow (one that republishes
@@ -663,6 +664,7 @@ interface StartRunCoreDeps {
   snapshotManager?: SnapshotManager;
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
   usageStore?: UsageStore;
+  workspaceManager?: WorkspaceManager;
 }
 
 interface StartRunCoreParams {
@@ -751,6 +753,7 @@ function startRunCore(
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
+  const { workspaceManager } = deps;
   const {
     workflow,
     inputs,
@@ -864,6 +867,7 @@ function startRunCore(
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
     ...(usageStore !== undefined ? { usageStore } : {}),
+    ...(workspaceManager !== undefined ? { workspaceManager } : {}),
   });
   activeRuns.register(runId, {
     abort,
@@ -903,6 +907,7 @@ function resumeRunCore(
 ): ResumeRunResult {
   const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, catalog, usageStore } = deps;
+  const { workspaceManager } = deps;
   const { projectsStore, projectNotebookStore } = deps;
 
   const run = store.getRun(runId);
@@ -990,6 +995,7 @@ function resumeRunCore(
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
     ...(usageStore !== undefined ? { usageStore } : {}),
+    ...(workspaceManager !== undefined ? { workspaceManager } : {}),
     ...(notebook !== undefined ? { notebook } : {}),
     completedNodeOutputs,
     existingWorktreePath: run.worktreePath ?? undefined,
@@ -1191,6 +1197,7 @@ export function createWorkflowController(
     snapshotManager,
     ribWorkflowBindings,
     usageStore,
+    workspaceManager,
   } = opts;
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
@@ -1364,6 +1371,7 @@ export function createWorkflowController(
             ...(snapshotManager !== undefined ? { snapshotManager } : {}),
             ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
             ...(usageStore !== undefined ? { usageStore } : {}),
+            ...(workspaceManager !== undefined ? { workspaceManager } : {}),
           },
           {
             workflow,
@@ -1406,6 +1414,7 @@ export function createWorkflowController(
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
+          ...(workspaceManager !== undefined ? { workspaceManager } : {}),
         },
         runId,
       );
@@ -1517,6 +1526,7 @@ export function workflowsRoutes(
     snapshotManager,
     ribWorkflowBindings,
     usageStore,
+    workspaceManager,
     isRegionWorkflow,
   } = opts;
   const {
@@ -1833,6 +1843,7 @@ export function workflowsRoutes(
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
+          ...(workspaceManager !== undefined ? { workspaceManager } : {}),
         },
         {
           workflow,
@@ -1923,6 +1934,7 @@ export function workflowsRoutes(
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
+          ...(workspaceManager !== undefined ? { workspaceManager } : {}),
         },
         {
           workflow,
@@ -2294,6 +2306,7 @@ interface ExecuteRunArgs {
   // Optional usage ledger. When set, each node_done carrying real usage records
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  workspaceManager?: WorkspaceManager;
 }
 
 // Process-wide slot pool, lazily built so KEELSON_MAX_CONCURRENT_RUNS is read
@@ -2368,6 +2381,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     completedNodeOutputs,
     existingWorktreePath,
     usageStore,
+    workspaceManager,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -2394,11 +2408,11 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     effectiveCwd = existingWorktreePath;
     worktreePathForCleanup = existingWorktreePath;
     cleanupOnSuccessOnly = true;
-    const deps = await ensureWorktreeDeps({
+    const deps = await workspaceManager?.prepareDeps({
       worktreePath: existingWorktreePath,
       abortSignal: abort.signal,
     });
-    if (deps.error !== null) {
+    if (deps?.error !== null && deps?.error !== undefined) {
       subscribers.broadcast(runId, {
         type: "run_warning",
         nodeId: null,
@@ -2423,70 +2437,75 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
             : `worktree isolation requested but ${cwd} is not a git repo; running in place`,
       });
     } else {
-      const branch = resolveBranchTemplate(isolation.branchTemplate, {
-        workflow: workflow.name,
-        runId,
-      });
-      const dest = worktreePathForRepoLocal({
-        projectRootPath: isolation.projectRootPath,
-        branch,
-      });
-      const base = isolation.base ?? (await resolveDefaultBranch(cwd));
-      try {
-        if (base !== null) {
+      if (workspaceManager === undefined) {
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: "worktree isolation requested but workspace manager is unavailable; running in place",
+        });
+      } else {
+        const branch = resolveBranchTemplate(isolation.branchTemplate, {
+          workflow: workflow.name,
+          runId,
+        });
+        const dest = worktreePathForRepoLocal({
+          projectRootPath: isolation.projectRootPath,
+          branch,
+        });
+        const base = isolation.base ?? (await resolveDefaultBranch(cwd));
+        try {
+          if (base !== null) {
+            try {
+              store.setRunWorktreeBase(runId, base);
+            } catch (err) {
+              console.warn(
+                `[workflows] failed to persist worktree base for ${runId}: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+            if (await headDivergesFrom(cwd, base)) {
+              subscribers.broadcast(runId, {
+                type: "run_warning",
+                nodeId: null,
+                message: `current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
+              });
+            }
+          }
+          const created = await workspaceManager.prepareWorktree({
+            repoPath: cwd,
+            branch,
+            dest,
+            base,
+            abortSignal: abort.signal,
+          });
+          effectiveCwd = created.worktreePath;
+          worktreePathForCleanup = created.worktreePath;
+          cleanupOnSuccessOnly = true;
           try {
-            store.setRunWorktreeBase(runId, base);
+            store.setRunWorktreePath(runId, created.worktreePath);
           } catch (err) {
             console.warn(
-              `[workflows] failed to persist worktree base for ${runId}: ${
+              `[workflows] failed to persist worktree path for ${runId}: ${
                 err instanceof Error ? err.message : String(err)
               }`,
             );
           }
-          if (await headDivergesFrom(cwd, base)) {
+          if (created.depsError !== null) {
             subscribers.broadcast(runId, {
               type: "run_warning",
               nodeId: null,
-              message: `current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
+              message: `worktree dependency install failed; continuing: ${created.depsError}`,
             });
           }
-        }
-        const created = await createWorktree({
-          repoPath: cwd,
-          branch,
-          dest,
-          base: base ?? undefined,
-        });
-        effectiveCwd = created.worktreePath;
-        worktreePathForCleanup = created.worktreePath;
-        cleanupOnSuccessOnly = true;
-        try {
-          store.setRunWorktreePath(runId, created.worktreePath);
         } catch (err) {
-          console.warn(
-            `[workflows] failed to persist worktree path for ${runId}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
-        const deps = await ensureWorktreeDeps({
-          worktreePath: created.worktreePath,
-          abortSignal: abort.signal,
-        });
-        if (deps.error !== null) {
+          const message = err instanceof Error ? err.message : String(err);
           subscribers.broadcast(runId, {
             type: "run_warning",
             nodeId: null,
-            message: `worktree dependency install failed; continuing: ${deps.error}`,
+            message: `worktree creation failed; running in place: ${message}`,
           });
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        subscribers.broadcast(runId, {
-          type: "run_warning",
-          nodeId: null,
-          message: `worktree creation failed; running in place: ${message}`,
-        });
       }
     }
   }
@@ -2866,19 +2885,23 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       // that committed elsewhere) or left bash scratch in the working tree.
       // The worktree is ephemeral; if the author wanted the changes they
       // should have committed-and-pushed.
-      const out = await removeWorktree({
-        repoPath: cwd,
-        dest: worktreePathForCleanup,
-        force: true,
-      });
-      if (out.warning !== null) {
-        console.warn(`[workflows] worktree cleanup for ${runId} warned: ${out.warning}`);
-      }
-      if (out.removed) {
-        try {
-          store.setRunWorktreePath(runId, null);
-        } catch {
-          // Best-effort; non-fatal.
+      if (workspaceManager === undefined) {
+        console.warn(`[workflows] worktree cleanup for ${runId} skipped: workspace manager unavailable`);
+      } else {
+        const out = await workspaceManager.removeWorktree({
+          repoPath: cwd,
+          dest: worktreePathForCleanup,
+          force: true,
+        });
+        if (out.warning !== null) {
+          console.warn(`[workflows] worktree cleanup for ${runId} warned: ${out.warning}`);
+        }
+        if (out.removed) {
+          try {
+            store.setRunWorktreePath(runId, null);
+          } catch {
+            // Best-effort; non-fatal.
+          }
         }
       }
     }

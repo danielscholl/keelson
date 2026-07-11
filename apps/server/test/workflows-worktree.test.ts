@@ -19,6 +19,8 @@ import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
+import { createWorkspaceLeaseStore } from "../src/workspace-lease-store.ts";
+import { createWorkspaceManager } from "../src/workspace-manager.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { workflowsRoutes } from "../src/workflows-handler.ts";
 import { rmTemp } from "./temp.ts";
@@ -92,10 +94,14 @@ function makeRig() {
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
   const projectsStore = createProjectsStore(db);
+  const workspaceManager = createWorkspaceManager({
+    store: createWorkspaceLeaseStore(db),
+    projectsStore,
+  });
   const project = projectsStore.create({ name: "repo", rootPath: repoDir });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const app = new Hono();
-  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore });
+  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore, workspaceManager });
   return { app, store, projectId: project.id };
 }
 
@@ -197,6 +203,11 @@ nodes:
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
     const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const workspaceManager = createWorkspaceManager({
+      store: createWorkspaceLeaseStore(db),
+      projectsStore,
+    });
     const catalog = bootstrapWorkflows({ workflowDir: wfDir });
     const producer = catalog.get("isoprod");
     if (!producer) throw new Error("fixture workflow missing");
@@ -208,6 +219,7 @@ nodes:
       conversationStore,
       refreshCwd: repoDir,
       ribWorkflowBindings: bindings,
+      workspaceManager,
     });
     const res = await app.fetch(
       new Request("http://test/api/workflows/isoprod/refresh", {
