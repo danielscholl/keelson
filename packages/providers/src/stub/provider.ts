@@ -53,9 +53,7 @@ export class StubProvider implements IAgentProvider {
     for (const token of emittedTokens) {
       yield { type: "text", content: `${token} ` };
     }
-    _options?.onFinishReason?.(
-      tokens.length > STUB_OUTPUT_TOKEN_BUDGET ? "max_tokens" : "end",
-    );
+    _options?.onFinishReason?.(tokens.length > STUB_OUTPUT_TOKEN_BUDGET ? "max_tokens" : "end");
     // Deterministic synthetic usage (1 word ≈ 1 token) so the keyless path
     // exercises the same usage pipeline the real providers feed.
     const count = tokens.length;

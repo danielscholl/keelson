@@ -233,9 +233,12 @@ describe("registerStubProvider", () => {
       chunks.push(chunk);
     }
     expect(finishReason).toBe("end");
-    expect(chunks.filter((c) => c.type === "text").map((c) => c.content).join("")).toBe(
-      "hello world ",
-    );
+    expect(
+      chunks
+        .filter((c) => c.type === "text")
+        .map((c) => c.content)
+        .join(""),
+    ).toBe("hello world ");
   });
 
   it("stub reports max_tokens and truncates over-budget output", async () => {

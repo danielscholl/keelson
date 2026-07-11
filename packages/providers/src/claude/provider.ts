@@ -14,8 +14,8 @@ import type {
   IAgentProvider,
   MessageChunk,
   ModelInfo,
-  ProviderFinishReason,
   ProviderCapabilities,
+  ProviderFinishReason,
   SendQueryOptions,
 } from "../types.ts";
 import { buildFriendlyClaudeError } from "./errors.ts";
