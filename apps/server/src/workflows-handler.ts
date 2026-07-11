@@ -54,8 +54,10 @@ import {
   type AwaitApproval,
   type AwaitInteraction,
   bashHandler,
+  createWorktree,
   type DagNode,
   defaultRunUntilBashProbe,
+  ensureWorktreeDeps,
   headDivergesFrom,
   isGitRepo,
   type MemoryTools,
@@ -73,6 +75,7 @@ import {
   type RunSummary,
   resolveBranchTemplate,
   resolveDefaultBranch,
+  removeWorktree,
   runWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
@@ -2404,15 +2407,71 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // directory removal turns into a reliable CI failure).
   let pendingRunDoneEvent: Extract<RunStreamEvent, { type: "run_done" }> | undefined;
   let runDoneCompletedAt: string | undefined;
+  const prepareDeps = async (worktreePath: string) => {
+    if (workspaceManager !== undefined) {
+      return workspaceManager.prepareDeps({
+        worktreePath,
+        abortSignal: abort.signal,
+      });
+    }
+    return ensureWorktreeDeps({
+      worktreePath,
+      abortSignal: abort.signal,
+    });
+  };
+  const prepareWorktree = async (opts: {
+    repoPath: string;
+    branch: string;
+    dest: string;
+    base: string | null;
+  }) => {
+    if (workspaceManager !== undefined) {
+      return workspaceManager.prepareWorktree({
+        repoPath: opts.repoPath,
+        branch: opts.branch,
+        dest: opts.dest,
+        ...(opts.base !== null ? { base: opts.base } : {}),
+        abortSignal: abort.signal,
+      });
+    }
+    const created = await createWorktree({
+      repoPath: opts.repoPath,
+      branch: opts.branch,
+      dest: opts.dest,
+      ...(opts.base !== null ? { base: opts.base } : {}),
+    });
+    const deps = await ensureWorktreeDeps({
+      worktreePath: created.worktreePath,
+      abortSignal: abort.signal,
+    });
+    return {
+      worktreePath: created.worktreePath,
+      adopted: created.adopted,
+      branchCreated: created.branchCreated,
+      deps,
+      depsError: deps.error,
+    };
+  };
+  const removePreparedWorktree = (dest: string) => {
+    if (workspaceManager !== undefined) {
+      return workspaceManager.removeWorktree({
+        repoPath: cwd,
+        dest,
+        force: true,
+      });
+    }
+    return removeWorktree({
+      repoPath: cwd,
+      dest,
+      force: true,
+    });
+  };
   if (existingWorktreePath !== undefined) {
     effectiveCwd = existingWorktreePath;
     worktreePathForCleanup = existingWorktreePath;
     cleanupOnSuccessOnly = true;
-    const deps = await workspaceManager?.prepareDeps({
-      worktreePath: existingWorktreePath,
-      abortSignal: abort.signal,
-    });
-    if (deps?.error !== null && deps?.error !== undefined) {
+    const deps = await prepareDeps(existingWorktreePath);
+    if (deps.error !== null) {
       subscribers.broadcast(runId, {
         type: "run_warning",
         nodeId: null,
@@ -2437,76 +2496,66 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
             : `worktree isolation requested but ${cwd} is not a git repo; running in place`,
       });
     } else {
-      if (workspaceManager === undefined) {
-        subscribers.broadcast(runId, {
-          type: "run_warning",
-          nodeId: null,
-          message:
-            "worktree isolation requested but workspace manager is unavailable; running in place",
-        });
-      } else {
-        const branch = resolveBranchTemplate(isolation.branchTemplate, {
-          workflow: workflow.name,
-          runId,
-        });
-        const dest = worktreePathForRepoLocal({
-          projectRootPath: isolation.projectRootPath,
-          branch,
-        });
-        const base = isolation.base ?? (await resolveDefaultBranch(cwd));
-        try {
-          if (base !== null) {
-            try {
-              store.setRunWorktreeBase(runId, base);
-            } catch (err) {
-              console.warn(
-                `[workflows] failed to persist worktree base for ${runId}: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              );
-            }
-            if (await headDivergesFrom(cwd, base)) {
-              subscribers.broadcast(runId, {
-                type: "run_warning",
-                nodeId: null,
-                message: `current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
-              });
-            }
-          }
-          const created = await workspaceManager.prepareWorktree({
-            repoPath: cwd,
-            branch,
-            dest,
-            base,
-            abortSignal: abort.signal,
-          });
-          effectiveCwd = created.worktreePath;
-          worktreePathForCleanup = created.worktreePath;
-          cleanupOnSuccessOnly = true;
+      const branch = resolveBranchTemplate(isolation.branchTemplate, {
+        workflow: workflow.name,
+        runId,
+      });
+      const dest = worktreePathForRepoLocal({
+        projectRootPath: isolation.projectRootPath,
+        branch,
+      });
+      const base = isolation.base ?? (await resolveDefaultBranch(cwd));
+      try {
+        if (base !== null) {
           try {
-            store.setRunWorktreePath(runId, created.worktreePath);
+            store.setRunWorktreeBase(runId, base);
           } catch (err) {
             console.warn(
-              `[workflows] failed to persist worktree path for ${runId}: ${
+              `[workflows] failed to persist worktree base for ${runId}: ${
                 err instanceof Error ? err.message : String(err)
               }`,
             );
           }
-          if (created.depsError !== null) {
+          if (await headDivergesFrom(cwd, base)) {
             subscribers.broadcast(runId, {
               type: "run_warning",
               nodeId: null,
-              message: `worktree dependency install failed; continuing: ${created.depsError}`,
+              message: `current HEAD is not contained in ${base}; creating isolated worktree branch from ${base}`,
             });
           }
+        }
+        const created = await prepareWorktree({
+          repoPath: cwd,
+          branch,
+          dest,
+          base,
+        });
+        effectiveCwd = created.worktreePath;
+        worktreePathForCleanup = created.worktreePath;
+        cleanupOnSuccessOnly = true;
+        try {
+          store.setRunWorktreePath(runId, created.worktreePath);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[workflows] failed to persist worktree path for ${runId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+        if (created.depsError !== null) {
           subscribers.broadcast(runId, {
             type: "run_warning",
             nodeId: null,
-            message: `worktree creation failed; running in place: ${message}`,
+            message: `worktree dependency install failed; continuing: ${created.depsError}`,
           });
         }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        subscribers.broadcast(runId, {
+          type: "run_warning",
+          nodeId: null,
+          message: `worktree creation failed; running in place: ${message}`,
+        });
       }
     }
   }
@@ -2886,25 +2935,15 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       // that committed elsewhere) or left bash scratch in the working tree.
       // The worktree is ephemeral; if the author wanted the changes they
       // should have committed-and-pushed.
-      if (workspaceManager === undefined) {
-        console.warn(
-          `[workflows] worktree cleanup for ${runId} skipped: workspace manager unavailable`,
-        );
-      } else {
-        const out = await workspaceManager.removeWorktree({
-          repoPath: cwd,
-          dest: worktreePathForCleanup,
-          force: true,
-        });
-        if (out.warning !== null) {
-          console.warn(`[workflows] worktree cleanup for ${runId} warned: ${out.warning}`);
-        }
-        if (out.removed) {
-          try {
-            store.setRunWorktreePath(runId, null);
-          } catch {
-            // Best-effort; non-fatal.
-          }
+      const out = await removePreparedWorktree(worktreePathForCleanup);
+      if (out.warning !== null) {
+        console.warn(`[workflows] worktree cleanup for ${runId} warned: ${out.warning}`);
+      }
+      if (out.removed) {
+        try {
+          store.setRunWorktreePath(runId, null);
+        } catch {
+          // Best-effort; non-fatal.
         }
       }
     }
