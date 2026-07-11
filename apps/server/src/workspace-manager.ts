@@ -139,17 +139,28 @@ export function createWorkspaceManager({
         dest: req.dest,
         ...(req.base ? { base: req.base } : {}),
       });
-      const deps = await manager.prepareDeps({
-        worktreePath: created.worktreePath,
-        ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
-      });
-      return {
-        worktreePath: created.worktreePath,
-        adopted: created.adopted,
-        branchCreated: created.branchCreated,
-        deps,
-        depsError: deps.error,
-      };
+      try {
+        const deps = await manager.prepareDeps({
+          worktreePath: created.worktreePath,
+          ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
+        });
+        return {
+          worktreePath: created.worktreePath,
+          adopted: created.adopted,
+          branchCreated: created.branchCreated,
+          deps,
+          depsError: deps.error,
+        };
+      } catch (err) {
+        if (!created.adopted) {
+          await removeWorktree({
+            repoPath: req.repoPath,
+            dest: created.worktreePath,
+            force: true,
+          });
+        }
+        throw err;
+      }
     },
     removeWorktree(opts) {
       return removeWorktree(opts);
