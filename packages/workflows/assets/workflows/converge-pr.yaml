@@ -541,10 +541,10 @@ nodes:
       set -euo pipefail
       NEW_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/threads.json" 2>/dev/null || echo 0)
       OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json" 2>/dev/null || echo 0)
-      CI_STATUS=$(cat <<'EOF' | awk -F'CI_STATUS: ' '/CI_STATUS: / {print $2}' | tail -1 | awk '{print $1}'
-      $await-ci.output
-      EOF
-      )
+      # bash nodes do not get $<node>.output text-substitution (rawBody runs, to
+      # avoid injecting upstream output); read await-ci's output from the safe
+      # env-var channel instead.
+      CI_STATUS=$(printf '%s\n' "$KEELSON_NODE_await_ci_OUTPUT" | awk -F'CI_STATUS: ' '/CI_STATUS: / {print $2}' | tail -1 | awk '{print $1}')
 
       if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ]; then
         echo "Converged: CI passed and this round found no new unresolved threads."
