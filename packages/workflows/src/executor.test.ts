@@ -2212,9 +2212,240 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-comments conditional approval g
 // ---------------------------------------------------------------------------
 
 import { bashHandler } from "./handlers/bash.ts";
+import { makeCancelHandler } from "./handlers/cancel.ts";
 import { makeCommandHandler } from "./handlers/command.ts";
 import { makeLoopHandler } from "./handlers/loop.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
+
+// ---------------------------------------------------------------------------
+// converge-pr — the real converge loop with its jq gates (triage-gate,
+// reply-gate, converge-check) run for real and the gh/git nodes canned, mirroring
+// the resolve-comments gate suite above. Exercises Fix 1 (converge-check gates on
+// the post-CI re-fetch), the has_new fan-out, fork cancellation, and round-cap
+// exhaustion.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!hasJq)("runWorkflow — converge-pr converge loop gates", () => {
+  interface Thread {
+    threadId: string;
+    commentId: number;
+  }
+
+  function threadRows(threads: Thread[]): unknown[] {
+    return threads.map((t) => ({
+      threadId: t.threadId,
+      path: "src/a.ts",
+      line: 1,
+      commentId: t.commentId,
+      body: "b",
+      author: "copilot",
+      replyCount: 0,
+    }));
+  }
+
+  interface ConvergeOpts {
+    isFork?: boolean;
+    hasNew: boolean;
+    ciStatus: "PASS" | "FAIL";
+    threads?: Thread[];
+    triage?: { threadId: string; decision: string }[];
+    results?: {
+      threadId: string;
+      commentId: number;
+      action: string;
+      commit: string | null;
+      reply: string;
+    }[];
+    postCiThreads?: unknown[];
+    postCiRetry?: unknown[];
+    handled?: unknown[];
+  }
+
+  // Seeds the artifacts a real round would have produced, cans the gh/git/CI bash
+  // nodes (fetch-state returns the JSON summary; await-ci returns the CI_STATUS
+  // channel), and runs the real bash handler only for the three deterministic
+  // jq gates. A cancel handler trips the run's AbortController so refuse-fork
+  // actually cancels.
+  function convergeRun(opts: ConvergeOpts) {
+    const artifactsDir = mkdtempSync(join(tmpdir(), "cpr-"));
+    const threads = opts.threads ?? [];
+    const write = (name: string, value: unknown): void =>
+      writeFileSync(join(artifactsDir, name), JSON.stringify(value));
+
+    write("threads.json", threadRows(threads));
+    write("all-unresolved-threads.json", threadRows(threads));
+    write("handled.json", opts.handled ?? []);
+    write("resolve-retry.json", []);
+    write("post-ci-threads.json", opts.postCiThreads ?? []);
+    write("post-ci-retry.json", opts.postCiRetry ?? []);
+    if (opts.triage) {
+      write("triage.json", {
+        threads: opts.triage.map((t) => ({
+          threadId: t.threadId,
+          path: "src/a.ts",
+          line: 1,
+          decision: t.decision,
+          reasoning: "r",
+          reply_hint: "h",
+        })),
+      });
+    }
+    if (opts.results)
+      write(
+        "results.json",
+        opts.results.map((r) => ({ ...r })),
+      );
+
+    const fetchStateOutput = JSON.stringify({
+      is_fork: opts.isFork ? "true" : "false",
+      has_new: opts.hasNew ? "true" : "false",
+      new_count: opts.hasNew ? threads.length : 0,
+      open_count: threads.length,
+      retry_count: 0,
+    });
+
+    const approvalCalls: string[] = [];
+    let convergeCheckCalls = 0;
+    const canned = {
+      status: "succeeded" as const,
+      output: { kind: "text" as const, text: "ok" },
+    };
+    const realBashIds = new Set(["triage-gate", "reply-gate", "converge-check"]);
+    const prompt: NodeHandler = { type: "prompt", handle: async () => canned };
+    const bash: NodeHandler = {
+      type: "bash",
+      async handle(node, ctx) {
+        if (node.id === "converge-check") convergeCheckCalls++;
+        if (realBashIds.has(node.id)) return bashHandler.handle(node, ctx);
+        if (node.id === "fetch-state") {
+          return { status: "succeeded", output: { kind: "text", text: fetchStateOutput } };
+        }
+        if (node.id === "await-ci") {
+          return {
+            status: "succeeded",
+            output: { kind: "text", text: `watch\nCI_STATUS: ${opts.ciStatus}` },
+          };
+        }
+        return canned;
+      },
+    };
+    const approval: NodeHandler = {
+      type: "approval",
+      async handle(node) {
+        approvalCalls.push(node.id);
+        return { status: "succeeded", output: { kind: "text", text: "approve" } };
+      },
+    };
+    const controller = new AbortController();
+    const cancel = makeCancelHandler({ requestCancel: () => controller.abort() });
+    const run = runWorkflow({
+      workflow: loadBundled("converge-pr"),
+      runId: "run-cpr",
+      inputs: { ARGUMENTS: "converge pr 42" },
+      cwd: artifactsDir,
+      artifactsDir,
+      abortSignal: controller.signal,
+      handlers: new Map([
+        ["prompt", prompt],
+        ["bash", bash],
+        ["approval", approval],
+        ["cancel", cancel],
+      ]),
+    });
+    return { run, approvalCalls, convergeCheckCalls: () => convergeCheckCalls };
+  }
+
+  test("a new-thread round drives the fix/reply subgraph then converges", async () => {
+    const { run, approvalCalls, convergeCheckCalls } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t1", commentId: 1 }],
+      triage: [{ threadId: "t1", decision: "actionable-code-change" }],
+      results: [{ threadId: "t1", commentId: 1, action: "fixed", commit: "c1", reply: "r1" }],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    // has_new drove the whole mutation chain.
+    expect(approvalCalls).toEqual(["approve"]);
+    expect(summary.nodes.triage.state).toBe("completed");
+    expect(summary.nodes.fix.state).toBe("completed");
+    expect(summary.nodes.push.state).toBe("completed");
+    expect(summary.nodes["reply-gate"].state).toBe("completed");
+    expect(summary.nodes["reply-resolve"].state).toBe("completed");
+    // Post-CI re-fetch (empty) + CI PASS converge in one round.
+    expect(summary.nodes["post-ci-state"].state).toBe("completed");
+    expect(summary.nodes["converge-check"].state).toBe("completed");
+    expect(summary.nodes.report.state).toBe("completed");
+    expect(convergeCheckCalls()).toBe(1);
+  });
+
+  test("a clean round with no new threads and CI PASS converges immediately", async () => {
+    const { run, approvalCalls, convergeCheckCalls } = convergeRun({
+      hasNew: false,
+      ciStatus: "PASS",
+      threads: [],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(approvalCalls).toEqual([]);
+    // No new threads: the fix chain is skipped entirely.
+    expect(summary.nodes.triage.state).toBe("skipped");
+    expect(summary.nodes.fix.state).toBe("skipped");
+    expect(summary.nodes["reply-resolve"].state).toBe("skipped");
+    expect(summary.nodes["converge-check"].state).toBe("completed");
+    expect(summary.nodes.report.state).toBe("completed");
+    expect(convergeCheckCalls()).toBe(1);
+  });
+
+  test("converge-check gates on the post-CI set: a thread that landed mid-watch blocks convergence until exhaustion", async () => {
+    // fetch-state saw no new threads at the START of the round (has_new false),
+    // but the post-CI re-fetch found one → converge-check must NOT declare
+    // convergence even though CI passed and threads.json is empty.
+    const { run, convergeCheckCalls } = convergeRun({
+      hasNew: false,
+      ciStatus: "PASS",
+      threads: [],
+      postCiThreads: threadRows([{ threadId: "late", commentId: 9 }]),
+    });
+    const summary = await run;
+    // Never converges (post-ci NEW_COUNT stays > 0), so the loop runs the cap.
+    expect(convergeCheckCalls()).toBe(8);
+    expect(summary.status).toBe("succeeded"); // on_exhaust: approval accepted below
+  });
+
+  test("a fork PR cancels the run at refuse-fork before CI or the gate run", async () => {
+    const { run, convergeCheckCalls } = convergeRun({
+      isFork: true,
+      hasNew: false,
+      ciStatus: "PASS",
+      threads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("cancelled");
+    expect(summary.nodes["refuse-fork"].state).toBe("failed");
+    // The cancel lands before CI is watched or the gate is evaluated.
+    expect(summary.nodes["converge-check"].state).not.toBe("completed");
+    expect(summary.nodes.report.state).not.toBe("completed");
+    expect(convergeCheckCalls()).toBe(0);
+  });
+
+  test("a persistently failing gate exhausts the round cap then hits the exhaust approval", async () => {
+    const { run, approvalCalls, convergeCheckCalls } = convergeRun({
+      hasNew: false,
+      ciStatus: "FAIL",
+      threads: [],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    // converge-check ran once per round for the full cap, then on_exhaust paused.
+    expect(convergeCheckCalls()).toBe(8);
+    expect(approvalCalls).toContain("converge-check__converge_exhaust");
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes.report.state).toBe("completed");
+  });
+});
 
 // Bundled smoke-test is Bun-only (no `runtime: uv` nodes), so this suite runs unconditionally.
 describe("runWorkflow — smoke-test (every node type)", () => {

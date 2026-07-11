@@ -69,12 +69,104 @@ nodes:
       echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
       echo "Round $ROUND: fetching PR #$PR_NUM state" >&2
 
+      # GraphQL paging + handled-ledger diff, written once and sourced by both
+      # fetch-state and post-ci-state so the two never drift. The ledger diff
+      # splits unresolved threads three ways: `new` (no ledger entry at all →
+      # full triage/reply/resolve), `retry` (a fixed thread whose reply posted
+      # but resolve failed → resolve-only), and the rest of `open` (already
+      # replied, intentionally left open).
+      cat > "$KEELSON_ARTIFACTS_DIR/thread-lib.sh" <<'THREADLIB'
+      fetch_thread_state() {
+        local PR_NUM="$1" OWNER="$2" REPO_NAME="$3" STATE_OUT="$4"
+        local HANDLED="$KEELSON_ARTIFACTS_DIR/handled.json"
+        local PAGES="${STATE_OUT}.pages.ndjson"
+        local COMBINED="${STATE_OUT}.combined.json"
+        local CURSOR="" HAS_NEXT=""
+        [ -f "$HANDLED" ] || printf '[]\n' > "$HANDLED"
+        : > "$PAGES"
+        while :; do
+          if [ -z "$CURSOR" ]; then
+            gh api graphql -f query='
+              query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $pr) {
+                    reviewThreads(first: 100, after: $cursor) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes {
+                        id
+                        isResolved
+                        path
+                        line
+                        comments(first: 50) {
+                          nodes { databaseId body author { login } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ' -f owner="$OWNER" -f repo="$REPO_NAME" -F pr="$PR_NUM" >> "$PAGES"
+          else
+            gh api graphql -f query='
+              query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $pr) {
+                    reviewThreads(first: 100, after: $cursor) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes {
+                        id
+                        isResolved
+                        path
+                        line
+                        comments(first: 50) {
+                          nodes { databaseId body author { login } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ' -f owner="$OWNER" -f repo="$REPO_NAME" -F pr="$PR_NUM" -f cursor="$CURSOR" >> "$PAGES"
+          fi
+          HAS_NEXT=$(tail -n 1 "$PAGES" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+          CURSOR=$(tail -n 1 "$PAGES" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')
+          [ "$HAS_NEXT" = "true" ] || break
+        done
+        jq -s '{data: {repository: {pullRequest: {reviewThreads: {nodes: [.[].data.repository.pullRequest.reviewThreads.nodes[]]}}}}}' \
+          "$PAGES" > "$COMBINED"
+        jq --slurpfile handled "$HANDLED" '
+          ($handled[0] // []) as $ledger
+          | ([$ledger[]?.threadId] | unique) as $handledIds
+          | ([$ledger[]? | select(.replied == true and (.resolved != true) and .action == "fixed") | .threadId] | unique) as $retryIds
+          | .data.repository.pullRequest.reviewThreads.nodes
+          | map(select(.isResolved == false))
+          | map({
+              threadId: .id,
+              path: .path,
+              line: (.line // null),
+              commentId: (.comments.nodes[0].databaseId // null),
+              body: ([.comments.nodes[].body] | join("\n\n---\n\n")),
+              author: (.comments.nodes[0].author.login // "unknown"),
+              replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
+            })
+          | . as $open
+          | {
+              open: $open,
+              new: ($open | map(select((.threadId as $id | $handledIds | index($id)) == null))),
+              retry: ($open | map(select((.threadId as $id | $retryIds | index($id)) != null)))
+            }
+        ' "$COMBINED" > "$STATE_OUT"
+        rm -f "$PAGES" "$COMBINED"
+      }
+      THREADLIB
+
       IS_FORK=$(gh pr view "$PR_NUM" --json isCrossRepository -q '.isCrossRepository')
       if [ "$IS_FORK" = "true" ]; then
         printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/threads.json"
         printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json"
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/resolve-retry.json"
         jq -cn --arg is_fork "$IS_FORK" \
-          '{is_fork: $is_fork, has_new: "false", new_count: 0, open_count: 0}'
+          '{is_fork: $is_fork, has_new: "false", new_count: 0, open_count: 0, retry_count: 0}'
         exit 0
       fi
 
@@ -98,111 +190,32 @@ nodes:
       OWNER=$(echo "$REPO" | cut -d/ -f1)
       REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
 
-      PAGES="$KEELSON_ARTIFACTS_DIR/raw-thread-pages.ndjson"
-      : > "$PAGES"
-      CURSOR=""
-      while :; do
-        if [ -z "$CURSOR" ]; then
-          gh api graphql -f query='
-            query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
-              repository(owner: $owner, name: $repo) {
-                pullRequest(number: $pr) {
-                  reviewThreads(first: 100, after: $cursor) {
-                    pageInfo { hasNextPage endCursor }
-                    nodes {
-                      id
-                      isResolved
-                      path
-                      line
-                      comments(first: 50) {
-                        nodes {
-                          databaseId
-                          body
-                          author { login }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          ' -f owner="$OWNER" -f repo="$REPO_NAME" -F pr="$PR_NUM" >> "$PAGES"
-        else
-          gh api graphql -f query='
-            query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
-              repository(owner: $owner, name: $repo) {
-                pullRequest(number: $pr) {
-                  reviewThreads(first: 100, after: $cursor) {
-                    pageInfo { hasNextPage endCursor }
-                    nodes {
-                      id
-                      isResolved
-                      path
-                      line
-                      comments(first: 50) {
-                        nodes {
-                          databaseId
-                          body
-                          author { login }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          ' -f owner="$OWNER" -f repo="$REPO_NAME" -F pr="$PR_NUM" -f cursor="$CURSOR" >> "$PAGES"
-        fi
-
-        HAS_NEXT=$(tail -n 1 "$PAGES" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
-        CURSOR=$(tail -n 1 "$PAGES" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')
-        if [ "$HAS_NEXT" != "true" ]; then
-          break
-        fi
-      done
-
-      jq -s '{data: {repository: {pullRequest: {reviewThreads: {nodes: [.[].data.repository.pullRequest.reviewThreads.nodes[]]}}}}}' \
-        "$PAGES" > "$KEELSON_ARTIFACTS_DIR/raw-threads.json"
-
-      jq --slurpfile handled "$HANDLED" '
-        ([($handled[0] // [])[]?.threadId] | unique) as $handledIds
-        | .data.repository.pullRequest.reviewThreads.nodes
-        | map(select(.isResolved == false))
-        | map({
-            threadId: .id,
-            path: .path,
-            line: (.line // null),
-            commentId: (.comments.nodes[0].databaseId // null),
-            body: ([.comments.nodes[].body] | join("\n\n---\n\n")),
-            author: (.comments.nodes[0].author.login // "unknown"),
-            replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
-          })
-        | . as $open
-        | {
-            open: $open,
-            new: ($open | map(select((.threadId as $id | $handledIds | index($id)) == null)))
-          }
-      ' "$KEELSON_ARTIFACTS_DIR/raw-threads.json" > "$KEELSON_ARTIFACTS_DIR/thread-state.json"
+      . "$KEELSON_ARTIFACTS_DIR/thread-lib.sh"
+      fetch_thread_state "$PR_NUM" "$OWNER" "$REPO_NAME" "$KEELSON_ARTIFACTS_DIR/thread-state.json"
 
       jq '.open' "$KEELSON_ARTIFACTS_DIR/thread-state.json" \
         > "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json"
       jq '.new' "$KEELSON_ARTIFACTS_DIR/thread-state.json" \
         > "$KEELSON_ARTIFACTS_DIR/threads.json"
+      jq '.retry' "$KEELSON_ARTIFACTS_DIR/thread-state.json" \
+        > "$KEELSON_ARTIFACTS_DIR/resolve-retry.json"
 
       OPEN_COUNT=$(jq '.open | length' "$KEELSON_ARTIFACTS_DIR/thread-state.json")
       NEW_COUNT=$(jq '.new | length' "$KEELSON_ARTIFACTS_DIR/thread-state.json")
+      RETRY_COUNT=$(jq '.retry | length' "$KEELSON_ARTIFACTS_DIR/thread-state.json")
       HAS_NEW=false
       if [ "$NEW_COUNT" -gt 0 ]; then
         HAS_NEW=true
       fi
 
-      echo "Round $ROUND: $OPEN_COUNT unresolved threads, $NEW_COUNT new for this run." >&2
+      echo "Round $ROUND: $OPEN_COUNT unresolved threads, $NEW_COUNT new, $RETRY_COUNT resolve-retry for this run." >&2
       jq -cn \
         --arg is_fork "$IS_FORK" \
         --arg has_new "$HAS_NEW" \
         --argjson new_count "$NEW_COUNT" \
         --argjson open_count "$OPEN_COUNT" \
-        '{is_fork: $is_fork, has_new: $has_new, new_count: $new_count, open_count: $open_count}'
+        --argjson retry_count "$RETRY_COUNT" \
+        '{is_fork: $is_fork, has_new: $has_new, new_count: $new_count, open_count: $open_count, retry_count: $retry_count}'
 
   - id: refuse-fork
     depends_on: [fetch-state]
@@ -524,12 +537,14 @@ nodes:
       - Post a reply on every entry in `$ARTIFACTS_DIR/results.json`.
       - Call `resolveReviewThread` only for entries where `action == "fixed"`.
       - Never resolve a `replied-only` thread.
-      - Append a thread to `$ARTIFACTS_DIR/handled.json` ONLY when it is FULLY
-        handled: its reply posted AND, for a `fixed` thread, its
-        `resolveReviewThread` call SUCCEEDED. If a fixed thread's reply posts but
-        the resolve fails, do NOT record it — leaving it unhandled means a later
-        round re-handles it, so the gate never converges with a fixed-but-
-        unresolved thread.
+      - Record a thread into `$ARTIFACTS_DIR/handled.json` as soon as its reply is
+        posted, carrying `replied: true` and `resolved: <bool>` — `resolved: true`
+        ONLY when a `fixed` thread's `resolveReviewThread` call SUCCEEDED,
+        otherwise `resolved: false`. Recording on reply (not on full resolve) is
+        deliberate: it stops the NEXT round from re-posting the same reply. A
+        `fixed` thread whose resolve failed is recorded with `resolved: false` so
+        a later round retries the resolve ONLY — that thread is never re-triaged
+        or re-replied.
 
       ## Steps
 
@@ -543,20 +558,64 @@ nodes:
          `resolveReviewThread(input: {threadId: "{threadId}"})`.
       5. Write `$ARTIFACTS_DIR/outcome.json`:
          `{ "replied": [...], "resolved": [...], "left_open": [...] }`
-      6. Append to `$ARTIFACTS_DIR/handled.json` ONLY the entries that are fully
-         handled per the Invariant (reply posted; for `fixed`, resolve succeeded),
-         preserving existing entries and recording at least `threadId`,
-         `commentId`, `action`, `decision`, `commit`, `reply`, `resolved` (bool),
-         and `round: $converge.round`. Do NOT record a fixed thread whose resolve
-         failed.
+      6. Append to `$ARTIFACTS_DIR/handled.json` one entry per thread whose reply
+         posted, preserving existing entries and recording `threadId`,
+         `commentId`, `action`, `decision`, `commit`, `reply`, `replied: true`,
+         `resolved` (true ONLY when a `fixed` thread's resolve succeeded, else
+         false), and `round: $converge.round`. Record every replied thread —
+         INCLUDING a `fixed` thread whose resolve failed (with `resolved: false`),
+         so it is retried resolve-only and never re-replied.
       7. Print a summary: how many replied, resolved, left open, and newly
          recorded in handled.json.
+
+  # Resolve-only retry path for threads that were replied+fixed in a prior round
+  # but whose resolveReviewThread call failed. fetch-state records these into
+  # resolve-retry.json; this node re-calls resolveReviewThread WITHOUT posting
+  # another reply (no duplicate comments), and flips the ledger entry to
+  # resolved on success so a resolved thread stops being retried.
+  - id: resolve-retry
+    depends_on: [fetch-state]
+    bash: |
+      set -euo pipefail
+      RETRY="$KEELSON_ARTIFACTS_DIR/resolve-retry.json"
+      HANDLED="$KEELSON_ARTIFACTS_DIR/handled.json"
+      if [ ! -f "$RETRY" ] || [ "$(jq 'length' "$RETRY" 2>/dev/null || echo 0)" -eq 0 ]; then
+        echo "No fixed-but-unresolved threads to retry this round."
+        exit 0
+      fi
+      COUNT=$(jq 'length' "$RETRY")
+      echo "Retrying resolveReviewThread for $COUNT fixed-but-unresolved thread(s)."
+      OK="$KEELSON_ARTIFACTS_DIR/.resolve-retry-ok.json"
+      printf '[]\n' > "$OK"
+      jq -r '.[].threadId' "$RETRY" | while read -r TID; do
+        [ -n "$TID" ] || continue
+        if gh api graphql -f query='
+          mutation($threadId: ID!) {
+            resolveReviewThread(input: {threadId: $threadId}) {
+              thread { isResolved }
+            }
+          }
+        ' -f threadId="$TID" >&2; then
+          jq --arg id "$TID" '. + [$id]' "$OK" > "$OK.tmp" && mv "$OK.tmp" "$OK"
+          echo "Resolved $TID on retry." >&2
+        else
+          echo "Resolve still failing for $TID; will retry next round." >&2
+        fi
+      done
+      if [ -f "$HANDLED" ]; then
+        jq --slurpfile ok "$OK" '
+          ($ok[0] // []) as $done
+          | map(if (.threadId as $id | $done | index($id)) != null then (.resolved = true) else . end)
+        ' "$HANDLED" > "$HANDLED.tmp" && mv "$HANDLED.tmp" "$HANDLED"
+      fi
+      echo "resolve-retry: $(jq 'length' "$OK") of $COUNT resolved on retry."
 
   - id: await-ci
     # refuse-fork is a dependency so it sits in the gate's converge subgraph and
     # cancels a fork run BEFORE await-ci reruns any CI jobs; a non-fork skips it,
-    # tolerated by none_failed_min_one_success.
-    depends_on: [reply-resolve, fetch-state, refuse-fork]
+    # tolerated by none_failed_min_one_success. resolve-retry is a dependency so
+    # a re-resolve lands before CI is watched and post-ci-state re-fetches.
+    depends_on: [reply-resolve, fetch-state, refuse-fork, resolve-retry]
     trigger_rule: none_failed_min_one_success
     timeout: 1500000
     bash: |
@@ -578,8 +637,19 @@ nodes:
       fi
       echo "=== CI failed on first pass ==="
       cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
-      echo "Rerunning failed jobs once to rule out flakes ..."
+      # The whole converge subgraph reruns each round, so rerunning on every round
+      # would rerun the same jobs up to max_rounds times for one unchanged commit.
+      # Gate the rerun on a per-HEAD-SHA marker (artifacts persist across rounds):
+      # at most one rerun per SHA, and a new push (new SHA) re-enables one rerun.
       HEAD_SHA=$(git rev-parse HEAD)
+      RERUN_MARKER="$KEELSON_ARTIFACTS_DIR/.ci-rerun-attempted-$HEAD_SHA"
+      if [ -f "$RERUN_MARKER" ]; then
+        echo "CI already reran once for $HEAD_SHA this convergence; not rerunning again."
+        echo "CI_STATUS: FAIL"
+        exit 0
+      fi
+      touch "$RERUN_MARKER"
+      echo "Rerunning failed jobs once to rule out flakes ..."
       HEAD_REF=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-head-ref" 2>/dev/null || true)
       if [ -n "$HEAD_REF" ]; then
         gh run list --branch "$HEAD_REF" --limit 20 \
@@ -598,23 +668,77 @@ nodes:
       echo "CI_STATUS: FAIL"
       exit 0
 
-  - id: converge-check
+  # Re-fetch after the CI watch. fetch-state's threads.json is computed at the
+  # START of the round, before the (possibly many-minute) CI watch; a
+  # review-on-push bot can add a thread during the watch. Re-diffing GitHub's
+  # live unresolved set against the (resolve-retry-updated) ledger here gives
+  # converge-check a fresh count so it never declares convergence over a thread
+  # that landed mid-watch. Mirrors fetch-state's fork short-circuit.
+  - id: post-ci-state
     depends_on: [await-ci]
     bash: |
       set -euo pipefail
-      NEW_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/threads.json" 2>/dev/null || echo 0)
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
+      if [ -z "$PR_NUM" ]; then
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json"
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json"
+        echo "post-ci-state: no PR number recorded; nothing to re-check." >&2
+        jq -cn '{is_fork: "unknown", new_count: 0, retry_count: 0}'
+        exit 0
+      fi
+
+      IS_FORK=$(gh pr view "$PR_NUM" --json isCrossRepository -q '.isCrossRepository' 2>/dev/null || echo "")
+      if [ "$IS_FORK" = "true" ]; then
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json"
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json"
+        jq -cn '{is_fork: "true", new_count: 0, retry_count: 0}'
+        exit 0
+      fi
+
+      if [ ! -f "$KEELSON_ARTIFACTS_DIR/thread-lib.sh" ]; then
+        echo "post-ci-state: thread-lib.sh missing (fetch-state did not run this round)." >&2
+        exit 1
+      fi
+
+      REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+      OWNER=$(echo "$REPO" | cut -d/ -f1)
+      REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
+
+      . "$KEELSON_ARTIFACTS_DIR/thread-lib.sh"
+      fetch_thread_state "$PR_NUM" "$OWNER" "$REPO_NAME" "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json"
+
+      jq '.new' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json" \
+        > "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json"
+      jq '.retry' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json" \
+        > "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json"
+
+      NEW_COUNT=$(jq '.new | length' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json")
+      RETRY_COUNT=$(jq '.retry | length' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json")
+      echo "post-ci-state: $NEW_COUNT new, $RETRY_COUNT resolve-retry after CI." >&2
+      jq -cn --argjson new_count "$NEW_COUNT" --argjson retry_count "$RETRY_COUNT" \
+        '{is_fork: "false", new_count: $new_count, retry_count: $retry_count}'
+
+  - id: converge-check
+    depends_on: [post-ci-state]
+    bash: |
+      set -euo pipefail
+      # Gate on the post-CI re-fetch, NOT fetch-state's start-of-round threads.json:
+      # NEW_COUNT counts threads that appeared (e.g. a bot on push) with no ledger
+      # entry, RETRY_COUNT counts fixed threads still awaiting a successful resolve.
+      NEW_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json" 2>/dev/null || echo 0)
+      RETRY_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json" 2>/dev/null || echo 0)
       OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json" 2>/dev/null || echo 0)
       # bash nodes do not get $<node>.output text-substitution (rawBody runs, to
       # avoid injecting upstream output); read await-ci's output from the safe
       # env-var channel instead.
       CI_STATUS=$(printf '%s\n' "$KEELSON_NODE_await_ci_OUTPUT" | awk -F'CI_STATUS: ' '/CI_STATUS: / {print $2}' | tail -1 | awk '{print $1}')
 
-      if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ]; then
-        echo "Converged: CI passed and this round found no new unresolved threads."
+      if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ] && [ "$RETRY_COUNT" -eq 0 ]; then
+        echo "Converged: CI passed, no new unresolved threads after CI, and no pending resolve-retries."
         exit 0
       fi
 
-      echo "Not converged: CI_STATUS=${CI_STATUS:-UNKNOWN}, new_threads=$NEW_COUNT, open_threads=$OPEN_COUNT"
+      echo "Not converged: CI_STATUS=${CI_STATUS:-UNKNOWN}, new_threads=$NEW_COUNT, resolve_retries=$RETRY_COUNT, open_threads=$OPEN_COUNT"
       exit 1
 
   - id: report
@@ -629,7 +753,8 @@ nodes:
       - PR number: `$ARTIFACTS_DIR/.pr-number`
       - Handled ledger: `$ARTIFACTS_DIR/handled.json`
       - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
-      - Latest new-thread set: `$ARTIFACTS_DIR/threads.json`
+      - Post-CI new-thread set: `$ARTIFACTS_DIR/post-ci-threads.json`
+      - Pending resolve-retries: `$ARTIFACTS_DIR/post-ci-retry.json`
       - Latest CI result:
 
         $await-ci.output
