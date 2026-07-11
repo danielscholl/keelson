@@ -195,7 +195,7 @@ async function runTurn(
     return { status: "error", text: "", error: "prompt must be non-empty" };
   }
   if (req.abortSignal?.aborted) {
-    return { status: "aborted", text: "" };
+    return { status: "aborted", text: "", stopReason: "aborted" };
   }
 
   const resolved = resolveProviderId(req.provider, deps);
@@ -208,7 +208,7 @@ async function runTurn(
   try {
     provider = deps.getProvider(providerId);
   } catch (err) {
-    return { status: "error", text: "", error: errMessage(err), providerId };
+    return { status: "error", text: "", error: errMessage(err), providerId, stopReason: "error" };
   }
 
   // Never inherit the server's (host repo) cwd; a turn that omits `cwd`
@@ -232,11 +232,19 @@ async function runTurn(
         }, req.timeoutMs)
       : undefined;
 
+  let capturedSessionId: string | undefined;
+  let reportedFinish: "end" | "max_tokens" | undefined;
   const options: SendQueryOptions = {
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
     ...(req.model ? { model: req.model } : {}),
     ...(req.allowedDirectories !== undefined ? { allowedDirectories: req.allowedDirectories } : {}),
+    onSessionId: (id) => {
+      if (id) capturedSessionId = id;
+    },
+    onFinishReason: (reason) => {
+      reportedFinish = reason;
+    },
     ...(await toolOptions(req, deps, { ribId, providerId }, cwd, controller.signal)),
   };
 
@@ -270,7 +278,13 @@ async function runTurn(
         ribId,
       });
     }
-    return turnUsage !== undefined ? { ...result, usage: turnUsage } : result;
+    const stopReason = result.status === "ok" ? reportedFinish : result.status;
+    return {
+      ...result,
+      ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
+      ...(capturedSessionId !== undefined ? { sessionId: capturedSessionId } : {}),
+      ...(stopReason !== undefined ? { stopReason } : {}),
+    };
   };
   try {
     const stream = provider.sendQuery(req.prompt, cwd, req.resumeSessionId, options);
