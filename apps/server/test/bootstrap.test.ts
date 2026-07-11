@@ -16,9 +16,11 @@ import {
 } from "@keelson/providers";
 import type {
   MemoryTools,
+  OpHandle,
   Project,
   RecallRequest,
   RecallResponse,
+  RegisterOpRequest,
   Rib,
   ToolDefinition,
   WritebackRequest,
@@ -549,6 +551,62 @@ describe("bootstrapRibs", () => {
       displayName: "alpha",
       registerTools: (ctx) => {
         hasSeam = ctx.acquireWorkspace !== undefined;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: probe } });
+    expect(hasSeam).toBe(false);
+  });
+
+  test("registerOp forwards to the late-bound registry with a rib-scoped owner", async () => {
+    delete process.env.KEELSON_RIBS;
+    let registryRef: { register: (owner: string, req: RegisterOpRequest) => OpHandle } | undefined;
+    const registerCalls: Array<{ owner: string; req: RegisterOpRequest }> = [];
+    let accessor: ((req: RegisterOpRequest) => OpHandle) | undefined;
+    const rib: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        accessor = ctx.registerOp;
+        return [];
+      },
+    };
+    await bootstrapRibs({
+      available: { alpha: rib },
+      getOpRegistry: () => registryRef as never,
+    });
+    expect(accessor).toBeDefined();
+    // Registry not yet wired (late-bound): the seam throws synchronously with a
+    // clear error rather than returning a dead handle.
+    expect(() => accessor?.({ kind: "demo" })).toThrow("op registry unavailable");
+
+    const ac = new AbortController();
+    registryRef = {
+      register: (owner, req) => {
+        registerCalls.push({ owner, req });
+        return {
+          id: "op-1",
+          signal: ac.signal,
+          log: () => {},
+          progress: () => {},
+          done: () => {},
+          error: () => {},
+        };
+      },
+    };
+    const handle = accessor?.({ kind: "demo", title: "t" });
+    expect(handle?.id).toBe("op-1");
+    expect(registerCalls).toEqual([{ owner: "rib:alpha", req: { kind: "demo", title: "t" } }]);
+  });
+
+  test("RibContext.registerOp is absent when no registry source is supplied", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasSeam = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasSeam = ctx.registerOp !== undefined;
         return [];
       },
     };

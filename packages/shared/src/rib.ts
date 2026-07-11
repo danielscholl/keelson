@@ -169,6 +169,36 @@ export interface AcquireWorkspaceRequest {
   branch?: string;
 }
 
+// Op registry contract. A rib registers a long-running operation to get a
+// durable handle: it returns an id promptly (so a long tool need not block its
+// single MCP POST), streams `log`/`progress` frames, and settles with
+// `done`/`error`. The harness persists the row + frames so `run_status` /
+// `run_events` can be polled — and the terminal result retrieved — even after a
+// server restart. `signal` aborts on `run_cancel`; declaring `onSteer` makes the
+// op steerable so `run_steer` can deliver an operator note. Structural types,
+// kept free of a @keelson/workflows back-dep (the RibWorkflowRunResult rule).
+export type OpFrameKind = "log" | "progress" | "done" | "error";
+
+export interface RegisterOpRequest {
+  // Op kind, e.g. the tool name that spawned it ("squad_coordinate").
+  kind: string;
+  title?: string;
+  projectId?: string | null;
+  // Declaring this makes the op steerable: run_steer delivers the operator's
+  // note here. The callback lives only in the live registry (never persisted),
+  // so a steer fails cleanly once the op is terminal or the server restarted.
+  onSteer?: (note: string) => void;
+}
+
+export interface OpHandle {
+  readonly id: string;
+  readonly signal: AbortSignal;
+  log: (message: string, data?: unknown) => void;
+  progress: (message: string, data?: unknown) => void;
+  done: (result?: unknown) => void;
+  error: (message: string) => void;
+}
+
 // A registered provider, surfaced to a rib so it can make provider-aware choices
 // (e.g. assign a member's vendor at cast time) without a back-dep on
 // @keelson/providers. The minimal shape: the `id` a rib pins on a
@@ -263,6 +293,13 @@ export interface RibContext {
   // caller still owns tool policy and cwd choices. Optional so a rib built against an
   // older harness degrades to no workspace leasing, not a throw.
   acquireWorkspace?: (req: AcquireWorkspaceRequest) => Promise<WorkspaceLease>;
+  // Register a long-running operation on the durable op registry, returning a
+  // handle immediately (synchronous — the rib returns the op id in the same turn,
+  // then works in the background honoring `signal`). Generic run_status/run_events/
+  // run_cancel/run_steer tools reach it over chat + MCP. Optional so a rib built
+  // against an older harness degrades to blocking tool calls (no durable handle),
+  // not a throw. See RegisterOpRequest / OpHandle.
+  registerOp?: (req: RegisterOpRequest) => OpHandle;
   // Read-only snapshot of the providers registered at call time, so a rib can make
   // availability-aware provider choices (e.g. assign a member's vendor at cast). This
   // only LISTS what's registered; it grants no access beyond the existing runAgentTurn

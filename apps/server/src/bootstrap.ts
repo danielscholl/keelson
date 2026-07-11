@@ -33,7 +33,9 @@ import type {
   MemoryTools,
   MessageChunk,
   OpenChatSeed,
+  OpHandle,
   Project,
+  RegisterOpRequest,
   Rib,
   RibAction,
   RibActionResult,
@@ -80,6 +82,9 @@ import {
 } from "@keelson/workflows";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+// Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
+// import direction is not turned into a runtime cycle.
+import type { OpRegistry } from "./op-registry.ts";
 import {
   createPolicyEngine,
   type PolicyEngine,
@@ -95,8 +100,6 @@ import {
   type RibWorkflowContribution,
 } from "./ribs.ts";
 import type { UsageStore } from "./usage-store.ts";
-// Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
-// import direction is not turned into a runtime cycle.
 import type { WorkflowController } from "./workflows-handler.ts";
 import type { WorkspaceManager } from "./workspace-manager.ts";
 
@@ -235,6 +238,9 @@ export interface BootstrapRibsOptions {
   // Lazy resolver for the WorkspaceManager backing RibContext.acquireWorkspace.
   // Lazy because the manager needs stores created AFTER bootstrapRibs returns.
   getWorkspaceManager?: () => WorkspaceManager | undefined;
+  // Lazy resolver for the OpRegistry backing RibContext.registerOp. Lazy for the
+  // same reason: the registry needs the db-backed OpStore created after boot.
+  getOpRegistry?: () => OpRegistry | undefined;
   // Backs RibContext.getProviders. Defaults to the live provider registry
   // (getProviderInfoList); tests may inject a deterministic list.
   getProviders?: () => readonly RibProviderInfo[];
@@ -426,6 +432,17 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         });
       }
     : undefined;
+  // Synchronous (unlike acquireWorkspace): the rib gets an op handle back in the
+  // same turn, returns its id, then works in the background honoring op.signal.
+  // The owner is stamped by the harness so a rib can't spoof another's scope.
+  const getOpRegistry = options.getOpRegistry;
+  const registerOpSeam = getOpRegistry
+    ? (ribId: string, req: RegisterOpRequest): OpHandle => {
+        const registry = getOpRegistry();
+        if (!registry) throw new Error("op registry unavailable");
+        return registry.register(`rib:${ribId}`, req);
+      }
+    : undefined;
   // RibContext.getProviders resolver: the registered-provider list (id + label) so a
   // rib can make availability-aware provider choices (e.g. assign a member's vendor at
   // cast). Read-only; grants nothing beyond the existing runAgentTurn routing. Tests
@@ -563,6 +580,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
     ...(getMemory ? { getMemory } : {}),
     ...(acquireWorkspaceSeam ? { acquireWorkspace: acquireWorkspaceSeam } : {}),
+    ...(registerOpSeam ? { registerOp: registerOpSeam } : {}),
     getProviders,
     callTool,
   });

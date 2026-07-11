@@ -1,0 +1,180 @@
+// Copyright 2026, Daniel Scholl
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+// Generic dispatch-and-poll tools over the op registry. A long-running tool
+// (e.g. a rib's squad_coordinate) returns an op id promptly instead of blocking
+// its single MCP POST; these five tools then poll the durable registry:
+// run_list discovers, run_status reports, run_events streams cursor-based frames,
+// run_cancel aborts a live op, run_steer delivers an operator note to a steerable
+// op. Results — and event history — survive a server restart. Reaches chat + MCP
+// via the same one-array `harnessTools` injection the workflow tools use.
+
+import type { ToolContext, ToolDefinition } from "@keelson/shared";
+import { z } from "zod";
+import type { OpEventView, OpRegistry, OpStatusView, OpSummaryView } from "./op-registry.ts";
+import { emitResult, truncate } from "./workflow-tools.ts";
+
+// Cap a single run_events page so a chatty op can't flood one turn; the caller
+// pages by passing the returned next-cursor back in.
+const EVENT_PAGE = 100;
+const RESULT_CAP = 8_000;
+
+const listInputSchema = z.object({});
+const statusInputSchema = z.object({ id: z.string().min(1) });
+const eventsInputSchema = z.object({
+  id: z.string().min(1),
+  cursor: z.number().int().nonnegative().optional(),
+});
+const cancelInputSchema = z.object({ id: z.string().min(1) });
+const steerInputSchema = z.object({
+  id: z.string().min(1),
+  note: z.string().min(1).max(8_192),
+});
+
+function renderSummaryLine(op: OpSummaryView): string {
+  const steer = op.steerable ? " (steerable)" : "";
+  const done = op.completedAt ? ` completed ${op.completedAt}` : "";
+  return `• ${op.id} — ${op.kind} [${op.status}]${steer} started ${op.createdAt}${done}`;
+}
+
+function renderStatus(op: OpStatusView): string {
+  const lines = [
+    `Op ${op.id} — ${op.kind} — status ${op.status}.`,
+    `owner: ${op.owner} · steerable: ${op.steerable} · started: ${op.createdAt}` +
+      (op.completedAt ? ` · completed: ${op.completedAt}` : ""),
+  ];
+  if (op.error) lines.push(`error: ${op.error}`);
+  if (op.result !== undefined && op.result !== null) {
+    lines.push(`result: ${truncate(JSON.stringify(op.result), RESULT_CAP)}`);
+  }
+  lines.push(
+    op.lastSeq > 0
+      ? `${op.lastSeq} event(s) — read them with run_events(id="${op.id}", cursor=0).`
+      : "No events yet.",
+  );
+  return lines.join("\n");
+}
+
+function renderEvents(id: string, events: OpEventView[], cursor: number): string {
+  if (events.length === 0) {
+    return `No events for op ${id} after cursor ${cursor}.`;
+  }
+  const page = events.slice(0, EVENT_PAGE);
+  const lines = page.map((e) => `[${e.seq}] ${e.kind}${e.message ? ` ${e.message}` : ""}`);
+  const nextCursor = (page[page.length - 1] as OpEventView).seq;
+  const more =
+    events.length > EVENT_PAGE
+      ? `\n… more events remain. Poll run_events(id="${id}", cursor=${nextCursor}) for the next page.`
+      : `\nNext cursor: ${nextCursor}. Poll run_events(id="${id}", cursor=${nextCursor}) for new frames.`;
+  return `${page.length} event(s) for op ${id} after cursor ${cursor}:\n${lines.join("\n")}${more}`;
+}
+
+export function createOpTools(deps: { registry: OpRegistry }): ToolDefinition[] {
+  const { registry } = deps;
+
+  const runList: ToolDefinition = {
+    name: "run_list",
+    description:
+      "List active operations (long-running work registered on the durable op registry) plus live workflow runs. Each row shows the op id, kind, status, and whether it accepts steering. Use run_status / run_events with an id to inspect one; workflow ops carry a `wf:` id prefix.",
+    inputSchema: listInputSchema,
+    async execute(input, ctx: ToolContext) {
+      const parsed = listInputSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
+        return;
+      }
+      const ops = registry.list();
+      if (ops.length === 0) {
+        emitResult(ctx, "No active operations or runs.");
+        return;
+      }
+      emitResult(
+        ctx,
+        `${ops.length} operation(s):\n${ops.map(renderSummaryLine).join("\n")}\n\nInspect one with run_status(id="…"); stream its frames with run_events(id="…", cursor=0).`,
+      );
+    },
+  };
+
+  const runStatus: ToolDefinition = {
+    name: "run_status",
+    description:
+      "Report one operation's status and — when it has finished — its terminal result. The result and event history are durable, so this still works after a server restart (an op that was mid-flight at the crash reports 'orphaned'). Pass the op id from run_list or the id a long tool returned.",
+    inputSchema: statusInputSchema,
+    async execute(input, ctx: ToolContext) {
+      const parsed = statusInputSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
+        return;
+      }
+      const status = registry.status(parsed.data.id.trim());
+      if (!status) {
+        emitResult(ctx, `Operation ${parsed.data.id} was not found.`, true);
+        return;
+      }
+      emitResult(ctx, renderStatus(status));
+    },
+  };
+
+  const runEvents: ToolDefinition = {
+    name: "run_events",
+    description:
+      "Read an operation's progress frames after a cursor (0 for the beginning). Returns log/progress/done/error frames with monotonic seq numbers; pass the highest seq back as `cursor` to poll only new frames. This is the dispatch-and-poll substrate — long tools stream progress here rather than blocking their call.",
+    inputSchema: eventsInputSchema,
+    async execute(input, ctx: ToolContext) {
+      const parsed = eventsInputSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
+        return;
+      }
+      const id = parsed.data.id.trim();
+      const cursor = parsed.data.cursor ?? 0;
+      if (!registry.status(id)) {
+        emitResult(ctx, `Operation ${id} was not found.`, true);
+        return;
+      }
+      // Fetch one past the page so renderEvents can still detect "more remain".
+      emitResult(ctx, renderEvents(id, registry.events(id, cursor, EVENT_PAGE + 1), cursor));
+    },
+  };
+
+  const runCancel: ToolDefinition = {
+    name: "run_cancel",
+    description:
+      "Cancel a live operation by id — aborts its execution (the op's terminal row is preserved, not deleted). Fails cleanly if the op is already terminal or has no live execution (e.g. after a server restart).",
+    inputSchema: cancelInputSchema,
+    state_changing: true,
+    async execute(input, ctx: ToolContext) {
+      const parsed = cancelInputSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
+        return;
+      }
+      const result = registry.cancel(parsed.data.id.trim());
+      emitResult(ctx, result.message, !result.ok);
+    },
+  };
+
+  const runSteer: ToolDefinition = {
+    name: "run_steer",
+    description:
+      "Deliver a steering note to a live operation that declared a steer channel (see the `steerable` flag in run_list). Errors if the op is not steerable, is terminal, or is a workflow run (answer a workflow approval pause with workflow_respond instead).",
+    inputSchema: steerInputSchema,
+    state_changing: true,
+    async execute(input, ctx: ToolContext) {
+      const parsed = steerInputSchema.safeParse(input);
+      if (!parsed.success) {
+        emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
+        return;
+      }
+      const result = registry.steer(parsed.data.id.trim(), parsed.data.note);
+      emitResult(ctx, result.message, !result.ok);
+    },
+  };
+
+  return [runList, runStatus, runEvents, runCancel, runSteer];
+}

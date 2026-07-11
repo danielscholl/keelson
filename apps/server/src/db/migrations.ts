@@ -348,6 +348,41 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 10,
+    description: "op registry: durable run handles + cursor-based event log",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE ops (
+          id           TEXT PRIMARY KEY NOT NULL,
+          kind         TEXT NOT NULL,
+          title        TEXT,
+          owner        TEXT NOT NULL,
+          project_id   TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL,
+          status       TEXT NOT NULL DEFAULT 'running'
+                       CHECK (status IN ('running', 'done', 'error', 'cancelled', 'orphaned')),
+          steerable    INTEGER NOT NULL DEFAULT 0 CHECK (steerable IN (0, 1)),
+          result_json  TEXT,
+          error        TEXT,
+          created_at   TEXT NOT NULL,
+          updated_at   TEXT NOT NULL,
+          completed_at TEXT
+        );
+        CREATE INDEX ix_ops_status_created ON ops(status, created_at DESC);
+        CREATE INDEX ix_ops_project ON ops(project_id);
+
+        CREATE TABLE op_events (
+          op_id      TEXT NOT NULL REFERENCES ops(id) ON DELETE CASCADE,
+          seq        INTEGER NOT NULL,
+          kind       TEXT NOT NULL CHECK (kind IN ('log', 'progress', 'done', 'error')),
+          message    TEXT,
+          data_json  TEXT,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (op_id, seq)
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

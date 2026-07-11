@@ -10,7 +10,7 @@ import type { CategoryResult, CheckResult } from "./types.ts";
 
 // Mirror the highest `version` in apps/server/src/db/migrations.ts; a binding
 // test in doctor.test.ts asserts the two stay in sync.
-export const LATEST_MIGRATION_VERSION = 9;
+export const LATEST_MIGRATION_VERSION = 10;
 
 interface SchemaRow {
   v: number | null;
