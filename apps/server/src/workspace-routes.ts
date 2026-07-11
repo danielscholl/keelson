@@ -17,6 +17,7 @@ export function workspaceRoutes(app: Hono, opts: WorkspaceRoutesOptions): void {
   const { store } = opts;
 
   app.get("/api/workspaces/leases", (c) => {
-    return c.json({ leases: store.list() });
+    // Pending rows are crash-recovery bookkeeping, not operator-facing leases.
+    return c.json({ leases: store.list().filter((lease) => lease.status === "active") });
   });
 }

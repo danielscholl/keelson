@@ -46,12 +46,19 @@ describe("workspace routes", () => {
       status: "active" as const,
     };
     store.insert(lease);
+    store.insert({
+      ...lease,
+      id: "lease-2",
+      worktreePath: join(tmpDir, "repo", ".worktrees", "pending"),
+      status: "pending" as const,
+    });
     const app = new Hono();
     workspaceRoutes(app, { store });
 
     const res = await app.fetch(new Request("http://test/api/workspaces/leases"));
 
     expect(res.status).toBe(200);
+    // Pending (mid-acquisition / crash-recovery) rows are not exposed.
     expect(await res.json()).toEqual({ leases: [lease] });
   });
 });
