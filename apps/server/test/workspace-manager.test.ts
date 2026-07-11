@@ -228,17 +228,39 @@ describe("WorkspaceManager", () => {
     expect(leaseStore.list()).toEqual([]);
   });
 
+  test("prepareWorktree rejects an adopted destination before touching deps", async () => {
+    await initRepo(repoDir);
+    const dest = join(repoDir, ".worktrees", "held");
+    await git(["worktree", "add", "-b", "keelson/lease/held", dest], repoDir);
+    let depsCalls = 0;
+    manager.prepareDeps = async () => {
+      depsCalls += 1;
+      return { installed: false, skipped: "no-manifest", error: null, durationMs: 1 };
+    };
+
+    await expect(
+      manager.prepareWorktree({
+        repoPath: repoDir,
+        branch: "keelson/lease/held",
+        dest,
+        rejectAdopted: true,
+      }),
+    ).rejects.toThrow("refusing to adopt");
+
+    expect(depsCalls).toBe(0);
+    expect(existsSync(dest)).toBe(true);
+  });
+
   test("acquire rejects an adopted destination without removing it", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });
     const removeCalls: unknown[] = [];
-    manager.prepareWorktree = async (req) => ({
-      worktreePath: req.dest,
-      adopted: true,
-      branchCreated: false,
-      deps: { installed: false, skipped: "no-manifest", error: null, durationMs: 1 },
-      depsError: null,
-    });
+    manager.prepareWorktree = async (req) => {
+      if (req.rejectAdopted === true) {
+        throw new Error(`workspace destination already exists at ${req.dest} — refusing to adopt another owner's checkout`);
+      }
+      throw new Error("expected rejectAdopted to be requested");
+    };
     manager.removeWorktree = async (opts) => {
       removeCalls.push(opts);
       return { removed: true, warning: null };

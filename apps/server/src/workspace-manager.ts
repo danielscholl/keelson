@@ -60,6 +60,7 @@ export interface PrepareWorktreeRequest {
   dest: string;
   base?: string | null;
   abortSignal?: AbortSignal;
+  rejectAdopted?: boolean;
 }
 
 export interface PreparedWorktree {
@@ -140,6 +141,14 @@ export function createWorkspaceManager({
         dest: req.dest,
         ...(req.base ? { base: req.base } : {}),
       });
+      // Adoption must be rejected before prepareDeps: bun install runs
+      // lifecycle scripts, which must never execute inside another owner's
+      // checkout (an active workflow worktree).
+      if (req.rejectAdopted === true && created.adopted) {
+        throw new Error(
+          `workspace destination already exists at ${req.dest} — refusing to adopt another owner's checkout`,
+        );
+      }
       try {
         const deps = await manager.prepareDeps({
           worktreePath: created.worktreePath,
@@ -207,13 +216,9 @@ export function createWorkspaceManager({
             branch,
             dest,
             base,
+            rejectAdopted: true,
             ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
           });
-          if (prepared.adopted) {
-            throw new Error(
-              `workspace destination already exists at ${dest} — refusing to adopt another owner's checkout`,
-            );
-          }
           if (prepared.depsError !== null) {
             throw new Error(`workspace dependency install failed: ${prepared.depsError}`);
           }
