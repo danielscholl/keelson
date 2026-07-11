@@ -64,24 +64,44 @@ function renderStatus(op: OpStatusView): string {
   return lines.join("\n");
 }
 
+// Cap message + data per frame (a rib can log an unbounded string) so a single
+// frame can't blow the page byte budget on its own.
+function buildFrameLine(e: OpEventView): string {
+  const dataStr =
+    e.data === null || e.data === undefined
+      ? ""
+      : ` ${truncate(JSON.stringify(e.data), FRAME_DATA_CAP)}`;
+  const msg = e.message ? ` ${truncate(e.message, FRAME_MSG_CAP)}` : "";
+  return `[${e.seq}] ${e.kind}${msg}${dataStr}`;
+}
+
 function renderEvents(id: string, events: OpEventView[], cursor: number): string {
   if (events.length === 0) {
     return `No events for op ${id} after cursor ${cursor}.`;
   }
+  // Workflow ops (wf: id) are a snapshot with an ignored cursor, so render the
+  // TAIL: the terminal frame (last) and most-recent nodes are what matter, and
+  // paging off the head would make the terminal permanently unreachable.
+  if (id.startsWith("wf:")) {
+    const tail: string[] = [];
+    let usedBytes = 0;
+    for (let i = events.length - 1; i >= 0 && tail.length < EVENT_PAGE; i--) {
+      const line = buildFrameLine(events[i] as OpEventView);
+      if (tail.length > 0 && usedBytes + line.length > EVENT_BYTE_BUDGET) break;
+      tail.unshift(line);
+      usedBytes += line.length + 1;
+    }
+    const omitted = events.length - tail.length;
+    const note = omitted > 0 ? `\n… (${omitted} earlier node frame(s) omitted)` : "";
+    return `workflow snapshot — ${tail.length} of ${events.length} node frame(s) for op ${id} (re-read for current state):\n${tail.join("\n")}${note}`;
+  }
+  // Native ops: head-first with a durable, incremental cursor.
   const lines: string[] = [];
   let used = 0;
   let lastSeq = cursor;
   let bytesHit = false;
   for (const e of events.slice(0, EVENT_PAGE)) {
-    const dataStr =
-      e.data === null || e.data === undefined
-        ? ""
-        : ` ${truncate(JSON.stringify(e.data), FRAME_DATA_CAP)}`;
-    // Cap the message too (a rib can log an unbounded string) so a single frame
-    // can't blow the page budget on its own.
-    const msg = e.message ? ` ${truncate(e.message, FRAME_MSG_CAP)}` : "";
-    const line = `[${e.seq}] ${e.kind}${msg}${dataStr}`;
-    // Always render at least one frame; stop before exceeding the byte budget.
+    const line = buildFrameLine(e);
     if (lines.length > 0 && used + line.length > EVENT_BYTE_BUDGET) {
       bytesHit = true;
       break;
@@ -90,16 +110,10 @@ function renderEvents(id: string, events: OpEventView[], cursor: number): string
     used += line.length + 1;
     lastSeq = e.seq;
   }
-  const truncated = bytesHit || events.length > lines.length;
-  // Workflow ops (wf: id) are a snapshot — the cursor is not incremental, so no
-  // "poll at cursor N" advice (that would loop on the same first page forever).
-  if (id.startsWith("wf:")) {
-    const note = truncated ? "\n… (snapshot truncated to fit)" : "";
-    return `workflow snapshot — ${lines.length} node frame(s) for op ${id} (re-read run_events for current state):\n${lines.join("\n")}${note}`;
-  }
-  const more = truncated
-    ? `\n… more frames remain. Poll run_events(id="${id}", cursor=${lastSeq}) for the next page.`
-    : `\nNext cursor: ${lastSeq}. Poll run_events(id="${id}", cursor=${lastSeq}) for new frames.`;
+  const more =
+    bytesHit || events.length > lines.length
+      ? `\n… more frames remain. Poll run_events(id="${id}", cursor=${lastSeq}) for the next page.`
+      : `\nNext cursor: ${lastSeq}. Poll run_events(id="${id}", cursor=${lastSeq}) for new frames.`;
   return `${lines.length} frame(s) for op ${id} after cursor ${cursor}:\n${lines.join("\n")}${more}`;
 }
 

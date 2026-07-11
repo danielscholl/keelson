@@ -128,7 +128,9 @@ function workflowFrames(detail: WorkflowRunDetail): OpEventView[] {
   if ((TERMINAL_RUN_STATUSES as readonly WorkflowRunStatus[]).includes(detail.status)) {
     frames.push({
       seq: frames.length + 1,
-      kind: detail.status === "failed" ? "error" : "done",
+      // Only a succeeded run is `done`; failed AND cancelled map to `error`, so a
+      // consumer keying on frame kind never reads a cancellation as success.
+      kind: detail.status === "succeeded" ? "done" : "error",
       message: `run ${detail.status}${detail.error ? `: ${detail.error}` : ""}`,
       data: null,
       createdAt: detail.completedAt ?? detail.startedAt,
