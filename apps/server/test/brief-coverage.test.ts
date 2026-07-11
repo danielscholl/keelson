@@ -100,9 +100,13 @@ describe("parseCoverageArtifact", () => {
     expect(
       parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":false,"step":"Task 1"}]}'),
     ).toBeNull();
-    // A covered row with an empty step is schema-invalid, not a silent per-row MISSING.
+    // A covered row with an empty (or whitespace-only) step is schema-invalid, not a
+    // silent per-row MISSING — otherwise it would render covered while naming no step.
     expect(
       parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":true,"step":""}]}'),
+    ).toBeNull();
+    expect(
+      parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":true,"step":"   "}]}'),
     ).toBeNull();
   });
 });

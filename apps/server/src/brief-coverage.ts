@@ -24,10 +24,13 @@ const coverageRowSchema = z
     step: z.string().nullable(),
   })
   .strict()
-  .refine((row) => (row.covered ? row.step !== null && row.step.length > 0 : row.step === null), {
-    message: "covered rows must name a non-empty step; missing rows must use null",
-    path: ["step"],
-  });
+  .refine(
+    (row) => (row.covered ? row.step !== null && row.step.trim().length > 0 : row.step === null),
+    {
+      message: "covered rows must name a non-empty step; missing rows must use null",
+      path: ["step"],
+    },
+  );
 
 const coverageArtifactSchema = z
   .object({
