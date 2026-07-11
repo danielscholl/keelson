@@ -103,8 +103,16 @@ describe("createKeelsonMcpServer", () => {
     });
     expect(danglingRefs).toEqual([]);
 
-    const inlineSchema = z.toJSONSchema(z.object({ board: canvasBoardViewSchema }));
-    expect(JSON.stringify(inputSchema).length).toBeLessThan(JSON.stringify(inlineSchema).length);
+    // Fair baseline: the same schema explicitly inlined with `$schema` stripped
+    // like the advertised one, so the only difference measured is `$defs`/`$ref`
+    // reuse — and require a material cut (measured ~51%), not a one-byte win.
+    const inlineSchema = z.toJSONSchema(z.object({ board: canvasBoardViewSchema }), {
+      reused: "inline",
+    }) as Record<string, unknown>;
+    delete inlineSchema.$schema;
+    expect(JSON.stringify(inputSchema).length).toBeLessThan(
+      JSON.stringify(inlineSchema).length * 0.75,
+    );
   });
 
   test("tools/call round-trips the tool_result", async () => {
