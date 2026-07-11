@@ -51,13 +51,15 @@ nodes:
       ROUND="$converge.round"
       RAW=$(printf '%s' "$KEELSON_NODE_extract_pr_OUTPUT" | tr -d "'\"\`\n " )
       if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
-        PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
-      else
-        PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
+        # This run executes in an isolated worktree on a generated branch, so the
+        # target PR cannot be inferred from the current branch — require it.
+        echo "converge-pr needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'converge pr 42'." >&2
+        exit 1
       fi
+      PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
 
       if [ -z "$PR_NUM" ]; then
-        echo "Could not resolve a PR number; pass one like 'converge pr 42' or run from a PR branch." >&2
+        echo "Could not parse a PR number from '$RAW'; pass one like 'converge pr 42'." >&2
         exit 1
       fi
 
@@ -294,12 +296,15 @@ nodes:
 
   - id: approve
     depends_on: [triage-gate]
-    when: "$triage-gate.output.needs_review == 'true'"
+    when: "$triage-gate.output.has_new == 'true'"
     approval:
       message: |
-        Round $converge.round triage contains judgment calls (question /
-        wontfix / already-addressed / invalid). Review before any branch
-        mutation or public reply.
+        Round $converge.round: a new batch of review threads has been triaged and
+        is ready to act on. Review ALL verdicts before any branch mutation or
+        public reply — actionable-code-change threads will be fixed, committed,
+        and pushed; question / wontfix / already-addressed / invalid threads get a
+        factual reply only and are never auto-resolved. This batched approval
+        gates every round that mutates the PR.
 
         Triage file: $ARTIFACTS_DIR/triage.json
       capture_response: true
@@ -457,8 +462,48 @@ nodes:
       git push origin "HEAD:refs/heads/$HEAD_REF"
       echo "Pushed to origin/$HEAD_REF."
 
-  - id: reply-resolve
+  # Deterministic honesty gate: validate the model's results.json against the
+  # triage BEFORE any public reply/resolve, so a malformed result can't skip a
+  # reply or resolve a thread that wasn't fixed. Fail-closed.
+  - id: reply-gate
     depends_on: [push]
+    when: "$triage-gate.output.has_new == 'true'"
+    bash: |
+      set -euo pipefail
+      R="$KEELSON_ARTIFACTS_DIR/results.json"
+      T="$KEELSON_ARTIFACTS_DIR/triage.json"
+      TH="$KEELSON_ARTIFACTS_DIR/threads.json"
+      [ -f "$R" ] || { echo "results.json missing; refusing to reply/resolve." >&2; exit 1; }
+      jq -e 'type == "array"' "$R" >/dev/null || { echo "results.json must be a JSON array." >&2; exit 1; }
+      # Reply-all: every new thread has exactly one result entry.
+      NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
+      RES_IDS=$(jq -cS '[.[].threadId] | unique | sort' "$R")
+      if [ "$NEW_IDS" != "$RES_IDS" ]; then
+        echo "results.json thread ids do not match the new threads (a reply is missing or extra); refusing to mutate." >&2
+        echo "new:    $NEW_IDS" >&2
+        echo "result: $RES_IDS" >&2
+        exit 1
+      fi
+      # Valid action; a 'fixed' resolve requires actionable triage AND a commit.
+      BAD=$(jq -r --slurpfile tri "$T" '
+        ($tri[0].threads | map({ (.threadId): .decision }) | add) as $dec
+        | [ .[]
+            | select(
+                (.action != "fixed" and .action != "replied-only")
+                or (.action == "fixed" and (($dec[.threadId]) != "actionable-code-change"))
+                or (.action == "fixed" and (((.commit // "") | tostring | length) == 0))
+              )
+            | .threadId ] | join(", ")
+      ' "$R")
+      if [ -n "$BAD" ]; then
+        echo "honesty gate failed for thread(s): $BAD" >&2
+        echo "(each result must be action fixed|replied-only; a 'fixed' action requires actionable-code-change triage AND a non-empty commit)." >&2
+        exit 1
+      fi
+      echo "honesty gate OK: $(jq 'length' "$R") result(s) validated against triage before reply/resolve."
+
+  - id: reply-resolve
+    depends_on: [reply-gate]
     context: fresh
     model: auto
     prompt: |
@@ -493,7 +538,10 @@ nodes:
          recorded in handled.json.
 
   - id: await-ci
-    depends_on: [reply-resolve, fetch-state]
+    # refuse-fork is a dependency so it sits in the gate's converge subgraph and
+    # cancels a fork run BEFORE await-ci reruns any CI jobs; a non-fork skips it,
+    # tolerated by none_failed_min_one_success.
+    depends_on: [reply-resolve, fetch-state, refuse-fork]
     trigger_rule: none_failed_min_one_success
     timeout: 1500000
     bash: |

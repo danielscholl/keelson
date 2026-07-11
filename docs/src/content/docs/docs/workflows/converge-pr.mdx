@@ -23,15 +23,15 @@ surface stops changing.
 
 ```sh
 keelson workflow run converge-pr --inputs ARGUMENTS="converge PR 42"
-keelson workflow run converge-pr --inputs ARGUMENTS="finish this PR"  # from a PR branch
 ```
 
-Pass a number to target a PR from any branch. Omit the number, or use wording
-that implies the current PR, to let `gh pr view` resolve it from the branch.
+Pass an explicit PR number. converge-pr runs in an isolated worktree on a
+generated branch, so it cannot infer the target PR from the current branch.
 
 ### What it needs
 
 - `gh` CLI authenticated with **repo write** scope and **GraphQL** access.
+- `jq` on `PATH` — several bash nodes use it (Git-for-Windows Bash does not ship it).
 - A GitHub Copilot subscription (`provider: copilot`, `model: auto`).
 - A running Keelson server (`keelson start`) for approval pauses.
 
