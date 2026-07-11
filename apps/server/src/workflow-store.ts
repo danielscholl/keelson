@@ -292,6 +292,15 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const selectNodeUsage = db.prepare(
     "SELECT usage_json FROM workflow_node_outputs WHERE run_id = ?",
   );
+  // Request-policy budgeting must include repeated executions of the same node
+  // (converge rounds / resumes). usage_events is append-only per node_done, so
+  // summing by run_id captures full spend where workflow_node_outputs is latest-only.
+  const selectLedgerUsage = db.prepare(
+    `SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS totalTokens,
+            COUNT(*) AS turns
+       FROM usage_events
+      WHERE source = 'workflow' AND run_id = ?`,
+  );
   const deleteRunStmt = db.prepare("DELETE FROM workflow_runs WHERE id = ?");
   const deleteNodeStmt = db.prepare(
     "DELETE FROM workflow_node_outputs WHERE run_id = ? AND node_id = ?",
@@ -345,6 +354,8 @@ export function createWorkflowStore(db: Database): WorkflowStore {
       );
     },
     getRunUsageTotals(runId) {
+      const ledger = selectLedgerUsage.get(runId) as { totalTokens: number; turns: number };
+      if (ledger.turns > 0) return { totalTokens: ledger.totalTokens, turns: ledger.turns };
       const rows = selectNodeUsage.all(runId) as { usage_json: string | null }[];
       let totalTokens = 0;
       let turns = 0;

@@ -11,7 +11,7 @@ import * as os from "node:os";
 // @ts-ignore
 import * as path from "node:path";
 
-import { discoverWorkflows, parseWorkflow } from "./loader.ts";
+import { discoverWorkflows, parseWorkflow, validateWorkflowInvariants } from "./loader.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "pi-procedures-loader-"));
@@ -76,6 +76,29 @@ nodes:
     expect(result.workflow?.name).toBe("hello");
     expect(result.workflow?.nodes.length).toBe(1);
     expect(result.warnings).toEqual([]);
+  });
+
+  test("workflow-level converge config parses with defaults", () => {
+    const yaml = `
+name: converge-valid
+description: valid converge config
+converge:
+  gate: check
+  max_rounds: 3
+nodes:
+  - id: prepare
+    bash: echo prepare
+  - id: check
+    depends_on: [prepare]
+    bash: test -f /tmp/ready
+`;
+    const result = parseWorkflow(yaml, "converge-valid.yaml");
+    expect(result.error).toBeNull();
+    expect(result.workflow?.converge).toEqual({
+      gate: "check",
+      max_rounds: 3,
+      on_exhaust: "fail",
+    });
   });
 
   test("DAG with depends_on, when:, trigger_rule", () => {
@@ -190,6 +213,115 @@ nodes:
     depends_on: [missing]
 `;
     expect(parseWorkflow(yaml, "dangling.yaml").error?.error).toMatch(/unknown node 'missing'/);
+  });
+
+  test("converge gate must reference an existing node", () => {
+    const yaml = `
+name: converge-missing-gate
+description: converge references missing node
+converge:
+  gate: missing
+  max_rounds: 2
+nodes:
+  - id: check
+    bash: exit 1
+`;
+    const result = parseWorkflow(yaml, "converge-missing.yaml");
+    expect(result.error?.error).toBe("Converge gate 'missing' is not a node in this workflow");
+    expect(result.workflow).toBeNull();
+  });
+
+  test("converge gate cannot be a loop node", () => {
+    const yaml = `
+name: converge-loop-gate
+description: converge gate is a loop node
+converge:
+  gate: gate
+  max_rounds: 2
+nodes:
+  - id: gate
+    loop:
+      prompt: keep going
+      until: DONE
+      max_iterations: 2
+`;
+    const result = parseWorkflow(yaml, "converge-loop.yaml");
+    expect(result.error?.error).toBe("Converge gate 'gate' cannot be a loop node");
+    expect(result.workflow).toBeNull();
+  });
+
+  test("converge gate cannot declare retry", () => {
+    const yaml = `
+name: converge-retry-gate
+description: converge gate retries conflict with rounds
+converge:
+  gate: gate
+  max_rounds: 2
+nodes:
+  - id: gate
+    bash: exit 1
+    retry:
+      max_attempts: 2
+`;
+    const result = parseWorkflow(yaml, "converge-retry.yaml");
+    expect(result.error?.error).toBe(
+      "Converge gate 'gate' cannot declare 'retry:' (a failing gate triggers another round, not a retry)",
+    );
+    expect(result.workflow).toBeNull();
+  });
+
+  test("node id 'converge' is rejected (collides with the $converge substitution namespace)", () => {
+    const yaml = `
+name: converge-node-id
+description: shadows converge namespace
+nodes:
+  - id: converge
+    bash: echo x
+`;
+    const result = parseWorkflow(yaml, "converge-node-id.yaml");
+    expect(result.error?.error).toMatch(/Node id 'converge' is reserved.*substitution namespace/);
+    expect(result.workflow).toBeNull();
+  });
+
+  test("converge max_rounds must be in range", () => {
+    const yaml = `
+name: converge-bad-rounds
+description: invalid max_rounds
+converge:
+  gate: gate
+  max_rounds: 11
+nodes:
+  - id: gate
+    bash: exit 1
+`;
+    const result = parseWorkflow(yaml, "converge-bad-rounds.yaml");
+    expect(result.error?.error).toContain("'converge.max_rounds' must be between 1 and 10");
+    expect(result.workflow).toBeNull();
+  });
+
+  test("validateWorkflowInvariants applies converge gate checks for contributed workflows", () => {
+    const parsed = parseWorkflow(
+      `
+name: converge-invariant
+description: valid before mutation
+converge:
+  gate: gate
+  max_rounds: 2
+nodes:
+  - id: gate
+    bash: exit 1
+`,
+      "converge-invariant.yaml",
+    );
+    expect(parsed.error).toBeNull();
+
+    const workflow = {
+      ...parsed.workflow!,
+      converge: { gate: "missing", max_rounds: 2, on_exhaust: "fail" as const },
+    };
+    expect(validateWorkflowInvariants(workflow)).toBe(
+      "Converge gate 'missing' is not a node in this workflow",
+    );
   });
 
   test("cycle is rejected", () => {

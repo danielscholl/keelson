@@ -109,6 +109,8 @@ export interface NodeContext {
   // Handlers that re-resolve nested bodies must forward this to `resolveBody` so $memory.recall.* substitutes
   // against the recalled values rather than defaults.
   memoryRecall?: MemoryRecallContext;
+  /** Current converge round for handlers that re-resolve nested bodies. */
+  convergeRound?: number;
 }
 
 /**
@@ -287,7 +289,8 @@ function nodeBodyOf(node: DagNode): string {
 // must exclude all of those — falling through to the node-output alt
 // where the full id is captured (subject to the loader's reserved-id check).
 const SUB_PATTERN =
-  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
+  /(\\)?\$(?:(ARGUMENTS)(?![a-zA-Z0-9_-])|(ARTIFACTS_DIR)(?![a-zA-Z0-9_-])|(converge\.round)(?![a-zA-Z0-9_-])|memory\.recall\.(items|trace)(?![a-zA-Z0-9_-])|inputs\.([a-zA-Z_][a-zA-Z0-9_]*)|([a-zA-Z_][a-zA-Z0-9_-]*)\.output(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?)?/g;
+const CONVERGE_ROUND_PATTERN = /(\\)?\$(converge\.round)(?![a-zA-Z0-9_-])/g;
 
 /**
  * Per-node memory recall context — populated by the executor before
@@ -317,7 +320,7 @@ export function resolveBody(
   rawBody: string,
   inputs: Readonly<Record<string, string>>,
   nodeOutputs: ReadonlyMap<string, NodeOutput>,
-  options?: { artifactsDir?: string; memoryRecall?: MemoryRecallContext },
+  options?: { artifactsDir?: string; memoryRecall?: MemoryRecallContext; convergeRound?: number },
 ): string {
   return rawBody.replace(
     SUB_PATTERN,
@@ -326,6 +329,7 @@ export function resolveBody(
       backslash: string | undefined,
       argsMarker: string | undefined,
       artifactsMarker: string | undefined,
+      convergeRoundMarker: string | undefined,
       memoryField: string | undefined,
       inputKey: string | undefined,
       nodeId: string | undefined,
@@ -340,6 +344,9 @@ export function resolveBody(
       // input. Authors who require an artifacts dir should check inside
       // the script body (`if [ -z "$KEELSON_ARTIFACTS_DIR" ] ...`).
       if (artifactsMarker !== undefined) return options?.artifactsDir ?? "";
+      if (convergeRoundMarker !== undefined) {
+        return options?.convergeRound !== undefined ? String(options.convergeRound) : "";
+      }
       if (memoryField !== undefined) {
         const recall = options?.memoryRecall;
         if (memoryField === "items") return recall ? JSON.stringify(recall.items) : "[]";
@@ -378,6 +385,24 @@ export function resolveBody(
       }
       // Bare `$` with no marker (e.g. `unit $`, or `$1`/`$5.00`): leave as-is.
       return match;
+    },
+  );
+}
+
+export function resolveConvergeRound(
+  rawBody: string,
+  options?: { convergeRound?: number; preserveEscaped?: boolean },
+): string {
+  return rawBody.replace(
+    CONVERGE_ROUND_PATTERN,
+    (match, backslash: string | undefined, _marker: string | undefined) => {
+      // Shell bodies keep the `\$` intact — bash itself turns it into a
+      // literal `$`; stripping it here would hand bash `$converge`, which it
+      // would expand as an (empty) environment variable.
+      if (backslash !== undefined) {
+        return options?.preserveEscaped === true ? match : match.slice(1);
+      }
+      return options?.convergeRound !== undefined ? String(options.convergeRound) : "";
     },
   );
 }
@@ -474,9 +499,9 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
   const shapeErrors = validateDagShape(workflow.nodes);
   if (shapeErrors.length > 0) throw new ExecutorValidationError(shapeErrors);
 
-  const layers = buildTopologicalLayers(workflow.nodes);
   const nodeOutputs = new Map<string, NodeOutput>();
   const allNodeIds = workflow.nodes.map((n) => n.id);
+  const runAbortSignal = abortSignal ?? new AbortController().signal;
 
   if (completedNodeOutputs) {
     for (const [id, out] of completedNodeOutputs) {
@@ -490,40 +515,79 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
 
   let cancelled = false;
 
-  for (const layer of layers) {
-    if (abortSignal?.aborted) {
-      cancelled = true;
-      break;
+  const sharedCtx: LayerRunCtx = {
+    workflow,
+    runId,
+    inputs,
+    cwd,
+    abortSignal: runAbortSignal,
+    emit,
+    handlers,
+    ...(artifactsDir !== undefined ? { artifactsDir } : {}),
+    ...(memoryTools !== undefined ? { memoryTools } : {}),
+    ...(projectId !== undefined ? { projectId } : {}),
+    ...(notebook !== undefined ? { notebook } : {}),
+  };
+
+  if (workflow.converge !== undefined) {
+    const { gate, max_rounds: maxRounds, on_exhaust: onExhaust } = workflow.converge;
+    const subgraphIds = buildConvergeSubgraphIds(workflow.nodes, gate);
+    const subgraphNodes = workflow.nodes.filter((node) => subgraphIds.has(node.id));
+    const restNodes = workflow.nodes.filter((node) => !subgraphIds.has(node.id));
+    const subgraphLayers = buildTopologicalLayers(subgraphNodes);
+    const restLayers = buildPartitionLayers(restNodes);
+    let converged = false;
+    if (nodeOutputs.get(gate)?.state !== "completed") {
+      for (const id of subgraphIds) nodeOutputs.delete(id);
     }
-    // Per-layer write buffer keeps siblings from observing each other through
-    // the shared nodeOutputs map mid-layer (would make handler behavior race-
-    // sensitive). Merged into nodeOutputs after the layer settles.
-    const layerResults = new Map<string, NodeOutput>();
-    const pending = layer.filter((node) => !nodeOutputs.has(node.id));
-    await Promise.allSettled(
-      pending.map((node) =>
-        runNodeOnce(node, {
-          workflow,
-          runId,
-          inputs,
-          cwd,
-          abortSignal: abortSignal ?? new AbortController().signal,
+
+    for (let round = 1; round <= maxRounds; round++) {
+      if (runAbortSignal.aborted) {
+        cancelled = true;
+        break;
+      }
+      cancelled = await runLayers(subgraphLayers, nodeOutputs, sharedCtx, round);
+      if (cancelled) break;
+      const gateOutput = nodeOutputs.get(gate);
+      if (gateOutput?.state === "completed") {
+        converged = true;
+        break;
+      }
+      if (round < maxRounds) {
+        for (const id of subgraphIds) nodeOutputs.delete(id);
+        emit({
+          type: "run_warning",
+          nodeId: gate,
+          message: `converge gate '${gate}' did not pass in round ${round}; resetting subgraph outputs for round ${round + 1}`,
+        });
+      }
+    }
+
+    if (!cancelled && !converged) {
+      ensureConvergeGateFailed(nodeOutputs, gate, maxRounds, emit);
+      if (onExhaust === "approval") {
+        converged = await runConvergeExhaustApproval(
+          gate,
+          maxRounds,
+          subgraphIds,
           nodeOutputs,
-          layerResults,
-          emit,
-          handlers,
-          ...(artifactsDir !== undefined ? { artifactsDir } : {}),
-          ...(memoryTools !== undefined ? { memoryTools } : {}),
-          ...(projectId !== undefined ? { projectId } : {}),
-          ...(notebook !== undefined ? { notebook } : {}),
-        }),
-      ),
-    );
-    for (const [id, out] of layerResults) nodeOutputs.set(id, out);
+          sharedCtx,
+        );
+        if (runAbortSignal.aborted) cancelled = true;
+      }
+    }
+
+    if (!cancelled && converged) {
+      cancelled = await runLayers(restLayers, nodeOutputs, sharedCtx);
+    } else if (!cancelled) {
+      markMissingNodesSkipped(restNodes, nodeOutputs, emit);
+    }
+  } else {
+    cancelled = await runLayers(buildTopologicalLayers(workflow.nodes), nodeOutputs, sharedCtx);
   }
   // Catches the case where the signal fires mid-last-layer: handlers settle
   // but no further iteration of the loop happens to see aborted=true.
-  if (!cancelled && abortSignal?.aborted) cancelled = true;
+  if (!cancelled && runAbortSignal.aborted) cancelled = true;
 
   if (cancelled) {
     for (const id of allNodeIds) {
@@ -572,6 +636,210 @@ interface RunCtx {
   projectId?: string;
   /** Project-notebook handle (read + contribute) — see RunOptions.notebook. */
   notebook?: NotebookAdapter;
+  /** Current converge round when a node runs inside a converge subgraph. */
+  convergeRound?: number;
+}
+
+type LayerRunCtx = Omit<RunCtx, "nodeOutputs" | "layerResults" | "convergeRound">;
+
+async function runLayers(
+  layers: readonly (readonly DagNode[])[],
+  nodeOutputs: Map<string, NodeOutput>,
+  sharedCtx: LayerRunCtx,
+  convergeRound?: number,
+): Promise<boolean> {
+  for (const layer of layers) {
+    if (sharedCtx.abortSignal.aborted) return true;
+    const layerResults = new Map<string, NodeOutput>();
+    const pending = layer.filter((node) => !nodeOutputs.has(node.id));
+    await Promise.allSettled(
+      pending.map((node) =>
+        runNodeOnce(node, {
+          ...sharedCtx,
+          nodeOutputs,
+          layerResults,
+          ...(convergeRound !== undefined ? { convergeRound } : {}),
+        }),
+      ),
+    );
+    for (const [id, out] of layerResults) nodeOutputs.set(id, out);
+  }
+  return sharedCtx.abortSignal.aborted;
+}
+
+function buildConvergeSubgraphIds(nodes: readonly DagNode[], gate: string): Set<string> {
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const ids = new Set<string>();
+  const stack = [gate];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || ids.has(id)) continue;
+    ids.add(id);
+    stack.push(...(byId.get(id)?.depends_on ?? []));
+  }
+  return ids;
+}
+
+function buildPartitionLayers(nodes: readonly DagNode[]): DagNode[][] {
+  const ids = new Set(nodes.map((node) => node.id));
+  const inDegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+
+  for (const node of nodes) {
+    const internalDeps = (node.depends_on ?? []).filter((dep) => ids.has(dep));
+    inDegree.set(node.id, internalDeps.length);
+    for (const dep of internalDeps) {
+      const list = dependents.get(dep) ?? [];
+      list.push(node.id);
+      dependents.set(dep, list);
+    }
+  }
+
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const layers: DagNode[][] = [];
+  let ready = nodes.filter((node) => (inDegree.get(node.id) ?? 0) === 0);
+  const placed = new Set<string>();
+
+  while (ready.length > 0) {
+    layers.push(ready);
+    for (const node of ready) placed.add(node.id);
+    const nextIds: string[] = [];
+    for (const node of ready) {
+      for (const downstream of dependents.get(node.id) ?? []) {
+        const remaining = (inDegree.get(downstream) ?? 0) - 1;
+        inDegree.set(downstream, remaining);
+        if (remaining === 0) nextIds.push(downstream);
+      }
+    }
+    ready = nextIds.map((id) => byId.get(id)).filter((node): node is DagNode => node !== undefined);
+  }
+
+  if (placed.size < nodes.length) {
+    throw new Error(
+      "buildPartitionLayers: cycle detected — call validateDagShape() at load time to reject these earlier",
+    );
+  }
+  return layers;
+}
+
+function ensureConvergeGateFailed(
+  nodeOutputs: Map<string, NodeOutput>,
+  gate: string,
+  maxRounds: number,
+  emit: (event: RunStreamEvent) => void,
+): void {
+  if (nodeOutputs.get(gate)?.state === "failed") return;
+  const error = `converge gate '${gate}' did not pass after ${maxRounds} round(s)`;
+  nodeOutputs.set(gate, {
+    state: "failed",
+    output: "",
+    error,
+  });
+  emit({ type: "node_done", nodeId: gate, result: failedResult(error) });
+}
+
+function toCompletedOutput(output: NodeOutput, text = output.output): NodeOutput {
+  return {
+    state: "completed",
+    output: text,
+    ...("sessionId" in output && output.sessionId !== undefined
+      ? { sessionId: output.sessionId }
+      : {}),
+    ...("usage" in output && output.usage !== undefined ? { usage: output.usage } : {}),
+    ...("startedAt" in output && output.startedAt !== undefined
+      ? { startedAt: output.startedAt }
+      : {}),
+    ...("completedAt" in output && output.completedAt !== undefined
+      ? { completedAt: output.completedAt }
+      : {}),
+    ...("durationMs" in output && output.durationMs !== undefined
+      ? { durationMs: output.durationMs }
+      : {}),
+  };
+}
+
+function emitSucceededNodeDone(
+  emit: (event: RunStreamEvent) => void,
+  nodeId: string,
+  output: string,
+): void {
+  emit({
+    type: "node_done",
+    nodeId,
+    result: { status: "succeeded", output: { kind: "text", text: output } },
+  });
+}
+
+function absorbConvergeSubgraphFailures(
+  subgraphIds: ReadonlySet<string>,
+  gate: string,
+  nodeOutputs: Map<string, NodeOutput>,
+  emit: (event: RunStreamEvent) => void,
+): void {
+  for (const id of subgraphIds) {
+    if (id === gate) continue;
+    const output = nodeOutputs.get(id);
+    if (output?.state !== "failed") continue;
+    const absorbed = toCompletedOutput(output);
+    nodeOutputs.set(id, absorbed);
+    emitSucceededNodeDone(emit, id, absorbed.output);
+  }
+}
+
+function makeConvergeExhaustApprovalNodeId(gate: string, nodes: readonly DagNode[]): string {
+  const base = `${gate}__converge_exhaust`;
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  if (!nodeIds.has(base)) return base;
+  let suffix = 1;
+  let candidate = `${base}__${String(suffix)}`;
+  while (nodeIds.has(candidate)) {
+    suffix++;
+    candidate = `${base}__${String(suffix)}`;
+  }
+  return candidate;
+}
+
+async function runConvergeExhaustApproval(
+  gate: string,
+  maxRounds: number,
+  subgraphIds: ReadonlySet<string>,
+  nodeOutputs: Map<string, NodeOutput>,
+  sharedCtx: LayerRunCtx,
+): Promise<boolean> {
+  const approvalNodeId = makeConvergeExhaustApprovalNodeId(gate, sharedCtx.workflow.nodes);
+  const approvalNode: DagNode = {
+    id: approvalNodeId,
+    approval: {
+      message: `Converge gate '${gate}' did not pass after ${maxRounds} round(s). Approve to continue anyway.`,
+    },
+  };
+  const layerResults = new Map<string, NodeOutput>();
+  await runNodeOnce(approvalNode, {
+    ...sharedCtx,
+    nodeOutputs,
+    layerResults,
+  });
+  // Keep synthetic approval output out of nodeOutputs so it can't shadow a
+  // real workflow node that happens to use the same id.
+  const approvalOutput = layerResults.get(approvalNode.id);
+  if (approvalOutput?.state !== "completed") return false;
+  absorbConvergeSubgraphFailures(subgraphIds, gate, nodeOutputs, sharedCtx.emit);
+  const acceptedGateOutput = toCompletedOutput(approvalOutput);
+  nodeOutputs.set(gate, acceptedGateOutput);
+  emitSucceededNodeDone(sharedCtx.emit, gate, acceptedGateOutput.output);
+  return true;
+}
+
+function markMissingNodesSkipped(
+  nodes: readonly DagNode[],
+  nodeOutputs: Map<string, NodeOutput>,
+  emit: (event: RunStreamEvent) => void,
+): void {
+  for (const node of nodes) {
+    if (nodeOutputs.has(node.id)) continue;
+    nodeOutputs.set(node.id, skippedOutput());
+    emit({ type: "node_done", nodeId: node.id, result: skippedResult() });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -787,6 +1055,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
   const resolvedBody = resolveBody(rawBody, ctx.inputs, nodeOutputs, {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   });
 
   // 5. dispatch
@@ -814,6 +1083,7 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
     ...(ctx.notebook !== undefined ? { notebook: ctx.notebook } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
     ...(ctx.memoryTools !== undefined ? { memory: ctx.memoryTools } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   };
   emit({ type: "node_started", nodeId: node.id });
   const startedAtMs = Date.now();
@@ -982,6 +1252,7 @@ async function runPreRecall(
   // exist yet at this hook).
   const resolvedQuery = resolveBody(memBlock.recall.query, ctx.inputs, nodeOutputs, {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   });
 
   const req = {
@@ -1050,6 +1321,7 @@ async function runPostWriteback(
   const resolveOpts = {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   };
 
   const summary = resolveBody(wb.summary, ctx.inputs, outputsWithSelf, resolveOpts);
@@ -1136,6 +1408,7 @@ async function runNotebookContribute(
   const entry = resolveBody(block.append, ctx.inputs, outputsWithSelf, {
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
+    ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
   });
 
   // Contribution is best-effort: a thrown adapter (e.g. the project was deleted

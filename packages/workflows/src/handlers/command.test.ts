@@ -143,4 +143,18 @@ describe("makeCommandHandler", () => {
     );
     expect(calls[0].ctx.resolvedBody).toBe("args=from-user lane=stable prior=upstream-text");
   });
+
+  test("substitutes $converge.round inside the command file body", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "keelson-cmd-"));
+    await mkdir(join(cwd, ".keelson/commands"), { recursive: true });
+    await writeFile(join(cwd, ".keelson/commands/round.md"), "round=$converge.round");
+    const { handler: promptHandler, calls } = makeRecorderHandler();
+    const handler = makeCommandHandler({ promptHandler });
+    const ctx: NodeContext = { ...buildCtx(cwd), convergeRound: 3 };
+    const node = { id: "cmd", command: "round" } as unknown as DagNode;
+    await handler.handle(node, ctx);
+    expect(calls).toHaveLength(1);
+    expect((calls[0].node as { prompt?: string }).prompt).toBe("round=3");
+    expect(calls[0].ctx.resolvedBody).toBe("round=3");
+  });
 });

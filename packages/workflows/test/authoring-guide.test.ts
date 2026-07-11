@@ -9,6 +9,7 @@ import {
   authoringGuideSection,
   WORKFLOW_AUTHORING_GUIDE,
 } from "../src/authoring-guide.ts";
+import type { ConvergeConfig } from "../src/schema/converge.ts";
 import {
   approvalOnRejectSchema,
   dagNodeBaseSchema,
@@ -27,6 +28,12 @@ const LOOP_CONFIG_KEYS: Record<keyof LoopNodeConfig, true> = {
   until_bash: true,
   interactive: true,
   gate_message: true,
+};
+
+const CONVERGE_CONFIG_KEYS: Record<keyof ConvergeConfig, true> = {
+  gate: true,
+  max_rounds: true,
+  on_exhaust: true,
 };
 
 const NODE_TYPE_KEYWORDS = [
@@ -91,10 +98,11 @@ describe("workflow authoring guide", () => {
 
   // Nested block fields drift too — a wrong field name in the guide makes
   // every draft authored from it fail validation.
-  test("documents the nested retry, loop, and approval on_reject fields", () => {
+  test("documents the nested retry, loop, converge, and approval on_reject fields", () => {
     const nestedKeys = [
       ...Object.keys(stepRetryConfigSchema.shape),
       ...Object.keys(LOOP_CONFIG_KEYS),
+      ...Object.keys(CONVERGE_CONFIG_KEYS),
       ...Object.keys(approvalOnRejectSchema.shape),
     ];
     for (const field of nestedKeys) {

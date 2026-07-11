@@ -32,6 +32,7 @@ import type { z } from "zod";
 import { validateDagShape } from "./graph.ts";
 import {
   BASH_NODE_AI_FIELDS,
+  convergeConfigSchema,
   type DagNode,
   dagNodeSchema,
   isApprovalNode,
@@ -216,7 +217,7 @@ const RESERVED_REF_NAMESPACES = new Set(["inputs", "ARTIFACTS_DIR"]);
  *  `$ARTIFACTS_DIR`, and `$memory.recall.*` before considering them as node
  *  refs, so a node literally named any of these would be silently shadowed
  *  — reject at parse time. */
-const RESERVED_NODE_IDS = new Set(["inputs", "ARGUMENTS", "ARTIFACTS_DIR", "memory"]);
+const RESERVED_NODE_IDS = new Set(["inputs", "ARGUMENTS", "ARTIFACTS_DIR", "memory", "converge"]);
 
 /** Workflow names that can't be declared because they collide with the
  *  `/api/workflows/<name>` route family. The path segment `runs` is owned by
@@ -276,7 +277,24 @@ export function validateWorkflowInvariants(workflow: WorkflowDefinition): string
   if (shapeErrors.length > 0) return formatShapeErrors(shapeErrors);
   const reservedError = validateReservedNodeIds(workflow.nodes);
   if (reservedError) return reservedError;
+  const convergeError = validateConverge(workflow);
+  if (convergeError) return convergeError;
   return validateOutputRefs(workflow.nodes);
+}
+
+function validateConverge(workflow: WorkflowDefinition): string | null {
+  if (workflow.converge === undefined) return null;
+  const gateNode = workflow.nodes.find((node) => node.id === workflow.converge?.gate);
+  if (gateNode === undefined) {
+    return `Converge gate '${workflow.converge.gate}' is not a node in this workflow`;
+  }
+  if (isLoopNode(gateNode)) {
+    return `Converge gate '${gateNode.id}' cannot be a loop node`;
+  }
+  if (gateNode.retry !== undefined) {
+    return `Converge gate '${gateNode.id}' cannot declare 'retry:' (a failing gate triggers another round, not a retry)`;
+  }
+  return null;
 }
 
 /**
@@ -598,6 +616,27 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     };
   }
 
+  const convergeResult =
+    obj.converge === undefined ? undefined : convergeConfigSchema.safeParse(obj.converge);
+  if (convergeResult !== undefined && !convergeResult.success) {
+    const message = convergeResult.error.issues
+      .map((issue) => {
+        const issuePath = issue.path.length > 0 ? `converge.${issue.path.join(".")}` : "converge";
+        return `${issuePath}: ${issue.message}`;
+      })
+      .join("; ");
+    return {
+      workflow: null,
+      warnings,
+      error: {
+        filename,
+        error: `Invalid converge config: ${message}`,
+        errorType: "validation_error",
+      },
+    };
+  }
+  const converge = convergeResult?.data;
+
   // Provider — pass through unchanged. Registry membership is the runtime's
   // job, same as `model:` (see schema/dag-node.ts). Unknown provider ids
   // surface at handler dispatch with the full registered list in the message.
@@ -711,8 +750,18 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     ...(requiresProject !== undefined ? { requiresProject } : {}),
     nodes,
     ...(worktreePolicy ? { worktree: worktreePolicy } : {}),
+    ...(converge ? { converge } : {}),
     ...(tags !== undefined ? { tags } : {}),
   };
+
+  const convergeError = validateConverge(workflow);
+  if (convergeError) {
+    return {
+      workflow: null,
+      warnings,
+      error: { filename, error: convergeError, errorType: "validation_error" },
+    };
+  }
 
   return { workflow, warnings, error: null };
 }
