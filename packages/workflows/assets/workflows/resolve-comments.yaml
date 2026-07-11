@@ -277,9 +277,9 @@ nodes:
     depends_on: [gate-check, approve]
     trigger_rule: none_failed_min_one_success
     context: fresh
-    # The code-writing arm; pin to a frontier model like triage rather than
-    # letting `model: auto` pick a weaker default.
-    model: claude-opus-4.8
+    # The code-writing arm; pin a frontier coding model rather than letting
+    # `model: auto` pick a weaker default.
+    model: gpt-5.6-sol
     idle_timeout: 1800000
     prompt: |
       You are fixing actionable PR review threads. Read the triage, apply each
