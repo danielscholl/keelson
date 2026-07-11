@@ -8,6 +8,8 @@
 
 // Command name validation
 export { isValidCommandName } from "./command-validation.ts";
+export type { ConvergeConfig } from "./converge.ts";
+export { convergeConfigSchema } from "./converge.ts";
 export type {
   AgentDefinition,
   ApprovalNode,
