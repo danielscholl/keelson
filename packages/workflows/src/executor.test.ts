@@ -136,6 +136,14 @@ function recordEvents(): { events: RunStreamEvent[]; onEvent: (e: RunStreamEvent
   return { events, onEvent: (e) => events.push(e) };
 }
 
+async function waitFor(predicate: () => boolean, message: string): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(message);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 // DAG-shape fixtures: hello-world (single layer), status-report (sequential), classify-changes (conditional fan-out).
 function loadStarter(name: string): WorkflowDefinition {
   const root = join(import.meta.dir, "..", "test", "fixtures", `${name}.yaml`);
@@ -1547,6 +1555,281 @@ nodes:
     // `apply` was downstream of an unfinished review; cancellation
     // shouldn't promote it through.
     expect(summary.nodes.apply.state).toBe("skipped");
+  });
+});
+
+describe("runWorkflow — converge", () => {
+  test("re-runs the converge subgraph until the gate passes", async () => {
+    const workflow = parseInline(`
+name: converge-pass
+description: converge gate passes on round two
+converge:
+  gate: gate
+  max_rounds: 3
+nodes:
+  - id: prepare
+    bash: "prepare round=$converge.round"
+  - id: gate
+    depends_on: [prepare]
+    bash: "gate sees $prepare.output round=$converge.round"
+  - id: after
+    depends_on: [gate]
+    bash: "after gate=$gate.output round=$converge.round"
+`);
+    const calls: RecordedCall[] = [];
+    let prepareCalls = 0;
+    let gateCalls = 0;
+    const bash: NodeHandler = {
+      type: "bash",
+      async handle(node, ctx) {
+        calls.push({
+          nodeId: node.id,
+          resolvedBody: ctx.resolvedBody,
+          rawBody: ctx.rawBody,
+          at: Date.now(),
+        });
+        if (node.id === "prepare") {
+          prepareCalls++;
+          return { status: "succeeded", output: { kind: "text", text: `prepare-${prepareCalls}` } };
+        }
+        if (node.id === "gate") {
+          gateCalls++;
+          if (gateCalls < 2) {
+            return { status: "failed", output: { kind: "text", text: "" }, error: "not ready" };
+          }
+          return { status: "succeeded", output: { kind: "text", text: `gate-${gateCalls}` } };
+        }
+        return { status: "succeeded", output: { kind: "text", text: "after" } };
+      },
+    };
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", bash]]),
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(calls.filter((call) => call.nodeId === "prepare")).toHaveLength(2);
+    const gateResolved = calls
+      .filter((call) => call.nodeId === "gate")
+      .map((call) => call.resolvedBody);
+    expect(gateResolved).toEqual([
+      "gate sees prepare-1 round=1",
+      "gate sees prepare-2 round=2",
+    ]);
+    const afterCalls = calls.filter((call) => call.nodeId === "after");
+    expect(afterCalls).toHaveLength(1);
+    expect(afterCalls[0].resolvedBody).toBe("after gate=gate-2 round=");
+    expect(summary.nodes.prepare.output).toBe("prepare-2");
+    expect(summary.nodes.gate.output).toBe("gate-2");
+  });
+
+  test("on_exhaust fail leaves the final failed gate output", async () => {
+    const workflow = parseInline(`
+name: converge-fail
+description: converge gate never passes
+converge:
+  gate: gate
+  max_rounds: 2
+nodes:
+  - id: prepare
+    bash: "prepare"
+  - id: gate
+    depends_on: [prepare]
+    bash: "gate"
+`);
+    let gateCalls = 0;
+    const bash: NodeHandler = {
+      type: "bash",
+      async handle(node) {
+        if (node.id === "gate") {
+          gateCalls++;
+          return { status: "failed", output: { kind: "text", text: "" }, error: "still red" };
+        }
+        return { status: "succeeded", output: { kind: "text", text: "ok" } };
+      },
+    };
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", bash]]),
+    });
+
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.gate.state).toBe("failed");
+    expect(gateCalls).toBe(2);
+  });
+
+  test("on_exhaust approval accepts the failed gate and runs downstream nodes", async () => {
+    const workflow = parseInline(`
+name: converge-approval
+description: exhausted converge can be approved
+converge:
+  gate: gate
+  max_rounds: 1
+  on_exhaust: approval
+nodes:
+  - id: gate
+    bash: "gate"
+  - id: after
+    depends_on: [gate]
+    bash: "after gate=$gate.output"
+`);
+    const approvalCalls: string[] = [];
+    const approval = makeApprovalHandler({
+      awaitApproval: async (_runId, nodeId, message) => {
+        approvalCalls.push(`${nodeId}:${message}`);
+        return "approved by human";
+      },
+    });
+    const { handler: bash, calls } = echoHandler("bash");
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map<string, NodeHandler>([
+        ["bash", {
+          type: "bash",
+          async handle(node, ctx) {
+            if (node.id === "gate") {
+              return { status: "failed", output: { kind: "text", text: "" }, error: "not ready" };
+            }
+            return bash.handle(node, ctx);
+          },
+        }],
+        ["approval", approval],
+      ]),
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(approvalCalls).toHaveLength(1);
+    expect(approvalCalls[0]).toContain("gate__converge_exhaust:");
+    expect(summary.nodes.gate).toMatchObject({
+      state: "completed",
+      output: "approved by human",
+    });
+    expect(summary.nodes.after.state).toBe("completed");
+    expect(calls[0].resolvedBody).toBe("after gate=approved by human");
+  });
+
+  test("on_exhaust approval rejection leaves the run failed", async () => {
+    const workflow = parseInline(`
+name: converge-approval-reject
+description: exhausted converge can be rejected
+converge:
+  gate: gate
+  max_rounds: 1
+  on_exhaust: approval
+nodes:
+  - id: gate
+    bash: "gate"
+  - id: after
+    depends_on: [gate]
+    bash: "after"
+`);
+    const approval = makeApprovalHandler({
+      awaitApproval: async () => {
+        throw new Error("rejected");
+      },
+    });
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map<string, NodeHandler>([
+        ["bash", failingHandler("bash", "not ready")],
+        ["approval", approval],
+      ]),
+    });
+
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.gate.state).toBe("failed");
+    expect(summary.nodes.after.state).toBe("skipped");
+  });
+
+  test("approval inside the converge subgraph pauses once per round after output reset", async () => {
+    const workflow = parseInline(`
+name: converge-subgraph-approval
+description: approval in the converge subgraph repeats each round
+converge:
+  gate: gate
+  max_rounds: 2
+nodes:
+  - id: review
+    approval:
+      message: review this round
+  - id: gate
+    depends_on: [review]
+    bash: "gate saw $review.output round=$converge.round"
+`);
+    const pendingApprovals: Array<{
+      nodeId: string;
+      message: string;
+      resolve: (reply: string) => void;
+    }> = [];
+    const approval = makeApprovalHandler({
+      awaitApproval: (_runId, nodeId, message) =>
+        new Promise<string>((resolve) => {
+          pendingApprovals.push({ nodeId, message, resolve });
+        }),
+    });
+    const gateCalls: RecordedCall[] = [];
+    const bash: NodeHandler = {
+      type: "bash",
+      async handle(node, ctx) {
+        gateCalls.push({
+          nodeId: node.id,
+          resolvedBody: ctx.resolvedBody,
+          rawBody: ctx.rawBody,
+          at: Date.now(),
+        });
+        return { status: "failed", output: { kind: "text", text: "" }, error: "still red" };
+      },
+    };
+
+    const run = runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map<string, NodeHandler>([
+        ["approval", approval],
+        ["bash", bash],
+      ]),
+    });
+
+    await waitFor(() => pendingApprovals.length === 1, "first approval did not pause");
+    expect(pendingApprovals[0].nodeId).toBe("review");
+    expect(pendingApprovals[0].message).toBe("review this round");
+    pendingApprovals[0].resolve("approved-1");
+
+    await waitFor(() => pendingApprovals.length === 2, "second approval did not pause");
+    expect(pendingApprovals[1].nodeId).toBe("review");
+    expect(pendingApprovals[1].message).toBe("review this round");
+    pendingApprovals[1].resolve("approved-2");
+
+    const summary = await run;
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.review.output).toBe("approved-2");
+    expect(gateCalls.map((call) => call.resolvedBody)).toEqual([
+      "gate saw approved-1 round=1",
+      "gate saw approved-2 round=2",
+    ]);
+  });
+
+  test("non-converge workflows keep the single-pass path", async () => {
+    const workflow = parseInline(`
+name: no-converge
+description: baseline
+nodes:
+  - id: first
+    bash: "first round=$converge.round"
+  - id: second
+    depends_on: [first]
+    bash: "second $first.output"
+`);
+    const { handler, calls } = echoHandler("bash");
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", handler]]),
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(calls.map((call) => call.nodeId)).toEqual(["first", "second"]);
+    expect(calls[0].resolvedBody).toBe("first round=");
   });
 });
 
