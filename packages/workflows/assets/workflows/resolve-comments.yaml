@@ -238,6 +238,17 @@ nodes:
     depends_on: [triage]
     bash: |
       set -euo pipefail
+      # Fail closed: an empty or partial triage must never auto-pass the gate.
+      # The skip condition is "EVERY thread is actionable", which is only
+      # established when triage covered exactly the fetched thread set.
+      FETCHED=$(jq -cS '[.[].threadId] | sort' "$KEELSON_ARTIFACTS_DIR/threads.json")
+      TRIAGED=$(jq -cS '[.threads[].threadId] | sort' "$KEELSON_ARTIFACTS_DIR/triage.json")
+      if [ "$FETCHED" != "$TRIAGED" ]; then
+        echo "triage.json thread ids do not match threads.json — refusing to gate on an incomplete triage." >&2
+        echo "fetched: $FETCHED" >&2
+        echo "triaged: $TRIAGED" >&2
+        exit 1
+      fi
       # Pure JSON on stdout: the approve node's `when:` reads .needs_review.
       jq -c '
         ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
@@ -266,6 +277,9 @@ nodes:
     depends_on: [gate-check, approve]
     trigger_rule: none_failed_min_one_success
     context: fresh
+    # The code-writing arm; pin to a frontier model like triage rather than
+    # letting `model: auto` pick a weaker default.
+    model: claude-opus-4.8
     idle_timeout: 1800000
     prompt: |
       You are fixing actionable PR review threads. Read the triage, apply each
