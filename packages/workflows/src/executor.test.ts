@@ -1621,6 +1621,63 @@ nodes:
     expect(summary.nodes.gate.output).toBe("gate-2");
   });
 
+  test("resume clears seeded converge ancestors before round one when gate is not seeded", async () => {
+    const workflow = parseInline(`
+name: converge-resume-seed
+description: stale converge ancestors are cleared on resume
+converge:
+  gate: gate
+  max_rounds: 1
+nodes:
+  - id: fix
+    bash: "fix round=$converge.round"
+  - id: gate
+    depends_on: [fix]
+    bash: "gate sees $fix.output round=$converge.round"
+`);
+    const seededOutputs = new Map<string, NodeOutput>([
+      [
+        "fix",
+        {
+          state: "completed",
+          output: "stale-fix",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          completedAt: "2026-01-01T00:00:01.000Z",
+          durationMs: 1000,
+        },
+      ],
+    ]);
+    let fixCalls = 0;
+    const gateBodies: string[] = [];
+    const bash: NodeHandler = {
+      type: "bash",
+      async handle(node, ctx) {
+        if (node.id === "fix") {
+          fixCalls++;
+          return { status: "succeeded", output: { kind: "text", text: `fresh-fix-${fixCalls}` } };
+        }
+        if (node.id === "gate") {
+          gateBodies.push(ctx.resolvedBody);
+          const passed = ctx.resolvedBody.includes("fresh-fix-1");
+          return passed
+            ? { status: "succeeded", output: { kind: "text", text: "gate-pass" } }
+            : { status: "failed", output: { kind: "text", text: "" }, error: "stale input" };
+        }
+        return { status: "succeeded", output: { kind: "text", text: "ok" } };
+      },
+    };
+
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["bash", bash]]),
+      completedNodeOutputs: seededOutputs,
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(fixCalls).toBe(1);
+    expect(gateBodies).toEqual(["gate sees fresh-fix-1 round=1"]);
+  });
+
   test("on_exhaust fail leaves the final failed gate output", async () => {
     const workflow = parseInline(`
 name: converge-fail

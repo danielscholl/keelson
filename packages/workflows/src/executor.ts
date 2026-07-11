@@ -532,6 +532,9 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     const subgraphLayers = buildTopologicalLayers(subgraphNodes);
     const restLayers = buildPartitionLayers(restNodes);
     let converged = false;
+    if (nodeOutputs.get(gate)?.state !== "completed") {
+      for (const id of subgraphIds) nodeOutputs.delete(id);
+    }
 
     for (let round = 1; round <= maxRounds; round++) {
       if (runAbortSignal.aborted) {
