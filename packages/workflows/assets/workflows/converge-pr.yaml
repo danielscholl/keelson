@@ -8,10 +8,11 @@ description: |
             "drive PR to green", "handle bot review until clean".
   Does: Fetches unresolved review threads each round via GraphQL -> filters out
         threads already handled by this run -> triages new threads -> pauses for
-        approval on judgment calls -> fixes actionable threads -> validates and
-        pushes -> replies on every handled thread -> resolves ONLY fixed threads
-        -> waits for CI -> repeats until CI passes and a clean round observes no
-        new threads, or escalates at the round cap.
+        a batched human approval every round that has new threads -> fixes
+        actionable threads -> validates and pushes -> replies on every handled
+        thread -> resolves ONLY fixed threads -> waits for CI -> repeats until CI
+        passes and a clean round observes no new threads, or escalates at the
+        round cap.
   NOT for: Fork PRs, which cannot be pushed safely by this workflow.
            One-shot comment resolution without a CI convergence loop (use
            resolve-comments).
@@ -477,29 +478,35 @@ nodes:
       TH="$KEELSON_ARTIFACTS_DIR/threads.json"
       [ -f "$R" ] || { echo "results.json missing; refusing to reply/resolve." >&2; exit 1; }
       jq -e 'type == "array"' "$R" >/dev/null || { echo "results.json must be a JSON array." >&2; exit 1; }
-      # Reply-all: every new thread has exactly one result entry.
+      # Reply-all: every new thread has exactly one result entry (NOT deduplicated,
+      # so a duplicate result id is caught rather than masked).
       NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
-      RES_IDS=$(jq -cS '[.[].threadId] | unique | sort' "$R")
+      RES_IDS=$(jq -cS '[.[].threadId] | sort' "$R")
       if [ "$NEW_IDS" != "$RES_IDS" ]; then
-        echo "results.json thread ids do not match the new threads (a reply is missing or extra); refusing to mutate." >&2
+        echo "results.json thread ids do not match the new threads (missing, extra, or duplicate reply); refusing to mutate." >&2
         echo "new:    $NEW_IDS" >&2
         echo "result: $RES_IDS" >&2
         exit 1
       fi
-      # Valid action; a 'fixed' resolve requires actionable triage AND a commit.
-      BAD=$(jq -r --slurpfile tri "$T" '
+      # Valid action; a 'fixed' resolve requires actionable triage AND a commit;
+      # a non-empty reply; and a commentId that is the thread's OWN reply target
+      # (so a swapped id can't post the response on the wrong thread).
+      BAD=$(jq -r --slurpfile tri "$T" --slurpfile th "$TH" '
         ($tri[0].threads | map({ (.threadId): .decision }) | add) as $dec
+        | ($th[0] | map({ (.threadId): .commentId }) | add) as $cid
         | [ .[]
             | select(
                 (.action != "fixed" and .action != "replied-only")
                 or (.action == "fixed" and (($dec[.threadId]) != "actionable-code-change"))
                 or (.action == "fixed" and (((.commit // "") | tostring | length) == 0))
+                or (((.reply // "") | tostring | length) == 0)
+                or (.commentId != ($cid[.threadId]))
               )
             | .threadId ] | join(", ")
       ' "$R")
       if [ -n "$BAD" ]; then
         echo "honesty gate failed for thread(s): $BAD" >&2
-        echo "(each result must be action fixed|replied-only; a 'fixed' action requires actionable-code-change triage AND a non-empty commit)." >&2
+        echo "(each result: action fixed|replied-only; a 'fixed' action requires actionable triage + a commit; a non-empty reply; and a commentId matching the thread's own comment)." >&2
         exit 1
       fi
       echo "honesty gate OK: $(jq 'length' "$R") result(s) validated against triage before reply/resolve."
@@ -517,8 +524,12 @@ nodes:
       - Post a reply on every entry in `$ARTIFACTS_DIR/results.json`.
       - Call `resolveReviewThread` only for entries where `action == "fixed"`.
       - Never resolve a `replied-only` thread.
-      - Append every successfully replied thread to `$ARTIFACTS_DIR/handled.json`
-        so later rounds never re-triage or re-reply to it.
+      - Append a thread to `$ARTIFACTS_DIR/handled.json` ONLY when it is FULLY
+        handled: its reply posted AND, for a `fixed` thread, its
+        `resolveReviewThread` call SUCCEEDED. If a fixed thread's reply posts but
+        the resolve fails, do NOT record it — leaving it unhandled means a later
+        round re-handles it, so the gate never converges with a fixed-but-
+        unresolved thread.
 
       ## Steps
 
@@ -532,10 +543,12 @@ nodes:
          `resolveReviewThread(input: {threadId: "{threadId}"})`.
       5. Write `$ARTIFACTS_DIR/outcome.json`:
          `{ "replied": [...], "resolved": [...], "left_open": [...] }`
-      6. Append the replied result entries to `$ARTIFACTS_DIR/handled.json`,
+      6. Append to `$ARTIFACTS_DIR/handled.json` ONLY the entries that are fully
+         handled per the Invariant (reply posted; for `fixed`, resolve succeeded),
          preserving existing entries and recording at least `threadId`,
-         `commentId`, `action`, `decision`, `commit`, `reply`, and
-         `round: $converge.round`.
+         `commentId`, `action`, `decision`, `commit`, `reply`, `resolved` (bool),
+         and `round: $converge.round`. Do NOT record a fixed thread whose resolve
+         failed.
       7. Print a summary: how many replied, resolved, left open, and newly
          recorded in handled.json.
 
