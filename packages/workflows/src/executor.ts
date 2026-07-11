@@ -725,8 +725,9 @@ async function runConvergeExhaustApproval(
     nodeOutputs,
     layerResults,
   });
-  for (const [id, out] of layerResults) nodeOutputs.set(id, out);
-  const approvalOutput = nodeOutputs.get(approvalNode.id);
+  // Keep synthetic approval output out of nodeOutputs so it can't shadow a
+  // real workflow node that happens to use the same id.
+  const approvalOutput = layerResults.get(approvalNode.id);
   if (approvalOutput?.state !== "completed") return false;
   nodeOutputs.set(gate, {
     state: "completed",

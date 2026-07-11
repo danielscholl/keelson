@@ -1710,6 +1710,62 @@ nodes:
     expect(calls[0].resolvedBody).toBe("after gate=approved by human");
   });
 
+  test("on_exhaust approval does not shadow a real node id collision", async () => {
+    const workflow = parseInline(`
+name: converge-approval-collision
+description: approval node id collision stays safe
+converge:
+  gate: gate
+  max_rounds: 1
+  on_exhaust: approval
+nodes:
+  - id: gate
+    bash: "gate"
+  - id: gate__converge_exhaust
+    depends_on: [gate]
+    bash: "real collide node"
+  - id: after
+    depends_on: [gate__converge_exhaust]
+    bash: "after $gate__converge_exhaust.output"
+`);
+    const approval = makeApprovalHandler({
+      awaitApproval: async () => "approved by human",
+    });
+    const { handler: echoBash, calls } = echoHandler("bash");
+    let collideCalls = 0;
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map<string, NodeHandler>([
+        [
+          "bash",
+          {
+            type: "bash",
+            async handle(node, ctx) {
+              if (node.id === "gate") {
+                return { status: "failed", output: { kind: "text", text: "" }, error: "not ready" };
+              }
+              if (node.id === "gate__converge_exhaust") {
+                collideCalls++;
+                return { status: "succeeded", output: { kind: "text", text: "real-output" } };
+              }
+              return echoBash.handle(node, ctx);
+            },
+          },
+        ],
+        ["approval", approval],
+      ]),
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(collideCalls).toBe(1);
+    expect(summary.nodes.gate.state).toBe("completed");
+    expect(summary.nodes["gate__converge_exhaust"]).toMatchObject({
+      state: "completed",
+      output: "real-output",
+    });
+    expect(calls[0].resolvedBody).toBe("after real-output");
+  });
+
   test("on_exhaust approval rejection leaves the run failed", async () => {
     const workflow = parseInline(`
 name: converge-approval-reject
