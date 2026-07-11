@@ -143,15 +143,6 @@ nodes:
       expect(conflict.error).toContain('for "guarded"');
       expect(conflict.error).toContain(first.runId.slice(0, 8));
 
-      const isolatedRes = await app.fetch(
-        postJson("http://test/api/workflows/guarded/runs", {
-          inputs: {},
-          projectId: project.id,
-          isolation: "worktree",
-        }),
-      );
-      expect(isolatedRes.status).toBe(200);
-
       const resumeRes = await app.fetch(
         postJson(`http://test/api/workflows/runs/${first.runId}/resume`, {
           nodeId: "review",
@@ -168,6 +159,149 @@ nodes:
         }),
       );
       expect(afterReleaseRes.status).toBe(200);
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
+
+  test("workingDir override locks the project containing execution cwd", async () => {
+    writeWorkflow(
+      "guarded-override.yaml",
+      `name: guarded-override
+description: waits under the mutation lock
+nodes:
+  - id: review
+    approval:
+      message: hold the lock
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const repoA = join(tmpDir, "repo-a");
+    const repoB = join(tmpDir, "repo-b");
+    mkdirSync(repoA);
+    mkdirSync(repoB);
+    const projectA = projectsStore.create({ name: "repo-a", rootPath: repoA });
+    const projectB = projectsStore.create({ name: "repo-b", rootPath: repoB });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      {
+        catalog,
+        store,
+        conversationStore,
+        projectsStore,
+        mutationLockManager,
+      },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      const firstRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-override/runs", {
+          inputs: {},
+          projectId: projectA.id,
+          workingDir: repoB,
+        }),
+      );
+      expect(firstRes.status).toBe(200);
+      const first = (await firstRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, first.runId, (status) => status === "paused");
+
+      const conflictRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-override/runs", {
+          inputs: {},
+          projectId: projectB.id,
+        }),
+      );
+      expect(conflictRes.status).toBe(409);
+      const conflict = (await conflictRes.json()) as { error: string };
+      expect(conflict.error).toContain(`project ${projectB.id} is locked by workflow:`);
+      expect(conflict.error).not.toContain(`project ${projectA.id} is locked by workflow:`);
+
+      const unaffectedRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-override/runs", {
+          inputs: {},
+          projectId: projectA.id,
+        }),
+      );
+      expect(unaffectedRes.status).toBe(200);
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
+
+  test("isolation fallback acquires mutation lock before running in place", async () => {
+    writeWorkflow(
+      "guarded-fallback.yaml",
+      `name: guarded-fallback
+description: waits under the mutation lock
+nodes:
+  - id: review
+    approval:
+      message: hold the lock
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "repo", rootPath: tmpDir });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      {
+        catalog,
+        store,
+        conversationStore,
+        projectsStore,
+        mutationLockManager,
+      },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      const firstRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-fallback/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      expect(firstRes.status).toBe(200);
+      const first = (await firstRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, first.runId, (status) => status === "paused");
+
+      const fallbackRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-fallback/runs", {
+          inputs: {},
+          projectId: project.id,
+          isolation: "worktree",
+        }),
+      );
+      expect(fallbackRes.status).toBe(200);
+      const fallback = (await fallbackRes.json()) as { runId: string };
+      await pollUntilTerminal(store, fallback.runId);
+      const fallbackRun = store.getRun(fallback.runId);
+      expect(fallbackRun?.status).toBe("failed");
+      expect(fallbackRun?.error).toContain(`project ${project.id} is locked by workflow:`);
     } finally {
       await activeRuns.abortAll();
       db.close();

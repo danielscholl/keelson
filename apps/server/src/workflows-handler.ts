@@ -665,6 +665,7 @@ function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
 interface StartRunCoreDeps {
   store: WorkflowStore;
   conversationStore: ConversationStore;
+  projectsStore?: ProjectsStore;
   activeRuns: ActiveRuns;
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
@@ -751,6 +752,21 @@ function buildNotebookAdapter(
   };
 }
 
+function resolveMutationLockProjectId(opts: {
+  resolvedProject: Pick<Project, "id" | "rootPath"> | null;
+  workingDir: string;
+  projectsStore?: ProjectsStore;
+}): string | null {
+  const cwd = canonicalPath(opts.workingDir);
+  if (
+    opts.resolvedProject !== null &&
+    isPathInside(canonicalPath(opts.resolvedProject.rootPath), cwd)
+  ) {
+    return opts.resolvedProject.id;
+  }
+  return opts.projectsStore?.findByPathPrefix(cwd)?.id ?? null;
+}
+
 function mutationLockOwner(origin: WorkflowRunOrigin, runId: string): string {
   return `${origin === "scheduled" ? "scheduled" : "workflow"}:${runId.slice(0, 8)}`;
 }
@@ -758,22 +774,20 @@ function mutationLockOwner(origin: WorkflowRunOrigin, runId: string): string {
 function acquireRunMutationLock(opts: {
   mutationLockManager?: MutationLockManager;
   workflow: WorkflowDefinition;
-  resolvedProject: Pick<Project, "id" | "rootPath"> | null;
-  isolationOn: boolean;
+  lockProjectId: string | null;
   runId: string;
   origin: WorkflowRunOrigin;
 }): MutationLockHandle | undefined {
-  const { mutationLockManager, workflow, resolvedProject, isolationOn, runId, origin } = opts;
+  const { mutationLockManager, workflow, lockProjectId, runId, origin } = opts;
   if (
     mutationLockManager === undefined ||
-    isolationOn ||
-    resolvedProject === null ||
+    lockProjectId === null ||
     workflow.mutates_checkout === false
   ) {
     return undefined;
   }
   return mutationLockManager.acquire({
-    projectId: resolvedProject.id,
+    projectId: lockProjectId,
     purpose: workflow.name,
     owner: mutationLockOwner(origin, runId),
   });
@@ -823,7 +837,7 @@ function startRunCore(
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
-  const { workspaceManager, mutationLockManager } = deps;
+  const { workspaceManager, mutationLockManager, projectsStore } = deps;
   const {
     workflow,
     inputs,
@@ -844,6 +858,11 @@ function startRunCore(
   );
   const name = workflow.name;
   const dedupeKey = runDedupeKey(name, workingDir, inputs);
+  const lockProjectId = resolveMutationLockProjectId({
+    resolvedProject,
+    workingDir,
+    projectsStore,
+  });
   // De-dup only non-isolated producer refreshes — bound producers AND any
   // scheduled-origin start (the heartbeat, /refresh, a rib's ctx.refreshWorkflow),
   // which covers unbound region workflows too: a concurrent start with an
@@ -864,14 +883,27 @@ function startRunCore(
     }
   }
   const runId = crypto.randomUUID();
-  let lockHandle = acquireRunMutationLock({
-    mutationLockManager,
-    workflow,
-    resolvedProject,
-    isolationOn,
-    runId,
-    origin,
-  });
+  let lockHandle = !isolationOn
+    ? acquireRunMutationLock({
+        mutationLockManager,
+        workflow,
+        lockProjectId,
+        runId,
+        origin,
+      })
+    : undefined;
+  const isolationFallbackLock =
+    isolationOn &&
+    mutationLockManager !== undefined &&
+    workflow.mutates_checkout !== false &&
+    lockProjectId !== null
+      ? {
+          manager: mutationLockManager,
+          projectId: lockProjectId,
+          purpose: workflow.name,
+          owner: mutationLockOwner(origin, runId),
+        }
+      : undefined;
   const startedAt = new Date().toISOString();
   let conversation: ReturnType<ConversationStore["create"]> | undefined;
   try {
@@ -953,6 +985,7 @@ function startRunCore(
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
     ...(usageStore !== undefined ? { usageStore } : {}),
     ...(workspaceManager !== undefined ? { workspaceManager } : {}),
+    ...(isolationFallbackLock !== undefined ? { isolationFallbackLock } : {}),
   });
   try {
     activeRuns.register(runId, {
@@ -1061,16 +1094,23 @@ function resumeRunCore(
     resumeProject?.rootPath ?? null,
     run.workingDir,
   );
+  const resumeLockProjectId = resolveMutationLockProjectId({
+    resolvedProject: resumeProject,
+    workingDir: run.workingDir,
+    projectsStore,
+  });
   let lockHandle: MutationLockHandle | undefined;
   try {
-    lockHandle = acquireRunMutationLock({
-      mutationLockManager,
-      workflow,
-      resolvedProject: resumeProject,
-      isolationOn: run.worktreePath !== null,
-      runId,
-      origin: run.origin,
-    });
+    lockHandle =
+      run.worktreePath === null
+        ? acquireRunMutationLock({
+            mutationLockManager,
+            workflow,
+            lockProjectId: resumeLockProjectId,
+            runId,
+            origin: run.origin,
+          })
+        : undefined;
   } catch (err) {
     if (err instanceof MutationLockConflictError) {
       return { ok: false, reason: "not_terminal", message: err.message };
@@ -1494,6 +1534,7 @@ export function createWorkflowController(
           {
             store,
             conversationStore,
+            ...(projectsStore !== undefined ? { projectsStore } : {}),
             activeRuns,
             subscribers,
             promptHandler,
@@ -1969,6 +2010,7 @@ export function workflowsRoutes(
         {
           store,
           conversationStore,
+          ...(projectsStore !== undefined ? { projectsStore } : {}),
           activeRuns,
           subscribers,
           promptHandler: effectivePromptHandler,
@@ -2064,6 +2106,7 @@ export function workflowsRoutes(
         {
           store,
           conversationStore,
+          ...(projectsStore !== undefined ? { projectsStore } : {}),
           activeRuns,
           subscribers,
           promptHandler: effectivePromptHandler,
@@ -2451,6 +2494,15 @@ interface ExecuteRunArgs {
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
   workspaceManager?: WorkspaceManager;
+  // Mutation lock to acquire before an isolation-requested run continues in
+  // place (repo probe/worktree creation fallback), so fallback never mutates
+  // the live checkout unlocked.
+  isolationFallbackLock?: {
+    manager: MutationLockManager;
+    projectId: string;
+    purpose: string;
+    owner: string;
+  };
 }
 
 // Process-wide slot pool, lazily built so KEELSON_MAX_CONCURRENT_RUNS is read
@@ -2526,6 +2578,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     existingWorktreePath,
     usageStore,
     workspaceManager,
+    isolationFallbackLock,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -2541,6 +2594,8 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // this instead of re-reading from SQLite — test teardown can delete the DB
   // file between the executor returning and our cleanup running.
   let terminalStatus: WorkflowRunStatus | null = null;
+  let lockOnInPlaceIsolationFallback = false;
+  let isolationFallbackLockHandle: MutationLockHandle | undefined;
   // The run_done event is captured here rather than dispatched immediately so
   // the finally block can persist/broadcast it AFTER artifacts.cleanup() runs
   // — otherwise a client polling status can observe "succeeded" while the run's
@@ -2631,6 +2686,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       probeError = err instanceof Error ? err.message : String(err);
     }
     if (!isRepo) {
+      lockOnInPlaceIsolationFallback = true;
       subscribers.broadcast(runId, {
         type: "run_warning",
         nodeId: null,
@@ -2700,6 +2756,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        lockOnInPlaceIsolationFallback = true;
         subscribers.broadcast(runId, {
           type: "run_warning",
           nodeId: null,
@@ -3029,6 +3086,13 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       : publishStructured;
 
   try {
+    if (lockOnInPlaceIsolationFallback && isolationFallbackLock !== undefined) {
+      isolationFallbackLockHandle = isolationFallbackLock.manager.acquire({
+        projectId: isolationFallbackLock.projectId,
+        purpose: isolationFallbackLock.purpose,
+        owner: isolationFallbackLock.owner,
+      });
+    }
     await runWorkflow({
       workflow,
       runId,
@@ -3074,6 +3138,10 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     terminalStatus = "failed" as WorkflowRunStatus;
     subscribers.broadcast(runId, { type: "run_done", status: "failed" });
   } finally {
+    if (isolationFallbackLockHandle !== undefined) {
+      releaseMutationLockNow(runId, isolationFallbackLockHandle);
+      isolationFallbackLockHandle = undefined;
+    }
     // Worktree cleanup before activeRuns.delete so the shutdown drain awaits
     // it via `entry.done`. Only on a clean terminal status — failed /
     // cancelled runs leave the worktree behind for inspection. `keelson
