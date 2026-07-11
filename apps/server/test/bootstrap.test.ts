@@ -488,6 +488,74 @@ describe("bootstrapRibs", () => {
     expect(accessor?.()).toEqual(live);
   });
 
+  test("acquireWorkspace forwards to the late-bound manager with a rib-scoped owner", async () => {
+    delete process.env.KEELSON_RIBS;
+    let managerRef:
+      | { acquire: (req: Record<string, unknown>) => Promise<Record<string, unknown>> }
+      | undefined;
+    const acquireCalls: Record<string, unknown>[] = [];
+    let released = 0;
+    let accessor:
+      | ((req: { projectId: string; purpose: string; branch?: string }) => Promise<{
+          id: string;
+          path: string;
+          branch: string;
+          release: () => Promise<void>;
+        }>)
+      | undefined;
+    const rib: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        accessor = ctx.acquireWorkspace;
+        return [];
+      },
+    };
+    await bootstrapRibs({
+      available: { alpha: rib },
+      getWorkspaceManager: () => managerRef as never,
+    });
+    expect(accessor).toBeDefined();
+    // Manager not yet wired (late-bound): the seam fails with a clear error.
+    await expect(
+      accessor?.({ projectId: "p1", purpose: "test" }) ?? Promise.resolve(),
+    ).rejects.toThrow("workspace manager unavailable");
+    managerRef = {
+      acquire: async (req) => {
+        acquireCalls.push(req);
+        return {
+          id: "lease-1",
+          path: "/tmp/wt",
+          branch: "keelson/lease/test",
+          release: async () => {
+            released += 1;
+          },
+        };
+      },
+    };
+    const lease = await accessor?.({ projectId: "p1", purpose: "test", branch: "custom" });
+    expect(acquireCalls).toEqual([
+      { projectId: "p1", purpose: "test", owner: "rib:alpha", branch: "custom" },
+    ]);
+    await lease?.release();
+    expect(released).toBe(1);
+  });
+
+  test("RibContext.acquireWorkspace is absent when no manager source is supplied", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasSeam = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasSeam = ctx.acquireWorkspace !== undefined;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: probe } });
+    expect(hasSeam).toBe(false);
+  });
+
   test("RibContext.getProjects is absent when no projects source is supplied", async () => {
     delete process.env.KEELSON_RIBS;
     let hasAccessor = true;

@@ -440,15 +440,16 @@ export function repoPathFromWorktree(worktreeDir: string): string | null {
  * list --porcelain` parsed into `{ path, branch }` entries; useful for the
  * `keelson worktree prune` command.
  */
-export async function listWorktrees(
-  repoPath: string,
-): Promise<readonly { path: string; branch: string | null }[]> {
-  const out = await runGit(["worktree", "list", "--porcelain"], repoPath);
-  if (out.exitCode !== 0) return [];
+export interface ListWorktreesWithStatusResult {
+  worktrees: readonly { path: string; branch: string | null }[];
+  error: string | null;
+}
+
+function parseWorktreeListPorcelain(stdout: string): { path: string; branch: string | null }[] {
   const entries: { path: string; branch: string | null }[] = [];
   let path: string | null = null;
   let branch: string | null = null;
-  for (const line of out.stdout.split("\n")) {
+  for (const line of stdout.split("\n")) {
     if (line.startsWith("worktree ")) {
       if (path) entries.push({ path, branch });
       path = line.slice("worktree ".length);
@@ -459,4 +460,24 @@ export async function listWorktrees(
   }
   if (path) entries.push({ path, branch });
   return entries;
+}
+
+export async function listWorktreesWithStatus(
+  repoPath: string,
+): Promise<ListWorktreesWithStatusResult> {
+  const out = await runGit(["worktree", "list", "--porcelain"], repoPath);
+  if (out.exitCode !== 0) {
+    const detail = out.stderr.trim() || out.stdout.trim() || "unknown git error";
+    return {
+      worktrees: [],
+      error: `git worktree list failed (exit ${out.exitCode}): ${detail}`,
+    };
+  }
+  return { worktrees: parseWorktreeListPorcelain(out.stdout), error: null };
+}
+
+export async function listWorktrees(
+  repoPath: string,
+): Promise<readonly { path: string; branch: string | null }[]> {
+  return (await listWorktreesWithStatus(repoPath)).worktrees;
 }

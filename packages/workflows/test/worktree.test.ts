@@ -19,6 +19,7 @@ import {
   headDivergesFrom,
   isGitRepo,
   listWorktrees,
+  listWorktreesWithStatus,
   NotAGitRepoError,
   removeWorktree,
   repoPathFromWorktree,
@@ -416,5 +417,11 @@ describe("listWorktrees", () => {
     // branch instead of the dest path.
     const found = entries.find((e) => e.branch === "keelson/test/feature");
     expect(found).toBeDefined();
+  });
+
+  test("returns an explicit error when git listing fails", async () => {
+    const listed = await listWorktreesWithStatus(tmp);
+    expect(listed.worktrees).toEqual([]);
+    expect(listed.error).toContain("git worktree list failed");
   });
 });

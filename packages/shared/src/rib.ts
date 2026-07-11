@@ -156,6 +156,19 @@ export interface RibWorkflowRunResult {
   error?: string;
 }
 
+export interface WorkspaceLease {
+  id: string;
+  path: string;
+  branch: string;
+  release: () => Promise<void>;
+}
+
+export interface AcquireWorkspaceRequest {
+  projectId: string;
+  purpose: string;
+  branch?: string;
+}
+
 // A registered provider, surfaced to a rib so it can make provider-aware choices
 // (e.g. assign a member's vendor at cast time) without a back-dep on
 // @keelson/providers. The minimal shape: the `id` a rib pins on a
@@ -245,6 +258,11 @@ export interface RibContext {
   // / always-inject row. Optional so a rib built against an older harness degrades to no
   // governed memory (recall it can fold in), not a throw.
   getMemory?: () => MemoryTools;
+  // Acquire an isolated project checkout with dependencies installed for mutation-heavy
+  // work, then release it when finished. This is checkout isolation, not a sandbox: the
+  // caller still owns tool policy and cwd choices. Optional so a rib built against an
+  // older harness degrades to no workspace leasing, not a throw.
+  acquireWorkspace?: (req: AcquireWorkspaceRequest) => Promise<WorkspaceLease>;
   // Read-only snapshot of the providers registered at call time, so a rib can make
   // availability-aware provider choices (e.g. assign a member's vendor at cast). This
   // only LISTS what's registered; it grants no access beyond the existing runAgentTurn
