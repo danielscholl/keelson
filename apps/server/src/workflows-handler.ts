@@ -758,13 +758,20 @@ function resolveMutationLockProjectId(opts: {
   projectsStore?: ProjectsStore;
 }): string | null {
   const cwd = canonicalPath(opts.workingDir);
+  // Resolve the cwd to its most-specific registered project FIRST, so two runs in
+  // the same (possibly nested) checkout always lock the same project id; the
+  // caller-supplied project is only a fallback for a cwd under no registered
+  // project. Preferring the caller's project could otherwise let concurrent runs
+  // lock an outer and an inner project independently and mutate the same tree.
+  const byPath = opts.projectsStore?.findByPathPrefix(cwd)?.id;
+  if (byPath !== undefined) return byPath;
   if (
     opts.resolvedProject !== null &&
     isPathInside(canonicalPath(opts.resolvedProject.rootPath), cwd)
   ) {
     return opts.resolvedProject.id;
   }
-  return opts.projectsStore?.findByPathPrefix(cwd)?.id ?? null;
+  return null;
 }
 
 function mutationLockOwner(origin: WorkflowRunOrigin, runId: string): string {

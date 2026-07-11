@@ -42,11 +42,12 @@ immediately, with no server restart.
 | `tags` | no | A list of strings for filtering. |
 | `worktree` | no | `{ enabled, branch }` pins git-worktree isolation per run; `branch` accepts `{workflow}` and `{run_id_short}`. |
 | `requiresProject` | no | `true` marks a repo-scoped workflow; `workflow_run` refuses to start it unless the resolved working directory is a git repo. |
+| `mutates_checkout` | no | `false` marks a read-only workflow; a non-isolated run against a project's live checkout then skips the per-project mutation lock (it can't clash with a mutating run). Defaults to mutating. |
 | `effort`, `thinking` | no | Claude-only reasoning controls. |
 
 The loader **accepts but ignores** these workflow-level fields, dropping them
 with a warning so a cross-runtime file still loads: `sandbox`, `betas`,
-`fallbackModel`, `additionalDirectories`, `mutates_checkout`.
+`fallbackModel`, `additionalDirectories`.
 
 ### Description format
 
