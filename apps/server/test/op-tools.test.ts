@@ -178,6 +178,10 @@ describe("op tools — native ops", () => {
     expect(res.content).toContain("threw");
     // The op stays alive (a callback failure isn't a settlement).
     expect((await run("run_status", { id: handle.id })).content).toContain("status running");
+    // The diagnostic is a non-terminal `log` frame, never an `error` frame a
+    // poller could read as settled while the op is still running.
+    const events = await run("run_events", { id: handle.id, cursor: 0 });
+    expect(events.content).toContain("log steer callback failed: boom");
   });
 
   test("run_list advertises steerability and includes native ops", async () => {
@@ -236,6 +240,19 @@ describe("op tools — native ops", () => {
     handle.done({ late: true });
     const after = await run("run_status", { id: handle.id });
     expect(after.content).toContain("status cancelled");
+  });
+
+  test("register after drain returns an inert handle that never touches the db", async () => {
+    registry.drain();
+    // A late rib disposer registering during shutdown gets an already-aborted,
+    // no-op handle: no row is created, so nothing writes through the closing db.
+    const late = registry.register("rib:squad", { kind: "squad_coordinate" });
+    expect(late.signal.aborted).toBe(true);
+    late.progress("should be dropped");
+    late.done({ late: true });
+    const status = await run("run_status", { id: late.id });
+    expect(status.isError).toBe(true);
+    expect(status.content).toContain("was not found");
   });
 
   test("run_steer records the steer frame before an onSteer that self-settles", async () => {

@@ -28,6 +28,9 @@ const EVENT_BYTE_BUDGET = 8_000;
 const FRAME_MSG_CAP = 2_000;
 const FRAME_DATA_CAP = 2_000;
 const RESULT_CAP = 8_000;
+// `kind` is caller-supplied at registration with no length limit; cap it while
+// rendering so a long kind can't blow up a 100-row run_list or a run_status line.
+const KIND_CAP = 200;
 
 const listInputSchema = z.object({});
 const statusInputSchema = z.object({ id: z.string().min(1) });
@@ -44,16 +47,16 @@ const steerInputSchema = z.object({
 function renderSummaryLine(op: OpSummaryView): string {
   const steer = op.steerable ? " (steerable)" : "";
   const done = op.completedAt ? ` completed ${op.completedAt}` : "";
-  return `• ${op.id} — ${op.kind} [${op.status}]${steer} started ${op.createdAt}${done}`;
+  return `• ${op.id} — ${truncate(op.kind, KIND_CAP)} [${op.status}]${steer} started ${op.createdAt}${done}`;
 }
 
 function renderStatus(op: OpStatusView): string {
   const lines = [
-    `Op ${op.id} — ${op.kind} — status ${op.status}.`,
+    `Op ${op.id} — ${truncate(op.kind, KIND_CAP)} — status ${op.status}.`,
     `owner: ${op.owner} · steerable: ${op.steerable} · started: ${op.createdAt}` +
       (op.completedAt ? ` · completed: ${op.completedAt}` : ""),
   ];
-  if (op.error) lines.push(`error: ${op.error}`);
+  if (op.error) lines.push(`error: ${truncate(op.error, RESULT_CAP)}`);
   if (op.result !== undefined && op.result !== null) {
     lines.push(`result: ${truncate(JSON.stringify(op.result), RESULT_CAP)}`);
   }

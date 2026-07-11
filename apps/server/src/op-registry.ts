@@ -150,6 +150,10 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
   // (done/error) and run_cancel remove it, so every handle method gating on
   // membership becomes a clean no-op once the op is terminal.
   const live = new Map<string, LiveController>();
+  // Set by drain() at shutdown, BEFORE ribs.disposeAll(): once closed, register()
+  // hands back an inert handle so a late disposer can't create a row or write a
+  // frame through the about-to-close database.
+  let closed = false;
 
   const controller = (): WorkflowController | undefined => deps.getWorkflowController?.();
 
@@ -204,8 +208,22 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
     };
   };
 
+  const inertHandle = (): OpHandle => {
+    const abort = new AbortController();
+    abort.abort();
+    return {
+      id: crypto.randomUUID(),
+      signal: abort.signal,
+      log: () => {},
+      progress: () => {},
+      done: () => {},
+      error: () => {},
+    };
+  };
+
   return {
     register(owner, req) {
+      if (closed) return inertHandle();
       const id = crypto.randomUUID();
       const abort = new AbortController();
       const steerable = typeof req.onSteer === "function";
@@ -387,16 +405,18 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
       try {
         ctl.onSteer(note);
       } catch (err) {
-        // A rib's onSteer is untrusted code; a throw must surface as a typed
-        // failure, not escape run_steer.
+        // A rib's onSteer is untrusted code; a throw surfaces as a typed failure
+        // (the return value), recorded as a non-terminal `log` frame — the op is
+        // still running, so an `error` frame would let a poller read it as settled.
         const msg = err instanceof Error ? err.message : String(err);
-        store.appendEvent(id, { kind: "error", message: `steer callback failed: ${msg}` }, now());
+        store.appendEvent(id, { kind: "log", message: `steer callback failed: ${msg}` }, now());
         return { ok: false, message: `steer callback for op ${id} threw: ${msg}` };
       }
       return { ok: true, message: `steer delivered to op ${id}` };
     },
 
     drain() {
+      closed = true;
       for (const [id, ctl] of Array.from(live.entries())) {
         // Remove from `live` first so a re-entrant handle call from the abort
         // listener no-ops; then settle the durable row and fire the signal.
