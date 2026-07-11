@@ -367,7 +367,7 @@ function mapSdkMessageToChunks(msg: ClaudeSdkMessage): MessageChunk[] {
 }
 
 function mapClaudeStopReason(reason: string | null | undefined): ProviderFinishReason | undefined {
-  if (reason === "max_tokens") return "max_tokens";
+  if (reason === "max_tokens" || reason === "model_context_window_exceeded") return "max_tokens";
   if (reason === "end_turn" || reason === "stop_sequence") return "end";
   return undefined;
 }

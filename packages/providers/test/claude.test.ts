@@ -735,6 +735,35 @@ describe("ClaudeProvider — happy path stream translation", () => {
     expect(finishReason).toBe("max_tokens");
   });
 
+  it("maps model_context_window_exceeded to max_tokens", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "assistant",
+          message: { content: [], stop_reason: "model_context_window_exceeded" },
+          uuid: "a1",
+          session_id: "sess-id",
+        });
+        await pushSuccess(push);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    let finishReason: ProviderFinishReason | undefined;
+
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        onFinishReason: (reason) => {
+          finishReason = reason;
+        },
+      }),
+    );
+
+    expect(finishReason).toBe("max_tokens");
+  });
+
   it("reports end from the root assistant stop reason", async () => {
     const sdk = makeMockSdk({
       scenario: async (push) => {

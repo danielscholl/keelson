@@ -265,6 +265,11 @@ export class GatewayProvider implements IAgentProvider {
     let usage: GatewayUsage | undefined;
     let finished = false;
     let finishReasonSeen = false;
+    const reportFinishReason = (reason: ProviderFinishReason | undefined): void => {
+      if (reason === undefined || finishReasonSeen) return;
+      finishReasonSeen = true;
+      options?.onFinishReason?.(reason);
+    };
     try {
       while (!finished) {
         const { done, value } = await reader.read();
@@ -284,10 +289,7 @@ export class GatewayProvider implements IAgentProvider {
           const parsed = parseSseData(payload);
           for (const chunk of parsed.chunks) yield chunk;
           if (parsed.usage) usage = parsed.usage;
-          if (parsed.finishReason !== undefined && !finishReasonSeen) {
-            finishReasonSeen = true;
-            options?.onFinishReason?.(parsed.finishReason);
-          }
+          reportFinishReason(parsed.finishReason);
         }
       }
       // Flush a final event that arrived without a trailing blank line.
@@ -297,10 +299,7 @@ export class GatewayProvider implements IAgentProvider {
           const parsed = parseSseData(payload);
           for (const chunk of parsed.chunks) yield chunk;
           if (parsed.usage) usage = parsed.usage;
-          if (parsed.finishReason !== undefined && !finishReasonSeen) {
-            finishReasonSeen = true;
-            options?.onFinishReason?.(parsed.finishReason);
-          }
+          reportFinishReason(parsed.finishReason);
         }
       }
     } catch (err) {
