@@ -86,8 +86,8 @@ import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
 
-import { loadBriefAndCoverage } from "./brief-coverage.ts";
 import type { RibWorkflowBinding, WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
+import { loadBriefAndCoverage } from "./brief-coverage.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import { createRunSlots, type RunSlots, resolveMaxConcurrentRuns } from "./run-concurrency.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";

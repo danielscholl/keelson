@@ -62,7 +62,9 @@ describe("parseCoverageArtifact", () => {
 
   test("returns null for malformed or schema-invalid coverage", () => {
     expect(parseCoverageArtifact("{")).toBeNull();
-    expect(parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":true,"step":null}]}')).toBeNull();
+    expect(
+      parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":true,"step":null}]}'),
+    ).toBeNull();
     expect(
       parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":false,"step":"Task 1"}]}'),
     ).toBeNull();
