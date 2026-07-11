@@ -557,6 +557,77 @@ nodes:
     }
   });
 
+  test("resume of a succeeded run reports not-resumable, not locked, under a held lock", async () => {
+    writeWorkflow(
+      "done-ok.yaml",
+      `name: done-ok
+description: succeeds so it is not resumable
+nodes:
+  - id: ok
+    bash: "true"
+`,
+    );
+    writeWorkflow(
+      "guarded-hold.yaml",
+      `name: guarded-hold
+description: holds the project mutation lock at an approval
+nodes:
+  - id: review
+    approval:
+      message: hold the lock
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "repo", rootPath: tmpDir });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, mutationLockManager },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      const okRes = await app.fetch(
+        postJson("http://test/api/workflows/done-ok/runs", { inputs: {}, projectId: project.id }),
+      );
+      const done = (await okRes.json()) as { runId: string };
+      await pollUntilTerminal(store, done.runId);
+      expect(store.getRun(done.runId)?.status).toBe("succeeded");
+
+      const holdRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-hold/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      const hold = (await holdRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, hold.runId, (status) => status === "paused");
+
+      // The lock is never acquired for a non-resumable run, so this reports the
+      // accurate not-resumable error rather than a misleading lock conflict.
+      const res = await app.fetch(
+        postJson(`http://test/api/workflows/runs/${done.runId}/resume-run`, {}),
+      );
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("not in a resumable state");
+      expect(body.error).not.toContain("is locked by workflow");
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
+
   test("resume of a failed worktree-isolated run is exempt from a held project lock", async () => {
     const repo = join(tmpDir, "iso-resume-repo");
     mkdirSync(repo);

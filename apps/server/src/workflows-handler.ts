@@ -1101,6 +1101,17 @@ function resumeRunCore(
     resumeProject?.rootPath ?? null,
     run.workingDir,
   );
+  // Verify the run is actually resumable BEFORE acquiring the mutation lock: a
+  // succeeded run whose project happens to be locked would otherwise report
+  // `locked` instead of the accurate not-resumable result. The atomic
+  // claimRunForResume below still guards the concurrent-resume race.
+  if (run.status !== "failed" && run.status !== "cancelled") {
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
+    };
+  }
   const resumeLockProjectId = resolveMutationLockProjectId({
     resolvedProject: resumeProject,
     workingDir: run.workingDir,
