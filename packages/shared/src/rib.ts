@@ -202,6 +202,16 @@ export interface OpHandle {
   error: (message: string) => void;
 }
 
+export interface MutationLock {
+  id: string;
+  release: () => Promise<void>;
+}
+
+export interface AcquireMutationLockRequest {
+  projectId: string;
+  purpose: string;
+}
+
 // A registered provider, surfaced to a rib so it can make provider-aware choices
 // (e.g. assign a member's vendor at cast time) without a back-dep on
 // @keelson/providers. The minimal shape: the `id` a rib pins on a
@@ -303,6 +313,10 @@ export interface RibContext {
   // against an older harness degrades to blocking tool calls (no durable handle),
   // not a throw. See RegisterOpRequest / OpHandle.
   registerOp?: (req: RegisterOpRequest) => OpHandle;
+  // Acquire an advisory per-project mutation lock before mutating a project's live
+  // checkout directly. Lease-held worktrees are isolated and do not need this.
+  // Optional so a rib built against an older harness degrades to no lock, not a throw.
+  acquireMutationLock?: (req: AcquireMutationLockRequest) => Promise<MutationLock>;
   // Read-only snapshot of the providers registered at call time, so a rib can make
   // availability-aware provider choices (e.g. assign a member's vendor at cast). This
   // only LISTS what's registered; it grants no access beyond the existing runAgentTurn
