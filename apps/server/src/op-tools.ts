@@ -96,8 +96,8 @@ function renderEvents(id: string, events: OpEventView[], cursor: number): string
       usedBytes += line.length + 1;
     }
     const omitted = events.length - tail.length;
-    const note = omitted > 0 ? `\n… (${omitted} earlier node frame(s) omitted)` : "";
-    return `workflow snapshot — ${tail.length} of ${events.length} node frame(s) for op ${id} (re-read for current state):\n${tail.join("\n")}${note}`;
+    const note = omitted > 0 ? `\n… (${omitted} earlier frame(s) omitted)` : "";
+    return `workflow snapshot — ${tail.length} of ${events.length} frame(s) for op ${id} (re-read for current state):\n${tail.join("\n")}${note}`;
   }
   // Native ops: head-first with a durable, incremental cursor.
   const lines: string[] = [];
