@@ -1657,6 +1657,55 @@ nodes:
     expect(gateCalls).toBe(2);
   });
 
+  test("on_exhaust fail emits a failed gate override when the gate was skipped", async () => {
+    const workflow = parseInline(`
+name: converge-fail-skipped-gate
+description: skipped gate gets synthesized failure
+converge:
+  gate: gate
+  max_rounds: 1
+nodes:
+  - id: fix
+    bash: "fix"
+  - id: gate
+    depends_on: [fix]
+    bash: "gate"
+`);
+    const { events, onEvent } = recordEvents();
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([
+        [
+          "bash",
+          {
+            type: "bash",
+            async handle(node) {
+              if (node.id === "fix") {
+                return {
+                  status: "failed",
+                  output: { kind: "text", text: "fix failed" },
+                  error: "still red",
+                };
+              }
+              return { status: "succeeded", output: { kind: "text", text: "ok" } };
+            },
+          } satisfies NodeHandler,
+        ],
+      ]),
+      onEvent,
+    });
+
+    expect(summary.status).toBe("failed");
+    expect(summary.nodes.gate.state).toBe("failed");
+    const gateDoneStatuses = events
+      .filter(
+        (e): e is Extract<RunStreamEvent, { type: "node_done" }> =>
+          e.type === "node_done" && e.nodeId === "gate",
+      )
+      .map((e) => e.result.status);
+    expect(gateDoneStatuses).toEqual(["skipped", "failed"]);
+  });
+
   test("on_exhaust approval accepts the failed gate and runs downstream nodes", async () => {
     const workflow = parseInline(`
 name: converge-approval
@@ -1680,6 +1729,7 @@ nodes:
       },
     });
     const { handler: bash, calls } = echoHandler("bash");
+    const { events, onEvent } = recordEvents();
     const summary = await runWorkflow({
       ...baseOpts(workflow),
       handlers: new Map<string, NodeHandler>([
@@ -1697,6 +1747,7 @@ nodes:
         ],
         ["approval", approval],
       ]),
+      onEvent,
     });
 
     expect(summary.status).toBe("succeeded");
@@ -1708,6 +1759,73 @@ nodes:
     });
     expect(summary.nodes.after.state).toBe("completed");
     expect(calls[0].resolvedBody).toBe("after gate=approved by human");
+    const gateDoneStatuses = events
+      .filter(
+        (e): e is Extract<RunStreamEvent, { type: "node_done" }> =>
+          e.type === "node_done" && e.nodeId === "gate",
+      )
+      .map((e) => e.result.status);
+    expect(gateDoneStatuses).toEqual(["failed", "succeeded"]);
+  });
+
+  test("on_exhaust approval absorbs failed converge ancestors", async () => {
+    const workflow = parseInline(`
+name: converge-approval-ancestor-failed
+description: ancestor failures are absorbed on approval
+converge:
+  gate: gate
+  max_rounds: 1
+  on_exhaust: approval
+nodes:
+  - id: fix
+    bash: "fix"
+  - id: gate
+    depends_on: [fix]
+    bash: "gate"
+  - id: after
+    depends_on: [gate]
+    bash: "after fix=$fix.output gate=$gate.output"
+`);
+    const approval = makeApprovalHandler({
+      awaitApproval: async () => "approved by human",
+    });
+    const { handler: echoBash, calls } = echoHandler("bash");
+    let gateCalls = 0;
+    const summary = await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map<string, NodeHandler>([
+        [
+          "bash",
+          {
+            type: "bash",
+            async handle(node, ctx) {
+              if (node.id === "fix") {
+                return {
+                  status: "failed",
+                  output: { kind: "text", text: "fix-output" },
+                  error: "still red",
+                };
+              }
+              if (node.id === "gate") {
+                gateCalls++;
+              }
+              return echoBash.handle(node, ctx);
+            },
+          },
+        ],
+        ["approval", approval],
+      ]),
+    });
+
+    expect(summary.status).toBe("succeeded");
+    expect(gateCalls).toBe(0);
+    expect(summary.nodes.fix).toMatchObject({ state: "completed", output: "fix-output" });
+    expect(summary.nodes.gate).toMatchObject({
+      state: "completed",
+      output: "approved by human",
+    });
+    expect(summary.nodes.after.state).toBe("completed");
+    expect(calls[0].resolvedBody).toBe("after fix=fix-output gate=approved by human");
   });
 
   test("on_exhaust approval does not shadow a real node id collision", async () => {
@@ -1728,8 +1846,12 @@ nodes:
     depends_on: [gate__converge_exhaust]
     bash: "after $gate__converge_exhaust.output"
 `);
+    const approvalNodeIds: string[] = [];
     const approval = makeApprovalHandler({
-      awaitApproval: async () => "approved by human",
+      awaitApproval: async (_runId, nodeId) => {
+        approvalNodeIds.push(nodeId);
+        return "approved by human";
+      },
     });
     const { handler: echoBash, calls } = echoHandler("bash");
     let collideCalls = 0;
@@ -1758,6 +1880,9 @@ nodes:
 
     expect(summary.status).toBe("succeeded");
     expect(collideCalls).toBe(1);
+    expect(approvalNodeIds).toHaveLength(1);
+    expect(approvalNodeIds[0].startsWith("gate__converge_exhaust")).toBe(true);
+    expect(approvalNodeIds[0]).not.toBe("gate__converge_exhaust");
     expect(summary.nodes.gate.state).toBe("completed");
     expect(summary.nodes["gate__converge_exhaust"]).toMatchObject({
       state: "completed",

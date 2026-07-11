@@ -320,7 +320,7 @@ describe("makeLoopHandler — interactive loops", () => {
     expect(pauseCalls).toBe(1);
   });
 
-  test("resolves $ARGUMENTS in gate_message before pausing", async () => {
+  test("resolves $ARGUMENTS and $converge.round in gate_message before pausing", async () => {
     const { handler: promptHandler } = makeRecorderHandler((_, i) =>
       i === 0
         ? { status: "succeeded", output: { kind: "text", text: "still working" } }
@@ -342,12 +342,12 @@ describe("makeLoopHandler — interactive loops", () => {
         max_iterations: 3,
         fresh_context: false,
         interactive: true,
-        gate_message: "user said: $ARGUMENTS",
+        gate_message: "user said: $ARGUMENTS round=$converge.round",
       },
     } as unknown as Parameters<typeof handler.handle>[0];
-    const ctx = { ...buildCtx(), inputs: { ARGUMENTS: "hello world" } };
+    const ctx = { ...buildCtx(), inputs: { ARGUMENTS: "hello world" }, convergeRound: 4 };
     await handler.handle(node, ctx);
-    expect(gates).toEqual(["user said: hello world"]);
+    expect(gates).toEqual(["user said: hello world round=4"]);
   });
 
   test("aborted pause returns a failed result with 'aborted' error", async () => {
@@ -830,7 +830,7 @@ describe("makeLoopHandler — output_format is filtered from iteration prompts",
 });
 
 describe("makeLoopHandler — substitution in loop.prompt", () => {
-  test("expands $ARGUMENTS / $inputs.* / $X.output before $LOOP_PREV_OUTPUT", async () => {
+  test("expands $ARGUMENTS / $inputs.* / $X.output / $converge.round before $LOOP_PREV_OUTPUT", async () => {
     const { handler: promptHandler, seen } = makeRecorderHandler(() => ({
       status: "succeeded",
       output: { kind: "text", text: "DONE" },
@@ -839,7 +839,8 @@ describe("makeLoopHandler — substitution in loop.prompt", () => {
       id: "loop1",
       model: "x",
       loop: {
-        prompt: "args=$ARGUMENTS lane=$inputs.lane prior=$producer.output prev=$LOOP_PREV_OUTPUT",
+        prompt:
+          "args=$ARGUMENTS lane=$inputs.lane prior=$producer.output round=$converge.round prev=$LOOP_PREV_OUTPUT",
         until: "DONE",
         max_iterations: 1,
         fresh_context: false,
@@ -861,9 +862,10 @@ describe("makeLoopHandler — substitution in loop.prompt", () => {
           },
         ],
       ]),
+      convergeRound: 2,
     };
     await handler.handle(node, ctx);
     expect(seen).toHaveLength(1);
-    expect(seen[0].prompt).toBe("args=u-msg lane=stable prior=upstream-text prev=");
+    expect(seen[0].prompt).toBe("args=u-msg lane=stable prior=upstream-text round=2 prev=");
   });
 });

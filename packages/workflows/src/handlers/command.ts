@@ -44,10 +44,12 @@ export function makeCommandHandler(opts: MakeCommandHandlerOptions): NodeHandler
       // file would otherwise reach the model literally. Forward
       // `memoryRecall` so `$memory.recall.items` inside the command file
       // substitutes against the executor's pre-run recall (otherwise the
-      // declared memory.recall: block silently no-ops for command nodes).
+      // declared memory.recall: block silently no-ops for command nodes),
+      // and `convergeRound` so `$converge.round` resolves in command files.
       const resolvedPrompt = resolveBody(resolved.content, ctx.inputs, ctx.upstreamOutputs, {
         ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
         ...(ctx.memoryRecall !== undefined ? { memoryRecall: ctx.memoryRecall } : {}),
+        ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
       });
       const synthesized = synthesizePromptNode(node, {
         id: node.id,

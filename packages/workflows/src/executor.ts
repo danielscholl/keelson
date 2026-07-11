@@ -542,9 +542,15 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     }
 
     if (!cancelled && !converged) {
-      ensureConvergeGateFailed(nodeOutputs, gate, maxRounds);
+      ensureConvergeGateFailed(nodeOutputs, gate, maxRounds, emit);
       if (onExhaust === "approval") {
-        converged = await runConvergeExhaustApproval(gate, maxRounds, nodeOutputs, sharedCtx);
+        converged = await runConvergeExhaustApproval(
+          gate,
+          maxRounds,
+          subgraphIds,
+          nodeOutputs,
+          sharedCtx,
+        );
         if (runAbortSignal.aborted) cancelled = true;
       }
     }
@@ -698,23 +704,89 @@ function ensureConvergeGateFailed(
   nodeOutputs: Map<string, NodeOutput>,
   gate: string,
   maxRounds: number,
+  emit: (event: RunStreamEvent) => void,
 ): void {
   if (nodeOutputs.get(gate)?.state === "failed") return;
+  const error = `converge gate '${gate}' did not pass after ${maxRounds} round(s)`;
   nodeOutputs.set(gate, {
     state: "failed",
     output: "",
-    error: `converge gate '${gate}' did not pass after ${maxRounds} round(s)`,
+    error,
   });
+  emit({ type: "node_done", nodeId: gate, result: failedResult(error) });
+}
+
+function toCompletedOutput(output: NodeOutput, text = output.output): NodeOutput {
+  return {
+    state: "completed",
+    output: text,
+    ...("sessionId" in output && output.sessionId !== undefined
+      ? { sessionId: output.sessionId }
+      : {}),
+    ...("usage" in output && output.usage !== undefined ? { usage: output.usage } : {}),
+    ...("startedAt" in output && output.startedAt !== undefined
+      ? { startedAt: output.startedAt }
+      : {}),
+    ...("completedAt" in output && output.completedAt !== undefined
+      ? { completedAt: output.completedAt }
+      : {}),
+    ...("durationMs" in output && output.durationMs !== undefined
+      ? { durationMs: output.durationMs }
+      : {}),
+  };
+}
+
+function emitSucceededNodeDone(
+  emit: (event: RunStreamEvent) => void,
+  nodeId: string,
+  output: string,
+): void {
+  emit({
+    type: "node_done",
+    nodeId,
+    result: { status: "succeeded", output: { kind: "text", text: output } },
+  });
+}
+
+function absorbConvergeSubgraphFailures(
+  subgraphIds: ReadonlySet<string>,
+  gate: string,
+  nodeOutputs: Map<string, NodeOutput>,
+  emit: (event: RunStreamEvent) => void,
+): void {
+  for (const id of subgraphIds) {
+    if (id === gate) continue;
+    const output = nodeOutputs.get(id);
+    if (output?.state !== "failed") continue;
+    const absorbed = toCompletedOutput(output);
+    nodeOutputs.set(id, absorbed);
+    emitSucceededNodeDone(emit, id, absorbed.output);
+  }
+}
+
+function makeConvergeExhaustApprovalNodeId(gate: string, nodes: readonly DagNode[]): string {
+  const base = `${gate}__converge_exhaust`;
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  if (!nodeIds.has(base)) return base;
+  let suffix = 1;
+  let candidate = `${base}__${String(suffix)}`;
+  while (nodeIds.has(candidate)) {
+    suffix++;
+    candidate = `${base}__${String(suffix)}`;
+  }
+  return candidate;
 }
 
 async function runConvergeExhaustApproval(
   gate: string,
   maxRounds: number,
+  subgraphIds: ReadonlySet<string>,
   nodeOutputs: Map<string, NodeOutput>,
   sharedCtx: LayerRunCtx,
 ): Promise<boolean> {
+  const approvalNodeId = makeConvergeExhaustApprovalNodeId(gate, sharedCtx.workflow.nodes);
   const approvalNode: DagNode = {
-    id: `${gate}__converge_exhaust`,
+    id: approvalNodeId,
     approval: {
       message: `Converge gate '${gate}' did not pass after ${maxRounds} round(s). Approve to continue anyway.`,
     },
@@ -729,15 +801,10 @@ async function runConvergeExhaustApproval(
   // real workflow node that happens to use the same id.
   const approvalOutput = layerResults.get(approvalNode.id);
   if (approvalOutput?.state !== "completed") return false;
-  nodeOutputs.set(gate, {
-    state: "completed",
-    output: approvalOutput.output,
-    ...(approvalOutput.startedAt !== undefined ? { startedAt: approvalOutput.startedAt } : {}),
-    ...(approvalOutput.completedAt !== undefined
-      ? { completedAt: approvalOutput.completedAt }
-      : {}),
-    ...(approvalOutput.durationMs !== undefined ? { durationMs: approvalOutput.durationMs } : {}),
-  });
+  absorbConvergeSubgraphFailures(subgraphIds, gate, nodeOutputs, sharedCtx.emit);
+  const acceptedGateOutput = toCompletedOutput(approvalOutput);
+  nodeOutputs.set(gate, acceptedGateOutput);
+  emitSucceededNodeDone(sharedCtx.emit, gate, acceptedGateOutput.output);
   return true;
 }
 

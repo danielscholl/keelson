@@ -223,10 +223,12 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
         // otherwise) are loop-only extensions layered on top. `memoryRecall`
         // is forwarded so `$memory.recall.items` inside loop.prompt
         // substitutes against the executor's pre-run recall on every
-        // iteration, not just the (skipped) outer pass.
+        // iteration, not just the (skipped) outer pass; `convergeRound` is
+        // also forwarded so `$converge.round` resolves inside loop.prompt.
         const substituted = resolveBody(loop.prompt, ctx.inputs, ctx.upstreamOutputs, {
           ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
           ...(ctx.memoryRecall !== undefined ? { memoryRecall: ctx.memoryRecall } : {}),
+          ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
         });
         const iterationPrompt = substituteLoopMarkers(substituted, prevOutput, userInput);
 
@@ -333,6 +335,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
             resolveBody(rawGate, ctx.inputs, ctx.upstreamOutputs, {
               ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
               ...(ctx.memoryRecall !== undefined ? { memoryRecall: ctx.memoryRecall } : {}),
+              ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
             }),
             stripped,
             userInput,
