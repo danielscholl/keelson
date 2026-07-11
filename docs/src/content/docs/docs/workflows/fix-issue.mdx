@@ -77,7 +77,9 @@ only when the pushed PR's checks pass.
 | Plan | `investigate` | prompt | **`when: issue_type == 'bug'`**, **`model: claude-opus-4.8`**: root-cause analysis into `plan.md`. |
 | | `plan` | prompt | **`when: issue_type != 'bug'`**, **`model: claude-opus-4.8`**: an implementation plan into the *same* `plan.md`. |
 | | `plan-ready` | bash | Funnel (`trigger_rule: one_success`): asserts `plan.md` exists and has tasks, then prints it. |
-| | `coverage-check` | prompt | **`model: claude-opus-4.8`**: semantic judge — maps each brief criterion to the plan step that covers it or **MISSING**, into `coverage.json`. Skips when the brief has no criteria. |
+| | `criteria-count` | bash | Prints the brief's acceptance-criteria count so the next node can gate on it. |
+| | `coverage-check` | prompt | **`when: criteria-count > 0`**, **`model: claude-opus-4.8`**: semantic judge — maps each brief criterion to the plan step that covers it or **MISSING**. Returns typed JSON only; skipped entirely when the brief has no criteria. |
+| | `coverage-ready` | bash | Funnel (`trigger_rule: all_done`): writes the judge's output to `coverage.json` when criteria exist, and removes the artifact otherwise. |
 | Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. The criteria-coverage checklist is appended here. |
 | Implement | `implement` | prompt | **`model: gpt-5.6-terra`**: Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
 | Validate | `validate` | bash | Runs `verify.sh` fail-fast. **Exits 0** and reports `VALIDATION_STATUS` so the fixer can read it. |

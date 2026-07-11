@@ -89,8 +89,8 @@ nodes:
           BEGIN{f=0}
           /^#{1,6}[[:space:]]+[Aa]cceptance [Cc]riteria[[:space:]]*:?[[:space:]]*$/{f=1; next}
           /^#{1,6}[[:space:]]/{if(f)exit}
-          f && /^[[:space:]]*[-*][[:space:]]+/{
-            line=$0; sub(/^[[:space:]]*[-*][[:space:]]+(\[[ xX]\][[:space:]]*)?/,"",line);
+          f && /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/{
+            line=$0; sub(/^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+(\[[ xX]\][[:space:]]*)?/,"",line);
             if(length(line)>0) print line
           }' | jq -R -s -c 'split("\n") | map(select(length>0))' 2>/dev/null || printf '[]')
         case "$CRITERIA" in
@@ -299,8 +299,19 @@ nodes:
       echo "=== PLAN ==="
       cat "$PLAN_FILE"
 
+  - id: criteria-count
+    depends_on: [extract-brief]
+    bash: |
+      set -uo pipefail
+      COUNT=$(jq -r '(.criteria // []) | length' "$KEELSON_ARTIFACTS_DIR/brief.json" 2>/dev/null || printf '0')
+      case "$COUNT" in ''|*[!0-9]*) COUNT=0 ;; esac
+      printf '%s\n' "$COUNT"
+
+  # Gated on a real criteria count so a no-criteria brief (the common path) skips
+  # this full Opus call entirely rather than paying for it and discarding the result.
   - id: coverage-check
-    depends_on: [plan-ready, extract-brief]
+    depends_on: [plan-ready, extract-brief, criteria-count]
+    when: "$criteria-count.output > '0'"
     context: fresh
     model: claude-opus-4.8
     allowed_tools: []

@@ -2367,6 +2367,92 @@ nodes:
     await pollUntilTerminal(app, runId);
   });
 
+  test("approval augments the awaiting row + WS frame with coverage and attaches run.brief", async () => {
+    // The setup node writes brief + coverage artifacts before the approval pauses,
+    // so awaitApproval renders the criteria checklist into the awaiting row and the
+    // approval_awaiting WS frame, and persists run.brief.
+    writeWorkflow(
+      "pa-brief.yaml",
+      `name: pa-brief
+description: approval that surfaces criteria coverage
+nodes:
+  - id: setup
+    bash: |
+      printf '%s' '{"criteria":["Alpha criterion","Beta criterion"]}' > "$KEELSON_ARTIFACTS_DIR/brief.json"
+      printf '%s' '{"coverage":[{"criterion":"Alpha criterion","covered":true,"step":"Task 1"},{"criterion":"Beta criterion","covered":false,"step":null}]}' > "$KEELSON_ARTIFACTS_DIR/coverage.json"
+      sleep 0.05
+  - id: review
+    depends_on: [setup]
+    approval:
+      message: please approve
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const subscribers = createWorkflowSubscribers();
+    const received: Array<{ type: string; nodeId?: string; message?: string }> = [];
+    const fakeWs = {
+      send: (raw: string) => {
+        received.push(JSON.parse(raw));
+      },
+    } as unknown as Parameters<typeof subscribers.subscribe>[1];
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      {
+        catalog,
+        store,
+        conversationStore: createConversationStore(db),
+        defaultCwd: tmpDir,
+      },
+      undefined,
+      subscribers,
+    );
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/pa-brief/runs", { inputs: {}, workingDir: tmpDir }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    subscribers.subscribe(runId, fakeWs);
+    const pausedDeadline = Date.now() + 3000;
+    while (Date.now() < pausedDeadline) {
+      if (received.some((f) => f.type === "approval_awaiting")) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const approvalFrame = received.find((f) => f.type === "approval_awaiting") as
+      | { type: string; message?: string }
+      | undefined;
+    expect(approvalFrame).toBeDefined();
+    // The WS frame carries the rendered criteria checklist, not just the bare message.
+    expect(approvalFrame?.message).toContain("please approve");
+    expect(approvalFrame?.message).toContain("## Criteria coverage");
+    expect(approvalFrame?.message).toContain("- [x] Alpha criterion -> Task 1");
+    expect(approvalFrame?.message).toContain("- [ ] Beta criterion -> **MISSING**");
+
+    // The persisted awaiting row and run.brief reflect the same artifacts.
+    const detailRes = await app.fetch(new Request(`http://test/api/workflows/runs/${runId}`));
+    const detail = (await detailRes.json()) as {
+      run: {
+        brief: { criteria: string[] } | null;
+        nodes: Array<{ nodeId: string; status: string; outputText: string | null }>;
+      };
+    };
+    expect(detail.run.brief).toEqual({ criteria: ["Alpha criterion", "Beta criterion"] });
+    const awaiting = detail.run.nodes.find((n) => n.nodeId === "review");
+    expect(awaiting?.status).toBe("awaiting");
+    expect(awaiting?.outputText).toContain("## Criteria coverage");
+    expect(awaiting?.outputText).toContain("- [ ] Beta criterion -> **MISSING**");
+
+    // Cleanup.
+    await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume`, {
+        nodeId: "review",
+        text: "approve",
+      }),
+    );
+    await pollUntilTerminal(app, runId);
+  });
+
   test("WS open replays approval_awaiting with live pauseId for reconnecting clients", async () => {
     writeWorkflow(
       "pa-replay.yaml",

@@ -22,17 +22,25 @@ import {
 import { rmTemp } from "./temp.ts";
 
 describe("reconcileCoverage", () => {
-  test("emits one row per criterion in brief order, flagging omitted/reordered as MISSING", () => {
+  test("matches positionally: only the in-order exact row is covered, reordered/omitted are MISSING", () => {
     const criteria = ["a", "b", "c"];
-    // Model omitted "b" and covered "a" (with a step); "c" claims covered but no step.
+    // Row 0 "a" matches index 0 and is covered; row 1 is "c" (reordered — it belongs
+    // at index 2), so criterion "b" at index 1 is MISSING and criterion "c" at index 2
+    // has no row of its own — the stray "c" row does NOT satisfy it.
     const rows = reconcileCoverage(criteria, [
-      { criterion: "c", covered: true, step: null },
       { criterion: "a", covered: true, step: "Task 1" },
+      { criterion: "c", covered: true, step: "Task 3" },
     ]);
     expect(rows.map((r) => r.criterion)).toEqual(["a", "b", "c"]);
     expect(rows[0]).toEqual({ criterion: "a", covered: true, step: "Task 1" });
-    expect(rows[1]).toEqual({ criterion: "b", covered: false, step: null }); // omitted -> MISSING
-    expect(rows[2]).toEqual({ criterion: "c", covered: false, step: null }); // no step -> MISSING
+    expect(rows[1]).toEqual({ criterion: "b", covered: false, step: null }); // reordered -> MISSING
+    expect(rows[2]).toEqual({ criterion: "c", covered: false, step: null }); // wrong position -> MISSING
+  });
+
+  test("a duplicated criterion needs its own row at each position", () => {
+    const rows = reconcileCoverage(["a", "a"], [{ criterion: "a", covered: true, step: "Task 1" }]);
+    expect(rows[0]).toEqual({ criterion: "a", covered: true, step: "Task 1" });
+    expect(rows[1]).toEqual({ criterion: "a", covered: false, step: null }); // one row can't cover both
   });
 
   test("empty coverage rows flag every criterion MISSING (fail-visible)", () => {
@@ -91,6 +99,10 @@ describe("parseCoverageArtifact", () => {
     ).toBeNull();
     expect(
       parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":false,"step":"Task 1"}]}'),
+    ).toBeNull();
+    // A covered row with an empty step is schema-invalid, not a silent per-row MISSING.
+    expect(
+      parseCoverageArtifact('{"coverage":[{"criterion":"x","covered":true,"step":""}]}'),
     ).toBeNull();
   });
 });

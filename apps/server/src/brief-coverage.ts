@@ -24,8 +24,8 @@ const coverageRowSchema = z
     step: z.string().nullable(),
   })
   .strict()
-  .refine((row) => (row.covered ? row.step !== null : row.step === null), {
-    message: "covered rows must name a step; missing rows must use null",
+  .refine((row) => (row.covered ? row.step !== null && row.step.length > 0 : row.step === null), {
+    message: "covered rows must name a non-empty step; missing rows must use null",
     path: ["step"],
   });
 
@@ -55,16 +55,15 @@ export function parseCoverageArtifact(raw: string): CoverageRow[] | null {
   }
 }
 
-// Reconcile the model's coverage rows against the brief's criteria by exact match:
-// every criterion appears exactly once, in brief order; a criterion the model
-// omitted, reordered, or marked covered without a real step is flagged MISSING.
-// The model judges coverage; the server guarantees completeness so a dropped
-// criterion (the exact #85 failure this feature guards) can't silently hide.
+// Reconcile the model's coverage rows against the brief's criteria positionally:
+// row[i] must match criteria[i] by exact text, so an omitted or reordered row lands
+// on the wrong criterion and is flagged MISSING, and a duplicate criterion needs its
+// own row rather than being satisfied by one. The model judges coverage; the server
+// guarantees completeness so a dropped criterion can't silently hide.
 export function reconcileCoverage(criteria: string[], rows: CoverageRow[]): CoverageRow[] {
-  const byCriterion = new Map(rows.map((row) => [row.criterion, row]));
-  return criteria.map((criterion) => {
-    const row = byCriterion.get(criterion);
-    return row && row.covered && row.step !== null && row.step.length > 0
+  return criteria.map((criterion, i) => {
+    const row = rows[i];
+    return row && row.criterion === criterion && row.covered && row.step !== null
       ? { criterion, covered: true, step: row.step }
       : { criterion, covered: false, step: null };
   });
