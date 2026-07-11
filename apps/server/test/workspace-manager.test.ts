@@ -228,6 +228,75 @@ describe("WorkspaceManager", () => {
     expect(leaseStore.list()).toEqual([]);
   });
 
+  test("acquire rejects an adopted destination without removing it", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const removeCalls: unknown[] = [];
+    manager.prepareWorktree = async (req) => ({
+      worktreePath: req.dest,
+      adopted: true,
+      branchCreated: false,
+      deps: { installed: false, skipped: "no-manifest", error: null, durationMs: 1 },
+      depsError: null,
+    });
+    manager.removeWorktree = async (opts) => {
+      removeCalls.push(opts);
+      return { removed: true, warning: null };
+    };
+
+    await expect(
+      manager.acquire({ projectId: project.id, purpose: "steal", owner: "tool" }),
+    ).rejects.toThrow("refusing to adopt");
+
+    expect(removeCalls).toHaveLength(0);
+    expect(leaseStore.list()).toEqual([]);
+  });
+
+  test("acquire keeps the lease row when failure cleanup itself fails", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    manager.prepareWorktree = async (req) => ({
+      worktreePath: req.dest,
+      adopted: false,
+      branchCreated: true,
+      deps: { installed: false, skipped: null, error: "boom", durationMs: 1 },
+      depsError: "boom",
+    });
+    manager.removeWorktree = async () => ({ removed: false, warning: "removal failed" });
+
+    await expect(
+      manager.acquire({ projectId: project.id, purpose: "sticky", owner: "tool" }),
+    ).rejects.toThrow("dependency install failed");
+
+    expect(leaseStore.list()).toHaveLength(1);
+  });
+
+  test("release refuses a lease whose acquisition is still in flight", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    let releaseError: Error | null = null;
+    manager.prepareWorktree = async (req) => {
+      const pending = leaseStore.list()[0];
+      if (pending) {
+        await manager.release(pending.id).catch((err) => {
+          releaseError = err as Error;
+        });
+      }
+      return {
+        worktreePath: req.dest,
+        adopted: false,
+        branchCreated: true,
+        deps: { installed: false, skipped: "no-manifest", error: null, durationMs: 1 },
+        depsError: null,
+      };
+    };
+
+    await manager.acquire({ projectId: project.id, purpose: "inflight", owner: "tool" });
+
+    expect(releaseError?.message ?? "").toContain("acquisition still in progress");
+    expect(leaseStore.list()).toHaveLength(1);
+  });
+
   test("acquire honors an explicit branch", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });

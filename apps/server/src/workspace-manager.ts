@@ -120,6 +120,7 @@ export function createWorkspaceManager({
   store: WorkspaceLeaseStore;
   projectsStore: ProjectsStore;
 }): WorkspaceManager {
+  const pendingAcquisitions = new Set<string>();
   const resolveRepoPath = (record: WorkspaceLeaseRecord): string | null => {
     if (record.projectId !== null) {
       const project = projectsStore.get(record.projectId);
@@ -185,64 +186,86 @@ export function createWorkspaceManager({
       });
       const createdAt = new Date().toISOString();
 
-      store.insert({
-        id,
-        projectId: project.id,
-        purpose: req.purpose,
-        owner: req.owner,
-        branch,
-        worktreePath: dest,
-        createdAt,
-      });
-
-      let prepared: PreparedWorktree | null = null;
-
+      pendingAcquisitions.add(id);
       try {
-        const base = await resolveDefaultBranch(project.rootPath);
-        prepared = await manager.prepareWorktree({
-          repoPath: project.rootPath,
+        store.insert({
+          id,
+          projectId: project.id,
+          purpose: req.purpose,
+          owner: req.owner,
           branch,
-          dest,
-          base,
-          ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
+          worktreePath: dest,
+          createdAt,
         });
-        if (prepared.depsError !== null) {
-          throw new Error(`workspace dependency install failed: ${prepared.depsError}`);
-        }
-        if (prepared.deps.skipped === "aborted") {
-          throw new Error("workspace acquisition aborted during dependency preparation");
-        }
-      } catch (err) {
-        try {
-          store.delete(id);
-        } catch (cleanupErr) {
-          console.warn(
-            `[workspace] failed to delete lease row ${id} after acquisition failure: ${
-              cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
-            }`,
-          );
-        }
-        if (prepared !== null && !prepared.adopted) {
-          const out = await manager.removeWorktree({
-            repoPath: project.rootPath,
-            dest: prepared.worktreePath,
-            force: true,
-          });
-          if (out.warning !== null) {
-            console.warn(`[workspace] failed to clean up lease worktree ${id}: ${out.warning}`);
-          }
-        }
-        throw err;
-      }
 
-      return {
-        id,
-        path: prepared.worktreePath,
-        branch,
-        release: () => manager.release(id),
-      };
+        let prepared: PreparedWorktree | null = null;
+
+        try {
+          const base = await resolveDefaultBranch(project.rootPath);
+          prepared = await manager.prepareWorktree({
+            repoPath: project.rootPath,
+            branch,
+            dest,
+            base,
+            ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
+          });
+          if (prepared.adopted) {
+            throw new Error(
+              `workspace destination already exists at ${dest} — refusing to adopt another owner's checkout`,
+            );
+          }
+          if (prepared.depsError !== null) {
+            throw new Error(`workspace dependency install failed: ${prepared.depsError}`);
+          }
+          if (prepared.deps.skipped === "aborted") {
+            throw new Error("workspace acquisition aborted during dependency preparation");
+          }
+        } catch (err) {
+          // Remove the checkout before the row: a row without a checkout is a
+          // reconcilable no-op, but a checkout without a row is untracked and
+          // unreleasable — so on cleanup failure the row stays for a retry.
+          let cleanupOk = true;
+          if (prepared !== null && !prepared.adopted) {
+            const out = await manager.removeWorktree({
+              repoPath: project.rootPath,
+              dest: prepared.worktreePath,
+              force: true,
+            });
+            if (out.warning !== null) {
+              cleanupOk = false;
+              console.warn(
+                `[workspace] failed to clean up lease worktree ${id}; keeping its row for release retry: ${out.warning}`,
+              );
+            }
+          }
+          if (cleanupOk) {
+            try {
+              store.delete(id);
+            } catch (cleanupErr) {
+              console.warn(
+                `[workspace] failed to delete lease row ${id} after acquisition failure: ${
+                  cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+                }`,
+              );
+            }
+          }
+          throw err;
+        }
+
+        return {
+          id,
+          path: prepared.worktreePath,
+          branch,
+          release: () => manager.release(id),
+        };
+      } finally {
+        pendingAcquisitions.delete(id);
+      }
     },
     async release(id) {
+      if (pendingAcquisitions.has(id)) {
+        throw new WorkspaceLeaseReleaseError(id, "acquisition still in progress");
+      }
       const record = store.get(id);
       if (!record) return;
       if (existsSync(record.worktreePath)) {

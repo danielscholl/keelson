@@ -17,6 +17,7 @@ import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
+import { createWorkspaceLeaseStore } from "../src/workspace-lease-store.ts";
 import { migrateLegacyProjectsLayout } from "../src/workspace-migration.ts";
 import { rmTemp } from "./temp.ts";
 
@@ -140,6 +141,16 @@ describe("migrateLegacyProjectsLayout", () => {
       workingDir: legacyBar,
       worktreePath: legacyWorktree,
     });
+    const leaseStore = createWorkspaceLeaseStore(db);
+    leaseStore.insert({
+      id: "lease-1",
+      projectId: bar.id,
+      purpose: "test",
+      owner: "tool",
+      branch: "keelson/y/br",
+      worktreePath: legacyWorktree,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
 
     migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: workspace });
 
@@ -148,6 +159,8 @@ describe("migrateLegacyProjectsLayout", () => {
     expect(projectsStore.get(bar.id)?.rootPath).toBe(movedBar);
     // The run row that pointed at the old repo-local path now points at the new one.
     expect(workflowStore.getRun("r1")?.worktreePath).toBe(movedWorktree);
+    // The lease row moved with it.
+    expect(leaseStore.get("lease-1")?.worktreePath).toBe(movedWorktree);
     // Git metadata was repaired: the moved worktree resolves and the repo lists
     // no stale path under the old projects/ location.
     expect((await git(["rev-parse", "--is-inside-work-tree"], movedWorktree)).trim()).toBe("true");

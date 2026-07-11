@@ -105,10 +105,17 @@ export function migrateLegacyProjectsLayout(opts: MigrateOptions): void {
   const updateRunPath = db.prepare(
     "UPDATE workflow_runs SET worktree_path = ? WHERE worktree_path = ?",
   );
+  const updateLeasePath = db.prepare(
+    "UPDATE workspace_leases SET worktree_path = ? WHERE worktree_path = ?",
+  );
+  const rewritePaths = (newPath: string, oldPath: string): void => {
+    updateRunPath.run(newPath, oldPath);
+    updateLeasePath.run(newPath, oldPath);
+  };
 
   // A project dir move carries its repo-local `.worktrees/` along; the moved
-  // worktrees' git metadata and the run rows that reference them still hold the
-  // pre-move absolute path. Repair both against the new project root.
+  // worktrees' git metadata and the run/lease rows that reference them still
+  // hold the pre-move absolute path. Repair all against the new project root.
   const repairMovedWorktrees = (oldRoot: string, newRoot: string): void => {
     const wtDir = join(newRoot, ".worktrees");
     if (!isDir(wtDir)) return;
@@ -116,7 +123,7 @@ export function migrateLegacyProjectsLayout(opts: MigrateOptions): void {
       const newPath = join(wtDir, leaf);
       if (!isDir(newPath)) continue;
       repairWorktree(newRoot, newPath);
-      updateRunPath.run(newPath, join(oldRoot, ".worktrees", leaf));
+      rewritePaths(newPath, join(oldRoot, ".worktrees", leaf));
     }
   };
 
@@ -189,7 +196,7 @@ export function migrateLegacyProjectsLayout(opts: MigrateOptions): void {
         mkdirSync(destParent, { recursive: true });
         if (!safeMove(oldPath, newPath)) continue;
         repairWorktree(repoRoot, newPath);
-        updateRunPath.run(newPath, oldPath);
+        rewritePaths(newPath, oldPath);
       }
       removeIfEmpty(projDir);
     }
