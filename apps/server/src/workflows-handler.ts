@@ -100,6 +100,11 @@ function originForbidden(c: { req: { header: (n: string) => string | undefined }
 
 import type { ConversationStore } from "./conversation-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import {
+  MutationLockConflictError,
+  type MutationLockHandle,
+  type MutationLockManager,
+} from "./mutation-lock-manager.ts";
 import { formatNotebookSection, type ProjectNotebookStore } from "./project-notebook-store.ts";
 import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
 import type { UsageStore } from "./usage-store.ts";
@@ -154,6 +159,7 @@ export interface WorkflowsHandlerOptions {
   // Shared workspace lifecycle service. Production wires this so workflow
   // worktrees use the same prepare/remove primitives as workspace leases.
   workspaceManager?: WorkspaceManager;
+  mutationLockManager?: MutationLockManager;
   // Whether an active rib surface region (static or runtime-added) declares this
   // workflow as its refresh producer. Widens the `/refresh` gate beyond bound
   // producers: a region may name an UNBOUND workflow (one that republishes
@@ -668,6 +674,7 @@ interface StartRunCoreDeps {
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
   usageStore?: UsageStore;
   workspaceManager?: WorkspaceManager;
+  mutationLockManager?: MutationLockManager;
 }
 
 interface StartRunCoreParams {
@@ -744,6 +751,66 @@ function buildNotebookAdapter(
   };
 }
 
+function mutationLockOwner(origin: WorkflowRunOrigin, runId: string): string {
+  return `${origin === "scheduled" ? "scheduled" : "workflow"}:${runId.slice(0, 8)}`;
+}
+
+function acquireRunMutationLock(opts: {
+  mutationLockManager?: MutationLockManager;
+  workflow: WorkflowDefinition;
+  resolvedProject: Pick<Project, "id" | "rootPath"> | null;
+  isolationOn: boolean;
+  runId: string;
+  origin: WorkflowRunOrigin;
+}): MutationLockHandle | undefined {
+  const { mutationLockManager, workflow, resolvedProject, isolationOn, runId, origin } = opts;
+  if (
+    mutationLockManager === undefined ||
+    isolationOn ||
+    resolvedProject === null ||
+    workflow.mutates_checkout === false
+  ) {
+    return undefined;
+  }
+  return mutationLockManager.acquire({
+    projectId: resolvedProject.id,
+    purpose: workflow.name,
+    owner: mutationLockOwner(origin, runId),
+  });
+}
+
+function releaseMutationLockNow(runId: string, lockHandle: MutationLockHandle): void {
+  try {
+    lockHandle.release();
+  } catch (err) {
+    console.warn(
+      `[mutation-lock] failed to release lock ${lockHandle.id} for run ${runId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
+function releaseMutationLockOnSettle(
+  runId: string,
+  lockHandle: MutationLockHandle,
+  done: Promise<void>,
+): void {
+  void done
+    .finally(() => releaseMutationLockNow(runId, lockHandle))
+    .catch((err) => {
+      console.warn(
+        `[mutation-lock] release chain observed run ${runId} rejection: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+}
+
+function startRunErrorStatus(err: unknown): 409 | 500 {
+  return err instanceof MutationLockConflictError ? 409 : 500;
+}
+
 // Run-launch core: create the linked conversation + run row, spawn the
 // background executor, register the active run. Both the HTTP start route and
 // the WorkflowController call this after resolving inputs / working dir, so the
@@ -756,7 +823,7 @@ function startRunCore(
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
-  const { workspaceManager } = deps;
+  const { workspaceManager, mutationLockManager } = deps;
   const {
     workflow,
     inputs,
@@ -797,13 +864,22 @@ function startRunCore(
     }
   }
   const runId = crypto.randomUUID();
-  const startedAt = new Date().toISOString();
-  // Create the conversation FIRST so the workflow_runs FK has a target.
-  const conversation = conversationStore.create({
-    providerId: "workflow",
-    name: `${name} · ${runId.slice(0, 6)}`,
+  let lockHandle = acquireRunMutationLock({
+    mutationLockManager,
+    workflow,
+    resolvedProject,
+    isolationOn,
+    runId,
+    origin,
   });
+  const startedAt = new Date().toISOString();
+  let conversation: ReturnType<ConversationStore["create"]> | undefined;
   try {
+    // Create the conversation FIRST so the workflow_runs FK has a target.
+    conversation = conversationStore.create({
+      providerId: "workflow",
+      name: `${name} · ${runId.slice(0, 6)}`,
+    });
     conversationStore.appendMessage(conversation.id, {
       id: crypto.randomUUID(),
       role: "user",
@@ -822,16 +898,22 @@ function startRunCore(
       ribId,
     });
   } catch (err) {
+    if (lockHandle !== undefined) {
+      releaseMutationLockNow(runId, lockHandle);
+      lockHandle = undefined;
+    }
     // Orphan rollback: the conversation row exists only to anchor a run, so
     // if createRun throws drop the empty conversation rather than leak it.
-    try {
-      conversationStore.delete(conversation.id);
-    } catch (cleanupErr) {
-      console.warn(
-        `[workflows] orphan-rollback failed for conversation ${conversation.id}: ${
-          cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
-        }`,
-      );
+    if (conversation !== undefined) {
+      try {
+        conversationStore.delete(conversation.id);
+      } catch (cleanupErr) {
+        console.warn(
+          `[workflows] orphan-rollback failed for conversation ${conversation.id}: ${
+            cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+          }`,
+        );
+      }
     }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[workflows] createRun failed for ${name}: ${message}`);
@@ -872,14 +954,26 @@ function startRunCore(
     ...(usageStore !== undefined ? { usageStore } : {}),
     ...(workspaceManager !== undefined ? { workspaceManager } : {}),
   });
-  activeRuns.register(runId, {
-    abort,
-    done,
-    pendingApprovals,
-    dedupeKey,
-    definition: workflow,
-    conversationId: conversation.id,
-  });
+  try {
+    activeRuns.register(runId, {
+      abort,
+      done,
+      pendingApprovals,
+      dedupeKey,
+      definition: workflow,
+      conversationId: conversation.id,
+    });
+  } catch (err) {
+    if (lockHandle !== undefined) {
+      releaseMutationLockNow(runId, lockHandle);
+      lockHandle = undefined;
+    }
+    throw err;
+  }
+  if (lockHandle !== undefined) {
+    releaseMutationLockOnSettle(runId, lockHandle, done);
+    lockHandle = undefined;
+  }
   // Retention is a creation-time invariant of scheduled runs, so it covers the
   // heartbeat AND panel /refresh uniformly (rather than only firing on a
   // scheduler tick). Manual runs are never auto-pruned.
@@ -910,7 +1004,7 @@ function resumeRunCore(
 ): ResumeRunResult {
   const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, catalog, usageStore } = deps;
-  const { workspaceManager } = deps;
+  const { workspaceManager, mutationLockManager } = deps;
   const { projectsStore, projectNotebookStore } = deps;
 
   const run = store.getRun(runId);
@@ -958,17 +1052,6 @@ function resumeRunCore(
     };
   }
 
-  // Atomically claim the run: one UPDATE flips failed/cancelled → running. A
-  // succeeded (or otherwise non-interrupted) run, or one a concurrent resume
-  // already claimed, loses here — only the winner launches a background run.
-  if (!store.claimRunForResume(runId)) {
-    return {
-      ok: false,
-      reason: "not_terminal",
-      message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
-    };
-  }
-
   // Resolve the run's project from its persisted id so the resumed run binds the
   // same notebook adapter a fresh run would (the start path resolves it too).
   const resumeProject = run.projectId !== null ? (projectsStore?.get(run.projectId) ?? null) : null;
@@ -978,40 +1061,84 @@ function resumeRunCore(
     resumeProject?.rootPath ?? null,
     run.workingDir,
   );
+  let lockHandle: MutationLockHandle | undefined;
+  try {
+    lockHandle = acquireRunMutationLock({
+      mutationLockManager,
+      workflow,
+      resolvedProject: resumeProject,
+      isolationOn: run.worktreePath !== null,
+      runId,
+      origin: run.origin,
+    });
+  } catch (err) {
+    if (err instanceof MutationLockConflictError) {
+      return { ok: false, reason: "not_terminal", message: err.message };
+    }
+    throw err;
+  }
+
+  // Atomically claim the run: one UPDATE flips failed/cancelled → running. A
+  // succeeded (or otherwise non-interrupted) run, or one a concurrent resume
+  // already claimed, loses here — only the winner launches a background run.
+  if (!store.claimRunForResume(runId)) {
+    if (lockHandle !== undefined) {
+      releaseMutationLockNow(runId, lockHandle);
+      lockHandle = undefined;
+    }
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
+    };
+  }
 
   const abort = new AbortController();
   const pendingApprovals = new Map<string, PendingApproval>();
-  const done = executeRunInBackground({
-    workflow,
-    runId,
-    inputs: run.inputs,
-    cwd: run.workingDir,
-    store,
-    abort,
-    activeRuns,
-    subscribers,
-    promptHandler,
-    pendingApprovals,
-    isolation: null,
-    ...(run.projectId !== null ? { projectId: run.projectId } : {}),
-    ...(memoryTools !== undefined ? { memoryTools } : {}),
-    ...(snapshotManager !== undefined ? { snapshotManager } : {}),
-    ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
-    ...(usageStore !== undefined ? { usageStore } : {}),
-    ...(workspaceManager !== undefined ? { workspaceManager } : {}),
-    ...(notebook !== undefined ? { notebook } : {}),
-    completedNodeOutputs,
-    existingWorktreePath: run.worktreePath ?? undefined,
-  });
+  let done: Promise<void>;
+  try {
+    done = executeRunInBackground({
+      workflow,
+      runId,
+      inputs: run.inputs,
+      cwd: run.workingDir,
+      store,
+      abort,
+      activeRuns,
+      subscribers,
+      promptHandler,
+      pendingApprovals,
+      isolation: null,
+      ...(run.projectId !== null ? { projectId: run.projectId } : {}),
+      ...(memoryTools !== undefined ? { memoryTools } : {}),
+      ...(snapshotManager !== undefined ? { snapshotManager } : {}),
+      ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
+      ...(usageStore !== undefined ? { usageStore } : {}),
+      ...(workspaceManager !== undefined ? { workspaceManager } : {}),
+      ...(notebook !== undefined ? { notebook } : {}),
+      completedNodeOutputs,
+      existingWorktreePath: run.worktreePath ?? undefined,
+    });
 
-  activeRuns.register(runId, {
-    abort,
-    done,
-    pendingApprovals,
-    dedupeKey: runDedupeKey(workflow.name, run.workingDir, run.inputs),
-    definition: workflow,
-    conversationId: run.conversationId,
-  });
+    activeRuns.register(runId, {
+      abort,
+      done,
+      pendingApprovals,
+      dedupeKey: runDedupeKey(workflow.name, run.workingDir, run.inputs),
+      definition: workflow,
+      conversationId: run.conversationId,
+    });
+  } catch (err) {
+    if (lockHandle !== undefined) {
+      releaseMutationLockNow(runId, lockHandle);
+      lockHandle = undefined;
+    }
+    throw err;
+  }
+  if (lockHandle !== undefined) {
+    releaseMutationLockOnSettle(runId, lockHandle, done);
+    lockHandle = undefined;
+  }
 
   return { ok: true };
 }
@@ -1201,6 +1328,7 @@ export function createWorkflowController(
     ribWorkflowBindings,
     usageStore,
     workspaceManager,
+    mutationLockManager,
   } = opts;
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
@@ -1375,6 +1503,7 @@ export function createWorkflowController(
             ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
             ...(usageStore !== undefined ? { usageStore } : {}),
             ...(workspaceManager !== undefined ? { workspaceManager } : {}),
+            ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
           },
           {
             workflow,
@@ -1418,6 +1547,7 @@ export function createWorkflowController(
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
           ...(workspaceManager !== undefined ? { workspaceManager } : {}),
+          ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
         },
         runId,
       );
@@ -1530,6 +1660,7 @@ export function workflowsRoutes(
     ribWorkflowBindings,
     usageStore,
     workspaceManager,
+    mutationLockManager,
     isRegionWorkflow,
   } = opts;
   const {
@@ -1847,6 +1978,7 @@ export function workflowsRoutes(
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
           ...(workspaceManager !== undefined ? { workspaceManager } : {}),
+          ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
         },
         {
           workflow,
@@ -1865,7 +1997,10 @@ export function workflowsRoutes(
       // the client the real name for run-detail / "open in Workflows" routes.
       return c.json({ runId, workflowName: workflow.name });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        startRunErrorStatus(err),
+      );
     }
   });
 
@@ -1938,6 +2073,7 @@ export function workflowsRoutes(
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
           ...(workspaceManager !== undefined ? { workspaceManager } : {}),
+          ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
         },
         {
           workflow,
@@ -1958,7 +2094,10 @@ export function workflowsRoutes(
       );
       return c.json({ runId, workflowName: workflow.name });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        startRunErrorStatus(err),
+      );
     }
   });
 
@@ -2122,6 +2261,8 @@ export function workflowsRoutes(
         ...(usageStore !== undefined ? { usageStore } : {}),
         ...(projectsStore !== undefined ? { projectsStore } : {}),
         ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
+        ...(workspaceManager !== undefined ? { workspaceManager } : {}),
+        ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
         catalog,
       },
       runId,

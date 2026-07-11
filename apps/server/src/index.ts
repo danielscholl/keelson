@@ -538,9 +538,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // drive runs through the identical wiring. The controller + chat tools are built
   // here (after the workflow subsystem exists, and NOT via the rib path which
   // bootstraps earlier) and injected only on the chat path.
-  const workflowHandlerOptions: WorkflowsHandlerOptions & {
-    mutationLockManager: MutationLockManager;
-  } = {
+  const workflowHandlerOptions: WorkflowsHandlerOptions = {
     catalog: workflowCatalog,
     store: workflowStore,
     conversationStore: store,
