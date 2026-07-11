@@ -348,6 +348,7 @@ nodes:
 
   - id: coverage-ready
     depends_on: [coverage-check]
+    trigger_rule: all_done
     bash: |
       set -uo pipefail
       BRIEF_FILE="$KEELSON_ARTIFACTS_DIR/brief.json"
