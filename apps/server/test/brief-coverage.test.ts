@@ -19,6 +19,7 @@ import {
   reconcileCoverage,
   renderCoverageChecklist,
 } from "../src/brief-coverage.ts";
+import { rmTemp } from "./temp.ts";
 
 describe("reconcileCoverage", () => {
   test("emits one row per criterion in brief order, flagging omitted/reordered as MISSING", () => {
@@ -42,8 +43,6 @@ describe("reconcileCoverage", () => {
     ]);
   });
 });
-
-import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
 
