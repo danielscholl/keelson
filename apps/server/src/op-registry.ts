@@ -308,11 +308,10 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
         // Workflow ops are a live PROJECTION over the (mutable) workflow store, not
         // a durable append-only log: a resume re-runs nodes and rewrites their
         // frames in place, so an incremental cursor could silently drop re-run
-        // frames. Return the full current snapshot (cursor-independent, bounded by
-        // node count) — the caller sees current truth each poll. Native ops below
-        // keep a true durable cursor.
-        const frames = workflowFrames(detail);
-        return limit === undefined ? frames : frames.slice(0, limit);
+        // frames. Return the full current snapshot (cursor- and limit-independent,
+        // bounded by node count) so the terminal frame is never paged off — the
+        // caller sees current truth each poll. Native ops below keep a true cursor.
+        return workflowFrames(detail);
       }
       return store.listEvents(id, cursor, limit).map((event) => ({
         seq: event.seq,

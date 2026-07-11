@@ -53,7 +53,7 @@ Some tools kick off work that runs for minutes — a rib coordinating a fleet of
 
 - \`run_list\` — active operations and live workflow runs (workflow runs carry a \`wf:\` id prefix).
 - \`run_status(id)\` — one op's status and, once finished, its terminal result. Durable: it still answers after a server restart (an op that was mid-flight at a crash reads \`orphaned\`).
-- \`run_events(id, cursor)\` — the op's progress frames after a cursor (0 for the start). Pass the highest seq back as \`cursor\` to read only new frames.
+- \`run_events(id, cursor)\` — an op's progress frames. Native ops stream incrementally: pass the highest seq back as \`cursor\` to read only new frames. Workflow ops (a \`wf:\` id) instead return a full snapshot of node progress each poll (a live projection — re-read for current state; don't treat re-seen frames as new).
 - \`run_cancel(id)\` — abort a live op; its terminal row is preserved, not deleted.
 - \`run_steer(id, note)\` — deliver a note to an op that declared a steer channel (the \`steerable\` flag in \`run_list\`). For a workflow's approval pause, use \`workflow_respond\` instead.
 

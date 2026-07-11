@@ -229,6 +229,9 @@ export function createOpStore(db: Database): OpStore {
     opts?: SetTerminalOptions,
   ): void => {
     setTerminalStmt.run(status, safeStringify(opts?.result), opts?.error ?? null, at, at, id);
+    // Prune on every terminal transition too, not just on create — a burst of ops
+    // that all settle without a fresh create would otherwise stay over the bound.
+    pruneStmt.run(OP_TERMINAL_RETENTION);
   };
   const appendTxn = db.transaction(appendEventRow);
   // One transaction so a crash can't leave a durable terminal frame with the row

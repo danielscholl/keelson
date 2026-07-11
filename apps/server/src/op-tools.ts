@@ -90,10 +90,16 @@ function renderEvents(id: string, events: OpEventView[], cursor: number): string
     used += line.length + 1;
     lastSeq = e.seq;
   }
-  const more =
-    bytesHit || events.length > lines.length
-      ? `\n… more frames remain. Poll run_events(id="${id}", cursor=${lastSeq}) for the next page.`
-      : `\nNext cursor: ${lastSeq}. Poll run_events(id="${id}", cursor=${lastSeq}) for new frames.`;
+  const truncated = bytesHit || events.length > lines.length;
+  // Workflow ops (wf: id) are a snapshot — the cursor is not incremental, so no
+  // "poll at cursor N" advice (that would loop on the same first page forever).
+  if (id.startsWith("wf:")) {
+    const note = truncated ? "\n… (snapshot truncated to fit)" : "";
+    return `workflow snapshot — ${lines.length} node frame(s) for op ${id} (re-read run_events for current state):\n${lines.join("\n")}${note}`;
+  }
+  const more = truncated
+    ? `\n… more frames remain. Poll run_events(id="${id}", cursor=${lastSeq}) for the next page.`
+    : `\nNext cursor: ${lastSeq}. Poll run_events(id="${id}", cursor=${lastSeq}) for new frames.`;
   return `${lines.length} frame(s) for op ${id} after cursor ${cursor}:\n${lines.join("\n")}${more}`;
 }
 
