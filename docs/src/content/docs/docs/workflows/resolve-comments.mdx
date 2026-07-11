@@ -37,23 +37,29 @@ the current branch is linked to, omit the number or use the phrase `CURRENT`.
 
 <Aside type="caution" title="Branch mutation">
 This workflow commits, pushes, replies, and resolves. Run it on a PR branch you
-own and have push access to. The approval gate pauses before any code lands.
+own and have push access to. The approval gate pauses before any code lands
+whenever the triage contains a judgment call; an all-actionable triage proceeds
+straight to the fix phase.
 </Aside>
 
 ## The shape
 
-The run is eleven nodes across eight phases. Four `bash` nodes handle deterministic GitHub I/O and
-the verify.sh gate (fetch-threads, validate, revalidate, push); six `prompt` nodes (extract-pr,
-triage, fix, fix-validation, reply-resolve, and report) are agent turns; one `approval` node is
-the human gate before any mutation.
+The run is twelve nodes across eight phases. Five `bash` nodes handle deterministic GitHub I/O and
+the verify.sh gate (fetch-threads, gate-check, validate, revalidate, push); six `prompt` nodes
+(extract-pr, triage, fix, fix-validation, reply-resolve, and report) are agent turns; one
+`approval` node is the human gate before any mutation — and it runs conditionally: `gate-check`
+counts triage decisions other than `actionable-code-change`, and the pause fires only when that
+count is non-zero. When every thread is an actionable fix there is no judgment to confirm, so the
+run proceeds straight to `fix` (verify.sh still gates the push).
 
 | Node | Kind | What it does |
 | --- | --- | --- |
 | `extract-pr` | prompt | Parses the PR number out of `$ARGUMENTS`, or emits `CURRENT` for the next node to resolve. |
 | `fetch-threads` | bash | Resolves the PR number, refuses a fork PR (same-repo only), checks out the PR's head *commit* detached in the worktree — so it can't collide with a sibling worktree that already holds the branch — records the head ref, pages the `reviewThreads` GraphQL query, filters `isResolved == false`, and writes `threads.json` (one entry per unresolved thread with `threadId`, `path`, `line`, `commentId`, and concatenated `body`). |
 | `triage` | prompt | Reads the cited code on the PR branch and classifies each thread as `actionable-code-change`, `question`, `wontfix`, `already-addressed`, or `invalid` (a finding the code disproves). Pinned to `claude-opus-4.8` for reliable judgment. Writes `triage.json`. |
-| `approve` | approval | Shows the triage; pauses for human review before any branch mutation. Captures operator adjustments. |
-| `fix` | prompt | Reads triage, applies each `actionable-code-change` fix anchored to `path:line`, runs the narrowest covering check per fix, commits by name (never `git add -A`), and writes `results.json` with `action: "fixed"` or `"replied-only"` per thread. |
+| `gate-check` | bash | Fails closed if triage's thread ids don't exactly match the fetched set, then emits `needs_review` — `true` when any decision is not `actionable-code-change`. |
+| `approve` | approval | Runs only when `gate-check` reports `needs_review`; shows the triage and pauses for human review before any branch mutation. Captures operator adjustments. |
+| `fix` | prompt | Reads triage, applies each `actionable-code-change` fix anchored to `path:line`, runs the narrowest covering check per fix, commits by name (never `git add -A`), and writes `results.json` with `action: "fixed"` or `"replied-only"` per thread. Pinned to `gpt-5.6-sol`. |
 | `validate` | bash | Runs `verify.sh` (discovered by the fix step). Always exits 0 so `fix-validation` can read the output. |
 | `fix-validation` | prompt | Repairs broken checks if any; commits fixes. Skips if validation passed. |
 | `revalidate` | bash | Hard gate: exits non-zero if checks fail or no `verify.sh` was recorded. Prevents push on a broken tree. |

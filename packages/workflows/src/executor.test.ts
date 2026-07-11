@@ -1619,7 +1619,7 @@ describe("runWorkflow — resolve-comments conditional approval gate", () => {
       workflow: loadBundled("resolve-comments"),
       runId: "run-rc",
       inputs: {},
-      cwd: "/tmp",
+      cwd: artifactsDir,
       artifactsDir,
       handlers: new Map([
         ["prompt", prompt],
