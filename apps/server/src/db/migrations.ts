@@ -383,6 +383,13 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 11,
+    description: "workflow run brief: attached acceptance criteria",
+    up: (db) => {
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN brief_json TEXT;");
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
