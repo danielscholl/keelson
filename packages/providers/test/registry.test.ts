@@ -8,6 +8,7 @@ import {
   isRegisteredProvider,
   registerProvider,
   registerStubProvider,
+  STUB_OUTPUT_TOKEN_BUDGET,
   UnknownProviderError,
 } from "../src/index.ts";
 
@@ -217,6 +218,57 @@ describe("registerStubProvider", () => {
       usage: { inputTokens: 4, outputTokens: 4, contextTokens: 8, contextWindow: 8192 },
     });
     expect(chunks[chunks.length - 1]!.type).toBe("done");
+  });
+
+  it("stub reports end for a complete echo", async () => {
+    registerStubProvider();
+    const provider = getAgentProvider("stub");
+    const chunks = [];
+    let finishReason: string | undefined;
+    for await (const chunk of provider.sendQuery("hello world", "/tmp", undefined, {
+      onFinishReason: (reason) => {
+        finishReason = reason;
+      },
+    })) {
+      chunks.push(chunk);
+    }
+    expect(finishReason).toBe("end");
+    expect(chunks.filter((c) => c.type === "text").map((c) => c.content).join("")).toBe(
+      "hello world ",
+    );
+  });
+
+  it("stub reports max_tokens and truncates over-budget output", async () => {
+    registerStubProvider();
+    const provider = getAgentProvider("stub");
+    const prompt = Array.from({ length: STUB_OUTPUT_TOKEN_BUDGET + 2 }, (_, i) => `tok${i}`).join(
+      " ",
+    );
+    const chunks = [];
+    let finishReason: string | undefined;
+    for await (const chunk of provider.sendQuery(prompt, "/tmp", undefined, {
+      onFinishReason: (reason) => {
+        finishReason = reason;
+      },
+    })) {
+      chunks.push(chunk);
+    }
+    const textChunks = chunks.filter((c) => c.type === "text");
+    expect(finishReason).toBe("max_tokens");
+    expect(textChunks).toHaveLength(STUB_OUTPUT_TOKEN_BUDGET);
+    expect(textChunks.at(-1)).toEqual({
+      type: "text",
+      content: `tok${STUB_OUTPUT_TOKEN_BUDGET - 1} `,
+    });
+    expect(chunks.find((c) => c.type === "usage")).toEqual({
+      type: "usage",
+      usage: {
+        inputTokens: STUB_OUTPUT_TOKEN_BUDGET + 2,
+        outputTokens: STUB_OUTPUT_TOKEN_BUDGET,
+        contextTokens: STUB_OUTPUT_TOKEN_BUDGET * 2 + 2,
+        contextWindow: 8192,
+      },
+    });
   });
 });
 

@@ -15,6 +15,8 @@ import type {
 } from "../types.ts";
 
 const STUB_CONTEXT_WINDOW = 8192;
+// Lets the stub exercise max_tokens handling without depending on a real SDK.
+export const STUB_OUTPUT_TOKEN_BUDGET = 256;
 
 export const STUB_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,
@@ -47,18 +49,23 @@ export class StubProvider implements IAgentProvider {
   ): AsyncGenerator<MessageChunk> {
     yield { type: "system", content: "stub provider started" };
     const tokens = prompt.split(/\s+/).filter(Boolean);
-    for (const token of tokens) {
+    const emittedTokens = tokens.slice(0, STUB_OUTPUT_TOKEN_BUDGET);
+    for (const token of emittedTokens) {
       yield { type: "text", content: `${token} ` };
     }
+    _options?.onFinishReason?.(
+      tokens.length > STUB_OUTPUT_TOKEN_BUDGET ? "max_tokens" : "end",
+    );
     // Deterministic synthetic usage (1 word ≈ 1 token) so the keyless path
     // exercises the same usage pipeline the real providers feed.
     const count = tokens.length;
+    const outputCount = emittedTokens.length;
     yield {
       type: "usage",
       usage: {
         inputTokens: count,
-        outputTokens: count,
-        contextTokens: count * 2,
+        outputTokens: outputCount,
+        contextTokens: count + outputCount,
         contextWindow: STUB_CONTEXT_WINDOW,
       },
     };

@@ -121,13 +121,14 @@ export {
   registerProvider,
   unregisterProvider,
 } from "./registry.ts";
-export { StubProvider } from "./stub/provider.ts";
+export { STUB_OUTPUT_TOKEN_BUDGET, StubProvider } from "./stub/provider.ts";
 export { registerStubProvider } from "./stub/registration.ts";
 export type {
   IAgentProvider,
   MCPServerConfig,
   MessageChunk,
   ModelInfo,
+  ProviderFinishReason,
   ProviderCapabilities,
   ProviderInfo,
   ProviderRegistration,
