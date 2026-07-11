@@ -1,0 +1,127 @@
+---
+title: converge-pr
+description: Loops on an existing PR until CI is green and no new review threads remain.
+sidebar:
+  order: 11
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`converge-pr` drives an existing same-repo pull request toward a clean finish:
+it fetches unresolved review threads, triages only threads this run has not
+handled yet, fixes actionable ones, replies to every handled thread, resolves
+only what it actually fixed, waits for CI, then repeats until the next round sees
+CI green and no new threads.
+
+Use it when a PR is already open and reviewers or bots may keep adding comments
+after each push. `resolve-comments` is a one-shot pass over current threads.
+`fix-issue` starts from an issue and opens a PR. `converge-pr` sits between them:
+it assumes the PR exists, then keeps re-fetching PR state until the review and CI
+surface stops changing.
+
+## Invoke it
+
+```sh
+keelson workflow run converge-pr --inputs ARGUMENTS="converge PR 42"
+```
+
+Pass an explicit PR number. converge-pr runs in an isolated worktree on a
+generated branch, so it cannot infer the target PR from the current branch.
+
+### What it needs
+
+- `gh` CLI authenticated with **repo write** scope and **GraphQL** access.
+- `jq` on `PATH` — several bash nodes use it (Git-for-Windows Bash does not ship it).
+- A GitHub Copilot subscription (`provider: copilot`, `model: auto`).
+- A running Keelson server (`keelson start`) for approval pauses.
+
+<Aside type="caution" title="Branch mutation and fork refusal">
+This workflow commits, pushes, replies, and resolves GitHub review threads. Run
+it only on a PR branch you own and can push to. Fork PRs are refused before any
+mutation because pushing fixes back to `origin` would target the base repository,
+not the fork's head branch.
+</Aside>
+
+## The loop
+
+The workflow uses a top-level `converge:` block:
+
+```yaml
+converge:
+  gate: converge-check
+  max_rounds: 8
+  on_exhaust: approval
+```
+
+Keelson reruns the `converge-check` dependency subgraph until the gate succeeds.
+`fetch-state`'s `threads.json` is computed at the *start* of the round, before
+the CI watch, so the gate does not read it. Instead, after the watch, a
+`post-ci-state` node re-fetches GitHub's live unresolved threads and re-diffs
+them against the ledger. The gate exits 0 only when all three hold:
+
+- the latest CI watch reports `CI_STATUS: PASS`;
+- `post-ci-threads.json` (the post-CI re-fetch) contains zero new, unhandled
+  threads — so a thread a bot adds *during* the CI watch blocks the round; and
+- `post-ci-retry.json` is empty — no fixed thread is still awaiting a successful
+  `resolveReviewThread`.
+
+If any of those fails, the gate fails into another round.
+
+The key state is `$ARTIFACTS_DIR/handled.json`. `fetch-state` diffs GitHub's
+current unresolved threads against that ledger and splits them: threads with no
+ledger entry are *new* (written to `threads.json` for full triage/reply/resolve),
+and a thread whose ledger entry is `replied: true, resolved: false, action:
+"fixed"` is a *resolve-retry* (written to `resolve-retry.json` for a resolve-only
+retry). `reply-resolve` records a thread into the ledger as soon as its reply is
+posted — carrying `replied: true` and `resolved: <bool>` — so a fixed thread
+whose resolve failed is never re-replied, only re-resolved. That prevents
+duplicate replies while allowing a deliberate `wontfix`, `question`,
+`already-addressed`, or `invalid` reply to stay open on GitHub without forcing
+the loop to run forever.
+
+`max_rounds: 8` caps runaway bot churn. With `on_exhaust: approval`, reaching the
+cap pauses for a human override instead of silently declaring success or failing
+without context.
+
+## Node by node
+
+| Node | Kind | What it does |
+| --- | --- | --- |
+| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS` — an explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
+| `fetch-state` | bash | Resolves the PR, refuses forks by emitting `is_fork`, checks out the head commit detached on round 1, pages the `reviewThreads` GraphQL query (via a shared `thread-lib.sh` it also sources into `post-ci-state`), and splits unresolved threads against `handled.json` into `threads.json` (new), `resolve-retry.json` (fixed-but-unresolved), and `all-unresolved-threads.json`, emitting `has_new`, `new_count`, `open_count`, and `retry_count`. |
+| `refuse-fork` | cancel | Stops the run cleanly when `fetch-state` reports a fork PR. |
+| `triage` | prompt | Runs only when there are new threads. Reads the cited code and classifies each new thread as `actionable-code-change`, `question`, `wontfix`, `already-addressed`, or `invalid`. |
+| `triage-gate` | bash | Fails closed if triage ids do not exactly match the fetched new-thread set, then emits `has_new`. |
+| `approve` | approval | Pauses once per round that has new threads, presenting all triage verdicts and capturing operator feedback before any branch mutation or public reply. |
+| `fix` | prompt | Applies actionable fixes on the detached PR head, runs narrow checks, commits by file name, composes replies for every new thread, and writes `results.json`. |
+| `validate` | bash | Soft-runs the discovered `verify.sh`, reporting `VALIDATION_STATUS` for the fixer. |
+| `fix-validation` | prompt | Repairs broken validation, if any, and commits the repair. |
+| `revalidate` | bash | Hard gate: refuses to push if `verify.sh` is missing or failing. |
+| `push` | bash | Pushes the detached HEAD back to the recorded PR head ref on `origin`. |
+| `reply-gate` | bash | Fail-closed honesty check: validates `results.json` against triage (a reply for every new thread, valid actions, and a `fixed` action only with actionable triage and a commit) before any public reply or resolve. |
+| `reply-resolve` | prompt | Replies on every result entry, resolves only entries marked `action: "fixed"`, writes `outcome.json`, and records each replied thread into `handled.json` with `replied: true` and `resolved: <bool>` (a fixed thread whose resolve failed is recorded `resolved: false`, never re-replied). |
+| `resolve-retry` | bash | Runs every round. For each `resolve-retry.json` thread (a prior-round fixed thread whose resolve failed), re-calls `resolveReviewThread` **without posting a reply** and flips its ledger entry to `resolved: true` on success. |
+| `await-ci` | bash | Runs every round, even when there were no new threads. Watches PR checks, reruns failed jobs at most once per head SHA (a per-SHA marker in `$ARTIFACTS_DIR` survives rounds, so an unchanged commit is not rerun on every round), and emits `CI_STATUS`. |
+| `post-ci-state` | bash | Runs after the CI watch. Re-fetches GitHub's live unresolved threads and re-diffs them against the (resolve-retry-updated) ledger into `post-ci-threads.json` (new) and `post-ci-retry.json` (pending retries), so the gate reflects threads that arrived during the watch. Short-circuits to empty sets on a fork. |
+| `converge-check` | bash | Gate node. Succeeds only when CI passed, `post-ci-threads.json` has zero new threads, and `post-ci-retry.json` has zero pending resolve-retries. |
+| `report` | prompt | Runs after convergence or exhaust approval and writes the operator summary, counting resolutions from the ledger's `resolved` boolean rather than `action`. |
+
+<Aside type="note" title="Honesty invariant">
+`reply-resolve` resolves a thread only when `results.json` records
+`action: "fixed"`, which means an actual code change was committed for that
+thread. All other dispositions get a reply and are recorded as handled by this
+run, but they stay unresolved on GitHub. If a fixed thread's reply posts but its
+`resolveReviewThread` call fails, the ledger records it `resolved: false`;
+`resolve-retry` re-attempts the resolve on later rounds without posting a second
+reply, so the ledger's `resolved` boolean — not `action` — is the true measure
+of what closed.
+</Aside>
+
+## Related
+
+- [resolve-comments](../resolve-comments/): a one-shot pass over current PR
+  review threads.
+- [fix-issue](../fix-issue/): starts from a GitHub issue and opens a draft PR.
+- [pr-review](../pr-review/): reviews a PR without fixing it.
+- [Workflow nodes](../../reference/workflow-nodes/): `converge`, `approval`,
+  `cancel`, `trigger_rule`, and `worktree`.
