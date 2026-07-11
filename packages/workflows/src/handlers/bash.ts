@@ -46,6 +46,7 @@ export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler 
       try {
         const bash = resolveBash();
         const shellBody = resolveConvergeRound(ctx.rawBody, {
+          preserveEscaped: true,
           ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
         });
         outcome = await runSubprocess({

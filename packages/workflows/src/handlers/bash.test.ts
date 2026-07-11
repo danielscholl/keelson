@@ -112,6 +112,20 @@ describe("bashHandler", () => {
     expect(text).toContain("round=3");
   });
 
+  test("preserves the \\$ escape so bash prints a literal $converge.round", async () => {
+    const result = await bashHandler.handle(
+      stubNode,
+      buildCtx({
+        resolvedBody: 'echo "\\$converge.round"',
+        convergeRound: 3,
+      }),
+    );
+    expect(result.status).toBe("succeeded");
+    const text = result.output.kind === "text" ? result.output.text : "";
+    expect(text).toContain("$converge.round");
+    expect(text).not.toContain("3");
+  });
+
   test("drain is bounded even if a child escapes the process group (setsid)", async () => {
     // `setsid` puts the child in a new session/pgroup that our kill can't
     // reach. The drain deadline must still bound the handler so abort

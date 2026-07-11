@@ -391,12 +391,17 @@ export function resolveBody(
 
 export function resolveConvergeRound(
   rawBody: string,
-  options?: { convergeRound?: number },
+  options?: { convergeRound?: number; preserveEscaped?: boolean },
 ): string {
   return rawBody.replace(
     CONVERGE_ROUND_PATTERN,
     (match, backslash: string | undefined, _marker: string | undefined) => {
-      if (backslash !== undefined) return match.slice(1);
+      // Shell bodies keep the `\$` intact — bash itself turns it into a
+      // literal `$`; stripping it here would hand bash `$converge`, which it
+      // would expand as an (empty) environment variable.
+      if (backslash !== undefined) {
+        return options?.preserveEscaped === true ? match : match.slice(1);
+      }
       return options?.convergeRound !== undefined ? String(options.convergeRound) : "";
     },
   );
