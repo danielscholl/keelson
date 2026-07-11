@@ -92,6 +92,45 @@ describe("GatewayProvider.sendQuery", () => {
     expect(body.messages).toEqual([{ role: "user", content: "hi" }]);
   });
 
+  it("reports the finish reason once via onFinishReason", async () => {
+    const { fn } = mockFetch(() =>
+      sse(
+        chunk({ content: "x" }),
+        JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+        "[DONE]",
+      ),
+    );
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "http://h/v1",
+      getApiKey: noKey,
+      model: "m1",
+      fetchImpl: fn,
+    });
+    const reasons: string[] = [];
+    await collect(p.sendQuery("q", "/tmp", undefined, { onFinishReason: (r) => reasons.push(r) }));
+    expect(reasons).toEqual(["end"]);
+  });
+
+  it("maps a length finish reason to max_tokens", async () => {
+    const { fn } = mockFetch(() =>
+      sse(
+        JSON.stringify({ choices: [{ delta: { content: "x" }, finish_reason: "length" }] }),
+        "[DONE]",
+      ),
+    );
+    const p = new GatewayProvider({
+      id: "g",
+      baseUrl: "http://h/v1",
+      getApiKey: noKey,
+      model: "m1",
+      fetchImpl: fn,
+    });
+    const reasons: string[] = [];
+    await collect(p.sendQuery("q", "/tmp", undefined, { onFinishReason: (r) => reasons.push(r) }));
+    expect(reasons).toEqual(["max_tokens"]);
+  });
+
   it("includes a system message when systemPrompt is set", async () => {
     const { fn, calls } = mockFetch(() => sse(chunk({ content: "ok" }), "[DONE]"));
     const p = new GatewayProvider({

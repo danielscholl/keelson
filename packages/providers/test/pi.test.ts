@@ -15,7 +15,7 @@ import {
   type PiAuthStorageLike,
 } from "../src/pi/catalog.ts";
 import type { PiRawEvent } from "../src/pi/event-bridge.ts";
-import { mapPiEvent } from "../src/pi/event-bridge.ts";
+import { mapPiEvent, mapPiFinishReason } from "../src/pi/event-bridge.ts";
 import type { PiCreateSessionParams, PiSession, PiSessionFactory } from "../src/pi/factory.ts";
 import { checkPiAuth } from "../src/pi/factory.ts";
 import { PI_CAPABILITIES, PiProvider } from "../src/pi/provider.ts";
@@ -871,5 +871,47 @@ describe("projectToolsForPi", () => {
     expect(seen?.aborted).toBe(false);
     turnAbort.abort();
     expect(seen?.aborted).toBe(true);
+  });
+});
+
+describe("mapPiFinishReason", () => {
+  test("terminal stop maps to end", () => {
+    expect(
+      mapPiFinishReason({
+        type: "agent_end",
+        willRetry: false,
+        messages: [{ role: "assistant", stopReason: "stop", content: [] }],
+      }),
+    ).toBe("end");
+  });
+
+  test("max_tokens and length map to max_tokens", () => {
+    for (const stopReason of ["max_tokens", "length"]) {
+      expect(
+        mapPiFinishReason({
+          type: "agent_end",
+          willRetry: false,
+          messages: [{ role: "assistant", stopReason }],
+        }),
+      ).toBe("max_tokens");
+    }
+  });
+
+  test("errored, retrying, and non-terminal events report nothing", () => {
+    expect(
+      mapPiFinishReason({
+        type: "agent_end",
+        willRetry: false,
+        messages: [{ role: "assistant", stopReason: "error" }],
+      }),
+    ).toBeUndefined();
+    expect(
+      mapPiFinishReason({
+        type: "agent_end",
+        willRetry: true,
+        messages: [{ role: "assistant", stopReason: "stop" }],
+      }),
+    ).toBeUndefined();
+    expect(mapPiFinishReason({ type: "message_update" })).toBeUndefined();
   });
 });
