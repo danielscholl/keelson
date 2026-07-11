@@ -20,6 +20,7 @@
  */
 
 import {
+  type AcquireWorkspaceRequest,
   type AgentSummary,
   type CallToolResult,
   type CommandCompletion,
@@ -50,6 +51,7 @@ import {
   type SnapshotManager,
   type SnapshotValidator,
   type ToolDefinition,
+  type WorkspaceLease,
 } from "@keelson/shared";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import type { RibPolicyContribution } from "./policy-engine.ts";
@@ -180,6 +182,12 @@ export interface ApplyRibsOptions {
   // governed memory rows. Rib-id-scoped for parity/future per-rib policy. Optional so
   // applyRibs unit tests without a memory store stay deterministic.
   readonly getMemory?: (ribId: string) => MemoryTools;
+  // Backs RibContext.acquireWorkspace: create a durable isolated checkout for the
+  // rib and record the owning rib id. Optional so older/test hosts omit the seam.
+  readonly acquireWorkspace?: (
+    ribId: string,
+    req: AcquireWorkspaceRequest,
+  ) => Promise<WorkspaceLease>;
   // Backs RibContext.getProviders: a read-only list of the registered providers, so a
   // rib can make availability-aware provider choices. Optional so applyRibs unit tests
   // stay deterministic without the provider registry.
@@ -331,6 +339,12 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
           }
         : {}),
       ...(opts.getMemory ? { getMemory: () => opts.getMemory!(rib.id) } : {}),
+      ...(opts.acquireWorkspace
+        ? {
+            acquireWorkspace: (req: AcquireWorkspaceRequest) =>
+              opts.acquireWorkspace!(rib.id, req),
+          }
+        : {}),
       // Normalize to the minimal {id, displayName} shape at the boundary so a richer
       // embedder-supplied list (e.g. live ProviderInfo) can't leak control-plane fields.
       ...(opts.getProviders
