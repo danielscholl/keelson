@@ -4,7 +4,7 @@
 
 import type { TokenUsage } from "@keelson/shared";
 import { toTokenCount } from "../token-count.ts";
-import type { MessageChunk } from "../types.ts";
+import type { MessageChunk, ProviderFinishReason } from "../types.ts";
 
 // Loose view of pi's AgentSessionEvent — only the fields the bridge reads. The
 // real session emits richer, strongly-typed objects; the SDK adapter forwards
@@ -162,5 +162,24 @@ function mapAssistantEvent(e: Record<string, unknown>): MessageChunk[] {
     }
     default:
       return [];
+  }
+}
+
+// The terminal finish reason for the rib-turn contract: only a terminal
+// agent_end (not a willRetry) whose final assistant message carries a
+// recognized stopReason maps; everything else reports nothing.
+export function mapPiFinishReason(event: PiRawEvent): ProviderFinishReason | undefined {
+  if (event.type !== "agent_end" || event.willRetry === true) return undefined;
+  const messages = Array.isArray(event.messages) ? event.messages : [];
+  const last = messages[messages.length - 1];
+  if (!isRecord(last) || last.role !== "assistant") return undefined;
+  switch (last.stopReason) {
+    case "stop":
+      return "end";
+    case "max_tokens":
+    case "length":
+      return "max_tokens";
+    default:
+      return undefined;
   }
 }

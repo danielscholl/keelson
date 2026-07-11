@@ -11,6 +11,7 @@ import type {
   MessageChunk,
   ModelInfo,
   ProviderCapabilities,
+  ProviderFinishReason,
   SendQueryOptions,
 } from "../types.ts";
 
@@ -40,7 +41,7 @@ interface OpenAiDelta {
 }
 
 interface OpenAiStreamEvent {
-  choices?: Array<{ delta?: OpenAiDelta }>;
+  choices?: Array<{ delta?: OpenAiDelta; finish_reason?: unknown }>;
   usage?: {
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
@@ -85,7 +86,14 @@ type GatewayUsage = {
 type ParsedSseEvent = {
   chunks: MessageChunk[];
   usage?: GatewayUsage;
+  finishReason?: ProviderFinishReason;
 };
+
+function mapOpenAiFinishReason(reason: unknown): ProviderFinishReason | undefined {
+  if (reason === "stop") return "end";
+  if (reason === "length") return "max_tokens";
+  return undefined;
+}
 
 // Parse one event payload's JSON into message chunks. A non-JSON payload yields
 // nothing (a partial/garbled frame is skipped, never fatal to the turn).
@@ -106,6 +114,11 @@ function parseSseData(payload: string): ParsedSseEvent {
       chunks.push({ type: "text", content: delta.content });
     }
   }
+  const finishReason = mapOpenAiFinishReason(event.choices?.[0]?.finish_reason);
+  const base: ParsedSseEvent = {
+    chunks,
+    ...(finishReason !== undefined ? { finishReason } : {}),
+  };
   const inp = nonNegInt(event.usage?.prompt_tokens);
   const out = nonNegInt(event.usage?.completion_tokens);
   const cacheRead = nonNegInt(event.usage?.prompt_tokens_details?.cached_tokens);
@@ -115,9 +128,9 @@ function parseSseData(payload: string): ParsedSseEvent {
       outputTokens: out,
     };
     if (cacheRead !== undefined && cacheRead > 0) usage.cacheReadInputTokens = cacheRead;
-    return { chunks, usage };
+    return { ...base, usage };
   }
-  return { chunks };
+  return base;
 }
 
 async function bodyTail(res: Response): Promise<string> {
@@ -251,6 +264,12 @@ export class GatewayProvider implements IAgentProvider {
     let buffer = "";
     let usage: GatewayUsage | undefined;
     let finished = false;
+    let finishReasonSeen = false;
+    const reportFinishReason = (reason: ProviderFinishReason | undefined): void => {
+      if (reason === undefined || finishReasonSeen) return;
+      finishReasonSeen = true;
+      options?.onFinishReason?.(reason);
+    };
     try {
       while (!finished) {
         const { done, value } = await reader.read();
@@ -270,6 +289,7 @@ export class GatewayProvider implements IAgentProvider {
           const parsed = parseSseData(payload);
           for (const chunk of parsed.chunks) yield chunk;
           if (parsed.usage) usage = parsed.usage;
+          reportFinishReason(parsed.finishReason);
         }
       }
       // Flush a final event that arrived without a trailing blank line.
@@ -279,6 +299,7 @@ export class GatewayProvider implements IAgentProvider {
           const parsed = parseSseData(payload);
           for (const chunk of parsed.chunks) yield chunk;
           if (parsed.usage) usage = parsed.usage;
+          reportFinishReason(parsed.finishReason);
         }
       }
     } catch (err) {

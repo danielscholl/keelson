@@ -108,7 +108,8 @@ export interface RibAgentTurnRequest {
   cwd?: string;
   // Confinement roots for this turn; absent means unconfined.
   allowedDirectories?: readonly string[];
-  // Accepted now, inert until provider capabilities allow session resumption.
+  // Resume a prior turn by passing that turn's sessionId; providers without
+  // sessionResume support ignore it.
   resumeSessionId?: string;
 }
 
@@ -118,7 +119,14 @@ export interface RibAgentTurnResult {
   error?: string;
   // The provider id the turn resolved to.
   providerId?: string;
+  // The provider's backend session id for this turn, when it reported one.
+  // Pass it as the next turn's resumeSessionId to continue the same session
+  // with providers whose capabilities.sessionResume is true.
   sessionId?: string;
+  // Harness-owned terminal reasons mirror status for aborted/timeout/error.
+  // end/max_tokens come only from providers that report a finish reason; derive
+  // truncation as stopReason === "max_tokens".
+  stopReason?: "end" | "max_tokens" | "aborted" | "timeout" | "error";
   // The provider's final usage-bearing chunk, coerced. Undefined when the
   // provider never reported one (a text-only stream, or a turn that failed
   // before the stream reached that point).
