@@ -99,6 +99,7 @@ import {
   type RibManifest,
   type RibWorkflowContribution,
 } from "./ribs.ts";
+import type { MutationLockManager } from "./mutation-lock-manager.ts";
 import type { UsageStore } from "./usage-store.ts";
 import type { WorkflowController } from "./workflows-handler.ts";
 import type { WorkspaceManager } from "./workspace-manager.ts";
@@ -241,6 +242,9 @@ export interface BootstrapRibsOptions {
   // Lazy resolver for the OpRegistry backing RibContext.registerOp. Lazy for the
   // same reason: the registry needs the db-backed OpStore created after boot.
   getOpRegistry?: () => OpRegistry | undefined;
+  // Lazy resolver for the MutationLockManager backing RibContext.acquireMutationLock.
+  // Lazy because the manager is created AFTER bootstrapRibs returns.
+  getMutationLockManager?: () => MutationLockManager | undefined;
   // Backs RibContext.getProviders. Defaults to the live provider registry
   // (getProviderInfoList); tests may inject a deterministic list.
   getProviders?: () => readonly RibProviderInfo[];
