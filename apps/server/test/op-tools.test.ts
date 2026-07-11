@@ -449,6 +449,44 @@ describe("op tools — workflow projection", () => {
     expect(events.content).toContain("error run failed: boom");
   });
 
+  test("a paused workflow surfaces its awaiting node as a non-terminal progress frame", async () => {
+    fakeDetails.rw = {
+      workflowName: "fix-issue",
+      status: "paused",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: null,
+      error: null,
+      nodes: [
+        {
+          nodeId: "plan",
+          status: "succeeded",
+          completedAt: "2026-01-01T00:01:00.000Z",
+          outputText: null,
+          startedAt: "2026-01-01T00:00:30.000Z",
+          error: null,
+        },
+        {
+          nodeId: "approve",
+          status: "awaiting",
+          completedAt: null,
+          outputText: "approve the plan?",
+          startedAt: "2026-01-01T00:01:30.000Z",
+          error: null,
+        },
+      ],
+    };
+    const events = await run("run_events", { id: "wf:rw", cursor: 0 });
+    // The awaiting frontier is surfaced so a poller sees the run stopped for input
+    // instead of polling a `running` op forever; no terminal frame — it isn't settled.
+    expect(events.content).toContain("[approve] awaiting input");
+    expect(events.content).toContain("workflow_respond");
+    expect(events.content).not.toContain("done run");
+    expect(events.content).not.toContain("error run");
+    // lastSeq counts the awaiting frame (1 completed + 1 awaiting = 2).
+    const status = await run("run_status", { id: "wf:rw" });
+    expect(status.content).toContain("2 event(s)");
+  });
+
   test("run_events returns a resume-safe full snapshot for a workflow op (cursor-independent)", async () => {
     fakeDetails.r1 = {
       workflowName: "fix-issue",

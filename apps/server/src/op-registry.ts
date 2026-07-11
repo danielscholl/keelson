@@ -133,6 +133,20 @@ function workflowFrames(detail: WorkflowRunDetail): OpEventView[] {
     data: null,
     createdAt: node.completedAt as string,
   }));
+  // An `awaiting` node is a paused approval/interactive frontier (completedAt null,
+  // so excluded above). The op vocabulary has no `paused`, and mapWorkflowStatus
+  // projects paused → running; without this frame a poller following the dispatch/
+  // poll loop sees a `running` op that never settles and waits forever instead of
+  // calling workflow_respond. Surface it as a non-terminal progress frame.
+  for (const node of detail.nodes.filter((n) => n.status === "awaiting")) {
+    frames.push({
+      seq: frames.length + 1,
+      kind: "progress",
+      message: `[${node.nodeId}] awaiting input — answer with workflow_respond`,
+      data: null,
+      createdAt: node.startedAt ?? detail.startedAt,
+    });
+  }
   if ((TERMINAL_RUN_STATUSES as readonly WorkflowRunStatus[]).includes(detail.status)) {
     frames.push({
       seq: frames.length + 1,
