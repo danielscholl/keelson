@@ -10,6 +10,7 @@
 // own zod instance — the provider adapters call `z.toJSONSchema()` on those
 // schemas, which can break across two copies of zod.
 export { z } from "zod";
+export * from "./brief.ts";
 export * from "./canvas.ts";
 export * from "./chat.ts";
 export * from "./commands.ts";

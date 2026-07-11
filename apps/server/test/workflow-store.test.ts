@@ -60,6 +60,7 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.status).toBe("running");
     expect(run!.inputs).toEqual({ ARGUMENTS: "hi" });
     expect(run!.nodes).toEqual([]);
+    expect(run!.brief).toBeNull();
     expect(run!.completedAt).toBeNull();
     expect(run!.error).toBeNull();
   });
@@ -79,6 +80,31 @@ describe("SQLite WorkflowStore", () => {
     expect(store.getRun("r1")!.worktreeBase).toBeNull();
     store.setRunWorktreeBase("r1", "origin/main");
     expect(store.getRun("r1")!.worktreeBase).toBe("origin/main");
+  });
+
+  test("persists and clears the run brief", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "hello-world",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db, "hello-world-conv"),
+      workingDir: "/repo",
+    });
+
+    expect(store.getRun("r1")!.brief).toBeNull();
+    const brief = {
+      sourceUrl: "https://github.com/danielscholl/keelson/issues/1",
+      title: "Fix issue coverage",
+      criteria: ["Approval message shows missing criteria"],
+    };
+    store.setRunBrief("r1", brief);
+    expect(store.getRun("r1")!.brief).toEqual(brief);
+
+    store.setRunBrief("r1", null);
+    expect(store.getRun("r1")!.brief).toBeNull();
   });
 
   test("upsertNodeOutput then updateRunStatus persists the terminal state", () => {

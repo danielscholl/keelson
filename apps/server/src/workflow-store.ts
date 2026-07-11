@@ -8,6 +8,8 @@
 
 import type { Database } from "bun:sqlite";
 import {
+  type Brief,
+  briefSchema,
   type ContentBlock,
   type NodeOutputRow,
   parsePersistedTokenUsage,
@@ -100,6 +102,7 @@ export interface WorkflowStore {
   // path isn't known at createRun time when isolation is on).
   setRunWorktreePath(runId: string, worktreePath: string | null): void;
   setRunWorktreeBase(runId: string, worktreeBase: string | null): void;
+  setRunBrief(runId: string, brief: Brief | null): void;
   // Accumulated model-call spend for one run: `totalTokens` is fresh input +
   // output. Cache read/write stay separate in TokenUsage; older rows may carry
   // mixed provider input conventions.
@@ -155,6 +158,7 @@ interface RunRow {
   worktree_base: string | null;
   origin: string;
   rib_id: string | null;
+  brief_json: string | null;
 }
 
 interface NodeRow {
@@ -222,6 +226,17 @@ function rowToNodeOutput(row: NodeRow): NodeOutputRow {
   };
 }
 
+function parseBrief(raw: string | null): Brief | null {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const result = briefSchema.safeParse(parsed);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createWorkflowStore(db: Database): WorkflowStore {
   // Boot-time reconcile: any rows still in 'running' or 'paused' belong to a
   // prior process that crashed or was killed before the shutdown drain could
@@ -257,6 +272,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
   const updateWorktreePath = db.prepare("UPDATE workflow_runs SET worktree_path = ? WHERE id = ?");
   const updateWorktreeBase = db.prepare("UPDATE workflow_runs SET worktree_base = ? WHERE id = ?");
+  const updateBrief = db.prepare("UPDATE workflow_runs SET brief_json = ? WHERE id = ?");
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
   const listRunsAll = db.prepare(
     "SELECT * FROM workflow_runs ORDER BY started_at DESC, rowid DESC",
@@ -338,6 +354,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
     setRunWorktreeBase(runId, worktreeBase) {
       updateWorktreeBase.run(worktreeBase, runId);
     },
+    setRunBrief(runId, brief) {
+      updateBrief.run(brief !== null ? JSON.stringify(brief) : null, runId);
+    },
     upsertNodeOutput(input) {
       upsertNode.run(
         input.runId,
@@ -386,6 +405,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         ...rowToRunSummary(row),
         inputs,
         nodes,
+        brief: parseBrief(row.brief_json),
       };
     },
     listRuns(workflowName) {
