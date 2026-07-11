@@ -29,6 +29,10 @@ import type { WorkflowController } from "./workflows-handler.ts";
 // bare UUID; a workflow op id is `wf:<runId>`.
 const WF_PREFIX = "wf:";
 
+// Cap the active native ops run_list materializes, so a rib with many concurrent
+// running ops can't flood one turn. run_list notes when the cap is hit.
+const OP_LIST_LIMIT = 500;
+
 export interface OpSummaryView {
   id: string;
   kind: string;
@@ -269,9 +273,10 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
     },
 
     list() {
-      // Active native ops only — a terminal-op history would grow unbounded and
-      // flood run_list; matches the workflow side (listRuns = running + paused).
-      const native = store.list({ status: "running" }).map(
+      // Active native ops only, capped — a terminal-op history would grow unbounded
+      // and even many running ops shouldn't flood one turn; matches the workflow
+      // side (listRuns = running + paused).
+      const native = store.list({ status: "running", limit: OP_LIST_LIMIT }).map(
         (rec): OpSummaryView => ({
           id: rec.id,
           kind: rec.kind,

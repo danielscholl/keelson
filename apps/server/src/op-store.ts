@@ -64,8 +64,9 @@ export interface OpStore {
   create(params: CreateOpParams): void;
   get(id: string): OpRecord | undefined;
   // Newest first. Pass a status filter to bound the result (run_list wants only
-  // `running` native ops — a terminal-op history would grow unbounded).
-  list(filter?: { status?: OpStatus }): OpRecord[];
+  // `running` native ops); `limit` caps the SQL read so even many running ops
+  // can't materialize the whole table into one turn.
+  list(filter?: { status?: OpStatus; limit?: number }): OpRecord[];
   // Append one frame with a per-op monotonic seq; returns that seq.
   appendEvent(opId: string, frame: AppendOpEvent, at: string): number;
   // Append a terminal frame AND flip the row to `status` in a single transaction
@@ -124,7 +125,11 @@ function safeParse(json: string | null): unknown {
 function safeStringify(value: unknown): string | null {
   if (value === undefined) return null;
   try {
-    return JSON.stringify(value) ?? null;
+    const json = JSON.stringify(value);
+    // JSON.stringify returns undefined (without throwing) for a function/symbol
+    // top-level value or a toJSON() that yields undefined — store the placeholder,
+    // not NULL, so a non-undefined value is never silently lost.
+    return json === undefined ? '"[unserializable value]"' : json;
   } catch {
     return '"[unserializable value]"';
   }
@@ -147,7 +152,7 @@ function rowToRecord(row: OpRow): OpRecord {
   };
 }
 
-export function createOpStore(db: Database): OpStore {
+export function createOpStore(db: Database, retention: number = OP_TERMINAL_RETENTION): OpStore {
   // Boot-time reconcile: a row still 'running' belongs to a prior process whose
   // in-memory controller (AbortController / onSteer) is gone. Flip it to
   // 'orphaned' so run_status can never report it running and run_cancel/run_steer
@@ -175,9 +180,9 @@ export function createOpStore(db: Database): OpStore {
   const OP_COLUMNS =
     "id, kind, title, owner, project_id, status, steerable, result_json, error, created_at, updated_at, completed_at";
   const listStmt = db.prepare(`SELECT ${OP_COLUMNS} FROM ops ORDER BY created_at DESC, id ASC`);
-  // Uses ix_ops_status_created (status, created_at DESC).
+  // Uses ix_ops_status_created (status, created_at DESC). LIMIT -1 = unbounded.
   const listByStatusStmt = db.prepare(
-    `SELECT ${OP_COLUMNS} FROM ops WHERE status = ? ORDER BY created_at DESC, id ASC`,
+    `SELECT ${OP_COLUMNS} FROM ops WHERE status = ? ORDER BY created_at DESC, id ASC LIMIT ?`,
   );
   const nextSeqStmt = db.prepare(
     "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM op_events WHERE op_id = ?",
@@ -209,7 +214,7 @@ export function createOpStore(db: Database): OpStore {
            ORDER BY completed_at DESC, id DESC LIMIT ?
          )`,
   );
-  pruneStmt.run(OP_TERMINAL_RETENTION);
+  pruneStmt.run(retention);
 
   const appendEventRow = (opId: string, frame: AppendOpEvent, at: string): number => {
     const seq = (nextSeqStmt.get(opId) as { next: number }).next;
@@ -232,7 +237,7 @@ export function createOpStore(db: Database): OpStore {
     setTerminalStmt.run(status, safeStringify(opts?.result), opts?.error ?? null, at, at, id);
     // Prune on every terminal transition too, not just on create — a burst of ops
     // that all settle without a fresh create would otherwise stay over the bound.
-    pruneStmt.run(OP_TERMINAL_RETENTION);
+    pruneStmt.run(retention);
   };
   const appendTxn = db.transaction(appendEventRow);
   // One transaction so a crash can't leave a durable terminal frame with the row
@@ -259,7 +264,7 @@ export function createOpStore(db: Database): OpStore {
         params.createdAt,
       );
       // Bound the tables continuously, not just at boot.
-      pruneStmt.run(OP_TERMINAL_RETENTION);
+      pruneStmt.run(retention);
     },
     get(id) {
       const row = getStmt.get(id) as OpRow | null;
@@ -267,7 +272,7 @@ export function createOpStore(db: Database): OpStore {
     },
     list(filter) {
       const rows = (
-        filter?.status ? listByStatusStmt.all(filter.status) : listStmt.all()
+        filter?.status ? listByStatusStmt.all(filter.status, filter.limit ?? -1) : listStmt.all()
       ) as OpRow[];
       return rows.map(rowToRecord);
     },

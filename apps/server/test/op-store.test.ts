@@ -149,6 +149,29 @@ describe("OpStore", () => {
     expect(store.list().map((r) => r.id)).toEqual(["op-new", "op-old"]);
   });
 
+  test("retention keeps active ops + the N most-recently-COMPLETED terminal ops", () => {
+    // A small-retention store to exercise the prune without 1,000 rows.
+    const store2 = createOpStore(db, 2);
+    const mk = (id: string, createdAt: string) =>
+      store2.create({ id, kind: "k", owner: "o", steerable: false, createdAt });
+    // A long-CREATED op that completes LAST must survive (completion-time, not
+    // creation-time, selects the retained rows).
+    mk("old-created", "2026-01-01T00:00:00.000Z");
+    mk("b", "2026-01-02T00:00:00.000Z");
+    mk("c", "2026-01-03T00:00:00.000Z");
+    mk("running", "2026-01-04T00:00:00.000Z"); // never settled
+
+    store2.settle("b", "done", { kind: "done" }, "2026-01-05T00:00:01.000Z");
+    store2.settle("c", "done", { kind: "done" }, "2026-01-05T00:00:02.000Z");
+    store2.settle("old-created", "done", { kind: "done" }, "2026-01-05T00:00:03.000Z");
+
+    // retention=2 terminal: keep old-created (@:03) + c (@:02); prune b (@:01).
+    expect(store2.get("b")).toBeUndefined();
+    expect(store2.get("c")?.status).toBe("done");
+    expect(store2.get("old-created")?.status).toBe("done"); // kept despite oldest created_at
+    expect(store2.get("running")?.status).toBe("running"); // active never pruned
+  });
+
   test("boot sweep flips a left-running op to orphaned but preserves terminal rows across restart", () => {
     createOp("op-running");
     createOp("op-done");

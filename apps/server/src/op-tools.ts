@@ -23,6 +23,7 @@ import { emitResult, truncate } from "./workflow-tools.ts";
 // pages by passing the returned next-cursor back in. The byte budget bounds the
 // rendered SIZE (a frame message/data is unbounded), independent of frame count.
 const EVENT_PAGE = 100;
+const LIST_RENDER_CAP = 100;
 const EVENT_BYTE_BUDGET = 8_000;
 const FRAME_MSG_CAP = 2_000;
 const FRAME_DATA_CAP = 2_000;
@@ -136,9 +137,18 @@ export function createOpTools(deps: { registry: OpRegistry }): ToolDefinition[] 
         emitResult(ctx, "No active operations or runs.");
         return;
       }
+      const shown = ops.slice(0, LIST_RENDER_CAP);
+      const moreNote =
+        ops.length > shown.length
+          ? `\n… and ${ops.length - shown.length} more active operation(s) not shown.`
+          : "";
+      const header =
+        ops.length > shown.length
+          ? `${ops.length} active operation(s) (showing ${shown.length}):`
+          : `${ops.length} operation(s):`;
       emitResult(
         ctx,
-        `${ops.length} operation(s):\n${ops.map(renderSummaryLine).join("\n")}\n\nInspect one with run_status(id="…"); stream its frames with run_events(id="…", cursor=0).`,
+        `${header}\n${shown.map(renderSummaryLine).join("\n")}${moreNote}\n\nInspect one with run_status(id="…"); stream its frames with run_events(id="…", cursor=0).`,
       );
     },
   };
