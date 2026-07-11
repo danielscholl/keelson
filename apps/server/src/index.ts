@@ -639,6 +639,14 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[keelson] workflow run drain during shutdown failed: ${msg}`);
     }
+    // Abort live native rib ops and settle their rows BEFORE ribs.disposeAll() and
+    // db.close(), so a detached op can't write through a closed database.
+    try {
+      opRegistry.drain();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] op registry drain during shutdown failed: ${msg}`);
+    }
     if (mcpRoutes) {
       try {
         await mcpRoutes.dispose();

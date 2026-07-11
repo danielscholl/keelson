@@ -190,6 +190,9 @@ export interface RegisterOpRequest {
   onSteer?: (note: string) => void;
 }
 
+// `data` / `result` values must be JSON-serializable; a value that cannot
+// serialize (a cyclic object, a BigInt) is stored as a placeholder rather than
+// throwing — so `done` always settles the op terminal.
 export interface OpHandle {
   readonly id: string;
   readonly signal: AbortSignal;

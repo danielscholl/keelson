@@ -63,6 +63,15 @@ export interface OpStore {
   list(filter?: { status?: OpStatus }): OpRecord[];
   // Append one frame with a per-op monotonic seq; returns that seq.
   appendEvent(opId: string, frame: AppendOpEvent, at: string): number;
+  // Append a terminal frame AND flip the row to `status` in a single transaction
+  // (crash-atomic — never a durable terminal frame with a still-'running' row).
+  settle(
+    id: string,
+    status: OpStatus,
+    frame: AppendOpEvent,
+    at: string,
+    opts?: SetTerminalOptions,
+  ): number;
   // Frames with seq > cursor, in order — cursor-based polling for run_events.
   // `limit` bounds the SQL read so a long backlog can't be materialized at once.
   listEvents(opId: string, cursor: number, limit?: number): OpEventRecord[];
@@ -101,6 +110,18 @@ function safeParse(json: string | null): unknown {
     return JSON.parse(json);
   } catch {
     return null;
+  }
+}
+
+// Frame data / op results are `unknown` at the contract boundary. A cyclic value
+// or a BigInt would make JSON.stringify throw — which, on a terminal write, would
+// leave the op stuck 'running'. Never throw: fall back to a valid-JSON placeholder.
+function safeStringify(value: unknown): string | null {
+  if (value === undefined) return null;
+  try {
+    return JSON.stringify(value) ?? null;
+  } catch {
+    return '"[unserializable value]"';
   }
 }
 
@@ -173,18 +194,37 @@ export function createOpStore(db: Database): OpStore {
      WHERE id = ? AND status = 'running'`,
   );
 
-  const appendTxn = db.transaction((opId: string, frame: AppendOpEvent, at: string): number => {
+  const appendEventRow = (opId: string, frame: AppendOpEvent, at: string): number => {
     const seq = (nextSeqStmt.get(opId) as { next: number }).next;
     insertEventStmt.run(
       opId,
       seq,
       frame.kind,
       frame.message ?? null,
-      frame.data === undefined ? null : JSON.stringify(frame.data),
+      safeStringify(frame.data),
       at,
     );
     return seq;
-  });
+  };
+  const setTerminalRow = (
+    id: string,
+    status: OpStatus,
+    at: string,
+    opts?: SetTerminalOptions,
+  ): void => {
+    setTerminalStmt.run(status, safeStringify(opts?.result), opts?.error ?? null, at, at, id);
+  };
+  const appendTxn = db.transaction(appendEventRow);
+  // One transaction so a crash can't leave a durable terminal frame with the row
+  // still 'running' (which boot reconcile would flip to 'orphaned', losing the
+  // result). The terminal frame and the row transition settle together.
+  const settleTxn = db.transaction(
+    (id: string, status: OpStatus, frame: AppendOpEvent, at: string, opts?: SetTerminalOptions) => {
+      const seq = appendEventRow(id, frame, at);
+      setTerminalRow(id, status, at, opts);
+      return seq;
+    },
+  );
 
   return {
     create(params) {
@@ -212,6 +252,9 @@ export function createOpStore(db: Database): OpStore {
     appendEvent(opId, frame, at) {
       return appendTxn(opId, frame, at);
     },
+    settle(id, status, frame, at, opts) {
+      return settleTxn(id, status, frame, at, opts);
+    },
     lastSeq(opId) {
       return (lastSeqStmt.get(opId) as { last: number }).last;
     },
@@ -226,14 +269,7 @@ export function createOpStore(db: Database): OpStore {
       }));
     },
     setTerminal(id, status, at, opts) {
-      setTerminalStmt.run(
-        status,
-        opts?.result === undefined ? null : JSON.stringify(opts.result),
-        opts?.error ?? null,
-        at,
-        at,
-        id,
-      );
+      setTerminalRow(id, status, at, opts);
     },
   };
 }

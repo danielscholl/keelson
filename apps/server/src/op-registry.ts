@@ -67,15 +67,19 @@ export interface OpRegistry {
   events(id: string, cursor: number, limit?: number): OpEventView[];
   cancel(id: string): OpControlResult;
   steer(id: string, note: string): OpControlResult;
+  // Abort every live native op and settle its row. Called at server shutdown
+  // BEFORE the database closes, so a detached rib op can't write through a
+  // closed db after `done`/`log`.
+  drain(): void;
 }
 
 export interface OpRegistryDeps {
   store: OpStore;
-  // Projection source for workflow-run ops (AC2). Lazy: the controller is built
-  // after the registry, and workflow ops are read-only projections.
+  // Projection source for workflow-run ops. Lazy: the controller is built after
+  // the registry, and workflow ops are read-only projections.
   getWorkflowController?: () => WorkflowController | undefined;
-  // Abort a live workflow run — abort-only (keeps the cancelled row for AC1),
-  // NOT purge. Returns false when there is no live run to abort.
+  // Abort a live workflow run — abort-only (keeps the cancelled row so the
+  // terminal result stays retrievable), NOT purge. False when no live run.
   cancelWorkflowRun?: (runId: string) => boolean;
   now?: () => string;
 }
@@ -202,7 +206,8 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
       const id = crypto.randomUUID();
       const abort = new AbortController();
       const steerable = typeof req.onSteer === "function";
-      live.set(id, { abort, ...(req.onSteer ? { onSteer: req.onSteer } : {}) });
+      // Create the durable row BEFORE publishing the controller into `live`: if the
+      // insert throws (e.g. a bad projectId FK), no controller is left stranded.
       store.create({
         id,
         kind: req.kind,
@@ -212,6 +217,7 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
         steerable,
         createdAt: now(),
       });
+      live.set(id, { abort, ...(req.onSteer ? { onSteer: req.onSteer } : {}) });
 
       const append = (kind: OpFrameKind, message?: string, data?: unknown): void => {
         if (!live.has(id)) return;
@@ -232,16 +238,17 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
         terminal: { result?: unknown; error?: string },
       ): void => {
         if (!live.has(id)) return;
-        store.appendEvent(
+        store.settle(
           id,
+          status,
           {
             kind,
             ...(frame.message !== undefined ? { message: frame.message } : {}),
             ...(frame.data !== undefined ? { data: frame.data } : {}),
           },
           now(),
+          terminal,
         );
-        store.setTerminal(id, status, now(), terminal);
         live.delete(id);
       };
 
@@ -340,8 +347,9 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
       // signal: AbortController.abort() dispatches listeners synchronously, so a
       // rib that self-settles inside its abort listener would otherwise re-enter
       // settle() while the op still looked live and append a post-terminal frame.
-      store.appendEvent(id, { kind: "error", message: "cancelled by run_cancel" }, now());
-      store.setTerminal(id, "cancelled", now(), { error: "cancelled" });
+      store.settle(id, "cancelled", { kind: "error", message: "cancelled by run_cancel" }, now(), {
+        error: "cancelled",
+      });
       live.delete(id);
       ctl.abort.abort();
       return { ok: true, message: `op ${id} cancelled` };
@@ -364,9 +372,31 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
       if (!ctl?.onSteer) {
         return { ok: false, message: `op ${id} does not accept steering` };
       }
-      ctl.onSteer(note);
+      // Record the steer frame BEFORE invoking the callback: onSteer may settle the
+      // op synchronously, and its terminal frame must be causally after this one.
       store.appendEvent(id, { kind: "log", message: `steer: ${note}` }, now());
+      ctl.onSteer(note);
       return { ok: true, message: `steer delivered to op ${id}` };
+    },
+
+    drain() {
+      for (const [id, ctl] of Array.from(live.entries())) {
+        // Remove from `live` first so a re-entrant handle call from the abort
+        // listener no-ops; then settle the durable row and fire the signal.
+        live.delete(id);
+        try {
+          store.settle(id, "cancelled", { kind: "error", message: "server shutting down" }, now(), {
+            error: "server shutting down",
+          });
+        } catch {
+          // best-effort during shutdown
+        }
+        try {
+          ctl.abort.abort();
+        } catch {
+          // already aborted
+        }
+      }
     },
   };
 }

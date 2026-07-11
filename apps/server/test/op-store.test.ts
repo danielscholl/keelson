@@ -106,6 +106,43 @@ describe("OpStore", () => {
     expect(store.get("op-1")?.status).toBe("done");
   });
 
+  test("settle appends the terminal frame and flips the row in one step", () => {
+    createOp("op-1");
+    const seq = store.settle(
+      "op-1",
+      "done",
+      { kind: "done", message: "done", data: { ok: true } },
+      "2026-01-01T00:01:00.000Z",
+      { result: { ok: true } },
+    );
+    expect(seq).toBe(1);
+    const rec = store.get("op-1");
+    expect(rec?.status).toBe("done");
+    expect(rec?.result).toEqual({ ok: true });
+    expect(store.listEvents("op-1", 0).map((e) => e.kind)).toEqual(["done"]);
+  });
+
+  test("a non-serializable frame value / result stores a placeholder instead of throwing", () => {
+    createOp("op-1");
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() =>
+      store.appendEvent(
+        "op-1",
+        { kind: "log", message: "x", data: cyclic },
+        "2026-01-01T00:00:01.000Z",
+      ),
+    ).not.toThrow();
+    // A BigInt result would make JSON.stringify throw — settle must still land.
+    expect(() =>
+      store.settle("op-1", "done", { kind: "done" }, "2026-01-01T00:01:00.000Z", {
+        result: 10n as unknown,
+      }),
+    ).not.toThrow();
+    expect(store.get("op-1")?.status).toBe("done");
+    expect(store.listEvents("op-1", 0)[0]?.data).toBe("[unserializable value]");
+  });
+
   test("list orders newest ops first", () => {
     createOp("op-old", { createdAt: "2026-01-01T00:00:00.000Z" });
     createOp("op-new", { createdAt: "2026-01-02T00:00:00.000Z" });
@@ -125,7 +162,7 @@ describe("OpStore", () => {
     const store2 = createOpStore(db2);
     expect(store2.get("op-running")?.status).toBe("orphaned");
     expect(store2.get("op-running")?.completedAt).not.toBeNull();
-    // The terminal op and its result survive untouched (AC1).
+    // The terminal op and its result survive the restart untouched.
     const done = store2.get("op-done");
     expect(done?.status).toBe("done");
     expect(done?.result).toBe("final");

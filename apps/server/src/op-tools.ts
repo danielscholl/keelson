@@ -20,8 +20,11 @@ import type { OpEventView, OpRegistry, OpStatusView, OpSummaryView } from "./op-
 import { emitResult, truncate } from "./workflow-tools.ts";
 
 // Cap a single run_events page so a chatty op can't flood one turn; the caller
-// pages by passing the returned next-cursor back in.
+// pages by passing the returned next-cursor back in. The byte budget bounds the
+// rendered SIZE (a frame message/data is unbounded), independent of frame count.
 const EVENT_PAGE = 100;
+const EVENT_BYTE_BUDGET = 8_000;
+const FRAME_DATA_CAP = 2_000;
 const RESULT_CAP = 8_000;
 
 const listInputSchema = z.object({});
@@ -64,14 +67,30 @@ function renderEvents(id: string, events: OpEventView[], cursor: number): string
   if (events.length === 0) {
     return `No events for op ${id} after cursor ${cursor}.`;
   }
-  const page = events.slice(0, EVENT_PAGE);
-  const lines = page.map((e) => `[${e.seq}] ${e.kind}${e.message ? ` ${e.message}` : ""}`);
-  const nextCursor = (page[page.length - 1] as OpEventView).seq;
+  const lines: string[] = [];
+  let used = 0;
+  let lastSeq = cursor;
+  let bytesHit = false;
+  for (const e of events.slice(0, EVENT_PAGE)) {
+    const dataStr =
+      e.data === null || e.data === undefined
+        ? ""
+        : ` ${truncate(JSON.stringify(e.data), FRAME_DATA_CAP)}`;
+    const line = `[${e.seq}] ${e.kind}${e.message ? ` ${e.message}` : ""}${dataStr}`;
+    // Always render at least one frame; stop before exceeding the byte budget.
+    if (lines.length > 0 && used + line.length > EVENT_BYTE_BUDGET) {
+      bytesHit = true;
+      break;
+    }
+    lines.push(line);
+    used += line.length + 1;
+    lastSeq = e.seq;
+  }
   const more =
-    events.length > EVENT_PAGE
-      ? `\n… more events remain. Poll run_events(id="${id}", cursor=${nextCursor}) for the next page.`
-      : `\nNext cursor: ${nextCursor}. Poll run_events(id="${id}", cursor=${nextCursor}) for new frames.`;
-  return `${page.length} event(s) for op ${id} after cursor ${cursor}:\n${lines.join("\n")}${more}`;
+    bytesHit || events.length > lines.length
+      ? `\n… more frames remain. Poll run_events(id="${id}", cursor=${lastSeq}) for the next page.`
+      : `\nNext cursor: ${lastSeq}. Poll run_events(id="${id}", cursor=${lastSeq}) for new frames.`;
+  return `${lines.length} frame(s) for op ${id} after cursor ${cursor}:\n${lines.join("\n")}${more}`;
 }
 
 export function createOpTools(deps: { registry: OpRegistry }): ToolDefinition[] {

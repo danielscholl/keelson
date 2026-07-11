@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MessageChunk, ToolContext, ToolDefinition } from "@keelson/shared";
+import type { MessageChunk, OpHandle, ToolContext, ToolDefinition } from "@keelson/shared";
 import { openDatabase } from "../src/db/init.ts";
 import { createOpRegistry, type OpRegistry } from "../src/op-registry.ts";
 import { createOpStore } from "../src/op-store.ts";
@@ -201,6 +201,52 @@ describe("op tools — native ops", () => {
     const events = await run("run_events", { id: handle.id, cursor: 0 });
     expect(events.isError).toBe(false);
     expect(events.content).toContain(`No events for op ${handle.id} after cursor 0.`);
+  });
+
+  test("run_events renders bounded frame data", async () => {
+    const handle = registry.register("rib:squad", { kind: "squad_coordinate" });
+    handle.progress("scanning", { files: 12, phase: "index" });
+    const events = await run("run_events", { id: handle.id, cursor: 0 });
+    expect(events.content).toContain("scanning");
+    expect(events.content).toContain('"files":12');
+  });
+
+  test("drain aborts live native ops and settles them cancelled", async () => {
+    const handle = registry.register("rib:squad", { kind: "squad_coordinate" });
+    expect(handle.signal.aborted).toBe(false);
+    registry.drain();
+    expect(handle.signal.aborted).toBe(true);
+    const status = await run("run_status", { id: handle.id });
+    expect(status.content).toContain("status cancelled");
+    // A post-drain settle no-ops — the op is already terminal.
+    handle.done({ late: true });
+    const after = await run("run_status", { id: handle.id });
+    expect(after.content).toContain("status cancelled");
+  });
+
+  test("run_steer records the steer frame before an onSteer that self-settles", async () => {
+    let h: OpHandle | undefined;
+    h = registry.register("rib:squad", {
+      kind: "squad_coordinate",
+      onSteer: () => h?.done({ acked: true }),
+    });
+    const res = await run("run_steer", { id: h.id, note: "wrap up" });
+    expect(res.isError).toBe(false);
+    const events = await run("run_events", { id: h.id, cursor: 0 });
+    const steerAt = events.content.indexOf("steer: wrap up");
+    const doneAt = events.content.indexOf("] done");
+    expect(steerAt).toBeGreaterThanOrEqual(0);
+    expect(doneAt).toBeGreaterThan(steerAt);
+  });
+
+  test("register creates the row before publishing the controller (no stranded op on FK failure)", () => {
+    // A nonexistent projectId violates the ops FK, so create throws before live.set.
+    expect(() =>
+      registry.register("rib:squad", { kind: "squad_coordinate", projectId: "nope" }),
+    ).toThrow();
+    // The registry is uncorrupted: a subsequent valid op registers fine.
+    const ok = registry.register("rib:squad", { kind: "squad_coordinate" });
+    expect(registry.status(ok.id)?.status).toBe("running");
   });
 });
 
@@ -431,7 +477,7 @@ describe("op tools — restart", () => {
       throw new Error(`no tool_result from ${name}`);
     };
 
-    // AC1: the settled op's durable terminal result is retrievable through the tool.
+    // The settled op's durable terminal result is retrievable through the tool.
     const done = await run2("run_status", { id: settled.id });
     expect(done.isError).toBe(false);
     expect(done.content).toContain("status done");
