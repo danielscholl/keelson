@@ -69,12 +69,19 @@ export function reconcileCoverage(criteria: string[], rows: CoverageRow[]): Cove
   });
 }
 
+// Criterion/step come from untrusted issue and model content. Collapse any CR/LF
+// (and runs of whitespace) to a single space so a value can't inject extra
+// checklist rows or headings into the rendered approval callout.
+function oneLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 export function renderCoverageChecklist(rows: CoverageRow[]): string {
   if (rows.length === 0) return "";
   const rendered = rows.map((row) =>
     row.covered && row.step !== null
-      ? `- [x] ${row.criterion} -> ${row.step}`
-      : `- [ ] ${row.criterion} -> **MISSING**`,
+      ? `- [x] ${oneLine(row.criterion)} -> ${oneLine(row.step)}`
+      : `- [ ] ${oneLine(row.criterion)} -> **MISSING**`,
   );
   return `## Criteria coverage\n\n${rendered.join("\n")}`;
 }

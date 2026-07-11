@@ -78,7 +78,14 @@ nodes:
     depends_on: [fetch-issue]
     bash: |
       set -uo pipefail
-      ISSUE_JSON="${KEELSON_NODE_fetch_issue_OUTPUT:-}"
+      # The env channel caps a node output at 16 KiB; a large issue (body + all
+      # comments) spills its full text to KEELSON_NODE_fetch_issue_OUTPUT_FILE.
+      # Prefer that file so the brief JSON isn't parsed from a truncated value.
+      if [ -n "${KEELSON_NODE_fetch_issue_OUTPUT_FILE:-}" ] && [ -f "${KEELSON_NODE_fetch_issue_OUTPUT_FILE}" ]; then
+        ISSUE_JSON=$(cat "$KEELSON_NODE_fetch_issue_OUTPUT_FILE")
+      else
+        ISSUE_JSON="${KEELSON_NODE_fetch_issue_OUTPUT:-}"
+      fi
       BRIEF_FILE="$KEELSON_ARTIFACTS_DIR/brief.json"
 
       if command -v jq >/dev/null 2>&1; then
@@ -87,7 +94,7 @@ nodes:
         BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body // empty' 2>/dev/null || true)
         CRITERIA=$(printf '%s\n' "$BODY" | awk '
           BEGIN{f=0}
-          /^#{1,6}[[:space:]]+[Aa]cceptance [Cc]riteria[[:space:]]*:?[[:space:]]*$/{f=1; next}
+          tolower($0) ~ /^#{1,6}[[:space:]]+acceptance criteria[[:space:]]*:?[[:space:]]*$/{f=1; next}
           /^#{1,6}[[:space:]]/{if(f)exit}
           f && /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/{
             line=$0; sub(/^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+(\[[ xX]\][[:space:]]*)?/,"",line);
@@ -375,7 +382,14 @@ nodes:
         exit 0
       fi
 
-      COVERAGE_JSON="${KEELSON_NODE_coverage_check_OUTPUT:-}"
+      # A large brief's checklist can exceed the 16 KiB env cap; prefer the full
+      # spill file so a truncated value isn't parsed as invalid JSON (which would
+      # drop coverage and mark every criterion MISSING).
+      if [ -n "${KEELSON_NODE_coverage_check_OUTPUT_FILE:-}" ] && [ -f "${KEELSON_NODE_coverage_check_OUTPUT_FILE}" ]; then
+        COVERAGE_JSON=$(cat "$KEELSON_NODE_coverage_check_OUTPUT_FILE")
+      else
+        COVERAGE_JSON="${KEELSON_NODE_coverage_check_OUTPUT:-}"
+      fi
       if printf '%s' "$COVERAGE_JSON" | jq -e '(.coverage | type) == "array"' >/dev/null 2>&1; then
         printf '%s\n' "$COVERAGE_JSON" > "$COVERAGE_FILE" || true
         ROWS=$(jq -r '.coverage | length' "$COVERAGE_FILE" 2>/dev/null || printf '0')

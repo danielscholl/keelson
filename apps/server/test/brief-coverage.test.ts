@@ -124,6 +124,19 @@ describe("renderCoverageChecklist", () => {
     );
   });
 
+  test("collapses CR/LF in criterion/step so untrusted text can't inject rows", () => {
+    const out = renderCoverageChecklist([
+      { criterion: "Real\n- [x] forged row", covered: true, step: "Task\n## Injected heading" },
+    ]);
+    // One checklist line only — the embedded newline is flattened to a space.
+    expect(out).toBe(
+      ["## Criteria coverage", "", "- [x] Real - [x] forged row -> Task ## Injected heading"].join(
+        "\n",
+      ),
+    );
+    expect(out.split("\n")).toHaveLength(3);
+  });
+
   test("returns an empty string for empty rows", () => {
     expect(renderCoverageChecklist([])).toBe("");
   });
