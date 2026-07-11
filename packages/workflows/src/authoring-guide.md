@@ -52,6 +52,8 @@ Optional:
   placeholders.
 - `requiresProject: true` — marks a repo-scoped workflow; `workflow_run` refuses
   to start it unless the resolved working directory is a git repo.
+- `converge` — `{ gate, max_rounds, on_exhaust }` re-runs the gate node's
+  dependency subgraph until the gate completes or the round budget exhausts.
 - `effort` (`low`|`medium`|`high`|`max`) and `thinking`
   (`adaptive`|`enabled`|`disabled` or `{type, budgetTokens}`) — claude-only
   reasoning controls.
@@ -187,9 +189,11 @@ warning.
   parsing (empty string when the output isn't JSON).
 - `$ARTIFACTS_DIR` — per-run scratch directory in prompt text; bash nodes see
   it as the `$KEELSON_ARTIFACTS_DIR` environment variable.
+- `$converge.round` — current converge round while a node runs inside a
+  `converge` subgraph; empty outside converge rounds.
 
 Reserved node ids (they collide with substitution namespaces): `inputs`,
-`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`.
+`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`, `converge`.
 
 ## Control flow patterns
 
@@ -230,6 +234,32 @@ Approval gate — plan, pause for a human, then act on approval:
     prompt: "Execute the plan: $plan.output"
     depends_on: [gate]
 ```
+
+Converge — re-run a gate's dependency subgraph until the gate passes:
+
+```yaml
+converge:
+  gate: checks
+  max_rounds: 3
+  on_exhaust: approval
+nodes:
+  - id: fix
+    prompt: "Fix the failing checks (round $converge.round)."
+  - id: checks
+    depends_on: [fix]
+    bash: gh pr checks --watch
+  - id: summarize
+    depends_on: [checks]
+    prompt: "Summarize the final checks: $checks.output"
+```
+
+`gate` names an existing node. Each round runs that gate plus its transitive
+`depends_on` ancestors, then resets those outputs before the next round so
+`$node.output` refs are round-scoped. `max_rounds` is 1–10. `on_exhaust` is
+`fail` (default) or `approval`; approval pauses for a human override after the
+last failed round. The gate cannot be a `loop` node and cannot declare `retry:`
+because a failed gate means "start another round"; non-gate nodes may still use
+`retry:` inside a round.
 
 ## Validation
 
