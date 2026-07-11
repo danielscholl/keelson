@@ -192,7 +192,7 @@ async function runTurn(
   // Reject an empty/whitespace prompt at the seam, before touching a
   // provider, so a transiently-empty prompt is a legible contract violation.
   if (!req.prompt || req.prompt.trim().length === 0) {
-    return { status: "error", text: "", error: "prompt must be non-empty" };
+    return { status: "error", text: "", error: "prompt must be non-empty", stopReason: "error" };
   }
   if (req.abortSignal?.aborted) {
     return { status: "aborted", text: "", stopReason: "aborted" };
@@ -200,7 +200,7 @@ async function runTurn(
 
   const resolved = resolveProviderId(req.provider, deps);
   if ("error" in resolved) {
-    return { status: "error", text: "", error: resolved.error };
+    return { status: "error", text: "", error: resolved.error, stopReason: "error" };
   }
   const providerId = resolved.id;
 
