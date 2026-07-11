@@ -1658,6 +1658,15 @@ describe("runWorkflow — resolve-comments conditional approval gate", () => {
     expect(summary.nodes.fix.state).toBe("completed");
   });
 
+  test("a zero-thread run skips the gate and the whole mutation chain", async () => {
+    const { run, approvalCalls } = gateRun({ fetched: [], triaged: [] });
+    const summary = await run;
+    expect(approvalCalls).toEqual([]);
+    expect(summary.nodes.approve.state).toBe("skipped");
+    expect(summary.nodes.fix.state).toBe("skipped");
+    expect(summary.nodes.push.state).toBe("skipped");
+  });
+
   test("an incomplete triage fails the gate closed and skips all mutation", async () => {
     const { run, approvalCalls } = gateRun({
       fetched: ["t1", "t2"],

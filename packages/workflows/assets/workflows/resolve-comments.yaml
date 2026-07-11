@@ -249,10 +249,13 @@ nodes:
         echo "triaged: $TRIAGED" >&2
         exit 1
       fi
-      # Pure JSON on stdout: the approve node's `when:` reads .needs_review.
-      jq -c '
+      # Pure JSON on stdout: approve's `when:` reads .needs_review; fix's
+      # `when:` reads .has_threads so a zero-thread run mutates nothing.
+      jq -c --slurpfile fetched "$KEELSON_ARTIFACTS_DIR/threads.json" '
         ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
-        | { contentious: $n, needs_review: (if $n > 0 then "true" else "false" end) }
+        | { contentious: $n,
+            needs_review: (if $n > 0 then "true" else "false" end),
+            has_threads: (if ($fetched[0] | length) > 0 then "true" else "false" end) }
       ' "$KEELSON_ARTIFACTS_DIR/triage.json"
 
   - id: approve
@@ -272,10 +275,12 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   # Runs after the gate whether it paused (approve completed) or was skipped
-  # (every thread actionable); a cancelled pause fails approve and skips this.
+  # (every thread actionable); a cancelled pause fails approve and skips this,
+  # and a zero-thread run skips the whole mutation chain via `when:`.
   - id: fix
     depends_on: [gate-check, approve]
     trigger_rule: none_failed_min_one_success
+    when: "$gate-check.output.has_threads == 'true'"
     context: fresh
     # The code-writing arm; pin a frontier coding model rather than letting
     # `model: auto` pick a weaker default.
