@@ -15,12 +15,15 @@ import {
   registerProvider,
 } from "@keelson/providers";
 import type {
+  AcquireWorkspaceRequest,
   MemoryTools,
   Project,
   RecallRequest,
   RecallResponse,
   Rib,
+  RibContext,
   ToolDefinition,
+  WorkspaceLease,
   WritebackRequest,
   WritebackResponse,
 } from "@keelson/shared";
@@ -47,6 +50,7 @@ import {
 import type { MemoryStore } from "../src/memory-store.ts";
 import { discoverRibs } from "../src/rib-discovery.ts";
 import { applyRibs, parseRibList } from "../src/ribs.ts";
+import type { WorkspaceManager } from "../src/workspace-manager.ts";
 
 describe("parseRibList", () => {
   test("unset returns an empty list (no ribs loaded by default)", () => {
@@ -656,6 +660,63 @@ describe("bootstrapRibs", () => {
       displayName: "alpha",
       registerTools: (ctx) => {
         hasAccessor = ctx.getMemory !== undefined;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: probe } });
+    expect(hasAccessor).toBe(false);
+  });
+
+  test("acquireWorkspace forwards to the manager with rib ownership at call time", async () => {
+    delete process.env.KEELSON_RIBS;
+    const calls: Array<AcquireWorkspaceRequest & { owner: string }> = [];
+    const lease: WorkspaceLease = {
+      id: "lease-1",
+      path: "/tmp/worktree",
+      branch: "keelson/lease/fix/abc123",
+      release: async () => {},
+    };
+    let managerRef: Pick<WorkspaceManager, "acquire"> | undefined;
+    let acquireWorkspace: RibContext["acquireWorkspace"] | undefined;
+    const reader: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        acquireWorkspace = ctx.acquireWorkspace;
+        return [];
+      },
+    };
+
+    await bootstrapRibs({
+      available: { alpha: reader },
+      getWorkspaceManager: () => managerRef as WorkspaceManager | undefined,
+    });
+
+    expect(acquireWorkspace).toBeDefined();
+    await expect(
+      acquireWorkspace?.({ projectId: "p1", purpose: "fix", branch: "custom" }),
+    ).rejects.toThrow("workspace manager unavailable");
+
+    managerRef = {
+      acquire: async (req) => {
+        calls.push(req);
+        return lease;
+      },
+    };
+    await expect(
+      acquireWorkspace?.({ projectId: "p1", purpose: "fix", branch: "custom" }),
+    ).resolves.toBe(lease);
+    expect(calls).toEqual([{ projectId: "p1", purpose: "fix", branch: "custom", owner: "rib:alpha" }]);
+  });
+
+  test("RibContext.acquireWorkspace is absent when no workspace manager source is supplied", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasAccessor = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasAccessor = ctx.acquireWorkspace !== undefined;
         return [];
       },
     };
