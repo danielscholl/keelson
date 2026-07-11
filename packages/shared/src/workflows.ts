@@ -7,6 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { z } from "zod";
+import { briefSchema } from "./brief.ts";
 import { contentBlockSchema, messageChunkSchema, tokenUsageSchema } from "./chat.ts";
 
 // Run-level status. `running` is the value the store writes on POST; the
@@ -185,6 +186,7 @@ export const workflowRunDetailSchema = workflowRunSummarySchema
   .extend({
     inputs: z.record(z.string(), z.string()),
     nodes: z.array(nodeOutputRowSchema),
+    brief: briefSchema.nullable().default(null),
   })
   .strict();
 export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>;
