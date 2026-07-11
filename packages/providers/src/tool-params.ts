@@ -23,7 +23,10 @@ export function deriveToolParametersJsonSchema(
   }
   let jsonSchema: Record<string, unknown>;
   try {
-    jsonSchema = z.toJSONSchema(tool.inputSchema as z.ZodType) as Record<string, unknown>;
+    jsonSchema = z.toJSONSchema(tool.inputSchema as z.ZodType, { reused: "ref" }) as Record<
+      string,
+      unknown
+    >;
   } catch {
     return { type: "object", additionalProperties: true };
   }
