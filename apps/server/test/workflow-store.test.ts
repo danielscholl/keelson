@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
+import { createUsageStore } from "../src/usage-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { rmTemp } from "./temp.ts";
 
@@ -221,6 +222,73 @@ describe("SQLite WorkflowStore", () => {
     expect(store.getRunUsageTotals("r1")).toEqual({ totalTokens: 400, turns: 2 });
     // Scoped to the run.
     expect(store.getRunUsageTotals("missing")).toEqual({ totalTokens: 0, turns: 0 });
+  });
+
+  test("getRunUsageTotals includes repeated workflow turns from the usage ledger", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const usageStore = createUsageStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "2025-01-01T00:00:00.000Z",
+      conversationId: mintConv(db),
+    });
+
+    const base = {
+      runId: "r1",
+      nodeId: "prompt",
+      status: "succeeded" as const,
+      outputText: "",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:01.000Z",
+      completedAt: "2025-01-01T00:00:02.000Z",
+      error: null,
+      provider: "copilot",
+      model: "gpt-5.6",
+    };
+    store.upsertNodeOutput({
+      ...base,
+      usage: { inputTokens: 100, outputTokens: 40 },
+    });
+    usageStore.record({
+      source: "workflow",
+      provider: "copilot",
+      model: "gpt-5.6",
+      inputTokens: 100,
+      outputTokens: 40,
+      runId: "r1",
+      nodeId: "prompt",
+      workflowName: "x",
+    });
+    store.upsertNodeOutput({
+      ...base,
+      usage: { inputTokens: 200, outputTokens: 60 },
+    });
+    usageStore.record({
+      source: "workflow",
+      provider: "copilot",
+      model: "gpt-5.6",
+      inputTokens: 200,
+      outputTokens: 60,
+      runId: "r1",
+      nodeId: "prompt",
+      workflowName: "x",
+    });
+    // Same runId but non-workflow source must not enter workflow request budgeting.
+    usageStore.record({
+      source: "rib",
+      provider: "copilot",
+      model: "gpt-5.6",
+      inputTokens: 1000,
+      outputTokens: 1000,
+      runId: "r1",
+      nodeId: "prompt",
+      workflowName: "x",
+    });
+
+    expect(store.getRunUsageTotals("r1")).toEqual({ totalTokens: 400, turns: 2 });
   });
 
   test("upsertNodeOutput is idempotent on (run_id, node_id)", () => {
