@@ -15,6 +15,7 @@ import type {
   ClaudeSdkMessage,
   ClaudeSdkModule,
   MessageChunk,
+  ProviderFinishReason,
 } from "../src/index.ts";
 import {
   buildFriendlyClaudeError,
@@ -703,6 +704,71 @@ describe("ClaudeProvider — happy path stream translation", () => {
     const options = sdk.lastOptions()!;
     expect(options.additionalDirectories).toEqual(["/tmp/room", "/tmp/shared"]);
     expect(options.permissionMode).toBe("default");
+  });
+
+  it("reports max_tokens from the root assistant stop reason", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "assistant",
+          message: { content: [], stop_reason: "max_tokens" },
+          uuid: "a1",
+          session_id: "sess-id",
+        });
+        await pushSuccess(push);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    let finishReason: ProviderFinishReason | undefined;
+
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        onFinishReason: (reason) => {
+          finishReason = reason;
+        },
+      }),
+    );
+
+    expect(finishReason).toBe("max_tokens");
+  });
+
+  it("reports end from the root assistant stop reason", async () => {
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        await push({
+          type: "assistant",
+          parent_tool_use_id: "toolu_task",
+          message: { content: [], stop_reason: "max_tokens" },
+          uuid: "a-sub",
+          session_id: "sess-id",
+        });
+        await push({
+          type: "assistant",
+          message: { content: [], stop_reason: "end_turn" },
+          uuid: "a-root",
+          session_id: "sess-id",
+        });
+        await pushSuccess(push);
+      },
+    });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+    let finishReason: ProviderFinishReason | undefined;
+
+    await drain(
+      provider.sendQuery("hi", "/tmp", undefined, {
+        onFinishReason: (reason) => {
+          finishReason = reason;
+        },
+      }),
+    );
+
+    expect(finishReason).toBe("end");
   });
 });
 
