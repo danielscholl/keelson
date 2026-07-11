@@ -119,6 +119,14 @@ exposes the reply as the node's output; `on_reject` re-prompts on rejection:
     capture_response: true
 ```
 
+Before an approval gate, a workflow may attach a run brief by writing
+`$ARTIFACTS_DIR/brief.json` as `{ sourceUrl?, title?, criteria: string[] }`.
+When the brief has criteria, a preceding reasoning node can write
+`$ARTIFACTS_DIR/coverage.json`; the server persists the brief and renders that
+coverage artifact into the approval message, mapping each criterion to a plan
+step or **MISSING**. Missing files, empty criteria, or invalid coverage are a
+no-op.
+
 `loop` — repeats an AI prompt until `until` text appears in the output (or
 `until_bash` exits 0), bounded by `max_iterations`; `fresh_context: true`
 starts a new session each iteration. `loop.interactive: true` requires
