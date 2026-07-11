@@ -126,6 +126,7 @@ const canvasCellSchema = z.union([
       value: canvasCellScalarSchema.optional(),
       tone: canvasToneSchema.optional(),
       badges: z.array(canvasCellBadgeSchema).optional(),
+      href: z.string().optional(),
     })
     .strict()
     // A wrapped cell must render something: a value, or at least one badge.
@@ -441,6 +442,7 @@ const barsSectionSchema = z
           total: z.number(),
           tone: canvasToneSchema.optional(),
           trailing: z.string().optional(),
+          href: z.string().optional(),
         })
         .strict(),
     ),

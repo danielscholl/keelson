@@ -759,18 +759,30 @@ function Section({ section }: { section: BoardSection }) {
                 {b.trailing ?? `${barPct(b.value, b.total)}%`}
               </span>
             );
+            const labelNode = isSafeLinkScheme(b.href) ? (
+              <a
+                className="cvb-link cvb-bar-label"
+                href={b.href}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {b.label}
+              </a>
+            ) : (
+              <span className="cvb-bar-label">{b.label}</span>
+            );
             return (
               <div key={key(JSON.stringify(b))} className="cvb-bar">
                 {inline ? (
                   <>
-                    <span className="cvb-bar-label">{b.label}</span>
+                    {labelNode}
                     {track}
                     {trailing}
                   </>
                 ) : (
                   <>
                     <div className="cvb-bar-head">
-                      <span className="cvb-bar-label">{b.label}</span>
+                      {labelNode}
                       {trailing}
                     </div>
                     {track}

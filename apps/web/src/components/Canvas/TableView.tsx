@@ -1,4 +1,5 @@
 import type { CanvasCell, CanvasCellBadge, CanvasTableView, CanvasTone } from "@keelson/shared";
+import { isSafeLinkScheme } from "../../lib/safeLink";
 
 type Tone = CanvasTone;
 
@@ -6,13 +7,20 @@ function normalizeCell(cell: CanvasCell | undefined): {
   display: string;
   tone?: Tone;
   badges?: CanvasCellBadge[];
+  href?: string;
 } {
   const obj = cell !== null && typeof cell === "object" ? cell : null;
   const value = obj ? obj.value : cell;
   const badges = obj?.badges?.length ? obj.badges : undefined;
+  const href = obj?.href;
   // A badge-only cell shows no dash placeholder; an empty value otherwise reads "—".
   const display = value === null || value === undefined ? (badges ? "" : "—") : String(value);
-  return { display, ...(obj?.tone ? { tone: obj.tone } : {}), ...(badges ? { badges } : {}) };
+  return {
+    display,
+    ...(obj?.tone ? { tone: obj.tone } : {}),
+    ...(badges ? { badges } : {}),
+    ...(href ? { href } : {}),
+  };
 }
 
 // Small toned chips beside (or instead of) a cell value — A–E grade chips, a
@@ -66,16 +74,23 @@ export function TableView({ view }: { view: CanvasTableView }) {
           {keyedRows.map(({ key, row }) => (
             <tr key={key}>
               {view.columns.map((col) => {
-                const { display, tone, badges } = normalizeCell(row[col.key]);
+                const { display, tone, badges, href } = normalizeCell(row[col.key]);
+                const displayNode = isSafeLinkScheme(href) ? (
+                  <a className="cvb-link" href={href} target="_blank" rel="noopener noreferrer">
+                    {display}
+                  </a>
+                ) : (
+                  display
+                );
                 return (
                   <td key={col.key} data-tone={tone}>
                     {badges ? (
                       <>
-                        {display && <span className="canvas-cell-value">{display}</span>}
+                        {display && <span className="canvas-cell-value">{displayNode}</span>}
                         <CellBadges badges={badges} />
                       </>
                     ) : (
-                      display
+                      displayNode
                     )}
                   </td>
                 );

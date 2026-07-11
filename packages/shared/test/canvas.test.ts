@@ -294,6 +294,32 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("board");
   });
 
+  it("parses href on a table cell and a bars item (deep-linkable primitives)", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "bars",
+          items: [{ label: "keycloak", value: 3, total: 9, href: "https://sonar.test/bar" }],
+        },
+        {
+          kind: "table",
+          columns: [{ key: "svc" }, { key: "rating" }],
+          rows: [
+            { svc: "alpha", rating: { value: "A", tone: "ok", href: "https://sonar.test/cell" } },
+          ],
+        },
+      ],
+    });
+    const bars = v.view === "board" ? v.sections[0] : undefined;
+    const table = v.view === "board" ? v.sections[1] : undefined;
+    expect(bars?.kind === "bars" ? bars.items[0]?.href : undefined).toBe("https://sonar.test/bar");
+    const cell = table?.kind === "table" ? table.rows[0]?.rating : undefined;
+    expect(cell !== null && typeof cell === "object" ? cell?.href : undefined).toBe(
+      "https://sonar.test/cell",
+    );
+  });
+
   it("parses a board header with a roster peek (people) and a collapse hint", () => {
     const v = canvasViewSchema.parse({
       view: "board",
