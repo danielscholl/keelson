@@ -16,8 +16,33 @@ import {
   loadBriefAndCoverage,
   parseBriefArtifact,
   parseCoverageArtifact,
+  reconcileCoverage,
   renderCoverageChecklist,
 } from "../src/brief-coverage.ts";
+
+describe("reconcileCoverage", () => {
+  test("emits one row per criterion in brief order, flagging omitted/reordered as MISSING", () => {
+    const criteria = ["a", "b", "c"];
+    // Model omitted "b" and covered "a" (with a step); "c" claims covered but no step.
+    const rows = reconcileCoverage(criteria, [
+      { criterion: "c", covered: true, step: null },
+      { criterion: "a", covered: true, step: "Task 1" },
+    ]);
+    expect(rows.map((r) => r.criterion)).toEqual(["a", "b", "c"]);
+    expect(rows[0]).toEqual({ criterion: "a", covered: true, step: "Task 1" });
+    expect(rows[1]).toEqual({ criterion: "b", covered: false, step: null }); // omitted -> MISSING
+    expect(rows[2]).toEqual({ criterion: "c", covered: false, step: null }); // no step -> MISSING
+  });
+
+  test("empty coverage rows flag every criterion MISSING (fail-visible)", () => {
+    const rows = reconcileCoverage(["x", "y"], []);
+    expect(rows).toEqual([
+      { criterion: "x", covered: false, step: null },
+      { criterion: "y", covered: false, step: null },
+    ]);
+  });
+});
+
 import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
@@ -117,13 +142,12 @@ describe("loadBriefAndCoverage", () => {
     });
   });
 
-  test("returns a parsed brief with no checklist when coverage is absent", async () => {
+  test("renders every criterion MISSING (fail-visible) when coverage is absent", async () => {
     writeFileSync(join(tmpDir, "brief.json"), '{"criteria":["Show covered criteria"]}');
 
-    await expect(loadBriefAndCoverage({ artifactsDir: tmpDir })).resolves.toEqual({
-      brief: { criteria: ["Show covered criteria"] },
-      checklist: "",
-    });
+    const result = await loadBriefAndCoverage({ artifactsDir: tmpDir });
+    expect(result.brief).toEqual({ criteria: ["Show covered criteria"] });
+    expect(result.checklist).toContain("- [ ] Show covered criteria -> **MISSING**");
   });
 
   test("returns an empty result when artifacts are absent", async () => {

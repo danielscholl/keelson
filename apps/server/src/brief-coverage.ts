@@ -55,6 +55,21 @@ export function parseCoverageArtifact(raw: string): CoverageRow[] | null {
   }
 }
 
+// Reconcile the model's coverage rows against the brief's criteria by exact match:
+// every criterion appears exactly once, in brief order; a criterion the model
+// omitted, reordered, or marked covered without a real step is flagged MISSING.
+// The model judges coverage; the server guarantees completeness so a dropped
+// criterion (the exact #85 failure this feature guards) can't silently hide.
+export function reconcileCoverage(criteria: string[], rows: CoverageRow[]): CoverageRow[] {
+  const byCriterion = new Map(rows.map((row) => [row.criterion, row]));
+  return criteria.map((criterion) => {
+    const row = byCriterion.get(criterion);
+    return row && row.covered && row.step !== null && row.step.length > 0
+      ? { criterion, covered: true, step: row.step }
+      : { criterion, covered: false, step: null };
+  });
+}
+
 export function renderCoverageChecklist(rows: CoverageRow[]): string {
   if (rows.length === 0) return "";
   const rendered = rows.map((row) =>
@@ -86,8 +101,10 @@ export async function loadBriefAndCoverage(opts: {
   if (brief.criteria.length === 0) return { brief, checklist: "" };
 
   const coverageRaw = await readArtifact(join(opts.artifactsDir, "coverage.json"));
-  if (coverageRaw === null) return { brief, checklist: "" };
-
-  const rows = parseCoverageArtifact(coverageRaw);
-  return { brief, checklist: rows !== null ? renderCoverageChecklist(rows) : "" };
+  const rows = coverageRaw !== null ? parseCoverageArtifact(coverageRaw) : null;
+  // Reconcile against the brief's criteria so absent / malformed / partial coverage
+  // still renders every criterion (MISSING where unproven) — fail-visible, never a
+  // silent omission of the criteria this gate exists to surface.
+  const reconciled = reconcileCoverage(brief.criteria, rows ?? []);
+  return { brief, checklist: renderCoverageChecklist(reconciled) };
 }
