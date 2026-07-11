@@ -11,6 +11,7 @@ import {
   sandboxSettingsSchema,
   thinkingConfigSchema,
 } from "./dag-node.ts";
+import { convergeConfigSchema } from "./converge.ts";
 
 // ---------------------------------------------------------------------------
 // Shared enum schemas
@@ -75,6 +76,7 @@ export const workflowBaseSchema = z.object({
   betas: z.array(z.string().min(1)).nonempty("'betas' must be a non-empty array").optional(),
   sandbox: sandboxSettingsSchema.optional(),
   worktree: workflowWorktreePolicySchema.optional(),
+  converge: convergeConfigSchema.optional(),
   /**
    * When `false`, the engine skips the path-exclusive lock for this workflow,
    * allowing N concurrent runs on the same live checkout. The author asserts
