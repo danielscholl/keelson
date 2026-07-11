@@ -215,9 +215,7 @@ export function createWorkspaceManager({
             force: true,
           });
           if (out.warning !== null) {
-            console.warn(
-              `[workspace] failed to clean up lease worktree ${id}: ${out.warning}`,
-            );
+            console.warn(`[workspace] failed to clean up lease worktree ${id}: ${out.warning}`);
           }
         }
         throw err;
