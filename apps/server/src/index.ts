@@ -380,9 +380,11 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   const workspaceLeaseStore = createWorkspaceLeaseStore(db);
   const workspaceManager = createWorkspaceManager({ store: workspaceLeaseStore, projectsStore });
   workspaceManagerRef = workspaceManager;
-  await workspaceManager.reconcile();
   const projectNotebookStore = createProjectNotebookStore(db);
   migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: WORKSPACE_ROOT });
+  // Reconcile only after the legacy-layout migration: it moves worktrees on
+  // disk, and reconciling first would drop lease rows for paths mid-move.
+  await workspaceManager.reconcile();
   const existingDefault = projectsStore.getByName(DEFAULT_PROJECT_NAME);
   const defaultProject =
     existingDefault ??

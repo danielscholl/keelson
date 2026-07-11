@@ -198,6 +198,9 @@ export function createWorkspaceManager({
         if (prepared.depsError !== null) {
           throw new Error(`workspace dependency install failed: ${prepared.depsError}`);
         }
+        if (prepared.deps.skipped === "aborted") {
+          throw new Error("workspace acquisition aborted during dependency preparation");
+        }
       } catch (err) {
         try {
           store.delete(id);

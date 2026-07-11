@@ -199,6 +199,35 @@ describe("WorkspaceManager", () => {
     expect(leaseStore.list()).toEqual([]);
   });
 
+  test("acquire fails and cleans up when preparation is aborted", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const removeCalls: Array<{ repoPath: string; dest: string; force?: boolean }> = [];
+
+    manager.prepareWorktree = async (req) => ({
+      worktreePath: req.dest,
+      adopted: false,
+      branchCreated: true,
+      deps: { installed: false, skipped: "aborted", error: null, durationMs: 1 },
+      depsError: null,
+    });
+    manager.removeWorktree = async (opts) => {
+      removeCalls.push(opts);
+      return { removed: true, warning: null };
+    };
+
+    await expect(
+      manager.acquire({
+        projectId: project.id,
+        purpose: "cancelled",
+        owner: "tool",
+      }),
+    ).rejects.toThrow("aborted during dependency preparation");
+
+    expect(removeCalls).toHaveLength(1);
+    expect(leaseStore.list()).toEqual([]);
+  });
+
   test("acquire honors an explicit branch", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });
