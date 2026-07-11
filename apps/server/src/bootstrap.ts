@@ -450,25 +450,30 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       }
     : undefined;
   const getMutationLockManager = options.getMutationLockManager;
-  const acquireMutationLockSeam = getMutationLockManager
-    ? async (ribId: string, req: AcquireMutationLockRequest): Promise<MutationLock> => {
-        const manager = getMutationLockManager();
-        if (!manager) throw new Error("mutation lock manager unavailable");
-        // Reject a phantom projectId (the same guard WorkspaceManager.acquire
-        // enforces): a lock under a non-existent key gives the rib false exclusion
-        // while a workflow locks the real project and mutates the real checkout.
-        const projects = options.getProjects?.();
-        if (projects && !projects.some((p) => p.id === req.projectId)) {
-          throw new Error(`unknown project '${req.projectId}'`);
+  const getProjectsForLock = options.getProjects;
+  // Fail closed: the seam is only exposed when a projects source is ALSO available,
+  // so it can always validate the projectId. Without it we cannot tell a real
+  // project from a phantom key, and an unvalidated lock gives the rib false
+  // exclusion while a workflow mutates the real checkout — so we offer no seam
+  // (the rib degrades to no lock) rather than an unsafe one.
+  const acquireMutationLockSeam =
+    getMutationLockManager && getProjectsForLock
+      ? async (ribId: string, req: AcquireMutationLockRequest): Promise<MutationLock> => {
+          const manager = getMutationLockManager();
+          if (!manager) throw new Error("mutation lock manager unavailable");
+          // Reject a phantom projectId (the same guard WorkspaceManager.acquire
+          // enforces): a lock under a non-existent key gives false exclusion.
+          if (!getProjectsForLock().some((p) => p.id === req.projectId)) {
+            throw new Error(`unknown project '${req.projectId}'`);
+          }
+          const handle = manager.acquire({
+            projectId: req.projectId,
+            purpose: req.purpose,
+            owner: `rib:${ribId}`,
+          });
+          return { id: handle.id, release: async () => handle.release() };
         }
-        const handle = manager.acquire({
-          projectId: req.projectId,
-          purpose: req.purpose,
-          owner: `rib:${ribId}`,
-        });
-        return { id: handle.id, release: async () => handle.release() };
-      }
-    : undefined;
+      : undefined;
   // RibContext.getProviders resolver: the registered-provider list (id + label) so a
   // rib can make availability-aware provider choices (e.g. assign a member's vendor at
   // cast). Read-only; grants nothing beyond the existing runAgentTurn routing. Tests

@@ -637,6 +637,9 @@ describe("bootstrapRibs", () => {
     };
     await bootstrapRibs({
       available: { alpha: rib },
+      getProjects: () => [
+        { id: "p1", name: "p1", rootPath: "/repos/p1", createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
       getMutationLockManager: () => managerRef as never,
     });
     expect(accessor).toBeDefined();
@@ -707,6 +710,27 @@ describe("bootstrapRibs", () => {
     const lock = await accessor?.({ projectId: "known", purpose: "x" });
     expect(lock?.id).toBe("lock-1");
     expect(acquired).toBe(1);
+  });
+
+  test("acquireMutationLock fails closed (no seam) when a manager is wired but no projects source", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasSeam = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasSeam = ctx.acquireMutationLock !== undefined;
+        return [];
+      },
+    };
+    // Without a projects source the seam cannot validate a projectId, so it is
+    // withheld rather than granting unvalidated (phantom-key) locks.
+    await bootstrapRibs({
+      available: { alpha: probe },
+      getMutationLockManager: () =>
+        ({ acquire: () => ({ id: "l", release: async () => {} }) }) as never,
+    });
+    expect(hasSeam).toBe(false);
   });
 
   test("RibContext.acquireMutationLock is absent when no manager source is supplied", async () => {

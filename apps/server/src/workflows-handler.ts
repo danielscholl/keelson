@@ -1136,7 +1136,15 @@ function resumeRunCore(
       // the resume-tool hint don't misreport it as "only failed/cancelled can resume".
       return { ok: false, reason: "locked", message: err.message };
     }
-    throw err;
+    // A non-conflict lock failure (e.g. a lock-store write error) is unexpected;
+    // surface a controlled result instead of throwing a raw error out of the route.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[workflows] resume lock acquisition failed for run ${runId}: ${message}`);
+    return {
+      ok: false,
+      reason: "not_terminal",
+      message: `failed to acquire mutation lock: ${message}`,
+    };
   }
 
   // Atomically claim the run: one UPDATE flips failed/cancelled → running. A
