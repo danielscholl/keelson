@@ -338,6 +338,16 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 9,
+    description: "usage events: index the per-run budget aggregation",
+    up: (db) => {
+      db.exec(`
+        CREATE INDEX ix_usage_events_source_run
+          ON usage_events(source, run_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
