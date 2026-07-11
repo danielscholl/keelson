@@ -101,6 +101,44 @@ nodes:
     });
   });
 
+  test("bundled workflow assets load without validation errors", () => {
+    const dir = path.join(import.meta.dir, "../assets/workflows");
+    const filenames = fs
+      .readdirSync(dir)
+      .filter((filename) => /\.ya?ml$/.test(filename))
+      .sort();
+
+    expect(filenames.length).toBeGreaterThan(0);
+
+    const failures: string[] = [];
+    for (const filename of filenames) {
+      const filePath = path.join(dir, filename);
+      const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+      if (result.error) {
+        failures.push(`${filename}: ${result.error.error}`);
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+
+  test("bundled converge-pr declares a valid converge gate", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/converge-pr.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.converge).toEqual({
+      gate: "converge-check",
+      max_rounds: 8,
+      on_exhaust: "approval",
+    });
+
+    const gate = result.workflow?.nodes.find((node) => node.id === "converge-check");
+    expect(gate).toBeDefined();
+    expect(gate && "bash" in gate).toBe(true);
+    expect(gate?.retry).toBeUndefined();
+  });
+
   test("DAG with depends_on, when:, trigger_rule", () => {
     const yaml = `
 name: triage
