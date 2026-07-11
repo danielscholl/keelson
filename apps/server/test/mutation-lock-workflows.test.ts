@@ -48,6 +48,22 @@ function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
 }
 
+async function git(args: string[], cwd: string): Promise<void> {
+  const proc = Bun.spawn({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
+  if ((await proc.exited) !== 0) {
+    throw new Error(`git ${args.join(" ")} in ${cwd}: ${await new Response(proc.stderr).text()}`);
+  }
+}
+
+async function initRepo(path: string): Promise<void> {
+  await git(["init", "--initial-branch=main"], path);
+  await git(["config", "user.email", "t@t"], path);
+  await git(["config", "user.name", "t"], path);
+  writeFileSync(join(path, "README.md"), "x\n");
+  await git(["add", "README.md"], path);
+  await git(["commit", "-m", "init"], path);
+}
+
 function postJson(url: string, body: unknown): Request {
   return new Request(url, {
     method: "POST",
@@ -302,6 +318,144 @@ nodes:
       const fallbackRun = store.getRun(fallback.runId);
       expect(fallbackRun?.status).toBe("failed");
       expect(fallbackRun?.error).toContain(`project ${project.id} is locked by workflow:`);
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
+
+  test("a mutates_checkout:false run starts while the project lock is held", async () => {
+    writeWorkflow(
+      "guarded.yaml",
+      `name: guarded
+description: holds the mutation lock at an approval
+nodes:
+  - id: review
+    approval:
+      message: hold the lock
+`,
+    );
+    writeWorkflow(
+      "readonly.yaml",
+      `name: readonly
+description: read-only, exempt from the mutation lock
+mutates_checkout: false
+nodes:
+  - id: noop
+    bash: "true"
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "repo", rootPath: tmpDir });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, mutationLockManager },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      const firstRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded/runs", { inputs: {}, projectId: project.id }),
+      );
+      expect(firstRes.status).toBe(200);
+      const first = (await firstRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, first.runId, (status) => status === "paused");
+
+      // The read-only workflow never takes the lock, so it starts despite the hold.
+      const exemptRes = await app.fetch(
+        postJson("http://test/api/workflows/readonly/runs", { inputs: {}, projectId: project.id }),
+      );
+      expect(exemptRes.status).toBe(200);
+      const exempt = (await exemptRes.json()) as { runId: string };
+      await pollUntilTerminal(store, exempt.runId);
+      expect(store.getRun(exempt.runId)?.status).toBe("succeeded");
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
+
+  test("a successfully worktree-isolated run starts while the project lock is held", async () => {
+    const repo = join(tmpDir, "iso-repo");
+    mkdirSync(repo);
+    await initRepo(repo);
+    writeWorkflow(
+      "guarded-live.yaml",
+      `name: guarded-live
+description: holds the in-place mutation lock at an approval
+nodes:
+  - id: review
+    approval:
+      message: hold the lock
+`,
+    );
+    writeWorkflow(
+      "iso.yaml",
+      `name: iso
+description: worktree-isolated, runs outside the live checkout
+worktree:
+  enabled: true
+nodes:
+  - id: where
+    bash: pwd
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "iso-repo", rootPath: repo });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, mutationLockManager },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      const firstRes = await app.fetch(
+        postJson("http://test/api/workflows/guarded-live/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      expect(firstRes.status).toBe(200);
+      const first = (await firstRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, first.runId, (status) => status === "paused");
+
+      // Isolation succeeds (real git repo), so the run never falls back to the
+      // in-place lock and must not conflict with the held live-checkout lock.
+      const isoRes = await app.fetch(
+        postJson("http://test/api/workflows/iso/runs", {
+          inputs: {},
+          projectId: project.id,
+          isolation: "worktree",
+        }),
+      );
+      expect(isoRes.status).toBe(200);
+      const iso = (await isoRes.json()) as { runId: string };
+      await pollUntilTerminal(store, iso.runId);
+      const isoRun = store.getRun(iso.runId);
+      expect(isoRun?.status).toBe("succeeded");
+      expect(isoRun?.error ?? "").not.toContain("is locked by workflow");
     } finally {
       await activeRuns.abortAll();
       db.close();
