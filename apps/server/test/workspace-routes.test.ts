@@ -43,6 +43,7 @@ describe("workspace routes", () => {
       branch: "keelson/lease/fix/abc123",
       worktreePath: join(tmpDir, "repo", ".worktrees", "abc123"),
       createdAt: "2026-01-01T00:00:00.000Z",
+      status: "active" as const,
     };
     store.insert(lease);
     const app = new Hono();

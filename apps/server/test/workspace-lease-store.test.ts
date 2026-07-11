@@ -47,6 +47,7 @@ function lease(overrides: Partial<WorkspaceLeaseRecord> = {}): WorkspaceLeaseRec
     branch: "keelson/lease/fix-issue/abc123",
     worktreePath: join(tmpDir, "repo", ".worktrees", "abc123"),
     createdAt: "2026-01-01T00:00:00.000Z",
+    status: "active",
     ...overrides,
   };
 }
@@ -69,11 +70,13 @@ describe("WorkspaceLeaseStore", () => {
       id: "lease-older",
       worktreePath: join(tmpDir, "older"),
       createdAt: "2026-01-01T00:00:00.000Z",
+      status: "active",
     });
     const newer = lease({
       id: "lease-newer",
       worktreePath: join(tmpDir, "newer"),
       createdAt: "2026-01-02T00:00:00.000Z",
+      status: "active",
     });
     store.insert(older);
     store.insert(newer);

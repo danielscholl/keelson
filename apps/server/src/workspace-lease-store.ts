@@ -16,12 +16,15 @@ export interface WorkspaceLeaseRecord {
   branch: string;
   worktreePath: string;
   createdAt: string;
+  status: "pending" | "active";
 }
 
 export interface WorkspaceLeaseStore {
   list(): WorkspaceLeaseRecord[];
   get(id: string): WorkspaceLeaseRecord | undefined;
   insert(record: WorkspaceLeaseRecord): void;
+  markActive(id: string): void;
+  updateBranch(id: string, branch: string): void;
   delete(id: string): boolean;
 }
 
@@ -33,6 +36,7 @@ interface WorkspaceLeaseRow {
   branch: string;
   worktree_path: string;
   created_at: string;
+  status: string;
 }
 
 function rowToRecord(row: WorkspaceLeaseRow): WorkspaceLeaseRecord {
@@ -44,25 +48,28 @@ function rowToRecord(row: WorkspaceLeaseRow): WorkspaceLeaseRecord {
     branch: row.branch,
     worktreePath: row.worktree_path,
     createdAt: row.created_at,
+    status: row.status === "pending" ? "pending" : "active",
   };
 }
 
 export function createWorkspaceLeaseStore(db: Database): WorkspaceLeaseStore {
   const listStmt = db.prepare(
-    `SELECT id, project_id, purpose, owner, branch, worktree_path, created_at
+    `SELECT id, project_id, purpose, owner, branch, worktree_path, created_at, status
      FROM workspace_leases
      ORDER BY created_at DESC, id ASC`,
   );
   const getStmt = db.prepare(
-    `SELECT id, project_id, purpose, owner, branch, worktree_path, created_at
+    `SELECT id, project_id, purpose, owner, branch, worktree_path, created_at, status
      FROM workspace_leases
      WHERE id = ?`,
   );
   const insertStmt = db.prepare(
     `INSERT INTO workspace_leases(
-       id, project_id, purpose, owner, branch, worktree_path, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       id, project_id, purpose, owner, branch, worktree_path, created_at, status
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const markActiveStmt = db.prepare("UPDATE workspace_leases SET status = 'active' WHERE id = ?");
+  const updateBranchStmt = db.prepare("UPDATE workspace_leases SET branch = ? WHERE id = ?");
   const deleteStmt = db.prepare("DELETE FROM workspace_leases WHERE id = ?");
 
   return {
@@ -83,7 +90,14 @@ export function createWorkspaceLeaseStore(db: Database): WorkspaceLeaseStore {
         record.branch,
         record.worktreePath,
         record.createdAt,
+        record.status,
       );
+    },
+    markActive(id) {
+      markActiveStmt.run(id);
+    },
+    updateBranch(id, branch) {
+      updateBranchStmt.run(branch, id);
     },
     delete(id) {
       return deleteStmt.run(id).changes > 0;

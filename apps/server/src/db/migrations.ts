@@ -327,7 +327,9 @@ const migrations: Migration[] = [
           owner         TEXT NOT NULL,
           branch        TEXT NOT NULL,
           worktree_path TEXT NOT NULL,
-          created_at    TEXT NOT NULL
+          created_at    TEXT NOT NULL,
+          status        TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('pending', 'active'))
         );
         CREATE INDEX ix_workspace_leases_project
           ON workspace_leases(project_id);

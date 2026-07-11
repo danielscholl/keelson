@@ -257,7 +257,9 @@ describe("WorkspaceManager", () => {
     const removeCalls: unknown[] = [];
     manager.prepareWorktree = async (req) => {
       if (req.rejectAdopted === true) {
-        throw new Error(`workspace destination already exists at ${req.dest} — refusing to adopt another owner's checkout`);
+        throw new Error(
+          `workspace destination already exists at ${req.dest} — refusing to adopt another owner's checkout`,
+        );
       }
       throw new Error("expected rejectAdopted to be requested");
     };
@@ -379,6 +381,7 @@ describe("WorkspaceManager", () => {
       branch: "keelson/lease/gone",
       worktreePath: join(repoDir, ".worktrees", "gone"),
       createdAt: "2026-01-01T00:00:00.000Z",
+      status: "active",
     });
 
     await manager.reconcile();
@@ -401,6 +404,7 @@ describe("WorkspaceManager", () => {
       branch: "keelson/lease/not-registered",
       worktreePath: unregistered,
       createdAt: "2026-01-01T00:00:00.000Z",
+      status: "active",
     });
 
     await manager.reconcile();
@@ -421,10 +425,78 @@ describe("WorkspaceManager", () => {
       branch: "keelson/lease/keep",
       worktreePath: pending,
       createdAt: "2026-01-01T00:00:00.000Z",
+      status: "active",
     });
 
     await manager.reconcile();
 
     expect(leaseStore.get("indeterminate")).toBeDefined();
+  });
+
+  test("reconcile drops a pending row and removes its half-prepared checkout", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const dest = join(repoDir, ".worktrees", "crashed");
+    await git(["worktree", "add", "-b", "keelson/lease/crashed", dest], repoDir);
+    leaseStore.insert({
+      id: "crashed",
+      projectId: project.id,
+      purpose: "crashed",
+      owner: "tool",
+      branch: "keelson/lease/crashed",
+      worktreePath: dest,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      status: "pending",
+    });
+
+    await manager.reconcile();
+
+    expect(leaseStore.get("crashed")).toBeUndefined();
+    expect(existsSync(dest)).toBe(false);
+  });
+
+  test("reconcile refreshes the stored branch instead of dropping a switched lease", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const lease = await manager.acquire({
+      projectId: project.id,
+      purpose: "switch",
+      owner: "tool",
+    });
+    await git(["checkout", "-b", "feature/renamed"], lease.path);
+
+    await manager.reconcile();
+
+    const record = leaseStore.get(lease.id);
+    expect(record).toBeDefined();
+    expect(record?.branch).toBe("feature/renamed");
+    await manager.release(lease.id);
+  });
+
+  test("concurrent releases of one lease are idempotent", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const lease = await manager.acquire({
+      projectId: project.id,
+      purpose: "double-release",
+      owner: "tool",
+    });
+
+    await Promise.all([manager.release(lease.id), manager.release(lease.id)]);
+
+    expect(leaseStore.get(lease.id)).toBeUndefined();
+    expect(existsSync(lease.path)).toBe(false);
+  });
+
+  test("acquire marks the lease active only after preparation succeeds", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const lease = await manager.acquire({
+      projectId: project.id,
+      purpose: "status",
+      owner: "tool",
+    });
+    expect(leaseStore.get(lease.id)?.status).toBe("active");
+    await manager.release(lease.id);
   });
 });

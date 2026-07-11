@@ -122,6 +122,7 @@ export function createWorkspaceManager({
   projectsStore: ProjectsStore;
 }): WorkspaceManager {
   const pendingAcquisitions = new Set<string>();
+  const releasesInFlight = new Map<string, Promise<void>>();
   const resolveRepoPath = (record: WorkspaceLeaseRecord): string | null => {
     if (record.projectId !== null) {
       const project = projectsStore.get(record.projectId);
@@ -205,6 +206,7 @@ export function createWorkspaceManager({
           branch,
           worktreePath: dest,
           createdAt,
+          status: "pending",
         });
 
         let prepared: PreparedWorktree | null = null;
@@ -257,6 +259,7 @@ export function createWorkspaceManager({
           throw err;
         }
 
+        store.markActive(id);
         return {
           id,
           path: prepared.worktreePath,
@@ -271,26 +274,36 @@ export function createWorkspaceManager({
       if (pendingAcquisitions.has(id)) {
         throw new WorkspaceLeaseReleaseError(id, "acquisition still in progress");
       }
-      const record = store.get(id);
-      if (!record) return;
-      if (existsSync(record.worktreePath)) {
-        const repoPath = resolveRepoPath(record);
-        if (repoPath === null) {
-          throw new WorkspaceLeaseReleaseError(
-            id,
-            `could not resolve source repo for ${record.worktreePath}`,
-          );
+      const inFlight = releasesInFlight.get(id);
+      if (inFlight) return inFlight;
+      const run = (async () => {
+        try {
+          const record = store.get(id);
+          if (!record) return;
+          if (existsSync(record.worktreePath)) {
+            const repoPath = resolveRepoPath(record);
+            if (repoPath === null) {
+              throw new WorkspaceLeaseReleaseError(
+                id,
+                `could not resolve source repo for ${record.worktreePath}`,
+              );
+            }
+            const out = await manager.removeWorktree({
+              repoPath,
+              dest: record.worktreePath,
+              force: true,
+            });
+            if (out.warning !== null) {
+              throw new WorkspaceLeaseReleaseError(id, out.warning);
+            }
+          }
+          store.delete(id);
+        } finally {
+          releasesInFlight.delete(id);
         }
-        const out = await manager.removeWorktree({
-          repoPath,
-          dest: record.worktreePath,
-          force: true,
-        });
-        if (out.warning !== null) {
-          throw new WorkspaceLeaseReleaseError(id, out.warning);
-        }
-      }
-      store.delete(id);
+      })();
+      releasesInFlight.set(id, run);
+      return run;
     },
     list() {
       return store.list();
@@ -298,6 +311,22 @@ export function createWorkspaceManager({
     async reconcile() {
       for (const record of store.list()) {
         try {
+          // A pending row is a crashed acquisition: the caller never received
+          // the lease, so remove whatever half-prepared checkout exists.
+          if (record.status === "pending") {
+            if (existsSync(record.worktreePath)) {
+              const repoPath = resolveRepoPath(record);
+              if (repoPath !== null) {
+                await manager.removeWorktree({
+                  repoPath,
+                  dest: record.worktreePath,
+                  force: true,
+                });
+              }
+            }
+            store.delete(record.id);
+            continue;
+          }
           if (!existsSync(record.worktreePath)) {
             store.delete(record.id);
             continue;
@@ -311,12 +340,15 @@ export function createWorkspaceManager({
           if (listed.error !== null) {
             throw new Error(`could not determine worktree registration: ${listed.error}`);
           }
-          const registered = listed.worktrees.some((worktree) => {
-            if (worktree.branch !== null && worktree.branch !== record.branch) return false;
-            return sameWorktreePath(worktree.path, record.worktreePath);
-          });
-          if (!registered) {
+          // Match on path alone: the holder may validly switch branches inside
+          // its checkout, so a branch mismatch refreshes the row, never drops it.
+          const registered = listed.worktrees.find((worktree) =>
+            sameWorktreePath(worktree.path, record.worktreePath),
+          );
+          if (registered === undefined) {
             store.delete(record.id);
+          } else if (registered.branch !== null && registered.branch !== record.branch) {
+            store.updateBranch(record.id, registered.branch);
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

@@ -150,6 +150,7 @@ describe("migrateLegacyProjectsLayout", () => {
       branch: "keelson/y/br",
       worktreePath: legacyWorktree,
       createdAt: "2026-01-01T00:00:00.000Z",
+      status: "active",
     });
 
     migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: workspace });
