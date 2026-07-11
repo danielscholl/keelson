@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { IAgentProvider, SendQueryOptions } from "@keelson/providers";
+import type { IAgentProvider, ProviderFinishReason, SendQueryOptions } from "@keelson/providers";
 import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
 import type { PolicyEngine } from "./policy-engine.ts";
@@ -43,6 +43,8 @@ function fakeProvider(
     throws?: unknown;
     duringStream?: () => void;
     onQuery?: (call: QueryCall) => void;
+    finishReason?: ProviderFinishReason;
+    sessionId?: string;
   } = {},
 ): IAgentProvider {
   return {
@@ -51,6 +53,7 @@ function fakeProvider(
     listModels: async () => [],
     async *sendQuery(prompt, cwd, resume, options) {
       opts.onQuery?.({ prompt, cwd, resume, options });
+      if (opts.sessionId) options?.onSessionId?.(opts.sessionId);
       if (opts.throws) throw opts.throws;
       const chunks = opts.chunks ?? [
         { type: "text", content: "hello" } as MessageChunk,
@@ -62,6 +65,7 @@ function fakeProvider(
         i += 1;
         yield c;
       }
+      if (opts.finishReason) options?.onFinishReason?.(opts.finishReason);
     },
   };
 }
@@ -269,6 +273,7 @@ describe("makeRibAgentTurn — seam invariants", () => {
     ac.abort();
     const result = await run("chamber", { prompt: "hi", abortSignal: ac.signal }).result;
     expect(result.status).toBe("aborted");
+    expect(result.stopReason).toBe("aborted");
     expect(called).toBe(false);
   });
 
@@ -285,6 +290,7 @@ describe("makeRibAgentTurn — seam invariants", () => {
     const run = makeRun(provider);
     const result = await run("chamber", { prompt: "hi", abortSignal: ac.signal }).result;
     expect(result.status).toBe("aborted");
+    expect(result.stopReason).toBe("aborted");
     expect(result.text).toBe("partial");
   });
 
@@ -295,6 +301,7 @@ describe("makeRibAgentTurn — seam invariants", () => {
     const turn = run("chamber", { prompt: "hi" });
     const result = await turn.result;
     expect(result.status).toBe("error");
+    expect(result.stopReason).toBe("error");
     expect(result.error).toBe("boom");
     expect(await drain(turn.stream)).toEqual([
       { type: "error", message: "boom" },
@@ -306,6 +313,7 @@ describe("makeRibAgentTurn — seam invariants", () => {
     const run = makeRun(fakeProvider({ throws: new Error("provider exploded") }));
     const result = await run("chamber", { prompt: "hi" }).result;
     expect(result.status).toBe("error");
+    expect(result.stopReason).toBe("error");
     expect(result.error).toBe("provider exploded");
   });
 
@@ -325,6 +333,52 @@ describe("makeRibAgentTurn — seam invariants", () => {
     const run = makeRun(provider);
     const result = await run("chamber", { prompt: "hi", timeoutMs: 10 }).result;
     expect(result.status).toBe("timeout");
+    expect(result.stopReason).toBe("timeout");
+  });
+});
+
+describe("makeRibAgentTurn — stop reasons and session resume", () => {
+  it("maps provider-reported max_tokens onto a clean turn", async () => {
+    const run = makeRun(fakeProvider({ finishReason: "max_tokens" }));
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("ok");
+    expect(result.stopReason).toBe("max_tokens");
+  });
+
+  it("maps provider-reported end onto a clean turn", async () => {
+    const run = makeRun(fakeProvider({ finishReason: "end" }));
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("ok");
+    expect(result.stopReason).toBe("end");
+  });
+
+  it("does not fabricate a stop reason when the provider reports none", async () => {
+    const run = makeRun(fakeProvider());
+    const result = await run("chamber", { prompt: "hi" }).result;
+    expect(result.status).toBe("ok");
+    expect(result.stopReason).toBeUndefined();
+  });
+
+  it("round-trips provider session ids through resumeSessionId", async () => {
+    const resumes: Array<string | undefined> = [];
+    const run = makeRun(
+      fakeProvider({
+        sessionId: "sess-1",
+        onQuery: (call) => {
+          resumes.push(call.resume);
+        },
+      }),
+    );
+
+    const first = await run("chamber", { prompt: "first" }).result;
+    const second = await run("chamber", {
+      prompt: "second",
+      resumeSessionId: first.sessionId,
+    }).result;
+
+    expect(first.sessionId).toBe("sess-1");
+    expect(second.sessionId).toBe("sess-1");
+    expect(resumes).toEqual([undefined, "sess-1"]);
   });
 });
 
