@@ -1,7 +1,7 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -1560,6 +1560,129 @@ describe("loadBundled — resolve-comments schema validation", () => {
     expect(workflow.name).toBe("resolve-comments");
     expect(workflow.worktree?.enabled).toBe(true);
     expect(workflow.nodes.length).toBeGreaterThanOrEqual(11);
+  });
+});
+
+// The gate-check node's real bash script shells out to jq, which the minimal
+// supported Windows setup (Git Bash) does not ship — skip rather than fail there.
+const hasJq = Bun.which("jq") !== null;
+
+describe.skipIf(!hasJq)("runWorkflow — resolve-comments conditional approval gate", () => {
+  function threadEntry(id: string) {
+    return {
+      threadId: id,
+      path: "src/a.ts",
+      line: 1,
+      commentId: 1,
+      body: "b",
+      author: "copilot",
+      replyCount: 0,
+    };
+  }
+
+  // Runs the real bundled DAG with the real bash handler on gate-check (so the
+  // fail-closed jq logic executes) and canned handlers everywhere else.
+  function gateRun(opts: { fetched: string[]; triaged: { threadId: string; decision: string }[] }) {
+    const artifactsDir = mkdtempSync(join(tmpdir(), "rc-gate-"));
+    writeFileSync(
+      join(artifactsDir, "threads.json"),
+      JSON.stringify(opts.fetched.map(threadEntry)),
+    );
+    writeFileSync(
+      join(artifactsDir, "triage.json"),
+      JSON.stringify({
+        threads: opts.triaged.map((t) => ({
+          ...threadEntry(t.threadId),
+          decision: t.decision,
+          reasoning: "r",
+          reply_hint: "h",
+        })),
+      }),
+    );
+    const approvalCalls: string[] = [];
+    const canned = {
+      status: "succeeded" as const,
+      output: { kind: "text" as const, text: "ok" },
+    };
+    const prompt: NodeHandler = { type: "prompt", handle: async () => canned };
+    const bash: NodeHandler = {
+      type: "bash",
+      async handle(node, ctx) {
+        if (node.id === "gate-check") return bashHandler.handle(node, ctx);
+        return canned;
+      },
+    };
+    const approval: NodeHandler = {
+      type: "approval",
+      async handle(node) {
+        approvalCalls.push(node.id);
+        return { status: "succeeded", output: { kind: "text", text: "approve" } };
+      },
+    };
+    const run = runWorkflow({
+      workflow: loadBundled("resolve-comments"),
+      runId: "run-rc",
+      inputs: {},
+      cwd: artifactsDir,
+      artifactsDir,
+      handlers: new Map([
+        ["prompt", prompt],
+        ["bash", bash],
+        ["approval", approval],
+      ]),
+    });
+    return { run, approvalCalls };
+  }
+
+  test("all-actionable triage skips the approval pause and still fixes", async () => {
+    const { run, approvalCalls } = gateRun({
+      fetched: ["t1", "t2"],
+      triaged: [
+        { threadId: "t1", decision: "actionable-code-change" },
+        { threadId: "t2", decision: "actionable-code-change" },
+      ],
+    });
+    const summary = await run;
+    expect(approvalCalls).toEqual([]);
+    expect(summary.nodes.approve.state).toBe("skipped");
+    expect(summary.nodes.fix.state).toBe("completed");
+  });
+
+  test("a judgment-call decision pauses at approve before any mutation", async () => {
+    const { run, approvalCalls } = gateRun({
+      fetched: ["t1", "t2"],
+      triaged: [
+        { threadId: "t1", decision: "actionable-code-change" },
+        { threadId: "t2", decision: "wontfix" },
+      ],
+    });
+    const summary = await run;
+    expect(approvalCalls).toEqual(["approve"]);
+    expect(summary.nodes.approve.state).toBe("completed");
+    expect(summary.nodes.fix.state).toBe("completed");
+  });
+
+  test("a zero-thread run skips the gate and the whole mutation chain", async () => {
+    const { run, approvalCalls } = gateRun({ fetched: [], triaged: [] });
+    const summary = await run;
+    expect(approvalCalls).toEqual([]);
+    expect(summary.nodes.approve.state).toBe("skipped");
+    expect(summary.nodes.fix.state).toBe("skipped");
+    expect(summary.nodes.push.state).toBe("skipped");
+  });
+
+  test("an incomplete triage fails the gate closed and skips all mutation", async () => {
+    const { run, approvalCalls } = gateRun({
+      fetched: ["t1", "t2"],
+      triaged: [{ threadId: "t1", decision: "actionable-code-change" }],
+    });
+    const summary = await run;
+    expect(approvalCalls).toEqual([]);
+    expect(summary.nodes["gate-check"].state).toBe("failed");
+    expect(summary.nodes.approve.state).toBe("skipped");
+    expect(summary.nodes.fix.state).toBe("skipped");
+    expect(summary.nodes.push.state).toBe("skipped");
+    expect(summary.status).toBe("failed");
   });
 });
 
