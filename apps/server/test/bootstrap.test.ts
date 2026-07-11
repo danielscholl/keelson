@@ -833,14 +833,24 @@ describe("bootstrapRibs", () => {
 
 describe("bootstrapProviders", () => {
   const envBefore = process.env.KEELSON_PROVIDERS;
+  const configBefore = process.env.KEELSON_CONFIG;
+  const isolatedMissingConfigPath = join(
+    tmpdir(),
+    `keelson-bootstrap-no-config-${process.pid}-${Math.random().toString(36).slice(2)}.json`,
+  );
   const noCredential = async () => undefined;
   const ids = () => getProviderInfoList().map((p) => p.id);
 
-  beforeEach(() => clearProviderRegistry());
+  beforeEach(() => {
+    clearProviderRegistry();
+    process.env.KEELSON_CONFIG = isolatedMissingConfigPath;
+  });
   afterEach(() => {
     clearProviderRegistry();
     if (envBefore === undefined) delete process.env.KEELSON_PROVIDERS;
     else process.env.KEELSON_PROVIDERS = envBefore;
+    if (configBefore === undefined) delete process.env.KEELSON_CONFIG;
+    else process.env.KEELSON_CONFIG = configBefore;
   });
 
   test("default set registers copilot only (stub, claude opt-in) and defaults to copilot", () => {
