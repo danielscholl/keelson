@@ -104,6 +104,7 @@ import { formatNotebookSection, type ProjectNotebookStore } from "./project-note
 import { canonicalPath, isPathInside, type ProjectsStore } from "./projects-store.ts";
 import type { UsageStore } from "./usage-store.ts";
 import type { WorkflowStore } from "./workflow-store.ts";
+import type { WorkspaceManager } from "./workspace-manager.ts";
 
 export interface WorkflowsHandlerOptions {
   catalog: WorkflowCatalog;
@@ -150,6 +151,9 @@ export interface WorkflowsHandlerOptions {
   // Optional usage ledger. When set, each node_done carrying real usage records
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  // Shared workspace lifecycle service. Production wires this so workflow
+  // worktrees use the same prepare/remove primitives as workspace leases.
+  workspaceManager?: WorkspaceManager;
   // Whether an active rib surface region (static or runtime-added) declares this
   // workflow as its refresh producer. Widens the `/refresh` gate beyond bound
   // producers: a region may name an UNBOUND workflow (one that republishes
@@ -663,6 +667,7 @@ interface StartRunCoreDeps {
   snapshotManager?: SnapshotManager;
   ribWorkflowBindings?: Map<WorkflowDefinition, RibWorkflowBinding>;
   usageStore?: UsageStore;
+  workspaceManager?: WorkspaceManager;
 }
 
 interface StartRunCoreParams {
@@ -751,6 +756,7 @@ function startRunCore(
 ): { runId: string; conversationId: string } {
   const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
+  const { workspaceManager } = deps;
   const {
     workflow,
     inputs,
@@ -864,6 +870,7 @@ function startRunCore(
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
     ...(usageStore !== undefined ? { usageStore } : {}),
+    ...(workspaceManager !== undefined ? { workspaceManager } : {}),
   });
   activeRuns.register(runId, {
     abort,
@@ -903,6 +910,7 @@ function resumeRunCore(
 ): ResumeRunResult {
   const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, catalog, usageStore } = deps;
+  const { workspaceManager } = deps;
   const { projectsStore, projectNotebookStore } = deps;
 
   const run = store.getRun(runId);
@@ -990,6 +998,7 @@ function resumeRunCore(
     ...(snapshotManager !== undefined ? { snapshotManager } : {}),
     ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
     ...(usageStore !== undefined ? { usageStore } : {}),
+    ...(workspaceManager !== undefined ? { workspaceManager } : {}),
     ...(notebook !== undefined ? { notebook } : {}),
     completedNodeOutputs,
     existingWorktreePath: run.worktreePath ?? undefined,
@@ -1191,6 +1200,7 @@ export function createWorkflowController(
     snapshotManager,
     ribWorkflowBindings,
     usageStore,
+    workspaceManager,
   } = opts;
   const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
 
@@ -1364,6 +1374,7 @@ export function createWorkflowController(
             ...(snapshotManager !== undefined ? { snapshotManager } : {}),
             ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
             ...(usageStore !== undefined ? { usageStore } : {}),
+            ...(workspaceManager !== undefined ? { workspaceManager } : {}),
           },
           {
             workflow,
@@ -1406,6 +1417,7 @@ export function createWorkflowController(
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
+          ...(workspaceManager !== undefined ? { workspaceManager } : {}),
         },
         runId,
       );
@@ -1517,6 +1529,7 @@ export function workflowsRoutes(
     snapshotManager,
     ribWorkflowBindings,
     usageStore,
+    workspaceManager,
     isRegionWorkflow,
   } = opts;
   const {
@@ -1833,6 +1846,7 @@ export function workflowsRoutes(
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
+          ...(workspaceManager !== undefined ? { workspaceManager } : {}),
         },
         {
           workflow,
@@ -1923,6 +1937,7 @@ export function workflowsRoutes(
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
           ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
           ...(usageStore !== undefined ? { usageStore } : {}),
+          ...(workspaceManager !== undefined ? { workspaceManager } : {}),
         },
         {
           workflow,
@@ -2294,6 +2309,7 @@ interface ExecuteRunArgs {
   // Optional usage ledger. When set, each node_done carrying real usage records
   // a `workflow`-sourced event; undefined → capture is skipped.
   usageStore?: UsageStore;
+  workspaceManager?: WorkspaceManager;
 }
 
 // Process-wide slot pool, lazily built so KEELSON_MAX_CONCURRENT_RUNS is read
@@ -2368,6 +2384,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     completedNodeOutputs,
     existingWorktreePath,
     usageStore,
+    workspaceManager,
   } = args;
   // Worktree lifecycle: create before the executor sees its first node, run
   // against the worktree path, prune on success — but keep on failure so the
@@ -2390,14 +2407,73 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // directory removal turns into a reliable CI failure).
   let pendingRunDoneEvent: Extract<RunStreamEvent, { type: "run_done" }> | undefined;
   let runDoneCompletedAt: string | undefined;
+  const prepareDeps = async (worktreePath: string) => {
+    if (workspaceManager !== undefined) {
+      return workspaceManager.prepareDeps({
+        worktreePath,
+        abortSignal: abort.signal,
+      });
+    }
+    return ensureWorktreeDeps({
+      worktreePath,
+      abortSignal: abort.signal,
+    });
+  };
+  const prepareWorktree = async (opts: {
+    repoPath: string;
+    branch: string;
+    dest: string;
+    base: string | null;
+    onCreated?: (worktreePath: string) => void;
+  }) => {
+    if (workspaceManager !== undefined) {
+      return workspaceManager.prepareWorktree({
+        repoPath: opts.repoPath,
+        branch: opts.branch,
+        dest: opts.dest,
+        ...(opts.base !== null ? { base: opts.base } : {}),
+        ...(opts.onCreated !== undefined ? { onCreated: opts.onCreated } : {}),
+        abortSignal: abort.signal,
+      });
+    }
+    const created = await createWorktree({
+      repoPath: opts.repoPath,
+      branch: opts.branch,
+      dest: opts.dest,
+      ...(opts.base !== null ? { base: opts.base } : {}),
+    });
+    opts.onCreated?.(created.worktreePath);
+    const deps = await ensureWorktreeDeps({
+      worktreePath: created.worktreePath,
+      abortSignal: abort.signal,
+    });
+    return {
+      worktreePath: created.worktreePath,
+      adopted: created.adopted,
+      branchCreated: created.branchCreated,
+      deps,
+      depsError: deps.error,
+    };
+  };
+  const removePreparedWorktree = (dest: string) => {
+    if (workspaceManager !== undefined) {
+      return workspaceManager.removeWorktree({
+        repoPath: cwd,
+        dest,
+        force: true,
+      });
+    }
+    return removeWorktree({
+      repoPath: cwd,
+      dest,
+      force: true,
+    });
+  };
   if (existingWorktreePath !== undefined) {
     effectiveCwd = existingWorktreePath;
     worktreePathForCleanup = existingWorktreePath;
     cleanupOnSuccessOnly = true;
-    const deps = await ensureWorktreeDeps({
-      worktreePath: existingWorktreePath,
-      abortSignal: abort.signal,
-    });
+    const deps = await prepareDeps(existingWorktreePath);
     if (deps.error !== null) {
       subscribers.broadcast(runId, {
         type: "run_warning",
@@ -2451,33 +2527,34 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
             });
           }
         }
-        const created = await createWorktree({
+        const created = await prepareWorktree({
           repoPath: cwd,
           branch,
           dest,
-          base: base ?? undefined,
+          base,
+          // Persist before the slow dependency install so a crash mid-install
+          // leaves a resumable run pointing at its (registered) worktree.
+          onCreated: (worktreePath) => {
+            effectiveCwd = worktreePath;
+            worktreePathForCleanup = worktreePath;
+            cleanupOnSuccessOnly = true;
+            try {
+              store.setRunWorktreePath(runId, worktreePath);
+            } catch (err) {
+              console.warn(
+                `[workflows] failed to persist worktree path for ${runId}: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+          },
         });
         effectiveCwd = created.worktreePath;
-        worktreePathForCleanup = created.worktreePath;
-        cleanupOnSuccessOnly = true;
-        try {
-          store.setRunWorktreePath(runId, created.worktreePath);
-        } catch (err) {
-          console.warn(
-            `[workflows] failed to persist worktree path for ${runId}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
-        const deps = await ensureWorktreeDeps({
-          worktreePath: created.worktreePath,
-          abortSignal: abort.signal,
-        });
-        if (deps.error !== null) {
+        if (created.depsError !== null) {
           subscribers.broadcast(runId, {
             type: "run_warning",
             nodeId: null,
-            message: `worktree dependency install failed; continuing: ${deps.error}`,
+            message: `worktree dependency install failed; continuing: ${created.depsError}`,
           });
         }
       } catch (err) {
@@ -2866,11 +2943,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       // that committed elsewhere) or left bash scratch in the working tree.
       // The worktree is ephemeral; if the author wanted the changes they
       // should have committed-and-pushed.
-      const out = await removeWorktree({
-        repoPath: cwd,
-        dest: worktreePathForCleanup,
-        force: true,
-      });
+      const out = await removePreparedWorktree(worktreePathForCleanup);
       if (out.warning !== null) {
         console.warn(`[workflows] worktree cleanup for ${runId} warned: ${out.warning}`);
       }

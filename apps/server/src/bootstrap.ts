@@ -23,6 +23,7 @@ import {
   registerWorkflowProvider,
 } from "@keelson/providers";
 import type {
+  AcquireWorkspaceRequest,
   AgentSummary,
   ApprovalDecision,
   ApprovalRequest,
@@ -48,6 +49,7 @@ import type {
   ToolDefinition,
   WorkflowDiscoveryNotice,
   WorkflowSource,
+  WorkspaceLease,
 } from "@keelson/shared";
 import { recallRequestSchema, writebackRequestSchema } from "@keelson/shared";
 import {
@@ -96,6 +98,7 @@ import type { UsageStore } from "./usage-store.ts";
 // Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
 // import direction is not turned into a runtime cycle.
 import type { WorkflowController } from "./workflows-handler.ts";
+import type { WorkspaceManager } from "./workspace-manager.ts";
 
 // A bound rib workflow ready to feed the run path: the workflow name plus the
 // callback that republishes a structured run output to the rib's snapshot key.
@@ -229,6 +232,9 @@ export interface BootstrapRibsOptions {
   // the composition root's late-bound binding at recall/writeback time, by which point
   // boot is done. Absent leaves the getMemory seam off the ctx (no governed memory).
   getMemoryStore?: () => MemoryStore | undefined;
+  // Lazy resolver for the WorkspaceManager backing RibContext.acquireWorkspace.
+  // Lazy because the manager needs stores created AFTER bootstrapRibs returns.
+  getWorkspaceManager?: () => WorkspaceManager | undefined;
   // Backs RibContext.getProviders. Defaults to the live provider registry
   // (getProviderInfoList); tests may inject a deterministic list.
   getProviders?: () => readonly RibProviderInfo[];
@@ -407,6 +413,19 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         },
       })
     : undefined;
+  const getWorkspaceManager = options.getWorkspaceManager;
+  const acquireWorkspaceSeam = getWorkspaceManager
+    ? async (ribId: string, req: AcquireWorkspaceRequest): Promise<WorkspaceLease> => {
+        const manager = getWorkspaceManager();
+        if (!manager) throw new Error("workspace manager unavailable");
+        return manager.acquire({
+          projectId: req.projectId,
+          purpose: req.purpose,
+          owner: `rib:${ribId}`,
+          ...(req.branch !== undefined ? { branch: req.branch } : {}),
+        });
+      }
+    : undefined;
   // RibContext.getProviders resolver: the registered-provider list (id + label) so a
   // rib can make availability-aware provider choices (e.g. assign a member's vendor at
   // cast). Read-only; grants nothing beyond the existing runAgentTurn routing. Tests
@@ -543,6 +562,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
     ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
     ...(getMemory ? { getMemory } : {}),
+    ...(acquireWorkspaceSeam ? { acquireWorkspace: acquireWorkspaceSeam } : {}),
     getProviders,
     callTool,
   });

@@ -50,6 +50,11 @@ as a versioned public contract.
 | `GET` | `/api/tools` | The shared tool registry, including rib tools, with `family` and the advisory `state_changing` / `requires_confirmation` flags. |
 | `POST` | `/api/mcp` | The MCP gateway: the same tool registry over the Model Context Protocol, for external agents. Tokenless and exposing state-changing tools by default (restrict with `exposeStateChanging: false`); `GET` returns 405 (no SSE stream). See [Using keelson over MCP](../../guides/using-mcp/). |
 
+The harness also registers state-changing workspace tools. `workspace_lease`
+creates a durable isolated checkout for a project, and `workspace_release`
+removes that checkout by lease id. Both appear in `/api/tools` and MCP with
+`state_changing: true`.
+
 See [The Rib contract](../rib-contract/#wire-shapes) for the rib wire shapes.
 
 ## Agents and commands
@@ -127,6 +132,12 @@ See [Snapshots and the canvas](../snapshots/) for the frame and payload shapes.
 | `POST` | `/api/workflows/runs/bulk-delete` | Delete several runs at once. |
 | `GET` | `/api/workflows/worktree-paths` | The worktree directories isolated runs created. |
 | `WS` | `/api/workflows/runs/:runId/ws` | The run event stream: node start, stream, and settle, plus the approval-pause frame. |
+
+## Workspaces
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/workspaces/leases` | Active workspace leases, returned as serializable records without the in-process `release` closure. Backs `keelson workspace list`. |
 
 ## Approvals
 

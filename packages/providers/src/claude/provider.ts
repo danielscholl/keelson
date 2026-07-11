@@ -15,6 +15,7 @@ import type {
   MessageChunk,
   ModelInfo,
   ProviderCapabilities,
+  ProviderFinishReason,
   SendQueryOptions,
 } from "../types.ts";
 import { buildFriendlyClaudeError } from "./errors.ts";
@@ -221,6 +222,7 @@ export class ClaudeProvider implements IAgentProvider {
     // Emit the SDK session id once; the handler persists it so the next turn
     // resumes the same conversation. Resume echoes the same id back.
     let sessionIdSeen = false;
+    let finishReasonSeen = false;
 
     const producer = (async () => {
       try {
@@ -244,14 +246,17 @@ export class ClaudeProvider implements IAgentProvider {
             terminalError = new Error(errMsg);
             return;
           }
-          if (
-            msg.type === "assistant" &&
-            msg.message?.usage !== undefined &&
-            (msg.parent_tool_use_id ?? null) === null
-          ) {
-            // Root-agent messages only — a Task subagent's tiny fresh context
-            // must not masquerade as the conversation's fill level.
-            lastApiUsage = msg.message.usage;
+          if (msg.type === "assistant" && (msg.parent_tool_use_id ?? null) === null) {
+            const finishReason = mapClaudeStopReason(msg.message?.stop_reason);
+            if (!finishReasonSeen && finishReason !== undefined) {
+              finishReasonSeen = true;
+              options?.onFinishReason?.(finishReason);
+            }
+            if (msg.message?.usage !== undefined) {
+              // Root-agent messages only — a Task subagent's tiny fresh context
+              // must not masquerade as the conversation's fill level.
+              lastApiUsage = msg.message.usage;
+            }
           }
 
           for (const chunk of mapSdkMessageToChunks(msg)) queue.push(chunk);
@@ -359,6 +364,12 @@ function mapSdkMessageToChunks(msg: ClaudeSdkMessage): MessageChunk[] {
     return out;
   }
   return [];
+}
+
+function mapClaudeStopReason(reason: string | null | undefined): ProviderFinishReason | undefined {
+  if (reason === "max_tokens" || reason === "model_context_window_exceeded") return "max_tokens";
+  if (reason === "end_turn" || reason === "stop_sequence") return "end";
+  return undefined;
 }
 
 function mapContentBlock(block: ClaudeContentBlock): MessageChunk | null {

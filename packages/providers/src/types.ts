@@ -59,6 +59,8 @@ export type ToolResultGate = (result: {
   result: unknown;
 }) => Promise<{ outcome: "allow"; data?: string } | { outcome: "deny"; reason: string }>;
 
+export type ProviderFinishReason = "end" | "max_tokens";
+
 export interface SendQueryOptions {
   model?: string;
   abortSignal?: AbortSignal;
@@ -98,6 +100,10 @@ export interface SendQueryOptions {
   // that keep history server-side rather than replaying it in the prompt.
   // Providers that have no resumable session simply never call it.
   onSessionId?: (sessionId: string) => void;
+  // In-memory only; never serialized on the message stream. Called at most once
+  // when an SDK reports why generation stopped. Providers that have no finish
+  // reason simply never call it.
+  onFinishReason?: (reason: ProviderFinishReason) => void;
   // Per-node hook matchers in the vendored workflowNodeHooksSchema shape:
   // `Record<eventName, Array<{matcher?, response, timeout?}>>`. Loose
   // structural typing so this contract layer stays free of a runtime

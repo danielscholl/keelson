@@ -108,7 +108,8 @@ export interface RibAgentTurnRequest {
   cwd?: string;
   // Confinement roots for this turn; absent means unconfined.
   allowedDirectories?: readonly string[];
-  // Accepted now, inert until provider capabilities allow session resumption.
+  // Resume a prior turn by passing that turn's sessionId; providers without
+  // sessionResume support ignore it.
   resumeSessionId?: string;
 }
 
@@ -118,7 +119,14 @@ export interface RibAgentTurnResult {
   error?: string;
   // The provider id the turn resolved to.
   providerId?: string;
+  // The provider's backend session id for this turn, when it reported one.
+  // Pass it as the next turn's resumeSessionId to continue the same session
+  // with providers whose capabilities.sessionResume is true.
   sessionId?: string;
+  // Harness-owned terminal reasons mirror status for aborted/timeout/error.
+  // end/max_tokens come only from providers that report a finish reason; derive
+  // truncation as stopReason === "max_tokens".
+  stopReason?: "end" | "max_tokens" | "aborted" | "timeout" | "error";
   // The provider's final usage-bearing chunk, coerced. Undefined when the
   // provider never reported one (a text-only stream, or a turn that failed
   // before the stream reached that point).
@@ -146,6 +154,19 @@ export interface RibWorkflowRunResult {
   status: "succeeded" | "failed" | "cancelled";
   nodes: Record<string, { state: string; output: string; error?: string }>;
   error?: string;
+}
+
+export interface WorkspaceLease {
+  id: string;
+  path: string;
+  branch: string;
+  release: () => Promise<void>;
+}
+
+export interface AcquireWorkspaceRequest {
+  projectId: string;
+  purpose: string;
+  branch?: string;
 }
 
 // A registered provider, surfaced to a rib so it can make provider-aware choices
@@ -237,6 +258,11 @@ export interface RibContext {
   // / always-inject row. Optional so a rib built against an older harness degrades to no
   // governed memory (recall it can fold in), not a throw.
   getMemory?: () => MemoryTools;
+  // Acquire an isolated project checkout with dependencies installed for mutation-heavy
+  // work, then release it when finished. This is checkout isolation, not a sandbox: the
+  // caller still owns tool policy and cwd choices. Optional so a rib built against an
+  // older harness degrades to no workspace leasing, not a throw.
+  acquireWorkspace?: (req: AcquireWorkspaceRequest) => Promise<WorkspaceLease>;
   // Read-only snapshot of the providers registered at call time, so a rib can make
   // availability-aware provider choices (e.g. assign a member's vendor at cast). This
   // only LISTS what's registered; it grants no access beyond the existing runAgentTurn

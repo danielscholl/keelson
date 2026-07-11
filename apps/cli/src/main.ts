@@ -33,6 +33,7 @@ import { runWorkflowResume } from "./commands/workflow-resume.ts";
 import { runWorkflowRun } from "./commands/workflow-run.ts";
 import { runWorkflowStatus } from "./commands/workflow-status.ts";
 import { runWorkflowValidate } from "./commands/workflow-validate.ts";
+import { runWorkspaceList } from "./commands/workspace.ts";
 import { runWorktreePrune } from "./commands/worktree.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "./exit.ts";
 import { listedRibs } from "./home.ts";
@@ -723,6 +724,20 @@ export function buildProgram(): Command {
       const { json } = globalOpts(this);
       const { strict } = this.opts<{ strict: boolean }>();
       await runDoctor({ json, strict });
+    });
+
+  const workspace = program
+    .command("workspace")
+    .description("workspace operations (list active workspace leases)");
+
+  workspace
+    .command("list")
+    .description("list active workspace leases (server-required)")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function workspaceListAction(this: Command, listOpts: { baseUrl?: string }) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", listOpts.baseUrl);
+      await runWorkspaceList({ json, ...(baseUrl ? { baseUrl } : {}) });
     });
 
   return program;

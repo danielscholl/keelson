@@ -11,7 +11,7 @@ import type {
   SendQueryOptions,
 } from "../types.ts";
 import { type PiCatalogSource, realPiCatalogSource } from "./catalog.ts";
-import { mapPiEvent } from "./event-bridge.ts";
+import { mapPiEvent, mapPiFinishReason } from "./event-bridge.ts";
 import { PiAgentSessionFactory, type PiSession, type PiSessionFactory } from "./factory.ts";
 import { projectToolsForPi } from "./tool-projection.ts";
 
@@ -167,6 +167,7 @@ export class PiProvider implements IAgentProvider {
     const text = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
 
     let unsubscribe: () => void = () => {};
+    let finishReasonSeen = false;
     // Captured by the producer; surfaced after the queue drains so any error
     // chunk reaches the consumer first.
     let terminalError: Error | null = null;
@@ -177,6 +178,13 @@ export class PiProvider implements IAgentProvider {
     const producer = (async () => {
       try {
         unsubscribe = session.subscribe((event) => {
+          if (!finishReasonSeen) {
+            const reason = mapPiFinishReason(event);
+            if (reason !== undefined) {
+              finishReasonSeen = true;
+              options?.onFinishReason?.(reason);
+            }
+          }
           for (const chunk of mapPiEvent(event)) queue.push(chunk);
         });
         // prompt() resolves only when the whole turn is done (including any pi

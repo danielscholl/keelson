@@ -121,7 +121,7 @@ export {
   registerProvider,
   unregisterProvider,
 } from "./registry.ts";
-export { StubProvider } from "./stub/provider.ts";
+export { STUB_OUTPUT_TOKEN_BUDGET, StubProvider } from "./stub/provider.ts";
 export { registerStubProvider } from "./stub/registration.ts";
 export type {
   IAgentProvider,
@@ -129,6 +129,7 @@ export type {
   MessageChunk,
   ModelInfo,
   ProviderCapabilities,
+  ProviderFinishReason,
   ProviderInfo,
   ProviderRegistration,
   SendQueryOptions,

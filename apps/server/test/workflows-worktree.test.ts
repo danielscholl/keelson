@@ -21,6 +21,8 @@ import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import { workflowsRoutes } from "../src/workflows-handler.ts";
+import { createWorkspaceLeaseStore } from "../src/workspace-lease-store.ts";
+import { createWorkspaceManager } from "../src/workspace-manager.ts";
 import { rmTemp } from "./temp.ts";
 
 let tmpDir: string;
@@ -87,15 +89,25 @@ function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
 }
 
-function makeRig() {
+function makeRig(opts: { includeWorkspaceManager?: boolean } = {}) {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
   const projectsStore = createProjectsStore(db);
+  const workspaceManager = createWorkspaceManager({
+    store: createWorkspaceLeaseStore(db),
+    projectsStore,
+  });
   const project = projectsStore.create({ name: "repo", rootPath: repoDir });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const app = new Hono();
-  workflowsRoutes(app, { catalog, store, conversationStore, projectsStore });
+  workflowsRoutes(app, {
+    catalog,
+    store,
+    conversationStore,
+    projectsStore,
+    ...(opts.includeWorkspaceManager === false ? {} : { workspaceManager }),
+  });
   return { app, store, projectId: project.id };
 }
 
@@ -181,6 +193,45 @@ nodes:
     expect(cleared.worktreePath).toBeNull();
   });
 
+  test("worktree isolation still runs when workspaceManager is omitted", async () => {
+    await initRepo(repoDir);
+    writeWorkflow(
+      "iso-no-manager.yaml",
+      `name: iso-no-manager
+description: isolate with primitive fallback
+worktree:
+  enabled: true
+nodes:
+  - id: where
+    bash: pwd
+`,
+    );
+    const { app, projectId } = makeRig({ includeWorkspaceManager: false });
+    const res = await app.fetch(
+      new Request("http://test/api/workflows/iso-no-manager/runs", {
+        method: "POST",
+        headers: { origin: ORIGIN, "content-type": "application/json" },
+        body: JSON.stringify({ inputs: {}, projectId }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { runId } = (await res.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ outputText: string | null }>;
+    };
+    expect(run.status).toBe("succeeded");
+    const echoed = run.nodes[0]!.outputText?.trim();
+    expect(echoed).toBeTruthy();
+    expect(echoed).not.toBe(repoDir);
+    expect(echoed!.replace(/\\/g, "/").includes("/.worktrees/")).toBe(true);
+
+    const cleared = (await pollUntilWorktreeCleared(app, runId)) as {
+      worktreePath: string | null;
+    };
+    expect(cleared.worktreePath).toBeNull();
+  });
+
   test("refresh honors a bound producer's worktree.enabled policy", async () => {
     await initRepo(repoDir);
     writeWorkflow(
@@ -197,6 +248,11 @@ nodes:
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
     const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const workspaceManager = createWorkspaceManager({
+      store: createWorkspaceLeaseStore(db),
+      projectsStore,
+    });
     const catalog = bootstrapWorkflows({ workflowDir: wfDir });
     const producer = catalog.get("isoprod");
     if (!producer) throw new Error("fixture workflow missing");
@@ -208,6 +264,7 @@ nodes:
       conversationStore,
       refreshCwd: repoDir,
       ribWorkflowBindings: bindings,
+      workspaceManager,
     });
     const res = await app.fetch(
       new Request("http://test/api/workflows/isoprod/refresh", {

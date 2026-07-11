@@ -80,7 +80,7 @@ export interface ClaudeSdkMessage {
   // Set on assistant messages emitted by Task subagents; null/absent for the
   // root agent's own messages.
   parent_tool_use_id?: string | null;
-  message?: { content?: ClaudeContentBlock[]; usage?: ClaudeApiUsage };
+  message?: { content?: ClaudeContentBlock[]; usage?: ClaudeApiUsage; stop_reason?: string | null };
   // Turn-total usage on `result` messages (SDKResultSuccess / SDKResultError).
   usage?: ClaudeApiUsage;
   // Per-model breakdown on `result` messages; read for contextWindow only.

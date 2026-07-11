@@ -315,6 +315,29 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    description: "workspace leases: durable isolated-checkout records",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE workspace_leases (
+          id            TEXT PRIMARY KEY NOT NULL,
+          project_id    TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL,
+          purpose       TEXT NOT NULL,
+          owner         TEXT NOT NULL,
+          branch        TEXT NOT NULL,
+          worktree_path TEXT NOT NULL,
+          created_at    TEXT NOT NULL,
+          status        TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('pending', 'active'))
+        );
+        CREATE INDEX ix_workspace_leases_project
+          ON workspace_leases(project_id);
+        CREATE UNIQUE INDEX ux_workspace_leases_path
+          ON workspace_leases(worktree_path);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
