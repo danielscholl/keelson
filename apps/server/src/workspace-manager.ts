@@ -126,6 +126,54 @@ export function createWorkspaceManager({
 }): WorkspaceManager {
   const pendingAcquisitions = new Set<string>();
   const releasesInFlight = new Map<string, Promise<void>>();
+  const releaseInner = async (id: string): Promise<void> => {
+    const record = store.get(id);
+    if (!record) return;
+    if (existsSync(record.worktreePath)) {
+      const repoPath = resolveRepoPath(record);
+      if (repoPath === null) {
+        throw new WorkspaceLeaseReleaseError(
+          id,
+          `could not resolve source repo for ${record.worktreePath}`,
+        );
+      }
+      const out = await manager.removeWorktree({
+        repoPath,
+        dest: record.worktreePath,
+        force: true,
+      });
+      if (out.warning !== null) {
+        throw new WorkspaceLeaseReleaseError(id, out.warning);
+      }
+    }
+    store.delete(id);
+  };
+  // A vanished checkout leaves a stale entry under the repo's .git/worktrees;
+  // prune it so the branch/path can be reacquired without manual git surgery.
+  const pruneStaleRegistrations = (record: WorkspaceLeaseRecord): void => {
+    const repoPath =
+      record.projectId !== null ? (projectsStore.get(record.projectId)?.rootPath ?? null) : null;
+    if (repoPath === null) return;
+    try {
+      const res = Bun.spawnSync({
+        cmd: ["git", "-C", repoPath, "worktree", "prune"],
+        stdout: "pipe",
+        stderr: "pipe",
+        windowsHide: true,
+      });
+      if (res.exitCode !== 0) {
+        console.warn(
+          `[workspace] git worktree prune failed for ${repoPath}: ${res.stderr.toString().trim()}`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[workspace] git worktree prune errored for ${repoPath}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  };
   const resolveRepoPath = (record: WorkspaceLeaseRecord): string | null => {
     if (record.projectId !== null) {
       const project = projectsStore.get(record.projectId);
@@ -280,32 +328,10 @@ export function createWorkspaceManager({
       }
       const inFlight = releasesInFlight.get(id);
       if (inFlight) return inFlight;
-      const run = (async () => {
-        try {
-          const record = store.get(id);
-          if (!record) return;
-          if (existsSync(record.worktreePath)) {
-            const repoPath = resolveRepoPath(record);
-            if (repoPath === null) {
-              throw new WorkspaceLeaseReleaseError(
-                id,
-                `could not resolve source repo for ${record.worktreePath}`,
-              );
-            }
-            const out = await manager.removeWorktree({
-              repoPath,
-              dest: record.worktreePath,
-              force: true,
-            });
-            if (out.warning !== null) {
-              throw new WorkspaceLeaseReleaseError(id, out.warning);
-            }
-          }
-          store.delete(id);
-        } finally {
-          releasesInFlight.delete(id);
-        }
-      })();
+      // `.finally` runs as a microtask, so the map entry set below is always
+      // in place before it is deleted — an IIFE with a sync early-return would
+      // delete first and strand a settled promise in the map forever.
+      const run = releaseInner(id).finally(() => releasesInFlight.delete(id));
       releasesInFlight.set(id, run);
       return run;
     },
@@ -318,6 +344,9 @@ export function createWorkspaceManager({
           // A pending row is a crashed acquisition: the caller never received
           // the lease, so remove whatever half-prepared checkout exists.
           if (record.status === "pending") {
+            if (!existsSync(record.worktreePath)) {
+              pruneStaleRegistrations(record);
+            }
             if (existsSync(record.worktreePath)) {
               const repoPath = resolveRepoPath(record);
               if (repoPath === null) {
@@ -342,6 +371,7 @@ export function createWorkspaceManager({
             continue;
           }
           if (!existsSync(record.worktreePath)) {
+            pruneStaleRegistrations(record);
             store.delete(record.id);
             continue;
           }

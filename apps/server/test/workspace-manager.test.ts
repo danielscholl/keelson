@@ -391,6 +391,27 @@ describe("WorkspaceManager", () => {
     await manager.release(lease.id);
   });
 
+  test("reconcile prunes the stale git registration of a vanished checkout", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const lease = await manager.acquire({
+      projectId: project.id,
+      purpose: "vanish",
+      owner: "tool",
+    });
+    rmSync(lease.path, { recursive: true, force: true });
+
+    await manager.reconcile();
+
+    expect(leaseStore.get(lease.id)).toBeUndefined();
+    const listed = Bun.spawnSync({
+      cmd: ["git", "-C", repoDir, "worktree", "list", "--porcelain"],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(listed.stdout.toString().includes(lease.path)).toBe(false);
+  });
+
   test("reconcile drops rows whose path is not a registered worktree", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });
