@@ -77,6 +77,7 @@ export function createWorkspaceTools({
           projectId: selectedProject.project.id,
           purpose: parsed.data.purpose,
           owner: "tool",
+          abortSignal: ctx.abortSignal,
           ...(parsed.data.branch !== undefined ? { branch: parsed.data.branch } : {}),
         });
         emitResult(

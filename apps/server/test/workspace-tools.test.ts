@@ -107,7 +107,13 @@ describe("workspace tools", () => {
     await leaseTool.execute({ project: "repo", purpose: "fix", branch: "custom/abc123" }, ctx);
 
     expect(calls).toEqual([
-      { projectId: project.id, purpose: "fix", owner: "tool", branch: "custom/abc123" },
+      {
+        projectId: project.id,
+        purpose: "fix",
+        owner: "tool",
+        abortSignal: ctx.abortSignal,
+        branch: "custom/abc123",
+      },
     ]);
     const result = lastToolResult(chunks);
     expect(result.isError).toBe(false);
