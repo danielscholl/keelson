@@ -86,6 +86,7 @@ import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
 
+import { loadBriefAndCoverage } from "./brief-coverage.ts";
 import type { RibWorkflowBinding, WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import { createRunSlots, type RunSlots, resolveMaxConcurrentRuns } from "./run-concurrency.ts";
@@ -2582,8 +2583,23 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // the approval callout from the snapshot, broadcasts the approval_awaiting
   // WS frame for live clients, and returns a Promise the route's POST /resume
   // (or DELETE / abortAll) settles.
-  const awaitApproval: AwaitApproval = (nodeRunId, nodeId, message, signal) =>
-    new Promise<string>((resolve, reject) => {
+  const awaitApproval: AwaitApproval = async (nodeRunId, nodeId, message, signal) => {
+    const artifactsDir = activeRuns.get(nodeRunId)?.artifactsDir;
+    const { brief, checklist } = await loadBriefAndCoverage({ artifactsDir });
+    if (brief !== null) {
+      try {
+        store.setRunBrief(nodeRunId, brief);
+      } catch (err) {
+        console.warn(
+          `[workflows] failed to persist brief for ${nodeRunId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    const augmentedMessage = checklist ? `${message}\n\n${checklist}` : message;
+
+    return new Promise<string>((resolve, reject) => {
       const pauseId = crypto.randomUUID();
       const settle = {
         resolve: (text: string) => {
@@ -2637,7 +2653,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       pendingApprovals.set(nodeId, {
         nodeId,
         pauseId,
-        message,
+        message: augmentedMessage,
         resolve: settle.resolve,
         reject: settle.reject,
       });
@@ -2654,7 +2670,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           runId: nodeRunId,
           nodeId,
           status: "awaiting",
-          outputText: message,
+          outputText: augmentedMessage,
           contentParts: null,
           startedAt: nodeStart.get(nodeId) ?? new Date().toISOString(),
           completedAt: null,
@@ -2675,10 +2691,11 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       subscribers.broadcast(nodeRunId, {
         type: "approval_awaiting",
         nodeId,
-        message,
+        message: augmentedMessage,
         pauseId,
       });
     });
+  };
 
   // Interactive-loop sibling of awaitApproval. Shares the pendingApprovals
   // map (keyed by nodeId) so the existing POST /resume + DELETE abort drain
