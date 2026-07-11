@@ -20,12 +20,14 @@
  */
 
 import {
+  type AcquireMutationLockRequest,
   type AcquireWorkspaceRequest,
   type AgentSummary,
   type CallToolResult,
   type CommandCompletion,
   type CommandInvokeResult,
   type MemoryTools,
+  type MutationLock,
   type OpenChatSeed,
   type OpHandle,
   type Policy,
@@ -193,6 +195,12 @@ export interface ApplyRibsOptions {
   // Backs RibContext.registerOp: register a long op on the durable registry,
   // stamping the owning rib id. Optional so older/test hosts omit the seam.
   readonly registerOp?: (ribId: string, req: RegisterOpRequest) => OpHandle;
+  // Backs RibContext.acquireMutationLock: record the owning rib id on a
+  // per-project live-checkout mutation lock. Optional so older/test hosts omit it.
+  readonly acquireMutationLock?: (
+    ribId: string,
+    req: AcquireMutationLockRequest,
+  ) => Promise<MutationLock>;
   // Backs RibContext.getProviders: a read-only list of the registered providers, so a
   // rib can make availability-aware provider choices. Optional so applyRibs unit tests
   // stay deterministic without the provider registry.
@@ -352,6 +360,12 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.registerOp
         ? {
             registerOp: (req: RegisterOpRequest) => opts.registerOp!(rib.id, req),
+          }
+        : {}),
+      ...(opts.acquireMutationLock
+        ? {
+            acquireMutationLock: (req: AcquireMutationLockRequest) =>
+              opts.acquireMutationLock!(rib.id, req),
           }
         : {}),
       // Normalize to the minimal {id, displayName} shape at the boundary so a richer

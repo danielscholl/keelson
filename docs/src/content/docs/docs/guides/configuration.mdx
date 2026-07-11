@@ -278,6 +278,7 @@ the matching config value when set.
 | `KEELSON_MCP_REQUIRE_TOKEN` | unset | Set to `1` to gate `/api/mcp` behind the `server.json` token. Overrides `mcp.requireToken`. |
 | `KEELSON_MCP_DENYLIST` | unset | Comma-separated tool names to hide over MCP. Merged with `mcp.toolDenylist`. |
 | `KEELSON_WORKSPACE` | `~/keelson` | Root for project workspaces. |
+| `KEELSON_DISABLE_MUTATION_LOCK` | unset | Emergency operator bypass: set to a non-empty value other than `0` / `false` to disable per-project mutation-lock enforcement (concurrent runs may then mutate the same live checkout). Leave unset in normal operation. |
 | `KEELSON_BASH` | auto-detected | Path to a POSIX shell for `bash` workflow nodes (Windows). |
 
 ## Confirm what loaded

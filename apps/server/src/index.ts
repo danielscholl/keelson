@@ -70,6 +70,8 @@ import { createMcpRoutes, type McpRoutesHandle } from "./mcp-handler.ts";
 import { memoryRoutes } from "./memory-handler.ts";
 import { createMemoryStore, type MemoryStore } from "./memory-store.ts";
 import { resolveModelCostHint } from "./model-cost-hint.ts";
+import { createMutationLockManager, type MutationLockManager } from "./mutation-lock-manager.ts";
+import { createMutationLockStore } from "./mutation-lock-store.ts";
 import { createOpRegistry, type OpRegistry } from "./op-registry.ts";
 import { createOpStore } from "./op-store.ts";
 import { createOpTools } from "./op-tools.ts";
@@ -292,6 +294,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // Late-bound like the manager above: the registry needs the db-backed OpStore
   // and the workflow controller, both created after bootstrapRibs returns.
   let opRegistryRef: OpRegistry | undefined;
+  let mutationLockManagerRef: MutationLockManager | undefined;
   const ribs = await bootstrapRibs({
     ribsRoot: paths.ribsRoot,
     snapshotManager,
@@ -305,6 +308,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     getMemoryStore: () => memoryStoreRef,
     getWorkspaceManager: () => workspaceManagerRef,
     getOpRegistry: () => opRegistryRef,
+    getMutationLockManager: () => mutationLockManagerRef,
     getUsageStore: () => usageStoreRef,
     // Same cwd the heartbeat scheduler uses (repoRoot below), so a rib refresh
     // collapses onto an in-flight heartbeat run instead of racing it.
@@ -391,11 +395,15 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   // Constructed here so its boot-time reconcile (running ops -> orphaned) runs
   // early; the registry that wraps it is built once the workflow controller exists.
   const opStore = createOpStore(db);
+  const mutationLockStore = createMutationLockStore();
+  const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+  mutationLockManagerRef = mutationLockManager;
   const projectNotebookStore = createProjectNotebookStore(db);
   migrateLegacyProjectsLayout({ db, projectsStore, workspaceRoot: WORKSPACE_ROOT });
   // Reconcile only after the legacy-layout migration: it moves worktrees on
   // disk, and reconciling first would drop lease rows for paths mid-move.
   await workspaceManager.reconcile();
+  mutationLockManager.reconcile();
   const existingDefault = projectsStore.getByName(DEFAULT_PROJECT_NAME);
   const defaultProject =
     existingDefault ??
@@ -541,6 +549,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     snapshotManager,
     usageStore,
     workspaceManager,
+    mutationLockManager,
     ribWorkflowBindings: ribWorkflows.bindings,
     // Working dir for surface-panel refreshes (POST /:name/refresh) re-running a
     // rib collector — its node uses absolute paths, so the cwd is nominal. Kept

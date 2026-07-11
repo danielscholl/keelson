@@ -614,6 +614,140 @@ describe("bootstrapRibs", () => {
     expect(hasSeam).toBe(false);
   });
 
+  test("acquireMutationLock forwards to the late-bound manager with a rib-scoped owner", async () => {
+    delete process.env.KEELSON_RIBS;
+    let managerRef:
+      | { acquire: (req: Record<string, unknown>) => { id: string; release: () => Promise<void> } }
+      | undefined;
+    const acquireCalls: Record<string, unknown>[] = [];
+    let released = 0;
+    let accessor:
+      | ((req: { projectId: string; purpose: string }) => Promise<{
+          id: string;
+          release: () => Promise<void>;
+        }>)
+      | undefined;
+    const rib: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        accessor = ctx.acquireMutationLock;
+        return [];
+      },
+    };
+    await bootstrapRibs({
+      available: { alpha: rib },
+      getProjects: () => [
+        { id: "p1", name: "p1", rootPath: "/repos/p1", createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+      getMutationLockManager: () => managerRef as never,
+    });
+    expect(accessor).toBeDefined();
+    // Manager not yet wired (late-bound): the seam fails with a clear error.
+    await expect(
+      accessor?.({ projectId: "p1", purpose: "test" }) ?? Promise.resolve(),
+    ).rejects.toThrow("mutation lock manager unavailable");
+    managerRef = {
+      acquire: (req) => {
+        acquireCalls.push(req);
+        return {
+          id: "lock-1",
+          release: async () => {
+            released += 1;
+          },
+        };
+      },
+    };
+    const lock = await accessor?.({ projectId: "p1", purpose: "guarded" });
+    // Owner is rib-scoped; a mutation lock carries no branch (unlike a workspace lease).
+    expect(acquireCalls).toEqual([{ projectId: "p1", purpose: "guarded", owner: "rib:alpha" }]);
+    expect(lock?.id).toBe("lock-1");
+    await lock?.release();
+    expect(released).toBe(1);
+  });
+
+  test("acquireMutationLock rejects a projectId that is not a known project", async () => {
+    delete process.env.KEELSON_RIBS;
+    let acquired = 0;
+    let accessor:
+      | ((req: { projectId: string; purpose: string }) => Promise<{
+          id: string;
+          release: () => Promise<void>;
+        }>)
+      | undefined;
+    const rib: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        accessor = ctx.acquireMutationLock;
+        return [];
+      },
+    };
+    await bootstrapRibs({
+      available: { alpha: rib },
+      getProjects: () => [
+        {
+          id: "known",
+          name: "known",
+          rootPath: "/repos/known",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      getMutationLockManager: () =>
+        ({
+          acquire: () => {
+            acquired += 1;
+            return { id: "lock-1", release: async () => {} };
+          },
+        }) as never,
+    });
+    // A phantom project is rejected before the manager is ever called.
+    await expect(accessor?.({ projectId: "ghost", purpose: "x" })).rejects.toThrow(
+      "unknown project 'ghost'",
+    );
+    expect(acquired).toBe(0);
+    // A known project still acquires.
+    const lock = await accessor?.({ projectId: "known", purpose: "x" });
+    expect(lock?.id).toBe("lock-1");
+    expect(acquired).toBe(1);
+  });
+
+  test("acquireMutationLock fails closed (no seam) when a manager is wired but no projects source", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasSeam = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasSeam = ctx.acquireMutationLock !== undefined;
+        return [];
+      },
+    };
+    // Without a projects source the seam cannot validate a projectId, so it is
+    // withheld rather than granting unvalidated (phantom-key) locks.
+    await bootstrapRibs({
+      available: { alpha: probe },
+      getMutationLockManager: () =>
+        ({ acquire: () => ({ id: "l", release: async () => {} }) }) as never,
+    });
+    expect(hasSeam).toBe(false);
+  });
+
+  test("RibContext.acquireMutationLock is absent when no manager source is supplied", async () => {
+    delete process.env.KEELSON_RIBS;
+    let hasSeam = true;
+    const probe: Rib = {
+      id: "alpha",
+      displayName: "alpha",
+      registerTools: (ctx) => {
+        hasSeam = ctx.acquireMutationLock !== undefined;
+        return [];
+      },
+    };
+    await bootstrapRibs({ available: { alpha: probe } });
+    expect(hasSeam).toBe(false);
+  });
+
   test("RibContext.getProjects is absent when no projects source is supplied", async () => {
     delete process.env.KEELSON_RIBS;
     let hasAccessor = true;

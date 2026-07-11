@@ -23,6 +23,7 @@ import {
   registerWorkflowProvider,
 } from "@keelson/providers";
 import type {
+  AcquireMutationLockRequest,
   AcquireWorkspaceRequest,
   AgentSummary,
   ApprovalDecision,
@@ -32,6 +33,7 @@ import type {
   CommandInvokeResult,
   MemoryTools,
   MessageChunk,
+  MutationLock,
   OpenChatSeed,
   OpHandle,
   Project,
@@ -82,6 +84,7 @@ import {
 } from "@keelson/workflows";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import type { MutationLockManager } from "./mutation-lock-manager.ts";
 // Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
 // import direction is not turned into a runtime cycle.
 import type { OpRegistry } from "./op-registry.ts";
@@ -241,6 +244,9 @@ export interface BootstrapRibsOptions {
   // Lazy resolver for the OpRegistry backing RibContext.registerOp. Lazy for the
   // same reason: the registry needs the db-backed OpStore created after boot.
   getOpRegistry?: () => OpRegistry | undefined;
+  // Lazy resolver for the MutationLockManager backing RibContext.acquireMutationLock.
+  // Lazy because the manager is created AFTER bootstrapRibs returns.
+  getMutationLockManager?: () => MutationLockManager | undefined;
   // Backs RibContext.getProviders. Defaults to the live provider registry
   // (getProviderInfoList); tests may inject a deterministic list.
   getProviders?: () => readonly RibProviderInfo[];
@@ -443,6 +449,31 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
         return registry.register(`rib:${ribId}`, req);
       }
     : undefined;
+  const getMutationLockManager = options.getMutationLockManager;
+  const getProjectsForLock = options.getProjects;
+  // Fail closed: the seam is only exposed when a projects source is ALSO available,
+  // so it can always validate the projectId. Without it we cannot tell a real
+  // project from a phantom key, and an unvalidated lock gives the rib false
+  // exclusion while a workflow mutates the real checkout — so we offer no seam
+  // (the rib degrades to no lock) rather than an unsafe one.
+  const acquireMutationLockSeam =
+    getMutationLockManager && getProjectsForLock
+      ? async (ribId: string, req: AcquireMutationLockRequest): Promise<MutationLock> => {
+          const manager = getMutationLockManager();
+          if (!manager) throw new Error("mutation lock manager unavailable");
+          // Reject a phantom projectId (the same guard WorkspaceManager.acquire
+          // enforces): a lock under a non-existent key gives false exclusion.
+          if (!getProjectsForLock().some((p) => p.id === req.projectId)) {
+            throw new Error(`unknown project '${req.projectId}'`);
+          }
+          const handle = manager.acquire({
+            projectId: req.projectId,
+            purpose: req.purpose,
+            owner: `rib:${ribId}`,
+          });
+          return { id: handle.id, release: async () => handle.release() };
+        }
+      : undefined;
   // RibContext.getProviders resolver: the registered-provider list (id + label) so a
   // rib can make availability-aware provider choices (e.g. assign a member's vendor at
   // cast). Read-only; grants nothing beyond the existing runAgentTurn routing. Tests
@@ -581,6 +612,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(getMemory ? { getMemory } : {}),
     ...(acquireWorkspaceSeam ? { acquireWorkspace: acquireWorkspaceSeam } : {}),
     ...(registerOpSeam ? { registerOp: registerOpSeam } : {}),
+    ...(acquireMutationLockSeam ? { acquireMutationLock: acquireMutationLockSeam } : {}),
     getProviders,
     callTool,
   });

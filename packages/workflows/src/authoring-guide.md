@@ -52,6 +52,10 @@ Optional:
   placeholders.
 - `requiresProject: true` — marks a repo-scoped workflow; `workflow_run` refuses
   to start it unless the resolved working directory is a git repo.
+- `mutates_checkout` — defaults to `true`; set `false` to mark a read-only
+  workflow that never writes the project checkout, exempting it from the project
+  mutation lock so it can run concurrently with a mutating run on the same
+  project.
 - `converge` — `{ gate, max_rounds, on_exhaust }` re-runs the gate node's
   dependency subgraph until the gate completes or the round budget exhausts.
 - `effort` (`low`|`medium`|`high`|`max`) and `thinking`
@@ -59,7 +63,7 @@ Optional:
   reasoning controls.
 
 Accepted but ignored at runtime (the loader warns and drops them): `sandbox`,
-`betas`, `fallbackModel`, `additionalDirectories`, `mutates_checkout`.
+`betas`, `fallbackModel`, `additionalDirectories`.
 
 ## Description format
 

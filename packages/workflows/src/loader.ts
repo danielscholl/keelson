@@ -102,7 +102,6 @@ const IGNORED_FIELDS_WORKFLOW: readonly string[] = [
   "betas",
   "fallbackModel",
   "additionalDirectories",
-  "mutates_checkout",
 ];
 
 // ---------------------------------------------------------------------------

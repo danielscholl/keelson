@@ -473,7 +473,9 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         const hint =
           result.reason === "not_terminal"
             ? " Only failed or cancelled runs can be resumed; call workflow_status to check its state."
-            : " The run or its workflow is no longer available — it may have been purged, or its workflow definition removed or renamed.";
+            : result.reason === "locked"
+              ? " Another run holds the project's mutation lock; retry once it releases."
+              : " The run or its workflow is no longer available — it may have been purged, or its workflow definition removed or renamed.";
         emitResult(ctx, `Could not resume run ${runId}: ${result.message}.${hint}`, true);
         return;
       }
