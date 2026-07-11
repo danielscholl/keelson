@@ -1941,7 +1941,7 @@ nodes:
     expect(approvalNodeIds[0].startsWith("gate__converge_exhaust")).toBe(true);
     expect(approvalNodeIds[0]).not.toBe("gate__converge_exhaust");
     expect(summary.nodes.gate.state).toBe("completed");
-    expect(summary.nodes["gate__converge_exhaust"]).toMatchObject({
+    expect(summary.nodes.gate__converge_exhaust).toMatchObject({
       state: "completed",
       output: "real-output",
     });

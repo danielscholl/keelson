@@ -21,7 +21,7 @@
  * `buildSubprocessEnv` populates — same contract the bash handler uses.
  */
 
-import { resolveConvergeRound, type NodeHandler, type NodeResult } from "../executor.ts";
+import { type NodeHandler, type NodeResult, resolveConvergeRound } from "../executor.ts";
 import { resolveScript, type ScriptRuntime } from "./discovery.ts";
 import { failed, formatSubprocessFailure, isInlineScript } from "./helpers.ts";
 import {

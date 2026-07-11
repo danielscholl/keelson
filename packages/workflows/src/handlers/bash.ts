@@ -17,7 +17,7 @@
  * output executable when bash parses the body.
  */
 
-import { resolveConvergeRound, type NodeHandler, type NodeResult } from "../executor.ts";
+import { type NodeHandler, type NodeResult, resolveConvergeRound } from "../executor.ts";
 import { prependPath, resolveBash } from "./shell.ts";
 import {
   buildSubprocessEnv,
