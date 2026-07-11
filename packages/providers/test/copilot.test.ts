@@ -86,6 +86,35 @@ interface MockSdkHandle {
   approveAll: (...args: unknown[]) => unknown;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireJsonSchemaProperty(
+  properties: Record<string, Record<string, unknown>>,
+  name: string,
+): Record<string, unknown> {
+  const property = properties[name];
+  if (!property) throw new Error(`missing JSON Schema property '${name}'`);
+  return property;
+}
+
+function resolveJsonSchemaProperty(
+  schema: Record<string, unknown>,
+  property: Record<string, unknown>,
+): Record<string, unknown> {
+  if (typeof property.$ref !== "string") return property;
+  if (!property.$ref.startsWith("#/$defs/")) {
+    throw new Error(`unsupported JSON Schema ref '${property.$ref}'`);
+  }
+  const defs = schema.$defs;
+  if (!isRecord(defs)) throw new Error("JSON Schema ref missing $defs");
+  const target = defs[property.$ref.slice("#/$defs/".length)];
+  if (!isRecord(target)) throw new Error(`missing JSON Schema def '${property.$ref}'`);
+  const { $ref: _ref, ...inlineProperty } = property;
+  return { ...target, ...inlineProperty };
+}
+
 function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
   let lastSession: MockSession | null = null;
   let lastClient: MockClient | null = null;
@@ -2328,22 +2357,37 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
     // Optional-only → no `required` array.
     expect(params.required).toBeUndefined();
 
-    expect(params.properties.user).toEqual({
+    const paramSchema = params as Record<string, unknown>;
+    expect(
+      resolveJsonSchemaProperty(paramSchema, requireJsonSchemaProperty(params.properties, "user")),
+    ).toEqual({
       type: "string",
       description: "GitLab handle for involvement.",
     });
-    expect(params.properties.state).toEqual({
+    expect(
+      resolveJsonSchemaProperty(paramSchema, requireJsonSchemaProperty(params.properties, "state")),
+    ).toEqual({
       type: "string",
       enum: ["opened", "merged", "closed", "all"],
       description: "Filter by MR state.",
     });
-    expect(params.properties.pipelines).toEqual({
+    expect(
+      resolveJsonSchemaProperty(
+        paramSchema,
+        requireJsonSchemaProperty(params.properties, "pipelines"),
+      ),
+    ).toEqual({
       type: "integer",
       minimum: 1,
       maximum: 50,
       description: "How many recent pipelines per project.",
     });
-    expect(params.properties.allProviders).toEqual({
+    expect(
+      resolveJsonSchemaProperty(
+        paramSchema,
+        requireJsonSchemaProperty(params.properties, "allProviders"),
+      ),
+    ).toEqual({
       type: "boolean",
       description: "Include every provider.",
     });

@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ToolContext, ToolDefinition } from "@keelson/shared";
+import { canvasBoardViewSchema, type ToolContext, type ToolDefinition } from "@keelson/shared";
 import { clearRegistry, registerTool } from "@keelson/skills";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -38,6 +38,24 @@ async function connect(opts: Partial<KeelsonMcpServerOptions> = {}): Promise<Cli
   return client;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  return value;
+}
+
+function collectJsonSchemaRefs(schema: unknown): Set<string> {
+  const refs = new Set<string>();
+  JSON.stringify(schema, (_key, value) => {
+    if (isRecord(value) && typeof value.$ref === "string") refs.add(value.$ref);
+    return value;
+  });
+  return refs;
+}
+
 afterEach(() => {
   clearRegistry();
 });
@@ -53,6 +71,48 @@ describe("createKeelsonMcpServer", () => {
     expect((t?.inputSchema.properties as Record<string, unknown>).q).toBeDefined();
     expect(t?.annotations?.readOnlyHint).toBe(true);
     expect(t?.annotations?.destructiveHint).toBe(false);
+  });
+
+  test("tools/list deduplicates repeated board schema definitions", async () => {
+    registerTool({
+      name: "board_view",
+      description: "board-backed read tool",
+      inputSchema: z.object({ board: canvasBoardViewSchema }),
+      execute: async (_input, ctx) => {
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "board" });
+      },
+    });
+
+    const client = await connect();
+    const tool = (await client.listTools()).tools.find((x) => x.name === "board_view");
+
+    expect(tool).toBeDefined();
+    const inputSchema = requireRecord(tool?.inputSchema, "inputSchema");
+    expect(inputSchema.type).toBe("object");
+    const properties = requireRecord(inputSchema.properties, "inputSchema.properties");
+    expect(properties.board).toBeDefined();
+
+    const defs = requireRecord(inputSchema.$defs, "inputSchema.$defs");
+    expect(Object.keys(defs).length).toBeGreaterThan(0);
+    const refs = collectJsonSchemaRefs(inputSchema);
+    expect(refs.size).toBeGreaterThan(0);
+    const defKeys = new Set(Object.keys(defs));
+    const danglingRefs = [...refs].filter((ref) => {
+      if (!ref.startsWith("#/$defs/")) return true;
+      return !defKeys.has(ref.slice("#/$defs/".length));
+    });
+    expect(danglingRefs).toEqual([]);
+
+    // Fair baseline: the same schema explicitly inlined with `$schema` stripped
+    // like the advertised one, so the only difference measured is `$defs`/`$ref`
+    // reuse — and require a material cut (measured ~51%), not a one-byte win.
+    const inlineSchema = z.toJSONSchema(z.object({ board: canvasBoardViewSchema }), {
+      reused: "inline",
+    }) as Record<string, unknown>;
+    delete inlineSchema.$schema;
+    expect(JSON.stringify(inputSchema).length).toBeLessThan(
+      JSON.stringify(inlineSchema).length * 0.75,
+    );
   });
 
   test("tools/call round-trips the tool_result", async () => {
