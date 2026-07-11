@@ -24,6 +24,7 @@ import { emitResult, truncate } from "./workflow-tools.ts";
 // rendered SIZE (a frame message/data is unbounded), independent of frame count.
 const EVENT_PAGE = 100;
 const EVENT_BYTE_BUDGET = 8_000;
+const FRAME_MSG_CAP = 2_000;
 const FRAME_DATA_CAP = 2_000;
 const RESULT_CAP = 8_000;
 
@@ -76,7 +77,10 @@ function renderEvents(id: string, events: OpEventView[], cursor: number): string
       e.data === null || e.data === undefined
         ? ""
         : ` ${truncate(JSON.stringify(e.data), FRAME_DATA_CAP)}`;
-    const line = `[${e.seq}] ${e.kind}${e.message ? ` ${e.message}` : ""}${dataStr}`;
+    // Cap the message too (a rib can log an unbounded string) so a single frame
+    // can't blow the page budget on its own.
+    const msg = e.message ? ` ${truncate(e.message, FRAME_MSG_CAP)}` : "";
+    const line = `[${e.seq}] ${e.kind}${msg}${dataStr}`;
     // Always render at least one frame; stop before exceeding the byte budget.
     if (lines.length > 0 && used + line.length > EVENT_BYTE_BUDGET) {
       bytesHit = true;
@@ -142,7 +146,7 @@ export function createOpTools(deps: { registry: OpRegistry }): ToolDefinition[] 
   const runEvents: ToolDefinition = {
     name: "run_events",
     description:
-      "Read an operation's progress frames after a cursor (0 for the beginning). Returns log/progress/done/error frames with monotonic seq numbers; pass the highest seq back as `cursor` to poll only new frames. This is the dispatch-and-poll substrate — long tools stream progress here rather than blocking their call.",
+      "Read an operation's progress frames after a cursor (0 for the beginning). Native ops return frames with monotonic seq numbers — pass the highest seq back as `cursor` to poll only new frames. Workflow ops (a `wf:` id) return a full snapshot of node progress each poll (their frames are a live projection). This is the dispatch-and-poll substrate — long tools stream progress here rather than blocking their call.",
     inputSchema: eventsInputSchema,
     async execute(input, ctx: ToolContext) {
       const parsed = eventsInputSchema.safeParse(input);

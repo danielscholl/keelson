@@ -11,6 +11,11 @@ import type { OpFrameKind } from "@keelson/shared";
 
 export type OpStatus = "running" | "done" | "error" | "cancelled" | "orphaned";
 
+// Bound the durable tables: keep every active op plus the most recent terminal
+// ops (op_events cascade-delete with their op). A rib registering an op per task
+// would otherwise grow the ops table forever.
+const OP_TERMINAL_RETENTION = 1000;
+
 export interface OpRecord {
   id: string;
   kind: string;
@@ -193,6 +198,17 @@ export function createOpStore(db: Database): OpStore {
        SET status = ?, result_json = ?, error = ?, updated_at = ?, completed_at = ?
      WHERE id = ? AND status = 'running'`,
   );
+  // Keep active ops + the most recent terminal ops; older terminal rows (and
+  // their cascaded op_events) are pruned so the tables stay bounded.
+  const pruneStmt = db.prepare(
+    `DELETE FROM ops
+       WHERE status != 'running'
+         AND id NOT IN (
+           SELECT id FROM ops WHERE status != 'running'
+           ORDER BY created_at DESC, id DESC LIMIT ?
+         )`,
+  );
+  pruneStmt.run(OP_TERMINAL_RETENTION);
 
   const appendEventRow = (opId: string, frame: AppendOpEvent, at: string): number => {
     const seq = (nextSeqStmt.get(opId) as { next: number }).next;
@@ -238,6 +254,8 @@ export function createOpStore(db: Database): OpStore {
         params.createdAt,
         params.createdAt,
       );
+      // Bound the tables continuously, not just at boot.
+      pruneStmt.run(OP_TERMINAL_RETENTION);
     },
     get(id) {
       const row = getStmt.get(id) as OpRow | null;

@@ -374,7 +374,7 @@ describe("op tools — workflow projection", () => {
     expect(paused.content).toContain("status running"); // paused projects to running
   });
 
-  test("run_events keeps an emitted node's seq stable across polls and yields only new frames", async () => {
+  test("run_events returns a resume-safe full snapshot for a workflow op (cursor-independent)", async () => {
     fakeDetails.r1 = {
       workflowName: "fix-issue",
       status: "running",
@@ -431,9 +431,10 @@ describe("op tools — workflow projection", () => {
         },
       ],
     };
-    // At cursor=1 fetch (seq 1) must not reappear; only plan (seq 2) + terminal (seq 3).
+    // A workflow op re-emits the full current snapshot even at a non-zero cursor
+    // (resume-safe projection), so all three frames come back — nothing is dropped.
     const second = await run("run_events", { id: "wf:r1", cursor: 1 });
-    expect(second.content).not.toContain("[1] progress [fetch]");
+    expect(second.content).toContain("[1] progress [fetch]");
     expect(second.content).toContain("[2] progress [plan]");
     expect(second.content).toContain("[3] done run succeeded");
   });

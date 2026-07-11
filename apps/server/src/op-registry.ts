@@ -43,9 +43,9 @@ export interface OpSummaryView {
 export interface OpStatusView extends OpSummaryView {
   result: unknown;
   error: string | null;
-  // Highest event seq — the cursor ceiling a poller passes back to run_events.
-  // For a native op this is a durable append-only counter; for a workflow op it
-  // is the current projected frame count (a resume may renumber — re-read from 0).
+  // Highest event seq. For a native op this is a durable append-only counter a
+  // poller passes back to run_events; for a workflow op it is the current
+  // projected frame count (workflow ops return a full snapshot each poll).
   lastSeq: number;
 }
 
@@ -105,14 +105,11 @@ function mapWorkflowStatus(status: WorkflowRunStatus): OpStatus {
 
 // Build the projected frame list for a workflow run: one frame per COMPLETED node
 // ordered by completion time, plus a terminal run frame. A still-running node is
-// simply not emitted yet. getRun returns nodes in rowid (completion) order — rows
-// are written only at node_done — and Array.sort is stable, so a completedAt sort
-// with NO tiebreak keeps completion order even on a same-millisecond tie: a later
-// completion always lands at a higher seq (the monotonic-cursor invariant
-// run_events relies on). A nodeId tiebreak would reorder a same-ms pair by name,
-// shifting an already-emitted frame. (A workflow RESUME re-runs nodes and rewrites
-// completedAt in place, so a cursor held across a resume may miss re-run frames —
-// re-read from cursor 0 after resuming; see OpStatusView.lastSeq.)
+// simply not emitted yet. This is a SNAPSHOT recomputed from the (mutable) workflow
+// store on each call — events() returns it cursor-independent for workflow ops
+// (a resume rewrites node frames in place, so an incremental cursor could drop
+// re-run frames). The completedAt sort has NO nodeId tiebreak so a same-millisecond
+// tie preserves getRun's rowid (completion) order via the stable sort.
 function workflowFrames(detail: WorkflowRunDetail): OpEventView[] {
   const completed = detail.nodes
     .filter((node) => node.completedAt !== null)
@@ -308,7 +305,13 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
         const c = controller();
         const detail = c?.getRun(id.slice(WF_PREFIX.length));
         if (!detail) return [];
-        const frames = workflowFrames(detail).filter((frame) => frame.seq > cursor);
+        // Workflow ops are a live PROJECTION over the (mutable) workflow store, not
+        // a durable append-only log: a resume re-runs nodes and rewrites their
+        // frames in place, so an incremental cursor could silently drop re-run
+        // frames. Return the full current snapshot (cursor-independent, bounded by
+        // node count) — the caller sees current truth each poll. Native ops below
+        // keep a true durable cursor.
+        const frames = workflowFrames(detail);
         return limit === undefined ? frames : frames.slice(0, limit);
       }
       return store.listEvents(id, cursor, limit).map((event) => ({
