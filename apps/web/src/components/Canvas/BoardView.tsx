@@ -716,6 +716,46 @@ function CopyActionButton({ action, label }: { action: RibAction; label?: string
   );
 }
 
+type BarItem = Extract<BoardSection, { kind: "bars" }>["items"][number];
+
+// A safe href links the whole bar row, mirroring how a grid cell links its whole cell.
+function BarRow({ bar, inline }: { bar: BarItem; inline: boolean }) {
+  const track = (
+    <div className="cvb-bar-track">
+      <div
+        className="cvb-bar-fill"
+        data-tone={bar.tone}
+        style={{ width: `${barPct(bar.value, bar.total)}%` }}
+      />
+    </div>
+  );
+  const trailing = (
+    <span className="cvb-bar-trailing">{bar.trailing ?? `${barPct(bar.value, bar.total)}%`}</span>
+  );
+  const body = inline ? (
+    <>
+      <span className="cvb-bar-label">{bar.label}</span>
+      {track}
+      {trailing}
+    </>
+  ) : (
+    <>
+      <div className="cvb-bar-head">
+        <span className="cvb-bar-label">{bar.label}</span>
+        {trailing}
+      </div>
+      {track}
+    </>
+  );
+  return isSafeLinkScheme(bar.href) ? (
+    <a className="cvb-bar cvb-link" href={bar.href} target="_blank" rel="noopener noreferrer">
+      {body}
+    </a>
+  ) : (
+    <div className="cvb-bar">{body}</div>
+  );
+}
+
 function Section({ section }: { section: BoardSection }) {
   switch (section.kind) {
     case "stats": {
@@ -744,41 +784,9 @@ function Section({ section }: { section: BoardSection }) {
       const inline = section.inline === true;
       return (
         <div className={`cvb-bars${inline ? " cvb-bars--inline" : ""}`}>
-          {section.items.map((b) => {
-            const track = (
-              <div className="cvb-bar-track">
-                <div
-                  className="cvb-bar-fill"
-                  data-tone={b.tone}
-                  style={{ width: `${barPct(b.value, b.total)}%` }}
-                />
-              </div>
-            );
-            const trailing = (
-              <span className="cvb-bar-trailing">
-                {b.trailing ?? `${barPct(b.value, b.total)}%`}
-              </span>
-            );
-            return (
-              <div key={key(JSON.stringify(b))} className="cvb-bar">
-                {inline ? (
-                  <>
-                    <span className="cvb-bar-label">{b.label}</span>
-                    {track}
-                    {trailing}
-                  </>
-                ) : (
-                  <>
-                    <div className="cvb-bar-head">
-                      <span className="cvb-bar-label">{b.label}</span>
-                      {trailing}
-                    </div>
-                    {track}
-                  </>
-                )}
-              </div>
-            );
-          })}
+          {section.items.map((b) => (
+            <BarRow key={key(JSON.stringify(b))} bar={b} inline={inline} />
+          ))}
         </div>
       );
     }

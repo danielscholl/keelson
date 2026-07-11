@@ -106,8 +106,10 @@ A `view` payload carries its own `view` discriminant, one of three:
 ```
 
 A `Cell` is a bare scalar (`string | number | boolean | null`) or a wrapped
-`{ value?, tone?, badges? }`, where each badge is `{ text, tone? }`. A wrapped
-cell must render something: a value or at least one badge.
+`{ value?, tone?, badges?, href? }`, where each badge is `{ text, tone? }`. A wrapped
+cell must render something: a value or at least one badge. An `href` renders the
+cell's value as an external link, but only a safe `http(s)://` URL becomes an
+anchor — other schemes fall back to plain text.
 
 ### graph
 
@@ -147,7 +149,7 @@ one-level layout wrapper that nests leaf sections side by side.
 | --- | --- | --- |
 | `stats` | `items: [{ label, value, sub?, tone? }]` | KPI tiles. |
 | `segments` | `items: [{ label, n, tone? }]` | A summary pulse. |
-| `bars` | `inline?`, `items: [{ label, value, total, tone?, trailing? }]` | Meters and offender lists. |
+| `bars` | `inline?`, `items: [{ label, value, total, tone?, trailing?, href? }]` | Meters and offender lists. A safe `http(s)://` `href` makes the whole bar row a link; other schemes fall back to plain text. |
 | `table` | `columns`, `rows`, `caption?` | The same table shape as the view. |
 | `cards` | `boxed?`, `items: [{ title, titleTone?, mono?, stacked?, dot?, pill?, href?, bar?, fields?, actions?, footnote?, reason? }]` | Rich item cards. A card may carry `actions: ActionItem[]` for inline per-card buttons, distinct from a standalone `actions` section. `stacked` renders the card's fields as a column (one per line) instead of the inline `·`-joined meta row — for line-oriented readouts. |
 | `rows` | `boxed?`, `items: [{ icon?, glyph?, chip?, text, href?, trailing?, detail? }]` | A status or feed list. A row with `detail` (long-form plain text, up to 4,000 chars) renders as a disclosure that expands beneath the row. |

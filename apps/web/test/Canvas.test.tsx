@@ -765,6 +765,47 @@ describe("CanvasProvider / useCanvas", () => {
     );
   });
 
+  test("board renders table-cell and bars-item hrefs as safe anchors", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            {
+              kind: "bars",
+              items: [{ label: "keycloak", value: 3, total: 9, href: "https://sonar.test/bar" }],
+            },
+            {
+              kind: "table",
+              columns: [{ key: "svc" }, { key: "rating" }],
+              rows: [
+                {
+                  svc: "alpha",
+                  rating: { value: "A", tone: "error", href: "https://sonar.test/cell" },
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    const barLink = dialog.querySelector('a.cvb-bar[href="https://sonar.test/bar"]');
+    expect(barLink?.textContent).toContain("keycloak");
+    const cellLink = dialog.querySelector('a.cvb-link[href="https://sonar.test/cell"]');
+    expect(cellLink?.textContent?.trim()).toBe("A");
+    // A toned linked cell keeps its status color: the tone rides the anchor as data-tone.
+    expect(cellLink?.getAttribute("data-tone")).toBe("error");
+  });
+
   test("board collapses unsafe href schemes to plain text (no anchor)", () => {
     const doc: CanvasDocument = {
       kind: "view",
@@ -775,6 +816,15 @@ describe("CanvasProvider / useCanvas", () => {
           sections: [
             { kind: "cards", items: [{ title: "evil card", href: "javascript:alert(1)" }] },
             { kind: "rows", items: [{ text: "evil row", href: "data:text/html,<b>x</b>" }] },
+            {
+              kind: "bars",
+              items: [{ label: "evil bar", value: 1, total: 2, href: "javascript:alert(2)" }],
+            },
+            {
+              kind: "table",
+              columns: [{ key: "c" }],
+              rows: [{ c: { value: "evil cell", href: "data:text/html,x" } }],
+            },
           ],
         }),
       },
@@ -789,6 +839,8 @@ describe("CanvasProvider / useCanvas", () => {
     // The labels still render, but never as clickable anchors.
     expect(dialog.textContent).toContain("evil card");
     expect(dialog.textContent).toContain("evil row");
+    expect(dialog.textContent).toContain("evil bar");
+    expect(dialog.textContent).toContain("evil cell");
     expect(dialog.querySelector('a[href^="javascript:"]')).toBeNull();
     expect(dialog.querySelector('a[href^="data:"]')).toBeNull();
   });
