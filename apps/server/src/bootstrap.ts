@@ -84,6 +84,7 @@ import {
 } from "@keelson/workflows";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
 import type { MemoryStore } from "./memory-store.ts";
+import type { MutationLockManager } from "./mutation-lock-manager.ts";
 // Type-only (erased at runtime) so the existing workflows-handler -> bootstrap
 // import direction is not turned into a runtime cycle.
 import type { OpRegistry } from "./op-registry.ts";
@@ -101,7 +102,6 @@ import {
   type RibManifest,
   type RibWorkflowContribution,
 } from "./ribs.ts";
-import type { MutationLockManager } from "./mutation-lock-manager.ts";
 import type { UsageStore } from "./usage-store.ts";
 import type { WorkflowController } from "./workflows-handler.ts";
 import type { WorkspaceManager } from "./workspace-manager.ts";

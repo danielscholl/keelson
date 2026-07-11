@@ -9,10 +9,7 @@
 import "./test-setup.ts";
 
 import { describe, expect, test } from "bun:test";
-import {
-  createMutationLockStore,
-  type MutationLockRecord,
-} from "../src/mutation-lock-store.ts";
+import { createMutationLockStore, type MutationLockRecord } from "../src/mutation-lock-store.ts";
 
 function lock(overrides: Partial<MutationLockRecord> = {}): MutationLockRecord {
   return {

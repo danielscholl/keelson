@@ -86,10 +86,12 @@ describe("MutationLockManager", () => {
     manager.acquire({ projectId: "project-a", purpose: "review", owner: "workflow:a" });
     manager.acquire({ projectId: "project-b", purpose: "review", owner: "workflow:b" });
 
-    expect(manager.list().map((record) => record.projectId).sort()).toEqual([
-      "project-a",
-      "project-b",
-    ]);
+    expect(
+      manager
+        .list()
+        .map((record) => record.projectId)
+        .sort(),
+    ).toEqual(["project-a", "project-b"]);
   });
 
   test("reconcile clears stale records and warns when non-empty", () => {

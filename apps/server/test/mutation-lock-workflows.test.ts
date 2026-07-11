@@ -21,7 +21,11 @@ import { createMutationLockManager } from "../src/mutation-lock-manager.ts";
 import { createMutationLockStore } from "../src/mutation-lock-store.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 import { createWorkflowStore, type WorkflowStore } from "../src/workflow-store.ts";
-import { createActiveRuns, createWorkflowSubscribers, workflowsRoutes } from "../src/workflows-handler.ts";
+import {
+  createActiveRuns,
+  createWorkflowSubscribers,
+  workflowsRoutes,
+} from "../src/workflows-handler.ts";
 import { rmTemp } from "./temp.ts";
 
 const ORIGIN = "http://127.0.0.1:5173";
@@ -71,7 +75,12 @@ async function pollUntilTerminal(
   runId: string,
   timeoutMs = 2000,
 ): Promise<void> {
-  await pollUntilStoreStatus(store, runId, (status) => status !== undefined && TERMINAL_STATUSES.has(status), timeoutMs);
+  await pollUntilStoreStatus(
+    store,
+    runId,
+    (status) => status !== undefined && TERMINAL_STATUSES.has(status),
+    timeoutMs,
+  );
 }
 
 describe("workflow mutation lock enforcement", () => {

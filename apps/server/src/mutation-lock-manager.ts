@@ -39,12 +39,20 @@ export interface MutationLockManager {
   reconcile(): void;
 }
 
-export function mutationLockDisabled(env: Record<string, string | undefined> = process.env): boolean {
+export function mutationLockDisabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
   const value = env.KEELSON_DISABLE_MUTATION_LOCK?.trim();
-  return value !== undefined && value.length > 0 && value !== "0" && value.toLowerCase() !== "false";
+  return (
+    value !== undefined && value.length > 0 && value !== "0" && value.toLowerCase() !== "false"
+  );
 }
 
-export function createMutationLockManager({ store }: { store: MutationLockStore }): MutationLockManager {
+export function createMutationLockManager({
+  store,
+}: {
+  store: MutationLockStore;
+}): MutationLockManager {
   const manager: MutationLockManager = {
     acquire(req) {
       if (mutationLockDisabled()) {
