@@ -166,6 +166,20 @@ describe("op tools — native ops", () => {
     expect(denied.content).toContain("does not accept steering");
   });
 
+  test("run_steer contains a throwing onSteer and returns a typed failure", async () => {
+    const handle = registry.register("rib:squad", {
+      kind: "squad_coordinate",
+      onSteer: () => {
+        throw new Error("boom");
+      },
+    });
+    const res = await run("run_steer", { id: handle.id, note: "go" });
+    expect(res.isError).toBe(true);
+    expect(res.content).toContain("threw");
+    // The op stays alive (a callback failure isn't a settlement).
+    expect((await run("run_status", { id: handle.id })).content).toContain("status running");
+  });
+
   test("run_list advertises steerability and includes native ops", async () => {
     registry.register("rib:squad", { kind: "squad_coordinate", onSteer: () => {} });
     const res = await run("run_list", {});

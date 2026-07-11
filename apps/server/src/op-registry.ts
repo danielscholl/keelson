@@ -384,7 +384,15 @@ export function createOpRegistry(deps: OpRegistryDeps): OpRegistry {
       // Record the steer frame BEFORE invoking the callback: onSteer may settle the
       // op synchronously, and its terminal frame must be causally after this one.
       store.appendEvent(id, { kind: "log", message: `steer: ${note}` }, now());
-      ctl.onSteer(note);
+      try {
+        ctl.onSteer(note);
+      } catch (err) {
+        // A rib's onSteer is untrusted code; a throw must surface as a typed
+        // failure, not escape run_steer.
+        const msg = err instanceof Error ? err.message : String(err);
+        store.appendEvent(id, { kind: "error", message: `steer callback failed: ${msg}` }, now());
+        return { ok: false, message: `steer callback for op ${id} threw: ${msg}` };
+      }
       return { ok: true, message: `steer delivered to op ${id}` };
     },
 
