@@ -56,7 +56,9 @@ nodes:
         echo "converge-pr needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'converge pr 42'." >&2
         exit 1
       fi
-      PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
+      # `|| true` so a no-digit input yields an empty PR_NUM and reaches the
+      # explicit check below, rather than tripping `set -o pipefail` (grep exits 1).
+      PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1 || true)
 
       if [ -z "$PR_NUM" ]; then
         echo "Could not parse a PR number from '$RAW'; pass one like 'converge pr 42'." >&2

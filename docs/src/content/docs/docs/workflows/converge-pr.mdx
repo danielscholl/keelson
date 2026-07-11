@@ -75,17 +75,18 @@ without context.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS`, or emits `CURRENT` for branch-based resolution. |
+| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS` — an explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
 | `fetch-state` | bash | Resolves the PR, refuses forks by emitting `is_fork`, checks out the head commit detached on round 1, pages the `reviewThreads` GraphQL query, diffs unresolved threads against `handled.json`, and emits `has_new`, `new_count`, and `open_count`. |
 | `refuse-fork` | cancel | Stops the run cleanly when `fetch-state` reports a fork PR. |
 | `triage` | prompt | Runs only when there are new threads. Reads the cited code and classifies each new thread as `actionable-code-change`, `question`, `wontfix`, `already-addressed`, or `invalid`. |
-| `triage-gate` | bash | Fails closed if triage ids do not exactly match the fetched new-thread set, then emits whether a human approval is needed. |
-| `approve` | approval | Pauses only for judgment calls, capturing operator feedback before mutation or public replies. |
+| `triage-gate` | bash | Fails closed if triage ids do not exactly match the fetched new-thread set, then emits `has_new`. |
+| `approve` | approval | Pauses once per round that has new threads, presenting all triage verdicts and capturing operator feedback before any branch mutation or public reply. |
 | `fix` | prompt | Applies actionable fixes on the detached PR head, runs narrow checks, commits by file name, composes replies for every new thread, and writes `results.json`. |
 | `validate` | bash | Soft-runs the discovered `verify.sh`, reporting `VALIDATION_STATUS` for the fixer. |
 | `fix-validation` | prompt | Repairs broken validation, if any, and commits the repair. |
 | `revalidate` | bash | Hard gate: refuses to push if `verify.sh` is missing or failing. |
 | `push` | bash | Pushes the detached HEAD back to the recorded PR head ref on `origin`. |
+| `reply-gate` | bash | Fail-closed honesty check: validates `results.json` against triage (a reply for every new thread, valid actions, and a `fixed` action only with actionable triage and a commit) before any public reply or resolve. |
 | `reply-resolve` | prompt | Replies on every result entry, resolves only entries marked `action: "fixed"`, writes `outcome.json`, and appends replied threads to `handled.json`. |
 | `await-ci` | bash | Runs every round, even when there were no new threads. Watches PR checks, reruns failed jobs once to shake out flakes, and emits `CI_STATUS`. |
 | `converge-check` | bash | Gate node. Succeeds only when CI passed and this round found zero new threads. |
