@@ -23,9 +23,11 @@ description: |
             "resolve threads on #123", "address reviewer feedback".
   Does: Fetches unresolved review threads via GraphQL → triages each
         (actionable-code-change / question / wontfix / already-addressed) →
-        pauses for human approval → fixes actionable threads in a worktree
-        (commit per thread/group, verify.sh gate) → posts a reply on every
-        thread → resolves ONLY the fixed ones → reports back.
+        pauses for human approval ONLY when triage contains a judgment call
+        (anything other than actionable-code-change) → fixes actionable
+        threads in a worktree (commit per thread/group, verify.sh gate) →
+        posts a reply on every thread → resolves ONLY the fixed ones →
+        reports back.
   NOT for: Reviewing a PR without fixing anything (use pr-review).
            Fixing a GitHub issue from scratch (use fix-issue).
            Threads already resolved.
@@ -223,14 +225,32 @@ nodes:
       Write the triage JSON to `$ARTIFACTS_DIR/triage.json` and print it.
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 3: HUMAN APPROVAL GATE
+  # PHASE 3: CONDITIONAL APPROVAL GATE
+  # The pause exists to protect judgment calls — a thread triaged as question /
+  # wontfix / already-addressed / invalid means the run will publicly push back
+  # on a reviewer without changing code, and an operator should sign off on
+  # that. When EVERY thread is actionable-code-change there is no judgment to
+  # confirm (the dispatcher asked for the fixes; verify.sh still gates the
+  # push), so the gate is skipped instead of blocking the run on a rubber stamp.
   # ─────────────────────────────────────────────────────────────────────────
 
-  - id: approve
+  - id: gate-check
     depends_on: [triage]
+    bash: |
+      set -euo pipefail
+      # Pure JSON on stdout: the approve node's `when:` reads .needs_review.
+      jq -c '
+        ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
+        | { contentious: $n, needs_review: (if $n > 0 then "true" else "false" end) }
+      ' "$KEELSON_ARTIFACTS_DIR/triage.json"
+
+  - id: approve
+    depends_on: [gate-check]
+    when: "$gate-check.output.needs_review == 'true'"
     approval:
       message: |
-        Review the triage below before any branch mutation.
+        Triage contains judgment calls (question / wontfix / already-addressed /
+        invalid) — review before any branch mutation.
         Approve to continue, or reply with adjustments.
 
         $ARTIFACTS_DIR/triage.json
@@ -240,15 +260,18 @@ nodes:
   # PHASE 4: FIX — implement actionable threads in the worktree
   # ─────────────────────────────────────────────────────────────────────────
 
+  # Runs after the gate whether it paused (approve completed) or was skipped
+  # (every thread actionable); a cancelled pause fails approve and skips this.
   - id: fix
-    depends_on: [approve]
+    depends_on: [gate-check, approve]
+    trigger_rule: none_failed_min_one_success
     context: fresh
     idle_timeout: 1800000
     prompt: |
       You are fixing actionable PR review threads. Read the triage, apply each
       `actionable-code-change` fix in the worktree, and record results.
 
-      ## Approval feedback
+      ## Approval feedback (empty when the gate auto-passed)
 
       $approve.output
 
