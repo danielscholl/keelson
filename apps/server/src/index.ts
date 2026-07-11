@@ -107,6 +107,7 @@ import {
 import { createWorkspaceLeaseStore } from "./workspace-lease-store.ts";
 import { createWorkspaceManager, type WorkspaceManager } from "./workspace-manager.ts";
 import { migrateLegacyProjectsLayout } from "./workspace-migration.ts";
+import { workspaceRoutes } from "./workspace-routes.ts";
 import { createWorkspaceTools } from "./workspace-tools.ts";
 
 const WORKFLOW_RUN_WS_RE = /^\/api\/workflows\/runs\/([^/]+)\/ws$/;
@@ -708,6 +709,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     commandCompleters: ribs.commandCompleters,
   });
   projectsRoutes(app, { store: projectsStore, projectsRoot: WORKSPACE_ROOT });
+  workspaceRoutes(app, { store: workspaceLeaseStore });
   memoryRoutes(app, { memoryStore });
   usageRoutes(app, { store: usageStore });
   projectNotebookRoutes(app, { store: projectNotebookStore, projectsStore });
