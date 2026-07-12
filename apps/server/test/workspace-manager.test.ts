@@ -45,7 +45,7 @@ async function git(args: string[], cwd: string): Promise<void> {
     windowsHide: true,
   });
   // Drain both pipes even on success: an undrained pipe read-end stays an open
-  // handle on win32 and blocks bun test from exiting (the Windows CI hang).
+  // handle on win32 that can block bun test from exiting.
   const [, err, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

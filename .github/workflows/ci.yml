@@ -60,8 +60,8 @@ jobs:
   check-windows:
     name: Typecheck and test (Windows)
     runs-on: windows-latest
-    # A green Windows run is ~4 min; a hung one used to burn the full 25.
-    # Bounded lower so a future win32 test-exit stall cancels fast, not silently.
+    # Bounded well above a normal (~4 min) run so a win32 test-exit stall
+    # cancels fast instead of running out a long silent timeout.
     timeout-minutes: 12
 
     steps:
