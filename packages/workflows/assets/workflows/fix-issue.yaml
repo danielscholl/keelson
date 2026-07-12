@@ -426,7 +426,7 @@ nodes:
     # this node does the actual edits, and pinning makes the model deterministic
     # (Copilot never reports what `auto` resolved). Account-dependent id — must
     # appear in the live Copilot list; swap or drop to `auto` if unavailable.
-    model: gpt-5.6-terra
+    model: gpt-5.6-sol
     # Large changes run many edit+check cycles; a tight cap kills a run mid-task
     # and loses uncommitted work. Generous here; the per-task checks stay scoped
     # (below) so this budget is for real work, not full-suite thrash.
@@ -659,14 +659,15 @@ nodes:
   # DAG layer, so this costs ~one review's wall-clock), a triage judge keeps only
   # high-confidence real defects (dropping false positives), a fixer applies just
   # those, and a re-review closes the loop. The `triage` judge is pinned to
-  # `claude-opus-4.8` (it is the decision gate); the three lenses stay on the
-  # workflow default — pin them too with a per-node `model:` to spend more on
-  # review quality.
+  # `claude-opus-4.8` (it is the decision gate); the three lenses are pinned to
+  # `gpt-5.6-terra` for review quality and a deterministic, observable model
+  # (account-dependent id — drop to `auto` if it isn't in the Copilot list).
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: review-correctness
     depends_on: [enforce-draft]
     context: fresh
+    model: gpt-5.6-terra
     prompt: |
       You are one of three INDEPENDENT reviewers of the branch that was just
       opened as a PR. Your lens is CORRECTNESS only.
@@ -687,6 +688,7 @@ nodes:
   - id: review-conventions
     depends_on: [enforce-draft]
     context: fresh
+    model: gpt-5.6-terra
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
 
@@ -707,6 +709,7 @@ nodes:
   - id: review-coverage
     depends_on: [enforce-draft]
     context: fresh
+    model: gpt-5.6-terra
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
 
