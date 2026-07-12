@@ -38,13 +38,15 @@ describe("TopBar", () => {
     expect(container.querySelector(".nav-divider")).not.toBeNull();
   });
 
-  test("the instruments popover opens and navigates to Memory, then closes", () => {
+  test("the instruments popover navigates, closes, and returns focus to its trigger", () => {
     const tabs: ActiveTab[] = [];
     renderBar({ onTabChange: (t) => tabs.push(t) });
-    fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
+    const trigger = screen.getByRole("button", { name: /Harness/ });
+    fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: "Memory" }));
     expect(tabs).toEqual(["memory"]);
     expect(screen.queryByLabelText("Harness")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
   test("a pending memory count rides the trigger as a dot and the row as a pip", () => {

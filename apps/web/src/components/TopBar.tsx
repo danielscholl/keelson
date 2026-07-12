@@ -34,10 +34,6 @@ export interface TopBarProps {
   onNewChat?: () => void;
 }
 
-// The tab row holds workspaces — the hull's own surfaces (Chat, Workflows)
-// then, past a hairline, whatever rib surfaces are installed. The harness
-// instruments (Memory, Usage) and the theme control live in the gear menu:
-// consulted, not inhabited.
 export function TopBar(props: TopBarProps) {
   const {
     activeTab,
@@ -214,6 +210,7 @@ function InstrumentsPopover({
               onClick={() => {
                 onTabChange(item.id);
                 setOpen(false);
+                triggerRef.current?.focus();
               }}
             >
               {item.label}
