@@ -44,7 +44,7 @@ the point once, on the clearest instance.
 - **Secrets never enter a snapshot or a log.** Credentials live in the OS keychain
   (`@napi-rs/keyring`); a rib gets a read-only reader scoped to its own namespace
   and cannot reach another rib's keys. Console output is scrubbed only inside a
-  `runWithRedaction` scope (the credential-reveal route opens one). Flag any path
+  `runWithRedaction` scope. Flag any path
   that writes a secret into a published snapshot/frame, persists or logs it outside
   a redaction scope, returns it somewhere other than the direct action result, or
   lets a rib read a credential outside its namespace.
@@ -54,24 +54,24 @@ the point once, on the clearest instance.
   `rib:<id>:*` (enforced by `assertInNamespace` at activation). Flag a change that reaches around
   the contract into harness internals, weakens the namespace guard, or narrows the
   contract without a deprecation path.
-- **The workflow YAML loader is lenient about unknown *fields*.** Unrecognized
-  fields surface as `warnings` data (and `--strict` refuses them), never a hard
-  parse error, so an older harness still loads a newer workflow. (Structural
-  problems — unparseable YAML, or DAG-shape errors like duplicate ids, unknown
-  deps, or cycles — still fail, by design.) Flag a loader change that turns an
-  unknown *field* into a fatal error or otherwise makes the parser reject-by-default.
+- **The loader is lenient about unknown *top-level and generic node* fields.**
+  They surface as `warnings` data (and `--strict` refuses them), never a hard parse
+  error, so an older harness still loads a newer workflow. (Deliberately NOT lenient
+  everywhere: unparseable YAML, DAG-shape errors, and strict nested schemas — e.g.
+  notebook blocks (`.strict()`) — still fail.) Flag a change that turns a *generic*
+  unknown field into a fatal error, or that loosens a schema meant to be strict.
 - **SQLite schema changes go through `db/migrations.ts`.** Migrations are an
   append-only list keyed by an integer version; the runner records each applied
   version in the `schema_version` table and `doctor` checks the DB is at the
   latest migration. (This is the DB schema — distinct from the wire `SCHEMA_VERSION`
   in `chat.ts`, which is the peer-contract version.) Flag a new table/column added
   outside a migration entry, or an edit to an already-shipped migration.
-- **Server lifecycle is token-gated and pid-identity-guarded.** `POST
-  /api/server/shutdown` requires the `server.json` bearer token via a
-  constant-time compare, and `stopOnce` only clears state / exits when the
-  recorded pid is *this* process. Flag a shutdown path that skips the token check
-  (or compares non-constant-time), or a stop that signals/clears a pid without
-  confirming identity.
+- **Shutdown is token-gated; clearing `server.json` is pid-guarded.** `POST
+  /api/server/shutdown` requires the `server.json` bearer token via a constant-time
+  compare. `stopOnce` clears the on-disk state only when the recorded pid is *this*
+  process (so it never clobbers a newer server's record), then shuts down and exits.
+  Flag a shutdown path that skips the token check (or compares non-constant-time),
+  or a `clearServerState` that drops the pid-ownership check.
 - **A declared `validate` fails closed.** `validate` is optional on snapshot
   registrations and bound rib workflows, but where one is declared it runs (a zod
   `.parse`) before a frame is cached or broadcast — an invalid payload is dropped
