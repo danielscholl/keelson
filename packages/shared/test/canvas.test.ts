@@ -1264,6 +1264,25 @@ describe("canvasViewSchema", () => {
     expect(cards?.kind === "cards" && cards.boxed).toBe(true);
   });
 
+  it("parses a grid cards section with a ghost open-seat item", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          grid: true,
+          items: [
+            { title: "Jarvis", dot: "id-teal" },
+            { title: "Author a Mind", ghost: true, actions: [{ type: "author", label: "Author" }] },
+          ],
+        },
+      ],
+    });
+    const [cards] = v.view === "board" ? v.sections : [];
+    expect(cards?.kind === "cards" && cards.grid).toBe(true);
+    expect(cards?.kind === "cards" && cards.items[1]?.ghost).toBe(true);
+  });
+
   it("rejects an unknown key on a copyAction (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({

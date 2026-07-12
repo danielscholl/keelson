@@ -815,11 +815,16 @@ function Section({ section }: { section: BoardSection }) {
     case "cards": {
       const key = makeKeyer();
       return (
-        <div className={`cvb-cards${section.boxed ? " cvb-cards--boxed" : ""}`}>
+        <div
+          className={`cvb-cards${section.boxed ? " cvb-cards--boxed" : ""}${section.grid ? " cvb-cards--grid" : ""}`}
+        >
           {section.items.map((c) => {
             const fieldKey = makeKeyer();
             return (
-              <div key={key(JSON.stringify(c))} className="cvb-card">
+              <div
+                key={key(JSON.stringify(c))}
+                className={`cvb-card${c.ghost ? " cvb-card--ghost" : ""}`}
+              >
                 <div className="cvb-card-head">
                   {c.dot && <span className="cvb-card-dot" data-tone={c.dot} />}
                   {isSafeLinkScheme(c.href) ? (

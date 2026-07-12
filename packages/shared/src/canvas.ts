@@ -473,6 +473,11 @@ const cardsSectionSchema = z
     // than inline text — for credential/address lists where each field is its
     // own copyable affordance.
     boxed: z.boolean().optional(),
+    // Lay the cards out side by side as an auto-fit grid instead of the stacked
+    // full-width column — for fixed-capacity rosters where the row IS the bench.
+    // The host owns the responsive column count; a card whose fields-form is
+    // open breaks out to span the full grid row.
+    grid: z.boolean().optional(),
     items: z.array(
       z
         .object({
@@ -492,6 +497,10 @@ const cardsSectionSchema = z
           fields: z.array(canvasFieldSchema).optional(),
           actions: z.array(canvasActionItemSchema).optional(),
           footnote: z.string().optional(),
+          // Render as an open-seat placeholder — dashed border, centered body —
+          // the "empty seat" affordance in a grid bench (an authoring launchpad,
+          // an unfilled casting slot).
+          ghost: z.boolean().optional(),
           // A labelled annotation line under the card body (dashed rule), e.g.
           // `why flagged: stale-61d` — the label is dimmed, the text muted.
           reason: z

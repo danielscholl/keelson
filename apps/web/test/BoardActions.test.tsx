@@ -675,6 +675,35 @@ describe("board layout primitives", () => {
     expect(screen.getByRole("button", { name: "Copy postgres" })).toBeDefined();
   });
 
+  test("a grid cards section renders the grid class and a ghost open seat", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "cards",
+          grid: true,
+          items: [
+            { title: "Jarvis", dot: "id-teal" },
+            {
+              title: "Author a Mind",
+              ghost: true,
+              actions: [
+                { type: "author", label: "Author", fields: [{ name: "brief", label: "Brief" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(<BoardView view={view} />);
+    expect(container.querySelector(".cvb-cards.cvb-cards--grid")).not.toBeNull();
+    const ghost = container.querySelector(".cvb-card.cvb-card--ghost");
+    expect(ghost).not.toBeNull();
+    expect(ghost?.textContent).toContain("Author a Mind");
+    // A non-ghost sibling stays a plain card.
+    expect(container.querySelectorAll(".cvb-card:not(.cvb-card--ghost)").length).toBe(1);
+  });
+
   test("the header renders a toned status pill", () => {
     const view = {
       view: "board",
