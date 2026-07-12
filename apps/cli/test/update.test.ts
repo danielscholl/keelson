@@ -3,13 +3,15 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import cliPkg from "../package.json" with { type: "json" };
 import {
   applyManifestVersion,
   parseTagVersion,
+  readWorkflowContents,
+  reconcileManagedWorkflows,
   releaseAssetUrls,
   ribDependencies,
   selectReleaseNotes,
@@ -84,6 +86,71 @@ describe("update pure helpers", () => {
     expect(notes).not.toContain("## v0.1.0");
     expect(notes.indexOf("v0.2.0")).toBeLessThan(notes.indexOf("v0.3.0"));
     expect(selectReleaseNotes(releases, "0.3.0", "0.3.0")).toBe("");
+  });
+});
+
+describe("reconcileManagedWorkflows", () => {
+  test("refreshes an unmodified managed workflow", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const previous = new Map([["fix-issue.yaml", "old bundle\n"]]);
+    const next = new Map([["fix-issue.yaml", "new bundle\n"]]);
+    writeFileSync(join(overlayDir, "fix-issue.yaml"), "old bundle\n");
+
+    expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
+      refreshed: ["fix-issue.yaml"],
+      conflicts: [],
+    });
+    expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("new bundle\n");
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("preserves and reports a customized workflow", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const previous = new Map([["fix-issue.yaml", "old bundle\n"]]);
+    const next = new Map([["fix-issue.yaml", "new bundle\n"]]);
+    writeFileSync(join(overlayDir, "fix-issue.yaml"), "my customization\n");
+
+    expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
+      refreshed: [],
+      conflicts: ["fix-issue.yaml"],
+    });
+    expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("my customization\n");
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("does nothing when an overlay workflow is already current", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const previous = new Map([["fix-issue.yaml", "old bundle\n"]]);
+    const next = new Map([["fix-issue.yaml", "new bundle\n"]]);
+    writeFileSync(join(overlayDir, "fix-issue.yaml"), "new bundle\n");
+
+    expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
+      refreshed: [],
+      conflicts: [],
+    });
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("does not create an overlay for a bundle-only workflow", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const next = new Map([["converge-pr.yaml", "new bundle\n"]]);
+
+    expect(reconcileManagedWorkflows(overlayDir, new Map(), next)).toEqual({
+      refreshed: [],
+      conflicts: [],
+    });
+    expect(existsSync(join(overlayDir, "converge-pr.yaml"))).toBe(false);
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("reads only workflow YAML files and tolerates a missing directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    writeFileSync(join(dir, "fix-issue.yaml"), "workflow\n");
+    writeFileSync(join(dir, "notes.txt"), "ignore\n");
+
+    expect(readWorkflowContents(join(dir, "missing"))).toEqual(new Map());
+    expect(readWorkflowContents(dir)).toEqual(new Map([["fix-issue.yaml", "workflow\n"]]));
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -179,6 +246,100 @@ describe("keelson update (e2e against a mock releases API)", () => {
     expect(out.data.latest).toBe("999.0.0");
     expect(out.data.notes).toContain("999.0.0");
     rmSync(home, { recursive: true, force: true });
+  });
+
+  test("non-check update refreshes unchanged overlays and preserves customized ones", async () => {
+    latestTag = "v999.0.1";
+    const root = mkdtempSync(join(tmpdir(), "keelson-update-apply-"));
+    const home = join(root, "home");
+    const fakeBin = join(root, "bin");
+    const bundleDir = join(home, "node_modules", "@keelson", "cli", "assets", "workflows");
+    const overlayDir = join(home, "workflows");
+
+    try {
+      mkdirSync(fakeBin, { recursive: true });
+      mkdirSync(bundleDir, { recursive: true });
+      mkdirSync(overlayDir, { recursive: true });
+      writeFileSync(
+        join(home, "package.json"),
+        `${JSON.stringify(
+          {
+            name: "keelson-home",
+            private: true,
+            dependencies: {
+              "@keelson/cli":
+                "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
+            },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      writeFileSync(join(bundleDir, "fix-issue.yaml"), "old shared workflow\n");
+      writeFileSync(join(bundleDir, "customize.yaml"), "old customizable workflow\n");
+      writeFileSync(join(overlayDir, "fix-issue.yaml"), "old shared workflow\n");
+      writeFileSync(join(overlayDir, "customize.yaml"), "my customization\n");
+
+      const fakeBunHelper = join(fakeBin, "fake-bun.ts");
+      writeFileSync(
+        fakeBunHelper,
+        [
+          'import { mkdirSync, writeFileSync } from "node:fs";',
+          'import { join } from "node:path";',
+          "",
+          "const args = process.argv.slice(2);",
+          'if (args[0] === "install") {',
+          "  const managed = process.env.KEELSON_TEST_BUNDLE_DIR;",
+          "  if (!managed) process.exit(41);",
+          "  mkdirSync(managed, { recursive: true });",
+          '  writeFileSync(join(managed, "fix-issue.yaml"), process.env.KEELSON_TEST_NEXT_FIX ?? "");',
+          '  writeFileSync(join(managed, "customize.yaml"), process.env.KEELSON_TEST_NEXT_CUSTOM ?? "");',
+          "  process.exit(0);",
+          "}",
+          "",
+          "const realBun = process.env.KEELSON_REAL_BUN;",
+          "if (!realBun) process.exit(42);",
+          "const proc = Bun.spawn([realBun, ...args], {",
+          '  stdin: "inherit",',
+          '  stdout: "inherit",',
+          '  stderr: "inherit",',
+          "});",
+          "process.exit(await proc.exited);",
+          "",
+        ].join("\n"),
+      );
+      writeFileSync(
+        join(fakeBin, "bun"),
+        '#!/usr/bin/env sh\nexec "$KEELSON_REAL_BUN" "$KEELSON_FAKE_BUN_HELPER" "$@"\n',
+        { mode: 0o755 },
+      );
+      writeFileSync(
+        join(fakeBin, "bun.cmd"),
+        '@echo off\r\n"%KEELSON_REAL_BUN%" "%KEELSON_FAKE_BUN_HELPER%" %*\r\n',
+      );
+
+      const { stdout, exitCode } = await runCli(["--json", "update"], {
+        ...env(home),
+        KEELSON_REAL_BUN: process.execPath,
+        KEELSON_FAKE_BUN_HELPER: fakeBunHelper,
+        KEELSON_TEST_BUNDLE_DIR: bundleDir,
+        KEELSON_TEST_NEXT_FIX: "new shared workflow\n",
+        KEELSON_TEST_NEXT_CUSTOM: "new customizable workflow\n",
+        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+      });
+      expect(exitCode).toBe(0);
+      const out = JSON.parse(stdout.trim());
+      expect(out.ok).toBe(true);
+      expect(out.data.updated).toBe(true);
+      expect(out.data.refreshedWorkflows).toEqual(["fix-issue.yaml"]);
+      expect(out.data.workflowConflicts).toEqual(["customize.yaml"]);
+      expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe(
+        "new shared workflow\n",
+      );
+      expect(readFileSync(join(overlayDir, "customize.yaml"), "utf8")).toBe("my customization\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("already on the latest release exits 0, updated:false", async () => {
