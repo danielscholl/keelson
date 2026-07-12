@@ -257,6 +257,112 @@ body {
   font-weight: 600;
   line-height: 1;
 }
+/* The seam between the hull's own tabs and the installed ribs' tabs — renders
+   only when at least one rib surface exists. */
+.nav-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 6px;
+  flex: none;
+}
+
+/* instruments — the harness menu (Memory, Usage, theme) on the topbar's right */
+.instruments {
+  position: relative;
+}
+.instruments-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+.instruments-trigger:hover {
+  color: var(--fg);
+}
+.instruments-trigger.is-active {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--fg);
+}
+.instruments-dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--magenta);
+}
+.instruments-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 78%, transparent);
+}
+.instruments-heading {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 8px 2px;
+}
+.instruments-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.instruments-item:hover,
+.instruments-item.is-active {
+  background: var(--card);
+  border-color: var(--border-soft);
+}
+.instruments-item .nav-pip {
+  margin-left: auto;
+}
+.instruments-sep {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 5px 4px;
+}
+.instruments-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 8px 4px;
+}
+.instruments-theme-label {
+  font-size: 13px;
+  color: var(--fg);
+}
 .tab {
   padding: 5px 14px;
   border-radius: 6px;
