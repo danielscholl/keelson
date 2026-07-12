@@ -27,7 +27,10 @@ micro-optimization concerns. No poems, jokes, or emoji.
 
 A comment is warranted only when it captures a non-obvious **why** (a hidden
 constraint, a workaround, an order dependency, an invariant from another module).
-Flag a comment only when it *violates* the policy (narration / what-just-changed),
+Do not raise comment *wording or style* nits. A comment that is factually wrong,
+stale, or security-relevant is still worth flagging on its merits — the goal is to
+stop style/coverage nits, not to ignore a substantively broken comment. Flag a
+comment *for the policy* only when it violates it (narration / what-just-changed),
 not when one is merely absent. Never repeat one observation across N sites — make
 the point once, on the clearest instance.
 
@@ -47,30 +50,34 @@ the point once, on the clearest instance.
   lets a rib read a credential outside its namespace.
 - **Ribs attach only through the `Rib` contract** (`packages/shared/src/rib.ts`),
   a public surface whose breaking changes need a deprecation cycle. Every rib
-  snapshot key, view, region, and bound workflow key must live under `rib:<id>:*`
-  (enforced by `assertInNamespace` at activation). Flag a change that reaches around
+  snapshot key, view, region, and bound workflow key must live under `rib:<id>` or
+  `rib:<id>:*` (enforced by `assertInNamespace` at activation). Flag a change that reaches around
   the contract into harness internals, weakens the namespace guard, or narrows the
   contract without a deprecation path.
-- **The workflow YAML loader is intentionally lenient.** Unknown fields surface as
-  `warnings` data (and `--strict` refuses them), never a hard parse error, so an
-  older harness still loads a newer workflow. Flag a loader change that turns an
-  unknown field into a fatal error or otherwise makes the parser reject-by-default.
+- **The workflow YAML loader is lenient about unknown *fields*.** Unrecognized
+  fields surface as `warnings` data (and `--strict` refuses them), never a hard
+  parse error, so an older harness still loads a newer workflow. (Structural
+  problems — unparseable YAML, or DAG-shape errors like duplicate ids, unknown
+  deps, or cycles — still fail, by design.) Flag a loader change that turns an
+  unknown *field* into a fatal error or otherwise makes the parser reject-by-default.
 - **SQLite schema changes go through `db/migrations.ts`.** Migrations are an
-  append-only list keyed by version; the runner records each in `schema_version`
-  and `doctor` checks it matches `SCHEMA_VERSION`. Flag a new table/column added
-  outside a migration entry, an edit to an already-shipped migration, or a schema
-  change that doesn't bump `SCHEMA_VERSION` in lockstep.
+  append-only list keyed by an integer version; the runner records each applied
+  version in the `schema_version` table and `doctor` checks the DB is at the
+  latest migration. (This is the DB schema — distinct from the wire `SCHEMA_VERSION`
+  in `chat.ts`, which is the peer-contract version.) Flag a new table/column added
+  outside a migration entry, or an edit to an already-shipped migration.
 - **Server lifecycle is token-gated and pid-identity-guarded.** `POST
   /api/server/shutdown` requires the `server.json` bearer token via a
   constant-time compare, and `stopOnce` only clears state / exits when the
   recorded pid is *this* process. Flag a shutdown path that skips the token check
   (or compares non-constant-time), or a stop that signals/clears a pid without
   confirming identity.
-- **Producers fail closed through `validate`.** Snapshot registrations and bound
-  rib workflows run a `validate` (a zod `.parse`) before a frame is cached or
-  broadcast — an invalid payload is dropped and the prior value kept, so nothing
-  malformed reaches a trusted renderer. Flag a producer that publishes to a canvas
-  key without validation, or a path that broadcasts an unvalidated frame.
+- **A declared `validate` fails closed.** `validate` is optional on snapshot
+  registrations and bound rib workflows, but where one is declared it runs (a zod
+  `.parse`) before a frame is cached or broadcast — an invalid payload is dropped
+  and the prior value kept, so nothing malformed reaches a trusted renderer. Flag a
+  change that weakens or bypasses an existing `validate`, or a producer of
+  rib-shaped/attacker-influenced data that publishes to a trusted renderer without one.
 - **Provider/tool determinism is operator-owned.** `KEELSON_WORKFLOW_PROVIDER`
   pins the provider for `prompt` nodes; rib tools are registered **default-off** in
   workflow prompt nodes (a node sees a rib tool only via explicit `allowed_tools`);
