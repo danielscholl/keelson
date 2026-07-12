@@ -3982,6 +3982,16 @@ button.cvb-action-field-model:disabled {
   flex-direction: column;
   gap: 8px;
 }
+.cvb-cards--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: stretch;
+}
+/* An open fields-form is cramped inside a one-column grid cell — the card
+   carrying it spans the full row (the actions strip's full-width-panel rule). */
+.cvb-cards--grid .cvb-card:has(.cvb-action-form) {
+  grid-column: 1 / -1;
+}
 .cvb-card {
   display: flex;
   flex-direction: column;
@@ -3990,6 +4000,25 @@ button.cvb-action-field-model:disabled {
   background: var(--card-2);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+.cvb-card--ghost {
+  border-style: dashed;
+  background: transparent;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--muted);
+}
+.cvb-card--ghost .cvb-card-head {
+  justify-content: center;
+}
+.cvb-card--ghost .cvb-card-title {
+  color: var(--muted);
+  flex: 0 1 auto;
+}
+.cvb-card--ghost .cvb-card-actions {
+  justify-content: center;
+  width: 100%;
 }
 .cvb-card-head {
   display: flex;
@@ -4201,6 +4230,15 @@ a.cvb-card-title::after {
   flex-wrap: wrap;
   align-items: stretch;
   margin-top: 2px;
+}
+/* Same rule as the wrap strip: an open fields-form takes the card's full width
+   rather than squeezing into the chip row. */
+.cvb-card-actions > .cvb-action:has(.cvb-action-form) {
+  flex-basis: 100%;
+}
+.cvb-card-actions > .cvb-action:has(.cvb-action-form) .cvb-action-form {
+  align-self: stretch;
+  text-align: left;
 }
 
 /* people — identity-toned names in a field's value slot (a room's cast). Each
