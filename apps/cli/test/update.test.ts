@@ -333,7 +333,9 @@ describe("keelson update (e2e against a mock releases API)", () => {
       expect(out.data.updated).toBe(true);
       expect(out.data.refreshedWorkflows).toEqual(["fix-issue.yaml"]);
       expect(out.data.workflowConflicts).toEqual(["customize.yaml"]);
-      expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("new shared workflow\n");
+      expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe(
+        "new shared workflow\n",
+      );
       expect(readFileSync(join(overlayDir, "customize.yaml"), "utf8")).toBe("my customization\n");
     } finally {
       rmSync(root, { recursive: true, force: true });
