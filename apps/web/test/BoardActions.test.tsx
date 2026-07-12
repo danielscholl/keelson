@@ -291,6 +291,46 @@ describe("board actions with input fields", () => {
     );
   });
 
+  test("the form's submit button prefers submitLabel over the action's label", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "convene-debate",
+              label: "Debate",
+              submitLabel: "Convene",
+              fields: [{ name: "motion", label: "Motion" }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    // The disclosure button still reads the label; only the submit renames.
+    fireEvent.click(screen.getByRole("button", { name: "Debate" }));
+    const submit = screen.getByRole("button", { name: "Convene" });
+    expect(submit.getAttribute("type")).toBe("submit");
+    fireEvent.change(container.querySelector(".cvb-action-field-input") as HTMLInputElement, {
+      target: { value: "ship it" },
+    });
+    fireEvent.submit(container.querySelector(".cvb-action-form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(calls).toEqual([{ type: "convene-debate", payload: { motion: "ship it" } }]),
+    );
+  });
+
   test("a required field blocks dispatch until filled", async () => {
     const calls: RibAction[] = [];
     const run = async (a: RibAction): Promise<RibActionResult> => {
@@ -446,6 +486,37 @@ describe("tabs actions section", () => {
     expect(container.querySelector(".cvb-action-form")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Discussion" }));
     expect(container.querySelector(".cvb-action-form")).not.toBeNull();
+  });
+
+  test("a tabs item renders its subtitle as a second line under the label", () => {
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={tabsBoard({ subtitle: "Explore ideas together." })} />
+      </BoardActionProvider>,
+    );
+    const subtitle = container.querySelector(".cvb-action-subtitle");
+    expect(subtitle?.textContent).toBe("Explore ideas together.");
+    // The subtitle rides inside the tab button, under its label.
+    const button = subtitle?.closest("button");
+    expect(button?.textContent).toBe("DiscussionExplore ideas together.");
+  });
+
+  test("non-tabs layouts ignore an item's subtitle", () => {
+    const view = {
+      view: "board",
+      sections: [
+        { kind: "actions", items: [{ type: "a", label: "A", subtitle: "Stacked line." }] },
+        { kind: "actions", wrap: true, items: [{ type: "b", label: "B", subtitle: "Chip line." }] },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    expect(container.querySelector(".cvb-action-subtitle")).toBeNull();
+    expect(screen.getByRole("button", { name: "A" }).textContent).toBe("A");
+    expect(screen.getByRole("button", { name: "B" }).textContent).toBe("B");
   });
 
   test("an item without fields still dispatches on click, leaving the open tab alone", async () => {
