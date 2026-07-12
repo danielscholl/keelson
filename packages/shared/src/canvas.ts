@@ -332,6 +332,10 @@ export const canvasActionItemSchema = z
   .object({
     type: z.string().min(1),
     label: z.string().min(1),
+    // A second muted line under the label, rendered only by the `tabs` layout so
+    // a mode picker's one-line description reads inline instead of hiding in a
+    // hover tooltip. Other layouts ignore it; `hint` stays the hover explanation.
+    subtitle: z.string().min(1).max(200).optional(),
     glyph: z.string().optional(),
     tone: canvasToneSchema.optional(),
     destructive: z.boolean().optional(),
@@ -377,6 +381,10 @@ export const canvasActionItemSchema = z
     // action's label/glyph/tone — no disclosure click — for a hero action whose
     // input IS the affordance. Inert without `fields`.
     expanded: z.boolean().optional(),
+    // The `fields` form's submit button text, when `label` names the tab/mode
+    // rather than the verb (a "Debate" tab submitting as "Convene"). Defaults to
+    // `label`; inert without `fields`.
+    submitLabel: z.string().min(1).max(40).optional(),
     // Confirmation presentation metadata. `destructive` still marks dangerous
     // actions; this only controls whether the confirm dialog is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),

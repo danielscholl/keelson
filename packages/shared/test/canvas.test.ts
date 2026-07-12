@@ -1025,6 +1025,45 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses an action subtitle and submitLabel, rejecting an empty subtitle and over-long submitLabel", () => {
+    const parsed = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            {
+              type: "convene",
+              label: "Debate",
+              subtitle: "Stress-test assumptions.",
+              submitLabel: "Convene",
+              fields: [{ name: "motion", label: "Motion" }],
+            },
+          ],
+        },
+      ],
+    });
+    const section = parsed.view === "board" ? parsed.sections[0] : undefined;
+    const items = section?.kind === "actions" ? section.items : [];
+    expect(items[0]?.subtitle).toBe("Stress-test assumptions.");
+    expect(items[0]?.submitLabel).toBe("Convene");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "x", label: "X", subtitle: "" }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "actions", items: [{ type: "x", label: "X", submitLabel: "y".repeat(41) }] },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("parses an action item with a glyph and an opaque payload", () => {
     const v = canvasViewSchema.parse({
       view: "board",

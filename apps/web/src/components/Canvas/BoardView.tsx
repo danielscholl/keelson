@@ -168,6 +168,17 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
   const nativelyDisabled = !ctx || pending;
   const ariaDisabled = item.disabled === true || undefined;
   const tooltip = actionTooltip(item);
+  // `subtitle` only renders in the tabs layout (a controlled item), where the
+  // strip is a mode picker whose description should read without hover.
+  const labelContent =
+    onOpenChange !== undefined && item.subtitle ? (
+      <span className="cvb-action-label">
+        {item.label}
+        <span className="cvb-action-subtitle">{item.subtitle}</span>
+      </span>
+    ) : (
+      item.label
+    );
   const setOpen = (next: boolean) => {
     if (onOpenChange) onOpenChange(next);
     else setLocalOpen(next);
@@ -248,7 +259,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               {item.glyph}
             </span>
           )}
-          {item.label}
+          {labelContent}
         </button>
         <ModelCatalogPopover
           popoverId={instanceId}
@@ -302,7 +313,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
               {item.glyph}
             </span>
           )}
-          {item.label}
+          {labelContent}
         </button>
       )}
       {hasFields && (expanded || open) && (
@@ -389,7 +400,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                   {item.glyph}
                 </span>
               )}
-              {item.label}
+              {item.submitLabel ?? item.label}
             </button>
             {!expanded && (
               <button type="button" className="cvb-action-button" onClick={() => setOpen(false)}>
