@@ -207,6 +207,7 @@ function InstrumentsPopover({
               type="button"
               key={item.id}
               className={`instruments-item${activeTab === item.id ? " is-active" : ""}`}
+              aria-pressed={activeTab === item.id}
               onClick={() => {
                 onTabChange(item.id);
                 setOpen(false);

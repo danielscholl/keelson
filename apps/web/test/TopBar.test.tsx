@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { type ActiveTab, TopBar } from "../src/components/TopBar.tsx";
 
 function renderBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
@@ -67,6 +67,16 @@ describe("TopBar", () => {
     const trigger = screen.getByRole("button", { name: /Harness.*Memory.*2 pending/ });
     expect(trigger.classList.contains("is-active")).toBe(true);
     expect(trigger.textContent).toContain("Memory");
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("region", { name: "Harness" });
+    expect(
+      within(menu)
+        .getByRole("button", { name: /Memory/ })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(within(menu).getByRole("button", { name: "Usage" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
   test("the theme control lives inside the popover", () => {
