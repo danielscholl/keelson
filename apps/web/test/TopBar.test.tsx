@@ -38,20 +38,20 @@ describe("TopBar", () => {
     expect(container.querySelector(".nav-divider")).not.toBeNull();
   });
 
-  test("the instruments menu opens and navigates to Memory, then closes", () => {
+  test("the instruments popover opens and navigates to Memory, then closes", () => {
     const tabs: ActiveTab[] = [];
     renderBar({ onTabChange: (t) => tabs.push(t) });
-    fireEvent.click(screen.getByRole("button", { name: "Harness menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Memory" }));
+    fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }));
     expect(tabs).toEqual(["memory"]);
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByLabelText("Harness")).toBeNull();
   });
 
   test("a pending memory count rides the trigger as a dot and the row as a pip", () => {
     const { container } = renderBar({ pendingMemoryCount: 3 });
     expect(container.querySelector(".instruments-dot")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Harness menu" }));
-    const memoryItem = screen.getByRole("menuitem", { name: /Memory/ });
+    fireEvent.click(screen.getByRole("button", { name: /Harness.*3 pending/ }));
+    const memoryItem = screen.getByRole("button", { name: /Memory/ });
     expect(memoryItem.querySelector(".nav-pip")?.textContent).toBe("3");
   });
 
@@ -61,24 +61,27 @@ describe("TopBar", () => {
   });
 
   test("while an instrument is active the trigger wears its name as an active chip", () => {
-    renderBar({ activeTab: "memory" });
-    const trigger = screen.getByRole("button", { name: "Harness menu" });
+    renderBar({ activeTab: "memory", pendingMemoryCount: 2 });
+    const trigger = screen.getByRole("button", { name: /Harness.*Memory.*2 pending/ });
     expect(trigger.classList.contains("is-active")).toBe(true);
     expect(trigger.textContent).toContain("Memory");
   });
 
-  test("the theme control lives inside the menu", () => {
+  test("the theme control lives inside the popover", () => {
     renderBar();
     expect(screen.queryByRole("radiogroup", { name: "Theme" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Harness menu" }));
+    fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
     expect(screen.getByRole("radiogroup", { name: "Theme" })).toBeDefined();
   });
 
-  test("Escape closes the menu", () => {
+  test("the popover moves focus inside and Escape returns it to the trigger", () => {
     renderBar();
-    fireEvent.click(screen.getByRole("button", { name: "Harness menu" }));
-    expect(screen.getByRole("menu")).toBeDefined();
+    const trigger = screen.getByRole("button", { name: /Harness/ });
+    fireEvent.click(trigger);
+    expect(screen.getByLabelText("Harness")).toBeDefined();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Memory" }));
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByLabelText("Harness")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });

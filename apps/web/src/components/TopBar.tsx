@@ -107,7 +107,7 @@ export function TopBar(props: TopBarProps) {
         </nav>
       </div>
       <div className="topbar-right">
-        <InstrumentsMenu
+        <InstrumentsPopover
           activeTab={activeTab}
           onTabChange={onTabChange}
           pendingMemoryCount={pendingMemoryCount ?? 0}
@@ -124,7 +124,7 @@ const INSTRUMENTS: ReadonlyArray<{ id: "memory" | "usage"; label: string }> = [
   { id: "usage", label: "Usage" },
 ];
 
-function InstrumentsMenu({
+function InstrumentsPopover({
   activeTab,
   onTabChange,
   pendingMemoryCount,
@@ -139,7 +139,7 @@ function InstrumentsMenu({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   // An instrument surface stays a full route; while one is active the trigger
   // wears its name as an active chip so the bar never reads "nothing selected".
   const activeInstrument = INSTRUMENTS.find((i) => i.id === activeTab);
@@ -149,7 +149,7 @@ function InstrumentsMenu({
     const close = (event: MouseEvent | TouchEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
       setOpen(false);
     };
     document.addEventListener("mousedown", close);
@@ -162,6 +162,7 @@ function InstrumentsMenu({
 
   useEffect(() => {
     if (!open) return;
+    panelRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setOpen(false);
@@ -171,15 +172,20 @@ function InstrumentsMenu({
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
+  const triggerLabel = `Harness controls${activeInstrument ? `, ${activeInstrument.label} active` : ""}${
+    pendingMemoryCount > 0
+      ? `, ${pendingMemoryCount} pending memory ${pendingMemoryCount === 1 ? "item" : "items"}`
+      : ""
+  }`;
+
   return (
     <div className="instruments">
       <button
         type="button"
         ref={triggerRef}
         className={`instruments-trigger${activeInstrument ? " is-active" : ""}`}
-        aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Harness menu"
+        aria-label={triggerLabel}
         title={
           pendingMemoryCount > 0
             ? `${pendingMemoryCount} memory item(s) awaiting review`
@@ -198,13 +204,12 @@ function InstrumentsMenu({
         )}
       </button>
       {open && (
-        <div className="instruments-menu" ref={menuRef} role="menu" aria-label="Harness">
+        <section className="instruments-menu" ref={panelRef} aria-label="Harness">
           <div className="instruments-heading">Harness</div>
           {INSTRUMENTS.map((item) => (
             <button
               type="button"
               key={item.id}
-              role="menuitem"
               className={`instruments-item${activeTab === item.id ? " is-active" : ""}`}
               onClick={() => {
                 onTabChange(item.id);
@@ -230,7 +235,7 @@ function InstrumentsMenu({
             <span className="instruments-theme-label">Theme</span>
             <ThemePicker value={themePreference} onChange={onThemeChange} />
           </div>
-        </div>
+        </section>
       )}
     </div>
   );
