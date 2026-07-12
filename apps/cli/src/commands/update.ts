@@ -2,8 +2,10 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { keelsonPaths } from "@keelson/shared/paths";
+import { isWorkflowYaml } from "@keelson/workflows";
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
@@ -143,6 +145,56 @@ function installedCliVersion(home: string): string | null {
   }
 }
 
+export function readWorkflowContents(dir: string): Map<string, string> {
+  if (!existsSync(dir)) return new Map();
+  try {
+    return new Map(
+      readdirSync(dir)
+        .filter(isWorkflowYaml)
+        .sort()
+        .map((name) => [name, readFileSync(join(dir, name), "utf8")]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+export function reconcileManagedWorkflows(
+  overlayDir: string,
+  previous: ReadonlyMap<string, string>,
+  next: ReadonlyMap<string, string>,
+): { refreshed: string[]; conflicts: string[] } {
+  const refreshed: string[] = [];
+  const conflicts: string[] = [];
+
+  for (const [name, nextContent] of next) {
+    const overlayPath = join(overlayDir, name);
+    if (!existsSync(overlayPath)) continue;
+
+    try {
+      const overlayContent = readFileSync(overlayPath, "utf8");
+      if (overlayContent === nextContent) continue;
+      if (overlayContent !== previous.get(name)) {
+        conflicts.push(name);
+        continue;
+      }
+
+      const tempPath = join(overlayDir, `.${name}.${process.pid}.updtmp`);
+      try {
+        writeFileSync(tempPath, nextContent);
+        renameSync(tempPath, overlayPath);
+        refreshed.push(name);
+      } catch {
+        rmSync(tempPath, { force: true });
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return { refreshed, conflicts };
+}
+
 function fail(message: string, code: string, json: boolean): never {
   emit({ error: message, code }, { json });
   process.exit(EXIT_FAIL);
@@ -221,6 +273,8 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
 
   if (!opts.json) printDelta(current, latest, notes);
 
+  const bundleDir = join(home, "node_modules", "@keelson", "cli", "assets", "workflows");
+  const previous = readWorkflowContents(bundleDir);
   writeFileSync(
     manifestPath,
     `${JSON.stringify(applyManifestVersion(manifest, REPO, latest), null, 2)}\n`,
@@ -233,6 +287,18 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
       "INSTALL_FAILED",
       opts.json,
     );
+  }
+
+  let refreshed: string[] = [];
+  let conflicts: string[] = [];
+  try {
+    ({ refreshed, conflicts } = reconcileManagedWorkflows(
+      keelsonPaths(home).workflowsDir,
+      previous,
+      readWorkflowContents(bundleDir),
+    ));
+  } catch {
+    // Reconciliation must not turn a successful package update into a failure.
   }
 
   const ribs = opts.ribs ? ribDependencies(manifest) : [];
@@ -255,8 +321,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     installed,
     updated: true,
     ribsUpdated: ribs,
+    refreshedWorkflows: refreshed,
     restartRequired: server !== null,
     home,
+    workflowConflicts: conflicts,
     ...(installed !== latest ? { warning: `installed ${installed}, expected ${latest}` } : {}),
   });
   if (!opts.json) {
@@ -264,6 +332,12 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     if (ribs.length > 0)
       process.stdout.write(
         `advanced ribs: ${ribs.map((r) => r.replace("@keelson/rib-", "")).join(", ")}\n`,
+      );
+    if (refreshed.length > 0)
+      process.stdout.write(`refreshed ${refreshed.length} workflow(s): ${refreshed.join(", ")}\n`);
+    for (const name of conflicts)
+      process.stdout.write(
+        `kept your customized ${name} (bundle updated; review to adopt the new version)\n`,
       );
     if (server !== null)
       process.stdout.write("restart the server (`keelson restart`) to load the update\n");
