@@ -1,10 +1,10 @@
-name: converge-pr
+name: finish-pr
 provider: copilot
 model: auto
 description: |
   Use when: User wants to drive an existing same-repo PR to CI-green with no
             unhandled unresolved review threads.
-  Triggers: "converge pr", "finish PR #123", "get this PR green",
+  Triggers: "finish PR #123", "converge pr", "get this PR green",
             "drive PR to green", "handle bot review until clean".
   Does: Fetches unresolved review threads each round via GraphQL -> filters out
         threads already handled by this run -> triages new threads -> pauses for
@@ -14,9 +14,8 @@ description: |
         passes and a clean round observes no new threads, or escalates at the
         round cap.
   NOT for: Fork PRs, which cannot be pushed safely by this workflow.
-           One-shot comment resolution without a CI convergence loop (use
-           resolve-comments).
            Creating a PR from an issue (use fix-issue).
+           Reviewing a PR without changing it (use pr-review).
 
 requiresProject: true
 worktree:
@@ -54,7 +53,7 @@ nodes:
       if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
         # This run executes in an isolated worktree on a generated branch, so the
         # target PR cannot be inferred from the current branch — require it.
-        echo "converge-pr needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'converge pr 42'." >&2
+        echo "finish-pr needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'finish pr 42'." >&2
         exit 1
       fi
       # `|| true` so a no-digit input yields an empty PR_NUM and reaches the
@@ -221,7 +220,7 @@ nodes:
     depends_on: [fetch-state]
     when: "$fetch-state.output.is_fork == 'true'"
     cancel: |
-      converge-pr only supports same-repo PRs because it pushes commits back to
+      finish-pr only supports same-repo PRs because it pushes commits back to
       the PR head branch. Fork PRs must be handled manually or by a workflow
       with explicit fork-remote credentials.
 
@@ -746,7 +745,7 @@ nodes:
     context: fresh
     model: auto
     prompt: |
-      Produce the final converge-pr summary.
+      Produce the final finish-pr summary.
 
       ## Inputs
 
@@ -771,7 +770,7 @@ nodes:
       ## Output format
 
       ```
-      ## converge-pr - PR #<N>
+      ## finish-pr - PR #<N>
 
       ### Summary
 

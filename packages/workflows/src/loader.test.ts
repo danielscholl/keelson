@@ -122,8 +122,8 @@ nodes:
     expect(failures).toEqual([]);
   });
 
-  test("bundled converge-pr declares a valid converge gate", () => {
-    const filePath = path.join(import.meta.dir, "../assets/workflows/converge-pr.yaml");
+  test("bundled finish-pr declares a valid converge gate", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/finish-pr.yaml");
     const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
 
     expect(result.error).toBeNull();

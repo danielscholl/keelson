@@ -844,7 +844,7 @@ nodes:
   # is green. Unrelated/flaky red leaves the PR a draft for a human — auto-fixing
   # someone else's failing test to force green would be worse than failing loud.
   # Bot reviews fire on "ready" and arrive asynchronously, so addressing them is
-  # delegated to the resolve-comments workflow, not blocked on here.
+  # delegated to the finish-pr workflow, not blocked on here.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: await-ci
@@ -1045,7 +1045,7 @@ nodes:
       -- CI & PR state --
       {READY or DRAFT — read it from the finalize-pr output above; if DRAFT, name
        the failing check and say whether it was unrelated/flaky. If any review
-       threads still need handling, suggest: resolve-comments #{number}}
+       threads still need handling, suggest: finish-pr #{number}}
 
       ===============================================================
       ```
