@@ -133,13 +133,13 @@ describe("reconcileManagedWorkflows", () => {
 
   test("does not create an overlay for a bundle-only workflow", () => {
     const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
-    const next = new Map([["converge-pr.yaml", "new bundle\n"]]);
+    const next = new Map([["finish-pr.yaml", "new bundle\n"]]);
 
     expect(reconcileManagedWorkflows(overlayDir, new Map(), next)).toEqual({
       refreshed: [],
       conflicts: [],
     });
-    expect(existsSync(join(overlayDir, "converge-pr.yaml"))).toBe(false);
+    expect(existsSync(join(overlayDir, "finish-pr.yaml"))).toBe(false);
     rmSync(overlayDir, { recursive: true, force: true });
   });
 

@@ -1,5 +1,5 @@
 ---
-title: converge-pr
+title: finish-pr
 description: Loops on an existing PR until CI is green and no new review threads remain.
 sidebar:
   order: 11
@@ -7,25 +7,24 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-`converge-pr` drives an existing same-repo pull request toward a clean finish:
+`finish-pr` drives an existing same-repo pull request toward a clean finish:
 it fetches unresolved review threads, triages only threads this run has not
 handled yet, fixes actionable ones, replies to every handled thread, resolves
 only what it actually fixed, waits for CI, then repeats until the next round sees
 CI green and no new threads.
 
 Use it when a PR is already open and reviewers or bots may keep adding comments
-after each push. `resolve-comments` is a one-shot pass over current threads.
-`fix-issue` starts from an issue and opens a PR. `converge-pr` sits between them:
-it assumes the PR exists, then keeps re-fetching PR state until the review and CI
-surface stops changing.
+after each push. `fix-issue` starts from an issue and opens a PR; `finish-pr`
+picks up where it leaves off: it assumes the PR exists, then keeps re-fetching PR
+state until the review and CI surface stops changing.
 
 ## Invoke it
 
 ```sh
-keelson workflow run converge-pr --inputs ARGUMENTS="converge PR 42"
+keelson workflow run finish-pr --inputs ARGUMENTS="finish PR 42"
 ```
 
-Pass an explicit PR number. converge-pr runs in an isolated worktree on a
+Pass an explicit PR number. finish-pr runs in an isolated worktree on a
 generated branch, so it cannot infer the target PR from the current branch.
 
 ### What it needs
@@ -119,8 +118,6 @@ of what closed.
 
 ## Related
 
-- [resolve-comments](../resolve-comments/): a one-shot pass over current PR
-  review threads.
 - [fix-issue](../fix-issue/): starts from a GitHub issue and opens a draft PR.
 - [pr-review](../pr-review/): reviews a PR without fixing it.
 - [Workflow nodes](../../reference/workflow-nodes/): `converge`, `approval`,

@@ -34,9 +34,9 @@ keelson workflow run fix-issue --inputs ARGUMENTS="42"
 ```
 
 <Aside type="note" title="What the Copilot workflows need">
-Nine of the eleven set `provider: copilot` and `model: auto`, so they need a
+Eight of the ten set `provider: copilot` and `model: auto`, so they need a
 GitHub Copilot subscription registered. The GitHub-facing ones (`fix-issue`,
-`pr-review`, `plan-act-evaluate`, `resolve-comments`, `converge-pr`) also drive
+`pr-review`, `plan-act-evaluate`, `finish-pr`) also drive
 the `gh` CLI, so it must be installed and authenticated. The approval and
 interactive workflows pause for a human, which needs a running server (`keelson
 start`). The other two pin no provider: `smoke-test` runs provider-free on the
@@ -47,11 +47,11 @@ authoring tracks the strongest model the server offers.
 ## Ship code
 
 The delivery flagships: an issue taken to a draft PR, a scoped PR review, a
-plan-first lifecycle, a PR review thread resolver, and a PR convergence loop.
-Each composes gates, loops, and branches into a real pipeline, and each has a
-full walkthrough.
+plan-first lifecycle, and a PR convergence loop that drives a PR to a clean
+finish. Each composes gates, loops, and branches into a real pipeline, and each
+has a full walkthrough.
 
-<WorkflowCards names={["fix-issue", "pr-review", "plan-act-evaluate", "resolve-comments", "converge-pr"]} />
+<WorkflowCards names={["fix-issue", "pr-review", "plan-act-evaluate", "finish-pr"]} />
 
 ## Plan and shape
 

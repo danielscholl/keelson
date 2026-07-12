@@ -108,7 +108,7 @@ When a run is isolated, keelson:
 Isolation is **opt-in**, decided per run:
 
 - A workflow declares it in YAML with `worktree.enabled: true`. The bundled
-  workflows that change code (`fix-issue`, `plan-act-evaluate`, `resolve-comments`)
+  workflows that change code (`fix-issue`, `plan-act-evaluate`, `finish-pr`)
   set it.
 - `--worktree` forces it on and `--no-worktree` forces it off, each overriding the
   workflow's default.
