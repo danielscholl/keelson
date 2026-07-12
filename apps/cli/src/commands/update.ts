@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { keelsonPaths } from "@keelson/shared/paths";
 import { isWorkflowYaml } from "@keelson/workflows";
@@ -187,9 +187,7 @@ export function reconcileManagedWorkflows(
       } catch {
         rmSync(tempPath, { force: true });
       }
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   return { refreshed, conflicts };
