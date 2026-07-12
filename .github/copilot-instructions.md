@@ -54,12 +54,12 @@ the point once, on the clearest instance.
   `rib:<id>:*` (enforced by `assertInNamespace` at activation). Flag a change that reaches around
   the contract into harness internals, weakens the namespace guard, or narrows the
   contract without a deprecation path.
-- **The loader is lenient about unknown *top-level and generic node* fields.**
-  They surface as `warnings` data (and `--strict` refuses them), never a hard parse
-  error, so an older harness still loads a newer workflow. (Deliberately NOT lenient
-  everywhere: unparseable YAML, DAG-shape errors, and strict nested schemas — e.g.
-  notebook blocks (`.strict()`) — still fail.) Flag a change that turns a *generic*
-  unknown field into a fatal error, or that loosens a schema meant to be strict.
+- **The loader tolerates unknown fields rather than rejecting.** Extra top-level
+  and generic node keys don't fail the parse, so an older harness still loads a
+  newer workflow. (The exceptions, which *do* fail: unparseable YAML, a broken DAG,
+  and a schema explicitly marked strict — e.g. notebook blocks (`.strict()`).) Flag
+  a loader change that makes an unknown *generic* field fatal, or that loosens a
+  schema meant to be strict.
 - **SQLite schema changes go through `db/migrations.ts`.** Migrations are an
   append-only list keyed by an integer version; the runner records each applied
   version in the `schema_version` table and `doctor` checks the DB is at the
@@ -79,7 +79,8 @@ the point once, on the clearest instance.
   change that weakens or bypasses an existing `validate`, or a producer of
   rib-shaped/attacker-influenced data that publishes to a trusted renderer without one.
 - **Provider/tool determinism is operator-owned.** `KEELSON_WORKFLOW_PROVIDER`
-  pins the provider for `prompt` nodes; rib tools are registered **default-off** in
+  sets the *default* provider for `prompt` nodes — a node's or the workflow's own
+  `provider:` overrides it; rib tools are registered **default-off** in
   workflow prompt nodes (a node sees a rib tool only via explicit `allowed_tools`);
   `KEELSON_WORKFLOW_TOOL_DENYLIST` is the operator floor the policy engine enforces.
   Flag a change that exposes rib tools to prompt nodes by default or bypasses the
