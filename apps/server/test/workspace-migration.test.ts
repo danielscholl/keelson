@@ -34,10 +34,22 @@ afterEach(() => {
 });
 
 async function git(args: string[], cwd: string): Promise<string> {
-  const proc = Bun.spawn({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
-  const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  const proc = Bun.spawn({
+    cmd: ["git", ...args],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    windowsHide: true,
+  });
+  // Drain both pipes even on success: an undrained stderr read-end stays an open
+  // handle on win32 and blocks bun test from exiting (the Windows CI hang).
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
   if (code !== 0) {
-    const err = await new Response(proc.stderr).text();
     throw new Error(`git ${args.join(" ")} in ${cwd}: ${err}`);
   }
   return out;

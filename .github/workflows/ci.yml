@@ -45,7 +45,9 @@ jobs:
         run: bun --filter '*' typecheck
 
       - name: Test
-        run: bun --filter '*' test
+        # Per-test timeout so a stalled test fails fast (named) instead of
+        # hanging the job until the wall-clock ceiling — see the win32 note below.
+        run: bun --filter '*' test --timeout 120000
         env:
           KEELSON_USE_STUBS: "1"
 
@@ -58,7 +60,9 @@ jobs:
   check-windows:
     name: Typecheck and test (Windows)
     runs-on: windows-latest
-    timeout-minutes: 25
+    # A green Windows run is ~4 min; a hung one used to burn the full 25.
+    # Bounded lower so a future win32 test-exit stall cancels fast, not silently.
+    timeout-minutes: 12
 
     steps:
       - name: Checkout
@@ -79,6 +83,8 @@ jobs:
         run: bun --filter '*' typecheck
 
       - name: Test
-        run: bun --filter '*' test
+        # Per-test timeout so a stalled test fails fast (named) instead of
+        # hanging the job until the wall-clock ceiling — see the win32 note below.
+        run: bun --filter '*' test --timeout 120000
         env:
           KEELSON_USE_STUBS: "1"
