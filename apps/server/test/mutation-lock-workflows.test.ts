@@ -49,9 +49,23 @@ function writeWorkflow(filename: string, body: string): void {
 }
 
 async function git(args: string[], cwd: string): Promise<void> {
-  const proc = Bun.spawn({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
-  if ((await proc.exited) !== 0) {
-    throw new Error(`git ${args.join(" ")} in ${cwd}: ${await new Response(proc.stderr).text()}`);
+  const proc = Bun.spawn({
+    cmd: ["git", ...args],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    windowsHide: true,
+  });
+  // Drain both pipes even on success: an undrained pipe read-end stays an open
+  // handle on win32 that can block bun test from exiting.
+  const [, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (code !== 0) {
+    throw new Error(`git ${args.join(" ")} in ${cwd}: ${err}`);
   }
 }
 

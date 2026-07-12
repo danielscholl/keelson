@@ -32,10 +32,22 @@ import {
 let tmp: string;
 
 async function git(args: string[], cwd: string): Promise<void> {
-  const proc = Bun.spawn({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
-  const code = await proc.exited;
+  const proc = Bun.spawn({
+    cmd: ["git", ...args],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    windowsHide: true,
+  });
+  // Drain both pipes even on success: an undrained pipe read-end stays an open
+  // handle on win32 that can block bun test from exiting.
+  const [, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
   if (code !== 0) {
-    const err = await new Response(proc.stderr).text();
     throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${err}`);
   }
 }
@@ -54,10 +66,22 @@ async function gitText(args: string[], cwd: string): Promise<string> {
 }
 
 async function bun(args: string[], cwd: string): Promise<void> {
-  const proc = Bun.spawn({ cmd: ["bun", ...args], cwd, stdout: "pipe", stderr: "pipe" });
-  const code = await proc.exited;
+  const proc = Bun.spawn({
+    cmd: ["bun", ...args],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    windowsHide: true,
+  });
+  // Drain both pipes even on success: an undrained pipe read-end stays an open
+  // handle on win32 that can block bun test from exiting.
+  const [, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
   if (code !== 0) {
-    const err = await new Response(proc.stderr).text();
     throw new Error(`bun ${args.join(" ")} failed in ${cwd}: ${err}`);
   }
 }

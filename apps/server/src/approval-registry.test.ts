@@ -69,7 +69,15 @@ describe("createApprovalRegistry", () => {
     const registry = createApprovalRegistry({ timeoutMs: 5 });
     const pending = registry.request(req());
     expect(registry.list()).toHaveLength(1);
-    expect(await pending).toBe("reject");
+    // The auto-reject timer is unref'd (so a pending approval never blocks
+    // process exit). On win32, an unref'd timer that is the only pending handle
+    // never fires — hanging this await — so hold a ref'd timer until it settles.
+    const keepAlive = setTimeout(() => {}, 1_000);
+    try {
+      expect(await pending).toBe("reject");
+    } finally {
+      clearTimeout(keepAlive);
+    }
     expect(registry.list()).toEqual([]);
   });
 
