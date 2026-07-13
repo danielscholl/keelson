@@ -2145,6 +2145,10 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     const write = (name: string, value: unknown): void =>
       writeFileSync(join(artifactsDir, name), JSON.stringify(value));
 
+    // fetch-state writes .pr-number early and unconditionally; resolve-retry
+    // (which depends on it) reads it for the forge resolve call. Seed it so the
+    // node's `cat .pr-number` under `set -e` matches production.
+    writeFileSync(join(artifactsDir, ".pr-number"), "42");
     write("threads.json", threadRows(threads));
     write("all-unresolved-threads.json", threadRows(threads));
     write("handled.json", opts.handled ?? []);
