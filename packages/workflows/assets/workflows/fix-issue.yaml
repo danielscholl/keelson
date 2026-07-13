@@ -56,7 +56,7 @@ nodes:
       - If the message contains an explicit issue number (e.g. "#709", "issue 709",
         "fix 709"), extract that number.
       - If the message is ambiguous (e.g. "fix the SQLite timestamp bug"), use
-        `gh issue list` to search for the best match and pick it.
+        `forge issue list` to search for the best match and pick it.
 
       CRITICAL: Your final output must be ONLY the bare integer with no quotes,
       no markdown, and no explanation. Example correct output: 709
@@ -72,7 +72,7 @@ nodes:
         exit 1
       fi
       echo "$ISSUE_NUM" > "$KEELSON_ARTIFACTS_DIR/.issue-number"
-      gh issue view "$ISSUE_NUM" --json number,title,body,labels,comments,state,url,author
+      forge issue view "$ISSUE_NUM" --json number,title,body,labels,comments,state,url,author
 
   - id: extract-brief
     depends_on: [fetch-issue]
@@ -594,9 +594,9 @@ nodes:
          or `docs/PULL_REQUEST_TEMPLATE.md` exists, read it and follow its sections.
       3. Verify HEAD is NOT `main`. If it is, refuse and stop.
       4. Push: `git push -u origin HEAD`.
-      5. Check existing PRs: `gh pr list --head $(git branch --show-current)`.
+      5. Check existing PRs: `forge pr list --head $(git branch --show-current)`.
          If one exists, capture its number and skip creation.
-      6. Otherwise: `gh pr create --draft --base main`
+      6. Otherwise: `forge pr create --draft --base main`
          - Title: under 70 chars, conventional commit style.
          - Body: from the project's PR template if present, otherwise:
            - **What**: 1-2 sentences
@@ -606,11 +606,11 @@ nodes:
            — never at the repo root (the next commit would sweep it up).
       7. Capture identifiers:
          ```
-         gh pr view --json number -q '.number' > "$ARTIFACTS_DIR/.pr-number"
-         gh pr view --json url    -q '.url'    > "$ARTIFACTS_DIR/.pr-url"
+         forge pr view --json number -q '.number' > "$ARTIFACTS_DIR/.pr-number"
+         forge pr view --json url    -q '.url'    > "$ARTIFACTS_DIR/.pr-url"
          ```
-      8. Verify base: `gh pr view --json baseRefName -q '.baseRefName'` must be `main`.
-         If not, `gh pr edit <num> --base main`.
+      8. Verify base: `forge pr view --json baseRefName -q '.baseRefName'` must be `main`.
+         If not, `forge pr edit <num> --base main`.
 
   - id: enforce-draft
     depends_on: [create-pr]
@@ -619,10 +619,10 @@ nodes:
 
       PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | grep -oE '[0-9]+' | head -1)
       if [ -z "$PR_NUM" ]; then
-       PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null | grep -oE '[0-9]+' | head -1)
+       PR_NUM=$(forge pr view --json number -q '.number' 2>/dev/null | grep -oE '[0-9]+' | head -1)
        if [ -n "$PR_NUM" ]; then
          printf '%s' "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
-         PR_URL=$(gh pr view "$PR_NUM" --json url -q '.url' 2>/dev/null | tr -d '[:space:]')
+         PR_URL=$(forge pr view "$PR_NUM" --json url -q '.url' 2>/dev/null | tr -d '[:space:]')
          [ -n "$PR_URL" ] && printf '%s' "$PR_URL" > "$KEELSON_ARTIFACTS_DIR/.pr-url"
          echo "DRAFT_GUARD: RECOVERED — resolved PR #$PR_NUM from the head branch"
        else
@@ -633,15 +633,15 @@ nodes:
 
       IS_DRAFT=""
       for attempt in 1 2 3; do
-       IS_DRAFT=$(gh pr view "$PR_NUM" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
+       IS_DRAFT=$(forge pr view "$PR_NUM" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
        [ -n "$IS_DRAFT" ] && break
        sleep 2
       done
       if [ "$IS_DRAFT" = "false" ]; then
-       if gh pr ready --undo "$PR_NUM"; then
+       if forge pr ready --undo "$PR_NUM"; then
          echo "DRAFT_GUARD: CONVERTED — PR #$PR_NUM was ready; converted back to draft"
        else
-         echo "DRAFT_GUARD: FAILED — PR #$PR_NUM is ready but 'gh pr ready --undo' failed"
+         echo "DRAFT_GUARD: FAILED — PR #$PR_NUM is ready but 'forge pr ready --undo' failed"
          exit 1
        fi
       elif [ "$IS_DRAFT" = "true" ]; then
@@ -864,12 +864,12 @@ nodes:
       fi
       # No checks at all (no CI configured, or runs gated behind approval) means
       # there is nothing to gate on — never call that a pass.
-      if [ "$(gh pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
+      if [ "$(forge pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
         echo "CI_STATUS: UNKNOWN — no CI checks present for PR #$PR_NUM; nothing to gate on"
         exit 0
       fi
       echo "Watching CI for PR #$PR_NUM ..."
-      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-1.txt" 2>&1; then
+      if forge pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-1.txt" 2>&1; then
         cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
         echo "CI_STATUS: PASS"
         exit 0
@@ -878,12 +878,12 @@ nodes:
       cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
       echo "Rerunning failed jobs once to rule out flakes ..."
       HEAD_SHA=$(git rev-parse HEAD)
-      gh run list --branch "$(git branch --show-current)" --limit 20 \
+      forge run list --branch "$(git branch --show-current)" --limit 20 \
         --json databaseId,headSha,conclusion \
         -q ".[] | select(.headSha==\"$HEAD_SHA\" and .conclusion==\"failure\") | .databaseId" \
-        | while read -r RID; do [ -n "$RID" ] && gh run rerun "$RID" --failed || true; done
+        | while read -r RID; do [ -n "$RID" ] && forge run rerun "$RID" --failed || true; done
       sleep 20
-      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-2.txt" 2>&1; then
+      if forge pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-2.txt" 2>&1; then
         cat "$KEELSON_ARTIFACTS_DIR/.ci-2.txt"
         echo "CI_STATUS: PASS"
         exit 0
@@ -928,7 +928,7 @@ nodes:
       - If it ends with `CI_STATUS: UNKNOWN`, set `ci_status` to "unknown" and
         `actionable` to [].
       - Otherwise CI failed. For EACH failed check, read its failing logs
-        (`gh run view <run-id> --log-failed`, or open the URLs in the CI output)
+        (`forge run view <run-id> --log-failed`, or open the URLs in the CI output)
         and this PR's diff (`git diff main...HEAD`). Classify each:
         - ACTIONABLE: caused by code THIS PR changed, or a direct consequence of
           it. Add it to `actionable` with the `file` and the `fix`.
@@ -976,18 +976,18 @@ nodes:
         exit 0
       fi
       # Never promote a PR we couldn't actually gate: zero checks means no CI.
-      if [ "$(gh pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
+      if [ "$(forge pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
         echo "PR_STATE: DRAFT — no CI checks present; nothing to gate on, left a draft"
         exit 0
       fi
       echo "Final CI check for PR #$PR_NUM ..."
-      if gh pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-final.txt" 2>&1; then
+      if forge pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-final.txt" 2>&1; then
         # Gate the READY claim on the promotion actually succeeding — a failed
-        # `gh pr ready` must not be reported as success.
-        if gh pr ready "$PR_NUM"; then
+        # `forge pr ready` must not be reported as success.
+        if forge pr ready "$PR_NUM"; then
           echo "PR_STATE: READY — CI green; marked ready for review"
         else
-          echo "PR_STATE: DRAFT — CI green but 'gh pr ready' failed; left a draft"
+          echo "PR_STATE: DRAFT — CI green but 'forge pr ready' failed; left a draft"
         fi
         exit 0
       fi

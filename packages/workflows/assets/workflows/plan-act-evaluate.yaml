@@ -108,10 +108,10 @@ nodes:
 
       if [ -n "$ISSUE_NUM" ]; then
         echo "SOURCE: existing GitHub issue #$ISSUE_NUM (plan will be added as a comment)"
-        gh issue view "$ISSUE_NUM" \
+        forge issue view "$ISSUE_NUM" \
           --json number,title,body,labels,comments,state,url,author > "$ART/issue.json"
         echo "$ISSUE_NUM" > "$ART/.issue-number"
-        echo "ISSUE_TITLE: $(gh issue view "$ISSUE_NUM" --json title -q '.title')"
+        echo "ISSUE_TITLE: $(forge issue view "$ISSUE_NUM" --json title -q '.title')"
       elif [ -f "$RAW" ]; then
         echo "SOURCE: plan/PRD file at $RAW (a new issue will be created from the plan)"
         cp "$RAW" "$ART/task.md"
@@ -121,7 +121,7 @@ nodes:
       fi
 
       # Default branch — never assume "main". Used as the PR base and diff base.
-      DEFAULT=$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || true)
+      DEFAULT=$(forge repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || true)
       [ -z "$DEFAULT" ] && DEFAULT=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)
       [ -z "$DEFAULT" ] && DEFAULT=main
       printf '%s' "$DEFAULT" > "$ART/.default-branch"
@@ -262,11 +262,11 @@ nodes:
       N=$(cat "$ART/.issue-number" 2>/dev/null || true)
       if [ -n "$N" ]; then
         echo "Existing issue #$N — recording the plan as a comment."
-        gh issue comment "$N" --body-file "$ART/plan.md" >/dev/null
-        URL=$(gh issue view "$N" --json url -q '.url')
+        forge issue comment "$N" --body-file "$ART/plan.md" >/dev/null
+        URL=$(forge issue view "$N" --json url -q '.url')
       else
         echo "No issue supplied — creating one as the plan artifact."
-        URL=$(gh issue create --title "$TITLE" --body-file "$ART/plan.md")
+        URL=$(forge issue create --title "$TITLE" --body-file "$ART/plan.md")
         N=$(printf '%s' "$URL" | grep -oE '[0-9]+$' || true)
         printf '%s' "$N" > "$ART/.issue-number"
       fi
@@ -308,8 +308,14 @@ nodes:
   # ACT — choose the path from the human's reply
   # ═══════════════════════════════════════════════════════════════════════════
 
-  - id: select-mode
+  - id: detect-forge
     depends_on: [approve-plan]
+    bash: |
+      set -euo pipefail
+      forge caps    # prints "github" or "gitlab" — the resolved forge for this repo
+
+  - id: select-mode
+    depends_on: [approve-plan, detect-forge]
     context: fresh
     output_format:
       type: object
@@ -323,9 +329,13 @@ nodes:
       Decide the execution mode from the reviewer's reply to the plan approval.
 
       Reviewer reply: $approve-plan.output
+      Detected forge: $detect-forge.output
 
       Rules:
-      - If they asked to delegate / "assign to copilot" / hand off / let the
+      - If the detected forge is not "github" (e.g. "gitlab"), mode MUST be
+        **local** — agent delegation (the GitHub Copilot coding agent) is
+        GitHub-only. This rule wins over any request to delegate.
+      - Else if they asked to delegate / "assign to copilot" / hand off / let the
         coding agent do it → mode = **delegate**.
       - Otherwise (an approval like "approve"/"looks good", an empty reply, or
         plan feedback to fold in) → mode = **local**.
@@ -351,13 +361,13 @@ nodes:
       ## Rules
 
       - The canonical plan is the GitHub issue. Read `$ARTIFACTS_DIR/.issue-number`,
-        then `gh issue view <N> --comments` to load the plan you must follow.
+        then `forge issue view <N> --comments` to load the plan you must follow.
       - Learn this project's conventions and verify commands first — read whichever
         exist: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, plus its
         build config (package.json scripts, Makefile, pyproject.toml, Cargo.toml,
         go.mod, …). Run THAT project's checks after each change — assume no tool.
       - If the feedback above is more than a bare approval, record a short
-        `gh issue comment <N>` noting the agreed change BEFORE coding.
+        `forge issue comment <N>` noting the agreed change BEFORE coding.
       - Read each file before editing it. Stage files **by name** — never
         `git add -A` / `git add .` / `git add -u`.
       - Never commit anything under `$ARTIFACTS_DIR`, scratch files, or PR drafts.
@@ -392,7 +402,7 @@ nodes:
         reviewer here, not a rubber stamp.
 
         The canonical plan is the GitHub issue: read `$ARTIFACTS_DIR/.issue-number`,
-        then `gh issue view <N> --comments`. The base branch is in
+        then `forge issue view <N> --comments`. The base branch is in
         `$ARTIFACTS_DIR/.default-branch`.
 
         Previous iteration's review (empty on the first pass):
@@ -446,17 +456,17 @@ nodes:
          `.github/PULL_REQUEST_TEMPLATE.md`, or `docs/PULL_REQUEST_TEMPLATE.md`),
          read it and follow its sections.
       4. `git push -u origin HEAD`.
-      5. `gh pr list --head "$(git branch --show-current)"` — if a PR exists,
+      5. `forge pr list --head "$(git branch --show-current)"` — if a PR exists,
          reuse its number and skip creation.
-      6. Otherwise `gh pr create --draft --base <base>`:
+      6. Otherwise `forge pr create --draft --base <base>`:
          - Title: under 70 chars, conventional-commit style.
          - Body: the project's template if present, otherwise **What** /
            **Why now** / **Test plan**. Link the issue with `Fixes #<num>`.
          - Write any body draft to `$ARTIFACTS_DIR/pr-body.md`, never the repo root.
       7. Capture identifiers:
-         `gh pr view --json number -q '.number' > "$ARTIFACTS_DIR/.pr-number"`
-         `gh pr view --json url    -q '.url'    > "$ARTIFACTS_DIR/.pr-url"`
-      8. Confirm the base; if wrong, `gh pr edit <num> --base <base>`.
+         `forge pr view --json number -q '.number' > "$ARTIFACTS_DIR/.pr-number"`
+         `forge pr view --json url    -q '.url'    > "$ARTIFACTS_DIR/.pr-url"`
+      8. Confirm the base; if wrong, `forge pr edit <num> --base <base>`.
 
   # ─────────────────────────────────────────────────────────────────────────
   # ACT — DELEGATE: assign the issue to the GitHub Copilot coding agent
@@ -469,10 +479,14 @@ nodes:
     when: "$select-mode.output.mode == 'delegate'"
     bash: |
       set -euo pipefail
+      # Delegation assigns the GitHub Copilot coding agent — GitHub-only. On a
+      # GitLab repo this fails loudly (exit 3) instead of a confusing api error;
+      # select-mode already routes non-GitHub repos to local, so this is a belt.
+      forge caps --require delegate
       ART="$KEELSON_ARTIFACTS_DIR"
       N=$(cat "$ART/.issue-number")
-      OWNER=$(gh repo view --json owner -q '.owner.login')
-      NAME=$(gh repo view --json name -q '.name')
+      OWNER=$(forge repo view --json owner -q '.owner.login')
+      NAME=$(forge repo view --json name -q '.name')
 
       # Carry any substantive reviewer note onto the issue so Copilot sees it.
       REPLY="$KEELSON_NODE_approve_plan_OUTPUT"
@@ -481,11 +495,11 @@ nodes:
         | tr -d '[:space:]')
       if [ -n "$TRIMMED" ]; then
         printf 'Supervisor note before delegating to Copilot:\n\n%s\n' "$REPLY" \
-          | gh issue comment "$N" --body-file -
+          | forge issue comment "$N" --body-file -
       fi
 
       echo "Resolving the Copilot coding agent on ${OWNER}/${NAME}..."
-      BOT=$(gh api graphql -f query='query($o:String!,$n:String!){repository(owner:$o,name:$n){
+      BOT=$(forge api graphql -f query='query($o:String!,$n:String!){repository(owner:$o,name:$n){
         suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:50){nodes{login ... on Bot{id}}}}}' \
         -F o="$OWNER" -F n="$NAME" \
         --jq '.data.repository.suggestedActors.nodes[]|select(.login=="copilot-swe-agent").id')
@@ -495,9 +509,9 @@ nodes:
         exit 1
       fi
 
-      ISSUE_ID=$(gh issue view "$N" --json id -q '.id')
+      ISSUE_ID=$(forge issue view "$N" --json id -q '.id')
       echo "Assigning issue #${N} to Copilot..."
-      gh api graphql -f query='mutation($a:ID!,$b:ID!){replaceActorsForAssignable(
+      forge api graphql -f query='mutation($a:ID!,$b:ID!){replaceActorsForAssignable(
         input:{assignableId:$a,actorIds:[$b]}){assignable{... on Issue{number}}}}' \
         -F a="$ISSUE_ID" -F b="$BOT" >/dev/null
       echo "DELEGATED: issue #$N assigned to copilot-swe-agent. Copilot will open a PR."
@@ -521,14 +535,14 @@ nodes:
       PR=""; PREV_SHA=""
       while [ "$(date +%s)" -lt "$DEADLINE" ]; do
         # Copilot's PR is authored by the bot and/or links the issue in its body.
-        PR=$(gh pr list --state open --json number,author,body \
+        PR=$(forge pr list --state open --json number,author,body \
           | jq -r --arg n "$N" '.[]
               | select((.author.login // "" | test("copilot";"i"))
                        or ((.body // "") | test("#"+$n+"\\b|/issues/"+$n+"\\b")))
               | .number' | head -1)
         if [ -n "$PR" ]; then
-          DRAFT=$(gh pr view "$PR" --json isDraft -q '.isDraft' 2>/dev/null || echo true)
-          SHA=$(gh pr view "$PR" --json headRefOid -q '.headRefOid' 2>/dev/null || echo "")
+          DRAFT=$(forge pr view "$PR" --json isDraft -q '.isDraft' 2>/dev/null || echo true)
+          SHA=$(forge pr view "$PR" --json headRefOid -q '.headRefOid' 2>/dev/null || echo "")
           echo "  found PR #${PR} (draft=${DRAFT}, head=${SHA:0:7})"
           [ "$DRAFT" = "false" ] && break
           if [ -n "$SHA" ] && [ "$SHA" = "$PREV_SHA" ]; then
@@ -546,8 +560,8 @@ nodes:
         exit 1
       fi
       printf '%s' "$PR" > "$ART/.pr-number"
-      gh pr view "$PR" --json url -q '.url' > "$ART/.pr-url"
-      DRAFT=$(gh pr view "$PR" --json isDraft -q '.isDraft')
+      forge pr view "$PR" --json url -q '.url' > "$ART/.pr-url"
+      DRAFT=$(forge pr view "$PR" --json isDraft -q '.isDraft')
       [ "$DRAFT" = "true" ] && echo "NOTE: PR #${PR} is still a draft — a maintainer must mark it ready (and approve its CI) before it can merge."
       echo "COPILOT_PR=#${PR}"
 
@@ -570,19 +584,19 @@ nodes:
         echo "CI_SIGNALS: SKIPPED (no PR number recorded)"
         exit 0
       fi
-      echo "=== Remote CI checks for PR #${PR} (gh pr checks --watch) ==="
-      OUT=$(gh pr checks "$PR" --watch 2>&1); code=$?
+      echo "=== Remote CI checks for PR #${PR} (forge pr checks --watch) ==="
+      OUT=$(forge pr checks "$PR" --watch 2>&1); code=$?
       printf '%s\n' "$OUT"
       if printf '%s' "$OUT" | grep -qi 'no checks'; then
         # "No checks" is ambiguous: either the repo genuinely has no CI, OR CI
         # exists but is gated behind maintainer approval (the common case for a
         # bot / first-time-contributor PR like Copilot's — its runs sit in
-        # `action_required` and gh reports them as no checks). Distinguish them so
+        # `action_required` and forge reports them as no checks). Distinguish them so
         # the audit trail doesn't claim "no CI" when CI is merely waiting on a human.
-        BRANCH=$(gh pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || echo "")
+        BRANCH=$(forge pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || echo "")
         GATED=0
         if [ -n "$BRANCH" ]; then
-          GATED=$(gh run list --branch "$BRANCH" --json status,conclusion \
+          GATED=$(forge run list --branch "$BRANCH" --json status,conclusion \
             -q '[.[] | select(.conclusion=="action_required")] | length' 2>/dev/null || echo 0)
         fi
         if [ "${GATED:-0}" -gt 0 ]; then
@@ -593,7 +607,7 @@ nodes:
       elif [ "$code" -eq 0 ]; then
         echo "CI_SIGNALS: PASS"
       else
-        echo "CI_SIGNALS: FAIL (gh exit $code) — the PR must not merge until these are green"
+        echo "CI_SIGNALS: FAIL (exit $code) — the PR must not merge until these are green"
       fi
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -610,8 +624,8 @@ nodes:
       ART="$KEELSON_ARTIFACTS_DIR"
       PR=$(cat "$ART/.pr-number" 2>/dev/null || true)
       if [ -n "$PR" ]; then
-        gh pr diff "$PR" > "$ART/diff.patch" 2>/dev/null || true
-        gh pr view "$PR" --json files \
+        forge pr diff "$PR" > "$ART/diff.patch" 2>/dev/null || true
+        forge pr view "$PR" --json files \
           -q '.files[] | "\(.path) (+\(.additions)/-\(.deletions))"' > "$ART/diff.stat" 2>/dev/null || true
       fi
       # Fallback to the local worktree diff if the PR diff was unavailable.
@@ -694,10 +708,10 @@ nodes:
 
       - If the contributor-model review below has NO unresolved CRITICAL or HIGH
         findings → approve:
-        `gh pr review <PR> --approve --body "<one-paragraph verdict>"`
+        `forge pr review <PR> --approve --body "<one-paragraph verdict>"`
       - Otherwise → request changes, listing the CRITICAL/HIGH findings in the
         body so Copilot can act on them:
-        `gh pr review <PR> --request-changes --body "<findings>"`
+        `forge pr review <PR> --request-changes --body "<findings>"`
 
       Use a HEREDOC for `--body` to preserve markdown. Do not edit any files.
 
@@ -745,8 +759,8 @@ nodes:
       # Branch + changeset from the real PR (uniform for local and delegate).
       BRANCH="(n/a)"; CHANGES="(no PR diff available)"
       if [ -n "$PR" ]; then
-        BRANCH=$(gh pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || echo "?")
-        CHANGES=$(gh pr view "$PR" --json files \
+        BRANCH=$(forge pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || echo "?")
+        CHANGES=$(forge pr view "$PR" --json files \
           -q '.files[] | "• \(.path)  (+\(.additions)/-\(.deletions))"' 2>/dev/null)
         [ -z "$CHANGES" ] && CHANGES=$(git diff "$BASE"...HEAD --stat 2>/dev/null | sed 's/^/• /' || echo "(none)")
       fi

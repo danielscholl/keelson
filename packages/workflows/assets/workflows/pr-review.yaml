@@ -5,7 +5,7 @@
 #
 # Read-only by harness rail: every review lane sets
 # `allowed_tools: [Read, Glob, Grep]` and the only intended PR-mutating step
-# is the final `gh api …/reviews` call. Both providers enforce this — claude
+# is the final `forge pr review-batch` call. Both providers enforce this — claude
 # gates by tool name, copilot (the pin below) gates the underlying capability
 # through its permission handler, so the model's built-in write/shell tools
 # are denied mid-review regardless of provider. An opus triage gate
@@ -69,7 +69,7 @@ nodes:
 
       if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
         # Resolve from the current branch.
-        PR_NUM=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
+        PR_NUM=$(forge pr view --json number -q '.number' 2>/dev/null || echo "")
       else
         PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
       fi
@@ -80,7 +80,7 @@ nodes:
       fi
 
       echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
-      gh pr view "$PR_NUM" --json number,title,body,baseRefName,headRefName,author,labels,state,url > "$KEELSON_ARTIFACTS_DIR/pr.json"
+      forge pr view "$PR_NUM" --json number,title,body,baseRefName,headRefName,author,labels,state,url > "$KEELSON_ARTIFACTS_DIR/pr.json"
 
       BASE=$(jq -r '.baseRefName' "$KEELSON_ARTIFACTS_DIR/pr.json")
       HEAD=$(jq -r '.headRefName' "$KEELSON_ARTIFACTS_DIR/pr.json")
@@ -88,8 +88,8 @@ nodes:
       # Make sure we have the base branch locally for diff comparison.
       git fetch origin "$BASE" --quiet 2>/dev/null || true
 
-      DIFF_STAT=$(gh pr diff "$PR_NUM" --name-only 2>/dev/null || true)
-      DIFF_BODY=$(gh pr diff "$PR_NUM" 2>/dev/null || true)
+      DIFF_STAT=$(forge pr diff "$PR_NUM" --name-only 2>/dev/null || true)
+      DIFF_BODY=$(forge pr diff "$PR_NUM" 2>/dev/null || true)
 
       printf '%s\n' "$DIFF_STAT" > "$KEELSON_ARTIFACTS_DIR/changed-files.txt"
       printf '%s\n' "$DIFF_BODY" > "$KEELSON_ARTIFACTS_DIR/diff.patch"
@@ -475,22 +475,19 @@ nodes:
       PR_NUM=$(cat "$ARTIFACTS/.pr-number")
       PAYLOAD="$ARTIFACTS/payload.json"
 
-      REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
-
       # Extract the content hash from the payload body for idempotency check.
       HASH=$(grep -oE 'keelson:pr-review:[a-f0-9]+' "$PAYLOAD" | head -1 | cut -d: -f3 || true)
 
       if [ -n "$HASH" ]; then
-        EXISTING=$(gh api "repos/${REPO}/pulls/${PR_NUM}/reviews" --jq '.[].body' 2>/dev/null || true)
+        EXISTING=$(forge pr reviews "$PR_NUM" --json body -q '.[].body' 2>/dev/null || true)
         if printf '%s' "$EXISTING" | grep -qF "keelson:pr-review:${HASH}"; then
           echo "No change since last review — skipping (hash=${HASH})"
-          gh pr view "$PR_NUM" --json url -q '.url'
+          forge pr view "$PR_NUM" --json url -q '.url'
           exit 0
         fi
       fi
 
-      gh api -X POST "repos/${REPO}/pulls/${PR_NUM}/reviews" \
-        --input "$PAYLOAD"
+      forge pr review-batch "$PR_NUM" --input "$PAYLOAD"
 
       echo "Posted review on PR #${PR_NUM}"
-      gh pr view "$PR_NUM" --json url -q '.url'
+      forge pr view "$PR_NUM" --json url -q '.url'

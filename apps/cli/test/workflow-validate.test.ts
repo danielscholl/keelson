@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseWorkflow } from "@keelson/workflows";
 
@@ -109,12 +109,15 @@ describe("pr-review workflow node graph", () => {
     expect(triage?.model).toBe("claude-opus-4.8");
   });
 
-  test("no node uses gh pr comment; post-review references /reviews", () => {
+  test("no node posts a plain comment; post-review uses the batched review verb", () => {
     const filename = `${WORKFLOWS}/pr-review.yaml`;
     const content = readFileSync(filename, "utf-8");
-    // These invariants hold at the raw YAML level.
+    // The synthesis posts as a single batched PR review — never a plain PR
+    // comment — routed through the forge shim (portable to gh/glab) rather than
+    // a hardcoded gh reviews-API path.
     expect(content).not.toContain("gh pr comment");
-    expect(content).toContain("/reviews");
+    expect(content).not.toContain("forge pr comment");
+    expect(content).toContain("forge pr review-batch");
   });
 
   function buildReviewBash(): string {
@@ -162,4 +165,33 @@ describe("pr-review workflow node graph", () => {
     expect(lines).toContain("foo.ts\t11"); // added line
     expect(lines).toContain("foo.ts\t10"); // context line, now anchorable
   }, 15000);
+});
+
+describe("bundled workflows are forge-portable (no direct gh)", () => {
+  const WORKFLOWS = resolve(
+    import.meta.dir,
+    "..",
+    "..",
+    "..",
+    "packages",
+    "workflows",
+    "assets",
+    "workflows",
+  );
+
+  // The bundled workflows must call `forge` (portable to gh/glab), never `gh`
+  // directly — otherwise they silently regress to GitHub-only. Guards against a
+  // future author reintroducing a raw `gh` call (keelson #557).
+  const files = readdirSync(WORKFLOWS).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
+  const GH_CALL = /\bgh (pr|issue|repo|api|run|auth|search)\b/;
+  for (const file of files) {
+    test(`${file} calls forge, not gh`, () => {
+      const content = readFileSync(resolve(WORKFLOWS, file), "utf-8");
+      const offenders = content
+        .split("\n")
+        .map((line, i) => ({ line, n: i + 1 }))
+        .filter(({ line }) => GH_CALL.test(line));
+      expect(offenders.map((o) => `${file}:${o.n}: ${o.line.trim()}`)).toEqual([]);
+    });
+  }
 });
