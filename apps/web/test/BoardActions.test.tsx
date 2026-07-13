@@ -1558,3 +1558,169 @@ describe("model picker action fields", () => {
     );
   });
 });
+
+describe("create-form affordances", () => {
+  test("a tabs strip opens the first enabled defaultOpen item's form; the operator's toggle wins after", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            {
+              type: "create",
+              label: "aws",
+              disabled: true,
+              reason: "coming soon",
+              defaultOpen: true,
+              fields: [{ name: "env", label: "AWS env" }],
+            },
+            {
+              type: "create",
+              label: "kind",
+              defaultOpen: true,
+              // Distinct from the tab label so getByRole("kind") stays unique
+              // while the form (whose submit defaults to the label) is open.
+              submitLabel: "Create cluster",
+              fields: [{ name: "env", label: "Environment" }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    // The disabled defaultOpen item is skipped; the first enabled one opens.
+    expect(screen.getByLabelText("Environment")).not.toBeNull();
+    expect(screen.queryByLabelText("AWS env")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "kind" }));
+    expect(screen.queryByLabelText("Environment")).toBeNull();
+  });
+
+  test("a segmented field selects by press and dispatches the chosen option value", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "create",
+              label: "Create",
+              expanded: true,
+              fields: [
+                {
+                  name: "profile",
+                  label: "Profile",
+                  segmented: true,
+                  placeholder: "cimpl default",
+                  options: [
+                    { value: "core", label: "core" },
+                    { value: "full", label: "full" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    // The optional field leads with a clear segment, pressed while unset.
+    const clear = screen.getByRole("button", { name: "cimpl default" });
+    expect(clear.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "full" }));
+    expect(screen.getByRole("button", { name: "full" }).getAttribute("aria-pressed")).toBe("true");
+    expect(clear.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(calls).toEqual([{ type: "create", payload: { profile: "full" } }]));
+  });
+
+  test("half fields carry the two-up class; full-width fields do not", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "create",
+              label: "Create",
+              expanded: true,
+              fields: [
+                { name: "env", label: "Environment", half: true },
+                { name: "partition", label: "Partition" },
+              ],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    const { container } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const fields = container.querySelectorAll(".cvb-action-field");
+    expect(fields[0]?.classList.contains("cvb-action-field--half")).toBe(true);
+    expect(fields[1]?.classList.contains("cvb-action-field--half")).toBe(false);
+  });
+
+  test("submitTone styles the submit without tinting the tab, and falls back to tone", () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            {
+              type: "create",
+              label: "kind",
+              submitTone: "brand",
+              submitLabel: "Create cluster",
+              defaultOpen: true,
+              fields: [{ name: "env", label: "Environment" }],
+            },
+          ],
+        },
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "author",
+              label: "Author",
+              tone: "brand",
+              expanded: true,
+              fields: [{ name: "brief", label: "Brief" }],
+            },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    expect(screen.getByRole("button", { name: "kind" }).getAttribute("data-tone")).toBeNull();
+    expect(screen.getByRole("button", { name: "Create cluster" }).getAttribute("data-tone")).toBe(
+      "brand",
+    );
+    // Without submitTone the submit keeps wearing the item's own tone.
+    expect(screen.getByRole("button", { name: "Author" }).getAttribute("data-tone")).toBe("brand");
+  });
+});

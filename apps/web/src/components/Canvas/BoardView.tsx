@@ -332,9 +332,18 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                 key={f.name}
                 className={`cvb-action-field${f.half ? " cvb-action-field--half" : ""}`}
               >
-                <label className="cvb-action-field-label" htmlFor={id}>
-                  {f.label}
-                </label>
+                {f.segmented && f.options ? (
+                  // A fieldset isn't labelable, and pointing the label at one
+                  // segment would rename that option after the field — a span +
+                  // aria-labelledby names the group, each segment keeps its own.
+                  <span id={`${id}-label`} className="cvb-action-field-label">
+                    {f.label}
+                  </span>
+                ) : (
+                  <label className="cvb-action-field-label" htmlFor={id}>
+                    {f.label}
+                  </label>
+                )}
                 {f.multiline ? (
                   <textarea
                     id={id}
@@ -365,12 +374,9 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                     }
                   />
                 ) : f.options && f.segmented ? (
-                  // The field label's htmlFor lands on the first segment — a
-                  // fieldset isn't labelable — while aria-label names the group.
-                  <fieldset className="cvb-action-segments" aria-label={f.label}>
+                  <fieldset className="cvb-action-segments" aria-labelledby={`${id}-label`}>
                     {!f.required && (
                       <button
-                        id={id}
                         type="button"
                         className="cvb-action-segment"
                         aria-pressed={!values[f.name]}
@@ -380,10 +386,9 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                         {f.placeholder ?? "—"}
                       </button>
                     )}
-                    {f.options.map((o, i) => (
+                    {f.options.map((o) => (
                       <button
                         key={o.value}
-                        id={f.required && i === 0 ? id : undefined}
                         type="button"
                         className="cvb-action-segment"
                         aria-pressed={values[f.name] === o.value}
