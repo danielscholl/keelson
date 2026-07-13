@@ -162,8 +162,8 @@ describe("pr-review workflow node graph", () => {
     const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     expect(code).toBe(0);
     const lines = out.trim().split("\n");
-    expect(lines).toContain("foo.ts\t11"); // added line
-    expect(lines).toContain("foo.ts\t10"); // context line, now anchorable
+    expect(lines).toContain("foo.ts\t11\t  const b = 2;"); // added line, with content
+    expect(lines).toContain("foo.ts\t10\t  const a = 1;"); // context line, now anchorable
   }, 15000);
 });
 
