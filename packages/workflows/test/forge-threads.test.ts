@@ -14,6 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeBinDir, pathWith, runForge } from "./forge-support.ts";
 
+// The shim is a POSIX bash script (needs bash + jq); gate its spawning suites to
+// POSIX — on Windows it runs under Git Bash, validated manually (see the PR).
+const shimDescribe = process.platform === "win32" ? describe.skip : describe;
+
 const tmps: string[] = [];
 afterEach(() => {
   while (tmps.length) rmSync(tmps.pop() as string, { recursive: true, force: true });
@@ -121,7 +125,7 @@ const GL_DISCUSSIONS = JSON.stringify([
   },
 ]);
 
-describe("forge pr threads (GitLab discussions -> gh reviewThreads)", () => {
+shimDescribe("forge pr threads (GitLab discussions -> gh reviewThreads)", () => {
   function glabThreads() {
     const FAKE = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "\${FAKE_LOG:-/dev/null}"
@@ -183,7 +187,7 @@ exit 1
   });
 });
 
-describe("forge pr threads (GitHub GraphQL) is identity-shaped", () => {
+shimDescribe("forge pr threads (GitHub GraphQL) is identity-shaped", () => {
   test("passes reviewThreads nodes through, filtering resolved", () => {
     const PAGE = JSON.stringify({
       data: {
@@ -234,7 +238,7 @@ exit 1
   });
 });
 
-describe("forge pr reply / resolve-thread route per forge", () => {
+shimDescribe("forge pr reply / resolve-thread route per forge", () => {
   test("gitlab reply posts to the discussion notes endpoint", () => {
     const log = logFile();
     const dir = fakeBinDir({
@@ -294,7 +298,7 @@ describe("forge pr reply / resolve-thread route per forge", () => {
   });
 });
 
-describe("forge pr review-batch anchors inline comments (GitLab)", () => {
+shimDescribe("forge pr review-batch anchors inline comments (GitLab)", () => {
   test("posts a NESTED position via --input - (RIGHT->new_*, LEFT->old_*)", () => {
     const stdinLog = logFile();
     const dir = fakeBinDir({

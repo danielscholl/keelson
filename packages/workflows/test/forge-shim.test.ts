@@ -8,11 +8,16 @@
 
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeBinDir, pathWith, runForge, SHIM } from "./forge-support.ts";
+
+// The forge shim is a POSIX bash script executed via its shebang; on Windows it
+// runs under Git Bash (validated manually — see the PR), which uv_spawn cannot
+// invoke by path. Gate the shim-spawning suites to POSIX.
+const shimDescribe = process.platform === "win32" ? describe.skip : describe;
 
 const tmps: string[] = [];
 function tmpFile(contents: string): string {
@@ -28,7 +33,7 @@ afterEach(() => {
 
 // ── GitHub passthrough: `exec gh "$@"` must be byte-for-byte ─────────────────
 
-describe("GitHub passthrough is byte-for-byte", () => {
+shimDescribe("GitHub passthrough is byte-for-byte", () => {
   // Fake gh echoes its argv to BOTH streams and derives its exit from a marker,
   // so we can compare `forge <args>` to a direct `gh <args>` invocation.
   const FAKE_GH = `#!/usr/bin/env bash
@@ -42,6 +47,7 @@ exit 0
 `;
   const dir = fakeBinDir({ gh: FAKE_GH });
   const env = { PATH: pathWith(dir), KEELSON_FORGE: "github" };
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
   function directGh(args: string[]) {
     const p = Bun.spawnSync({
@@ -124,7 +130,7 @@ const logText = (log: string): string => {
   }
 };
 
-describe("GitLab input translation", () => {
+shimDescribe("GitLab input translation", () => {
   test("pr create --draft --base --title --body-file -> mr create --yes --target-branch --draft ...", () => {
     const { env, log } = gitlabEnv();
     const body = tmpFile("PR BODY TEXT");
@@ -212,7 +218,7 @@ describe("GitLab input translation", () => {
   });
 });
 
-describe("GitLab output normalization (gh-shaped fields)", () => {
+shimDescribe("GitLab output normalization (gh-shaped fields)", () => {
   test("pr view remaps iid/description/web_url/branches/draft/cross-repo", () => {
     const { env } = gitlabEnv();
     const r = runForge(
@@ -279,7 +285,7 @@ describe("GitLab output normalization (gh-shaped fields)", () => {
 
 // ── CI checks: exit-code synthesis from the pipeline jobs API ────────────────
 
-describe("GitLab pr checks exit synthesis", () => {
+shimDescribe("GitLab pr checks exit synthesis", () => {
   function checksEnv(opts: { jobs: string; hasPipeline?: boolean; status?: string }) {
     const has = opts.hasPipeline !== false;
     const FAKE = `#!/usr/bin/env bash
@@ -342,7 +348,7 @@ exit 1
 
 // ── caps: GitHub-only capabilities degrade with exit 3 on GitLab ─────────────
 
-describe("forge caps gates GitHub-only capabilities", () => {
+shimDescribe("forge caps gates GitHub-only capabilities", () => {
   test("delegate is available on github", () => {
     expect(
       runForge(["caps", "--require", "delegate"], { env: { KEELSON_FORGE: "github" } }).exitCode,

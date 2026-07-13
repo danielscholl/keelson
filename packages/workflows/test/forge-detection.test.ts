@@ -15,7 +15,10 @@ import { join } from "node:path";
 import { runForge } from "./forge-support.ts";
 
 // `forge caps` with no --require prints the detected forge kind and exits 0
-// without touching gh/glab — the cheapest window into forge_kind().
+// without touching gh/glab — the cheapest window into forge_kind(). The shim is
+// a POSIX bash script run via Git Bash on Windows (validated manually); uv_spawn
+// can't invoke it by path there, so gate the spawning suite to POSIX.
+const shimDescribe = process.platform === "win32" ? describe.skip : describe;
 
 let repo: string;
 
@@ -34,7 +37,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(repo, { recursive: true, force: true }));
 
-describe("forge detection (from git remote host)", () => {
+shimDescribe("forge detection (from git remote host)", () => {
   const cases: Array<[string, string, string]> = [
     ["github ssh", "git@github.com:o/r.git", "github"],
     ["github https", "https://github.com/o/r.git", "github"],
