@@ -704,7 +704,13 @@ function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "a
   const [openIndex, setOpenIndex] = useState<number | null>(() => {
     if (!tabs) return null;
     const seed = section.items.findIndex(
-      (a) => a.defaultOpen === true && a.disabled !== true && (a.fields?.length ?? 0) > 0,
+      (a) =>
+        a.defaultOpen === true &&
+        a.disabled !== true &&
+        (a.fields?.length ?? 0) > 0 &&
+        // A solo model-picker action opens a popover off its button, not an
+        // inline form — it can't hold the open slot (see soloPicker).
+        !(a.fields?.length === 1 && a.fields[0]?.modelPicker),
     );
     return seed >= 0 ? seed : null;
   });

@@ -1577,6 +1577,14 @@ describe("create-form affordances", () => {
               fields: [{ name: "env", label: "AWS env" }],
             },
             {
+              // A solo model-picker opens a popover, not an inline form — it
+              // must not claim the open slot ahead of a form-bearing sibling.
+              type: "set-model",
+              label: "Model",
+              defaultOpen: true,
+              fields: [{ name: "model", label: "Model", modelPicker: {} }],
+            },
+            {
               type: "create",
               label: "kind",
               defaultOpen: true,

@@ -3922,8 +3922,7 @@ button.tab:focus-visible {
   flex-direction: column;
   gap: 6px;
 }
-/* A two-track grid so `half` fields can pair up on one row; every other child
-   spans the full row, which renders identically to the old stacked column. */
+/* Fields span both tracks unless `half` pairs adjacent fields two-up. */
 .cvb-action-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
