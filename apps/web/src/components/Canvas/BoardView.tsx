@@ -70,11 +70,11 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 // The form's starting values: each field's `defaultValue`, so a control opens on
 // a current value instead of blank. Also the post-submit reset target — never
-// bare `{}`, or a defaulted field would reopen empty. Sections and columns are
-// keyed positionally (a live board's tick must not remount a sibling's open form
-// and wipe its typing), so a changed default reaches a closed form via the
-// explicit re-seed effect in ActionItemButton; a card's own JSON change still
-// remounts its subtree.
+// bare `{}`, or a defaulted field would reopen empty. Sections and columns key
+// positionally, and cards/actions by stable identity (title / type), so a live
+// board's tick never remounts an open form and wipes its typing; a changed
+// default instead reaches a closed form via the re-seed effect in
+// ActionItemButton.
 function seedFieldValues(fields: readonly ActionField[]): Record<string, string> {
   const seed: Record<string, string> = {};
   for (const f of fields) {
@@ -837,13 +837,24 @@ function Section({ section }: { section: BoardSection }) {
         >
           {section.items.map((c) => {
             const fieldKey = makeKeyer();
-            // In a declared-capacity bench, a ghost card with no actions is a
-            // decorative pad seat — it rounds the bench up to full rows but
-            // carries nothing a reader needs.
-            const pad = columns !== undefined && c.ghost === true && (c.actions?.length ?? 0) === 0;
+            // A declared-capacity bench rounds up with decorative ghost pad seats.
+            // Hide one from assistive tech only when it carries nothing focusable —
+            // no title link, action, or interactive field — so `aria-hidden` can
+            // never bury a control a keyboard user can still reach.
+            const pad =
+              columns !== undefined &&
+              c.ghost === true &&
+              !isSafeLinkScheme(c.href) &&
+              (c.actions?.length ?? 0) === 0 &&
+              !(c.fields ?? []).some(
+                (f) =>
+                  Boolean(f.copyAction) ||
+                  (f.copyable === true && f.value != null) ||
+                  (!f.people && isSafeLinkScheme(f.href)),
+              );
             return (
               <div
-                key={key(JSON.stringify(c))}
+                key={key(c.title)}
                 className={`cvb-card${c.ghost ? " cvb-card--ghost" : ""}${pad ? " cvb-card--pad" : ""}`}
                 {...(pad ? { "aria-hidden": true } : {})}
               >
@@ -957,7 +968,7 @@ function Section({ section }: { section: BoardSection }) {
                   return inline.length > 0 ? (
                     <div className="cvb-actions cvb-card-actions">
                       {inline.map((a) => (
-                        <ActionItemButton key={fieldKey(JSON.stringify(a))} item={a} />
+                        <ActionItemButton key={fieldKey(a.type)} item={a} />
                       ))}
                     </div>
                   ) : null;

@@ -52,9 +52,15 @@ export function ReasoningEffortPopover({
       // fallback — the bottom of the document.
       popoverEl.style.top = `${Math.round(window.innerHeight / 3)}px`;
       popoverEl.style.bottom = "auto";
-      popoverEl.style.left = `${Math.round(Math.max(12, (window.innerWidth - popoverEl.offsetWidth) / 2))}px`;
+      // Transform-centre (not width math): on `beforetoggle` the panel is still
+      // display:none, so offsetWidth is 0 and width math would mis-centre a frame.
+      popoverEl.style.left = "50%";
+      popoverEl.style.transform = "translateX(-50%)";
       return;
     }
+    // Anchored placement sets an explicit left; clear any centring transform a
+    // prior anchor-less frame left behind, or it would shift this by half.
+    popoverEl.style.transform = "none";
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
     const spaceBelow = viewportH - rect.bottom;

@@ -1110,6 +1110,54 @@ describe("board actions — select fields and capability gating", () => {
     expect(box().value).toBe("Athena — guards the architecture");
   });
 
+  test("an open form keeps its typing while its OWN card's status ticks", async () => {
+    // The same-card variant: one seat carrying both an always-open brief and a
+    // status field that re-publishes each frame. Keying the card by its stable
+    // title (not its JSON) keeps the form mounted through the card's own tick —
+    // a JSON key would remount the whole card and wipe the textarea.
+    const seat = (elapsed: number): CanvasBoardView =>
+      ({
+        view: "board",
+        sections: [
+          {
+            kind: "cards",
+            grid: true,
+            columns: 4,
+            items: [
+              {
+                title: "Open seat",
+                ghost: true,
+                stacked: true,
+                fields: [{ value: `booting… · ${elapsed}s` }],
+                actions: [
+                  {
+                    type: "describe-own",
+                    label: "Author",
+                    expanded: true,
+                    fields: [{ name: "brief", label: "Brief", multiline: true }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }) as CanvasBoardView;
+    const { container, rerender } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={seat(5)} />
+      </BoardActionProvider>,
+    );
+    const box = () => container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(box(), { target: { value: "Athena — guards the architecture" } });
+    expect(box().value).toBe("Athena — guards the architecture");
+    rerender(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={seat(7)} />
+      </BoardActionProvider>,
+    );
+    expect(box().value).toBe("Athena — guards the architecture");
+  });
+
   test("a text field opens pre-filled from its defaultValue", async () => {
     const view = {
       view: "board",
