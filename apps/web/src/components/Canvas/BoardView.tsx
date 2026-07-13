@@ -380,10 +380,13 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                         type="button"
                         className="cvb-action-segment"
                         aria-pressed={!values[f.name]}
+                        // A bare "—" (or an empty placeholder) has no speakable
+                        // name; fall back to a stable "Clear <field>" label.
+                        aria-label={f.placeholder?.trim() ? undefined : `Clear ${f.label}`}
                         disabled={sealed}
                         onClick={() => setValues((v) => ({ ...v, [f.name]: "" }))}
                       >
-                        {f.placeholder ?? "—"}
+                        {f.placeholder?.trim() ? f.placeholder : "—"}
                       </button>
                     )}
                     {f.options.map((o) => (
