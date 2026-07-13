@@ -56,6 +56,10 @@ export function ReasoningEffortPopover({
       // display:none, so offsetWidth is 0 and width math would mis-centre a frame.
       popoverEl.style.left = "50%";
       popoverEl.style.transform = "translateX(-50%)";
+      // Clear the anchored path's inline sizing so a prior anchored open doesn't
+      // clip or mis-size this centred fallback.
+      popoverEl.style.maxHeight = "";
+      popoverEl.style.minWidth = "";
       return;
     }
     // Anchored placement sets an explicit left; clear any centring transform a
