@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runForge } from "./forge-support.ts";
+import { fakeBinDir, pathWith, runForge } from "./forge-support.ts";
 
 // `forge caps` with no --require prints the detected forge kind and exits 0
 // without touching gh/glab — the cheapest window into forge_kind(). The shim is
@@ -73,5 +73,33 @@ shimDescribe("forge detection (from git remote host)", () => {
     // 'gitlab' appears only in the path, not as a host segment.
     git(["remote", "add", "origin", "https://example.com/gitlab/r.git"]);
     expect(detect()).toBe("github");
+  });
+});
+
+// A self-hosted GitLab on a vanity host (no 'gitlab' segment, e.g.
+// community.opengroup.org) is invisible to the host-name check, so forge_kind
+// falls back to glab's own auth config as the tiebreak. Stub glab so the tier is
+// exercised without a real glab install or config.
+shimDescribe("forge detection (glab-authenticated vanity host)", () => {
+  // forge_kind's offline probe is `glab config get token --host <h>`; a
+  // non-empty token means glab is authenticated to that host.
+  const glabAuthed = fakeBinDir({
+    glab: `if [ "$1 $2 $3" = "config get token" ]; then printf 'glpat-fake-token\\n'; fi\nexit 0`,
+  });
+  const glabAnon = fakeBinDir({ glab: "exit 0" }); // no host configured -> empty
+
+  test("vanity host glab IS authed to -> gitlab", () => {
+    git(["remote", "add", "origin", "https://code.corp.internal/g/r.git"]);
+    expect(detect({ PATH: pathWith(glabAuthed) })).toBe("gitlab");
+  });
+
+  test("vanity host glab is NOT authed to -> github (incumbent)", () => {
+    git(["remote", "add", "origin", "https://code.corp.internal/g/r.git"]);
+    expect(detect({ PATH: pathWith(glabAnon) })).toBe("github");
+  });
+
+  test("github.com stays github even if glab reports a token (byte-for-byte AC)", () => {
+    git(["remote", "add", "origin", "https://github.com/o/r.git"]);
+    expect(detect({ PATH: pathWith(glabAuthed) })).toBe("github");
   });
 });
