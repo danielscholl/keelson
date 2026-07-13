@@ -68,7 +68,7 @@ describe("createKeelsonMcpServer", () => {
     const t = tools.find((x) => x.name === "osdu_read");
     expect(t).toBeDefined();
     expect(t?.inputSchema.type).toBe("object");
-    expect((t?.inputSchema.properties as Record<string, unknown>).q).toBeDefined();
+    expect((t?.inputSchema.properties as Record<string, unknown>)?.q).toBeDefined();
     expect(t?.annotations?.readOnlyHint).toBe(true);
     expect(t?.annotations?.destructiveHint).toBe(false);
   });
@@ -155,7 +155,7 @@ describe("createKeelsonMcpServer", () => {
     const t = (await client.listTools()).tools.find((x) => x.name === "workflow_run");
     expect(t).toBeDefined();
     expect(t?.inputSchema.type).toBe("object");
-    expect((t?.inputSchema.properties as Record<string, unknown>).project).toBeDefined();
+    expect((t?.inputSchema.properties as Record<string, unknown>)?.project).toBeDefined();
   });
 
   test("run_* op tools gate read-vs-state-changing at the MCP boundary", async () => {

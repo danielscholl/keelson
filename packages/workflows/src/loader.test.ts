@@ -548,7 +548,7 @@ nodes:
     ).toBe(false);
     const node = result.workflow?.nodes[0];
     expect(node?.output_format).toBeDefined();
-    expect((node?.output_format as { type?: unknown }).type).toBe("object");
+    expect((node?.output_format as { type?: unknown })?.type).toBe("object");
   });
 
   test("script node loads without an 'unimplemented' warning (handler is wired now)", () => {
