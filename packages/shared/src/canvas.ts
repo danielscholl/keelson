@@ -247,6 +247,15 @@ const canvasActionFieldSchema = z
     defaultValue: z.string().optional(),
     // Render a multi-line textarea rather than a single-line input.
     multiline: z.boolean().optional(),
+    // Half-width: adjacent `half` fields share a two-track row (Env | Profile)
+    // instead of each spanning the form, so a short form reads compact. A lone
+    // half field keeps its own row; full width stays the default.
+    half: z.boolean().optional(),
+    // Render `options` as a single-select segmented strip instead of a <select>
+    // — for a short enum set that should read at a glance. A non-required field
+    // leads with a clear segment (labelled by `placeholder`) dispatching "",
+    // mirroring the select's empty option. Requires `options`.
+    segmented: z.boolean().optional(),
     // A fixed choice set renders a <select> instead of a free-text input; the
     // dispatched value is the chosen option's `value`. A non-required select
     // offers `placeholder` as an empty "none" option, so an unset optional
@@ -276,6 +285,11 @@ const canvasActionFieldSchema = z
   .strict()
   .refine((f) => !(f.multiline && f.options), {
     message: "a field is either multiline or a select, not both",
+  })
+  // Segmented is a rendering of a fixed choice set; without options there is
+  // nothing to segment — fail at publish rather than falling back silently.
+  .refine((f) => !(f.segmented && !f.options), {
+    message: "a segmented field requires options",
   })
   .refine((f) => !(f.modelPicker && (f.multiline || f.options)), {
     message: "a modelPicker field carries neither multiline nor options",
@@ -381,10 +395,20 @@ export const canvasActionItemSchema = z
     // action's label/glyph/tone — no disclosure click — for a hero action whose
     // input IS the affordance. Inert without `fields`.
     expanded: z.boolean().optional(),
+    // In a `tabs` strip — where `expanded` is inert — open this item's form on
+    // first render, so the strip's primary mode isn't a click away (a create
+    // surface's default provider). The renderer opens the first enabled
+    // defaultOpen item carrying fields; the operator's toggles win after.
+    // Inert outside tabs and without `fields`.
+    defaultOpen: z.boolean().optional(),
     // The `fields` form's submit button text, when `label` names the tab/mode
     // rather than the verb (a "Debate" tab submitting as "Convene"). Defaults to
     // `label`; inert without `fields`.
     submitLabel: z.string().min(1).max(40).optional(),
+    // Tone for the `fields` form's submit button when `tone` must not style the
+    // trigger too — a neutral tab whose submit is the board's one primary verb
+    // (`tone` rides both buttons). Defaults to `tone`; inert without `fields`.
+    submitTone: canvasToneSchema.optional(),
     // Confirmation presentation metadata. `destructive` still marks dangerous
     // actions; this only controls whether the confirm dialog is simple or typed.
     confirm: canvasActionConfirmSchema.optional(),

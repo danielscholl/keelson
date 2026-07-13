@@ -1064,6 +1064,146 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("parses a defaultOpen tab item, and rejects a non-boolean defaultOpen", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            {
+              type: "create",
+              label: "kind",
+              defaultOpen: true,
+              fields: [{ name: "env", label: "Environment" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "actions", tabs: true, items: [{ type: "x", label: "X", defaultOpen: "yes" }] },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("parses a submitTone, and rejects an off-ramp submitTone", () => {
+    const parsed = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          tabs: true,
+          items: [
+            {
+              type: "create",
+              label: "kind",
+              submitTone: "brand",
+              fields: [{ name: "env", label: "Environment" }],
+            },
+          ],
+        },
+      ],
+    });
+    const section = parsed.view === "board" ? parsed.sections[0] : undefined;
+    const items = section?.kind === "actions" ? section.items : [];
+    expect(items[0]?.submitTone).toBe("brand");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "actions", items: [{ type: "x", label: "X", submitTone: "violet" }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("parses half fields, and rejects a non-boolean half", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "create",
+              label: "Create",
+              fields: [
+                { name: "env", label: "Environment", half: true },
+                { name: "profile", label: "Profile", half: true },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              { type: "x", label: "X", fields: [{ name: "env", label: "Env", half: "yes" }] },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("parses a segmented options field, and rejects segmented without options", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          items: [
+            {
+              type: "create",
+              label: "Create",
+              fields: [
+                {
+                  name: "profile",
+                  label: "Profile",
+                  segmented: true,
+                  placeholder: "cimpl default",
+                  options: [
+                    { value: "core", label: "core" },
+                    { value: "full", label: "full" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "x",
+                label: "X",
+                fields: [{ name: "profile", label: "Profile", segmented: true }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("parses an action item with a glyph and an opaque payload", () => {
     const v = canvasViewSchema.parse({
       view: "board",
