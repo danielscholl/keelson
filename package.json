@@ -25,7 +25,7 @@
     "check:fix": "biome check --write ."
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.2",
+    "@biomejs/biome": "2.5.3",
     "@types/node": "^26.0.0",
     "typescript": "^6.0.3"
   }
