@@ -198,7 +198,7 @@ ActionItem = {
   hint?,                // descriptive hover tooltip (WHAT it does), any state; joins with reason when disabled
   disabled?, reason?,   // gate the button (dim + seal); reason is the tooltip WHY, only with disabled: true
   expanded?,            // render fields as an always-open hero form (inert without fields)
-  defaultOpen?,         // in a tabs strip, open the first enabled, field-bearing item marked true on first render — the operator's toggles win after (inert elsewhere and without fields)
+  defaultOpen?,         // in a tabs strip, open the first enabled, field-bearing item marked true on first render — except a solo model-picker, which opens as a popover rather than a form and never seeds; the operator's toggles win after (inert elsewhere and without fields)
   submitLabel?,         // the fields form's submit button text, defaulting to label (inert without fields)
   submitTone?,          // tone for the fields form's submit button only, defaulting to tone — for a neutral tab whose submit is the board's primary verb (inert without fields)
   payload?,             // opaque rib-defined context, dispatched verbatim
