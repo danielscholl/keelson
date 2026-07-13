@@ -11,6 +11,7 @@
 // Reused by the local dry-run (scripts/dry-run-install.sh) and .github/workflows/release.yml.
 
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -150,6 +151,20 @@ for (const kind of STARTER_KINDS) {
   for (const n of files) {
     cpSync(join(srcDir, n), join(CLI_PKG_DIR, "assets", kind, n), { recursive: true });
   }
+}
+
+// 2d. Ship the `forge` shim under assets/bin/ (run-in-place, not seeded). The
+//     manifest's assets/ entry packs it; force +x so it stays executable after
+//     `bun pm pack` on POSIX installs.
+{
+  const forgeSrc = join(ROOT, "packages", "workflows", "assets", "bin", "forge");
+  if (!existsSync(forgeSrc)) {
+    throw new Error(`expected forge shim at ${forgeSrc}`);
+  }
+  const forgeDst = join(CLI_PKG_DIR, "assets", "bin", "forge");
+  mkdirSync(join(CLI_PKG_DIR, "assets", "bin"), { recursive: true });
+  cpSync(forgeSrc, forgeDst);
+  chmodSync(forgeDst, 0o755);
 }
 
 // 3. Pack the CLI package.
