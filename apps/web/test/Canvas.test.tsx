@@ -603,6 +603,56 @@ describe("CanvasProvider / useCanvas", () => {
     );
   });
 
+  test("declared-capacity cards grid pins columns and marks actionless ghosts as pads", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            {
+              kind: "cards",
+              grid: true,
+              columns: 4,
+              items: [
+                { title: "Moneypenny", pill: { label: "Chief of Staff" } },
+                {
+                  title: "Open seat",
+                  ghost: true,
+                  actions: [{ type: "describe-own", label: "Author a Mind" }],
+                },
+                { title: "Empty seat", ghost: true },
+                { title: "Empty seat", ghost: true },
+              ],
+            },
+          ],
+        }),
+      },
+      title: "bench",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    const grid = dialog.querySelector(".cvb-cards--grid");
+    expect(grid?.getAttribute("data-columns")).toBe("4");
+    expect((grid as HTMLElement).style.getPropertyValue("--cvb-cols")).toBe("4");
+    // Pads: decorative ghosts without actions — hidden from the tree; the
+    // launchpad ghost (it carries actions) is a real seat, never a pad.
+    const pads = dialog.querySelectorAll(".cvb-card--pad");
+    expect(pads.length).toBe(2);
+    for (const pad of pads) {
+      expect(pad.getAttribute("aria-hidden")).toBe("true");
+    }
+    const launchpad = dialog.querySelector(".cvb-card--ghost:not(.cvb-card--pad)");
+    expect(launchpad?.textContent).toContain("Open seat");
+    expect(launchpad?.getAttribute("aria-hidden")).toBeNull();
+  });
+
   test("board renders a people field as toned names and stacks a stacked card's fields", () => {
     const doc: CanvasDocument = {
       kind: "view",

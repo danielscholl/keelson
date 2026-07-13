@@ -76,7 +76,15 @@ export function ModelCatalogPopover({
     const popoverEl = popoverRef.current;
     if (!popoverEl) return;
     const trigger = document.getElementById(anchorId);
-    if (!trigger) return;
+    if (!trigger) {
+      // The anchor can vanish between click and toggle (a live board frame can
+      // remount it); center rather than paint at the top layer's static
+      // fallback — the bottom of the document.
+      popoverEl.style.top = `${Math.round(window.innerHeight / 3)}px`;
+      popoverEl.style.bottom = "auto";
+      popoverEl.style.left = `${Math.round(Math.max(12, (window.innerWidth - popoverEl.offsetWidth) / 2))}px`;
+      return;
+    }
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
     const spaceBelow = viewportH - rect.bottom;
@@ -114,8 +122,17 @@ export function ModelCatalogPopover({
         queueMicrotask(() => searchInputRef.current?.focus());
       }
     };
+    const onBeforeToggle = (e: Event) => {
+      // `toggle` dispatches async (coalesced) — reposition before the first
+      // paint too, or the popover shows a beat at its unpositioned fallback.
+      if ((e as ToggleEvent).newState === "open") reposition();
+    };
+    popoverEl.addEventListener("beforetoggle", onBeforeToggle);
     popoverEl.addEventListener("toggle", onToggle);
-    return () => popoverEl.removeEventListener("toggle", onToggle);
+    return () => {
+      popoverEl.removeEventListener("beforetoggle", onBeforeToggle);
+      popoverEl.removeEventListener("toggle", onToggle);
+    };
   }, [reposition, failed, reload]);
 
   useEffect(() => {

@@ -4132,6 +4132,64 @@ button.cvb-action-field-model:disabled {
 .cvb-card--ghost .cvb-action-form {
   text-align: left;
 }
+/* Declared-capacity bench (`columns`): exactly N set-size tracks when the panel
+   is wide enough. auto-fill against a floor of max(240px, an exact 1/N share)
+   holds the track count at N on wide surfaces and collapses it intrinsically on
+   narrow ones — a lone card never stretches to fill the row. */
+.cvb-cards--grid[data-columns] {
+  container-type: inline-size;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(max(240px, calc((100% - (var(--cvb-cols) - 1) * 8px) / var(--cvb-cols))), 1fr)
+  );
+}
+.cvb-cards--grid[data-columns] > .cvb-card {
+  min-height: 196px;
+}
+/* Set-size seats align their controls: footers anchor to the bottom edge. */
+.cvb-cards--grid > .cvb-card > .cvb-card-actions {
+  margin-top: auto;
+}
+/* Pad seat — the decorative ghost rounding the bench up to full rows. */
+.cvb-card--pad {
+  opacity: 0.55;
+}
+.cvb-card--pad .cvb-card-title {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+/* Below full capacity a pad is a dead cell between the roster and the next
+   content — drop them. Thresholds mirror the 240px track floor per declared
+   capacity. */
+@container (max-width: 487px) {
+  .cvb-cards--grid[data-columns="2"] > .cvb-card--pad {
+    display: none;
+  }
+}
+@container (max-width: 735px) {
+  .cvb-cards--grid[data-columns="3"] > .cvb-card--pad {
+    display: none;
+  }
+}
+@container (max-width: 983px) {
+  .cvb-cards--grid[data-columns="4"] > .cvb-card--pad {
+    display: none;
+  }
+}
+@container (max-width: 1231px) {
+  .cvb-cards--grid[data-columns="5"] > .cvb-card--pad {
+    display: none;
+  }
+}
+@container (max-width: 1479px) {
+  .cvb-cards--grid[data-columns="6"] > .cvb-card--pad {
+    display: none;
+  }
+}
 .cvb-card-head {
   display: flex;
   align-items: center;
