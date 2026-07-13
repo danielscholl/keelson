@@ -1,0 +1,623 @@
+#!/usr/bin/env bash
+# forge — a thin GitHub/GitLab abstraction for keelson's bundled workflows.
+#
+# Contract: on GitHub `forge <args>` is a literal `exec gh <args>` — the process
+# is replaced, so stdout/stderr/exit/stdin are gh's exactly (byte-for-byte). On
+# GitLab it dispatches per verb to `glab`/`glab api`, translating input flags AND
+# re-shaping output JSON to gh's field names, so downstream jq/prompts are
+# unchanged. A handful of verbs (pr threads/reply/resolve-thread/review-batch/
+# reviews, caps) are keelson-owned and implemented per-forge on BOTH sides.
+#
+# Forge selection: $KEELSON_FORGE (github|gitlab|auto) wins; otherwise the git
+# remote host decides. The default is ALWAYS github — glab is chosen only on an
+# affirmative gitlab host match, so an unknown/self-hosted/no-remote context is
+# byte-for-byte the incumbent gh. Self-hosted GitLab on a vanity host must set
+# KEELSON_FORGE=gitlab.
+
+set -uo pipefail
+
+die() { printf 'forge: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+forge_kind() {
+  case "${KEELSON_FORGE:-auto}" in
+    github|gh) printf 'github\n'; return 0 ;;
+    gitlab|glab) printf 'gitlab\n'; return 0 ;;
+  esac
+  local url host
+  url=$(git remote get-url --push origin 2>/dev/null \
+        || git remote get-url origin 2>/dev/null \
+        || git remote get-url "$(git remote 2>/dev/null | head -1)" 2>/dev/null \
+        || printf '')
+  # Strip scheme://, user@, and the :path or /path tail; match on dot-delimited
+  # host segments, not substrings (so github.corp.example detects but the shim
+  # never misfires on a path component).
+  host=$(printf '%s' "$url" | sed -E 's#^[a-z][a-z0-9+.-]*://##; s#^[^@/]*@##; s#[:/].*$##' | tr '[:upper:]' '[:lower:]')
+  case ".$host." in
+    *.gitlab.*) printf 'gitlab\n'; return 0 ;;
+  esac
+  printf 'github\n'   # incumbent: unknown host / no remote => gh, unchanged.
+}
+
+# ── GitLab helpers ──────────────────────────────────────────────────────────
+
+# URL-encoded "group/project" for glab api's projects/<id> path. glab's own
+# :fullpath placeholder is avoided so the shim works the same in older glab.
+_glp=""
+gl_project() {
+  if [ -z "$_glp" ]; then
+    _glp=$(glab repo view -F json 2>/dev/null | jq -r '.path_with_namespace // empty' | sed 's#/#%2F#g')
+    [ -n "$_glp" ] || die "could not resolve GitLab project from the current repo" 3
+  fi
+  printf '%s' "$_glp"
+}
+
+gl_default_branch() {
+  glab repo view -F json 2>/dev/null | jq -r '.default_branch // "main"'
+}
+
+# gh-shaped state from a glab state enum.
+gl_state_upper='(if .state=="opened" then "OPEN" elif .state=="closed" then "CLOSED" elif .state=="merged" then "MERGED" else "OPEN" end)'
+
+# Reshape one glab MR object (stdin) into a gh pr-view object (stdout).
+gl_mr_to_gh='{
+  number: .iid, url: .web_url, title: .title, body: (.description // ""),
+  state: '"$gl_state_upper"',
+  isDraft: ((.draft // .work_in_progress) // false),
+  baseRefName: .target_branch, headRefName: .source_branch,
+  headRefOid: (.sha // .diff_refs.head_sha // null),
+  isCrossRepository: ((.source_project_id // 0) != (.target_project_id // 0)),
+  author: { login: (.author.username // "unknown") },
+  mergeable: (if .merge_status=="can_be_merged" then "MERGEABLE" elif .merge_status=="cannot_be_merged" then "CONFLICTING" else "UNKNOWN" end),
+  labels: [ (.labels // [])[] | (if type=="string" then {name: .} else {name: (.name // .title // "")} end) ],
+  headRepository: { name: null }, headRepositoryOwner: { login: null }
+}'
+
+# Reshape one glab issue object (stdin) into a gh issue-view object (stdout).
+gl_issue_to_gh='{
+  number: .iid, url: .web_url, title: .title, body: (.description // ""),
+  state: (if .state=="opened" then "OPEN" else "CLOSED" end),
+  author: { login: (.author.username // "unknown") },
+  labels: [ (.labels // [])[] | (if type=="string" then {name: .} else {name: (.name // .title // "")} end) ],
+  milestone: (if .milestone then { number: .milestone.iid, title: .milestone.title } else null end),
+  comments: []
+}'
+
+# Project a gh-shaped payload (arg 1) to the caller's --json field set (arg 2,
+# comma list, "" = all) and optional -q jq expr (arg 3, "" = pretty print), the
+# way gh does. Mirrors `gh <verb> --json a,b -q '.a'`, and maps the projection
+# over elements when the payload is an array (list / checks verbs).
+emit_json() {
+  local full="$1" fields="$2" jqexpr="$3" proj
+  if [ -n "$fields" ]; then
+    proj=$(printf '%s' "$fields" | awk -F, '{o="{"; for(i=1;i<=NF;i++){gsub(/^[ \t]+|[ \t]+$/,"",$i); if($i!="") o=o (i>1?",":"") $i": ."$i} print o "}"}')
+    if [ "$(printf '%s' "$full" | jq -r 'type')" = array ]; then
+      full=$(printf '%s' "$full" | jq "[ .[] | $proj ]")
+    else
+      full=$(printf '%s' "$full" | jq "$proj")
+    fi
+  fi
+  if [ -n "$jqexpr" ]; then
+    printf '%s' "$full" | jq -r "$jqexpr"
+  else
+    printf '%s\n' "$full" | jq '.'
+  fi
+}
+
+# ── Read verbs (GitLab) ─────────────────────────────────────────────────────
+
+gl_pr_view() {                       # forge pr view [<n>] --json <f> [-q <e>]
+  local iid="" fields="" jqexpr=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) fields="$2"; shift 2 ;;
+      -q|--jq) jqexpr="$2"; shift 2 ;;
+      -*) shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  [ -n "$iid" ] || iid=$(glab mr view -F json 2>/dev/null | jq -r '.iid')
+  local raw; raw=$(glab mr view "$iid" -F json) || die "glab mr view $iid failed" 1
+  emit_json "$(printf '%s' "$raw" | jq "$gl_mr_to_gh")" "$fields" "$jqexpr"
+}
+
+gl_issue_view() {                    # forge issue view <n> --json <f> [-q <e>]
+  local iid="" fields="" jqexpr="" want_comments=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) fields="$2"; case ",$fields," in *,comments,*) want_comments=1 ;; esac; shift 2 ;;
+      -q|--jq) jqexpr="$2"; shift 2 ;;
+      --comments) want_comments=1; shift ;;
+      -*) shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  [ -n "$iid" ] || die "forge issue view needs an issue number" 2
+  local raw obj; raw=$(glab issue view "$iid" -F json) || die "glab issue view $iid failed" 1
+  obj=$(printf '%s' "$raw" | jq "$gl_issue_to_gh")
+  if [ "$want_comments" = 1 ]; then
+    local notes; notes=$(glab api --paginate "projects/$(gl_project)/issues/${iid}/notes?per_page=100" 2>/dev/null || printf '[]')
+    obj=$(printf '%s' "$obj" | jq --argjson n "$(printf '%s' "$notes" | jq -s 'add // []')" \
+      '.comments = [ $n[] | select(.system != true) | { author: { login: (.author.username // "unknown") }, body: (.body // ""), createdAt: .created_at } ]')
+  fi
+  emit_json "$obj" "$fields" "$jqexpr"
+}
+
+gl_repo_view() {                     # forge repo view --json <f> [-q <e>]
+  local fields="" jqexpr=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) fields="$2"; shift 2 ;;
+      -q|--jq) jqexpr="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  local raw; raw=$(glab repo view -F json) || die "glab repo view failed" 1
+  local obj; obj=$(printf '%s' "$raw" | jq '{
+    nameWithOwner: .path_with_namespace, name: .name,
+    owner: { login: (.namespace.full_path // (.path_with_namespace | split("/")[:-1] | join("/"))) },
+    defaultBranchRef: { name: .default_branch },
+    isPrivate: (.visibility != "public"), url: .web_url,
+    isFork: (has("forked_from_project") and .forked_from_project != null)
+  }')
+  emit_json "$obj" "$fields" "$jqexpr"
+}
+
+gl_list() {                          # forge {pr,mr}|issue list [...] — native table unless --json
+  local kind="$1"; shift
+  local fields="" jqexpr="" args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) fields="$2"; shift 2 ;;
+      -q|--jq) jqexpr="$2"; shift 2 ;;
+      --head|--source-branch) args+=(--source-branch "$2"); shift 2 ;;
+      --base|--target-branch) args+=(--target-branch "$2"); shift 2 ;;
+      --state) args+=("$( [ "$2" = open ] && printf -- '--opened' || printf -- '--%s' "$2" )"); shift 2 ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  # `${args[@]+...}` guards the empty-array expansion under `set -u` on bash 3.2
+  # (stock macOS), where a bare `"${args[@]}"` on an empty array aborts.
+  if [ -z "$fields" ]; then
+    glab "$kind" list ${args[@]+"${args[@]}"}; return $?
+  fi
+  # `mr list` uses -F for text|json; `issue list`'s -F is a details/ids format
+  # switch (it silently ignores an unknown value) — its json flag is -O.
+  local oflag remap
+  [ "$kind" = issue ] && oflag=(-O json) || oflag=(-F json)
+  [ "$kind" = mr ] && remap="$gl_mr_to_gh" || remap="$gl_issue_to_gh"
+  local raw; raw=$(glab "$kind" list ${args[@]+"${args[@]}"} "${oflag[@]}")
+  emit_json "$(printf '%s' "$raw" | jq "[ .[] | $remap ]")" "$fields" "$jqexpr"
+}
+
+gl_pr_diff() {                       # forge pr diff <n> [--name-only]
+  local iid="" name_only=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name-only) name_only=1; shift ;;
+      -*) shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  if [ "$name_only" = 1 ]; then
+    glab mr diff "$iid" --raw | grep -E '^diff --git' | awk '{print $3}' | sed 's#^a/##'
+  else
+    glab mr diff "$iid" --raw
+  fi
+}
+
+# ── CI / checks (GitLab) ────────────────────────────────────────────────────
+
+# Latest pipeline id for an MR, or "" if none.
+gl_mr_pipeline() {
+  glab api "projects/$(gl_project)/merge_requests/$1/pipelines?per_page=1" 2>/dev/null \
+    | jq -r 'if type=="array" and length>0 then .[0].id else empty end'
+}
+# Jobs for a pipeline as a gh-shaped check-row array on stdout.
+gl_pipeline_jobs() {
+  glab api --paginate "projects/$(gl_project)/pipelines/$1/jobs?per_page=100" 2>/dev/null \
+    | jq -s 'add // [] | [ .[] | {
+        name: .name, workflow: .stage,
+        status: (.status | ascii_upcase),
+        state: (.status | ascii_upcase),
+        conclusion: (if .status=="success" or (.allow_failure and .status=="failed") then "SUCCESS" elif .status=="failed" then "FAILURE" elif .status=="canceled" then "CANCELLED" elif .status=="skipped" or .status=="manual" then "SKIPPED" else "" end),
+        bucket: (if .status=="success" or (.allow_failure and .status=="failed") then "pass" elif .status=="failed" then "fail" elif .status=="canceled" then "cancel" elif .status=="skipped" or .status=="manual" then "skipping" else "pending" end),
+        allowFailure: (.allow_failure // false)
+      } ]'
+}
+# Exit-code from a gh-shaped check-row array (stdin): 0 all pass, 1 any fail, 8 any pending.
+gl_checks_exit() {
+  jq -r 'if any(.[]?; .bucket=="fail") then 1 elif any(.[]?; .bucket=="pending") then 8 else 0 end'
+}
+# The pipeline's own status, for the case where jobs haven't materialized yet.
+gl_pipeline_status() {               # <pid>
+  glab api "projects/$(gl_project)/pipelines/$1" 2>/dev/null | jq -r '.status // "unknown"'
+}
+# Exit-code from a pipeline status, mirroring gh's checks model (fail 1, pending 8).
+gl_status_exit() {                   # <status>
+  case "$1" in
+    failed) printf 1 ;;
+    created|pending|running|waiting_for_resource|preparing|scheduled) printf 8 ;;
+    *) printf 0 ;; # success | canceled | skipped | manual | unknown
+  esac
+}
+# Non-empty jobs -> derive from jobs; empty jobs -> fall back to the pipeline
+# status so a pipeline that hasn't spawned jobs yet never reports green.
+gl_checks_code() {                   # <pid> <rows-json>
+  if printf '%s' "$2" | jq -e 'length > 0' >/dev/null 2>&1; then
+    printf '%s' "$2" | gl_checks_exit
+  else
+    gl_status_exit "$(gl_pipeline_status "$1")"
+  fi
+}
+
+gl_pr_checks() {                     # forge pr checks <n> [--json <f>] [-q <e>] [--watch] [--interval N]
+  local iid="" fields="" jqexpr="" watch=0 interval=10
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) fields="$2"; shift 2 ;;
+      -q|--jq) jqexpr="$2"; shift 2 ;;
+      --watch) watch=1; shift ;;
+      --interval) interval="$2"; shift 2 ;;
+      -*) shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  local pid rows
+  pid=$(gl_mr_pipeline "$iid")
+  if [ -z "$pid" ]; then
+    # No pipeline == gh's "no checks": empty array (length 0 => UNKNOWN branch),
+    # never a green signal.
+    if [ -n "$fields" ] || [ -n "$jqexpr" ]; then emit_json '[]' "$fields" "$jqexpr"; else printf '[]\n'; fi
+    printf 'forge: no pipeline for MR %s (treated as no checks)\n' "$iid" >&2
+    [ "$watch" = 1 ] && return 1 || return 0
+  fi
+  if [ "$watch" = 1 ]; then
+    while :; do
+      rows=$(gl_pipeline_jobs "$pid")
+      if printf '%s' "$rows" | jq -e 'length > 0' >/dev/null 2>&1; then
+        printf '%s' "$rows" | jq -e 'any(.[]; .bucket=="pending")' >/dev/null 2>&1 || break
+      else
+        # No jobs yet: keep waiting unless the pipeline itself is terminal.
+        case "$(gl_pipeline_status "$pid")" in success|failed|canceled|skipped|manual) break ;; esac
+      fi
+      sleep "$interval"
+    done
+    printf '%s\n' "$rows" >&2
+    return "$(gl_checks_code "$pid" "$rows")"
+  fi
+  rows=$(gl_pipeline_jobs "$pid")
+  # gh returns early (exit 0) in --json/-q mode; only the plain form carries the
+  # pass/fail/pending exit code.
+  if [ -n "$fields" ] || [ -n "$jqexpr" ]; then
+    emit_json "$rows" "$fields" "$jqexpr"
+    return 0
+  fi
+  printf '%s\n' "$rows"
+  return "$(gl_checks_code "$pid" "$rows")"
+}
+
+# ── Write verbs (GitLab) ────────────────────────────────────────────────────
+
+gl_pr_create() {                     # forge pr create --draft --base <b> --title <t> --body-file <f>
+  local draft=0 fill=0 base="" title="" body=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --draft) draft=1; shift ;;
+      --base) base="$2"; shift 2 ;;
+      --title|-t) title="$2"; shift 2 ;;
+      --body|-b) body="$2"; shift 2 ;;
+      --body-file|-F) body="$(cat "$2")"; shift 2 ;;
+      --fill) fill=1; shift ;;
+      *) shift ;;
+    esac
+  done
+  [ -n "$base" ] || base=$(gl_default_branch)
+  local ga=(mr create --yes --target-branch "$base")
+  [ "$draft" = 1 ] && ga+=(--draft)
+  [ "$fill" = 1 ] && ga+=(--fill)
+  [ -n "$title" ] && ga+=(--title "$title")
+  [ -n "$body" ] && ga+=(--description "$body")
+  # glab prints a decorated block; echo only the MR URL line so callers that
+  # capture stdout (→ .pr-url) get the same single URL gh prints.
+  glab "${ga[@]}" 2>&1 | grep -oE 'https?://[^[:space:]]+/-/merge_requests/[0-9]+' | head -1
+}
+
+gl_pr_edit() {                       # forge pr edit <n> --base <b>
+  local iid="" base=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --base) base="$2"; shift 2 ;;
+      -*) shift 2 ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  glab mr update "$iid" --target-branch "$base"
+}
+
+gl_pr_ready() {                      # forge pr ready <n> [--undo]
+  local iid="" undo=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --undo) undo=1; shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  [ "$undo" = 1 ] && glab mr update "$iid" --draft || glab mr update "$iid" --ready
+}
+
+gl_pr_checkout() {                   # forge pr checkout <n> [--detach]
+  local iid="" detach=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --detach) detach=1; shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  glab mr checkout "$iid" || return 1
+  [ "$detach" = 1 ] && git checkout --detach 2>/dev/null || true
+}
+
+gl_issue_create() {                  # forge issue create --title <t> --body-file <f>
+  local title="" body=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --title|-t) title="$2"; shift 2 ;;
+      --body|-b) body="$2"; shift 2 ;;
+      --body-file|-F) body="$(cat "$2")"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  glab issue create --yes --title "$title" --description "$body" 2>&1 \
+    | grep -oE 'https?://[^[:space:]]+/-/issues/[0-9]+' | head -1
+}
+
+gl_issue_comment() {                 # forge issue comment <n> --body-file <f> | --body <t>
+  local iid="" body=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --body|-b) body="$2"; shift 2 ;;
+      --body-file|-F) body="$(cat "$2")"; shift 2 ;;
+      -*) shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  glab issue note "$iid" -m "$body"
+}
+
+gl_pr_review() {                     # forge pr review <n> [--approve|--request-changes|--comment] [--body <t>|--body-file <f>]
+  local iid="" mode="comment" body=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --approve) mode="approve"; shift ;;
+      --request-changes) mode="request-changes"; shift ;;
+      --comment) mode="comment"; shift ;;
+      --body|-b) body="$2"; shift 2 ;;
+      --body-file|-F) body="$(cat "$2")"; shift 2 ;;
+      -*) shift ;;
+      *) iid="$1"; shift ;;
+    esac
+  done
+  if [ "$mode" = approve ]; then
+    glab mr approve "$iid" || return 1
+    [ -n "$body" ] && glab mr note "$iid" -m "$body"
+    return 0
+  fi
+  # GitLab has no request-changes state; record it as an MR note (unapproved).
+  [ "$mode" = request-changes ] && body="Changes requested:
+${body}"
+  glab mr note "$iid" -m "$body"
+}
+
+# ── Review threads (purpose-built, per forge) ───────────────────────────────
+
+# Emit a gh-shaped reviewThreads.nodes[] array of UNRESOLVED threads.
+threads_github() {                   # <pr>
+  local pr="$1" repo owner name cursor="" page has_next out="[]"
+  repo=$(gh repo view --json nameWithOwner -q '.nameWithOwner'); owner="${repo%%/*}"; name="${repo##*/}"
+  while :; do
+    page=$(gh api graphql -f query='query($o:String!,$n:String!,$pr:Int!,$c:String){repository(owner:$o,name:$n){pullRequest(number:$pr){reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id isResolved path line comments(first:50){nodes{databaseId body author{login}}}}}}}}' \
+      -f o="$owner" -f n="$name" -F pr="$pr" ${cursor:+-f c="$cursor"})
+    out=$(jq -s '.[0] + [ .[1].data.repository.pullRequest.reviewThreads.nodes[] ]' <(printf '%s' "$out") <(printf '%s' "$page"))
+    has_next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+    cursor=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""')
+    [ "$has_next" = true ] || break
+  done
+  printf '%s' "$out" | jq '[ .[] | select(.isResolved == false) ]'
+}
+
+threads_gitlab() {                   # <mr>
+  glab api --paginate "projects/$(gl_project)/merge_requests/$1/discussions?per_page=100" 2>/dev/null \
+    | jq -s 'add // []
+      | [ .[]
+          | select(.individual_note != true)
+          | select(any(.notes[]?; (.resolvable == true) and (.resolved != true)))
+          | (([ .notes[] | select(.resolvable == true) ][0]) // .notes[0]) as $anchor
+          | {
+              id: (.id | tostring),
+              isResolved: ([ .notes[] | select(.resolvable == true) ] | length > 0 and all(.resolved == true)),
+              path: ($anchor.position.new_path // $anchor.position.old_path // null),
+              line: ($anchor.position.new_line // $anchor.position.old_line // null),
+              comments: { nodes: [ .notes[] | select(.system != true) | { databaseId: .id, body: .body, author: { login: .author.username } } ] }
+            }
+        ]'
+}
+
+cmd_threads() {                      # forge pr threads <n> --unresolved
+  local kind="$1" pr="${2:-}"
+  [ -n "$pr" ] || die "forge pr threads needs an MR/PR number" 2
+  [ "$kind" = gitlab ] && threads_gitlab "$pr" || threads_github "$pr"
+}
+
+cmd_reply() {                        # forge pr reply <n> --thread <id> [--comment <cid>] --body <t>|--body-file <f>
+  local kind="$1"; shift
+  local pr="" thread="" comment="" body=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --thread) thread="$2"; shift 2 ;;
+      --comment) comment="$2"; shift 2 ;;
+      --body) body="$2"; shift 2 ;;
+      --body-file) body="$(cat "$2")"; shift 2 ;;
+      -*) shift ;;
+      *) pr="$1"; shift ;;
+    esac
+  done
+  if [ "$kind" = gitlab ]; then
+    glab api -X POST "projects/$(gl_project)/merge_requests/${pr}/discussions/${thread}/notes" -f body="$body"
+  else
+    local repo owner name; repo=$(gh repo view --json nameWithOwner -q '.nameWithOwner'); owner="${repo%%/*}"; name="${repo##*/}"
+    [ -n "$comment" ] || die "GitHub reply needs --comment (first comment databaseId)" 2
+    gh api -X POST "repos/${owner}/${name}/pulls/${pr}/comments/${comment}/replies" -f body="$body"
+  fi
+}
+
+cmd_resolve_thread() {               # forge pr resolve-thread <n> --thread <id>
+  local kind="$1"; shift
+  local pr="" thread=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --thread) thread="$2"; shift 2 ;;
+      -*) shift ;;
+      *) pr="$1"; shift ;;
+    esac
+  done
+  if [ "$kind" = gitlab ]; then
+    # PUT resolved=true; wrap into gh's resolveReviewThread envelope so callers'
+    # `.data.resolveReviewThread.thread.isResolved` jq keeps working.
+    local resp; resp=$(glab api -X PUT "projects/$(gl_project)/merge_requests/${pr}/discussions/${thread}?resolved=true" 2>/dev/null) || {
+      # A standalone/system discussion has nothing to resolve — benign.
+      printf '{"data":{"resolveReviewThread":{"thread":{"id":"%s","isResolved":true}}}}\n' "$thread"; return 0; }
+    printf '%s' "$resp" | jq --arg id "$thread" '{data:{resolveReviewThread:{thread:{id:$id, isResolved: ([ (.notes // [])[] | select(.resolvable==true) ] | (length>0 and all(.resolved==true)))}}}}'
+  else
+    gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{id isResolved}}}' -f t="$thread"
+  fi
+}
+
+cmd_reviews() {                      # forge pr reviews <n> --json body [-q <e>]  (idempotency scan)
+  local kind="$1"; shift
+  local pr="" fields="" jqexpr=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) fields="$2"; shift 2 ;;
+      -q|--jq) jqexpr="$2"; shift 2 ;;
+      -*) shift ;;
+      *) pr="$1"; shift ;;
+    esac
+  done
+  local arr
+  if [ "$kind" = gitlab ]; then
+    arr=$(glab api --paginate "projects/$(gl_project)/merge_requests/${pr}/notes?per_page=100" 2>/dev/null \
+      | jq -s 'add // [] | [ .[] | select(.system != true) | { body: (.body // ""), author: { login: .author.username } } ]')
+  else
+    local repo owner name; repo=$(gh repo view --json nameWithOwner -q '.nameWithOwner'); owner="${repo%%/*}"; name="${repo##*/}"
+    arr=$(gh api --paginate "repos/${owner}/${name}/pulls/${pr}/reviews" 2>/dev/null \
+      | jq -s 'add // [] | [ .[] | { body: (.body // ""), author: { login: .user.login } } ]')
+  fi
+  emit_json "${arr:-[]}" "$fields" "$jqexpr"
+}
+
+cmd_review_batch() {                 # forge pr review-batch <n> --input <payload.json>
+  local kind="$1"; shift
+  local pr="" input=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --input) input="$2"; shift 2 ;;
+      -*) shift ;;
+      *) pr="$1"; shift ;;
+    esac
+  done
+  [ -f "$input" ] || die "forge pr review-batch needs --input <payload.json>" 2
+  if [ "$kind" != gitlab ]; then
+    local repo owner name; repo=$(gh repo view --json nameWithOwner -q '.nameWithOwner'); owner="${repo%%/*}"; name="${repo##*/}"
+    gh api -X POST "repos/${owner}/${name}/pulls/${pr}/reviews" --input "$input"
+    return $?
+  fi
+  # GitLab fan-out: summary body → one MR note; each anchored comment → a
+  # discussion positioned against the MR's CURRENT diff_refs (not the versions
+  # endpoint, which can be stale). Unanchorable comments degrade to a stderr log.
+  local body refs base start head p
+  body=$(jq -r '.body // ""' "$input")
+  [ -n "$body" ] && glab api -X POST "projects/$(gl_project)/merge_requests/${pr}/notes" -f body="$body" >/dev/null
+  refs=$(glab mr view "$pr" -F json | jq -r '.diff_refs | "\(.base_sha)\t\(.start_sha)\t\(.head_sha)"')
+  base=$(printf '%s' "$refs" | cut -f1); start=$(printf '%s' "$refs" | cut -f2); head=$(printf '%s' "$refs" | cut -f3)
+  p=$(gl_project)
+  # The position must be a NESTED object; glab serializes `-f position[k]=v` as
+  # flat JSON keys that GitLab drops, so build it with jq and pipe via --input -.
+  # A LEFT-side comment anchors on old_path/old_line, RIGHT on new_path/new_line.
+  jq -c '.comments[]?' "$input" | while IFS= read -r c; do
+    local cpath cline
+    cpath=$(printf '%s' "$c" | jq -r '.path'); cline=$(printf '%s' "$c" | jq -r '.line')
+    printf '%s' "$c" | jq -c --arg bs "$base" --arg ss "$start" --arg hs "$head" '
+      { body: .body,
+        position: ({ position_type: "text", base_sha: $bs, start_sha: $ss, head_sha: $hs }
+          + (if (.side // "RIGHT") == "LEFT"
+             then { old_path: .path, old_line: .line }
+             else { new_path: .path, new_line: .line } end)) }' \
+      | glab api -X POST "projects/${p}/merge_requests/${pr}/discussions" --input - >/dev/null 2>&1 \
+      || printf 'forge: could not anchor review comment at %s:%s (skipped)\n' "$cpath" "$cline" >&2
+  done
+}
+
+cmd_caps() {                         # forge caps --require <cap>  (exit 3 if unsupported on this forge)
+  local kind; kind=$(forge_kind)
+  local require=""
+  while [ $# -gt 0 ]; do case "$1" in --require) require="$2"; shift 2 ;; *) shift ;; esac; done
+  case "$require" in
+    delegate)   # GitHub Copilot coding-agent assignment — GitHub-only.
+      [ "$kind" = github ] || die "capability 'delegate' (agent assignment) is GitHub-only; not available on GitLab" 3 ;;
+    "") printf '%s\n' "$kind" ;;
+    *) : ;;   # unknown caps are permitted (forward-compatible)
+  esac
+}
+
+# ── Actions / pipelines (GitHub-only; degrade on GitLab) ────────────────────
+
+gl_run() {                           # forge run <list|rerun|view> ... — best-effort, skip-with-log
+  local action="$1"; shift
+  case "$action" in
+    list)   printf '[]\n'; printf 'forge: run list is GitHub-Actions-shaped; emitting [] on GitLab\n' >&2 ;;
+    rerun)  local pid="$1"; glab api -X POST "projects/$(gl_project)/pipelines/${pid}/retry" >/dev/null 2>&1 \
+              && printf 'retried pipeline %s\n' "$pid" \
+              || printf 'forge: could not retry pipeline %s on GitLab (skipped)\n' "$pid" >&2 ;;
+    view)   printf 'forge: run view --log-failed unavailable on GitLab (skipped)\n' >&2 ;;
+    *)      printf 'forge: run %s unsupported on GitLab (skipped)\n' "$action" >&2 ;;
+  esac
+}
+
+# ── Dispatch ────────────────────────────────────────────────────────────────
+
+# keelson-owned verbs run on BOTH forges (they are not gh subcommands).
+case "${1:-} ${2:-}" in
+  "pr threads")        shift 2; cmd_threads "$(forge_kind)" "$@"; exit $? ;;
+  "pr reply")          shift 2; cmd_reply "$(forge_kind)" "$@"; exit $? ;;
+  "pr resolve-thread") shift 2; cmd_resolve_thread "$(forge_kind)" "$@"; exit $? ;;
+  "pr reviews")        shift 2; cmd_reviews "$(forge_kind)" "$@"; exit $? ;;
+  "pr review-batch")   shift 2; cmd_review_batch "$(forge_kind)" "$@"; exit $? ;;
+  "caps "*|"caps")     shift; cmd_caps "$@"; exit $? ;;
+esac
+
+KIND=$(forge_kind)
+if [ "$KIND" = github ]; then
+  exec gh "$@"     # byte-for-byte passthrough (covers api, graphql, pr, issue, run, …)
+fi
+
+# GitLab translation.
+GROUP="${1:-}"; ACTION="${2:-}"
+case "$GROUP $ACTION" in
+  "pr view")     shift 2; gl_pr_view "$@" ;;
+  "pr list")     shift 2; gl_list mr "$@" ;;
+  "pr diff")     shift 2; gl_pr_diff "$@" ;;
+  "pr checks")   shift 2; gl_pr_checks "$@" ;;
+  "pr create")   shift 2; gl_pr_create "$@" ;;
+  "pr edit")     shift 2; gl_pr_edit "$@" ;;
+  "pr ready")    shift 2; gl_pr_ready "$@" ;;
+  "pr review")   shift 2; gl_pr_review "$@" ;;
+  "pr checkout") shift 2; gl_pr_checkout "$@" ;;
+  "issue view")    shift 2; gl_issue_view "$@" ;;
+  "issue list")    shift 2; gl_list issue "$@" ;;
+  "issue create")  shift 2; gl_issue_create "$@" ;;
+  "issue comment") shift 2; gl_issue_comment "$@" ;;
+  "repo view")   shift 2; gl_repo_view "$@" ;;
+  "run "*)       shift; gl_run "$@" ;;
+  "api "*)       die "'forge api' is GitHub-only; use forge pr threads/reply/resolve-thread for review threads" 3 ;;
+  *)             die "unsupported verb on GitLab: $GROUP $ACTION" 2 ;;
+esac

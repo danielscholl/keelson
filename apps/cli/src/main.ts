@@ -8,7 +8,7 @@ import {
   SCHEMA_VERSION,
 } from "@keelson/shared";
 import { keelsonPaths } from "@keelson/shared/paths";
-import { seedStarterAssets } from "@keelson/workflows";
+import { installForgeOnPath, seedStarterAssets } from "@keelson/workflows";
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { runApprovalList, runApprovalResolve } from "./commands/approval.ts";
@@ -913,6 +913,8 @@ export async function run(rawArgv: readonly string[]): Promise<void> {
   } catch {
     // non-fatal: discovery just sees an empty dir
   }
+  // In-process runs (server down) execute bash nodes here; put `forge` on PATH.
+  installForgeOnPath();
 
   applyExitOverride(program);
   if (wantsJson) {

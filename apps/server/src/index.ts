@@ -30,7 +30,7 @@ import {
 } from "@keelson/shared/config";
 import { keelsonPaths, resolveKeelsonHome, ribDataDir } from "@keelson/shared/paths";
 import { clearServerState, readServerState, writeServerState } from "@keelson/shared/server-state";
-import { bundledWorkflowsDir, seedStarterAssets } from "@keelson/workflows";
+import { bundledWorkflowsDir, installForgeOnPath, seedStarterAssets } from "@keelson/workflows";
 import type { Server } from "bun";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -208,6 +208,10 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
   } catch (err) {
     console.warn(`failed to seed starter assets: ${err}`);
   }
+
+  // Put the bundled `forge` shim on PATH so the model's tool-shell in `prompt:`
+  // nodes resolves a bare `forge` (bash: nodes get the dir spliced separately).
+  installForgeOnPath();
 
   // Hoist before bootstrapProviders — those code paths emit console.warn on
   // env-parse failures and the redaction wrapper must already be in place

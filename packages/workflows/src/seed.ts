@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { extname, join, resolve } from "node:path";
+import { delimiter, extname, join, resolve } from "node:path";
 import { COMMAND_EXTENSION, SCRIPT_EXT_RUNTIME } from "./handlers/discovery.ts";
 
 // Root the bundled starter assets live under, as sibling dirs `workflows/`,
@@ -21,6 +21,41 @@ const BUNDLED_ROOT = join(import.meta.dir, "..", "assets");
 // into a home that may already be populated.
 export function bundledWorkflowsDir(): string {
   return join(BUNDLED_ROOT, "workflows");
+}
+
+// Absolute path to the bundled `bin/` dir holding the `forge` shim. Resolves in
+// both layouts like bundledWorkflowsDir (source: packages/workflows/assets/bin;
+// bundle: <pkg>/assets/bin). Run in place — never seeded into the home, since a
+// bare extensionless `forge` matches no seed predicate and there must be exactly
+// one shim on disk (the shipped one).
+export function bundledBinDir(): string {
+  return join(BUNDLED_ROOT, "bin");
+}
+export function forgeShimPath(): string {
+  return join(bundledBinDir(), "forge");
+}
+
+// Put the bundled `forge` shim on a subprocess env's PATH and publish its
+// absolute path as KEELSON_FORGE_BIN. Used for the server/CLI `process.env` at
+// boot so the model's own tool-shell in `prompt:` nodes resolves a bare `forge`;
+// `bash:` nodes get the same dir spliced explicitly (they build env from a
+// module-load snapshot, not live process.env). Idempotent.
+export function installForgeOnPath(env: Record<string, string | undefined> = process.env): void {
+  const dir = bundledBinDir();
+  let key = "PATH";
+  if (env[key] === undefined) {
+    for (const k of Object.keys(env)) {
+      if (k.toUpperCase() === "PATH") {
+        key = k;
+        break;
+      }
+    }
+  }
+  const existing = env[key];
+  if (!existing?.split(delimiter).includes(dir)) {
+    env[key] = existing ? `${dir}${delimiter}${existing}` : dir;
+  }
+  env.KEELSON_FORGE_BIN = forgeShimPath();
 }
 
 // The single definition of "a workflow file" — shared so discovery and the seed

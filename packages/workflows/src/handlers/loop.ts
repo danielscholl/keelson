@@ -28,6 +28,7 @@ import {
   resolveBody,
 } from "../executor.ts";
 import { isLoopNode, type NodeOutput } from "../schema/index.ts";
+import { bundledBinDir, forgeShimPath } from "../seed.ts";
 import type { AwaitInteraction } from "./approval.ts";
 import {
   detectCompletionSignal,
@@ -97,9 +98,11 @@ export const defaultRunUntilBashProbe: RunUntilBashProbe = async (script, opts) 
   if (opts.env) {
     for (const [k, v] of Object.entries(opts.env)) env[k] = v;
   }
+  env.KEELSON_FORGE_BIN = forgeShimPath();
+  if (process.env.KEELSON_FORGE?.trim()) env.KEELSON_FORGE = process.env.KEELSON_FORGE;
   try {
     const bash = resolveBash();
-    prependPath(env, bash.pathDirs);
+    prependPath(env, [bundledBinDir(), ...bash.pathDirs]);
     const outcome = await runSubprocess({
       cmd: bash.cmd,
       args: ["-c", script],

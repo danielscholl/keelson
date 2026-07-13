@@ -97,7 +97,10 @@ export {
 } from "./loader.ts";
 export * from "./schema/index.ts";
 export {
+  bundledBinDir,
   bundledWorkflowsDir,
+  forgeShimPath,
+  installForgeOnPath,
   isWorkflowYaml,
   type SeededAssets,
   seedStarterAssets,

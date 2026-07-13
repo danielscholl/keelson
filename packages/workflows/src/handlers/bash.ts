@@ -18,6 +18,7 @@
  */
 
 import { type NodeHandler, type NodeResult, resolveConvergeRound } from "../executor.ts";
+import { bundledBinDir, forgeShimPath } from "../seed.ts";
 import { prependPath, resolveBash } from "./shell.ts";
 import {
   buildSubprocessEnv,
@@ -49,16 +50,20 @@ export function makeBashHandler(opts: MakeBashHandlerOptions = {}): NodeHandler 
           preserveEscaped: true,
           ...(ctx.convergeRound !== undefined ? { convergeRound: ctx.convergeRound } : {}),
         });
+        const nodeEnv = buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
+          ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
+        });
+        nodeEnv.KEELSON_FORGE_BIN = forgeShimPath();
+        // Live-splice the operator's forge selection: buildSubprocessEnv copies a
+        // module-load env snapshot, so a value set after boot (or by a future
+        // config path) wouldn't otherwise reach the node.
+        if (process.env.KEELSON_FORGE?.trim()) nodeEnv.KEELSON_FORGE = process.env.KEELSON_FORGE;
         outcome = await runSubprocess({
           cmd: bash.cmd,
           args: ["-c", shellBody],
           cwd: ctx.cwd,
-          env: prependPath(
-            buildSubprocessEnv(ctx.inputs, ctx.upstreamOutputs, {
-              ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
-            }),
-            bash.pathDirs,
-          ),
+          // The bundled bin dir goes first so a bare `forge` resolves to the shim.
+          env: prependPath(nodeEnv, [bundledBinDir(), ...bash.pathDirs]),
           timeoutMs,
           abortSignal: ctx.abortSignal,
           emit: ctx.emit,
