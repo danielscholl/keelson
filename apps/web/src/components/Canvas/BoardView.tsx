@@ -365,9 +365,12 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                     }
                   />
                 ) : f.options && f.segmented ? (
-                  <fieldset id={id} className="cvb-action-segments" aria-label={f.label}>
+                  // The field label's htmlFor lands on the first segment — a
+                  // fieldset isn't labelable — while aria-label names the group.
+                  <fieldset className="cvb-action-segments" aria-label={f.label}>
                     {!f.required && (
                       <button
+                        id={id}
                         type="button"
                         className="cvb-action-segment"
                         aria-pressed={!values[f.name]}
@@ -377,9 +380,10 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                         {f.placeholder ?? "—"}
                       </button>
                     )}
-                    {f.options.map((o) => (
+                    {f.options.map((o, i) => (
                       <button
                         key={o.value}
+                        id={f.required && i === 0 ? id : undefined}
                         type="button"
                         className="cvb-action-segment"
                         aria-pressed={values[f.name] === o.value}
