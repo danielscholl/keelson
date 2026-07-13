@@ -180,10 +180,12 @@ describe("bundled workflows are forge-portable (no direct gh)", () => {
   );
 
   // The bundled workflows must call `forge` (portable to gh/glab), never `gh`
-  // directly — otherwise they silently regress to GitHub-only. Guards against a
-  // future author reintroducing a raw `gh` call (keelson #557).
+  // directly — otherwise they silently regress to GitHub-only. Match any `gh`
+  // invocation (a bare `gh` word followed by a subcommand), not a fixed
+  // allowlist, so a new GitHub-only verb (`gh workflow`, `gh release`, …) can't
+  // slip past. `GitHub`, `high`, and `ghost` are not word-boundary `gh ` matches.
   const files = readdirSync(WORKFLOWS).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
-  const GH_CALL = /\bgh (pr|issue|repo|api|run|auth|search)\b/;
+  const GH_CALL = /\bgh\s+[a-z]/;
   for (const file of files) {
     test(`${file} calls forge, not gh`, () => {
       const content = readFileSync(resolve(WORKFLOWS, file), "utf-8");

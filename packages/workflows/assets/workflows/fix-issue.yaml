@@ -1,4 +1,4 @@
-# Fix a GitHub issue end-to-end. Concepts ported from Archon's
+# Fix an issue end-to-end. Concepts ported from Archon's
 # archon-piv-loop + archon-fix-github-issue workflows (MIT, see NOTICE),
 # rewritten as a single self-contained DAG that uses only Copilot models
 # and Keelson's supported node types (no `command:` refs, no interactive
@@ -9,7 +9,7 @@ name: fix-issue
 provider: copilot
 model: auto
 description: |
-  Use when: User wants to fix, resolve, or implement a GitHub issue end-to-end
+  Use when: User wants to fix, resolve, or implement an issue end-to-end
             and open a draft PR.
   Triggers: "fix issue", "fix #123", "resolve issue", "implement issue 123",
             "fix this bug", "fix github issue".
@@ -48,7 +48,7 @@ nodes:
   - id: extract-issue
     model: auto
     prompt: |
-      Find the GitHub issue number for this request.
+      Find the issue number for this request.
 
       Request: $ARGUMENTS
 
@@ -129,7 +129,7 @@ nodes:
         title: { type: string }
         reasoning: { type: string }
     prompt: |
-      You are an issue classifier. Read the GitHub issue JSON below and label it.
+      You are an issue classifier. Read the issue JSON below and label it.
 
       ## Issue
 
@@ -221,7 +221,7 @@ nodes:
     # Match the heavy edit nodes' idle budget so chunk-sparse work can finish.
     idle_timeout: 1800000
     prompt: |
-      You are creating an implementation plan from a non-bug GitHub issue.
+      You are creating an implementation plan from a non-bug issue.
 
       ## Issue
 

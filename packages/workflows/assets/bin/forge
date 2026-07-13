@@ -481,15 +481,19 @@ cmd_resolve_thread() {               # forge pr resolve-thread <n> --thread <id>
     esac
   done
   if [ "$kind" = gitlab ]; then
-    # PUT resolved=true; wrap into gh's resolveReviewThread envelope so callers'
-    # `.data.resolveReviewThread.thread.isResolved` jq keeps working.
-    local resp; resp=$(glab api -X PUT "projects/$(gl_project)/merge_requests/${pr}/discussions/${thread}?resolved=true" 2>/dev/null) || {
-      # A standalone/system discussion has nothing to resolve — benign.
-      printf '{"data":{"resolveReviewThread":{"thread":{"id":"%s","isResolved":true}}}}\n' "$thread"; return 0; }
-    printf '%s' "$resp" | jq --arg id "$thread" '{data:{resolveReviewThread:{thread:{id:$id, isResolved: ([ (.notes // [])[] | select(.resolvable==true) ] | (length>0 and all(.resolved==true)))}}}}'
-  else
-    gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{id isResolved}}}' -f t="$thread"
+    # PUT resolved=true, then wrap the response into gh's resolveReviewThread
+    # envelope so callers' `.data.resolveReviewThread.thread.isResolved` jq keeps
+    # working. Exit nonzero unless the API call SUCCEEDS and the discussion is
+    # confirmed resolved — otherwise the resolve-retry/convergence gate would
+    # mark a still-open thread resolved and stop retrying it.
+    local resp resolved
+    resp=$(glab api -X PUT "projects/$(gl_project)/merge_requests/${pr}/discussions/${thread}?resolved=true" 2>/dev/null) || return 1
+    resolved=$(printf '%s' "$resp" | jq -r '[ (.notes // [])[] | select(.resolvable == true) ] | (length > 0 and all(.resolved == true))')
+    printf '{"data":{"resolveReviewThread":{"thread":{"id":"%s","isResolved":%s}}}}\n' "$thread" "$resolved"
+    [ "$resolved" = true ] || return 1
+    return 0
   fi
+  gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{id isResolved}}}' -f t="$thread"
 }
 
 cmd_reviews() {                      # forge pr reviews <n> --json body [-q <e>]  (idempotency scan)

@@ -1,4 +1,4 @@
-# Plan → Act → Evaluate — the GitHub/Microsoft agent lifecycle loop, run as a
+# Plan → Act → Evaluate — the agent SDLC lifecycle loop, run as a
 # Keelson DAG. Concepts from the GH-600 "Prepare Agent Architecture and SDLC
 # Processes" domain (Microsoft Learn) fused with Archon's PIV loop (MIT, see
 # NOTICE) and Keelson's tested fix-issue mechanics.
@@ -13,7 +13,7 @@
 #   PLAN     The plan is an INSPECTABLE artifact in the system of record.
 #            The planner runs under a hard READ-ONLY capability boundary
 #            (allowed_tools: [Read, Glob, Grep] — no write, no shell). It emits
-#            the plan as text; a deterministic bash node records it as a GitHub
+#            the plan as text; a deterministic bash node records it as an
 #            ISSUE (new issue, or a comment on the issue you passed in) and to a
 #            local plan.md the approval canvas renders.
 #
@@ -47,7 +47,8 @@
 #     in bash. Node-id hyphens become underscores in env (approve-plan →
 #     KEELSON_NODE_approve_plan_OUTPUT).
 #
-# Prerequisites: a GitHub remote with Issues enabled and `gh` authenticated.
+# Prerequisites: a GitHub or GitLab remote with issues enabled and the matching
+# forge CLI (`gh`/`glab`) authenticated. The DELEGATE path is GitHub-only.
 # Because the authoritative check is the PR's remote CI, this is best paired with
 # a repo that has CI configured (without it, the run falls back to the agent's
 # best-effort local checks + human PR review). The DELEGATE path additionally
@@ -59,14 +60,14 @@ provider: copilot
 model: auto
 description: |
   Use when: User wants to build a feature or land a change in ANY repo under the
-            GitHub Plan→Act→Evaluate lifecycle — plan recorded as a GitHub issue,
-            a human gate before any code, then a choice to implement locally OR
-            delegate to the GitHub Copilot coding agent, with the PR's CI as the
+            Plan→Act→Evaluate lifecycle — plan recorded as an issue, a human gate
+            before any code, then a choice to implement locally OR delegate to the
+            GitHub Copilot coding agent (GitHub only), with the PR/MR's CI as the
             authoritative check.
   Triggers: "plan act evaluate", "pae loop", "plan first", "lifecycle loop",
             "plan-act-evaluate", "build with a plan issue", "delegate to copilot".
   Does: Normalizes the request (issue # / free text / plan file), drafts a plan
-        under a read-only capability boundary, records it as a GitHub issue,
+        under a read-only capability boundary, records it as an issue,
         pauses for human approval, then either implements locally (AI review loop
         on the project's own checks → draft PR) or assigns the issue to the
         Copilot coding agent and reviews its PR. Reads back remote CI, and reports
@@ -107,7 +108,7 @@ nodes:
         | grep -oE '[0-9]+' | head -1 || true)
 
       if [ -n "$ISSUE_NUM" ]; then
-        echo "SOURCE: existing GitHub issue #$ISSUE_NUM (plan will be added as a comment)"
+        echo "SOURCE: existing issue #$ISSUE_NUM (plan will be added as a comment)"
         forge issue view "$ISSUE_NUM" \
           --json number,title,body,labels,comments,state,url,author > "$ART/issue.json"
         echo "$ISSUE_NUM" > "$ART/.issue-number"
@@ -135,7 +136,7 @@ nodes:
   # PLAN — author the plan under a READ-ONLY capability boundary
   # allowed_tools: [Read, Glob, Grep] hard-blocks write + shell. The planner
   # CANNOT edit source, run code, branch, or commit — GH-600's "capability
-  # boundary > instructions". The plan is produced as text and recorded to GitHub
+  # boundary > instructions". The plan is produced as text and recorded to the forge
   # by the next (deterministic) node.
   # ═══════════════════════════════════════════════════════════════════════════
 
@@ -153,7 +154,7 @@ nodes:
       ## Inputs (read these from disk)
 
       The intake step recorded the request here — read whichever exists:
-      - `$ARTIFACTS_DIR/issue.json` — the GitHub issue (if the request named one)
+      - `$ARTIFACTS_DIR/issue.json` — the issue (if the request named one)
       - `$ARTIFACTS_DIR/task.md` — the free-text request or a plan/PRD file
 
       Intake summary:
@@ -172,9 +173,9 @@ nodes:
 
       ## Output contract — IMPORTANT
 
-      Your entire response is recorded verbatim as a **GitHub issue** (the system
+      Your entire response is recorded verbatim as an **issue** (the system
       of record) and is what the implementer — local or Copilot — will follow.
-      Output **only** the issue, in GitHub-flavored markdown:
+      Output **only** the issue, in Markdown:
 
       - The FIRST line must be `TITLE: <imperative summary, under 70 chars>`.
       - Then a blank line, then the issue body using the template below.
@@ -226,9 +227,9 @@ nodes:
       ```
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PLAN — record the plan as a GitHub issue (system of record)
+  # PLAN — record the plan as an issue (system of record)
   # Deterministic: the AI planner had no write/shell access, so this node is the
-  # only thing that touches GitHub. `plan.md` is also the in-UI review surface.
+  # only thing that touches the forge. `plan.md` is also the in-UI review surface.
   # ═══════════════════════════════════════════════════════════════════════════
 
   - id: publish-plan
@@ -243,7 +244,7 @@ nodes:
       # especially) sometimes leak reasoning preamble before it, even mid-line
       # ("…plan concrete.TITLE: …"). We take the text from the first `TITLE:` to
       # end of line as the title, drop everything up to and including that line,
-      # and keep the rest as the body — so leaked preamble never reaches GitHub.
+      # and keep the rest as the body — so leaked preamble never reaches the forge.
       # Portable across BSD/GNU (no GNU-only `sed '0,/re/d'`); a missing marker
       # falls back to the whole output so the body is never empty. `plan.md` is
       # BOTH the issue body and the in-UI review surface — the approval node
@@ -274,7 +275,7 @@ nodes:
 
       # Prepend the system-of-record link so the in-UI plan canvas shows where
       # the durable copy lives — review and approve right here in the viewer.
-      { printf '> 📋 Recorded in GitHub as issue #%s — %s\n\n' "$N" "$URL"; cat "$ART/plan.md"; } \
+      { printf '> 📋 Recorded as issue #%s — %s\n\n' "$N" "$URL"; cat "$ART/plan.md"; } \
         > "$ART/plan.md.tmp" && mv "$ART/plan.md.tmp" "$ART/plan.md"
 
       echo ""
@@ -360,7 +361,7 @@ nodes:
 
       ## Rules
 
-      - The canonical plan is the GitHub issue. Read `$ARTIFACTS_DIR/.issue-number`,
+      - The canonical plan is the issue. Read `$ARTIFACTS_DIR/.issue-number`,
         then `forge issue view <N> --comments` to load the plan you must follow.
       - Learn this project's conventions and verify commands first — read whichever
         exist: `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md`, plus its
@@ -401,7 +402,7 @@ nodes:
         the PR's own CI is the authoritative check — so be your own toughest
         reviewer here, not a rubber stamp.
 
-        The canonical plan is the GitHub issue: read `$ARTIFACTS_DIR/.issue-number`,
+        The canonical plan is the issue: read `$ARTIFACTS_DIR/.issue-number`,
         then `forge issue view <N> --comments`. The base branch is in
         `$ARTIFACTS_DIR/.default-branch`.
 

@@ -281,6 +281,33 @@ shimDescribe("forge pr reply / resolve-thread route per forge", () => {
     );
     const o = JSON.parse(r.stdout);
     expect(o.data.resolveReviewThread.thread.isResolved).toBe(true);
+    expect(r.exitCode).toBe(0);
+  });
+
+  test("gitlab resolve-thread exits nonzero when the API does not confirm resolution", () => {
+    // Response reports the discussion still unresolved -> the retry/convergence
+    // gate must NOT treat it as resolved.
+    const dir = fakeBinDir({
+      glab: `#!/usr/bin/env bash\nif [ "$1" = repo ]; then echo '{"path_with_namespace":"g/p"}'; exit 0; fi\necho '{"notes":[{"resolvable":true,"resolved":false}]}'\nexit 0\n`,
+    });
+    tmps.push(dir);
+    const r = runForge(["pr", "resolve-thread", "42", "--thread", "abc"], {
+      env: { PATH: pathWith(dir), KEELSON_FORGE: "gitlab" },
+    });
+    expect(r.exitCode).not.toBe(0);
+    // The envelope is still emitted (isResolved:false) for callers that read it.
+    expect(JSON.parse(r.stdout).data.resolveReviewThread.thread.isResolved).toBe(false);
+  });
+
+  test("gitlab resolve-thread exits nonzero when the PUT fails", () => {
+    const dir = fakeBinDir({
+      glab: `#!/usr/bin/env bash\nif [ "$1" = repo ]; then echo '{"path_with_namespace":"g/p"}'; exit 0; fi\necho "404" >&2\nexit 1\n`,
+    });
+    tmps.push(dir);
+    const r = runForge(["pr", "resolve-thread", "42", "--thread", "abc"], {
+      env: { PATH: pathWith(dir), KEELSON_FORGE: "gitlab" },
+    });
+    expect(r.exitCode).not.toBe(0);
   });
 
   test("github resolve-thread calls the resolveReviewThread mutation", () => {

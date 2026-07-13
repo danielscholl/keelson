@@ -16,16 +16,16 @@ name: pr-review
 provider: copilot
 model: auto
 description: |
-  Use when: User wants a smart, scoped code review of an existing GitHub PR
+  Use when: User wants a smart, scoped code review of an existing PR or MR
             that adapts to the PR's complexity and posts the synthesis as
-            line-anchored inline review comments via the GitHub Reviews API.
+            line-anchored inline review comments as a single batched review.
   Triggers: "review pr", "review #123", "smart pr review", "review this pr",
             "code review pr".
   Does: Fetches PR scope -> classifies complexity and which review lanes are
         relevant -> runs only those lanes (code review always, plus error
         handling / test coverage / docs impact when applicable) ->
         runs an opus triage gate to de-dupe and filter noise ->
-        posts findings as a GitHub PR review with line-anchored inline
+        posts findings as a batched PR/MR review with line-anchored inline
         comments and suggestion blocks.
   NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
 
@@ -42,13 +42,13 @@ nodes:
   # PHASE 1: SCOPE
   # Resolve the PR number, capture the diff scope, and persist a short
   # markdown brief to $ARTIFACTS_DIR/scope.md that every downstream lane
-  # reads. Bash so we don't burn AI tokens on a `gh` call.
+  # reads. Bash so we don't burn AI tokens on a `forge` call.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: extract-pr
     model: auto
     prompt: |
-      Find the GitHub PR number for this request.
+      Find the PR or MR number for this request.
 
       Request: $ARGUMENTS
 
@@ -383,8 +383,8 @@ nodes:
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 5: BUILD REVIEW PAYLOAD
-  # Pure offline step: anchor findings to diff lines, build the GitHub
-  # Reviews API payload. No network calls.
+  # Pure offline step: anchor findings to diff lines, build the review payload.
+  # No network calls.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: build-review

@@ -30,7 +30,7 @@ nodes:
   - id: extract-pr
     model: auto
     prompt: |
-      Find the GitHub PR number for this request.
+      Find the PR or MR number for this request.
 
       Request: $ARGUMENTS
 
@@ -610,7 +610,7 @@ nodes:
 
   # Re-fetch after the CI watch. fetch-state's threads.json is computed at the
   # START of the round, before the (possibly many-minute) CI watch; a
-  # review-on-push bot can add a thread during the watch. Re-diffing GitHub's
+  # review-on-push bot can add a thread during the watch. Re-diffing the forge's
   # live unresolved set against the (resolve-retry-updated) ledger here gives
   # converge-check a fresh count so it never declares convergence over a thread
   # that landed mid-watch. Mirrors fetch-state's fork short-circuit.
@@ -690,7 +690,7 @@ nodes:
       - Handled ledger: `$ARTIFACTS_DIR/handled.json` — each entry carries
         `replied` (bool) and `resolved` (bool). `resolved` is the authoritative
         signal: a `fixed` thread whose `resolveReviewThread` call failed is
-        recorded with `resolved: false`, so it is still open on GitHub even
+        recorded with `resolved: false`, so it is still open on the forge even
         though `action == "fixed"`. Count resolutions from `resolved`, never from
         `action`.
       - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
