@@ -1001,9 +1001,11 @@ describe("board actions — select fields and capability gating", () => {
     );
   });
 
-  test("a changed default remounts the form and re-seeds from the new value", async () => {
-    // SectionBlock is keyed by the section's JSON, so a moved pin remounts this
-    // subtree and the seed initializer re-runs — no re-seed effect involved.
+  test("a changed default re-seeds a closed form, but never clobbers an open one", async () => {
+    // Sections are keyed positionally (a live board's tick must not remount a
+    // sibling's open form), so a moved pin reaches the form via the closed-form
+    // re-seed effect: an OPEN form keeps its state, a closed one reopens on the
+    // new default.
     const modelView = (defaultValue: string): CanvasBoardView =>
       ({
         view: "board",
@@ -1045,8 +1047,115 @@ describe("board actions — select fields and capability gating", () => {
         <BoardView view={modelView("opus")} />
       </BoardActionProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Model — opus" }));
+    // The open form keeps its state — a background frame never clobbers input.
+    expect(sel().value).toBe("sonnet");
+    // Closed and reopened, the form seeds from the new default. The submit
+    // button shares the label while the form is open, so target the disclosure
+    // (the .cvb-action's direct child).
+    const disclosure = () =>
+      container.querySelector(".cvb-action > button.cvb-action-button") as HTMLButtonElement;
+    fireEvent.click(disclosure());
+    fireEvent.click(disclosure());
     expect(sel().value).toBe("opus");
+  });
+
+  test("an open form keeps its typing while a sibling card ticks", async () => {
+    // The chamber bench shape: a boot card whose elapsed count re-publishes
+    // every few seconds beside the open seat's always-open brief. The tick must
+    // not remount the section (positional key) or the seat's card (its own JSON
+    // is unchanged) — typing survives the frame.
+    const bench = (elapsed: number): CanvasBoardView =>
+      ({
+        view: "board",
+        sections: [
+          {
+            kind: "cards",
+            grid: true,
+            columns: 4,
+            items: [
+              {
+                title: "Moneypenny",
+                stacked: true,
+                fields: [{ value: `voice: calibrating… · ${elapsed}s` }],
+              },
+              {
+                title: "Open seat",
+                ghost: true,
+                actions: [
+                  {
+                    type: "describe-own",
+                    label: "Author",
+                    expanded: true,
+                    fields: [{ name: "brief", label: "Brief", multiline: true }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }) as CanvasBoardView;
+    const { container, rerender } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={bench(5)} />
+      </BoardActionProvider>,
+    );
+    const box = () => container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(box(), { target: { value: "Athena — guards the architecture" } });
+    expect(box().value).toBe("Athena — guards the architecture");
+    rerender(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={bench(7)} />
+      </BoardActionProvider>,
+    );
+    expect(box().value).toBe("Athena — guards the architecture");
+  });
+
+  test("an open form keeps its typing while its OWN card's status ticks", async () => {
+    // The same-card variant: one seat carrying both an always-open brief and a
+    // status field that re-publishes each frame. Keying the card by its stable
+    // title (not its JSON) keeps the form mounted through the card's own tick —
+    // a JSON key would remount the whole card and wipe the textarea.
+    const seat = (elapsed: number): CanvasBoardView =>
+      ({
+        view: "board",
+        sections: [
+          {
+            kind: "cards",
+            grid: true,
+            columns: 4,
+            items: [
+              {
+                title: "Open seat",
+                ghost: true,
+                stacked: true,
+                fields: [{ value: `booting… · ${elapsed}s` }],
+                actions: [
+                  {
+                    type: "describe-own",
+                    label: "Author",
+                    expanded: true,
+                    fields: [{ name: "brief", label: "Brief", multiline: true }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }) as CanvasBoardView;
+    const { container, rerender } = render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={seat(5)} />
+      </BoardActionProvider>,
+    );
+    const box = () => container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(box(), { target: { value: "Athena — guards the architecture" } });
+    expect(box().value).toBe("Athena — guards the architecture");
+    rerender(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={seat(7)} />
+      </BoardActionProvider>,
+    );
+    expect(box().value).toBe("Athena — guards the architecture");
   });
 
   test("a text field opens pre-filled from its defaultValue", async () => {

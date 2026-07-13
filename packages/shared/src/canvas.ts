@@ -478,6 +478,13 @@ const cardsSectionSchema = z
     // The host owns the responsive column count; an open fields-form stays
     // inside its card's column.
     grid: z.boolean().optional(),
+    // Declared bench capacity: the host lays exactly this many tracks per row
+    // when the surface is wide enough (fewer when narrow), so cards keep a set
+    // size instead of stretching to fill the row. A producer that declares
+    // capacity typically rounds the roster up with trailing decorative ghost
+    // seats (ghost cards without actions) so the bench reads as full rows.
+    // Only meaningful with `grid`.
+    columns: z.number().int().min(2).max(6).optional(),
     items: z.array(
       z
         .object({

@@ -68,11 +68,10 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-// The form's starting values: each field's `defaultValue`, so a control opens on
-// a current value instead of blank. Also the post-submit reset target — never
-// bare `{}`, or a defaulted field would reopen empty. A changed default remounts
-// this subtree (SectionBlock is keyed by the section's JSON), so the initializer
-// re-runs on its own — no re-seed effect needed.
+// Each field's `defaultValue` seeds its control and is the post-submit reset
+// target — never bare `{}`, or a defaulted field reopens empty. Keys are stable
+// (section kind, card title, action type), not content, so a live tick can't
+// remount an open form and wipe its typing.
 function seedFieldValues(fields: readonly ActionField[]): Record<string, string> {
   const seed: Record<string, string> = {};
   for (const f of fields) {
@@ -184,6 +183,14 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
     else setLocalOpen(next);
   };
   const [values, setValues] = useState<Record<string, string>>(() => seedFieldValues(fields));
+  // Sections are keyed positionally so a live board's tick never remounts a
+  // sibling's open form — which means a changed default no longer arrives via
+  // remount. Reconcile it here instead, only while the form is closed: a
+  // background frame must never clobber in-progress typing.
+  const seedJson = JSON.stringify(seedFieldValues(fields));
+  useEffect(() => {
+    if (!(expanded || open)) setValues(JSON.parse(seedJson) as Record<string, string>);
+  }, [seedJson, expanded, open]);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmValues, setConfirmValues] = useState<Record<string, string> | undefined>(undefined);
@@ -814,16 +821,38 @@ function Section({ section }: { section: BoardSection }) {
       );
     case "cards": {
       const key = makeKeyer();
+      const columns = section.grid ? section.columns : undefined;
       return (
         <div
           className={`cvb-cards${section.boxed ? " cvb-cards--boxed" : ""}${section.grid ? " cvb-cards--grid" : ""}`}
+          {...(columns !== undefined
+            ? {
+                "data-columns": columns,
+                style: { "--cvb-cols": columns } as CSSProperties,
+              }
+            : {})}
         >
           {section.items.map((c) => {
             const fieldKey = makeKeyer();
+            // A ghost pad seat is decorative, but hide it from assistive tech only
+            // when it carries nothing focusable — else `aria-hidden` would bury a
+            // control a keyboard user can still reach.
+            const pad =
+              columns !== undefined &&
+              c.ghost === true &&
+              !isSafeLinkScheme(c.href) &&
+              (c.actions?.length ?? 0) === 0 &&
+              !(c.fields ?? []).some(
+                (f) =>
+                  Boolean(f.copyAction) ||
+                  (f.copyable === true && f.value != null) ||
+                  (!f.people && isSafeLinkScheme(f.href)),
+              );
             return (
               <div
-                key={key(JSON.stringify(c))}
-                className={`cvb-card${c.ghost ? " cvb-card--ghost" : ""}`}
+                key={key(c.title)}
+                className={`cvb-card${c.ghost ? " cvb-card--ghost" : ""}${pad ? " cvb-card--pad" : ""}`}
+                {...(pad ? { "aria-hidden": true } : {})}
               >
                 <div className="cvb-card-head">
                   {c.dot && <span className="cvb-card-dot" data-tone={c.dot} />}
@@ -935,7 +964,7 @@ function Section({ section }: { section: BoardSection }) {
                   return inline.length > 0 ? (
                     <div className="cvb-actions cvb-card-actions">
                       {inline.map((a) => (
-                        <ActionItemButton key={fieldKey(JSON.stringify(a))} item={a} />
+                        <ActionItemButton key={fieldKey(a.type)} item={a} />
                       ))}
                     </div>
                   ) : null;
@@ -1087,12 +1116,15 @@ function Section({ section }: { section: BoardSection }) {
       const template = section.columns.map((c) => `minmax(0, ${c.weight ?? 1}fr)`).join(" ");
       return (
         <div className="cvb-columns" style={{ "--cvb-cols": template } as CSSProperties}>
-          {section.columns.map((col) => {
+          {section.columns.map((col, colIndex) => {
             const sectionKey = makeKeyer();
             return (
-              <div key={colKey(JSON.stringify(col))} className="cvb-column">
+              // Positional keys (not JSON): live data ticking inside a column or
+              // section must not remount siblings — an open form there would
+              // lose its typing. Default re-seeding happens at the item level.
+              <div key={colKey(`col#${colIndex}`)} className="cvb-column">
                 {col.sections.map((s) => (
-                  <SectionBlock key={sectionKey(JSON.stringify(s))} section={s} />
+                  <SectionBlock key={sectionKey(s.kind)} section={s} />
                 ))}
               </div>
             );
@@ -1141,12 +1173,15 @@ export function BoardHeader({ view }: { view: Pick<CanvasBoardView, "title" | "h
 
 // A board's section stack without the header strip. A surface region renders
 // this directly so its own gradient lane head owns the title/chip/pulse.
+// Sections key by kind + position, NOT content: a live board recomposes every
+// few seconds (a boot card's elapsed count, a room bar), and a JSON key would
+// remount every sibling on each frame — wiping an open form's typing mid-word.
 export function BoardBody({ view }: { view: Pick<CanvasBoardView, "sections"> }) {
   const key = makeKeyer();
   return (
     <div className="canvas-view-board">
       {view.sections.map((section) => (
-        <SectionBlock key={key(JSON.stringify(section))} section={section} />
+        <SectionBlock key={key(section.kind)} section={section} />
       ))}
     </div>
   );
@@ -1158,7 +1193,7 @@ export function BoardView({ view }: { view: CanvasBoardView }) {
     <div className="canvas-view-board">
       <BoardHeader view={view} />
       {view.sections.map((section) => (
-        <SectionBlock key={key(JSON.stringify(section))} section={section} />
+        <SectionBlock key={key(section.kind)} section={section} />
       ))}
     </div>
   );

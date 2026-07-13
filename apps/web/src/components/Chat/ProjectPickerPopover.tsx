@@ -31,7 +31,25 @@ export function ProjectPickerPopover({
     const popoverEl = popoverRef.current;
     if (!popoverEl) return;
     const trigger = document.querySelector<HTMLElement>(`[popovertarget="${popoverId}"]`);
-    if (!trigger) return;
+    if (!trigger) {
+      // The anchor can vanish between click and toggle (a live board frame can
+      // remount it); center rather than paint at the top layer's static
+      // fallback — the bottom of the document.
+      popoverEl.style.top = `${Math.round(window.innerHeight / 3)}px`;
+      popoverEl.style.bottom = "auto";
+      // Transform-centre (not width math): on `beforetoggle` the panel is still
+      // display:none, so offsetWidth is 0 and width math would mis-centre a frame.
+      popoverEl.style.left = "50%";
+      popoverEl.style.transform = "translateX(-50%)";
+      // Clear the anchored path's inline sizing so a prior anchored open doesn't
+      // clip or mis-size this centred fallback.
+      popoverEl.style.maxHeight = "";
+      popoverEl.style.minWidth = "";
+      return;
+    }
+    // Anchored placement sets an explicit left; clear any centring transform a
+    // prior anchor-less frame left behind, or it would shift this by half.
+    popoverEl.style.transform = "none";
     const rect = trigger.getBoundingClientRect();
     const viewportH = window.innerHeight;
     const spaceBelow = viewportH - rect.bottom;
@@ -61,8 +79,17 @@ export function ProjectPickerPopover({
         setEditingId(null);
       }
     };
+    const onBeforeToggle = (e: Event) => {
+      // `toggle` dispatches async (coalesced) — reposition before the first
+      // paint too, or the popover shows a beat at its unpositioned fallback.
+      if ((e as ToggleEvent).newState === "open") reposition();
+    };
+    popoverEl.addEventListener("beforetoggle", onBeforeToggle);
     popoverEl.addEventListener("toggle", onToggle);
-    return () => popoverEl.removeEventListener("toggle", onToggle);
+    return () => {
+      popoverEl.removeEventListener("beforetoggle", onBeforeToggle);
+      popoverEl.removeEventListener("toggle", onToggle);
+    };
   }, [reposition]);
 
   useEffect(() => {
