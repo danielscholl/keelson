@@ -3922,19 +3922,63 @@ button.tab:focus-visible {
   flex-direction: column;
   gap: 6px;
 }
+/* Fields span both tracks unless `half` pairs adjacent fields two-up. */
 .cvb-action-form {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-soft);
 }
+.cvb-action-form > * {
+  grid-column: 1 / -1;
+}
 .cvb-action-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.cvb-action-form > .cvb-action-field--half {
+  grid-column: auto / span 1;
+}
+/* Segmented options: a single-select strip inside the input skin; the pressed
+   segment reads as the value, siblings stay muted. */
+.cvb-action-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  /* A <fieldset>: zero the UA box so it sits like any other input control. */
+  margin: 0;
+  min-inline-size: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  width: fit-content;
+}
+.cvb-action-segment {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.cvb-action-segment:hover:not(:disabled) {
+  color: var(--fg);
+}
+.cvb-action-segment[aria-pressed="true"] {
+  background: var(--card-2);
+  color: var(--fg);
+  font-weight: 600;
+}
+.cvb-action-segment:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .cvb-action-field-label {
   font-size: 11px;

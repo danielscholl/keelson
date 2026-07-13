@@ -328,10 +328,22 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           {fields.map((f) => {
             const id = `cvb-af-${instanceId}-${f.name}`;
             return (
-              <div key={f.name} className="cvb-action-field">
-                <label className="cvb-action-field-label" htmlFor={id}>
-                  {f.label}
-                </label>
+              <div
+                key={f.name}
+                className={`cvb-action-field${f.half ? " cvb-action-field--half" : ""}`}
+              >
+                {f.segmented && f.options ? (
+                  // A fieldset isn't labelable, and pointing the label at one
+                  // segment would rename that option after the field — a span +
+                  // aria-labelledby names the group, each segment keeps its own.
+                  <span id={`${id}-label`} className="cvb-action-field-label">
+                    {f.label}
+                  </span>
+                ) : (
+                  <label className="cvb-action-field-label" htmlFor={id}>
+                    {f.label}
+                  </label>
+                )}
                 {f.multiline ? (
                   <textarea
                     id={id}
@@ -361,6 +373,35 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
                       }))
                     }
                   />
+                ) : f.options && f.segmented ? (
+                  <fieldset className="cvb-action-segments" aria-labelledby={`${id}-label`}>
+                    {!f.required && (
+                      <button
+                        type="button"
+                        className="cvb-action-segment"
+                        aria-pressed={!values[f.name]}
+                        // A bare "—" (or an empty placeholder) has no speakable
+                        // name; fall back to a stable "Clear <field>" label.
+                        aria-label={f.placeholder?.trim() ? undefined : `Clear ${f.label}`}
+                        disabled={sealed}
+                        onClick={() => setValues((v) => ({ ...v, [f.name]: "" }))}
+                      >
+                        {f.placeholder?.trim() ? f.placeholder : "—"}
+                      </button>
+                    )}
+                    {f.options.map((o) => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        className="cvb-action-segment"
+                        aria-pressed={values[f.name] === o.value}
+                        disabled={sealed}
+                        onClick={() => setValues((v) => ({ ...v, [f.name]: o.value }))}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </fieldset>
                 ) : f.options ? (
                   <select
                     id={id}
@@ -397,7 +438,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
             <button
               type="submit"
               className={`cvb-action-button${item.disabled ? " is-disabled" : ""}`}
-              data-tone={item.tone}
+              data-tone={item.submitTone ?? item.tone}
               disabled={nativelyDisabled}
               aria-disabled={ariaDisabled}
               title={tooltip}
@@ -662,7 +703,20 @@ function ActionsSection({ section }: { section: Extract<BoardSection, { kind: "a
   const tabs = section.tabs === true;
   // Tabs own their items' form-open state so exactly one form exists at a time;
   // indexed (not typed) so two items sharing a `type` stay independent.
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  // `defaultOpen` seeds only the first render — the operator's toggles win after.
+  const [openIndex, setOpenIndex] = useState<number | null>(() => {
+    if (!tabs) return null;
+    const seed = section.items.findIndex(
+      (a) =>
+        a.defaultOpen === true &&
+        a.disabled !== true &&
+        (a.fields?.length ?? 0) > 0 &&
+        // A solo model-picker action opens a popover off its button, not an
+        // inline form — it can't hold the open slot (see soloPicker).
+        !(a.fields?.length === 1 && a.fields[0]?.modelPicker),
+    );
+    return seed >= 0 ? seed : null;
+  });
   const layout = tabs ? " cvb-actions--tabs" : section.wrap ? " cvb-actions--wrap" : "";
   return (
     <div className={`cvb-actions${layout}`}>
