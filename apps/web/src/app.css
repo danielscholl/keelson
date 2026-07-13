@@ -4093,11 +4093,6 @@ button.cvb-action-field-model:disabled {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   align-items: stretch;
 }
-/* An open fields-form is cramped inside a one-column grid cell — the card
-   carrying it spans the full row (the actions strip's full-width-panel rule). */
-.cvb-cards--grid .cvb-card:has(.cvb-action-form) {
-  grid-column: 1 / -1;
-}
 .cvb-card {
   display: flex;
   flex-direction: column;
@@ -4125,6 +4120,17 @@ button.cvb-action-field-model:disabled {
 .cvb-card--ghost .cvb-card-actions {
   justify-content: center;
   width: 100%;
+}
+/* A composing ghost wakes in place — solid brand edge, background lift — so
+   authoring visibly takes the seat without the card leaving its grid cell. */
+.cvb-card--ghost:has(.cvb-action-form) {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--card-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.cvb-card--ghost .cvb-action-form {
+  text-align: left;
 }
 .cvb-card-head {
   display: flex;

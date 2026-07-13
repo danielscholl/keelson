@@ -475,8 +475,8 @@ const cardsSectionSchema = z
     boxed: z.boolean().optional(),
     // Lay the cards out side by side as an auto-fit grid instead of the stacked
     // full-width column — for fixed-capacity rosters where the row IS the bench.
-    // The host owns the responsive column count; a card whose fields-form is
-    // open breaks out to span the full grid row.
+    // The host owns the responsive column count; an open fields-form stays
+    // inside its card's column.
     grid: z.boolean().optional(),
     items: z.array(
       z
