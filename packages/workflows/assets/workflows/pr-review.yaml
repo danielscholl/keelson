@@ -9,8 +9,9 @@
 # gates by tool name, copilot (the pin below) gates the underlying capability
 # through its permission handler, so the model's built-in write/shell tools
 # are denied mid-review regardless of provider. An opus triage gate
-# de-dupes findings and drops confidence < 80 / false-positive / LOW before
-# the review is assembled and posted as line-anchored inline comments.
+# de-dupes findings, adversarially verifies each one against the diff and
+# repo, and drops refuted / confidence < 80 / LOW findings before the review
+# is assembled and posted as line-anchored inline comments.
 
 name: pr-review
 provider: copilot
@@ -213,14 +214,19 @@ nodes:
       2. Read the diff patch file. For each hunk worth flagging, write one finding.
       3. Look for: correctness bugs, race conditions, missing input validation,
          dead code, broken invariants, naming inconsistencies, CLAUDE.md drift.
-      4. Skip anything stylistic that Biome / TS will catch on its own.
+      4. Also check the footguns reviews miss: moved or extracted code that
+         dropped a guard or condition on the way, flipped config defaults,
+         narrowed lock or transaction scope, and version/constant drift between
+         files that must agree (a bump applied in one place but not its siblings).
+      5. Skip anything stylistic that Biome / TS will catch on its own.
 
       ## Output
 
       Markdown list. Each finding:
       - `path:line` — `severity` (CRITICAL | HIGH | MEDIUM | LOW) — `confidence` (0-100)
       - **What**: one sentence
-      - **Why it matters**: one sentence
+      - **Why it matters**: the concrete failure scenario — the input, state, or
+        sequence that triggers it and the wrong outcome, not "could cause issues"
       - **Suggested fix**: one or two lines, code where useful
 
   - id: error-handling
@@ -273,9 +279,10 @@ nodes:
 
       ## Output
 
-      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). Tag missing
-      tests with severity HIGH if the new code can branch on bad input or
-      external state; MEDIUM otherwise.
+      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). In `why`,
+      name the concrete untested branch and the input that would expose it.
+      Tag missing tests with severity HIGH if the new code can branch on bad
+      input or external state; MEDIUM otherwise.
 
   - id: docs-impact
     depends_on: [classify]
@@ -301,15 +308,17 @@ nodes:
 
       ## Output
 
-      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). Skip if the
-      diff has no user-facing surface change.
+      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). In `why`,
+      name the doc claim that goes stale and who it misleads. Skip if the diff
+      has no user-facing surface change.
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 4: TRIAGE
-  # Opus judge de-dupes lane findings, scores confidence, and emits a
-  # structured findings[] array. Drops LOW, confidence < 80, false positives,
-  # and pre-existing issues. `trigger_rule: one_success` so we proceed even
-  # if a conditional lane was skipped or one lane failed.
+  # Opus judge de-dupes lane findings, adversarially verifies each candidate
+  # against the diff and repo (read-only tools), and emits a structured
+  # findings[] array. Drops REFUTED, LOW, confidence < 80, and pre-existing
+  # issues. `trigger_rule: one_success` so we proceed even if a conditional
+  # lane was skipped or one lane failed.
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: triage
@@ -317,6 +326,7 @@ nodes:
     trigger_rule: one_success
     context: fresh
     model: claude-opus-4.8
+    allowed_tools: [Read, Glob, Grep]
     output_format:
       type: object
       required: [verdict, summary, findings]
@@ -341,8 +351,9 @@ nodes:
               why: { type: string }
               fix: { type: string }
     prompt: |
-      You are the PR review triage judge. Four independent lanes produced findings
-      (a section may be empty if that lane was skipped).
+      You are the PR review triage judge. Four independent lanes produced
+      candidate findings (a section may be empty if that lane was skipped).
+      Verify the candidates against the actual code; keep only what survives.
 
       ## Scope summary
       $scope.output
@@ -359,20 +370,35 @@ nodes:
       ## Docs impact findings
       $docs-impact.output
 
-      De-duplicate the findings. For each unique finding, score confidence 0-100
-      that it is a REAL, in-scope issue — NOT a false positive, NOT pre-existing,
-      NOT something a linter/type-checker/CI already catches, NOT a pedantic
-      nitpick.
+      De-duplicate the candidates, then ADVERSARIALLY VERIFY each unique one:
+      read `$ARTIFACTS_DIR/diff.patch` and the relevant source files and
+      actively try to REFUTE it. A candidate is refuted when the code already
+      handles the claimed case, the claim misreads the diff, the issue is
+      pre-existing rather than introduced by this PR, or a
+      linter/type-checker/CI gate already catches it. A survivor is CONFIRMED
+      when you traced the failure in the actual code (confidence 85-100), or
+      PLAUSIBLE when you could not refute it but could not fully trace it
+      either (confidence capped at 79).
 
-      Keep ONLY CRITICAL/HIGH/MEDIUM AND confidence >= 80. Drop everything else
-      as noise, including all LOW-severity findings. For each kept finding emit:
+      Keep ONLY CRITICAL/HIGH/MEDIUM survivors with confidence >= 80 — the
+      PLAUSIBLE cap sits below the keep line, so only CONFIRMED findings
+      post; re-trace a PLAUSIBLE candidate to CONFIRMED or let it drop. Drop
+      everything else as noise, including all LOW-severity findings and
+      pedantic nitpicks. Rank most severe first and cap the list at 10; when the cap
+      forces a cut, correctness findings outrank test-coverage and docs
+      findings of equal severity. For each kept finding emit:
       - path: the file path exactly as it appears in the diff
       - line: the line number on the RIGHT (new) side of the diff
       - severity: CRITICAL | HIGH | MEDIUM
       - confidence: integer 0-100
       - what: one sentence describing the problem
-      - why: one sentence on the impact
-      - fix: the exact corrected code snippet (one or two lines) to suggest
+      - why: the concrete failure scenario or cost, one or two sentences —
+        what input, state, or reader hits it and what goes wrong
+      - fix: the exact replacement for THAT anchored line (one or two lines).
+        A suggestion block replaces the anchored line when applied — so when
+        the real change belongs in another file, spans code away from the
+        anchor, or the anchored line is already correct, set fix to "" and
+        name the needed change inside `why` instead.
 
       Set verdict from the highest severity in findings:
       - CRITICAL or HIGH present → "NEEDS FIXES"
@@ -399,14 +425,15 @@ nodes:
 
       printf '%s' "$KEELSON_NODE_triage_OUTPUT" > "$TRIAGE_JSON"
 
-      # Build anchorable set: path<TAB>newline for every RIGHT-side line in the
-      # diff (added AND context). Parse the hunk header by field-splitting, not a
-      # 3-arg match() — that form is gawk-only and errors on BSD awk / mawk.
+      # Build anchorable set: path<TAB>newline<TAB>content for every RIGHT-side
+      # line in the diff (added AND context) — content so the suggestion gate
+      # below can detect a no-op fix. Parse the hunk header by field-splitting,
+      # not a 3-arg match() — that form is gawk-only and errors on BSD awk / mawk.
       awk '
         /^\+\+\+ b\// { file = substr($0, 7); next }
         /^@@ / { split($3, p, ","); new_line = substr(p[1], 2) - 1; next }
-        /^\+/ && file != "" { new_line++; print file "\t" new_line; next }
-        /^ / && file != "" { new_line++; print file "\t" new_line; next }
+        /^\+/ && file != "" { new_line++; print file "\t" new_line "\t" substr($0, 2); next }
+        /^ / && file != "" { new_line++; print file "\t" new_line "\t" substr($0, 2); next }
       ' "$DIFF" > "$ARTIFACTS/anchorable.txt"
 
       VERDICT=$(jq -r '.verdict' "$TRIAGE_JSON")
@@ -429,8 +456,20 @@ nodes:
         WHY=$(printf '%s' "$finding" | jq -r '.why')
         FIX=$(printf '%s' "$finding" | jq -r '.fix')
 
-        if grep -qxF "${PATH_F}"$'\t'"${LINE_F}" "$ARTIFACTS/anchorable.txt" 2>/dev/null; then
-          BODY=$(printf '**%s** — %s\n\n%s\n\n```suggestion\n%s\n```' "$SEV" "$WHAT" "$WHY" "$FIX")
+        if cut -f1,2 "$ARTIFACTS/anchorable.txt" 2>/dev/null | grep -qxF "${PATH_F}"$'\t'"${LINE_F}"; then
+          # A suggestion block replaces the anchored line when applied, so gate
+          # it: no fix, or a fix byte-identical to the line's current content (a
+          # cross-file fix the model anchored here anyway), posts as prose only.
+          # Raw comparison — an indentation-only change is a real fix.
+          CURRENT=$(awk -v pre="${PATH_F}\t${LINE_F}\t" \
+            'index($0, pre) == 1 { print substr($0, length(pre) + 1); exit }' \
+            "$ARTIFACTS/anchorable.txt")
+          FIX_T=$(printf '%s' "$FIX" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+          if [ -n "$FIX_T" ] && [ "$FIX" != "$CURRENT" ]; then
+            BODY=$(printf '**%s** — %s\n\n%s\n\n```suggestion\n%s\n```' "$SEV" "$WHAT" "$WHY" "$FIX")
+          else
+            BODY=$(printf '**%s** — %s\n\n%s' "$SEV" "$WHAT" "$WHY")
+          fi
           COMMENT=$(jq -n \
             --arg p "$PATH_F" \
             --argjson l "$LINE_F" \
