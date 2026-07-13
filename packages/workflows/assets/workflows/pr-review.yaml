@@ -378,12 +378,13 @@ nodes:
       linter/type-checker/CI gate already catches it. A survivor is CONFIRMED
       when you traced the failure in the actual code (confidence 85-100), or
       PLAUSIBLE when you could not refute it but could not fully trace it
-      either (confidence capped at 84).
+      either (confidence capped at 79).
 
-      Keep ONLY CRITICAL/HIGH/MEDIUM survivors with confidence >= 80 — so a
-      PLAUSIBLE finding must be nearly certain to survive. Drop everything
-      else as noise, including all LOW-severity findings and pedantic
-      nitpicks. Rank most severe first and cap the list at 10; when the cap
+      Keep ONLY CRITICAL/HIGH/MEDIUM survivors with confidence >= 80 — the
+      PLAUSIBLE cap sits below the keep line, so only CONFIRMED findings
+      post; re-trace a PLAUSIBLE candidate to CONFIRMED or let it drop. Drop
+      everything else as noise, including all LOW-severity findings and
+      pedantic nitpicks. Rank most severe first and cap the list at 10; when the cap
       forces a cut, correctness findings outrank test-coverage and docs
       findings of equal severity. For each kept finding emit:
       - path: the file path exactly as it appears in the diff
@@ -457,14 +458,14 @@ nodes:
 
         if cut -f1,2 "$ARTIFACTS/anchorable.txt" 2>/dev/null | grep -qxF "${PATH_F}"$'\t'"${LINE_F}"; then
           # A suggestion block replaces the anchored line when applied, so gate
-          # it: no fix, or a fix identical to the line's current content (a
+          # it: no fix, or a fix byte-identical to the line's current content (a
           # cross-file fix the model anchored here anyway), posts as prose only.
+          # Raw comparison — an indentation-only change is a real fix.
           CURRENT=$(awk -v pre="${PATH_F}\t${LINE_F}\t" \
             'index($0, pre) == 1 { print substr($0, length(pre) + 1); exit }' \
             "$ARTIFACTS/anchorable.txt")
           FIX_T=$(printf '%s' "$FIX" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-          CUR_T=$(printf '%s' "$CURRENT" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-          if [ -n "$FIX_T" ] && [ "$FIX_T" != "$CUR_T" ]; then
+          if [ -n "$FIX_T" ] && [ "$FIX" != "$CURRENT" ]; then
             BODY=$(printf '**%s** — %s\n\n%s\n\n```suggestion\n%s\n```' "$SEV" "$WHAT" "$WHY" "$FIX")
           else
             BODY=$(printf '**%s** — %s\n\n%s' "$SEV" "$WHAT" "$WHY")

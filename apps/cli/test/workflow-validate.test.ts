@@ -2,13 +2,18 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { parseWorkflow } from "@keelson/workflows";
 
 const BIN = resolve(import.meta.dir, "..", "bin", "keelson.ts");
 const FIXTURES = resolve(import.meta.dir, "fixtures");
+
+// The build-review node needs bash/jq/shasum; on Windows it runs under Git
+// Bash, not exercised here (mirrors packages/workflows/test/forge-threads.test.ts).
+const posixDescribe = process.platform === "win32" ? describe.skip : describe;
 
 async function runCli(args: readonly string[]): Promise<{ stdout: string; exitCode: number }> {
   const proc = Bun.spawn(["bun", BIN, ...args], { stdout: "pipe", stderr: "pipe" });
@@ -165,6 +170,106 @@ describe("pr-review workflow node graph", () => {
     expect(lines).toContain("foo.ts\t11\t  const b = 2;"); // added line, with content
     expect(lines).toContain("foo.ts\t10\t  const a = 1;"); // context line, now anchorable
   }, 15000);
+
+  posixDescribe("build-review suggestion gate (full bash node)", () => {
+    const DIFF_FIXTURE = [
+      "diff --git a/foo.py b/foo.py",
+      "index 111..222 100644",
+      "--- a/foo.py",
+      "+++ b/foo.py",
+      "@@ -1,3 +1,4 @@",
+      " def f():",
+      "+    x = compute()",
+      "     return x",
+      " # end",
+      "",
+    ].join("\n");
+
+    const tmps: string[] = [];
+    afterEach(() => {
+      while (tmps.length) rmSync(tmps.pop() as string, { recursive: true, force: true });
+    });
+
+    type Comment = { path: string; line: number; body: string };
+
+    async function runBuildReview(findings: unknown[]): Promise<{ comments: Comment[] }> {
+      const dir = mkdtempSync(join(tmpdir(), "keelson-pr-review-build-"));
+      tmps.push(dir);
+      writeFileSync(join(dir, "diff.patch"), DIFF_FIXTURE);
+
+      const proc = Bun.spawn(["bash", "-c", buildReviewBash()], {
+        env: {
+          ...process.env,
+          KEELSON_ARTIFACTS_DIR: dir,
+          KEELSON_NODE_triage_OUTPUT: JSON.stringify({
+            verdict: "NEEDS NITS",
+            summary: "test",
+            findings,
+          }),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [, exitCode, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        proc.exited,
+        new Response(proc.stderr).text(),
+      ]);
+      if (exitCode !== 0) {
+        throw new Error(`build-review bash exited ${exitCode}: ${stderr}`);
+      }
+
+      return JSON.parse(readFileSync(join(dir, "payload.json"), "utf-8"));
+    }
+
+    test("gates the suggestion block on a real content change vs. an empty or byte-identical fix, including an indentation-only edit", async () => {
+      // Findings a/b/c all anchor to line 2 (current content "    x = compute()");
+      // "d" anchors to line 3 (current content "    return x") to exercise an
+      // indentation-only fix ("        return x") — the regression this test guards.
+      const cases: Array<{ label: string; line: number; fix: string; expectSuggestion: boolean }> =
+        [
+          { label: "case-empty-fix", line: 2, fix: "", expectSuggestion: false },
+          {
+            label: "case-identical-fix",
+            line: 2,
+            fix: "    x = compute()",
+            expectSuggestion: false,
+          },
+          { label: "case-real-fix", line: 2, fix: "    x = compute(y)", expectSuggestion: true },
+          {
+            label: "case-indent-only-fix",
+            line: 3,
+            fix: "        return x",
+            expectSuggestion: true,
+          },
+        ];
+
+      const findings = cases.map((c) => ({
+        path: "foo.py",
+        line: c.line,
+        severity: "MEDIUM",
+        confidence: 90,
+        what: c.label,
+        why: `${c.label}-why`,
+        fix: c.fix,
+      }));
+
+      const payload = await runBuildReview(findings);
+      expect(payload.comments).toHaveLength(4);
+
+      for (const c of cases) {
+        const comment = payload.comments.find(
+          (cm) => cm.line === c.line && cm.body.includes(c.label),
+        );
+        expect(comment).toBeTruthy();
+        if (c.expectSuggestion) {
+          expect(comment?.body).toContain("```suggestion");
+        } else {
+          expect(comment?.body).not.toContain("```suggestion");
+        }
+      }
+    }, 15000);
+  });
 });
 
 describe("bundled workflows are forge-portable (no direct gh)", () => {
