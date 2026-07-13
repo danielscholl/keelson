@@ -34,7 +34,16 @@ forge_kind() {
   host=$(printf '%s' "$url" | sed -E 's#^[a-z][a-z0-9+.-]*://##; s#^[^@/]*@##; s#[:/].*$##' | tr '[:upper:]' '[:lower:]')
   case ".$host." in
     *.gitlab.*) printf 'gitlab\n'; return 0 ;;
+    *.github.*) printf 'github\n'; return 0 ;;
   esac
+  # A self-hosted GitLab on a vanity host (no 'gitlab' segment, e.g.
+  # community.opengroup.org) can't be named from the host alone; an affirmative
+  # glab auth to that exact host is the GitLab signal — an offline config read,
+  # and github.com is never a glab host, so the GitHub default is never at risk.
+  if [ -n "$host" ] && command -v glab >/dev/null 2>&1 \
+     && [ -n "$(glab config get token --host "$host" 2>/dev/null)" ]; then
+    printf 'gitlab\n'; return 0
+  fi
   printf 'github\n'   # incumbent: unknown host / no remote => gh, unchanged.
 }
 
