@@ -290,7 +290,7 @@ describe("GatewayProvider.sendQuery", () => {
       }).sendQuery("q", "/tmp"),
     );
     expect(
-      (keyless.calls[0]?.init?.headers as Record<string, string>).authorization,
+      (keyless.calls[0]?.init?.headers as Record<string, string>)?.authorization,
     ).toBeUndefined();
 
     const keyed = mockFetch(() => sse("[DONE]"));
@@ -303,7 +303,7 @@ describe("GatewayProvider.sendQuery", () => {
         fetchImpl: keyed.fn,
       }).sendQuery("q", "/tmp"),
     );
-    expect((keyed.calls[0]?.init?.headers as Record<string, string>).authorization).toBe(
+    expect((keyed.calls[0]?.init?.headers as Record<string, string>)?.authorization).toBe(
       "Bearer secret",
     );
   });

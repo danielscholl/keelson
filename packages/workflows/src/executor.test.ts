@@ -2614,7 +2614,7 @@ nodes:
 
     expect(summary.status).toBe("succeeded");
     expect(mem.writebacks).toHaveLength(1);
-    const draft = (mem.writebacks[0]?.req.memories as Record<string, unknown>[])[0];
+    const draft = (mem.writebacks[0]?.req.memories as Record<string, unknown>[])?.[0];
     expect(draft?.type).toBe("decision");
     expect(draft?.content).toBe("hello world");
     // Evidence-default invariant: executor hard-codes "generated" regardless
@@ -2932,7 +2932,7 @@ nodes:
     });
 
     expect(mem.writebacks).toHaveLength(1);
-    const draft = (mem.writebacks[0]?.req.memories as Record<string, unknown>[])[0];
+    const draft = (mem.writebacks[0]?.req.memories as Record<string, unknown>[])?.[0];
     expect(draft?.summary).toBe("saw rtid-7");
     expect(draft?.content).toBe(`items: ${JSON.stringify(items)}`);
   });
@@ -2971,7 +2971,7 @@ nodes:
 
     expect(summary.status).toBe("failed");
     expect(mem.writebacks).toHaveLength(1);
-    expect((mem.writebacks[0]?.req.memories as Record<string, unknown>[])[0]?.summary).toBe(
+    expect((mem.writebacks[0]?.req.memories as Record<string, unknown>[])?.[0]?.summary).toBe(
       "captured failure",
     );
   });

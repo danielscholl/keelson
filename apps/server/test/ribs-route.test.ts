@@ -180,7 +180,7 @@ describe("GET /api/ribs", () => {
     const surface = body.ribs[0]?.surfaces[0];
     expect(surface?.id).toBe("board");
     expect(surface?.title).toBe("Board");
-    expect((surface?.layout as { rows: unknown[] }).rows).toHaveLength(1);
+    expect((surface?.layout as { rows: unknown[] })?.rows).toHaveLength(1);
   });
 });
 
