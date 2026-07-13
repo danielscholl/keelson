@@ -555,18 +555,26 @@ cmd_review_batch() {                 # forge pr review-batch <n> --input <payloa
   p=$(gl_project)
   # The position must be a NESTED object; glab serializes `-f position[k]=v` as
   # flat JSON keys that GitLab drops, so build it with jq and pipe via --input -.
-  # A LEFT-side comment anchors on old_path/old_line, RIGHT on new_path/new_line.
+  # `--input` sends no Content-Type, so the header must be explicit or GitLab
+  # rejects the POST with 415. Both paths are required on a text position; a
+  # LEFT-side comment anchors on old_line, RIGHT on new_line.
   jq -c '.comments[]?' "$input" | while IFS= read -r c; do
-    local cpath cline
+    local cpath cline nbody
     cpath=$(printf '%s' "$c" | jq -r '.path'); cline=$(printf '%s' "$c" | jq -r '.line')
-    printf '%s' "$c" | jq -c --arg bs "$base" --arg ss "$start" --arg hs "$head" '
+    if ! printf '%s' "$c" | jq -c --arg bs "$base" --arg ss "$start" --arg hs "$head" '
       { body: .body,
-        position: ({ position_type: "text", base_sha: $bs, start_sha: $ss, head_sha: $hs }
+        position: ({ position_type: "text", base_sha: $bs, start_sha: $ss, head_sha: $hs,
+                     old_path: .path, new_path: .path }
           + (if (.side // "RIGHT") == "LEFT"
-             then { old_path: .path, old_line: .line }
-             else { new_path: .path, new_line: .line } end)) }' \
-      | glab api -X POST "projects/${p}/merge_requests/${pr}/discussions" --input - >/dev/null 2>&1 \
-      || printf 'forge: could not anchor review comment at %s:%s (skipped)\n' "$cpath" "$cline" >&2
+             then { old_line: .line } else { new_line: .line } end)) }' \
+      | glab api -X POST -H 'Content-Type: application/json' \
+          "projects/${p}/merge_requests/${pr}/discussions" --input - >/dev/null 2>&1; then
+      # Never drop review content: an unanchorable comment degrades to a plain
+      # MR note that names its intended anchor.
+      nbody=$(printf '%s' "$c" | jq -r '"**\(.path):\(.line)** (could not anchor to the diff)\n\n" + .body')
+      glab api -X POST "projects/${p}/merge_requests/${pr}/notes" -f body="$nbody" >/dev/null 2>&1 \
+        || printf 'forge: could not anchor review comment at %s:%s (skipped)\n' "$cpath" "$cline" >&2
+    fi
   done
 }
 

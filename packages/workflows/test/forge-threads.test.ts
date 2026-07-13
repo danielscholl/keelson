@@ -328,12 +328,13 @@ shimDescribe("forge pr reply / resolve-thread route per forge", () => {
 shimDescribe("forge pr review-batch anchors inline comments (GitLab)", () => {
   test("posts a NESTED position via --input - (RIGHT->new_*, LEFT->old_*)", () => {
     const stdinLog = logFile();
+    const argvLog = logFile();
     const dir = fakeBinDir({
       glab: `#!/usr/bin/env bash
 [ "$1" = repo ] && { echo '{"path_with_namespace":"g/p"}'; exit 0; }
 [ "$1 $2" = "mr view" ] && { echo '{"diff_refs":{"base_sha":"BBB","start_sha":"SSS","head_sha":"HHH"}}'; exit 0; }
 case "$*" in
-  *discussions*"--input -"*) cat >> "${stdinLog}"; printf '\\n' >> "${stdinLog}"; exit 0 ;;
+  *discussions*"--input -"*) printf '%s\\n' "$*" >> "${argvLog}"; cat >> "${stdinLog}"; printf '\\n' >> "${stdinLog}"; exit 0 ;;
 esac
 exit 0
 `,
@@ -354,7 +355,7 @@ exit 0
       }),
     );
     runForge(["pr", "review-batch", "42", "--input", payload], {
-      env: { PATH: pathWith(dir), KEELSON_FORGE: "gitlab", STDIN_LOG: stdinLog },
+      env: { PATH: pathWith(dir), KEELSON_FORGE: "gitlab" },
     });
     const posted = readLog(stdinLog)
       .split("\n")
@@ -362,14 +363,62 @@ exit 0
       .filter(Boolean)
       .map((l) => JSON.parse(l));
     expect(posted).toHaveLength(2);
+    // glab api --input sends no Content-Type; GitLab 415s without the header.
+    const discussionCalls = readLog(argvLog).split("\n").filter(Boolean);
+    expect(discussionCalls).toHaveLength(2);
+    for (const argv of discussionCalls) {
+      expect(argv).toContain("Content-Type: application/json");
+    }
     expect(posted[0].position).toMatchObject({
       position_type: "text",
+      old_path: "src/a.ts",
       new_path: "src/a.ts",
       new_line: 42,
       head_sha: "HHH",
     });
-    expect(posted[1].position).toMatchObject({ old_path: "src/b.ts", old_line: 10 });
+    expect(posted[0].position.old_line).toBeUndefined();
+    expect(posted[1].position).toMatchObject({
+      old_path: "src/b.ts",
+      new_path: "src/b.ts",
+      old_line: 10,
+    });
+    expect(posted[1].position.new_line).toBeUndefined();
     // flat position[...] keys must NOT be present.
     expect(JSON.stringify(posted)).not.toContain("position[");
+  });
+
+  test("degrades a rejected anchor to a plain MR note instead of dropping it", () => {
+    const argvLog = logFile();
+    const dir = fakeBinDir({
+      glab: `#!/usr/bin/env bash
+[ "$1" = repo ] && { echo '{"path_with_namespace":"g/p"}'; exit 0; }
+[ "$1 $2" = "mr view" ] && { echo '{"diff_refs":{"base_sha":"BBB","start_sha":"SSS","head_sha":"HHH"}}'; exit 0; }
+case "$*" in
+  *discussions*"--input -"*) cat > /dev/null; exit 1 ;;
+  *notes*) printf '%s\\n' "$*" >> "${argvLog}"; exit 0 ;;
+esac
+exit 0
+`,
+    });
+    tmps.push(dir);
+    const payloadDir = mkdtempSync(join(tmpdir(), "keelson-forge-payload-"));
+    tmps.push(payloadDir);
+    const payload = join(payloadDir, "p.json");
+    writeFileSync(
+      payload,
+      JSON.stringify({
+        event: "COMMENT",
+        body: "summary",
+        comments: [{ path: "src/a.ts", line: 42, side: "RIGHT", body: "boundary check missing" }],
+      }),
+    );
+    const r = runForge(["pr", "review-batch", "42", "--input", payload], {
+      env: { PATH: pathWith(dir), KEELSON_FORGE: "gitlab" },
+    });
+    expect(r.exitCode).toBe(0);
+    const notes = readLog(argvLog);
+    expect(notes).toContain("merge_requests/42/notes");
+    expect(notes).toContain("src/a.ts:42");
+    expect(notes).toContain("boundary check missing");
   });
 });
