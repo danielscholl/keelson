@@ -68,13 +68,10 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-// The form's starting values: each field's `defaultValue`, so a control opens on
-// a current value instead of blank. Also the post-submit reset target — never
-// bare `{}`, or a defaulted field would reopen empty. Sections and columns key
-// positionally, and cards/actions by stable identity (title / type), so a live
-// board's tick never remounts an open form and wipes its typing; a changed
-// default instead reaches a closed form via the re-seed effect in
-// ActionItemButton.
+// Each field's `defaultValue` seeds its control and is the post-submit reset
+// target — never bare `{}`, or a defaulted field reopens empty. Keys are stable
+// (section kind, card title, action type), not content, so a live tick can't
+// remount an open form and wipe its typing.
 function seedFieldValues(fields: readonly ActionField[]): Record<string, string> {
   const seed: Record<string, string> = {};
   for (const f of fields) {
@@ -837,10 +834,9 @@ function Section({ section }: { section: BoardSection }) {
         >
           {section.items.map((c) => {
             const fieldKey = makeKeyer();
-            // A declared-capacity bench rounds up with decorative ghost pad seats.
-            // Hide one from assistive tech only when it carries nothing focusable —
-            // no title link, action, or interactive field — so `aria-hidden` can
-            // never bury a control a keyboard user can still reach.
+            // A ghost pad seat is decorative, but hide it from assistive tech only
+            // when it carries nothing focusable — else `aria-hidden` would bury a
+            // control a keyboard user can still reach.
             const pad =
               columns !== undefined &&
               c.ghost === true &&
