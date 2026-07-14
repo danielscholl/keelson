@@ -66,6 +66,8 @@ export interface SendQueryOptions {
   abortSignal?: AbortSignal;
   systemPrompt?: string;
   tools?: ToolDefinition[];
+  // Opaque turn data forwarded to projected tools; providers never interpret it.
+  turnContext?: Readonly<Record<string, unknown>>;
   mcpServers?: MCPServerConfig[];
   env?: Record<string, string>;
   // Provider-neutral: Claude consumes this; others ignore. Undefined leaves
