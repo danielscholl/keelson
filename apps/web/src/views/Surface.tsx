@@ -10,7 +10,7 @@ import {
   type RibSurfaceRegion,
   ribIdFromKey,
 } from "@keelson/shared";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { postRibAction } from "../api.ts";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
 import { BoardBody, CardOverflowActions, Segments } from "../components/Canvas/BoardView.tsx";
@@ -22,6 +22,7 @@ import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
 import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
+import { useSettings } from "../hooks/useSettings.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
 import { useWorkflowTrigger } from "../hooks/useWorkflowTrigger.ts";
@@ -46,6 +47,12 @@ type OpenSurface = (surfaceId: string, regionKey?: string) => void;
 // silently drop any field the schema gains next.
 type Region = RibSurfaceRegion;
 
+interface HiddenRegionActions {
+  explore: boolean;
+  select: boolean;
+  expand: boolean;
+}
+
 // A rib's primary surface: region-bound boards laid out as header → banner →
 // rows(columns) → footer. Each region owns an independent snapshot subscription
 // (live + per-region refresh); the harness carries no rib-specific layout code.
@@ -65,10 +72,19 @@ export function Surface({
   onOpenSurface?: OpenSurface;
 }) {
   const { header, banner, rows, footer } = descriptor.layout;
-  // A surface can opt its whole layout out of the host's per-region explore/select/expand
-  // controls (a bespoke authoring console, not snapshot panels to lift into chat). Board
-  // actions still flow — only the head-strip chrome is suppressed.
-  const hideRegionActions = descriptor.hideRegionActions ?? false;
+  const { isRegionActionHidden } = useSettings();
+  // Two independent reasons a control is gone, unioned so each only ever hides
+  // more: the surface opts its whole layout out (a bespoke authoring console, not
+  // snapshot panels to lift into chat), or the viewer switched that one off for
+  // every surface. Board actions still flow — only head-strip chrome is suppressed.
+  const hiddenActions = useMemo<HiddenRegionActions>(() => {
+    const surfaceOptsOut = descriptor.hideRegionActions ?? false;
+    return {
+      explore: surfaceOptsOut || isRegionActionHidden("explore"),
+      select: surfaceOptsOut || isRegionActionHidden("select"),
+      expand: surfaceOptsOut || isRegionActionHidden("expand"),
+    };
+  }, [descriptor.hideRegionActions, isRegionActionHidden]);
   const [selected, setSelected] = useState<Map<string, ExplorePanel>>(() => new Map());
   const onToggleSelect = useCallback((key: string, panel: ExplorePanel | null) => {
     setSelected((current) => {
@@ -86,12 +102,13 @@ export function Surface({
     onExplore(buildExploreSeed([...selected.values()]));
     setSelected(new Map());
   }, [onExplore, selected]);
-  // If a surface opts out of region actions while panels are selected (a descriptor
-  // swapped in place, not a tab remount), drop the now-unreachable selection — its
-  // checkboxes and the selection bar are suppressed, so it could otherwise linger.
+  // If select goes away while panels are selected (a descriptor swapped in place,
+  // or the viewer switching the control off mid-selection), drop the now-unreachable
+  // selection — its checkboxes and the selection bar are suppressed, so it could
+  // otherwise linger.
   useEffect(() => {
-    if (hideRegionActions) setSelected((cur) => (cur.size > 0 ? new Map() : cur));
-  }, [hideRegionActions]);
+    if (hiddenActions.select) setSelected((cur) => (cur.size > 0 ? new Map() : cur));
+  }, [hiddenActions.select]);
   // A projectScoped surface carries the shared project chip in its header, wired to
   // the owning rib's select-project action; derive the rib id from a region key
   // (every region key is rib-namespaced).
@@ -116,7 +133,7 @@ export function Surface({
           )}
         </header>
       )}
-      {onExplore && !hideRegionActions && selected.size > 0 && (
+      {onExplore && !hiddenActions.select && selected.size > 0 && (
         <div className="surface-selection-bar">
           <button type="button" className="surface-region-action" onClick={exploreSelected}>
             Explore {selected.size} selected
@@ -132,7 +149,7 @@ export function Surface({
           onExplore={onExplore}
           selected={selected.has(header.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
-          hideActions={hideRegionActions}
+          hiddenActions={hiddenActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
         />
@@ -144,7 +161,7 @@ export function Surface({
           onExplore={onExplore}
           selected={selected.has(banner.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
-          hideActions={hideRegionActions}
+          hiddenActions={hiddenActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
         />
@@ -165,7 +182,7 @@ export function Surface({
                   onExplore={onExplore}
                   selected={selected.has(col.key)}
                   onToggleSelect={onExplore ? onToggleSelect : undefined}
-                  hideActions={hideRegionActions}
+                  hiddenActions={hiddenActions}
                   onLaunchWorkflow={onLaunchWorkflow}
                   onOpenSurface={onOpenSurface}
                 />
@@ -181,7 +198,7 @@ export function Surface({
           onExplore={onExplore}
           selected={selected.has(footer.key)}
           onToggleSelect={onExplore ? onToggleSelect : undefined}
-          hideActions={hideRegionActions}
+          hiddenActions={hiddenActions}
           onLaunchWorkflow={onLaunchWorkflow}
           onOpenSurface={onOpenSurface}
         />
@@ -215,7 +232,7 @@ function SurfaceRegion({
   onExplore,
   selected,
   onToggleSelect,
-  hideActions,
+  hiddenActions,
   onLaunchWorkflow,
   onOpenSurface,
 }: {
@@ -223,9 +240,9 @@ function SurfaceRegion({
   onExplore?: ExploreHandler;
   selected?: boolean;
   onToggleSelect?: (key: string, panel: ExplorePanel | null) => void;
-  // Suppress the head-strip explore/select/expand controls (surface opt-out). Board
+  // Which head-strip controls to suppress, already resolved by the surface. Board
   // actions still flow through onExplore, so open-chat directives keep working.
-  hideActions?: boolean;
+  hiddenActions: HiddenRegionActions;
   onLaunchWorkflow?: LaunchWorkflow;
   onOpenSurface?: OpenSurface;
 }) {
@@ -459,7 +476,7 @@ function SurfaceRegion({
             {freshness.label}
           </span>
         )}
-        {!hideActions && snap.status === "live" && onExplore && (
+        {!hiddenActions.explore && snap.status === "live" && onExplore && (
           <button
             type="button"
             className="surface-region-action surface-region-icon"
@@ -470,7 +487,7 @@ function SurfaceRegion({
             <span aria-hidden="true">✦</span>
           </button>
         )}
-        {!hideActions && (snap.status === "live" || selected) && onToggleSelect && (
+        {!hiddenActions.select && (snap.status === "live" || selected) && onToggleSelect && (
           <input
             type="checkbox"
             className="surface-region-action surface-region-select"
@@ -487,7 +504,7 @@ function SurfaceRegion({
             title="Select for multi-panel explore"
           />
         )}
-        {!hideActions && (
+        {!hiddenActions.expand && (
           <button
             type="button"
             className="surface-region-action surface-region-icon"
@@ -498,7 +515,7 @@ function SurfaceRegion({
             <span aria-hidden="true">⤢</span>
           </button>
         )}
-        {/* Rib head verbs render outside the hideActions gate (that flag hides
+        {/* Rib head verbs render outside the hiddenActions gates (those hide
           host chrome, not the rib's own verbs) and while collapsed, so a
           folded panel can still be retired. */}
         {ribId && region.headActions && (

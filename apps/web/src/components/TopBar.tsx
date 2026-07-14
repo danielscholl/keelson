@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import type { ThemePreference } from "../hooks/useSettings.ts";
+import type { RegionAction, ThemePreference } from "../hooks/useSettings.ts";
 import { ThemePicker } from "./ThemePicker.tsx";
 
 export type BuiltinTab = "chat" | "workflows" | "memory" | "usage";
@@ -21,6 +21,8 @@ export interface TopBarProps {
   surfaceTabs?: readonly SurfaceTab[];
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
+  isRegionActionHidden: (action: RegionAction) => boolean;
+  onToggleRegionAction: (action: RegionAction) => void;
   // Count of workflow runs currently paused awaiting human input. Drives
   // the magenta pip on the Workflows nav so the Chat tab notices without
   // subscribing to every run's WS.
@@ -41,6 +43,8 @@ export function TopBar(props: TopBarProps) {
     surfaceTabs,
     themePreference,
     onThemeChange,
+    isRegionActionHidden,
+    onToggleRegionAction,
     pausedRunCount,
     pendingMemoryCount,
     onNewChat,
@@ -109,6 +113,8 @@ export function TopBar(props: TopBarProps) {
           pendingMemoryCount={pendingMemoryCount ?? 0}
           themePreference={themePreference}
           onThemeChange={onThemeChange}
+          isRegionActionHidden={isRegionActionHidden}
+          onToggleRegionAction={onToggleRegionAction}
         />
       </div>
     </header>
@@ -120,18 +126,31 @@ const INSTRUMENTS: ReadonlyArray<{ id: "memory" | "usage"; label: string }> = [
   { id: "usage", label: "Usage" },
 ];
 
+// The host controls a surface region renders in its head strip. Listed here so the
+// menu can switch each off independently; `explore` first because it is the one
+// most viewers keep.
+const REGION_ACTIONS: Array<{ value: RegionAction; label: string; glyph: string }> = [
+  { value: "explore", label: "Explore in chat", glyph: "✦" },
+  { value: "select", label: "Select", glyph: "◻" },
+  { value: "expand", label: "Expand", glyph: "⤢" },
+];
+
 function InstrumentsPopover({
   activeTab,
   onTabChange,
   pendingMemoryCount,
   themePreference,
   onThemeChange,
+  isRegionActionHidden,
+  onToggleRegionAction,
 }: {
   activeTab: ActiveTab;
   onTabChange: (tab: ActiveTab) => void;
   pendingMemoryCount: number;
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
+  isRegionActionHidden: (action: RegionAction) => boolean;
+  onToggleRegionAction: (action: RegionAction) => void;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -233,6 +252,26 @@ function InstrumentsPopover({
             <span className="instruments-theme-label">Theme</span>
             <ThemePicker value={themePreference} onChange={onThemeChange} />
           </div>
+          <div className="instruments-heading">Panel controls</div>
+          {REGION_ACTIONS.map((item) => {
+            const shown = !isRegionActionHidden(item.value);
+            return (
+              <button
+                type="button"
+                key={item.value}
+                className="instruments-item"
+                aria-pressed={shown}
+                onClick={() => onToggleRegionAction(item.value)}
+                title={`${shown ? "Hide" : "Show"} the ${item.label} control on every panel`}
+              >
+                <span className="instruments-check" aria-hidden="true">
+                  {shown ? "✓" : ""}
+                </span>
+                <span aria-hidden="true">{item.glyph}</span>
+                {item.label}
+              </button>
+            );
+          })}
         </section>
       )}
     </div>

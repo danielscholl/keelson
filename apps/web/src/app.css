@@ -363,6 +363,12 @@ body {
   font-size: 13px;
   color: var(--fg);
 }
+/* Fixed width so the toggle rows' labels stay aligned whether or not the row is on. */
+.instruments-check {
+  width: 10px;
+  color: var(--accent);
+  font-size: 11px;
+}
 .tab {
   padding: 5px 14px;
   border-radius: 6px;

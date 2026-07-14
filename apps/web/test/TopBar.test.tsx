@@ -8,6 +8,8 @@ function renderBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
     onTabChange: () => {},
     themePreference: "system" as const,
     onThemeChange: () => {},
+    isRegionActionHidden: () => false,
+    onToggleRegionAction: () => {},
     ...overrides,
   };
   return render(<TopBar {...props} />);
@@ -32,6 +34,8 @@ describe("TopBar", () => {
         onTabChange={() => {}}
         themePreference="system"
         onThemeChange={() => {}}
+        isRegionActionHidden={() => false}
+        onToggleRegionAction={() => {}}
         surfaceTabs={[{ id: "surface:chamber:home", title: "Chamber" }]}
       />,
     );
@@ -84,6 +88,21 @@ describe("TopBar", () => {
     expect(screen.queryByRole("radiogroup", { name: "Theme" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
     expect(screen.getByRole("radiogroup", { name: "Theme" })).toBeDefined();
+  });
+
+  test("the panel controls toggle each region action and reflect what is hidden", () => {
+    const toggled: string[] = [];
+    renderBar({
+      isRegionActionHidden: (action) => action === "select",
+      onToggleRegionAction: (action) => toggled.push(action),
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Harness/ }));
+    const explore = screen.getByRole("button", { name: /Explore in chat/ });
+    const select = screen.getByRole("button", { name: /Select/ });
+    expect(explore.getAttribute("aria-pressed")).toBe("true");
+    expect(select.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(explore);
+    expect(toggled).toEqual(["explore"]);
   });
 
   test("the popover moves focus inside and Escape returns it to the trigger", () => {

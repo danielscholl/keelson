@@ -112,6 +112,10 @@ beforeEach(() => {
   postRibActionCalls.length = 0;
   postRibActionResult = { ok: true };
   ribSummaries = [];
+  // useSettings caches at module scope and only re-reads on a `storage` event, so
+  // a seeded region-action preference would otherwise leak into every later test.
+  localStorage.clear();
+  window.dispatchEvent(new StorageEvent("storage", { key: "keelson.settings.v1" }));
 });
 
 describe("Surface", () => {
@@ -467,6 +471,58 @@ describe("Surface", () => {
     expect(
       screen.queryByRole("checkbox", { name: "Select panel for multi-panel explore" }),
     ).toBeNull();
+  });
+
+  test("a viewer's hiddenRegionActions drops those controls but keeps the rest", () => {
+    localStorage.setItem(
+      "keelson.settings.v1",
+      JSON.stringify({ favorites: [], lastUsed: null, hiddenRegionActions: ["select", "expand"] }),
+    );
+    window.dispatchEvent(new StorageEvent("storage", { key: "keelson.settings.v1" }));
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    render(
+      <CanvasProvider>
+        <Surface
+          descriptor={{
+            id: "cimpl",
+            title: "CIMPL",
+            layout: { rows: [{ columns: [{ key: "rib:demo:quality", title: "Quality" }] }] },
+          }}
+          onExplore={() => {}}
+        />
+      </CanvasProvider>,
+    );
+    expect(screen.getByRole("button", { name: "Explore in chat" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: "Select panel for multi-panel explore" }),
+    ).toBeNull();
+  });
+
+  test("a surface's hideRegionActions still wins over a viewer keeping a control", () => {
+    // Viewer hides only select; the surface opts out of everything — the union
+    // means explore and expand stay gone rather than coming back.
+    localStorage.setItem(
+      "keelson.settings.v1",
+      JSON.stringify({ favorites: [], lastUsed: null, hiddenRegionActions: ["select"] }),
+    );
+    window.dispatchEvent(new StorageEvent("storage", { key: "keelson.settings.v1" }));
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    render(
+      <CanvasProvider>
+        <Surface
+          descriptor={{
+            id: "chamber",
+            title: "Chamber",
+            hideRegionActions: true,
+            layout: { rows: [{ columns: [{ key: "rib:demo:quality", title: "Quality" }] }] },
+          }}
+          onExplore={() => {}}
+        />
+      </CanvasProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "Explore in chat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
   });
 
   test("flipping hideRegionActions on clears a stale selection and its bar", () => {

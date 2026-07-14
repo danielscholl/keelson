@@ -36,7 +36,7 @@ export function App() {
 function AppInner() {
   useSchemaVersionGate();
   const toast = useToast();
-  const { settings, setTheme } = useSettings();
+  const { settings, setTheme, isRegionActionHidden, toggleHiddenRegionAction } = useSettings();
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
   // A run started from chat (`/workflow run`) — switches to the Workflows tab
   // and deep-links the run; Workflows consumes and clears it on mount.
@@ -176,6 +176,8 @@ function AppInner() {
         surfaceTabs={surfaceTabs}
         themePreference={themePreference}
         onThemeChange={setTheme}
+        isRegionActionHidden={isRegionActionHidden}
+        onToggleRegionAction={toggleHiddenRegionAction}
         pausedRunCount={pausedRunCount}
         pendingMemoryCount={pendingMemoryCount}
         onNewChat={goToFreshChat}
