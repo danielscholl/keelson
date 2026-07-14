@@ -406,7 +406,7 @@ describe("ensureWorktreeDeps", () => {
     await bun(["install"], repo);
     await git(["add", "package.json", "pkg/package.json", "bun.lock"], repo);
     await git(["commit", "-m", "add workspace"], repo);
-    rmSync(join(repo, "node_modules", "@scope", "pkg"));
+    rmSync(join(repo, "node_modules", "@scope", "pkg"), { recursive: true, force: true });
     symlinkSync(canonicalPath(external), join(repo, "node_modules", "@scope", "pkg"));
 
     const dest = join(repo, ".wt", "feature");
