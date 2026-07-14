@@ -100,6 +100,8 @@ export interface RibAgentTurnRequest {
   model?: string;
   // Omit for a text-only turn (the room default — no Bash/Edit between turns).
   tools?: readonly { name: string; [k: string]: unknown }[];
+  // Forwarded verbatim to tool executions; only the calling rib interprets it.
+  turnContext?: Readonly<Record<string, unknown>>;
   allowedTools?: readonly string[];
   disallowedTools?: readonly string[];
   // The room's dispose() aborts in-flight turns via this signal.
