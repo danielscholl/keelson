@@ -66,6 +66,7 @@ exit 0
     ["pr", "view", "42", "--json", "state,url", "-q", ".state"],
     ["issue", "view", "7", "--json", "title,body"],
     ["pr", "checks", "42", "--watch", "--interval", "5"],
+    ["pr", "checks", "42", "--required", "--watch"],
     ["api", "graphql", "-f", "query=query{viewer{login}}"],
     ["run", "list", "--branch", "main", "--json", "databaseId"],
     ["pr", "create", "--draft", "--base", "main"],
@@ -86,6 +87,46 @@ exit 0
     expect(runForge(["pr", "checks", "42", "__EXIT8__"], { env }).exitCode).toBe(8);
     expect(runForge(["repo", "view", "__FAIL__"], { env }).exitCode).toBe(1);
     expect(runForge(["repo", "view", "ok"], { env }).exitCode).toBe(0);
+  });
+});
+
+shimDescribe("required check discovery", () => {
+  test("GitHub unions branch protection and ruleset contexts", () => {
+    const FAKE = `#!/usr/bin/env bash
+case "$*" in
+  "pr view 42 --json baseRefName -q .baseRefName") echo "release/x" ;;
+  "repo view --json nameWithOwner -q .nameWithOwner") echo "o/r" ;;
+  "api repos/o/r/branches/release%2Fx/protection/required_status_checks") echo '{"contexts":["lint"],"checks":[{"context":"test"}]}' ;;
+  "api repos/o/r/rules/branches/release%2Fx") echo '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"},{"context":"build"}]}}]' ;;
+  *) exit 1 ;;
+esac
+`;
+    const dir = fakeBinDir({ gh: FAKE });
+    tmps.push(dir);
+    const r = runForge(["pr", "required-checks", "42"], {
+      env: { PATH: pathWith(dir), KEELSON_FORGE: "github" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim().split("\n")).toEqual(["build", "lint", "test"]);
+  });
+
+  test("GitHub returns empty when protection and rulesets are absent", () => {
+    const FAKE = `#!/usr/bin/env bash
+case "$*" in
+  "pr view 42 --json baseRefName -q .baseRefName") echo "main" ;;
+  "repo view --json nameWithOwner -q .nameWithOwner") echo "o/r" ;;
+  "api repos/o/r/branches/main/protection/required_status_checks") exit 1 ;;
+  "api repos/o/r/rules/branches/main") echo '[]' ;;
+  *) exit 1 ;;
+esac
+`;
+    const dir = fakeBinDir({ gh: FAKE });
+    tmps.push(dir);
+    const r = runForge(["pr", "required-checks", "42"], {
+      env: { PATH: pathWith(dir), KEELSON_FORGE: "github" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("");
   });
 });
 
@@ -343,6 +384,27 @@ exit 1
   test("a running pipeline with no jobs yet is pending (exit 8), never a false green", () => {
     const env = checksEnv({ jobs: "[]", status: "running" });
     expect(runForge(["pr", "checks", "42"], { env }).exitCode).toBe(8);
+  });
+
+  test("--required filters out allow-failure jobs", () => {
+    const jobs = JSON.stringify([
+      { name: "required", stage: "test", status: "success", allow_failure: false },
+      { name: "advisory", stage: "test", status: "failed", allow_failure: true },
+    ]);
+    const env = checksEnv({ jobs });
+    const r = runForge(["pr", "checks", "42", "--required", "--json", "name"], { env });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual([{ name: "required" }]);
+    expect(runForge(["pr", "checks", "42", "--required"], { env }).exitCode).toBe(0);
+  });
+
+  test("required-checks returns allow_failure=false job names", () => {
+    const jobs = JSON.stringify([
+      { name: "required", stage: "test", status: "success", allow_failure: false },
+      { name: "advisory", stage: "test", status: "success", allow_failure: true },
+    ]);
+    const env = checksEnv({ jobs });
+    expect(runForge(["pr", "required-checks", "42"], { env }).stdout.trim()).toBe("required");
   });
 });
 
