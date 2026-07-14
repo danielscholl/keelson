@@ -566,6 +566,19 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // only the runtime-region check stays live.
     isRegionWorkflow: (workflowName) =>
       staticRegionWorkflows.has(workflowName) || dynamicRegionStore.hasRegionWorkflow(workflowName),
+    // Rib.onRunEvent dispatch: fire-and-forget into the owning rib's handler;
+    // a rejecting hook logs and never reaches the run path.
+    onRibRunEvent: (ribId, event) => {
+      const handler = ribs.runEventHandlers.get(ribId);
+      if (!handler) return;
+      void handler(event).catch((err) => {
+        console.warn(
+          `[keelson] rib '${ribId}' onRunEvent threw for run ${event.runId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    },
   };
   const workflowController = createWorkflowController(
     workflowHandlerOptions,

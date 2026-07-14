@@ -29,6 +29,7 @@ import {
   type MessageChunk,
   type NodeOutputRow,
   type Project,
+  type RibRunEvent,
   type RibWorkflowRunResult,
   recallRequestSchema,
   refreshWorkflowBodySchema,
@@ -168,6 +169,12 @@ export interface WorkflowsHandlerOptions {
   // refresh must be able to run it. Region-declared only — an arbitrary catalog
   // workflow still goes through /runs with an explicit target.
   isRegionWorkflow?: (workflowName: string) => boolean;
+  // Deliver a run-lifecycle event to the rib that owns the run's workflow —
+  // the seam behind Rib.onRunEvent. Called at launch and, once the run
+  // settles, with its terminal status. The composition root wires this to the
+  // rib registry; undefined → no rib is notified. Must not throw (the emit
+  // sites also guard, fail-soft).
+  onRibRunEvent?: (ribId: string, event: RibRunEvent) => void;
 }
 
 // Renders the user-facing dispatch bubble that anchors the workflow run inside
@@ -677,6 +684,51 @@ interface StartRunCoreDeps {
   usageStore?: UsageStore;
   workspaceManager?: WorkspaceManager;
   mutationLockManager?: MutationLockManager;
+  onRibRunEvent?: (ribId: string, event: RibRunEvent) => void;
+}
+
+// Notify the owning rib that a run launched and, once `done` settles, that it
+// reached a terminal status. The terminal read comes from the store — `done`
+// resolves void for every outcome — and is skipped when the run is not
+// terminal (paused awaiting approval) or the row vanished (test teardown).
+// Fail-soft on both edges: a throwing emitter is logged, never propagated
+// into the run path.
+function emitRibRunEvents(opts: {
+  onRibRunEvent: (ribId: string, event: RibRunEvent) => void;
+  ribId: string;
+  store: WorkflowStore;
+  workflowName: string;
+  runId: string;
+  startedAt: string;
+  done: Promise<void>;
+}): void {
+  const { onRibRunEvent, ribId, store, workflowName, runId, startedAt, done } = opts;
+  const emit = (event: RibRunEvent): void => {
+    try {
+      onRibRunEvent(ribId, event);
+    } catch (err) {
+      console.warn(
+        `[workflows] onRibRunEvent(${ribId}) threw for run ${runId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  };
+  emit({ workflowName, runId, status: "running", startedAt });
+  void done
+    .catch(() => {})
+    .then(() => {
+      const run = store.getRun(runId);
+      if (!run || !isTerminalStatus(run.status)) return;
+      emit({
+        workflowName,
+        runId,
+        status: run.status as "succeeded" | "failed" | "cancelled",
+        startedAt: run.startedAt,
+        ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
+        ...(run.error !== null ? { error: run.error } : {}),
+      });
+    });
 }
 
 interface StartRunCoreParams {
@@ -1015,6 +1067,17 @@ function startRunCore(
     releaseMutationLockOnSettle(runId, lockHandle, done);
     lockHandle = undefined;
   }
+  if (ribId !== null && deps.onRibRunEvent !== undefined) {
+    emitRibRunEvents({
+      onRibRunEvent: deps.onRibRunEvent,
+      ribId,
+      store,
+      workflowName: name,
+      runId,
+      startedAt,
+      done,
+    });
+  }
   // Retention is a creation-time invariant of scheduled runs, so it covers the
   // heartbeat AND panel /refresh uniformly (rather than only firing on a
   // scheduler tick). Manual runs are never auto-pruned.
@@ -1208,6 +1271,19 @@ function resumeRunCore(
   if (lockHandle !== undefined) {
     releaseMutationLockOnSettle(runId, lockHandle, done);
     lockHandle = undefined;
+  }
+  // A resume re-launches the (already-stamped) run, so the owning rib sees the
+  // same running → terminal pair a fresh start emits.
+  if (run.ribId !== null && deps.onRibRunEvent !== undefined) {
+    emitRibRunEvents({
+      onRibRunEvent: deps.onRibRunEvent,
+      ribId: run.ribId,
+      store,
+      workflowName: workflow.name,
+      runId,
+      startedAt: run.startedAt,
+      done,
+    });
   }
 
   return { ok: true };
@@ -1575,6 +1651,7 @@ export function createWorkflowController(
             ...(usageStore !== undefined ? { usageStore } : {}),
             ...(workspaceManager !== undefined ? { workspaceManager } : {}),
             ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
+            ...(opts.onRibRunEvent !== undefined ? { onRibRunEvent: opts.onRibRunEvent } : {}),
           },
           {
             workflow,
@@ -1619,6 +1696,7 @@ export function createWorkflowController(
           ...(usageStore !== undefined ? { usageStore } : {}),
           ...(workspaceManager !== undefined ? { workspaceManager } : {}),
           ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
+          ...(opts.onRibRunEvent !== undefined ? { onRibRunEvent: opts.onRibRunEvent } : {}),
         },
         runId,
       );
@@ -2051,6 +2129,7 @@ export function workflowsRoutes(
           ...(usageStore !== undefined ? { usageStore } : {}),
           ...(workspaceManager !== undefined ? { workspaceManager } : {}),
           ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
+          ...(opts.onRibRunEvent !== undefined ? { onRibRunEvent: opts.onRibRunEvent } : {}),
         },
         {
           workflow,
@@ -2147,6 +2226,7 @@ export function workflowsRoutes(
           ...(usageStore !== undefined ? { usageStore } : {}),
           ...(workspaceManager !== undefined ? { workspaceManager } : {}),
           ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
+          ...(opts.onRibRunEvent !== undefined ? { onRibRunEvent: opts.onRibRunEvent } : {}),
         },
         {
           workflow,
@@ -2336,6 +2416,7 @@ export function workflowsRoutes(
         ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
         ...(workspaceManager !== undefined ? { workspaceManager } : {}),
         ...(mutationLockManager !== undefined ? { mutationLockManager } : {}),
+        ...(opts.onRibRunEvent !== undefined ? { onRibRunEvent: opts.onRibRunEvent } : {}),
         catalog,
       },
       runId,

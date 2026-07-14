@@ -156,6 +156,21 @@ export interface RibWorkflowRunResult {
   error?: string;
 }
 
+// A run-lifecycle notification delivered to the rib that OWNS the run's
+// workflow (runs are stamped with their owning rib id at run-start). Fired
+// once when the run launches (`running`) and once when it reaches a terminal
+// status — regardless of who started it: a board effect, the Workflows
+// surface, a cadence refresh. `error` carries the run-level failure message on
+// a failed run. See Rib.onRunEvent.
+export interface RibRunEvent {
+  workflowName: string;
+  runId: string;
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
 export interface WorkspaceLease {
   id: string;
   path: string;
@@ -584,6 +599,14 @@ export interface Rib {
   contributePolicies?(ctx: RibContext): readonly Policy[];
   // Inbound action handler reached via POST /api/ribs/:id/action.
   onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
+  // Run-lifecycle notifications for THIS rib's contributed workflows — launch
+  // and terminal transitions of every run stamped with the rib's id (see
+  // RibRunEvent), so a rib whose board reflects a long-running verb (a cluster
+  // create, a teardown) can track the run without polling. Fail-soft and
+  // fire-and-forget: the harness catches + logs a throwing/rejecting hook and
+  // never lets it affect the run; the hook must not assume it observes every
+  // run (a restart mid-run drops the terminal event).
+  onRunEvent?(event: RibRunEvent, ctx: RibContext): void | Promise<void>;
   // Agents the rib offers for direct chat — named, reusable turn templates
   // (a system prompt plus an optional model), surfaced at GET /api/agents.
   // `listAgents` is cheap (no system prompt assembled); `resolveAgent` lazily
