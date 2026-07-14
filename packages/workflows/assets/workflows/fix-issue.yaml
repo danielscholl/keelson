@@ -74,6 +74,16 @@ nodes:
       echo "$ISSUE_NUM" > "$KEELSON_ARTIFACTS_DIR/.issue-number"
       forge issue view "$ISSUE_NUM" --json number,title,body,labels,comments,state,url,author
 
+  - id: detect-base
+    bash: |
+      set -euo pipefail
+      # Default branch — never assume "main". PR base + diff base.
+      DEFAULT=$(forge repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || true)
+      [ -z "$DEFAULT" ] && DEFAULT=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)
+      [ -z "$DEFAULT" ] && DEFAULT=main
+      printf '%s' "$DEFAULT" > "$KEELSON_ARTIFACTS_DIR/.default-branch"
+      echo "DEFAULT_BRANCH: $DEFAULT"
+
   - id: extract-brief
     depends_on: [fetch-issue]
     bash: |
@@ -420,7 +430,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: implement
-    depends_on: [approve-plan]
+    depends_on: [approve-plan, detect-base]
     context: fresh
     # Pinned to a strong coding model rather than the workflow default `auto`:
     # this node does the actual edits, and pinning makes the model deterministic
