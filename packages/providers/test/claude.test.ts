@@ -1340,6 +1340,119 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
     expect(options.mcpServers!.keelson).toBe(mcpInstance);
   });
 
+  it("keeps concurrent same-cwd turn contexts isolated through tool execution", async () => {
+    const inputSchema = z.object({ turn: z.string() });
+    const seen = new Map<string, Readonly<Record<string, unknown>> | undefined>();
+    let arrived = 0;
+    let releaseBoth!: () => void;
+    const bothArrived = new Promise<void>((resolve) => {
+      releaseBoth = resolve;
+    });
+    const tool: ToolDefinition = {
+      name: "context_probe",
+      description: "Observe turn context",
+      inputSchema,
+      async execute(input, ctx) {
+        const { turn } = inputSchema.parse(input);
+        seen.set(turn, ctx.turnContext);
+        arrived += 1;
+        if (arrived === 2) releaseBoth();
+        await bothArrived;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: turn });
+      },
+    };
+    const runTurn = (
+      turn: string,
+      turnContext: Readonly<Record<string, unknown>>,
+    ): Promise<MessageChunk[]> => {
+      let projected:
+        | ((args: unknown, extra: unknown) => Promise<{ content: unknown[]; isError?: boolean }>)
+        | undefined;
+      const sdk = makeMockSdk({
+        scenario: async (push) => {
+          if (!projected) throw new Error("missing projected tool");
+          await projected({ turn }, {});
+          await pushSuccess(push);
+        },
+      });
+      sdk.module.createSdkMcpServer = (opts: {
+        name: string;
+        tools?: Array<{
+          handler: (
+            args: unknown,
+            extra: unknown,
+          ) => Promise<{ content: unknown[]; isError?: boolean }>;
+        }>;
+      }) => {
+        projected = opts.tools?.[0]?.handler;
+        return {};
+      };
+      const provider = new ClaudeProvider({
+        getCredential: async () => "k",
+        queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+      });
+      return drain(
+        provider.sendQuery("hi", "/same-cwd", undefined, {
+          tools: [tool],
+          turnContext,
+        }),
+      );
+    };
+    const alpha = { room: "alpha" } as const;
+    const beta = { room: "beta" } as const;
+
+    await Promise.all([runTurn("alpha", alpha), runTurn("beta", beta)]);
+
+    expect(seen.get("alpha")).toBe(alpha);
+    expect(seen.get("beta")).toBe(beta);
+  });
+
+  it("leaves tool turn context undefined when the turn omits it", async () => {
+    let executed = false;
+    let seen: Readonly<Record<string, unknown>> | undefined = { unexpected: true };
+    const tool: ToolDefinition = {
+      name: "context_probe",
+      description: "Observe turn context",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        executed = true;
+        seen = ctx.turnContext;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "ok" });
+      },
+    };
+    let projected:
+      | ((args: unknown, extra: unknown) => Promise<{ content: unknown[]; isError?: boolean }>)
+      | undefined;
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        if (!projected) throw new Error("missing projected tool");
+        await projected({}, {});
+        await pushSuccess(push);
+      },
+    });
+    sdk.module.createSdkMcpServer = (opts: {
+      name: string;
+      tools?: Array<{
+        handler: (
+          args: unknown,
+          extra: unknown,
+        ) => Promise<{ content: unknown[]; isError?: boolean }>;
+      }>;
+    }) => {
+      projected = opts.tools?.[0]?.handler;
+      return {};
+    };
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    await drain(provider.sendQuery("hi", "/same-cwd", undefined, { tools: [tool] }));
+
+    expect(executed).toBe(true);
+    expect(seen).toBeUndefined();
+  });
+
   it("projects ZodObject input schemas via .shape (Codex P2: required-arg tools)", async () => {
     // Regression: empty `inputSchema:{}` would advertise a zero-arg tool to
     // the SDK, so required-arg skills (e.g. read_file(path)) would never

@@ -266,6 +266,25 @@ describe("makeRibAgentTurn — seam invariants", () => {
     expect(seen?.options?.model).toBe("opus");
   });
 
+  it("forwards turn context verbatim to the provider", async () => {
+    let seen: QueryCall | undefined;
+    const turnContext = { room: "alpha" } as const;
+    const run = makeRun(fakeProvider({ onQuery: (c) => (seen = c) }));
+
+    await run("chamber", { prompt: "do x", turnContext }).result;
+
+    expect(seen?.options?.turnContext).toBe(turnContext);
+  });
+
+  it("leaves provider turn context undefined when the rib omits it", async () => {
+    let seen: QueryCall | undefined;
+    const run = makeRun(fakeProvider({ onQuery: (c) => (seen = c) }));
+
+    await run("chamber", { prompt: "do x" }).result;
+
+    expect(seen?.options?.turnContext).toBeUndefined();
+  });
+
   it("short-circuits an already-aborted turn without querying the provider", async () => {
     let called = false;
     const run = makeRun(fakeProvider({ onQuery: () => (called = true) }));

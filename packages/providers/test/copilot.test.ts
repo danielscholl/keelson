@@ -2302,6 +2302,105 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
     expect(tools[0]!.skipPermission).toBe(true);
   });
 
+  it("keeps concurrent same-cwd turn contexts isolated through tool execution", async () => {
+    const inputSchema = z.object({ turn: z.string() });
+    const seen = new Map<string, Readonly<Record<string, unknown>> | undefined>();
+    let arrived = 0;
+    let releaseBoth!: () => void;
+    const bothArrived = new Promise<void>((resolve) => {
+      releaseBoth = resolve;
+    });
+    const tool: ToolDefinition = {
+      name: "context_probe",
+      description: "Observe turn context",
+      inputSchema,
+      async execute(input, ctx) {
+        const { turn } = inputSchema.parse(input);
+        seen.set(turn, ctx.turnContext);
+        arrived += 1;
+        if (arrived === 2) releaseBoth();
+        await bothArrived;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: turn });
+      },
+    };
+    const runTurn = (
+      turn: string,
+      turnContext: Readonly<Record<string, unknown>>,
+    ): Promise<MessageChunk[]> => {
+      let sdk: MockSdkHandle;
+      sdk = makeMockSdk({
+        scenario: async (session) => {
+          const projected = (
+            sdk.lastSessionConfig()?.tools as
+              | Array<{
+                  handler: (args: unknown, invocation: { toolCallId: string }) => Promise<string>;
+                }>
+              | undefined
+          )?.[0];
+          if (!projected) throw new Error("missing projected tool");
+          await projected.handler({ turn }, { toolCallId: `call-${turn}` });
+          session.emit("session.idle");
+        },
+      });
+      const provider = new CopilotProvider({
+        getCredential: async () => "real-token",
+        clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+      });
+      return drain(
+        provider.sendQuery("hi", "/same-cwd", undefined, {
+          tools: [tool],
+          turnContext,
+        }),
+      );
+    };
+    const alpha = { room: "alpha" } as const;
+    const beta = { room: "beta" } as const;
+
+    await Promise.all([runTurn("alpha", alpha), runTurn("beta", beta)]);
+
+    expect(seen.get("alpha")).toBe(alpha);
+    expect(seen.get("beta")).toBe(beta);
+  });
+
+  it("leaves tool turn context undefined when the turn omits it", async () => {
+    let executed = false;
+    let seen: Readonly<Record<string, unknown>> | undefined = { unexpected: true };
+    const tool: ToolDefinition = {
+      name: "context_probe",
+      description: "Observe turn context",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        executed = true;
+        seen = ctx.turnContext;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "ok" });
+      },
+    };
+    let sdk: MockSdkHandle;
+    sdk = makeMockSdk({
+      scenario: async (session) => {
+        const projected = (
+          sdk.lastSessionConfig()?.tools as
+            | Array<{
+                handler: (args: unknown, invocation: { toolCallId: string }) => Promise<string>;
+              }>
+            | undefined
+        )?.[0];
+        if (!projected) throw new Error("missing projected tool");
+        await projected.handler({}, { toolCallId: "call-context" });
+        session.emit("session.idle");
+      },
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    await drain(provider.sendQuery("hi", "/same-cwd", undefined, { tools: [tool] }));
+
+    expect(executed).toBe(true);
+    expect(seen).toBeUndefined();
+  });
+
   // Optional-only schemas must surface as JSON Schema with per-field types,
   // not as zero-arg tools (the old safeParse({}) heuristic dropped them).
   it("projects optional-only Zod schemas as JSON Schema with field types + descriptions", async () => {
