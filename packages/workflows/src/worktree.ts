@@ -23,6 +23,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  statSync,
   symlinkSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -313,6 +314,16 @@ interface LocalDepLinkOutcome {
   errors: string[];
 }
 
+/** `undefined` on POSIX (the arg is ignored there); see the call site. */
+function windowsLinkType(target: string): "junction" | "file" | undefined {
+  if (process.platform !== "win32") return undefined;
+  try {
+    return statSync(target).isDirectory() ? "junction" : "file";
+  } catch {
+    return "file";
+  }
+}
+
 function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): LocalDepLinkOutcome {
   const parentModules = join(parentRepo, "node_modules");
   let parentReal: string;
@@ -360,7 +371,11 @@ function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): Lo
     const destination = join(worktreePath, "node_modules", candidate.name);
     try {
       mkdirSync(dirname(destination), { recursive: true });
-      symlinkSync(realTarget, destination);
+      // Windows needs the link type: the default is "file", and a file-type link
+      // to a directory does not resolve — a package link is almost always a
+      // directory. "junction" takes the absolute target we already resolved and
+      // needs no elevation, unlike a "dir" symlink.
+      symlinkSync(realTarget, destination, windowsLinkType(realTarget));
       linked.push(candidate.name);
     } catch (err) {
       errors.push(`${candidate.name}: ${err instanceof Error ? err.message : String(err)}`);

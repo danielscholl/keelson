@@ -259,8 +259,14 @@ nodes:
       mkdirSync(external, { recursive: true });
       writeFileSync(join(external, "index.js"), "module.exports = 'linked';\n");
       // The link lives in the ROOT's node_modules, gitignored, outside the repo.
+      // "junction" so the fixture resolves on Windows, where the default "file"
+      // type would produce a broken link to a directory.
       mkdirSync(join(repoDir, "node_modules", "@scope"), { recursive: true });
-      symlinkSync(external, join(repoDir, "node_modules", "@scope", "pkg"));
+      symlinkSync(
+        external,
+        join(repoDir, "node_modules", "@scope", "pkg"),
+        process.platform === "win32" ? "junction" : undefined,
+      );
       const subdir = join(repoDir, "packages", "nested");
       mkdirSync(subdir, { recursive: true });
 
