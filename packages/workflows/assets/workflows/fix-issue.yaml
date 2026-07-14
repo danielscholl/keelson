@@ -477,7 +477,7 @@ nodes:
          has no automated checks, write one that says so and exits 0. A later
          deterministic node runs this exact script (fail-fast) to gate the PR, so
          it MUST be runnable and exit-code-correct.
-      2. Branch: if HEAD is `main`, create `fix-issue/<issue-number>-<slug>`.
+      2. Branch: if HEAD is `$(cat $ARTIFACTS_DIR/.default-branch)`, create `fix-issue/<issue-number>-<slug>`.
          Otherwise stay on the current branch.
       3. For each `### Task N:` in the plan:
          a. Read the target file.
@@ -602,11 +602,11 @@ nodes:
       1. Read the plan file for the implementation summary.
       2. If `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
          or `docs/PULL_REQUEST_TEMPLATE.md` exists, read it and follow its sections.
-      3. Verify HEAD is NOT `main`. If it is, refuse and stop.
+      3. Verify HEAD is NOT `$(cat $ARTIFACTS_DIR/.default-branch)`. If it is, refuse and stop.
       4. Push: `git push -u origin HEAD`.
       5. Check existing PRs: `forge pr list --head $(git branch --show-current)`.
          If one exists, capture its number and skip creation.
-      6. Otherwise: `forge pr create --draft --base main`
+      6. Otherwise: `forge pr create --draft --base "$(cat $ARTIFACTS_DIR/.default-branch)"`
          - Title: under 70 chars, conventional commit style.
          - Body: from the project's PR template if present, otherwise:
            - **What**: 1-2 sentences
@@ -619,8 +619,9 @@ nodes:
          forge pr view --json number -q '.number' > "$ARTIFACTS_DIR/.pr-number"
          forge pr view --json url    -q '.url'    > "$ARTIFACTS_DIR/.pr-url"
          ```
-      8. Verify base: `forge pr view --json baseRefName -q '.baseRefName'` must be `main`.
-         If not, `forge pr edit <num> --base main`.
+      8. Verify base: `forge pr view --json baseRefName -q '.baseRefName'` must equal
+         `$(cat $ARTIFACTS_DIR/.default-branch)`. If not,
+         `forge pr edit <num> --base "$(cat $ARTIFACTS_DIR/.default-branch)"`.
 
   - id: enforce-draft
     depends_on: [create-pr]
