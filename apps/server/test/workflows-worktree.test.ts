@@ -222,10 +222,8 @@ nodes:
     expect(cleared.worktreePath).toBeNull();
   });
 
-  // The acceptance path for #560: local dep links are reproduced from the
-  // checkout ROOT, which a run's workingDir is allowed to sit below. Passing the
-  // run's cwd as the link source instead scans <subdir>/node_modules and finds
-  // nothing, so this fails if the source path regresses to cwd.
+  // Local dep links come from the checkout root, which a run's workingDir is
+  // allowed to sit below.
   for (const includeWorkspaceManager of [true, false]) {
     test(`restores a root local dep link for a run started in a subdirectory (workspaceManager=${includeWorkspaceManager})`, async () => {
       await initRepo(repoDir);
@@ -278,7 +276,11 @@ worktree:
   enabled: true
 nodes:
   - id: probe
-    bash: test -e node_modules/@scope/pkg && echo LINK_PRESENT || echo LINK_MISSING
+    bash: |
+      echo "CWD=$(pwd)"
+      echo "NM=$(ls node_modules 2>&1 | tr '\\n' ' ')"
+      echo "SCOPE=$(ls node_modules/@scope 2>&1 | tr '\\n' ' ')"
+      test -e node_modules/@scope/pkg && echo LINK_PRESENT || echo LINK_MISSING
 `,
       );
       const { app, projectId } = makeRig({ includeWorkspaceManager });
@@ -297,7 +299,9 @@ nodes:
         nodes: Array<{ outputText: string | null }>;
       };
       expect(run.status).toBe("succeeded");
-      expect(run.nodes[0]!.outputText?.trim()).toBe("LINK_PRESENT");
+      const probe = run.nodes[0]!.outputText ?? "";
+      expect(probe).toContain("LINK_PRESENT");
+      expect(probe).not.toContain("LINK_MISSING");
     });
   }
 

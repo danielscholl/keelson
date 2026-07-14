@@ -68,6 +68,8 @@ function fakeManager(overrides: Partial<WorkspaceManager> = {}): WorkspaceManage
       installed: false,
       skipped: "no-manifest",
       error: null,
+      linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: 0,
     }),
     prepareWorktree: async () => {

@@ -59,6 +59,7 @@ import {
   type DagNode,
   defaultRunUntilBashProbe,
   ensureWorktreeDeps,
+  gitToplevel,
   headDivergesFrom,
   isGitRepo,
   type MemoryTools,
@@ -2894,10 +2895,11 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         }
         const created = await prepareWorktree({
           repoPath: cwd,
-          // The link source is the checkout ROOT, not the run's cwd — which is
-          // allowed to be a subdirectory of it, and whose node_modules would be
-          // the wrong (or an absent) one.
-          linkSourceRepoPath: isolation.projectRootPath,
+          // The link source is the checkout ROOT: the run's cwd may sit below it,
+          // and its node_modules would be the wrong one (or absent). Ask git
+          // rather than trusting projectRootPath, which falls back to the raw
+          // workingDir when that dir isn't inside a registered project.
+          linkSourceRepoPath: (await gitToplevel(cwd)) ?? isolation.projectRootPath,
           branch,
           dest,
           base,
