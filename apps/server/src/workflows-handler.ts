@@ -2831,6 +2831,13 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         message: `worktree dependency install failed; continuing: ${deps.error}`,
       });
     }
+    if (deps.linkedLocalDeps.length > 0) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `linked ${deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${deps.linkedLocalDeps.join(", ")}`,
+      });
+    }
     if (deps.localDepLinkErrors.length > 0) {
       subscribers.broadcast(runId, {
         type: "run_warning",
