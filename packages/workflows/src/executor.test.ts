@@ -2345,12 +2345,24 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
       const binDir = mkdtempSync(join(tmpdir(), "cpr-bin-"));
       writeFileSync(join(binDir, "gh"), "#!/usr/bin/env bash\nexit 0\n");
       chmodSync(join(binDir, "gh"), 0o755);
-      const wrapper = join(binDir, "bashwrap");
-      writeFileSync(
-        wrapper,
-        `#!/usr/bin/env bash\nexport PATH="${binDir}:$PATH"\nexec bash "$@"\n`,
-      );
-      chmodSync(wrapper, 0o755);
+      // Resolve before overriding KEELSON_BASH so the wrapper delegates to the
+      // platform shell instead of recursively invoking itself.
+      const realBash = resolveBash().cmd;
+      let wrapper: string;
+      if (process.platform === "win32") {
+        wrapper = join(binDir, "bashwrap.cmd");
+        writeFileSync(
+          wrapper,
+          `@echo off\r\nset "PATH=${binDir};%PATH%"\r\n"${realBash}" %*\r\n`,
+        );
+      } else {
+        wrapper = join(binDir, "bashwrap");
+        writeFileSync(
+          wrapper,
+          `#!/usr/bin/env bash\nexport PATH="${binDir}:$PATH"\nexec "${realBash}" "$@"\n`,
+        );
+        chmodSync(wrapper, 0o755);
+      }
 
       const prevBash = process.env.KEELSON_BASH;
       process.env.KEELSON_BASH = wrapper;
