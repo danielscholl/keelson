@@ -2791,6 +2791,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     opts.onCreated?.(created.worktreePath);
     const deps = await ensureWorktreeDeps({
       worktreePath: created.worktreePath,
+      repoPath: opts.repoPath,
       abortSignal: abort.signal,
     });
     return {
@@ -2909,6 +2910,13 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
             type: "run_warning",
             nodeId: null,
             message: `linked ${created.deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${created.deps.linkedLocalDeps.join(", ")}`,
+          });
+        }
+        if (created.deps.localDepLinkErrors.length > 0) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: `could not link ${created.deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${created.deps.localDepLinkErrors.join("; ")}`,
           });
         }
       } catch (err) {

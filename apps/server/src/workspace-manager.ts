@@ -87,6 +87,8 @@ export type WorkspaceLeaseSummary = WorkspaceLeaseRecord;
 export interface WorkspaceManager {
   prepareDeps(opts: {
     worktreePath: string;
+    /** The checkout the worktree was created from; see ensureWorktreeDeps. */
+    repoPath?: string;
     abortSignal?: AbortSignal;
   }): Promise<EnsureWorktreeDepsResult>;
   prepareWorktree(req: PrepareWorktreeRequest): Promise<PreparedWorktree>;
@@ -205,6 +207,7 @@ export function createWorkspaceManager({
       try {
         const deps = await manager.prepareDeps({
           worktreePath: created.worktreePath,
+          repoPath: req.repoPath,
           ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
         });
         return {

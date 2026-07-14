@@ -368,6 +368,60 @@ describe("ensureWorktreeDeps", () => {
     );
   });
 
+  test("reports links it could not reproduce instead of reading as nothing-to-link", async () => {
+    const repo = join(tmp, "repo");
+    const external = join(tmp, "external");
+    mkdirSync(repo);
+    mkdirSync(external);
+    await initRepo(repo);
+    await writeInstallablePackage(repo, "link-error-root");
+    await git(["add", "package.json", "fixture/package.json", "bun.lock"], repo);
+    await git(["commit", "-m", "add package"], repo);
+    mkdirSync(join(repo, "node_modules", "@scope"), { recursive: true });
+    symlinkSync(canonicalPath(external), join(repo, "node_modules", "@scope", "pkg"));
+
+    const dest = join(repo, ".wt", "feature");
+    await createWorktree({ repoPath: repo, branch: "keelson/test/feature", dest });
+    // Install first so the sabotage below survives bun's node_modules handling.
+    await ensureWorktreeDeps({ worktreePath: dest, repoPath: repo });
+    // Occupy the link's parent with a FILE so creating the link must fail.
+    rmSync(join(dest, "node_modules", "@scope"), { recursive: true, force: true });
+    writeFileSync(join(dest, "node_modules", "@scope"), "not a directory");
+
+    const result = await ensureWorktreeDeps({ worktreePath: dest, repoPath: repo });
+
+    expect(result.linkedLocalDeps).toEqual([]);
+    expect(result.localDepLinkErrors.length).toBe(1);
+    expect(result.localDepLinkErrors[0]).toContain(join("@scope", "pkg"));
+  });
+
+  test("prefers an explicit repoPath over the worktree's owning checkout", async () => {
+    const repo = join(tmp, "repo");
+    const external = join(tmp, "external");
+    mkdirSync(repo);
+    mkdirSync(external);
+    await initRepo(repo);
+    await writeInstallablePackage(repo, "explicit-repo-root");
+    await git(["add", "package.json", "fixture/package.json", "bun.lock"], repo);
+    await git(["commit", "-m", "add package"], repo);
+
+    // The link lives on a DIFFERENT checkout than the one owning the worktree's
+    // .git dir, so it is only found when the caller's repoPath is honored.
+    const other = join(tmp, "other-checkout");
+    mkdirSync(join(other, "node_modules", "@scope"), { recursive: true });
+    symlinkSync(canonicalPath(external), join(other, "node_modules", "@scope", "pkg"));
+
+    const dest = join(repo, ".wt", "feature");
+    await createWorktree({ repoPath: repo, branch: "keelson/test/feature", dest });
+
+    const derived = await ensureWorktreeDeps({ worktreePath: dest });
+    expect(derived.linkedLocalDeps).toEqual([]);
+
+    rmSync(join(dest, "node_modules"), { recursive: true, force: true });
+    const explicit = await ensureWorktreeDeps({ worktreePath: dest, repoPath: other });
+    expect(explicit.linkedLocalDeps).toEqual([join("@scope", "pkg")]);
+  });
+
   test("does not reproduce symlinks that resolve inside the parent repo", async () => {
     const repo = join(tmp, "repo");
     const internal = join(repo, "internal");

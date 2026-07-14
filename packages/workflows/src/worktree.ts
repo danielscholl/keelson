@@ -298,10 +298,22 @@ export interface EnsureWorktreeDepsResult {
   /** Set when `bun install` ran but exited non-zero. */
   error: string | null;
   linkedLocalDeps: string[];
+  /**
+   * Local dep links that were found but could not be reproduced. A silent
+   * failure here rebuilds the missing-dependency baseline the reproduction
+   * exists to prevent, so callers surface these rather than reading an empty
+   * `linkedLocalDeps` as "nothing to link".
+   */
+  localDepLinkErrors: string[];
   durationMs: number;
 }
 
-function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): string[] {
+interface LocalDepLinkOutcome {
+  linked: string[];
+  errors: string[];
+}
+
+function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): LocalDepLinkOutcome {
   const parentModules = join(parentRepo, "node_modules");
   let parentReal: string;
   let topLevelEntries: string[];
@@ -309,7 +321,7 @@ function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): st
     parentReal = canonicalPath(parentRepo);
     topLevelEntries = readdirSync(parentModules);
   } catch {
-    return [];
+    return { linked: [], errors: [] };
   }
 
   const candidates: { name: string; path: string }[] = [];
@@ -326,27 +338,35 @@ function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): st
   }
 
   const linked: string[] = [];
+  const errors: string[] = [];
   for (const candidate of candidates) {
+    // Scanning stays best-effort: an unreadable entry is not a link we owe the
+    // worktree. Only a link we decided to reproduce can fail loudly.
+    let realTarget: string;
     try {
       if (!lstatSync(candidate.path).isSymbolicLink()) continue;
-      const realTarget = canonicalPath(
-        resolve(dirname(candidate.path), readlinkSync(candidate.path)),
-      );
+      realTarget = canonicalPath(resolve(dirname(candidate.path), readlinkSync(candidate.path)));
       const relativeTarget = relative(parentReal, realTarget);
       const targetOutsideRepo =
         relativeTarget === ".." ||
         relativeTarget.startsWith(`..${sep}`) ||
         isAbsolute(relativeTarget);
       if (!targetOutsideRepo) continue;
+      if (existsSync(join(worktreePath, "node_modules", candidate.name))) continue;
+    } catch {
+      continue;
+    }
 
-      const destination = join(worktreePath, "node_modules", candidate.name);
-      if (existsSync(destination)) continue;
+    const destination = join(worktreePath, "node_modules", candidate.name);
+    try {
       mkdirSync(dirname(destination), { recursive: true });
       symlinkSync(realTarget, destination);
       linked.push(candidate.name);
-    } catch {}
+    } catch (err) {
+      errors.push(`${candidate.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
-  return linked;
+  return { linked, errors };
 }
 
 /**
@@ -360,6 +380,13 @@ function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): st
  */
 export async function ensureWorktreeDeps(opts: {
   worktreePath: string;
+  /**
+   * The checkout the worktree was created from — the source of the local dep
+   * links to reproduce. `repoPathFromWorktree` only recovers the checkout owning
+   * the common `.git` dir, which is the PRIMARY one even when the run was
+   * launched from a linked worktree, so callers that know their repo pass it.
+   */
+  repoPath?: string;
   abortSignal?: AbortSignal;
 }): Promise<EnsureWorktreeDepsResult> {
   const startedAtMs = Date.now();
@@ -370,6 +397,7 @@ export async function ensureWorktreeDeps(opts: {
       skipped: "aborted",
       error: null,
       linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
@@ -379,6 +407,7 @@ export async function ensureWorktreeDeps(opts: {
       skipped: "no-manifest",
       error: null,
       linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
@@ -391,6 +420,7 @@ export async function ensureWorktreeDeps(opts: {
       skipped: "no-lockfile",
       error: null,
       linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
@@ -411,6 +441,7 @@ export async function ensureWorktreeDeps(opts: {
       skipped: null,
       error: `bun install could not be spawned: ${err instanceof Error ? err.message : String(err)}`,
       linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
@@ -420,6 +451,7 @@ export async function ensureWorktreeDeps(opts: {
       skipped: "aborted",
       error: null,
       linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
@@ -430,18 +462,20 @@ export async function ensureWorktreeDeps(opts: {
       skipped: null,
       error: `bun install failed (exit ${out.exitCode}): ${tail}`,
       linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
-  const parentRepo = repoPathFromWorktree(opts.worktreePath);
-  const linkedLocalDeps = parentRepo
+  const parentRepo = opts.repoPath ?? repoPathFromWorktree(opts.worktreePath);
+  const localDeps = parentRepo
     ? reproduceLocalDepSymlinks(parentRepo, opts.worktreePath)
-    : [];
+    : { linked: [], errors: [] };
   return {
     installed: true,
     skipped: null,
     error: null,
-    linkedLocalDeps,
+    linkedLocalDeps: localDeps.linked,
+    localDepLinkErrors: localDeps.errors,
     durationMs: elapsed(),
   };
 }
