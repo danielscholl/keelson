@@ -86,3 +86,37 @@ describe("useSettings — workflow provenance view prefs", () => {
     expect(result.current.settings.hiddenWorkflowSources).toBeUndefined();
   });
 });
+
+describe("useSettings — hiddenRegionActions", () => {
+  beforeEach(() => {
+    seedAndSync();
+  });
+
+  test("nothing is hidden by default", () => {
+    const { result } = renderHook(() => useSettings());
+    expect(result.current.settings.hiddenRegionActions).toBeUndefined();
+    expect(result.current.isRegionActionHidden("explore")).toBe(false);
+    expect(result.current.isRegionActionHidden("select")).toBe(false);
+    expect(result.current.isRegionActionHidden("expand")).toBe(false);
+  });
+
+  test("toggleHiddenRegionAction round-trips one action and persists it", () => {
+    const { result } = renderHook(() => useSettings());
+    act(() => result.current.toggleHiddenRegionAction("select"));
+    act(() => result.current.toggleHiddenRegionAction("expand"));
+    expect(result.current.isRegionActionHidden("select")).toBe(true);
+    expect(result.current.isRegionActionHidden("expand")).toBe(true);
+    // The one the viewer kept stays untouched.
+    expect(result.current.isRegionActionHidden("explore")).toBe(false);
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) as string);
+    expect(raw.hiddenRegionActions).toEqual(["select", "expand"]);
+    act(() => result.current.toggleHiddenRegionAction("select"));
+    expect(result.current.isRegionActionHidden("select")).toBe(false);
+  });
+
+  test("rejects an unknown action in a persisted payload (whole-settings guard)", () => {
+    seedAndSync({ favorites: [], lastUsed: null, hiddenRegionActions: ["select", "bogus"] });
+    const { result } = renderHook(() => useSettings());
+    expect(result.current.settings.hiddenRegionActions).toBeUndefined();
+  });
+});

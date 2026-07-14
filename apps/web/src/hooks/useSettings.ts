@@ -16,6 +16,9 @@ export interface ModelRef {
 // but the rendered `data-theme` attribute is always "light" or "dark".
 export type ThemePreference = "light" | "dark" | "system";
 export type WorkflowsViewMode = "both" | "workflows" | "runs";
+// The host's per-region head controls, addressable one at a time so a viewer can
+// keep the ones they use. Mirrors the ✦ / ◻ / ⤢ trio Surface renders.
+export type RegionAction = "explore" | "select" | "expand";
 
 export interface Settings {
   // Insertion-order list shown at the top of the picker.
@@ -37,6 +40,10 @@ export interface Settings {
   // Show scheduled (producer) runs in the runs feed. Missing = false — the feed
   // defaults to manual runs so high-cadence lanes don't bury them.
   showScheduledRuns?: boolean;
+  // Region head controls the viewer has switched off, on every surface. A
+  // surface's own `hideRegionActions` still wins — this only ever hides more.
+  // Missing = none hidden (all three render).
+  hiddenRegionActions?: RegionAction[];
 }
 
 const DEFAULTS: Settings = { favorites: [], lastUsed: null };
@@ -49,6 +56,11 @@ function isThemePreference(v: unknown): v is ThemePreference {
 const WORKFLOWS_VIEW_MODE_VALUES = ["both", "workflows", "runs"] as const;
 function isWorkflowsViewMode(v: unknown): v is WorkflowsViewMode {
   return typeof v === "string" && (WORKFLOWS_VIEW_MODE_VALUES as readonly string[]).includes(v);
+}
+
+const REGION_ACTION_VALUES = ["explore", "select", "expand"] as const;
+function isRegionAction(v: unknown): v is RegionAction {
+  return typeof v === "string" && (REGION_ACTION_VALUES as readonly string[]).includes(v);
 }
 
 function isModelRef(v: unknown): v is ModelRef {
@@ -79,6 +91,12 @@ function isSettings(v: unknown): v is Settings {
     return false;
   }
   if (o.showScheduledRuns !== undefined && typeof o.showScheduledRuns !== "boolean") {
+    return false;
+  }
+  if (
+    o.hiddenRegionActions !== undefined &&
+    (!Array.isArray(o.hiddenRegionActions) || !o.hiddenRegionActions.every(isRegionAction))
+  ) {
     return false;
   }
   return true;
@@ -159,6 +177,9 @@ export interface UseSettingsResult {
   isWorkflowSourceHidden: (ribId: string) => boolean;
   setShowBackgroundWorkflows: (value: boolean) => void;
   setShowScheduledRuns: (value: boolean) => void;
+  // Toggle one host region control off/on across every surface.
+  toggleHiddenRegionAction: (action: RegionAction) => void;
+  isRegionActionHidden: (action: RegionAction) => boolean;
 }
 
 export function useSettings(): UseSettingsResult {
@@ -235,6 +256,21 @@ export function useSettings(): UseSettingsResult {
     });
   }, []);
 
+  const toggleHiddenRegionAction = useCallback((action: RegionAction) => {
+    update((prev) => {
+      const current = prev.hiddenRegionActions ?? [];
+      const next = current.includes(action)
+        ? current.filter((a) => a !== action)
+        : [...current, action];
+      return { ...prev, hiddenRegionActions: next };
+    });
+  }, []);
+
+  const isRegionActionHidden = useCallback(
+    (action: RegionAction): boolean => (settings.hiddenRegionActions ?? []).includes(action),
+    [settings.hiddenRegionActions],
+  );
+
   return {
     settings,
     toggleFavorite,
@@ -247,5 +283,7 @@ export function useSettings(): UseSettingsResult {
     isWorkflowSourceHidden,
     setShowBackgroundWorkflows,
     setShowScheduledRuns,
+    toggleHiddenRegionAction,
+    isRegionActionHidden,
   };
 }
