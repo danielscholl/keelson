@@ -162,6 +162,29 @@ describe("rib run events", () => {
     }
   });
 
+  test("a done-subscriber that resumes immediately cannot swallow the first terminal event", async () => {
+    const events: RibRunEvent[] = [];
+    const { db, activeRuns, controller } = makeRig({
+      bash: "exit 1",
+      onRibRunEvent: (_ribId, event) => events.push(event),
+    });
+    try {
+      const result = controller.startRun({ name: "provision", inputs: {}, workingDir: tmpDir });
+      if (!result.ok) throw new Error(result.message);
+      // Races the settle-observer: a consumer of ActiveRunEntry.done that
+      // resumes in the same microtask turn flips the row back to running.
+      const raced = activeRuns.get(result.runId)?.done.then(() => {
+        const resumed = controller.resumeRun(result.runId);
+        if (!resumed.ok) throw new Error(resumed.message);
+      });
+      await raced;
+      await until(() => events.length === 4);
+      expect(events.map((e) => e.status)).toEqual(["running", "failed", "running", "failed"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("a hook that mutates its event's inputs cannot corrupt later events", async () => {
     const events: RibRunEvent[] = [];
     const { db, controller } = makeRig({

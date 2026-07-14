@@ -725,21 +725,23 @@ function emitRibRunEvents(opts: {
     }
   };
   emit({ workflowName, runId, status: "running", inputs: { ...inputsSnapshot }, startedAt });
-  void done
-    .catch(() => {})
-    .then(() => {
-      const run = store.getRun(runId);
-      if (!run || !isTerminalStatus(run.status)) return;
-      emit({
-        workflowName,
-        runId,
-        status: run.status as "succeeded" | "failed" | "cancelled",
-        inputs: { ...inputsSnapshot },
-        startedAt: run.startedAt,
-        ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
-        ...(run.error !== null ? { error: run.error } : {}),
-      });
+  const observeSettle = (): void => {
+    const run = store.getRun(runId);
+    if (!run || !isTerminalStatus(run.status)) return;
+    emit({
+      workflowName,
+      runId,
+      status: run.status as "succeeded" | "failed" | "cancelled",
+      inputs: { ...inputsSnapshot },
+      startedAt: run.startedAt,
+      ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
+      ...(run.error !== null ? { error: run.error } : {}),
     });
+  };
+  // Attached directly to done (not a derived .catch chain): registration order
+  // must beat later done-subscribers that could resume the run and flip the row
+  // non-terminal before this reads it.
+  void done.then(observeSettle, observeSettle);
 }
 
 interface StartRunCoreParams {
