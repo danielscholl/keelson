@@ -2904,6 +2904,13 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
             message: `worktree dependency install failed; continuing: ${created.depsError}`,
           });
         }
+        if (created.deps.linkedLocalDeps.length > 0) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: `linked ${created.deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${created.deps.linkedLocalDeps.join(", ")}`,
+          });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         lockOnInPlaceIsolationFallback = true;
