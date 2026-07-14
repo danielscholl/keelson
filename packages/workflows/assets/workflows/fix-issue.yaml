@@ -896,7 +896,11 @@ nodes:
         ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
       }
 
-      REQUIRED=$(forge pr required-checks "$PR_NUM" 2>/dev/null || true)
+      if ! REQUIRED=$(forge pr required-checks "$PR_NUM" 2> "$KEELSON_ARTIFACTS_DIR/.ci-final-required.err"); then
+        echo "PR_STATE: UNKNOWN — could not discover required checks; left as a draft"
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-final-required.err" 2>/dev/null || true
+        exit 0
+      fi
       if [ -z "$REQUIRED" ]; then
         echo "No required checks configured; waiting for all checks to settle within the deadline."
         ATTEMPT=1
@@ -1110,13 +1114,11 @@ nodes:
           exit 0
         fi
         if jq -e '
-          def state: ((.state // .bucket // "") | ascii_downcase);
-          any(.[]?; state == "fail" or state == "failed" or state == "failure")
+          any(.[]?; ((.bucket // "" | ascii_downcase) == "fail"))
         ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json" >/dev/null; then
           jq -r '
-            def state: ((.state // .bucket // "") | ascii_downcase);
-            .[] | select(state == "fail" or state == "failed" or state == "failure")
-            | "failing check: \(.name) — \(state)"
+            .[] | select((.bucket // "" | ascii_downcase) == "fail")
+            | "failing check: \(.name) — \((.state // .bucket // "unknown") | ascii_downcase)"
           ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
           echo "PR_STATE: DRAFT — CI has a failing check; left as a draft for a human"
           exit 0
