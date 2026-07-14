@@ -259,12 +259,13 @@ gl_checks_code() {                   # <pid> <rows-json>
   fi
 }
 
-gl_pr_checks() {                     # forge pr checks <n> [--json <f>] [-q <e>] [--watch] [--interval N]
-  local iid="" fields="" jqexpr="" watch=0 interval=10
+gl_pr_checks() {                     # forge pr checks <n> [--json <f>] [-q <e>] [--required] [--watch] [--interval N]
+  local iid="" fields="" jqexpr="" required=0 watch=0 interval=10
   while [ $# -gt 0 ]; do
     case "$1" in
       --json) fields="$2"; shift 2 ;;
       -q|--jq) jqexpr="$2"; shift 2 ;;
+      --required) required=1; shift ;;
       --watch) watch=1; shift ;;
       --interval) interval="$2"; shift 2 ;;
       -*) shift ;;
@@ -283,8 +284,11 @@ gl_pr_checks() {                     # forge pr checks <n> [--json <f>] [-q <e>]
   if [ "$watch" = 1 ]; then
     while :; do
       rows=$(gl_pipeline_jobs "$pid")
+      [ "$required" = 1 ] && rows=$(printf '%s' "$rows" | jq '[ .[] | select(.allowFailure == false) ]')
       if printf '%s' "$rows" | jq -e 'length > 0' >/dev/null 2>&1; then
         printf '%s' "$rows" | jq -e 'any(.[]; .bucket=="pending")' >/dev/null 2>&1 || break
+      elif [ "$required" = 1 ]; then
+        break
       else
         # No jobs yet: keep waiting unless the pipeline itself is terminal.
         case "$(gl_pipeline_status "$pid")" in success|failed|canceled|skipped|manual) break ;; esac
@@ -292,9 +296,11 @@ gl_pr_checks() {                     # forge pr checks <n> [--json <f>] [-q <e>]
       sleep "$interval"
     done
     printf '%s\n' "$rows" >&2
+    [ "$required" = 1 ] && return "$(printf '%s' "$rows" | gl_checks_exit)"
     return "$(gl_checks_code "$pid" "$rows")"
   fi
   rows=$(gl_pipeline_jobs "$pid")
+  [ "$required" = 1 ] && rows=$(printf '%s' "$rows" | jq '[ .[] | select(.allowFailure == false) ]')
   # gh returns early (exit 0) in --json/-q mode; only the plain form carries the
   # pass/fail/pending exit code.
   if [ -n "$fields" ] || [ -n "$jqexpr" ]; then
@@ -302,7 +308,32 @@ gl_pr_checks() {                     # forge pr checks <n> [--json <f>] [-q <e>]
     return 0
   fi
   printf '%s\n' "$rows"
+  [ "$required" = 1 ] && return "$(printf '%s' "$rows" | gl_checks_exit)"
   return "$(gl_checks_code "$pid" "$rows")"
+}
+
+cmd_required_checks() {             # forge pr required-checks <n>
+  local kind="$1" pr="$2" pid base repo encoded protection rules
+  if [ "$kind" = gitlab ]; then
+    pid=$(gl_mr_pipeline "$pr")
+    [ -n "$pid" ] || return 0
+    gl_pipeline_jobs "$pid" | jq -r '.[] | select(.allowFailure == false) | .name' | sort -u
+    return 0
+  fi
+
+  base=$(gh pr view "$pr" --json baseRefName -q '.baseRefName') \
+    || die "could not resolve base branch for PR $pr" 1
+  repo=$(gh repo view --json nameWithOwner -q '.nameWithOwner') \
+    || die "could not resolve GitHub repository" 1
+  encoded=$(printf '%s' "$base" | jq -sRr @uri)
+  protection=$(gh api "repos/${repo}/branches/${encoded}/protection/required_status_checks" 2>/dev/null || printf '{}')
+  rules=$(gh api "repos/${repo}/rules/branches/${encoded}" 2>/dev/null || printf '[]')
+  jq -nr --argjson protection "$protection" --argjson rules "$rules" '
+    [ $protection.contexts[]?,
+      $protection.checks[]?.context,
+      ($rules[]? | select(.type == "required_status_checks")
+        | .parameters.required_status_checks[]?.context) ]
+    | unique[]'
 }
 
 # ── Write verbs (GitLab) ────────────────────────────────────────────────────
@@ -613,6 +644,7 @@ case "${1:-} ${2:-}" in
   "pr resolve-thread") shift 2; cmd_resolve_thread "$(forge_kind)" "$@"; exit $? ;;
   "pr reviews")        shift 2; cmd_reviews "$(forge_kind)" "$@"; exit $? ;;
   "pr review-batch")   shift 2; cmd_review_batch "$(forge_kind)" "$@"; exit $? ;;
+  "pr required-checks") shift 2; cmd_required_checks "$(forge_kind)" "$@"; exit $? ;;
   "caps "*|"caps")     shift; cmd_caps "$@"; exit $? ;;
 esac
 
