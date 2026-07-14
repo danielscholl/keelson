@@ -899,6 +899,7 @@ function Section({ section }: { section: BoardSection }) {
             const pad =
               columns !== undefined &&
               c.ghost === true &&
+              c.action == null &&
               !isSafeLinkScheme(c.href) &&
               (c.actions?.length ?? 0) === 0 &&
               !(c.fields ?? []).some(
@@ -925,9 +926,12 @@ function Section({ section }: { section: BoardSection }) {
                   onClick: (e: ReactMouseEvent<HTMLDivElement>) => {
                     // A click on an interactive child (an action button, a title
                     // link, a copy affordance) is that child's — the card toggle
-                    // fires only on the card's own chrome.
+                    // fires only on the card's own chrome. Guard `closest` against a
+                    // non-Element target, since a text node can be the event target.
+                    const target = e.target;
                     if (
-                      (e.target as HTMLElement).closest("button, a, input, select, textarea, label")
+                      target instanceof Element &&
+                      target.closest("button, a, input, select, textarea, label")
                     )
                       return;
                     activateCard?.();
