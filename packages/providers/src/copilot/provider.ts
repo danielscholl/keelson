@@ -473,13 +473,12 @@ export class CopilotProvider implements IAgentProvider {
     // abortSignal so SDK-side handlers emit into the stream the UI drains.
     const toolProjection: CopilotToolProjectionContext = {
       pushChunk: (chunk) => queue.push(chunk),
-      contextFactory: (toolCallId): ToolContext => ({
+      // SDK-minted call ids stay internal; caller-authored turn context crosses opaquely.
+      contextFactory: (): ToolContext => ({
         cwd,
         emit: (chunk) => queue.push(chunk),
         abortSignal: options?.abortSignal ?? new AbortController().signal,
-        // toolCallId is consumed inside the projection closure, not on
-        // ToolContext (avoiding contract widening).
-        ...(toolCallId ? {} : {}),
+        ...(options?.turnContext !== undefined ? { turnContext: options.turnContext } : {}),
       }),
       ...(options?.evaluateToolCall !== undefined
         ? { evaluateToolCall: options.evaluateToolCall }
