@@ -489,6 +489,15 @@ const tableSectionSchema = z
     caption: z.string().optional(),
   })
   .strict();
+// A card-body click action — a bare rib-defined verb plus an opaque payload (no
+// label; the card itself is the affordance). Dispatches to the owning rib's
+// onAction exactly like a button action; the renderer guards clicks that land on
+// an interactive child so inner buttons/links keep their own behaviour.
+const canvasCardActionSchema = z
+  .object({ type: z.string().min(1), payload: z.unknown().optional() })
+  .strict();
+export type CanvasCardAction = z.infer<typeof canvasCardActionSchema>;
+
 const cardsSectionSchema = z
   .object({
     kind: z.literal("cards"),
@@ -524,6 +533,14 @@ const cardsSectionSchema = z
           dot: canvasToneSchema.optional(),
           pill: canvasPillSchema.optional(),
           href: z.string().optional(),
+          // Selectable-card affordance for pick/toggle benches where the card IS
+          // the selection control: `action` makes the whole card body a click
+          // target (dispatched like a button; a click on an interactive child —
+          // button, link, input — is ignored so those keep working), and
+          // `selected` marks it chosen (a brand ring). Independent of `href`,
+          // which navigates rather than dispatches.
+          action: canvasCardActionSchema.optional(),
+          selected: z.boolean().optional(),
           bar: z.object({ value: z.number(), total: z.number() }).strict().optional(),
           fields: z.array(canvasFieldSchema).optional(),
           actions: z.array(canvasActionItemSchema).optional(),
@@ -539,7 +556,14 @@ const cardsSectionSchema = z
             .strict()
             .optional(),
         })
-        .strict(),
+        .strict()
+        // `selected` is the paired state of the `action` toggle — selection has no
+        // meaning (and no accessible control) without it, so a selected card must
+        // carry an action. Fail closed at publish rather than render a ring with no
+        // toggle behind it.
+        .refine((c) => !c.selected || c.action !== undefined, {
+          message: "a selected card requires an action",
+        }),
     ),
   })
   .strict();

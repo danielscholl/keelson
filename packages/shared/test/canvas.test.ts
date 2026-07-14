@@ -240,6 +240,8 @@ describe("canvasViewSchema", () => {
               title: "Keycloak",
               pill: { label: "ACTIVE", tone: "ok" },
               href: "https://example.test",
+              selected: true,
+              action: { type: "draft-set", payload: { slug: "keycloak" } },
               bar: { value: 8, total: 9 },
               fields: [
                 { label: "user", value: "admin", copyable: true },
@@ -584,6 +586,39 @@ describe("canvasViewSchema", () => {
         sections: [
           { kind: "cards", items: [{ title: "x", fields: [{ value: "v", bogus: true }] }] },
         ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a selected card that carries no action (selection needs a control)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "x", selected: true }] }],
+      }),
+    ).toThrow();
+    // selected WITH an action is valid.
+    expect(
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "cards", items: [{ title: "x", selected: true, action: { type: "pick" } }] },
+        ],
+      }).view,
+    ).toBe("board");
+  });
+
+  it("rejects a card action missing a type or carrying an extra key (strict)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "x", action: { payload: { a: 1 } } }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "x", action: { type: "t", bogus: true } }] }],
       }),
     ).toThrow();
   });

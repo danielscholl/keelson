@@ -4146,6 +4146,50 @@ button.cvb-action-field-model:disabled {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.cvb-card--selectable {
+  position: relative;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.12s ease;
+}
+/* The whole-card select toggle: a transparent button stretched over the card,
+   layered under the card's real controls (raised below) so those keep their own
+   clicks and accessibility while a click on the card's body toggles selection. */
+.cvb-card-select {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: inherit;
+  cursor: pointer;
+}
+.cvb-card-select:disabled {
+  cursor: default;
+}
+.cvb-card-select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cvb-card--selectable:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+/* Every real control in the card — the overflow menu plus any link, button, or
+   field/form input — sits above the stretched select overlay so its own click
+   wins; the overlay only captures the card's inert body. */
+.cvb-card--selectable .cvb-card-overflow,
+.cvb-card--selectable :is(a, button, input, select, textarea, label):not(.cvb-card-select) {
+  position: relative;
+  z-index: 2;
+}
+.cvb-card.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card-2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .cvb-card--ghost {
   border-style: dashed;
   background: transparent;

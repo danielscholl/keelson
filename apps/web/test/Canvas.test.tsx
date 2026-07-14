@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
+  type CanvasBoardView,
   type CanvasDocument,
   type WorkflowNodeSummary,
 } from "@keelson/shared";
@@ -54,6 +55,8 @@ const { SandboxedHtml, composeCanvasHtmlDoc } = await import(
 );
 const { RunTrace } = await import("../src/components/Workflows/RunTrace.tsx");
 const { ToolCallsBlock } = await import("../src/components/Chat/ToolCallsBlock.tsx");
+const { BoardView } = await import("../src/components/Canvas/BoardView.tsx");
+const { BoardActionProvider } = await import("../src/components/Canvas/BoardActionContext.tsx");
 
 function Opener({ doc }: { doc: CanvasDocument }) {
   const { openCanvas, close } = useCanvas();
@@ -1162,5 +1165,63 @@ describe("ToolCallsBlock autoExpand", () => {
     const { container } = render(<ToolCallsBlock toolCalls={calls} streaming />);
     const details = container.querySelector("details.tool-calls-block") as HTMLDetailsElement;
     expect(details.open).toBe(true);
+  });
+});
+
+describe("BoardView selectable cards", () => {
+  const cardsView = (selected: boolean): CanvasBoardView => ({
+    view: "board",
+    sections: [
+      {
+        kind: "cards",
+        items: [
+          {
+            title: "Ada",
+            selected,
+            action: { type: "draft-set", payload: { slug: "ada" } },
+            actions: [{ type: "enter", label: "Enter Ada" }],
+          },
+        ],
+      },
+    ],
+  });
+
+  const renderWithDispatch = (view: CanvasBoardView, runs: unknown[]) =>
+    render(
+      <BoardActionProvider
+        run={async (a) => {
+          runs.push(a);
+          return { ok: true };
+        }}
+        reveal={async () => ({ ok: true })}
+      >
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+
+  test("a selected card rings; its stretched toggle is aria-pressed and dispatches", () => {
+    const runs: unknown[] = [];
+    renderWithDispatch(cardsView(true), runs);
+    expect(document.querySelector(".cvb-card.is-selected")).not.toBeNull();
+    const toggle = document.querySelector(".cvb-card-select");
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle?.getAttribute("aria-label")).toBe("Ada");
+    fireEvent.click(toggle as Element);
+    expect(runs).toEqual([{ type: "draft-set", payload: { slug: "ada" } }]);
+  });
+
+  test("clicking an action button inside the card fires the button, not the card toggle", () => {
+    const runs: unknown[] = [];
+    renderWithDispatch(cardsView(false), runs);
+    fireEvent.click(screen.getByRole("button", { name: "Enter Ada" }));
+    expect(runs).toEqual([{ type: "enter" }]);
+  });
+
+  test("without a dispatcher the toggle is inert but still conveys the selected state", () => {
+    render(<BoardView view={cardsView(true)} />);
+    const toggle = document.querySelector(".cvb-card-select") as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
   });
 });
