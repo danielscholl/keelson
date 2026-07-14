@@ -160,11 +160,13 @@ export interface RibWorkflowRunResult {
 // workflow (runs are stamped with their owning rib id at run-start). Fired at
 // each launch (`running`) and again when that launch settles — once per
 // LAUNCH, not per run: resuming a failed/cancelled run emits a fresh pair
-// with the same runId. Delivery is launch-source-agnostic (a board effect,
-// the Workflows surface, a cadence refresh). `inputs` are the run's inputs,
-// so a rib can reconstruct dispatch context for runs it didn't launch;
-// `error` carries the run-level failure message on a failed run. See
-// Rib.onRunEvent.
+// with the same runId. Launches of one run never interleave: a launch's
+// terminal event is delivered before any later launch's running event, so a
+// rib reducing the stream can treat the latest event as current. Delivery is
+// launch-source-agnostic (a board effect, the Workflows surface, a cadence
+// refresh). `inputs` are the run's inputs, so a rib can reconstruct dispatch
+// context for runs it didn't launch; `error` carries the run-level failure
+// message on a failed run. See Rib.onRunEvent.
 export interface RibRunEvent {
   workflowName: string;
   runId: string;

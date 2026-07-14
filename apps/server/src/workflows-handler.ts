@@ -709,11 +709,13 @@ function emitRibRunEvents(opts: {
   // event — the executor's own inputs object is never exposed, and a hook that
   // mutates its copy can't leak into the run or the terminal event.
   const inputsSnapshot = { ...opts.inputs };
+  // Metadata-only: the emitter chain ends in rib code that can read
+  // credentials, and this log runs outside any runWithRedaction scope.
   const warn = (err: unknown): void => {
     console.warn(
-      `[workflows] onRibRunEvent(${ribId}) threw for run ${runId}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      `[workflows] onRibRunEvent(${ribId}) threw for run ${runId} (${
+        err instanceof Error ? err.name : typeof err
+      })`,
     );
   };
   // An async callback is assignable to the void-returning seam, so guard the
@@ -740,25 +742,30 @@ function emitRibRunEvents(opts: {
     };
   };
   // Capture the terminal payload at the run_done broadcast — the same
-  // synchronous section that persists it, before the row becomes resumable. A
-  // settle-time read alone can race a resume that has already flipped the row
-  // back to running (the executor awaits a final recompose between persisting
-  // and resolving `done`). First frame only: a resumed launch's own run_done
-  // belongs to its own emitter.
-  let terminal: RibRunEvent | null = null;
+  // synchronous section that persists it, before the row becomes resumable —
+  // and deliver it one microtask later. That lands after the executor's sync
+  // section yet ahead of any resume, upholding the contract's ordering
+  // promise: a later launch's running event never precedes this launch's
+  // terminal event. A settle-time read alone can race a resume that has
+  // already flipped the row back to running (the executor awaits a final
+  // recompose between persisting and resolving `done`).
+  let emitted = false;
   const unsubscribe = subscribers.onFrame(runId, (frame) => {
-    if (frame.type !== "run_done" || terminal !== null) return;
-    terminal = readTerminal();
+    if (frame.type !== "run_done" || emitted) return;
+    const event = readTerminal();
+    if (event === null) return;
+    emitted = true;
+    unsubscribe();
+    queueMicrotask(() => emit(event));
   });
   const observeSettle = (): void => {
     unsubscribe();
+    if (emitted) return;
+    emitted = true;
     // Fallback for terminal paths that never broadcast a run_done frame.
-    const event = terminal ?? readTerminal();
+    const event = readTerminal();
     if (event !== null) emit(event);
   };
-  // Attached directly to done (not a derived .catch chain): registration order
-  // must beat later done-subscribers that could resume the run and interleave
-  // their fresh pair ahead of this launch's terminal event.
   void done.then(observeSettle, observeSettle);
 }
 

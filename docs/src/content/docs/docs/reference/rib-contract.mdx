@@ -263,7 +263,9 @@ coordination path.
    completedAt?, error? }` with `status` one of `running | succeeded | failed |
    cancelled`: one `running` at each launch and one terminal event when that
    launch settles. Delivery is once per launch, not once per run — resuming a
-   failed or cancelled run emits a fresh pair with the same `runId`. `inputs`
+   failed or cancelled run emits a fresh pair with the same `runId`, and
+   launches never interleave: a launch's terminal event arrives before any
+   later launch's `running`, so the latest event is always current. `inputs`
    are the run's inputs, so a rib can reconstruct dispatch context for runs it
    didn't start; `error` carries the run-level failure message. The hook is
    fail-soft and fire-and-forget: a throwing or rejecting hook is caught and

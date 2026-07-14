@@ -567,15 +567,17 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     isRegionWorkflow: (workflowName) =>
       staticRegionWorkflows.has(workflowName) || dynamicRegionStore.hasRegionWorkflow(workflowName),
     // Rib.onRunEvent dispatch: fire-and-forget into the owning rib's handler;
-    // a rejecting hook logs and never reaches the run path.
+    // a rejecting hook logs and never reaches the run path. Metadata-only log:
+    // the hook can read credentials via its ctx, and this runs outside any
+    // runWithRedaction scope.
     onRibRunEvent: (ribId, event) => {
       const handler = ribs.runEventHandlers.get(ribId);
       if (!handler) return;
       void handler(event).catch((err) => {
         console.warn(
-          `[keelson] rib '${ribId}' onRunEvent threw for run ${event.runId}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          `[keelson] rib '${ribId}' onRunEvent rejected for run ${event.runId} (${
+            err instanceof Error ? err.name : typeof err
+          })`,
         );
       });
     },

@@ -209,15 +209,9 @@ describe("rib run events", () => {
       });
       await until(() => events.length === 4);
       unsub();
-      // The resume's fresh pair starts before launch 1's terminal event goes
-      // out (the window closes only when done settles); what must hold is that
-      // both launches deliver their full pair.
-      expect(events.map((e) => e.status).sort()).toEqual([
-        "failed",
-        "failed",
-        "running",
-        "running",
-      ]);
+      // The contract's ordering promise: launch 1's terminal event is
+      // delivered before the resumed launch's running event.
+      expect(events.map((e) => e.status)).toEqual(["running", "failed", "running", "failed"]);
       for (const event of events) expect(event.runId).toBe(result.runId);
     } finally {
       db.close();
