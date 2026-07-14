@@ -15,8 +15,18 @@
  * catalog; the worktree path is stored directly on the workflow_runs row.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { killProcessTree } from "./handlers/subprocess.ts";
 
@@ -288,7 +298,90 @@ export interface EnsureWorktreeDepsResult {
   skipped: "no-manifest" | "no-lockfile" | "aborted" | null;
   /** Set when `bun install` ran but exited non-zero. */
   error: string | null;
+  linkedLocalDeps: string[];
+  /**
+   * Local dep links that were found but could not be reproduced. A silent
+   * failure here rebuilds the missing-dependency baseline the reproduction
+   * exists to prevent, so callers surface these rather than reading an empty
+   * `linkedLocalDeps` as "nothing to link".
+   */
+  localDepLinkErrors: string[];
   durationMs: number;
+}
+
+interface LocalDepLinkOutcome {
+  linked: string[];
+  errors: string[];
+}
+
+/** `undefined` on POSIX (the arg is ignored there); see the call site. */
+function windowsLinkType(target: string): "junction" | "file" | undefined {
+  if (process.platform !== "win32") return undefined;
+  try {
+    return statSync(target).isDirectory() ? "junction" : "file";
+  } catch {
+    return "junction";
+  }
+}
+
+function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): LocalDepLinkOutcome {
+  const parentModules = join(parentRepo, "node_modules");
+  let parentReal: string;
+  let topLevelEntries: string[];
+  try {
+    parentReal = canonicalPath(parentRepo);
+    topLevelEntries = readdirSync(parentModules);
+  } catch {
+    return { linked: [], errors: [] };
+  }
+
+  const candidates: { name: string; path: string }[] = [];
+  for (const entry of topLevelEntries) {
+    const entryPath = join(parentModules, entry);
+    candidates.push({ name: entry, path: entryPath });
+    if (!entry.startsWith("@")) continue;
+    try {
+      if (!lstatSync(entryPath).isDirectory()) continue;
+      for (const child of readdirSync(entryPath)) {
+        candidates.push({ name: join(entry, child), path: join(entryPath, child) });
+      }
+    } catch {}
+  }
+
+  const linked: string[] = [];
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    // Scanning stays best-effort: an unreadable entry is not a link we owe the
+    // worktree. Only a link we decided to reproduce can fail loudly.
+    let realTarget: string;
+    try {
+      if (!lstatSync(candidate.path).isSymbolicLink()) continue;
+      realTarget = canonicalPath(resolve(dirname(candidate.path), readlinkSync(candidate.path)));
+      const relativeTarget = relative(parentReal, realTarget);
+      const targetOutsideRepo =
+        relativeTarget === ".." ||
+        relativeTarget.startsWith(`..${sep}`) ||
+        isAbsolute(relativeTarget);
+      if (!targetOutsideRepo) continue;
+      if (existsSync(join(worktreePath, "node_modules", candidate.name))) continue;
+    } catch {
+      continue;
+    }
+
+    const destination = join(worktreePath, "node_modules", candidate.name);
+    try {
+      mkdirSync(dirname(destination), { recursive: true });
+      // Windows needs the link type: the default is "file", and a file-type link
+      // to a directory does not resolve — a package link is almost always a
+      // directory. "junction" takes the absolute target we already resolved and
+      // needs no elevation, unlike a "dir" symlink.
+      symlinkSync(realTarget, destination, windowsLinkType(realTarget));
+      linked.push(candidate.name);
+    } catch (err) {
+      errors.push(`${candidate.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return { linked, errors };
 }
 
 /**
@@ -302,21 +395,49 @@ export interface EnsureWorktreeDepsResult {
  */
 export async function ensureWorktreeDeps(opts: {
   worktreePath: string;
+  /**
+   * The checkout the worktree was created from — the source of the local dep
+   * links to reproduce. `repoPathFromWorktree` only recovers the checkout owning
+   * the common `.git` dir, which is the PRIMARY one even when the run was
+   * launched from a linked worktree, so callers that know their repo pass it.
+   */
+  repoPath?: string;
   abortSignal?: AbortSignal;
 }): Promise<EnsureWorktreeDepsResult> {
   const startedAtMs = Date.now();
   const elapsed = () => Date.now() - startedAtMs;
   if (opts.abortSignal?.aborted) {
-    return { installed: false, skipped: "aborted", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "aborted",
+      error: null,
+      linkedLocalDeps: [],
+      localDepLinkErrors: [],
+      durationMs: elapsed(),
+    };
   }
   if (!existsSync(join(opts.worktreePath, "package.json"))) {
-    return { installed: false, skipped: "no-manifest", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "no-manifest",
+      error: null,
+      linkedLocalDeps: [],
+      localDepLinkErrors: [],
+      durationMs: elapsed(),
+    };
   }
   const hasLockfile =
     existsSync(join(opts.worktreePath, "bun.lock")) ||
     existsSync(join(opts.worktreePath, "bun.lockb"));
   if (!hasLockfile) {
-    return { installed: false, skipped: "no-lockfile", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "no-lockfile",
+      error: null,
+      linkedLocalDeps: [],
+      localDepLinkErrors: [],
+      durationMs: elapsed(),
+    };
   }
   let out: GitOutcome;
   try {
@@ -334,11 +455,20 @@ export async function ensureWorktreeDeps(opts: {
       installed: false,
       skipped: null,
       error: `bun install could not be spawned: ${err instanceof Error ? err.message : String(err)}`,
+      linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
   if (opts.abortSignal?.aborted) {
-    return { installed: false, skipped: "aborted", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "aborted",
+      error: null,
+      linkedLocalDeps: [],
+      localDepLinkErrors: [],
+      durationMs: elapsed(),
+    };
   }
   if (out.exitCode !== 0) {
     const tail = (out.stderr.trim() || out.stdout.trim()).slice(-2000);
@@ -346,10 +476,23 @@ export async function ensureWorktreeDeps(opts: {
       installed: false,
       skipped: null,
       error: `bun install failed (exit ${out.exitCode}): ${tail}`,
+      linkedLocalDeps: [],
+      localDepLinkErrors: [],
       durationMs: elapsed(),
     };
   }
-  return { installed: true, skipped: null, error: null, durationMs: elapsed() };
+  const parentRepo = opts.repoPath ?? repoPathFromWorktree(opts.worktreePath);
+  const localDeps = parentRepo
+    ? reproduceLocalDepSymlinks(parentRepo, opts.worktreePath)
+    : { linked: [], errors: [] };
+  return {
+    installed: true,
+    skipped: null,
+    error: null,
+    linkedLocalDeps: localDeps.linked,
+    localDepLinkErrors: localDeps.errors,
+    durationMs: elapsed(),
+  };
 }
 
 export interface RemoveWorktreeOptions {

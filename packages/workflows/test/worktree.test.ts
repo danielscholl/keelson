@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -110,6 +110,22 @@ async function addOrigin(path: string): Promise<void> {
   await git(["remote", "add", "origin", remote], path);
   await git(["push", "-u", "origin", "main"], path);
   await git(["remote", "set-head", "origin", "-a"], path);
+}
+
+async function writeInstallablePackage(path: string, name: string): Promise<void> {
+  writeJson(join(path, "package.json"), {
+    name,
+    version: "0.0.0",
+    private: true,
+    workspaces: ["fixture"],
+    dependencies: { "@fixture/base": "workspace:*" },
+  });
+  mkdirSync(join(path, "fixture"));
+  writeJson(join(path, "fixture", "package.json"), {
+    name: "@fixture/base",
+    version: "0.0.0",
+  });
+  await bun(["install"], path);
 }
 
 beforeEach(() => {
@@ -326,7 +342,144 @@ describe("ensureWorktreeDeps", () => {
     expect(result.skipped).toBeNull();
     expect(result.error).toBeNull();
     expect(result.installed).toBe(true);
+    expect(result.linkedLocalDeps).toEqual([]);
     expect(existsSync(join(dest, "node_modules"))).toBe(true);
+  });
+
+  test("reproduces an out-of-repo local dependency symlink", async () => {
+    const repo = join(tmp, "repo");
+    const external = join(tmp, "external");
+    mkdirSync(repo);
+    mkdirSync(external);
+    await initRepo(repo);
+    await writeInstallablePackage(repo, "linked-deps-root");
+    await git(["add", "package.json", "fixture/package.json", "bun.lock"], repo);
+    await git(["commit", "-m", "add package"], repo);
+    mkdirSync(join(repo, "node_modules", "@scope"), { recursive: true });
+    symlinkSync(canonicalPath(external), join(repo, "node_modules", "@scope", "pkg"));
+
+    const dest = join(repo, ".wt", "feature");
+    await createWorktree({ repoPath: repo, branch: "keelson/test/feature", dest });
+    const result = await ensureWorktreeDeps({ worktreePath: dest });
+
+    expect(result.linkedLocalDeps).toEqual([join("@scope", "pkg")]);
+    expect(canonicalPath(join(dest, "node_modules", "@scope", "pkg"))).toBe(
+      canonicalPath(external),
+    );
+  });
+
+  test("reports links it could not reproduce instead of reading as nothing-to-link", async () => {
+    const repo = join(tmp, "repo");
+    const external = join(tmp, "external");
+    mkdirSync(repo);
+    mkdirSync(external);
+    await initRepo(repo);
+    await writeInstallablePackage(repo, "link-error-root");
+    await git(["add", "package.json", "fixture/package.json", "bun.lock"], repo);
+    await git(["commit", "-m", "add package"], repo);
+    mkdirSync(join(repo, "node_modules", "@scope"), { recursive: true });
+    symlinkSync(canonicalPath(external), join(repo, "node_modules", "@scope", "pkg"));
+
+    const dest = join(repo, ".wt", "feature");
+    await createWorktree({ repoPath: repo, branch: "keelson/test/feature", dest });
+    // Install first so the sabotage below survives bun's node_modules handling.
+    await ensureWorktreeDeps({ worktreePath: dest, repoPath: repo });
+    // Occupy the link's parent with a FILE so creating the link must fail.
+    rmSync(join(dest, "node_modules", "@scope"), { recursive: true, force: true });
+    writeFileSync(join(dest, "node_modules", "@scope"), "not a directory");
+
+    const result = await ensureWorktreeDeps({ worktreePath: dest, repoPath: repo });
+
+    expect(result.linkedLocalDeps).toEqual([]);
+    expect(result.localDepLinkErrors.length).toBe(1);
+    expect(result.localDepLinkErrors[0]).toContain(join("@scope", "pkg"));
+  });
+
+  test("prefers an explicit repoPath over the worktree's owning checkout", async () => {
+    const repo = join(tmp, "repo");
+    const external = join(tmp, "external");
+    mkdirSync(repo);
+    mkdirSync(external);
+    await initRepo(repo);
+    await writeInstallablePackage(repo, "explicit-repo-root");
+    await git(["add", "package.json", "fixture/package.json", "bun.lock"], repo);
+    await git(["commit", "-m", "add package"], repo);
+
+    // The link lives on a DIFFERENT checkout than the one owning the worktree's
+    // .git dir, so it is only found when the caller's repoPath is honored.
+    const other = join(tmp, "other-checkout");
+    mkdirSync(join(other, "node_modules", "@scope"), { recursive: true });
+    symlinkSync(canonicalPath(external), join(other, "node_modules", "@scope", "pkg"));
+
+    const dest = join(repo, ".wt", "feature");
+    await createWorktree({ repoPath: repo, branch: "keelson/test/feature", dest });
+
+    const derived = await ensureWorktreeDeps({ worktreePath: dest });
+    expect(derived.linkedLocalDeps).toEqual([]);
+
+    rmSync(join(dest, "node_modules"), { recursive: true, force: true });
+    const explicit = await ensureWorktreeDeps({ worktreePath: dest, repoPath: other });
+    expect(explicit.linkedLocalDeps).toEqual([join("@scope", "pkg")]);
+  });
+
+  test("does not reproduce symlinks that resolve inside the parent repo", async () => {
+    const repo = join(tmp, "repo");
+    const internal = join(repo, "internal");
+    mkdirSync(repo);
+    mkdirSync(internal);
+    await initRepo(repo);
+    await writeInstallablePackage(repo, "internal-link-root");
+    await git(["add", "package.json", "fixture/package.json", "bun.lock"], repo);
+    await git(["commit", "-m", "add package"], repo);
+    mkdirSync(join(repo, "node_modules", "@scope"), { recursive: true });
+    symlinkSync(internal, join(repo, "node_modules", "@scope", "pkg"));
+
+    const dest = join(repo, ".wt", "feature");
+    await createWorktree({ repoPath: repo, branch: "keelson/test/feature", dest });
+    const result = await ensureWorktreeDeps({ worktreePath: dest });
+
+    expect(result.linkedLocalDeps).toEqual([]);
+    expect(existsSync(join(dest, "node_modules", "@scope", "pkg"))).toBe(false);
+  });
+
+  test("does not replace a dependency installed by bun", async () => {
+    const repo = join(tmp, "repo");
+    const external = join(tmp, "external");
+    mkdirSync(repo);
+    mkdirSync(external);
+    await initRepo(repo);
+    writeJson(join(repo, "package.json"), {
+      name: "existing-dep-root",
+      version: "0.0.0",
+      private: true,
+      workspaces: ["pkg"],
+      dependencies: { "@scope/pkg": "workspace:*" },
+    });
+    mkdirSync(join(repo, "pkg"));
+    writeJson(join(repo, "pkg", "package.json"), { name: "@scope/pkg", version: "0.0.0" });
+    await bun(["install"], repo);
+    await git(["add", "package.json", "pkg/package.json", "bun.lock"], repo);
+    await git(["commit", "-m", "add workspace"], repo);
+    rmSync(join(repo, "node_modules", "@scope", "pkg"), { recursive: true, force: true });
+    symlinkSync(canonicalPath(external), join(repo, "node_modules", "@scope", "pkg"));
+
+    const dest = join(repo, ".wt", "feature");
+    await createWorktree({ repoPath: repo, branch: "keelson/test/feature", dest });
+    const result = await ensureWorktreeDeps({ worktreePath: dest });
+
+    expect(result.linkedLocalDeps).toEqual([]);
+    expect(canonicalPath(join(dest, "node_modules", "@scope", "pkg"))).toBe(
+      canonicalPath(join(dest, "pkg")),
+    );
+  });
+
+  test("does not reproduce links outside a git worktree", async () => {
+    await writeInstallablePackage(tmp, "plain-directory");
+
+    const result = await ensureWorktreeDeps({ worktreePath: tmp });
+
+    expect(result.installed).toBe(true);
+    expect(result.linkedLocalDeps).toEqual([]);
   });
 
   test("skips a worktree with no package.json", async () => {

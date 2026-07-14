@@ -186,6 +186,8 @@ describe("WorkspaceManager", () => {
         installed: false,
         skipped: null,
         error: "bun install failed (exit 1): lock mismatch",
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
         durationMs: 1,
       },
       depsError: "bun install failed (exit 1): lock mismatch",
@@ -211,6 +213,41 @@ describe("WorkspaceManager", () => {
     expect(leaseStore.list()).toEqual([]);
   });
 
+  test("acquire fails and cleans up when a local dependency link could not be restored", async () => {
+    await initRepo(repoDir);
+    const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+    const removeCalls: Array<{ repoPath: string; dest: string; force?: boolean }> = [];
+
+    manager.prepareWorktree = async (req) => ({
+      worktreePath: req.dest,
+      adopted: false,
+      branchCreated: true,
+      deps: {
+        installed: true,
+        skipped: null,
+        error: null,
+        linkedLocalDeps: [],
+        localDepLinkErrors: ["@keelson/shared: EACCES: permission denied"],
+        durationMs: 1,
+      },
+      depsError: null,
+    });
+    manager.removeWorktree = async (opts) => {
+      removeCalls.push(opts);
+      return { removed: true, warning: null };
+    };
+
+    // A lease promises a checkout with deps installed; a known-missing local dep
+    // must reject rather than hand back a checkout that can't reach a baseline.
+    await expect(
+      manager.acquire({ projectId: project.id, purpose: "deps", owner: "tool" }),
+    ).rejects.toThrow("workspace local dependency link failed");
+
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toMatchObject({ repoPath: repoDir, force: true });
+    expect(leaseStore.list()).toEqual([]);
+  });
+
   test("acquire fails and cleans up when preparation is aborted", async () => {
     await initRepo(repoDir);
     const project = projectsStore.create({ name: "repo", rootPath: repoDir });
@@ -220,7 +257,14 @@ describe("WorkspaceManager", () => {
       worktreePath: req.dest,
       adopted: false,
       branchCreated: true,
-      deps: { installed: false, skipped: "aborted", error: null, durationMs: 1 },
+      deps: {
+        installed: false,
+        skipped: "aborted",
+        error: null,
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
+        durationMs: 1,
+      },
       depsError: null,
     });
     manager.removeWorktree = async (opts) => {
@@ -247,7 +291,14 @@ describe("WorkspaceManager", () => {
     let depsCalls = 0;
     manager.prepareDeps = async () => {
       depsCalls += 1;
-      return { installed: false, skipped: "no-manifest", error: null, durationMs: 1 };
+      return {
+        installed: false,
+        skipped: "no-manifest",
+        error: null,
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
+        durationMs: 1,
+      };
     };
 
     await expect(
@@ -295,7 +346,14 @@ describe("WorkspaceManager", () => {
       worktreePath: req.dest,
       adopted: false,
       branchCreated: true,
-      deps: { installed: false, skipped: null, error: "boom", durationMs: 1 },
+      deps: {
+        installed: false,
+        skipped: null,
+        error: "boom",
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
+        durationMs: 1,
+      },
       depsError: "boom",
     });
     manager.removeWorktree = async () => ({ removed: false, warning: "removal failed" });
@@ -322,7 +380,14 @@ describe("WorkspaceManager", () => {
         worktreePath: req.dest,
         adopted: false,
         branchCreated: true,
-        deps: { installed: false, skipped: "no-manifest", error: null, durationMs: 1 },
+        deps: {
+          installed: false,
+          skipped: "no-manifest",
+          error: null,
+          linkedLocalDeps: [],
+          localDepLinkErrors: [],
+          durationMs: 1,
+        },
         depsError: null,
       };
     };

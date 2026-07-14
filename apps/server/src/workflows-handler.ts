@@ -59,6 +59,7 @@ import {
   type DagNode,
   defaultRunUntilBashProbe,
   ensureWorktreeDeps,
+  gitToplevel,
   headDivergesFrom,
   isGitRepo,
   type MemoryTools,
@@ -2753,20 +2754,24 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // directory removal turns into a reliable CI failure).
   let pendingRunDoneEvent: Extract<RunStreamEvent, { type: "run_done" }> | undefined;
   let runDoneCompletedAt: string | undefined;
-  const prepareDeps = async (worktreePath: string) => {
+  const prepareDeps = async (worktreePath: string, repoPath?: string) => {
     if (workspaceManager !== undefined) {
       return workspaceManager.prepareDeps({
         worktreePath,
+        ...(repoPath !== undefined ? { repoPath } : {}),
         abortSignal: abort.signal,
       });
     }
     return ensureWorktreeDeps({
       worktreePath,
+      ...(repoPath !== undefined ? { repoPath } : {}),
       abortSignal: abort.signal,
     });
   };
   const prepareWorktree = async (opts: {
     repoPath: string;
+    /** Checkout root to copy local dep links from; `repoPath` may be a subdir. */
+    linkSourceRepoPath: string;
     branch: string;
     dest: string;
     base: string | null;
@@ -2775,6 +2780,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     if (workspaceManager !== undefined) {
       return workspaceManager.prepareWorktree({
         repoPath: opts.repoPath,
+        linkSourceRepoPath: opts.linkSourceRepoPath,
         branch: opts.branch,
         dest: opts.dest,
         ...(opts.base !== null ? { base: opts.base } : {}),
@@ -2791,6 +2797,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     opts.onCreated?.(created.worktreePath);
     const deps = await ensureWorktreeDeps({
       worktreePath: created.worktreePath,
+      repoPath: opts.linkSourceRepoPath,
       abortSignal: abort.signal,
     });
     return {
@@ -2819,12 +2826,26 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     effectiveCwd = existingWorktreePath;
     worktreePathForCleanup = existingWorktreePath;
     cleanupOnSuccessOnly = true;
-    const deps = await prepareDeps(existingWorktreePath);
+    const deps = await prepareDeps(existingWorktreePath, (await gitToplevel(cwd)) ?? cwd);
     if (deps.error !== null) {
       subscribers.broadcast(runId, {
         type: "run_warning",
         nodeId: null,
         message: `worktree dependency install failed; continuing: ${deps.error}`,
+      });
+    }
+    if (deps.linkedLocalDeps.length > 0) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `linked ${deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${deps.linkedLocalDeps.join(", ")}`,
+      });
+    }
+    if (deps.localDepLinkErrors.length > 0) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `could not link ${deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${deps.localDepLinkErrors.join("; ")}`,
       });
     }
   } else if (isolation !== null) {
@@ -2876,6 +2897,11 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         }
         const created = await prepareWorktree({
           repoPath: cwd,
+          // The link source is the checkout ROOT: the run's cwd may sit below it,
+          // and its node_modules would be the wrong one (or absent). Ask git
+          // rather than trusting projectRootPath, which falls back to the raw
+          // workingDir when that dir isn't inside a registered project.
+          linkSourceRepoPath: (await gitToplevel(cwd)) ?? isolation.projectRootPath,
           branch,
           dest,
           base,
@@ -2902,6 +2928,20 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
             type: "run_warning",
             nodeId: null,
             message: `worktree dependency install failed; continuing: ${created.depsError}`,
+          });
+        }
+        if (created.deps.linkedLocalDeps.length > 0) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: `linked ${created.deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${created.deps.linkedLocalDeps.join(", ")}`,
+          });
+        }
+        if (created.deps.localDepLinkErrors.length > 0) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: `could not link ${created.deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${created.deps.localDepLinkErrors.join("; ")}`,
           });
         }
       } catch (err) {

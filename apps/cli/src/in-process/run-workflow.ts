@@ -315,10 +315,21 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         cleanupWorktree = { repoPath: repoRoot, dest: created.worktreePath };
         const deps = await ensureWorktreeDeps({
           worktreePath: created.worktreePath,
+          repoPath: repoRoot,
           abortSignal: abort.signal,
         });
         if (deps.error !== null) {
           console.warn(`[keelson] worktree dependency install failed; continuing: ${deps.error}`);
+        }
+        if (deps.localDepLinkErrors.length > 0) {
+          console.warn(
+            `[keelson] could not link local dependency symlink(s); the worktree may not reach a green baseline: ${deps.localDepLinkErrors.join("; ")}`,
+          );
+        }
+        if (deps.linkedLocalDeps.length > 0) {
+          console.warn(
+            `[keelson] linked ${deps.linkedLocalDeps.length} local dependency symlink(s) into the worktree: ${deps.linkedLocalDeps.join(", ")}`,
+          );
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

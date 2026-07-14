@@ -56,6 +56,13 @@ export class WorkspaceLeaseReleaseError extends Error {
 
 export interface PrepareWorktreeRequest {
   repoPath: string;
+  /**
+   * Checkout root whose local dep links are reproduced into the worktree.
+   * Defaults to `repoPath`, which callers may set to a subdirectory of the
+   * checkout (git resolves the repo from there, but its node_modules is the
+   * wrong one).
+   */
+  linkSourceRepoPath?: string;
   branch: string;
   dest: string;
   base?: string | null;
@@ -87,6 +94,8 @@ export type WorkspaceLeaseSummary = WorkspaceLeaseRecord;
 export interface WorkspaceManager {
   prepareDeps(opts: {
     worktreePath: string;
+    /** The checkout the worktree was created from; see ensureWorktreeDeps. */
+    repoPath?: string;
     abortSignal?: AbortSignal;
   }): Promise<EnsureWorktreeDepsResult>;
   prepareWorktree(req: PrepareWorktreeRequest): Promise<PreparedWorktree>;
@@ -205,6 +214,7 @@ export function createWorkspaceManager({
       try {
         const deps = await manager.prepareDeps({
           worktreePath: created.worktreePath,
+          repoPath: req.linkSourceRepoPath ?? req.repoPath,
           ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
         });
         return {
@@ -278,6 +288,15 @@ export function createWorkspaceManager({
           }
           if (prepared.deps.skipped === "aborted") {
             throw new Error("workspace acquisition aborted during dependency preparation");
+          }
+          // A lease promises a checkout with dependencies installed, and has no
+          // event stream to warn on — so a dep the caller is known to be missing
+          // fails acquisition rather than handing back a checkout that cannot
+          // reach a baseline, matching how an install failure is treated.
+          if (prepared.deps.localDepLinkErrors.length > 0) {
+            throw new Error(
+              `workspace local dependency link failed: ${prepared.deps.localDepLinkErrors.join("; ")}`,
+            );
           }
         } catch (err) {
           // Remove the checkout before the row: a row without a checkout is a

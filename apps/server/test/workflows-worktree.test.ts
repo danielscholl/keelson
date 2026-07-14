@@ -9,7 +9,15 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
@@ -67,6 +75,23 @@ async function gitText(args: string[], cwd: string): Promise<string> {
   return stdout;
 }
 
+async function bunInstall(cwd: string): Promise<void> {
+  const proc = Bun.spawn({
+    cmd: ["bun", "install"],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    windowsHide: true,
+  });
+  const [, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (code !== 0) throw new Error(`bun install in ${cwd}: ${err}`);
+}
+
 async function initRepo(path: string): Promise<void> {
   await git(["init", "--initial-branch=main"], path);
   await git(["config", "user.email", "t@t"], path);
@@ -85,7 +110,7 @@ async function addOrigin(path: string): Promise<void> {
 }
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "keelson-worktree-route-"));
+  tmpDir = realpathSync.native(mkdtempSync(join(tmpdir(), "keelson-worktree-route-")));
   repoDir = join(tmpDir, "repo");
   mkdirSync(repoDir);
   wfDir = join(tmpDir, "workflows");
@@ -101,7 +126,7 @@ function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
 }
 
-function makeRig(opts: { includeWorkspaceManager?: boolean } = {}) {
+function makeRig(opts: { includeWorkspaceManager?: boolean; projectRootPath?: string } = {}) {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
@@ -110,7 +135,10 @@ function makeRig(opts: { includeWorkspaceManager?: boolean } = {}) {
     store: createWorkspaceLeaseStore(db),
     projectsStore,
   });
-  const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+  const project = projectsStore.create({
+    name: "repo",
+    rootPath: opts.projectRootPath ?? repoDir,
+  });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const app = new Hono();
   workflowsRoutes(app, {
@@ -204,6 +232,180 @@ nodes:
     };
     expect(cleared.worktreePath).toBeNull();
   });
+
+  // Local dep links come from the checkout root, which a run's workingDir is
+  // allowed to sit below.
+  for (const includeWorkspaceManager of [true, false]) {
+    test(`restores a root local dep link for a run started in a subdirectory (workspaceManager=${includeWorkspaceManager})`, async () => {
+      await initRepo(repoDir);
+      // A manifest + lockfile so the worktree actually installs; link
+      // reproduction runs after a successful install. The workspace dep is what
+      // makes bun emit a lockfile at all.
+      writeFileSync(
+        join(repoDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "linkiso-root",
+            version: "0.0.0",
+            private: true,
+            workspaces: ["fixture"],
+            dependencies: { "@fixture/base": "workspace:*" },
+          },
+          null,
+          2,
+        ),
+      );
+      mkdirSync(join(repoDir, "fixture"), { recursive: true });
+      writeFileSync(
+        join(repoDir, "fixture", "package.json"),
+        JSON.stringify({ name: "@fixture/base", version: "0.0.0" }, null, 2),
+      );
+      await bunInstall(repoDir);
+      await git(["add", "package.json", "fixture/package.json", "bun.lock"], repoDir);
+      await git(["commit", "-m", "add manifest"], repoDir);
+
+      const external = join(tmpDir, "external-pkg");
+      mkdirSync(external, { recursive: true });
+      writeFileSync(join(external, "index.js"), "module.exports = 'linked';\n");
+      // The link lives in the ROOT's node_modules, gitignored, outside the repo.
+      // "junction" so the fixture resolves on Windows, where the default "file"
+      // type would produce a broken link to a directory.
+      mkdirSync(join(repoDir, "node_modules", "@scope"), { recursive: true });
+      symlinkSync(
+        external,
+        join(repoDir, "node_modules", "@scope", "pkg"),
+        process.platform === "win32" ? "junction" : undefined,
+      );
+      const subdir = join(repoDir, "packages", "nested");
+      mkdirSync(subdir, { recursive: true });
+
+      writeWorkflow(
+        "linkiso.yaml",
+        `name: linkiso
+description: report whether the root local dep link survived into the worktree
+worktree:
+  enabled: true
+nodes:
+  - id: probe
+    bash: |
+      test -e node_modules/@scope/pkg && echo LINK_PRESENT
+`,
+      );
+      const { app, projectId } = makeRig({ includeWorkspaceManager });
+      const res = await app.fetch(
+        new Request("http://test/api/workflows/linkiso/runs", {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ inputs: {}, projectId, workingDir: subdir }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      const { runId } = (await res.json()) as { runId: string };
+      const run = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        nodes: Array<{ outputText: string | null }>;
+      };
+      expect(run.status).toBe("succeeded");
+      const probe = run.nodes[0]!.outputText ?? "";
+      expect(probe).toContain("LINK_PRESENT");
+    });
+  }
+
+  for (const includeWorkspaceManager of [true, false]) {
+    test(`resume restores local dep links from the linked source checkout (workspaceManager=${includeWorkspaceManager})`, async () => {
+      await initRepo(repoDir);
+      writeFileSync(
+        join(repoDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "resume-link-root",
+            version: "0.0.0",
+            private: true,
+            workspaces: ["fixture"],
+            dependencies: { "@fixture/base": "workspace:*" },
+          },
+          null,
+          2,
+        ),
+      );
+      mkdirSync(join(repoDir, "fixture"), { recursive: true });
+      writeFileSync(
+        join(repoDir, "fixture", "package.json"),
+        JSON.stringify({ name: "@fixture/base", version: "0.0.0" }, null, 2),
+      );
+      await bunInstall(repoDir);
+      await git(["add", "package.json", "fixture/package.json", "bun.lock"], repoDir);
+      await git(["commit", "-m", "add manifest"], repoDir);
+
+      const sourceCheckout = join(tmpDir, "source-checkout");
+      await git(["worktree", "add", "-b", "linked-source", sourceCheckout], repoDir);
+      await bunInstall(sourceCheckout);
+      const external = join(tmpDir, "resume-external-pkg");
+      mkdirSync(external, { recursive: true });
+      mkdirSync(join(sourceCheckout, "node_modules", "@scope"), { recursive: true });
+      symlinkSync(
+        external,
+        join(sourceCheckout, "node_modules", "@scope", "pkg"),
+        process.platform === "win32" ? "junction" : undefined,
+      );
+      const subdir = join(sourceCheckout, "packages", "nested");
+      mkdirSync(subdir, { recursive: true });
+
+      writeWorkflow(
+        "resume-link.yaml",
+        `name: resume-link
+description: restore a linked dependency before re-entering a failed worktree
+worktree:
+  enabled: true
+nodes:
+  - id: probe
+    bash: |
+      test -e node_modules/@scope/pkg
+      if [ ! -f .resume-ready ]; then touch .resume-ready; exit 1; fi
+      echo LINK_PRESENT
+`,
+      );
+      const { app, projectId } = makeRig({
+        includeWorkspaceManager,
+        projectRootPath: sourceCheckout,
+      });
+      const start = await app.fetch(
+        new Request("http://test/api/workflows/resume-link/runs", {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ inputs: {}, projectId, workingDir: subdir }),
+        }),
+      );
+      expect(start.status).toBe(200);
+      const { runId } = (await start.json()) as { runId: string };
+      const failed = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        worktreePath: string | null;
+      };
+      expect(failed.status).toBe("failed");
+      expect(failed.worktreePath).toBeTruthy();
+      if (failed.worktreePath === null) throw new Error("failed run did not retain its worktree");
+      rmSync(join(failed.worktreePath, "node_modules", "@scope", "pkg"), {
+        recursive: true,
+        force: true,
+      });
+
+      const resume = await app.fetch(
+        new Request(`http://test/api/workflows/runs/${runId}/resume-run`, {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({}),
+        }),
+      );
+      expect(resume.status).toBe(200);
+      const completed = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        nodes: Array<{ outputText: string | null }>;
+      };
+      expect(completed.status).toBe("succeeded");
+      expect(completed.nodes[0]!.outputText).toContain("LINK_PRESENT");
+    });
+  }
 
   test("worktree isolation still runs when workspaceManager is omitted", async () => {
     await initRepo(repoDir);
