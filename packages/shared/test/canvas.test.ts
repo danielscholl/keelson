@@ -1649,17 +1649,35 @@ describe("canvasViewSchema", () => {
     expect(v.view).toBe("board");
   });
 
-  it("rejects a grid cell missing a badge or carrying an extra key (strict)", () => {
+  it("parses badge-less grid cells as a labelled link strip", () => {
+    const v = canvasViewSchema.parse({
+      view: "board",
+      sections: [
+        {
+          kind: "grid",
+          title: "PMC Report",
+          cells: [
+            { label: "Status Summary", href: "https://pmc.test/" },
+            { label: "History", href: "https://pmc.test/history.html" },
+            { label: "Smoke Tests" },
+          ],
+        },
+      ],
+    });
+    expect(v.view).toBe("board");
+  });
+
+  it("rejects a grid cell carrying an extra key (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({
         view: "board",
-        sections: [{ kind: "grid", cells: [{ label: "s" }] }],
+        sections: [{ kind: "grid", cells: [{ label: "s", badge: { text: "A" }, bogus: true }] }],
       }),
     ).toThrow();
     expect(() =>
       canvasViewSchema.parse({
         view: "board",
-        sections: [{ kind: "grid", cells: [{ label: "s", badge: { text: "A" }, bogus: true }] }],
+        sections: [{ kind: "grid", cells: [{ label: "s", badge: { tone: "ok" } }] }],
       }),
     ).toThrow();
   });
