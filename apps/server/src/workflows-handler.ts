@@ -703,7 +703,11 @@ function emitRibRunEvents(opts: {
   startedAt: string;
   done: Promise<void>;
 }): void {
-  const { onRibRunEvent, ribId, store, workflowName, runId, inputs, startedAt, done } = opts;
+  const { onRibRunEvent, ribId, store, workflowName, runId, startedAt, done } = opts;
+  // Pristine snapshot taken before the hook can run, dealt as a fresh copy per
+  // event — the executor's own inputs object is never exposed, and a hook that
+  // mutates its copy can't leak into the run or the terminal event.
+  const inputsSnapshot = { ...opts.inputs };
   const warn = (err: unknown): void => {
     console.warn(
       `[workflows] onRibRunEvent(${ribId}) threw for run ${runId}: ${
@@ -720,7 +724,7 @@ function emitRibRunEvents(opts: {
       warn(err);
     }
   };
-  emit({ workflowName, runId, status: "running", inputs, startedAt });
+  emit({ workflowName, runId, status: "running", inputs: { ...inputsSnapshot }, startedAt });
   void done
     .catch(() => {})
     .then(() => {
@@ -730,7 +734,7 @@ function emitRibRunEvents(opts: {
         workflowName,
         runId,
         status: run.status as "succeeded" | "failed" | "cancelled",
-        inputs,
+        inputs: { ...inputsSnapshot },
         startedAt: run.startedAt,
         ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
         ...(run.error !== null ? { error: run.error } : {}),

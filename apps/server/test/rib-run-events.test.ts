@@ -139,6 +139,54 @@ describe("rib run events", () => {
     }
   });
 
+  test("a resume emits a fresh running→terminal pair for the same runId", async () => {
+    const events: RibRunEvent[] = [];
+    const { db, controller } = makeRig({
+      bash: "exit 1",
+      onRibRunEvent: (_ribId, event) => events.push(event),
+    });
+    try {
+      const result = controller.startRun({ name: "provision", inputs: {}, workingDir: tmpDir });
+      if (!result.ok) throw new Error(result.message);
+      await until(() => events.length === 2);
+      expect(events[1]).toMatchObject({ status: "failed" });
+
+      const resumed = controller.resumeRun(result.runId);
+      if (!resumed.ok) throw new Error(resumed.message);
+      await until(() => events.length === 4);
+      // Once per LAUNCH, not per run: the resume re-emits with the same runId.
+      expect(events[2]).toMatchObject({ runId: result.runId, status: "running" });
+      expect(events[3]).toMatchObject({ runId: result.runId, status: "failed" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a hook that mutates its event's inputs cannot corrupt later events", async () => {
+    const events: RibRunEvent[] = [];
+    const { db, controller } = makeRig({
+      bash: "echo done",
+      onRibRunEvent: (_ribId, event) => {
+        events.push({ ...event, inputs: { ...event.inputs } });
+        // Hostile/buggy hook: scribble on the delivered object.
+        event.inputs.provider = "corrupted";
+      },
+    });
+    try {
+      const result = controller.startRun({
+        name: "provision",
+        inputs: { provider: "kind" },
+        workingDir: tmpDir,
+      });
+      if (!result.ok) throw new Error(result.message);
+      await until(() => events.length === 2);
+      expect(events[0]?.inputs).toEqual({ provider: "kind" });
+      expect(events[1]?.inputs).toEqual({ provider: "kind" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("a cancelled run's terminal event reports cancelled", async () => {
     const events: RibRunEvent[] = [];
     const { db, activeRuns, controller } = makeRig({
