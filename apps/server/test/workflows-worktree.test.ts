@@ -296,7 +296,6 @@ nodes:
         new Request("http://test/api/workflows/linkiso/runs", {
           method: "POST",
           headers: { origin: ORIGIN, "content-type": "application/json" },
-          // Start BELOW the checkout root — the case that regresses.
           body: JSON.stringify({ inputs: {}, projectId, workingDir: subdir }),
         }),
       );
