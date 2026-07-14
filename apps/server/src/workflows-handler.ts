@@ -2754,15 +2754,17 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   // directory removal turns into a reliable CI failure).
   let pendingRunDoneEvent: Extract<RunStreamEvent, { type: "run_done" }> | undefined;
   let runDoneCompletedAt: string | undefined;
-  const prepareDeps = async (worktreePath: string) => {
+  const prepareDeps = async (worktreePath: string, repoPath?: string) => {
     if (workspaceManager !== undefined) {
       return workspaceManager.prepareDeps({
         worktreePath,
+        ...(repoPath !== undefined ? { repoPath } : {}),
         abortSignal: abort.signal,
       });
     }
     return ensureWorktreeDeps({
       worktreePath,
+      ...(repoPath !== undefined ? { repoPath } : {}),
       abortSignal: abort.signal,
     });
   };
@@ -2824,7 +2826,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     effectiveCwd = existingWorktreePath;
     worktreePathForCleanup = existingWorktreePath;
     cleanupOnSuccessOnly = true;
-    const deps = await prepareDeps(existingWorktreePath);
+    const deps = await prepareDeps(existingWorktreePath, (await gitToplevel(cwd)) ?? cwd);
     if (deps.error !== null) {
       subscribers.broadcast(runId, {
         type: "run_warning",

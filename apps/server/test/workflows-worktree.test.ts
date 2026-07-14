@@ -9,7 +9,15 @@
 import "./test-setup.ts";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
@@ -102,7 +110,7 @@ async function addOrigin(path: string): Promise<void> {
 }
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "keelson-worktree-route-"));
+  tmpDir = realpathSync.native(mkdtempSync(join(tmpdir(), "keelson-worktree-route-")));
   repoDir = join(tmpDir, "repo");
   mkdirSync(repoDir);
   wfDir = join(tmpDir, "workflows");
@@ -118,7 +126,7 @@ function writeWorkflow(filename: string, body: string): void {
   writeFileSync(join(wfDir, filename), body);
 }
 
-function makeRig(opts: { includeWorkspaceManager?: boolean } = {}) {
+function makeRig(opts: { includeWorkspaceManager?: boolean; projectRootPath?: string } = {}) {
   const db = openDatabase({ path: dbPath });
   const store = createWorkflowStore(db);
   const conversationStore = createConversationStore(db);
@@ -127,7 +135,10 @@ function makeRig(opts: { includeWorkspaceManager?: boolean } = {}) {
     store: createWorkspaceLeaseStore(db),
     projectsStore,
   });
-  const project = projectsStore.create({ name: "repo", rootPath: repoDir });
+  const project = projectsStore.create({
+    name: "repo",
+    rootPath: opts.projectRootPath ?? repoDir,
+  });
   const catalog = bootstrapWorkflows({ workflowDir: wfDir });
   const app = new Hono();
   workflowsRoutes(app, {
@@ -277,10 +288,7 @@ worktree:
 nodes:
   - id: probe
     bash: |
-      echo "CWD=$(pwd)"
-      echo "NM=$(ls node_modules 2>&1 | tr '\\n' ' ')"
-      echo "SCOPE=$(ls node_modules/@scope 2>&1 | tr '\\n' ' ')"
-      test -e node_modules/@scope/pkg && echo LINK_PRESENT || echo LINK_MISSING
+      test -e node_modules/@scope/pkg && echo LINK_PRESENT
 `,
       );
       const { app, projectId } = makeRig({ includeWorkspaceManager });
@@ -301,7 +309,102 @@ nodes:
       expect(run.status).toBe("succeeded");
       const probe = run.nodes[0]!.outputText ?? "";
       expect(probe).toContain("LINK_PRESENT");
-      expect(probe).not.toContain("LINK_MISSING");
+    });
+  }
+
+  for (const includeWorkspaceManager of [true, false]) {
+    test(`resume restores local dep links from the linked source checkout (workspaceManager=${includeWorkspaceManager})`, async () => {
+      await initRepo(repoDir);
+      writeFileSync(
+        join(repoDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "resume-link-root",
+            version: "0.0.0",
+            private: true,
+            workspaces: ["fixture"],
+            dependencies: { "@fixture/base": "workspace:*" },
+          },
+          null,
+          2,
+        ),
+      );
+      mkdirSync(join(repoDir, "fixture"), { recursive: true });
+      writeFileSync(
+        join(repoDir, "fixture", "package.json"),
+        JSON.stringify({ name: "@fixture/base", version: "0.0.0" }, null, 2),
+      );
+      await bunInstall(repoDir);
+      await git(["add", "package.json", "fixture/package.json", "bun.lock"], repoDir);
+      await git(["commit", "-m", "add manifest"], repoDir);
+
+      const sourceCheckout = join(tmpDir, "source-checkout");
+      await git(["worktree", "add", "-b", "linked-source", sourceCheckout], repoDir);
+      await bunInstall(sourceCheckout);
+      const external = join(tmpDir, "resume-external-pkg");
+      mkdirSync(external, { recursive: true });
+      mkdirSync(join(sourceCheckout, "node_modules", "@scope"), { recursive: true });
+      symlinkSync(
+        external,
+        join(sourceCheckout, "node_modules", "@scope", "pkg"),
+        process.platform === "win32" ? "junction" : undefined,
+      );
+      const subdir = join(sourceCheckout, "packages", "nested");
+      mkdirSync(subdir, { recursive: true });
+
+      writeWorkflow(
+        "resume-link.yaml",
+        `name: resume-link
+description: restore a linked dependency before re-entering a failed worktree
+worktree:
+  enabled: true
+nodes:
+  - id: probe
+    bash: |
+      test -e node_modules/@scope/pkg
+      if [ ! -f .resume-ready ]; then touch .resume-ready; exit 1; fi
+      echo LINK_PRESENT
+`,
+      );
+      const { app, projectId } = makeRig({
+        includeWorkspaceManager,
+        projectRootPath: sourceCheckout,
+      });
+      const start = await app.fetch(
+        new Request("http://test/api/workflows/resume-link/runs", {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({ inputs: {}, projectId, workingDir: subdir }),
+        }),
+      );
+      expect(start.status).toBe(200);
+      const { runId } = (await start.json()) as { runId: string };
+      const failed = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        worktreePath: string | null;
+      };
+      expect(failed.status).toBe("failed");
+      expect(failed.worktreePath).toBeTruthy();
+      if (failed.worktreePath === null) throw new Error("failed run did not retain its worktree");
+      rmSync(join(failed.worktreePath, "node_modules", "@scope", "pkg"), {
+        recursive: true,
+        force: true,
+      });
+
+      const resume = await app.fetch(
+        new Request(`http://test/api/workflows/runs/${runId}/resume-run`, {
+          method: "POST",
+          headers: { origin: ORIGIN, "content-type": "application/json" },
+          body: JSON.stringify({}),
+        }),
+      );
+      expect(resume.status).toBe(200);
+      const completed = (await pollUntilTerminal(app, runId)) as {
+        status: string;
+        nodes: Array<{ outputText: string | null }>;
+      };
+      expect(completed.status).toBe("succeeded");
+      expect(completed.nodes[0]!.outputText).toContain("LINK_PRESENT");
     });
   }
 

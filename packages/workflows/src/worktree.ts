@@ -320,7 +320,7 @@ function windowsLinkType(target: string): "junction" | "file" | undefined {
   try {
     return statSync(target).isDirectory() ? "junction" : "file";
   } catch {
-    return "file";
+    return "junction";
   }
 }
 
