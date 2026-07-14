@@ -65,6 +65,25 @@ export class SubprocessSpawnError extends Error {
 
 const IS_WINDOWS = process.platform === "win32";
 
+export function killProcessTree(proc: { readonly pid?: number; kill(): void }): void {
+  if (IS_WINDOWS && proc.pid !== undefined) {
+    try {
+      Bun.spawnSync(["taskkill", "/pid", String(proc.pid), "/t", "/f"], {
+        stdout: "ignore",
+        stderr: "ignore",
+        windowsHide: true,
+      });
+    } catch {
+      // taskkill unavailable or pid already gone
+    }
+  }
+  try {
+    proc.kill();
+  } catch {
+    // already exited
+  }
+}
+
 // Windows exposes the search path as `Path`; Bun.spawn resolves a bare command
 // against `PATH` (uppercase) when handed an explicit env, so an env derived from
 // `process.env` (which only carries `Path`) fails ENOENT for `bun`/`uv`/etc.
@@ -119,12 +138,14 @@ export async function runSubprocess(opts: SubprocessOptions): Promise<Subprocess
 
   const signalGroup = (signal: "SIGTERM" | "SIGKILL"): void => {
     if (IS_WINDOWS) {
+      if (signal === "SIGKILL") {
+        killProcessTree(proc);
+        return;
+      }
       // No POSIX process groups: terminate the whole child tree by pid. `/t`
-      // walks children (the grandchildren a bare proc.kill would miss); `/f`
-      // forces it on the SIGKILL escalation. SIGTERM stays best-effort/graceful.
+      // walks children (the grandchildren a bare proc.kill would miss).
       try {
         const args = ["/pid", String(proc.pid), "/t"];
-        if (signal === "SIGKILL") args.push("/f");
         Bun.spawnSync(["taskkill", ...args], {
           stdout: "ignore",
           stderr: "ignore",

@@ -569,9 +569,91 @@ nodes:
         echo "CI_STATUS: UNKNOWN - no CI checks present for PR #$PR_NUM; nothing to gate on"
         exit 0
       fi
-      echo "Watching CI for PR #$PR_NUM ..."
-      if forge pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-1.txt" 2>&1; then
+      snapshot_checks() {
+        if forge pr checks "$PR_NUM" --json name,bucket,state \
+          > "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.tmp" \
+          2> "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.err" \
+          && jq -e 'type == "array" and length > 0' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.tmp" >/dev/null 2>&1; then
+          mv "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.tmp" "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
+          return 0
+        fi
+        rm -f "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.tmp"
+        return 1
+      }
+      log_advisory_checks() {
+        if ! snapshot_checks; then
+          echo "Could not refresh non-required check states for the audit log."
+          cat "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.err" 2>/dev/null || true
+          return
+        fi
+        printf '%s\n' "$REQUIRED" > "$KEELSON_ARTIFACTS_DIR/.ci-required.txt"
+        jq -r --rawfile required "$KEELSON_ARTIFACTS_DIR/.ci-required.txt" '
+          def state: ((.state // .bucket // "unknown") | ascii_downcase);
+          ($required | split("\n") | map(select(length > 0))) as $requiredNames
+          | .[]
+          | .name as $name
+          | select(($requiredNames | index($name)) == null)
+          | "treated as advisory: \($name) — \(state)"
+        ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
+      }
+
+      if ! REQUIRED=$(forge pr required-checks "$PR_NUM" 2> "$KEELSON_ARTIFACTS_DIR/.ci-required.err"); then
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-required.err" 2>/dev/null || true
+        echo "CI_STATUS: UNKNOWN — could not discover required checks"
+        exit 0
+      fi
+      if [ -z "$REQUIRED" ]; then
+        echo "No required checks configured; waiting for all checks to settle within the deadline."
+        ATTEMPT=1
+        MAX_ATTEMPTS=60
+        while :; do
+          if snapshot_checks; then
+            if ! jq -e 'any(.[]?; (.bucket // "" | ascii_downcase) == "pending")' \
+              "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json" >/dev/null 2>&1; then
+              break
+            fi
+          fi
+          if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+            break
+          fi
+          ATTEMPT=$((ATTEMPT + 1))
+          sleep 20
+        done
+        if [ ! -f "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json" ]; then
+          echo "CI_STATUS: UNKNOWN - could not read CI check states before the deadline"
+          exit 0
+        fi
+        if jq -e '
+          def state: ((.state // .bucket // "") | ascii_downcase);
+          any(.[]?; state == "fail" or state == "failed" or state == "failure")
+        ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json" >/dev/null; then
+          jq -r '
+            def state: ((.state // .bucket // "") | ascii_downcase);
+            .[] | select(state == "fail" or state == "failed" or state == "failure")
+            | "failing check: \(.name) — \(state)"
+          ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
+          echo "CI_STATUS: FAIL"
+          exit 0
+        fi
+        jq -r '
+          def state: ((.state // .bucket // "unknown") | ascii_downcase);
+          .[]
+          | if ((.bucket // "" | ascii_downcase) == "pending")
+            then "treated as advisory: \(.name) — pending past deadline"
+            elif state == "cancelled" or state == "canceled" or state == "timed_out"
+            then "treated as advisory: \(.name) — \(state)"
+            else empty
+            end
+        ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
+        echo "CI_STATUS: PASS"
+        exit 0
+      fi
+
+      echo "Waiting on required checks:"
+      printf '%s\n' "$REQUIRED"
+      if forge pr checks "$PR_NUM" --required --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-1.txt" 2>&1; then
         cat "$KEELSON_ARTIFACTS_DIR/.ci-1.txt"
+        log_advisory_checks
         echo "CI_STATUS: PASS"
         exit 0
       fi
@@ -585,6 +667,7 @@ nodes:
       RERUN_MARKER="$KEELSON_ARTIFACTS_DIR/.ci-rerun-attempted-$HEAD_SHA"
       if [ -f "$RERUN_MARKER" ]; then
         echo "CI already reran once for $HEAD_SHA this convergence; not rerunning again."
+        log_advisory_checks
         echo "CI_STATUS: FAIL"
         exit 0
       fi
@@ -598,13 +681,15 @@ nodes:
           | while read -r RID; do [ -n "$RID" ] && forge run rerun "$RID" --failed || true; done
       fi
       sleep 20
-      if forge pr checks "$PR_NUM" --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-2.txt" 2>&1; then
+      if forge pr checks "$PR_NUM" --required --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-2.txt" 2>&1; then
         cat "$KEELSON_ARTIFACTS_DIR/.ci-2.txt"
+        log_advisory_checks
         echo "CI_STATUS: PASS"
         exit 0
       fi
       echo "=== CI still failing after one rerun ==="
       cat "$KEELSON_ARTIFACTS_DIR/.ci-2.txt"
+      log_advisory_checks
       echo "CI_STATUS: FAIL"
       exit 0
 

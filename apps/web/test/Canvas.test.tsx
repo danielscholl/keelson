@@ -818,6 +818,45 @@ describe("CanvasProvider / useCanvas", () => {
     );
   });
 
+  test("board renders badge-less grid cells as a bare labelled link strip", () => {
+    const doc: CanvasDocument = {
+      kind: "view",
+      source: {
+        type: "inline",
+        text: JSON.stringify({
+          view: "board",
+          sections: [
+            {
+              kind: "grid",
+              title: "PMC Report",
+              cells: [
+                { label: "Status Summary", href: "https://pmc.test/" },
+                { label: "History", href: "https://pmc.test/history.html" },
+                { label: "Graded", badge: { text: "A", tone: "ok" } },
+              ],
+            },
+          ],
+        }),
+      },
+      title: "board",
+    };
+    render(
+      <CanvasProvider>
+        <Opener doc={doc} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelectorAll(".cvb-grid-cell").length).toBe(3);
+    // A badge-less cell renders its label and emits no badge element at all.
+    const strip = dialog.querySelector('a.cvb-grid-cell--link[href="https://pmc.test/"]');
+    expect(strip?.querySelector(".cvb-grid-label")?.textContent).toBe("Status Summary");
+    expect(strip?.querySelector(".cvb-grid-badge")).toBeNull();
+    // A badged cell in the same grid is unaffected.
+    expect(dialog.querySelector('.cvb-grid-badge[data-tone="ok"]')?.textContent).toBe("A");
+    expect(dialog.querySelectorAll(".cvb-grid-badge").length).toBe(1);
+  });
+
   test("board renders table-cell and bars-item hrefs as safe anchors", () => {
     const doc: CanvasDocument = {
       kind: "view",

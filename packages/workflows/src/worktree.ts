@@ -18,6 +18,8 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { killProcessTree } from "./handlers/subprocess.ts";
+
 const DEFAULT_BRANCH_TEMPLATE = "keelson/{workflow}/{run_id_short}";
 const GIT_TIMEOUT_MS = 30_000;
 // Resolving a fresh worktree's workspace graph is far slower than a git op.
@@ -115,11 +117,7 @@ async function runGit(args: string[], cwd?: string): Promise<GitOutcome> {
     return { exitCode: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
   }
   const timeout = setTimeout(() => {
-    try {
-      proc.kill();
-    } catch {
-      // already gone
-    }
+    killProcessTree(proc);
   }, GIT_TIMEOUT_MS);
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -146,13 +144,7 @@ async function runBun(args: string[], cwd: string, abortSignal?: AbortSignal): P
     // degrades to a non-zero result rather than an unhandled rejection.
     return { exitCode: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
   }
-  const kill = () => {
-    try {
-      proc.kill();
-    } catch {
-      // already gone
-    }
-  };
+  const kill = () => killProcessTree(proc);
   const timeout = setTimeout(kill, BUN_INSTALL_TIMEOUT_MS);
   // An already-aborted signal won't fire a fresh "abort" event, so kill now
   // rather than waiting out the timeout.
