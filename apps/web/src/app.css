@@ -4177,9 +4177,11 @@ button.cvb-action-field-model:disabled {
 .cvb-card--selectable:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
+/* Every real control in the card — the overflow menu plus any link, button, or
+   field/form input — sits above the stretched select overlay so its own click
+   wins; the overlay only captures the card's inert body. */
 .cvb-card--selectable .cvb-card-overflow,
-.cvb-card--selectable .cvb-card-actions,
-.cvb-card--selectable a.cvb-card-title {
+.cvb-card--selectable :is(a, button, input, select, textarea, label):not(.cvb-card-select) {
   position: relative;
   z-index: 2;
 }
