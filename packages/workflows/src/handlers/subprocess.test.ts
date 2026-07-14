@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { NodeOutput } from "../schema/index.ts";
-import { buildSubprocessEnv, ENV_VALUE_MAX_CHARS } from "./subprocess.ts";
+import { buildSubprocessEnv, ENV_VALUE_MAX_CHARS, killProcessTree } from "./subprocess.ts";
 
 function upstreamOf(id: string, output: string): ReadonlyMap<string, NodeOutput> {
   return new Map<string, NodeOutput>([
@@ -30,6 +30,30 @@ function upstreamOf(id: string, output: string): ReadonlyMap<string, NodeOutput>
     ],
   ]);
 }
+
+describe("killProcessTree", () => {
+  test.skipIf(process.platform === "win32")("kills the process handle on POSIX", () => {
+    let killCount = 0;
+    killProcessTree({
+      pid: 123,
+      kill: () => {
+        killCount++;
+      },
+    });
+    expect(killCount).toBe(1);
+  });
+
+  test.skipIf(process.platform === "win32")("does not throw when the process already exited", () => {
+    expect(() =>
+      killProcessTree({
+        pid: 123,
+        kill: () => {
+          throw new Error("already exited");
+        },
+      }),
+    ).not.toThrow();
+  });
+});
 
 describe("buildSubprocessEnv", () => {
   test("layers KEELSON_INPUTS_*, KEELSON_NODE_*_OUTPUT, and KEELSON_ARGUMENTS over PARENT_ENV", () => {
