@@ -1091,7 +1091,11 @@ nodes:
         ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
       }
 
-      REQUIRED=$(forge pr required-checks "$PR_NUM" 2>/dev/null || true)
+      if ! REQUIRED=$(forge pr required-checks "$PR_NUM" 2> "$KEELSON_ARTIFACTS_DIR/.ci-final-required.err"); then
+        echo "PR_STATE: UNKNOWN — could not discover required checks; left as a draft"
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-final-required.err" 2>/dev/null || true
+        exit 0
+      fi
       if [ -z "$REQUIRED" ]; then
         echo "No required checks configured; waiting for all checks to settle within the deadline."
         ATTEMPT=1
