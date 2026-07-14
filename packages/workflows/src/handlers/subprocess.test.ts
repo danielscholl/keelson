@@ -43,8 +43,6 @@ describe("killProcessTree", () => {
     expect(killCount).toBe(1);
   });
 
-  // The POSIX half of "no behavior change on POSIX": no taskkill, no spawn at
-  // all — just the bare handle kill the call sites used before.
   test.skipIf(process.platform === "win32")("spawns nothing on POSIX", () => {
     const spawn = spyOn(Bun, "spawnSync");
     try {
@@ -55,8 +53,6 @@ describe("killProcessTree", () => {
     }
   });
 
-  // The win32 branch is the whole point of the helper, so it is asserted on the
-  // platform that runs it (the CI matrix's Windows job) rather than left uncovered.
   test.skipIf(process.platform !== "win32")("tree-kills via taskkill on win32", () => {
     const spawn = spyOn(Bun, "spawnSync").mockReturnValue(
       undefined as unknown as ReturnType<typeof Bun.spawnSync>,
@@ -66,7 +62,6 @@ describe("killProcessTree", () => {
       killProcessTree({ pid: 4242, kill: () => killCount++ });
       expect(spawn).toHaveBeenCalled();
       expect(spawn.mock.calls[0]?.[0]).toEqual(["taskkill", "/pid", "4242", "/t", "/f"]);
-      // The handle kill still runs after the tree kill.
       expect(killCount).toBe(1);
     } finally {
       spawn.mockRestore();
