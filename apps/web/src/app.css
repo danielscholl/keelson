@@ -4146,6 +4146,30 @@ button.cvb-action-field-model:disabled {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+/* Selectable card — the whole body is a pick/toggle target (a Mind called to the
+   table). Pointer + a brand edge on hover/focus signal it's clickable; `is-selected`
+   rings it with the same brand treatment a waking ghost seat uses, so a chosen card
+   reads unmistakably against its unselected neighbours. */
+.cvb-card--selectable {
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.12s ease;
+}
+.cvb-card--selectable:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.cvb-card--selectable:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cvb-card.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card-2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .cvb-card--ghost {
   border-style: dashed;
   background: transparent;
