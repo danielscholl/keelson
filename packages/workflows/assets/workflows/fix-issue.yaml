@@ -683,7 +683,8 @@ nodes:
       You are one of three INDEPENDENT reviewers of the branch that was just
       opened as a PR. Your lens is CORRECTNESS only.
 
-      1. `git diff main...HEAD --stat`, then `git diff main...HEAD` for the full change.
+      1. `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD --stat`, then
+         `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD` for the full change.
       2. Hunt for real defects ONLY: logic bugs, broken/missing error handling,
          unhandled null/edge cases, off-by-one, race conditions, regressions in
          the changed call paths, and any destructive or irreversible operation
@@ -703,7 +704,7 @@ nodes:
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
 
-      1. Read the change: `git diff main...HEAD`.
+      1. Read the change: `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD`.
       2. Read whichever project guides exist (`CLAUDE.md`, `AGENTS.md`,
          `CONTRIBUTING.md`) and check the diff against them — especially the
          comment policy (no PR-narration / what-just-changed / code-restating
@@ -724,8 +725,8 @@ nodes:
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
 
-      1. Read the change: `git diff main...HEAD`, and learn the project's test
-         layout and conventions.
+      1. Read the change: `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD`,
+         and learn the project's test layout and conventions.
       2. For each new or changed branch of behavior, ask whether it is actually
          tested. Flag NEW logic with no test, and ESPECIALLY tests that were
          authored but never wired in or committed (a described case the diff
@@ -816,11 +817,12 @@ nodes:
       ## What the fixer reported
       $apply-fixes.output
 
-      For each must-fix issue, inspect the current code (`git diff main...HEAD` for
-      the relevant files) and confirm it is genuinely resolved and the fix
-      introduced no new CRITICAL/HIGH defect. If any issue is still open, or a fix
-      added a new defect, fix it now: read, edit, run the narrowest covering
-      check, then `git add <files>; git commit -m "fix: complete review follow-up"; git push`.
+      For each must-fix issue, inspect the current code
+      (`git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD` for the relevant
+      files) and confirm it is genuinely resolved and the fix introduced no new
+      CRITICAL/HIGH defect. If any issue is still open, or a fix added a new defect,
+      fix it now: read, edit, run the narrowest covering check, then
+      `git add <files>; git commit -m "fix: complete review follow-up"; git push`.
       Otherwise make no changes.
 
       Output one line per issue: resolved / fixed-now / still-open(reason).
@@ -1024,7 +1026,8 @@ nodes:
         `actionable` to [].
       - Otherwise CI failed. For EACH failed check, read its failing logs
         (`forge run view <run-id> --log-failed`, or open the URLs in the CI output)
-        and this PR's diff (`git diff main...HEAD`). Classify each:
+        and this PR's diff
+        (`git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD`). Classify each:
         - ACTIONABLE: caused by code THIS PR changed, or a direct consequence of
           it. Add it to `actionable` with the `file` and the `fix`.
         - UNRELATED: a pre-existing failure, an infra/flake (timeouts, network),
