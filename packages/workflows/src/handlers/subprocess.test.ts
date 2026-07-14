@@ -8,13 +8,13 @@
 
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { NodeOutput } from "../schema/index.ts";
-import { buildSubprocessEnv, ENV_VALUE_MAX_CHARS } from "./subprocess.ts";
+import { buildSubprocessEnv, ENV_VALUE_MAX_CHARS, killProcessTree } from "./subprocess.ts";
 
 function upstreamOf(id: string, output: string): ReadonlyMap<string, NodeOutput> {
   return new Map<string, NodeOutput>([
@@ -30,6 +30,74 @@ function upstreamOf(id: string, output: string): ReadonlyMap<string, NodeOutput>
     ],
   ]);
 }
+
+describe("killProcessTree", () => {
+  test.skipIf(process.platform === "win32")("kills the process handle on POSIX", () => {
+    let killCount = 0;
+    killProcessTree({
+      pid: 123,
+      kill: () => {
+        killCount++;
+      },
+    });
+    expect(killCount).toBe(1);
+  });
+
+  test.skipIf(process.platform === "win32")("spawns nothing on POSIX", () => {
+    const spawn = spyOn(Bun, "spawnSync");
+    try {
+      killProcessTree({ pid: 123, kill: () => {} });
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      spawn.mockRestore();
+    }
+  });
+
+  test.skipIf(process.platform !== "win32")("tree-kills via taskkill on win32", () => {
+    const spawn = spyOn(Bun, "spawnSync").mockReturnValue(
+      undefined as unknown as ReturnType<typeof Bun.spawnSync>,
+    );
+    try {
+      let killCount = 0;
+      killProcessTree({ pid: 4242, kill: () => killCount++ });
+      expect(spawn).toHaveBeenCalled();
+      expect(spawn.mock.calls[0]?.[0]).toEqual(["taskkill", "/pid", "4242", "/t", "/f"]);
+      expect(killCount).toBe(1);
+    } finally {
+      spawn.mockRestore();
+    }
+  });
+
+  test.skipIf(process.platform !== "win32")("skips taskkill when the pid is gone", () => {
+    const spawn = spyOn(Bun, "spawnSync");
+    try {
+      killProcessTree({ kill: () => {} });
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      spawn.mockRestore();
+    }
+  });
+
+  // Spawn is stubbed so win32 can't fire a real taskkill at whatever owns this
+  // pid on the runner.
+  test("does not throw when the process already exited", () => {
+    const spawn = spyOn(Bun, "spawnSync").mockReturnValue(
+      undefined as unknown as ReturnType<typeof Bun.spawnSync>,
+    );
+    try {
+      expect(() =>
+        killProcessTree({
+          pid: 123,
+          kill: () => {
+            throw new Error("already exited");
+          },
+        }),
+      ).not.toThrow();
+    } finally {
+      spawn.mockRestore();
+    }
+  });
+});
 
 describe("buildSubprocessEnv", () => {
   test("layers KEELSON_INPUTS_*, KEELSON_NODE_*_OUTPUT, and KEELSON_ARGUMENTS over PARENT_ENV", () => {
