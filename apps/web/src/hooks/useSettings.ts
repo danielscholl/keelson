@@ -42,11 +42,17 @@ export interface Settings {
   showScheduledRuns?: boolean;
   // Region head controls the viewer has switched off, on every surface. A
   // surface's own `hideRegionActions` still wins — this only ever hides more.
-  // Missing = none hidden (all three render).
+  // Missing falls back to DEFAULT_HIDDEN_REGION_ACTIONS; an empty array is a
+  // viewer who deliberately turned all three back on, which is not the same thing.
   hiddenRegionActions?: RegionAction[];
 }
 
 const DEFAULTS: Settings = { favorites: [], lastUsed: null };
+
+// Panels lead with ✦ alone: lifting one into chat is the verb that earns its
+// permanent place in every region head, while select and expand serve occasional
+// flows that the gear menu can hand back on demand.
+const DEFAULT_HIDDEN_REGION_ACTIONS: readonly RegionAction[] = ["select", "expand"];
 
 const THEME_VALUES = ["light", "dark", "system"] as const;
 function isThemePreference(v: unknown): v is ThemePreference {
@@ -257,7 +263,9 @@ export function useSettings(): UseSettingsResult {
 
   const toggleHiddenRegionAction = useCallback((action: RegionAction) => {
     update((prev) => {
-      const current = prev.hiddenRegionActions ?? [];
+      // The first toggle materializes the default, so a later change to it can't
+      // silently move controls the viewer has already decided about.
+      const current = prev.hiddenRegionActions ?? DEFAULT_HIDDEN_REGION_ACTIONS;
       const next = current.includes(action)
         ? current.filter((a) => a !== action)
         : [...current, action];
@@ -266,7 +274,8 @@ export function useSettings(): UseSettingsResult {
   }, []);
 
   const isRegionActionHidden = useCallback(
-    (action: RegionAction): boolean => (settings.hiddenRegionActions ?? []).includes(action),
+    (action: RegionAction): boolean =>
+      (settings.hiddenRegionActions ?? DEFAULT_HIDDEN_REGION_ACTIONS).includes(action),
     [settings.hiddenRegionActions],
   );
 

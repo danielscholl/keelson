@@ -92,26 +92,39 @@ describe("useSettings — hiddenRegionActions", () => {
     seedAndSync();
   });
 
-  test("nothing is hidden by default", () => {
+  test("select and expand are hidden by default, explore is not", () => {
     const { result } = renderHook(() => useSettings());
     expect(result.current.settings.hiddenRegionActions).toBeUndefined();
     expect(result.current.isRegionActionHidden("explore")).toBe(false);
-    expect(result.current.isRegionActionHidden("select")).toBe(false);
-    expect(result.current.isRegionActionHidden("expand")).toBe(false);
-  });
-
-  test("toggleHiddenRegionAction round-trips one action and persists it", () => {
-    const { result } = renderHook(() => useSettings());
-    act(() => result.current.toggleHiddenRegionAction("select"));
-    act(() => result.current.toggleHiddenRegionAction("expand"));
     expect(result.current.isRegionActionHidden("select")).toBe(true);
     expect(result.current.isRegionActionHidden("expand")).toBe(true);
-    // The one the viewer kept stays untouched.
-    expect(result.current.isRegionActionHidden("explore")).toBe(false);
+  });
+
+  test("toggling a defaulted action on writes the rest of the default down", () => {
+    const { result } = renderHook(() => useSettings());
+    act(() => result.current.toggleHiddenRegionAction("expand"));
+    expect(result.current.isRegionActionHidden("expand")).toBe(false);
+    // Select keeps its default, now persisted rather than implied.
+    expect(result.current.isRegionActionHidden("select")).toBe(true);
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) as string);
-    expect(raw.hiddenRegionActions).toEqual(["select", "expand"]);
-    act(() => result.current.toggleHiddenRegionAction("select"));
+    expect(raw.hiddenRegionActions).toEqual(["select"]);
+  });
+
+  test("toggleHiddenRegionAction round-trips explore and persists it", () => {
+    const { result } = renderHook(() => useSettings());
+    act(() => result.current.toggleHiddenRegionAction("explore"));
+    expect(result.current.isRegionActionHidden("explore")).toBe(true);
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) as string);
+    expect(raw.hiddenRegionActions).toEqual(["select", "expand", "explore"]);
+    act(() => result.current.toggleHiddenRegionAction("explore"));
+    expect(result.current.isRegionActionHidden("explore")).toBe(false);
+  });
+
+  test("an empty persisted list turns all three on (distinct from missing)", () => {
+    seedAndSync({ favorites: [], lastUsed: null, hiddenRegionActions: [] });
+    const { result } = renderHook(() => useSettings());
     expect(result.current.isRegionActionHidden("select")).toBe(false);
+    expect(result.current.isRegionActionHidden("expand")).toBe(false);
   });
 
   test("rejects an unknown action in a persisted payload (whole-settings guard)", () => {
