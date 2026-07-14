@@ -186,6 +186,8 @@ describe("WorkspaceManager", () => {
         installed: false,
         skipped: null,
         error: "bun install failed (exit 1): lock mismatch",
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
         durationMs: 1,
       },
       depsError: "bun install failed (exit 1): lock mismatch",
@@ -220,7 +222,14 @@ describe("WorkspaceManager", () => {
       worktreePath: req.dest,
       adopted: false,
       branchCreated: true,
-      deps: { installed: false, skipped: "aborted", error: null, durationMs: 1 },
+      deps: {
+        installed: false,
+        skipped: "aborted",
+        error: null,
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
+        durationMs: 1,
+      },
       depsError: null,
     });
     manager.removeWorktree = async (opts) => {
@@ -247,7 +256,14 @@ describe("WorkspaceManager", () => {
     let depsCalls = 0;
     manager.prepareDeps = async () => {
       depsCalls += 1;
-      return { installed: false, skipped: "no-manifest", error: null, durationMs: 1 };
+      return {
+        installed: false,
+        skipped: "no-manifest",
+        error: null,
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
+        durationMs: 1,
+      };
     };
 
     await expect(
@@ -295,7 +311,14 @@ describe("WorkspaceManager", () => {
       worktreePath: req.dest,
       adopted: false,
       branchCreated: true,
-      deps: { installed: false, skipped: null, error: "boom", durationMs: 1 },
+      deps: {
+        installed: false,
+        skipped: null,
+        error: "boom",
+        linkedLocalDeps: [],
+        localDepLinkErrors: [],
+        durationMs: 1,
+      },
       depsError: "boom",
     });
     manager.removeWorktree = async () => ({ removed: false, warning: "removal failed" });
@@ -322,7 +345,14 @@ describe("WorkspaceManager", () => {
         worktreePath: req.dest,
         adopted: false,
         branchCreated: true,
-        deps: { installed: false, skipped: "no-manifest", error: null, durationMs: 1 },
+        deps: {
+          installed: false,
+          skipped: "no-manifest",
+          error: null,
+          linkedLocalDeps: [],
+          localDepLinkErrors: [],
+          durationMs: 1,
+        },
         depsError: null,
       };
     };

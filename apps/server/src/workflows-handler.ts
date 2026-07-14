@@ -2767,6 +2767,8 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
   };
   const prepareWorktree = async (opts: {
     repoPath: string;
+    /** Checkout root to copy local dep links from; `repoPath` may be a subdir. */
+    linkSourceRepoPath: string;
     branch: string;
     dest: string;
     base: string | null;
@@ -2775,6 +2777,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     if (workspaceManager !== undefined) {
       return workspaceManager.prepareWorktree({
         repoPath: opts.repoPath,
+        linkSourceRepoPath: opts.linkSourceRepoPath,
         branch: opts.branch,
         dest: opts.dest,
         ...(opts.base !== null ? { base: opts.base } : {}),
@@ -2791,7 +2794,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     opts.onCreated?.(created.worktreePath);
     const deps = await ensureWorktreeDeps({
       worktreePath: created.worktreePath,
-      repoPath: opts.repoPath,
+      repoPath: opts.linkSourceRepoPath,
       abortSignal: abort.signal,
     });
     return {
@@ -2826,6 +2829,13 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         type: "run_warning",
         nodeId: null,
         message: `worktree dependency install failed; continuing: ${deps.error}`,
+      });
+    }
+    if (deps.localDepLinkErrors.length > 0) {
+      subscribers.broadcast(runId, {
+        type: "run_warning",
+        nodeId: null,
+        message: `could not link ${deps.localDepLinkErrors.length} local dependency symlink(s); the worktree may not reach a green baseline: ${deps.localDepLinkErrors.join("; ")}`,
       });
     }
   } else if (isolation !== null) {
@@ -2877,6 +2887,10 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         }
         const created = await prepareWorktree({
           repoPath: cwd,
+          // The link source is the checkout ROOT, not the run's cwd — which is
+          // allowed to be a subdirectory of it, and whose node_modules would be
+          // the wrong (or an absent) one.
+          linkSourceRepoPath: isolation.projectRootPath,
           branch,
           dest,
           base,
