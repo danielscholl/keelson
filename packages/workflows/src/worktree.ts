@@ -322,16 +322,16 @@ function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): st
       for (const child of readdirSync(entryPath)) {
         candidates.push({ name: join(entry, child), path: join(entryPath, child) });
       }
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   const linked: string[] = [];
   for (const candidate of candidates) {
     try {
       if (!lstatSync(candidate.path).isSymbolicLink()) continue;
-      const realTarget = canonicalPath(resolve(dirname(candidate.path), readlinkSync(candidate.path)));
+      const realTarget = canonicalPath(
+        resolve(dirname(candidate.path), readlinkSync(candidate.path)),
+      );
       const relativeTarget = relative(parentReal, realTarget);
       const targetOutsideRepo =
         relativeTarget === ".." ||
@@ -344,9 +344,7 @@ function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): st
       mkdirSync(dirname(destination), { recursive: true });
       symlinkSync(realTarget, destination);
       linked.push(candidate.name);
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   return linked;
 }
