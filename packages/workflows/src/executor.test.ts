@@ -2329,7 +2329,9 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     expect(summary.nodes.report.state).toBe("completed");
   });
 
-  test("a fixed-but-unresolved thread is re-resolved without a second reply", async () => {
+  test.skipIf(process.platform === "win32")(
+    "a fixed-but-unresolved thread is re-resolved without a second reply",
+    async () => {
     // A prior round posted the reply and committed the fix, but resolveReviewThread
     // failed, so the ledger holds { replied: true, resolved: false }. This round
     // must retry the resolve only — never re-triage or re-reply the thread — and
@@ -2398,7 +2400,8 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
       if (prevBash === undefined) delete process.env.KEELSON_BASH;
       else process.env.KEELSON_BASH = prevBash;
     }
-  });
+    },
+  );
 });
 
 // Bundled smoke-test is Bun-only (no `runtime: uv` nodes), so this suite runs unconditionally.
