@@ -556,7 +556,14 @@ const cardsSectionSchema = z
             .strict()
             .optional(),
         })
-        .strict(),
+        .strict()
+        // `selected` is the paired state of the `action` toggle — selection has no
+        // meaning (and no accessible control) without it, so a selected card must
+        // carry an action. Fail closed at publish rather than render a ring with no
+        // toggle behind it.
+        .refine((c) => !c.selected || c.action !== undefined, {
+          message: "a selected card requires an action",
+        }),
     ),
   })
   .strict();

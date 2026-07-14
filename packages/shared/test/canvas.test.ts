@@ -590,6 +590,24 @@ describe("canvasViewSchema", () => {
     ).toThrow();
   });
 
+  it("rejects a selected card that carries no action (selection needs a control)", () => {
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [{ kind: "cards", items: [{ title: "x", selected: true }] }],
+      }),
+    ).toThrow();
+    // selected WITH an action is valid.
+    expect(
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          { kind: "cards", items: [{ title: "x", selected: true, action: { type: "pick" } }] },
+        ],
+      }).view,
+    ).toBe("board");
+  });
+
   it("rejects a card action missing a type or carrying an extra key (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({
