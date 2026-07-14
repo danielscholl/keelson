@@ -709,22 +709,19 @@ function emitRibRunEvents(opts: {
   // event — the executor's own inputs object is never exposed, and a hook that
   // mutates its copy can't leak into the run or the terminal event.
   const inputsSnapshot = { ...opts.inputs };
-  // Metadata-only: the emitter chain ends in rib code that can read
-  // credentials, and this log runs outside any runWithRedaction scope.
-  const warn = (err: unknown): void => {
-    console.warn(
-      `[workflows] onRibRunEvent(${ribId}) threw for run ${runId} (${
-        err instanceof Error ? err.name : typeof err
-      })`,
-    );
+  // Reads nothing from the rejection value (even Error.name is writable): the
+  // emitter chain ends in rib code that can read credentials, and this log
+  // runs outside any runWithRedaction scope.
+  const warn = (): void => {
+    console.warn(`[workflows] onRibRunEvent(${ribId}) threw for run ${runId}`);
   };
   // An async callback is assignable to the void-returning seam, so guard the
   // rejection path as well as the synchronous throw.
   const emit = (event: RibRunEvent): void => {
     try {
       void Promise.resolve(onRibRunEvent(ribId, event)).catch(warn);
-    } catch (err) {
-      warn(err);
+    } catch {
+      warn();
     }
   };
   emit({ workflowName, runId, status: "running", inputs: { ...inputsSnapshot }, startedAt });

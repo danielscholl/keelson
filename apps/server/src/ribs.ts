@@ -577,8 +577,9 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
 // event's invocation starts, or a slow `running` handler could finish after
 // the terminal handler and overwrite the newer state the contract lets a rib
 // trust. Rejection-tolerant — a failed invocation logs and the chain
-// continues. Metadata-only log: the hook can read credentials via its ctx,
-// and this runs outside any runWithRedaction scope.
+// continues. The log reads nothing from the rejection value (even Error.name
+// is writable): the hook can read credentials via its ctx, and this runs
+// outside any runWithRedaction scope.
 export function createRunEventDispatcher(
   handlers: ReadonlyMap<string, (event: RibRunEvent) => Promise<void>>,
 ): (ribId: string, event: RibRunEvent) => void {
@@ -590,12 +591,8 @@ export function createRunEventDispatcher(
     const prior = chains.get(key) ?? Promise.resolve();
     const next = prior
       .then(() => handler(event))
-      .catch((err) => {
-        console.warn(
-          `[keelson] rib '${ribId}' onRunEvent rejected for run ${event.runId} (${
-            err instanceof Error ? err.name : typeof err
-          })`,
-        );
+      .catch(() => {
+        console.warn(`[keelson] rib '${ribId}' onRunEvent rejected for run ${event.runId}`);
       });
     chains.set(key, next);
     void next.then(() => {
