@@ -177,7 +177,6 @@ export interface UseSettingsResult {
   isWorkflowSourceHidden: (ribId: string) => boolean;
   setShowBackgroundWorkflows: (value: boolean) => void;
   setShowScheduledRuns: (value: boolean) => void;
-  // Toggle one host region control off/on across every surface.
   toggleHiddenRegionAction: (action: RegionAction) => void;
   isRegionActionHidden: (action: RegionAction) => boolean;
 }
