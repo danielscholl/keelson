@@ -2329,9 +2329,7 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     expect(summary.nodes.report.state).toBe("completed");
   });
 
-  test.skipIf(process.platform === "win32")(
-    "a fixed-but-unresolved thread is re-resolved without a second reply",
-    async () => {
+  test("a fixed-but-unresolved thread is re-resolved without a second reply", async () => {
     // A prior round posted the reply and committed the fix, but resolveReviewThread
     // failed, so the ledger holds { replied: true, resolved: false }. This round
     // must retry the resolve only — never re-triage or re-reply the thread — and
@@ -2343,16 +2341,21 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     chmodSync(join(binDir, "gh"), 0o755);
     // Resolve before overriding KEELSON_BASH so the wrapper delegates to the
     // platform shell instead of recursively invoking itself.
-    const realBash = resolveBash().cmd;
+    const { cmd: realBash, pathDirs } = resolveBash();
+    // The wrapper carries pathDirs itself: resolveBash derives Git Bash's
+    // coreutils dirs from a `…\bin\bash.exe` path, so once KEELSON_BASH points at
+    // this wrapper it yields none and the node's body would lose jq/grep.
     let wrapper: string;
     if (process.platform === "win32") {
       wrapper = join(binDir, "bashwrap.cmd");
-      writeFileSync(wrapper, `@echo off\r\nset "PATH=${binDir};%PATH%"\r\n"${realBash}" %*\r\n`);
+      const winPath = [binDir, ...pathDirs].join(";");
+      writeFileSync(wrapper, `@echo off\r\nset "PATH=${winPath};%PATH%"\r\n"${realBash}" %*\r\n`);
     } else {
       wrapper = join(binDir, "bashwrap");
+      const posixPath = [binDir, ...pathDirs].join(":");
       writeFileSync(
         wrapper,
-        `#!/usr/bin/env bash\nexport PATH="${binDir}:$PATH"\nexec "${realBash}" "$@"\n`,
+        `#!/usr/bin/env bash\nexport PATH="${posixPath}:$PATH"\nexec "${realBash}" "$@"\n`,
       );
       chmodSync(wrapper, 0o755);
     }
@@ -2400,8 +2403,7 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
       if (prevBash === undefined) delete process.env.KEELSON_BASH;
       else process.env.KEELSON_BASH = prevBash;
     }
-    },
-  );
+  });
 });
 
 // Bundled smoke-test is Bun-only (no `runtime: uv` nodes), so this suite runs unconditionally.
