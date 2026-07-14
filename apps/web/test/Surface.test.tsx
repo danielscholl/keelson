@@ -7,6 +7,7 @@ import {
 } from "@keelson/shared";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as realApi from "../src/api.ts";
+import type { RegionAction } from "../src/hooks/useSettings.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../src/lib/exploreSeed.ts";
 
 // Stub the snapshot hook (not api.ts/ws.ts) so this file's mocks don't collide
@@ -112,11 +113,25 @@ beforeEach(() => {
   postRibActionCalls.length = 0;
   postRibActionResult = { ok: true };
   ribSummaries = [];
-  // useSettings caches at module scope and only re-reads on a `storage` event, so
-  // a seeded region-action preference would otherwise leak into every later test.
-  localStorage.clear();
-  window.dispatchEvent(new StorageEvent("storage", { key: "keelson.settings.v1" }));
+  // Seeding an explicit empty list (rather than clearing) opts these tests into all
+  // three controls: select and expand are hidden by default, and most cases here
+  // exercise the controls themselves rather than that default.
+  seedRegionActions([]);
 });
+
+// Persist a hiddenRegionActions payload and sync useSettings' module-scope cache —
+// it only re-reads on a `storage` event, so a seeded preference would otherwise
+// leak into every later test. Pass null to persist nothing (the default applies).
+function seedRegionActions(hidden: RegionAction[] | null): void {
+  localStorage.clear();
+  if (hidden !== null) {
+    localStorage.setItem(
+      "keelson.settings.v1",
+      JSON.stringify({ favorites: [], lastUsed: null, hiddenRegionActions: hidden }),
+    );
+  }
+  window.dispatchEvent(new StorageEvent("storage", { key: "keelson.settings.v1" }));
+}
 
 describe("Surface", () => {
   test("lays out a row of columns, each rendering its board", () => {
@@ -473,12 +488,30 @@ describe("Surface", () => {
     ).toBeNull();
   });
 
-  test("a viewer's hiddenRegionActions drops those controls but keeps the rest", () => {
-    localStorage.setItem(
-      "keelson.settings.v1",
-      JSON.stringify({ favorites: [], lastUsed: null, hiddenRegionActions: ["select", "expand"] }),
+  test("by default a panel head carries Explore in chat alone", () => {
+    seedRegionActions(null);
+    live("rib:demo:quality", board("Quality", "Services", 23));
+    render(
+      <CanvasProvider>
+        <Surface
+          descriptor={{
+            id: "cimpl",
+            title: "CIMPL",
+            layout: { rows: [{ columns: [{ key: "rib:demo:quality", title: "Quality" }] }] },
+          }}
+          onExplore={() => {}}
+        />
+      </CanvasProvider>,
     );
-    window.dispatchEvent(new StorageEvent("storage", { key: "keelson.settings.v1" }));
+    expect(screen.getByRole("button", { name: "Explore in chat" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: "Select panel for multi-panel explore" }),
+    ).toBeNull();
+  });
+
+  test("a viewer's hiddenRegionActions drops those controls but keeps the rest", () => {
+    seedRegionActions(["select", "expand"]);
     live("rib:demo:quality", board("Quality", "Services", 23));
     render(
       <CanvasProvider>
@@ -502,11 +535,7 @@ describe("Surface", () => {
   test("a surface's hideRegionActions still wins over a viewer keeping a control", () => {
     // Viewer hides only select; the surface opts out of everything — the union
     // means explore and expand stay gone rather than coming back.
-    localStorage.setItem(
-      "keelson.settings.v1",
-      JSON.stringify({ favorites: [], lastUsed: null, hiddenRegionActions: ["select"] }),
-    );
-    window.dispatchEvent(new StorageEvent("storage", { key: "keelson.settings.v1" }));
+    seedRegionActions(["select"]);
     live("rib:demo:quality", board("Quality", "Services", 23));
     render(
       <CanvasProvider>
