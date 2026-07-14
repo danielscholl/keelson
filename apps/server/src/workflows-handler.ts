@@ -697,13 +697,14 @@ function emitRibRunEvents(opts: {
   onRibRunEvent: (ribId: string, event: RibRunEvent) => void;
   ribId: string;
   store: WorkflowStore;
+  subscribers: WorkflowSubscribers;
   workflowName: string;
   runId: string;
   inputs: Record<string, string>;
   startedAt: string;
   done: Promise<void>;
 }): void {
-  const { onRibRunEvent, ribId, store, workflowName, runId, startedAt, done } = opts;
+  const { onRibRunEvent, ribId, store, subscribers, workflowName, runId, startedAt, done } = opts;
   // Pristine snapshot taken before the hook can run, dealt as a fresh copy per
   // event — the executor's own inputs object is never exposed, and a hook that
   // mutates its copy can't leak into the run or the terminal event.
@@ -725,10 +726,10 @@ function emitRibRunEvents(opts: {
     }
   };
   emit({ workflowName, runId, status: "running", inputs: { ...inputsSnapshot }, startedAt });
-  const observeSettle = (): void => {
+  const readTerminal = (): RibRunEvent | null => {
     const run = store.getRun(runId);
-    if (!run || !isTerminalStatus(run.status)) return;
-    emit({
+    if (!run || !isTerminalStatus(run.status)) return null;
+    return {
       workflowName,
       runId,
       status: run.status as "succeeded" | "failed" | "cancelled",
@@ -736,11 +737,28 @@ function emitRibRunEvents(opts: {
       startedAt: run.startedAt,
       ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
       ...(run.error !== null ? { error: run.error } : {}),
-    });
+    };
+  };
+  // Capture the terminal payload at the run_done broadcast — the same
+  // synchronous section that persists it, before the row becomes resumable. A
+  // settle-time read alone can race a resume that has already flipped the row
+  // back to running (the executor awaits a final recompose between persisting
+  // and resolving `done`). First frame only: a resumed launch's own run_done
+  // belongs to its own emitter.
+  let terminal: RibRunEvent | null = null;
+  const unsubscribe = subscribers.onFrame(runId, (frame) => {
+    if (frame.type !== "run_done" || terminal !== null) return;
+    terminal = readTerminal();
+  });
+  const observeSettle = (): void => {
+    unsubscribe();
+    // Fallback for terminal paths that never broadcast a run_done frame.
+    const event = terminal ?? readTerminal();
+    if (event !== null) emit(event);
   };
   // Attached directly to done (not a derived .catch chain): registration order
-  // must beat later done-subscribers that could resume the run and flip the row
-  // non-terminal before this reads it.
+  // must beat later done-subscribers that could resume the run and interleave
+  // their fresh pair ahead of this launch's terminal event.
   void done.then(observeSettle, observeSettle);
 }
 
@@ -1085,6 +1103,7 @@ function startRunCore(
       onRibRunEvent: deps.onRibRunEvent,
       ribId,
       store,
+      subscribers,
       workflowName: name,
       runId,
       inputs,
@@ -1293,6 +1312,7 @@ function resumeRunCore(
       onRibRunEvent: deps.onRibRunEvent,
       ribId: run.ribId,
       store,
+      subscribers,
       workflowName: workflow.name,
       runId,
       inputs: run.inputs,

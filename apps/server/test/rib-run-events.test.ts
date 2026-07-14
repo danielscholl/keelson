@@ -70,6 +70,7 @@ describe("rib run events", () => {
         : {}),
     });
     const activeRuns = createActiveRuns();
+    const subscribers = createWorkflowSubscribers();
     const controller = createWorkflowController(
       {
         catalog,
@@ -79,9 +80,9 @@ describe("rib run events", () => {
         ...(opts.onRibRunEvent !== undefined ? { onRibRunEvent: opts.onRibRunEvent } : {}),
       },
       activeRuns,
-      createWorkflowSubscribers(),
+      subscribers,
     );
-    return { db, store, activeRuns, controller };
+    return { db, store, activeRuns, subscribers, controller };
   }
 
   test("a rib-owned run emits running at launch and succeeded when it settles", async () => {
@@ -180,6 +181,44 @@ describe("rib run events", () => {
       await raced;
       await until(() => events.length === 4);
       expect(events.map((e) => e.status)).toEqual(["running", "failed", "running", "failed"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a resume inside the settle window cannot swallow the first terminal event", async () => {
+    const events: RibRunEvent[] = [];
+    const { db, subscribers, controller } = makeRig({
+      bash: "exit 1",
+      onRibRunEvent: (_ribId, event) => events.push(event),
+    });
+    try {
+      const result = controller.startRun({ name: "provision", inputs: {}, workingDir: tmpDir });
+      if (!result.ok) throw new Error(result.message);
+      let resumed = false;
+      const unsub = subscribers.onFrame(result.runId, (frame) => {
+        if (frame.type !== "run_done" || resumed) return;
+        resumed = true;
+        // One microtask hop lands after the executor's sync section (terminal
+        // row persisted, active entry deleted — the run is resumable) but
+        // before its final awaited recompose resolves `done`.
+        queueMicrotask(() => {
+          const r = controller.resumeRun(result.runId);
+          if (!r.ok) throw new Error(r.message);
+        });
+      });
+      await until(() => events.length === 4);
+      unsub();
+      // The resume's fresh pair starts before launch 1's terminal event goes
+      // out (the window closes only when done settles); what must hold is that
+      // both launches deliver their full pair.
+      expect(events.map((e) => e.status).sort()).toEqual([
+        "failed",
+        "failed",
+        "running",
+        "running",
+      ]);
+      for (const event of events) expect(event.runId).toBe(result.runId);
     } finally {
       db.close();
     }
