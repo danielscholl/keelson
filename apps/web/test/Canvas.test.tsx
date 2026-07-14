@@ -1199,13 +1199,14 @@ describe("BoardView selectable cards", () => {
       </BoardActionProvider>,
     );
 
-  test("a selected card rings and is aria-pressed; clicking its body dispatches the action", () => {
+  test("a selected card rings; its stretched toggle is aria-pressed and dispatches", () => {
     const runs: unknown[] = [];
     renderWithDispatch(cardsView(true), runs);
-    const card = document.querySelector(".cvb-card.is-selected");
-    expect(card).not.toBeNull();
-    expect(card?.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(card as Element);
+    expect(document.querySelector(".cvb-card.is-selected")).not.toBeNull();
+    const toggle = document.querySelector(".cvb-card-select");
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle?.getAttribute("aria-label")).toBe("Ada");
+    fireEvent.click(toggle as Element);
     expect(runs).toEqual([{ type: "draft-set", payload: { slug: "ada" } }]);
   });
 
@@ -1214,5 +1215,13 @@ describe("BoardView selectable cards", () => {
     renderWithDispatch(cardsView(false), runs);
     fireEvent.click(screen.getByRole("button", { name: "Enter Ada" }));
     expect(runs).toEqual([{ type: "enter" }]);
+  });
+
+  test("without a dispatcher the toggle is inert but still conveys the selected state", () => {
+    render(<BoardView view={cardsView(true)} />);
+    const toggle = document.querySelector(".cvb-card-select") as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
   });
 });

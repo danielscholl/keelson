@@ -1,9 +1,8 @@
-import type { CanvasBoardView, CanvasTone, RibAction } from "@keelson/shared";
+import type { CanvasBoardView, CanvasCardAction, CanvasTone, RibAction } from "@keelson/shared";
 import {
   type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   useEffect,
   useId,
   useRef,
@@ -829,11 +828,47 @@ function BarRow({ bar, inline }: { bar: BarItem; inline: boolean }) {
   );
 }
 
+// A card's whole-body select toggle. Rendered as a transparent button stretched
+// over the card (see `.cvb-card-select`), layered UNDER the card's own controls by
+// z-index so those keep their semantics and clicks — a `role="button"` on the card
+// container would instead flatten them out of the accessibility tree. Carries the
+// `aria-pressed` selected state even when inert (no dispatcher, e.g. an inline
+// board), so selection is conveyed to assistive tech regardless. A per-button
+// pending guard keeps a double-click or repeated Enter from dispatching twice.
+function CardSelectButton({
+  action,
+  selected,
+  label,
+}: {
+  action: CanvasCardAction;
+  selected: boolean;
+  label: string;
+}) {
+  const ctx = useBoardActions();
+  const [pending, setPending] = useState(false);
+  return (
+    <button
+      type="button"
+      className="cvb-card-select"
+      aria-pressed={selected}
+      aria-label={label}
+      disabled={!ctx || pending}
+      onClick={() => {
+        if (!ctx || pending) return;
+        setPending(true);
+        void ctx
+          .run(
+            action.payload !== undefined
+              ? { type: action.type, payload: action.payload }
+              : { type: action.type },
+          )
+          .finally(() => setPending(false));
+      }}
+    />
+  );
+}
+
 function Section({ section }: { section: BoardSection }) {
-  // Null on inline/artifact boards (no provider) — a selectable card then still
-  // shows its ring but isn't wired to dispatch, mirroring how the action buttons
-  // render inert without a dispatcher.
-  const boardActions = useBoardActions();
   switch (section.kind) {
     case "stats": {
       const key = makeKeyer();
@@ -909,47 +944,19 @@ function Section({ section }: { section: BoardSection }) {
                   (!f.people && isSafeLinkScheme(f.href)),
               );
             const cardAction = c.action;
-            const clickable = cardAction != null && boardActions != null;
-            const activateCard = clickable
-              ? () =>
-                  void boardActions.run(
-                    cardAction.payload !== undefined
-                      ? { type: cardAction.type, payload: cardAction.payload }
-                      : { type: cardAction.type },
-                  )
-              : undefined;
-            const clickProps = clickable
-              ? {
-                  role: "button" as const,
-                  tabIndex: 0,
-                  "aria-pressed": c.selected === true,
-                  onClick: (e: ReactMouseEvent<HTMLDivElement>) => {
-                    // A click on an interactive child (an action button, a title
-                    // link, a copy affordance) is that child's — the card toggle
-                    // fires only on the card's own chrome. A click target can be a
-                    // text node, so normalize to its element before probing
-                    // ancestors (skipping would wrongly toggle on a child click).
-                    const t = e.target;
-                    const el = t instanceof Element ? t : t instanceof Node ? t.parentElement : null;
-                    if (el?.closest("button, a, input, select, textarea, label")) return;
-                    activateCard?.();
-                  },
-                  onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
-                    if (e.target !== e.currentTarget) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      activateCard?.();
-                    }
-                  },
-                }
-              : {};
             return (
               <div
                 key={key(c.title)}
-                className={`cvb-card${c.ghost ? " cvb-card--ghost" : ""}${pad ? " cvb-card--pad" : ""}${clickable ? " cvb-card--selectable" : ""}${c.selected ? " is-selected" : ""}`}
+                className={`cvb-card${c.ghost ? " cvb-card--ghost" : ""}${pad ? " cvb-card--pad" : ""}${cardAction ? " cvb-card--selectable" : ""}${c.selected ? " is-selected" : ""}`}
                 {...(pad ? { "aria-hidden": true } : {})}
-                {...clickProps}
               >
+                {cardAction && (
+                  <CardSelectButton
+                    action={cardAction}
+                    selected={c.selected === true}
+                    label={c.title}
+                  />
+                )}
                 <div className="cvb-card-head">
                   {c.dot && <span className="cvb-card-dot" data-tone={c.dot} />}
                   {isSafeLinkScheme(c.href) ? (

@@ -4146,24 +4146,42 @@ button.cvb-action-field-model:disabled {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-/* Selectable card — the whole body is a pick/toggle target (a Mind called to the
-   table). Pointer + a brand edge on hover/focus signal it's clickable; `is-selected`
-   rings it with the same brand treatment a waking ghost seat uses, so a chosen card
-   reads unmistakably against its unselected neighbours. */
 .cvb-card--selectable {
-  cursor: pointer;
+  position: relative;
   transition:
     border-color 0.12s ease,
     box-shadow 0.12s ease,
     background 0.12s ease;
 }
+/* The whole-card select toggle: a transparent button stretched over the card,
+   layered under the card's real controls (raised below) so those keep their own
+   clicks and accessibility while a click on the card's body toggles selection. */
+.cvb-card-select {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: inherit;
+  cursor: pointer;
+}
+.cvb-card-select:disabled {
+  cursor: default;
+}
+.cvb-card-select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
 .cvb-card--selectable:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
-.cvb-card--selectable:focus-visible {
-  outline: none;
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+.cvb-card--selectable .cvb-card-overflow,
+.cvb-card--selectable .cvb-card-actions,
+.cvb-card--selectable a.cvb-card-title {
+  position: relative;
+  z-index: 2;
 }
 .cvb-card.is-selected {
   border-color: color-mix(in srgb, var(--accent) 60%, transparent);
