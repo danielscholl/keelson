@@ -28,14 +28,22 @@ function workflowBash(workflow: string, nodeId: string): string {
   return script;
 }
 
-function runAdvisoryGate(workflow: string, nodeId: string, snapshot: string) {
+function runAdvisoryGate(
+  workflow: string,
+  nodeId: string,
+  snapshot: string,
+  opts: { requiredChecksFail?: boolean } = {},
+) {
   const artifacts = mkdtempSync(join(tmpdir(), "keelson-ci-gate-"));
   tmps.push(artifacts);
   writeFileSync(join(artifacts, ".pr-number"), "42\n");
+  const requiredArm = opts.requiredChecksFail
+    ? `"pr required-checks 42") echo "forge: could not resolve base branch for PR 42" >&2; exit 1 ;;`
+    : `"pr required-checks 42") exit 0 ;;`;
   const forge = `#!/usr/bin/env bash
 case "$*" in
   "pr checks 42 --json state -q length") echo 1 ;;
-  "pr required-checks 42") exit 0 ;;
+  ${requiredArm}
   "pr checks 42 --json name,bucket,state") echo '${snapshot}' ;;
   "pr ready 42") touch "$READY_MARKER" ;;
   *) echo "unexpected forge args: $*" >&2; exit 1 ;;
@@ -76,6 +84,35 @@ shimDescribe("CI advisory gate", () => {
       expect(result.stdout).not.toContain("CI_STATUS: PASS");
     });
   }
+
+  // A failed discovery must not read as "nothing is required" — that would route a
+  // real failure down the advisory path and pass it.
+  for (const workflow of ["finish-pr", "fix-issue"]) {
+    test(`${workflow}: required-check discovery failure emits UNKNOWN, never PASS`, () => {
+      const result = runAdvisoryGate(
+        workflow,
+        "await-ci",
+        '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"}]',
+        { requiredChecksFail: true },
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("CI_STATUS: UNKNOWN");
+      expect(result.stdout).not.toContain("CI_STATUS: PASS");
+      expect(result.stdout).not.toContain("CI_STATUS: FAIL");
+    });
+  }
+
+  test("finalize-pr leaves the PR a draft when discovery fails", () => {
+    const result = runAdvisoryGate(
+      "fix-issue",
+      "finalize-pr",
+      '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"}]',
+      { requiredChecksFail: true },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("PR_STATE: UNKNOWN");
+    expect(result.readyCalled).toBe(false);
+  });
 
   test("finalize-pr keeps a genuinely failing advisory-only PR in draft", () => {
     const result = runAdvisoryGate(

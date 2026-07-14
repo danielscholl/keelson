@@ -597,7 +597,11 @@ nodes:
         ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
       }
 
-      REQUIRED=$(forge pr required-checks "$PR_NUM" 2>/dev/null || true)
+      if ! REQUIRED=$(forge pr required-checks "$PR_NUM" 2> "$KEELSON_ARTIFACTS_DIR/.ci-required.err"); then
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-required.err" 2>/dev/null || true
+        echo "CI_STATUS: UNKNOWN — could not discover required checks"
+        exit 0
+      fi
       if [ -z "$REQUIRED" ]; then
         echo "No required checks configured; waiting for all checks to settle within the deadline."
         ATTEMPT=1
