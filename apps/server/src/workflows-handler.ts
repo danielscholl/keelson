@@ -699,10 +699,11 @@ function emitRibRunEvents(opts: {
   store: WorkflowStore;
   workflowName: string;
   runId: string;
+  inputs: Record<string, string>;
   startedAt: string;
   done: Promise<void>;
 }): void {
-  const { onRibRunEvent, ribId, store, workflowName, runId, startedAt, done } = opts;
+  const { onRibRunEvent, ribId, store, workflowName, runId, inputs, startedAt, done } = opts;
   const emit = (event: RibRunEvent): void => {
     try {
       onRibRunEvent(ribId, event);
@@ -714,7 +715,7 @@ function emitRibRunEvents(opts: {
       );
     }
   };
-  emit({ workflowName, runId, status: "running", startedAt });
+  emit({ workflowName, runId, status: "running", inputs, startedAt });
   void done
     .catch(() => {})
     .then(() => {
@@ -724,6 +725,7 @@ function emitRibRunEvents(opts: {
         workflowName,
         runId,
         status: run.status as "succeeded" | "failed" | "cancelled",
+        inputs,
         startedAt: run.startedAt,
         ...(run.completedAt !== null ? { completedAt: run.completedAt } : {}),
         ...(run.error !== null ? { error: run.error } : {}),
@@ -1074,6 +1076,7 @@ function startRunCore(
       store,
       workflowName: name,
       runId,
+      inputs,
       startedAt,
       done,
     });
@@ -1281,6 +1284,7 @@ function resumeRunCore(
       store,
       workflowName: workflow.name,
       runId,
+      inputs: run.inputs,
       startedAt: run.startedAt,
       done,
     });

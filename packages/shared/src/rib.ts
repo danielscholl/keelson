@@ -160,12 +160,14 @@ export interface RibWorkflowRunResult {
 // workflow (runs are stamped with their owning rib id at run-start). Fired
 // once when the run launches (`running`) and once when it reaches a terminal
 // status — regardless of who started it: a board effect, the Workflows
-// surface, a cadence refresh. `error` carries the run-level failure message on
-// a failed run. See Rib.onRunEvent.
+// surface, a cadence refresh. `inputs` are the run's inputs, so a rib can
+// reconstruct dispatch context for runs it didn't launch; `error` carries the
+// run-level failure message on a failed run. See Rib.onRunEvent.
 export interface RibRunEvent {
   workflowName: string;
   runId: string;
   status: "running" | "succeeded" | "failed" | "cancelled";
+  inputs: Record<string, string>;
   startedAt: string;
   completedAt?: string;
   error?: string;

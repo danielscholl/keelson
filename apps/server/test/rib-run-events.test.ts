@@ -91,7 +91,11 @@ describe("rib run events", () => {
       onRibRunEvent: (ribId, event) => events.push({ ribId, event }),
     });
     try {
-      const result = controller.startRun({ name: "provision", inputs: {}, workingDir: tmpDir });
+      const result = controller.startRun({
+        name: "provision",
+        inputs: { provider: "kind", env: "lab" },
+        workingDir: tmpDir,
+      });
       if (!result.ok) throw new Error(result.message);
 
       expect(events).toHaveLength(1);
@@ -100,6 +104,7 @@ describe("rib run events", () => {
         workflowName: "provision",
         runId: result.runId,
         status: "running",
+        inputs: { provider: "kind", env: "lab" },
       });
 
       await until(() => events.length === 2);
@@ -107,6 +112,7 @@ describe("rib run events", () => {
         workflowName: "provision",
         runId: result.runId,
         status: "succeeded",
+        inputs: { provider: "kind", env: "lab" },
       });
       expect(typeof events[1]?.event.completedAt).toBe("string");
       expect(events[1]?.event.error).toBeUndefined();
@@ -191,6 +197,7 @@ describe("applyRibs onRunEvent wiring", () => {
       workflowName: "osdu-cluster-create",
       runId: "run-1",
       status: "running",
+      inputs: { provider: "kind" },
       startedAt: "2026-07-13T12:00:00Z",
     });
     expect(seen).toHaveLength(1);
