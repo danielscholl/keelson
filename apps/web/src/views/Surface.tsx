@@ -47,8 +47,6 @@ type OpenSurface = (surfaceId: string, regionKey?: string) => void;
 // silently drop any field the schema gains next.
 type Region = RibSurfaceRegion;
 
-// Which head controls are suppressed, resolved once per surface from two
-// independent sources (the rib's opt-out and the viewer's preference).
 interface HiddenRegionActions {
   explore: boolean;
   select: boolean;
