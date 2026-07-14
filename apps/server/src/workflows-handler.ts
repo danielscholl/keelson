@@ -704,15 +704,20 @@ function emitRibRunEvents(opts: {
   done: Promise<void>;
 }): void {
   const { onRibRunEvent, ribId, store, workflowName, runId, inputs, startedAt, done } = opts;
+  const warn = (err: unknown): void => {
+    console.warn(
+      `[workflows] onRibRunEvent(${ribId}) threw for run ${runId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  };
+  // An async callback is assignable to the void-returning seam, so guard the
+  // rejection path as well as the synchronous throw.
   const emit = (event: RibRunEvent): void => {
     try {
-      onRibRunEvent(ribId, event);
+      void Promise.resolve(onRibRunEvent(ribId, event)).catch(warn);
     } catch (err) {
-      console.warn(
-        `[workflows] onRibRunEvent(${ribId}) threw for run ${runId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
+      warn(err);
     }
   };
   emit({ workflowName, runId, status: "running", inputs, startedAt });

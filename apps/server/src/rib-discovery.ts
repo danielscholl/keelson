@@ -22,6 +22,7 @@ export const HOOK_FIELDS = [
   "contributeDocs",
   "contributePolicies",
   "onAction",
+  "onRunEvent",
   "authStatus",
   "listAgents",
   "resolveAgent",

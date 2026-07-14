@@ -139,6 +139,26 @@ describe("rib run events", () => {
     }
   });
 
+  test("a cancelled run's terminal event reports cancelled", async () => {
+    const events: RibRunEvent[] = [];
+    const { db, activeRuns, controller } = makeRig({
+      bash: "sleep 30",
+      onRibRunEvent: (_ribId, event) => events.push(event),
+    });
+    try {
+      const result = controller.startRun({ name: "provision", inputs: {}, workingDir: tmpDir });
+      if (!result.ok) throw new Error(result.message);
+      await until(() => events.length === 1);
+      // The cancel route's core: trigger the run's AbortController; the
+      // executor's run_done branch persists 'cancelled', settling `done`.
+      activeRuns.get(result.runId)?.abort.abort();
+      await until(() => events.length === 2);
+      expect(events[1]).toMatchObject({ runId: result.runId, status: "cancelled" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("a run of a workflow no rib owns emits nothing", async () => {
     const events: RibRunEvent[] = [];
     const { db, activeRuns, controller } = makeRig({
