@@ -2083,8 +2083,8 @@ import { bashHandler } from "./handlers/bash.ts";
 import { makeCancelHandler } from "./handlers/cancel.ts";
 import { makeCommandHandler } from "./handlers/command.ts";
 import { makeLoopHandler } from "./handlers/loop.ts";
-import { resolveBash } from "./handlers/shell.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
+import { resolveBash } from "./handlers/shell.ts";
 
 // ---------------------------------------------------------------------------
 // finish-pr — drives the real converge loop with its deterministic jq gates
@@ -2329,88 +2329,76 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     expect(summary.nodes.report.state).toBe("completed");
   });
 
-  // The resolve-retry path stubs `gh` with a bash-shebang script + chmod + PATH
-  // injection (KEELSON_BASH) — a POSIX-only harness. On win32 the stub never
-  // resolves, so the converge loop exhausts and the assertion diverges; the
-  // resolve-retry logic itself is fully covered on POSIX.
-  test.skipIf(process.platform === "win32")(
-    "a fixed-but-unresolved thread is re-resolved without a second reply",
-    async () => {
-      // A prior round posted the reply and committed the fix, but resolveReviewThread
-      // failed, so the ledger holds { replied: true, resolved: false }. This round
-      // must retry the resolve only — never re-triage or re-reply the thread — and
-      // flip the ledger once the resolve succeeds. resolve-retry runs for real; a
-      // fake `gh` (exit 0) on a PATH-injecting bash wrapper stands in for the live
-      // GraphQL resolve so the node's own retry + ledger-flip logic executes.
-      const binDir = mkdtempSync(join(tmpdir(), "cpr-bin-"));
-      writeFileSync(join(binDir, "gh"), "#!/usr/bin/env bash\nexit 0\n");
-      chmodSync(join(binDir, "gh"), 0o755);
-      // Resolve before overriding KEELSON_BASH so the wrapper delegates to the
-      // platform shell instead of recursively invoking itself.
-      const realBash = resolveBash().cmd;
-      let wrapper: string;
-      if (process.platform === "win32") {
-        wrapper = join(binDir, "bashwrap.cmd");
-        writeFileSync(
-          wrapper,
-          `@echo off\r\nset "PATH=${binDir};%PATH%"\r\n"${realBash}" %*\r\n`,
-        );
-      } else {
-        wrapper = join(binDir, "bashwrap");
-        writeFileSync(
-          wrapper,
-          `#!/usr/bin/env bash\nexport PATH="${binDir}:$PATH"\nexec "${realBash}" "$@"\n`,
-        );
-        chmodSync(wrapper, 0o755);
-      }
+  test("a fixed-but-unresolved thread is re-resolved without a second reply", async () => {
+    // A prior round posted the reply and committed the fix, but resolveReviewThread
+    // failed, so the ledger holds { replied: true, resolved: false }. This round
+    // must retry the resolve only — never re-triage or re-reply the thread — and
+    // flip the ledger once the resolve succeeds. resolve-retry runs for real; a
+    // fake `gh` (exit 0) on a PATH-injecting bash wrapper stands in for the live
+    // GraphQL resolve so the node's own retry + ledger-flip logic executes.
+    const binDir = mkdtempSync(join(tmpdir(), "cpr-bin-"));
+    writeFileSync(join(binDir, "gh"), "#!/usr/bin/env bash\nexit 0\n");
+    chmodSync(join(binDir, "gh"), 0o755);
+    // Resolve before overriding KEELSON_BASH so the wrapper delegates to the
+    // platform shell instead of recursively invoking itself.
+    const realBash = resolveBash().cmd;
+    let wrapper: string;
+    if (process.platform === "win32") {
+      wrapper = join(binDir, "bashwrap.cmd");
+      writeFileSync(wrapper, `@echo off\r\nset "PATH=${binDir};%PATH%"\r\n"${realBash}" %*\r\n`);
+    } else {
+      wrapper = join(binDir, "bashwrap");
+      writeFileSync(
+        wrapper,
+        `#!/usr/bin/env bash\nexport PATH="${binDir}:$PATH"\nexec "${realBash}" "$@"\n`,
+      );
+      chmodSync(wrapper, 0o755);
+    }
 
-      const prevBash = process.env.KEELSON_BASH;
-      process.env.KEELSON_BASH = wrapper;
-      try {
-        const { run, approvalCalls, artifactsDir } = convergeRun({
-          hasNew: false,
-          ciStatus: "PASS",
-          threads: [],
-          postCiThreads: [],
-          postCiRetry: [],
-          resolveRetry: [{ threadId: "T_fix", commentId: 7 }],
-          handled: [
-            {
-              threadId: "T_fix",
-              commentId: 7,
-              action: "fixed",
-              decision: "actionable-code-change",
-              commit: "c9",
-              reply: "done",
-              replied: true,
-              resolved: false,
-              round: 1,
-            },
-          ],
-          realBashExtra: ["resolve-retry"],
-        });
-        const summary = await run;
-        expect(summary.status).toBe("succeeded");
-        // A retry thread has a ledger entry, so it is not "new": the triage/reply
-        // path never runs for it — no duplicate public comment.
-        expect(approvalCalls).toEqual([]);
-        expect(summary.nodes.triage.state).toBe("skipped");
-        expect(summary.nodes["reply-resolve"].state).toBe("skipped");
-        // resolve-retry re-attempted the resolve and, on success, flipped the ledger.
-        expect(summary.nodes["resolve-retry"].state).toBe("completed");
-        const ledger = JSON.parse(
-          readFileSync(join(artifactsDir, "handled.json"), "utf8"),
-        ) as Array<{
-          threadId: string;
-          resolved: boolean;
-        }>;
-        expect(ledger.find((e) => e.threadId === "T_fix")?.resolved).toBe(true);
-      } finally {
-        if (prevBash === undefined) delete process.env.KEELSON_BASH;
-        else process.env.KEELSON_BASH = prevBash;
-      }
-    },
-  );
+    const prevBash = process.env.KEELSON_BASH;
+    process.env.KEELSON_BASH = wrapper;
+    try {
+      const { run, approvalCalls, artifactsDir } = convergeRun({
+        hasNew: false,
+        ciStatus: "PASS",
+        threads: [],
+        postCiThreads: [],
+        postCiRetry: [],
+        resolveRetry: [{ threadId: "T_fix", commentId: 7 }],
+        handled: [
+          {
+            threadId: "T_fix",
+            commentId: 7,
+            action: "fixed",
+            decision: "actionable-code-change",
+            commit: "c9",
+            reply: "done",
+            replied: true,
+            resolved: false,
+            round: 1,
+          },
+        ],
+        realBashExtra: ["resolve-retry"],
+      });
+      const summary = await run;
+      expect(summary.status).toBe("succeeded");
+      // A retry thread has a ledger entry, so it is not "new": the triage/reply
+      // path never runs for it — no duplicate public comment.
+      expect(approvalCalls).toEqual([]);
+      expect(summary.nodes.triage.state).toBe("skipped");
+      expect(summary.nodes["reply-resolve"].state).toBe("skipped");
+      // resolve-retry re-attempted the resolve and, on success, flipped the ledger.
+      expect(summary.nodes["resolve-retry"].state).toBe("completed");
+      const ledger = JSON.parse(readFileSync(join(artifactsDir, "handled.json"), "utf8")) as Array<{
+        threadId: string;
+        resolved: boolean;
+      }>;
+      expect(ledger.find((e) => e.threadId === "T_fix")?.resolved).toBe(true);
+    } finally {
+      if (prevBash === undefined) delete process.env.KEELSON_BASH;
+      else process.env.KEELSON_BASH = prevBash;
+    }
+  });
 });
 
 // Bundled smoke-test is Bun-only (no `runtime: uv` nodes), so this suite runs unconditionally.
