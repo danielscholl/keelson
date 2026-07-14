@@ -144,13 +144,7 @@ async function runBun(args: string[], cwd: string, abortSignal?: AbortSignal): P
     // degrades to a non-zero result rather than an unhandled rejection.
     return { exitCode: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
   }
-  const kill = () => {
-    try {
-      proc.kill();
-    } catch {
-      // already gone
-    }
-  };
+  const kill = () => killProcessTree(proc);
   const timeout = setTimeout(kill, BUN_INSTALL_TIMEOUT_MS);
   // An already-aborted signal won't fire a fresh "abort" event, so kill now
   // rather than waiting out the timeout.

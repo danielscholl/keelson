@@ -43,16 +43,19 @@ describe("killProcessTree", () => {
     expect(killCount).toBe(1);
   });
 
-  test.skipIf(process.platform === "win32")("does not throw when the process already exited", () => {
-    expect(() =>
-      killProcessTree({
-        pid: 123,
-        kill: () => {
-          throw new Error("already exited");
-        },
-      }),
-    ).not.toThrow();
-  });
+  test.skipIf(process.platform === "win32")(
+    "does not throw when the process already exited",
+    () => {
+      expect(() =>
+        killProcessTree({
+          pid: 123,
+          kill: () => {
+            throw new Error("already exited");
+          },
+        }),
+      ).not.toThrow();
+    },
+  );
 });
 
 describe("buildSubprocessEnv", () => {
