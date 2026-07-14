@@ -741,14 +741,14 @@ function emitRibRunEvents(opts: {
       ...(run.error !== null ? { error: run.error } : {}),
     };
   };
-  // Capture the terminal payload at the run_done broadcast — the same
-  // synchronous section that persists it, before the row becomes resumable —
-  // and deliver it one microtask later. That lands after the executor's sync
-  // section yet ahead of any resume, upholding the contract's ordering
-  // promise: a later launch's running event never precedes this launch's
-  // terminal event. A settle-time read alone can race a resume that has
-  // already flipped the row back to running (the executor awaits a final
-  // recompose between persisting and resolving `done`).
+  // Deliver the terminal event synchronously inside the run_done broadcast —
+  // the same synchronous section that persists the row, before it becomes
+  // resumable. No later launch can start until this section ends, so the
+  // contract's ordering promise (a launch's terminal event precedes any later
+  // launch's running event) holds by atomicity, independent of listener
+  // registration or microtask order. A settle-time read alone can race a
+  // resume that has already flipped the row back to running (the executor
+  // awaits a final recompose between persisting and resolving `done`).
   let emitted = false;
   const unsubscribe = subscribers.onFrame(runId, (frame) => {
     if (frame.type !== "run_done" || emitted) return;
@@ -756,7 +756,7 @@ function emitRibRunEvents(opts: {
     if (event === null) return;
     emitted = true;
     unsubscribe();
-    queueMicrotask(() => emit(event));
+    emit(event);
   });
   const observeSettle = (): void => {
     unsubscribe();

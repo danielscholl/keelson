@@ -218,6 +218,43 @@ describe("rib run events", () => {
     }
   });
 
+  test("ordering holds across repeated resumes from a persistent frame listener", async () => {
+    const events: RibRunEvent[] = [];
+    const { db, subscribers, controller } = makeRig({
+      bash: "exit 1",
+      onRibRunEvent: (_ribId, event) => events.push(event),
+    });
+    try {
+      const result = controller.startRun({ name: "provision", inputs: {}, workingDir: tmpDir });
+      if (!result.ok) throw new Error(result.message);
+      // Registered after launch 1's emitter but before launch 2's: from the
+      // second launch on, this listener is iterated FIRST at run_done, so an
+      // emitter relying on listener/microtask order would let the queued
+      // resume's running event overtake the terminal event.
+      let resumes = 0;
+      const unsub = subscribers.onFrame(result.runId, (frame) => {
+        if (frame.type !== "run_done" || resumes >= 2) return;
+        resumes += 1;
+        queueMicrotask(() => {
+          const r = controller.resumeRun(result.runId);
+          if (!r.ok) throw new Error(r.message);
+        });
+      });
+      await until(() => events.length === 6);
+      unsub();
+      expect(events.map((e) => e.status)).toEqual([
+        "running",
+        "failed",
+        "running",
+        "failed",
+        "running",
+        "failed",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("a hook that mutates its event's inputs cannot corrupt later events", async () => {
     const events: RibRunEvent[] = [];
     const { db, controller } = makeRig({
