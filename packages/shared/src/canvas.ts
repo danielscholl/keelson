@@ -615,9 +615,10 @@ const actionsSectionSchema = z
     items: z.array(canvasActionItemSchema),
   })
   .strict();
-// A dense grid of labelled cells, each carrying a small toned badge — for a
-// compact at-a-glance matrix (a per-service grade grid, a status board) where
-// `cards` would be too heavy. Cells link out via `href`.
+// A dense grid of labelled cells, each optionally carrying a small toned badge —
+// for a compact at-a-glance matrix (a per-service grade grid, a status board)
+// where `cards` would be too heavy, or a dense strip of labelled links. Cells
+// link out via `href`.
 const gridSectionSchema = z
   .object({
     kind: z.literal("grid"),
@@ -627,7 +628,10 @@ const gridSectionSchema = z
         .object({
           label: z.string().min(1),
           href: z.string().optional(),
-          badge: z.object({ text: z.string().min(1), tone: canvasToneSchema.optional() }).strict(),
+          badge: z
+            .object({ text: z.string().min(1), tone: canvasToneSchema.optional() })
+            .strict()
+            .optional(),
         })
         .strict(),
     ),

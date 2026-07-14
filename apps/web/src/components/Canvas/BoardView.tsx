@@ -1198,16 +1198,20 @@ function Section({ section }: { section: BoardSection }) {
                 rel="noopener noreferrer"
               >
                 <span className="cvb-grid-label">{cell.label}</span>
-                <span className="cvb-grid-badge" data-tone={cell.badge.tone}>
-                  {cell.badge.text}
-                </span>
+                {cell.badge ? (
+                  <span className="cvb-grid-badge" data-tone={cell.badge.tone}>
+                    {cell.badge.text}
+                  </span>
+                ) : null}
               </a>
             ) : (
               <div key={key(JSON.stringify(cell))} className="cvb-grid-cell">
                 <span className="cvb-grid-label">{cell.label}</span>
-                <span className="cvb-grid-badge" data-tone={cell.badge.tone}>
-                  {cell.badge.text}
-                </span>
+                {cell.badge ? (
+                  <span className="cvb-grid-badge" data-tone={cell.badge.tone}>
+                    {cell.badge.text}
+                  </span>
+                ) : null}
               </div>
             ),
           )}
