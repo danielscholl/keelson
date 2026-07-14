@@ -572,6 +572,38 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
   };
 }
 
+// Run-event dispatch, fire-and-forget relative to the run path. Invocations
+// are serialized per rib+run: an async hook's promise settles before the next
+// event's invocation starts, or a slow `running` handler could finish after
+// the terminal handler and overwrite the newer state the contract lets a rib
+// trust. Rejection-tolerant — a failed invocation logs and the chain
+// continues. Metadata-only log: the hook can read credentials via its ctx,
+// and this runs outside any runWithRedaction scope.
+export function createRunEventDispatcher(
+  handlers: ReadonlyMap<string, (event: RibRunEvent) => Promise<void>>,
+): (ribId: string, event: RibRunEvent) => void {
+  const chains = new Map<string, Promise<void>>();
+  return (ribId, event) => {
+    const handler = handlers.get(ribId);
+    if (!handler) return;
+    const key = `${ribId} ${event.runId}`;
+    const prior = chains.get(key) ?? Promise.resolve();
+    const next = prior
+      .then(() => handler(event))
+      .catch((err) => {
+        console.warn(
+          `[keelson] rib '${ribId}' onRunEvent rejected for run ${event.runId} (${
+            err instanceof Error ? err.name : typeof err
+          })`,
+        );
+      });
+    chains.set(key, next);
+    void next.then(() => {
+      if (chains.get(key) === next) chains.delete(key);
+    });
+  };
+}
+
 // Narrow a rib's `registerTools` return into validated, non-colliding tools.
 // Defensive by design: a malformed entry or a non-array result warns and is
 // dropped rather than throwing, so one rib's bug can't take the server down or

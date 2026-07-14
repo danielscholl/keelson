@@ -611,7 +611,9 @@ export interface Rib {
   // create, a teardown) can track the run without polling. Fail-soft and
   // fire-and-forget: the harness catches + logs a throwing/rejecting hook and
   // never lets it affect the run; the hook must not assume it observes every
-  // run (a restart mid-run drops the terminal event).
+  // run (a restart mid-run drops the terminal event). Invocations for one run
+  // are serialized — an async hook's promise settles before the next event's
+  // invocation starts, so a slow handler can't overwrite newer state.
   onRunEvent?(event: RibRunEvent, ctx: RibContext): void | Promise<void>;
   // Agents the rib offers for direct chat — named, reusable turn templates
   // (a system prompt plus an optional model), surfaced at GET /api/agents.

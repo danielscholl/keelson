@@ -17,7 +17,7 @@ import { bootstrapWorkflows } from "../src/bootstrap.ts";
 import { createConversationStore } from "../src/conversation-store.ts";
 import { openDatabase } from "../src/db/init.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
-import { applyRibs } from "../src/ribs.ts";
+import { applyRibs, createRunEventDispatcher } from "../src/ribs.ts";
 import { createWorkflowStore } from "../src/workflow-store.ts";
 import {
   createActiveRuns,
@@ -399,5 +399,85 @@ describe("applyRibs onRunEvent wiring", () => {
       ctx: { getExec: () => ({}) as never },
     });
     expect(result.runEventHandlers.size).toBe(0);
+  });
+});
+
+describe("createRunEventDispatcher", () => {
+  const eventFor = (status: RibRunEvent["status"], runId = "run-1"): RibRunEvent => ({
+    workflowName: "provision",
+    runId,
+    status,
+    inputs: {},
+    startedAt: "2026-07-13T12:00:00Z",
+  });
+
+  test("a slow running handler settles before the terminal handler starts", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const dispatch = createRunEventDispatcher(
+      new Map([
+        [
+          "osdu",
+          async (event: RibRunEvent) => {
+            if (event.status === "running") await gate;
+            order.push(event.status);
+          },
+        ],
+      ]),
+    );
+    dispatch("osdu", eventFor("running"));
+    dispatch("osdu", eventFor("failed"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual([]);
+    release();
+    await until(() => order.length === 2);
+    expect(order).toEqual(["running", "failed"]);
+  });
+
+  test("a rejecting invocation does not break the chain", async () => {
+    const order: string[] = [];
+    const dispatch = createRunEventDispatcher(
+      new Map([
+        [
+          "osdu",
+          async (event: RibRunEvent) => {
+            if (event.status === "running") throw new Error("hook exploded");
+            order.push(event.status);
+          },
+        ],
+      ]),
+    );
+    dispatch("osdu", eventFor("running"));
+    dispatch("osdu", eventFor("succeeded"));
+    await until(() => order.length === 1);
+    expect(order).toEqual(["succeeded"]);
+  });
+
+  test("events for different runs do not serialize against each other", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const dispatch = createRunEventDispatcher(
+      new Map([
+        [
+          "osdu",
+          async (event: RibRunEvent) => {
+            if (event.runId === "run-slow") await gate;
+            order.push(event.runId);
+          },
+        ],
+      ]),
+    );
+    dispatch("osdu", eventFor("running", "run-slow"));
+    dispatch("osdu", eventFor("running", "run-fast"));
+    await until(() => order.length === 1);
+    expect(order).toEqual(["run-fast"]);
+    release();
+    await until(() => order.length === 2);
   });
 });

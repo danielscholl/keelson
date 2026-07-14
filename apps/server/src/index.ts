@@ -81,7 +81,7 @@ import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
 import { createProjectsStore, type ProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
-import { allRegions } from "./ribs.ts";
+import { allRegions, createRunEventDispatcher } from "./ribs.ts";
 import { ribsRoutes } from "./ribs-handler.ts";
 import { createScheduler, deriveSurfaceSchedules, makeBoundKeyResolver } from "./scheduler.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
@@ -566,21 +566,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // only the runtime-region check stays live.
     isRegionWorkflow: (workflowName) =>
       staticRegionWorkflows.has(workflowName) || dynamicRegionStore.hasRegionWorkflow(workflowName),
-    // Rib.onRunEvent dispatch: fire-and-forget into the owning rib's handler;
-    // a rejecting hook logs and never reaches the run path. Metadata-only log:
-    // the hook can read credentials via its ctx, and this runs outside any
-    // runWithRedaction scope.
-    onRibRunEvent: (ribId, event) => {
-      const handler = ribs.runEventHandlers.get(ribId);
-      if (!handler) return;
-      void handler(event).catch((err) => {
-        console.warn(
-          `[keelson] rib '${ribId}' onRunEvent rejected for run ${event.runId} (${
-            err instanceof Error ? err.name : typeof err
-          })`,
-        );
-      });
-    },
+    // Rib.onRunEvent dispatch — see createRunEventDispatcher for the
+    // fire-and-forget + per-run serialization semantics.
+    onRibRunEvent: createRunEventDispatcher(ribs.runEventHandlers),
   };
   const workflowController = createWorkflowController(
     workflowHandlerOptions,

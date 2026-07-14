@@ -269,7 +269,9 @@ coordination path.
    are the run's inputs, so a rib can reconstruct dispatch context for runs it
    didn't start; `error` carries the run-level failure message. The hook is
    fail-soft and fire-and-forget: a throwing or rejecting hook is caught and
-   logged, never affecting the run. Delivery is not guaranteed — a server
+   logged, never affecting the run — and invocations for one run are
+   serialized, so a slow async handler settles before the next event's
+   invocation starts. Delivery is not guaranteed — a server
    restart mid-run drops the terminal event — so derive state that tolerates a
    missed event (pair it with the observed system state or a staleness window).
 
