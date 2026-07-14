@@ -81,7 +81,7 @@ import { createProjectNotebookStore } from "./project-notebook-store.ts";
 import { projectsRoutes } from "./projects-handler.ts";
 import { createProjectsStore, type ProjectsStore } from "./projects-store.ts";
 import { installRedactedConsole } from "./redact.ts";
-import { allRegions } from "./ribs.ts";
+import { allRegions, createRunEventDispatcher } from "./ribs.ts";
 import { ribsRoutes } from "./ribs-handler.ts";
 import { createScheduler, deriveSurfaceSchedules, makeBoundKeyResolver } from "./scheduler.ts";
 import { isAllowedOrigin, type WsData } from "./server-context.ts";
@@ -566,6 +566,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     // only the runtime-region check stays live.
     isRegionWorkflow: (workflowName) =>
       staticRegionWorkflows.has(workflowName) || dynamicRegionStore.hasRegionWorkflow(workflowName),
+    // Rib.onRunEvent dispatch — see createRunEventDispatcher for the
+    // fire-and-forget + per-run serialization semantics.
+    onRibRunEvent: createRunEventDispatcher(ribs.runEventHandlers),
   };
   const workflowController = createWorkflowController(
     workflowHandlerOptions,

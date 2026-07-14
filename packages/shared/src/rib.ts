@@ -156,6 +156,27 @@ export interface RibWorkflowRunResult {
   error?: string;
 }
 
+// A run-lifecycle notification delivered to the rib that OWNS the run's
+// workflow (runs are stamped with their owning rib id at run-start). Fired at
+// each launch (`running`) and again when that launch settles — once per
+// LAUNCH, not per run: resuming a failed/cancelled run emits a fresh pair
+// with the same runId. Launches of one run never interleave: a launch's
+// terminal event is delivered before any later launch's running event, so a
+// rib reducing the stream can treat the latest event as current. Delivery is
+// launch-source-agnostic (a board effect, the Workflows surface, a cadence
+// refresh). `inputs` are the run's inputs, so a rib can reconstruct dispatch
+// context for runs it didn't launch; `error` carries the run-level failure
+// message on a failed run. See Rib.onRunEvent.
+export interface RibRunEvent {
+  workflowName: string;
+  runId: string;
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  inputs: Record<string, string>;
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
 export interface WorkspaceLease {
   id: string;
   path: string;
@@ -584,6 +605,16 @@ export interface Rib {
   contributePolicies?(ctx: RibContext): readonly Policy[];
   // Inbound action handler reached via POST /api/ribs/:id/action.
   onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
+  // Run-lifecycle notifications for THIS rib's contributed workflows — launch
+  // and terminal transitions of every run stamped with the rib's id (see
+  // RibRunEvent), so a rib whose board reflects a long-running verb (a cluster
+  // create, a teardown) can track the run without polling. Fail-soft and
+  // fire-and-forget: the harness catches + logs a throwing/rejecting hook and
+  // never lets it affect the run; the hook must not assume it observes every
+  // run (a restart mid-run drops the terminal event). Invocations for one run
+  // are serialized — an async hook's promise settles before the next event's
+  // invocation starts, so a slow handler can't overwrite newer state.
+  onRunEvent?(event: RibRunEvent, ctx: RibContext): void | Promise<void>;
   // Agents the rib offers for direct chat — named, reusable turn templates
   // (a system prompt plus an optional model), surfaced at GET /api/agents.
   // `listAgents` is cheap (no system prompt assembled); `resolveAgent` lazily

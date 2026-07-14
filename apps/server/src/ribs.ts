@@ -43,6 +43,7 @@ import {
   type RibContext,
   type RibDocsSource,
   type RibProviderInfo,
+  type RibRunEvent,
   type RibSurfaceDescriptor,
   type RibSurfaceRegion,
   type RibViewDescriptor,
@@ -100,6 +101,9 @@ export interface ApplyRibsResult {
   readonly disposers: RibDisposer[];
   readonly probes: Map<string, () => Promise<RibAuthStatus>>;
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
+  // Run-lifecycle listeners keyed by rib id (Rib.onRunEvent) — the target the
+  // workflow layer's onRibRunEvent seam dispatches to.
+  readonly runEventHandlers: Map<string, (event: RibRunEvent) => Promise<void>>;
   // Live agent discovery/resolution, keyed by rib id (the GET /api/agents source).
   readonly agentListers: Map<string, () => Promise<readonly AgentSummary[]>>;
   readonly agentResolvers: Map<string, (slug: string) => Promise<OpenChatSeed | null>>;
@@ -248,6 +252,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
   const disposers: RibDisposer[] = [];
   const probes = new Map<string, () => Promise<RibAuthStatus>>();
   const actionHandlers = new Map<string, (action: RibAction) => Promise<RibActionResult>>();
+  const runEventHandlers = new Map<string, (event: RibRunEvent) => Promise<void>>();
   const agentListers = new Map<string, () => Promise<readonly AgentSummary[]>>();
   const agentResolvers = new Map<string, (slug: string) => Promise<OpenChatSeed | null>>();
   const commandListers = new Map<string, () => Promise<readonly RibCommandDescriptor[]>>();
@@ -415,6 +420,11 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       const handler = rib.onAction.bind(rib);
       actionHandlers.set(rib.id, (action) => Promise.resolve(handler(action, ribCtx)));
     }
+    if (rib.onRunEvent) {
+      const handler = rib.onRunEvent.bind(rib);
+      // async wrapper so a sync throw from the hook rejects instead of escaping the caller's .catch
+      runEventHandlers.set(rib.id, async (event) => handler(event, ribCtx));
+    }
     if (rib.listAgents) {
       const lister = rib.listAgents.bind(rib);
       agentListers.set(rib.id, () => Promise.resolve(lister(ribCtx)));
@@ -548,6 +558,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     disposers,
     probes,
     actionHandlers,
+    runEventHandlers,
     agentListers,
     agentResolvers,
     commandListers,
@@ -558,6 +569,35 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     policies,
     tools,
     toolOwners,
+  };
+}
+
+// Run-event dispatch, fire-and-forget relative to the run path. Invocations
+// are serialized per rib+run: an async hook's promise settles before the next
+// event's invocation starts, or a slow `running` handler could finish after
+// the terminal handler and overwrite the newer state the contract lets a rib
+// trust. Rejection-tolerant — a failed invocation logs and the chain
+// continues. The log reads nothing from the rejection value (even Error.name
+// is writable): the hook can read credentials via its ctx, and this runs
+// outside any runWithRedaction scope.
+export function createRunEventDispatcher(
+  handlers: ReadonlyMap<string, (event: RibRunEvent) => Promise<void>>,
+): (ribId: string, event: RibRunEvent) => void {
+  const chains = new Map<string, Promise<void>>();
+  return (ribId, event) => {
+    const handler = handlers.get(ribId);
+    if (!handler) return;
+    const key = `${ribId} ${event.runId}`;
+    const prior = chains.get(key) ?? Promise.resolve();
+    const next = prior
+      .then(() => handler(event))
+      .catch(() => {
+        console.warn(`[keelson] rib '${ribId}' onRunEvent rejected for run ${event.runId}`);
+      });
+    chains.set(key, next);
+    void next.then(() => {
+      if (chains.get(key) === next) chains.delete(key);
+    });
   };
 }
 

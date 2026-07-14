@@ -56,6 +56,7 @@ interface Rib {
   contributeDocs?(ctx: RibContext): readonly RibDocsSource[];
   contributePolicies?(ctx: RibContext): readonly Policy[];
   onAction?(action: RibAction, ctx: RibContext): Promise<RibActionResult> | RibActionResult;
+  onRunEvent?(event: RibRunEvent, ctx: RibContext): void | Promise<void>;
   listAgents?(ctx: RibContext): readonly AgentSummary[] | Promise<readonly AgentSummary[]>;
   resolveAgent?(slug: string, ctx: RibContext): (OpenChatSeed | null) | Promise<OpenChatSeed | null>;
   listCommands?(ctx: RibContext): readonly RibCommandDescriptor[] | Promise<readonly RibCommandDescriptor[]>;
@@ -255,14 +256,33 @@ coordination path.
    identifies the conversation that produced it when one exists. Treat the
    payload as untrusted user data and narrow it at the rib boundary.
 
-9. **`listAgents(ctx)` / `resolveAgent(slug, ctx)`** offer named chat agents,
+9. **`onRunEvent(event, ctx)`** delivers run-lifecycle notifications for the
+   rib's own contributed workflows — every run stamped with the rib's id,
+   whoever started it (a board effect, the Workflows surface, a cadence
+   refresh). `event` is `{ workflowName, runId, status, inputs, startedAt,
+   completedAt?, error? }` with `status` one of `running | succeeded | failed |
+   cancelled`: one `running` at each launch and one terminal event when that
+   launch settles. Delivery is once per launch, not once per run — resuming a
+   failed or cancelled run emits a fresh pair with the same `runId`, and
+   launches never interleave: a launch's terminal event arrives before any
+   later launch's `running`, so the latest event is always current. `inputs`
+   are the run's inputs, so a rib can reconstruct dispatch context for runs it
+   didn't start; `error` carries the run-level failure message. The hook is
+   fail-soft and fire-and-forget: a throwing or rejecting hook is caught and
+   logged, never affecting the run — and invocations for one run are
+   serialized, so a slow async handler settles before the next event's
+   invocation starts. Delivery is not guaranteed — a server
+   restart mid-run drops the terminal event — so derive state that tolerates a
+   missed event (pair it with the observed system state or a staleness window).
+
+10. **`listAgents(ctx)` / `resolveAgent(slug, ctx)`** offer named chat agents,
    reusable turn templates of a system prompt plus an optional model, surfaced at
    `GET /api/agents`. `listAgents` is cheap and returns `AgentSummary`s;
    `resolveAgent` lazily builds one slug's `OpenChatSeed` on selection and
    returns `null` for an unknown slug. A surface opens the seed as a fresh,
    seeded chat.
 
-10. **`listCommands(ctx)` / `invokeCommand(name, arg, ctx)` /
+11. **`listCommands(ctx)` / `invokeCommand(name, arg, ctx)` /
     `completeCommand(name, prefix, ctx)`** add slash commands to the chat
     composer, surfaced at `GET /api/commands`. `listCommands` returns static
     descriptors. `invokeCommand` is a side-effect-free resolver: it decides which
@@ -271,12 +291,12 @@ coordination path.
     `completeCommand` backs argument type-ahead and must return the full candidate
     set for an empty `prefix`.
 
-11. **`authStatus(ctx)`** is a credential probe surfaced in `GET /api/ribs` (and
+12. **`authStatus(ctx)`** is a credential probe surfaced in `GET /api/ribs` (and
     optionally `doctor`). It returns `{ authenticated, statusMessage? }`. The
     probe is not expected to throw; a throwing probe is caught at the seam and
     reported as `{ authenticated: false, statusMessage: <error> }`.
 
-12. **`dispose()`** is teardown, sync or async. The harness awaits it during
+13. **`dispose()`** is teardown, sync or async. The harness awaits it during
     shutdown, before the database closes, so a rib holding sockets, watchers, or
     child processes can tear down cleanly.
 
