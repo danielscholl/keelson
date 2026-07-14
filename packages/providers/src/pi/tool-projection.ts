@@ -32,6 +32,7 @@ export interface PiProjectedToolResult {
 
 export interface PiToolProjectionContext {
   cwd: string;
+  turnContext?: Readonly<Record<string, unknown>>;
   // Live-stream sink for non-result chunks a tool emits mid-execution. The
   // tool_result itself is NOT pushed here — it returns to pi, which emits a
   // tool_execution_end event the bridge maps; pushing both would duplicate it.
@@ -76,6 +77,7 @@ export function projectToolsForPi(
           signals.length > 1
             ? AbortSignal.any(signals)
             : (signals[0] ?? new AbortController().signal),
+        ...(projection.turnContext !== undefined ? { turnContext: projection.turnContext } : {}),
         emit: (chunk) => {
           if (chunk.type === "tool_result") {
             resultContent = chunk.content;
