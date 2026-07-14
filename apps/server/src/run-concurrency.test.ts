@@ -129,20 +129,23 @@ describe("createRunSlots", () => {
 });
 
 describe("resolveMaxConcurrentRuns", () => {
-  test("defaults to 2 when unset, empty, or unparseable", () => {
-    expect(resolveMaxConcurrentRuns({})).toBe(2);
-    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "" })).toBe(2);
-    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "  " })).toBe(2);
-    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "abc" })).toBe(2);
+  test("defaults to 4 when unset, empty, or unparseable", () => {
+    expect(resolveMaxConcurrentRuns({})).toBe(4);
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "" })).toBe(4);
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "  " })).toBe(4);
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "abc" })).toBe(4);
   });
 
-  test("floors invalid numbers to the default", () => {
-    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "0" })).toBe(2);
-    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "-3" })).toBe(2);
+  test("floors invalid values to the default", () => {
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "0" })).toBe(4);
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "-3" })).toBe(4);
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "1.5" })).toBe(4);
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "8oops" })).toBe(4);
   });
 
   test("honors a valid explicit ceiling", () => {
     expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "1" })).toBe(1);
     expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: "8" })).toBe(8);
+    expect(resolveMaxConcurrentRuns({ KEELSON_MAX_CONCURRENT_RUNS: " 8 " })).toBe(8);
   });
 });

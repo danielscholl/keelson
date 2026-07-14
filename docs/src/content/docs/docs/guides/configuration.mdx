@@ -268,7 +268,7 @@ the matching config value when set.
 | `KEELSON_REDACT_PATTERN` | unset | Regex whose matches become `[REDACTED]` in tool results and workflow node output. See [Redaction](../governance/#redaction). |
 | `KEELSON_GATEWAY_KEY` | unset | API key `keelson gateway add` reads when `--key` is omitted, so it stays out of shell history. See [Gateways](#gateways). |
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
-| `KEELSON_MAX_CONCURRENT_RUNS` | `2` | Process-wide ceiling on workflow runs executing at once; further runs queue. Raise on a larger host. |
+| `KEELSON_MAX_CONCURRENT_RUNS` | `4` | Process-wide ceiling on worktree-isolated workflow runs executing at once; further runs queue. Raise on a larger host. |
 | `KEELSON_CROSS_RIB_GRANTS` | unset | `;`-separated `caller:target:tool` grant triples (the tool field takes a comma-separated list or `*`); default-deny when unset. See [Governance](../governance/#cross-rib-grants). |
 | `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` | `30000` | Timeout, in milliseconds, for one cross-rib tool call. See [Governance](../governance/#cross-rib-grants). |
 | `KEELSON_COPILOT_WARM_IDLE_MS` | `600000` | How long the Copilot language-server subprocess stays warm between turns before it is evicted, in milliseconds. `0` or negative disables warmth (every turn spawns fresh). |

@@ -94,16 +94,17 @@ export function createRunSlots(limit: number): RunSlots {
 
 /**
  * Resolve the concurrent-run ceiling from `KEELSON_MAX_CONCURRENT_RUNS`.
- * Defaults to 2: an isolated run drives the full validation suite, so even two
- * at once meaningfully loads the host, and higher values are what let the
- * spawn-ENOENT pileup happen. Operators on bigger machines can raise it.
+ * Defaults to 4 so independent isolated runs can make progress while the cap
+ * still bounds validation-heavy subprocess fan-out. Operators can override it.
  */
 export function resolveMaxConcurrentRuns(
   env: Record<string, string | undefined> = process.env,
 ): number {
   const raw = env.KEELSON_MAX_CONCURRENT_RUNS;
-  if (raw === undefined || raw.trim() === "") return 2;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 1) return 2;
+  if (raw === undefined || raw.trim() === "") return 4;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value)) return 4;
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 1) return 4;
   return n;
 }
