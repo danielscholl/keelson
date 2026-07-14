@@ -15,8 +15,17 @@
  * catalog; the worktree path is stored directly on the workflow_runs row.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  symlinkSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { killProcessTree } from "./handlers/subprocess.ts";
 
@@ -288,7 +297,58 @@ export interface EnsureWorktreeDepsResult {
   skipped: "no-manifest" | "no-lockfile" | "aborted" | null;
   /** Set when `bun install` ran but exited non-zero. */
   error: string | null;
+  linkedLocalDeps: string[];
   durationMs: number;
+}
+
+function reproduceLocalDepSymlinks(parentRepo: string, worktreePath: string): string[] {
+  const parentModules = join(parentRepo, "node_modules");
+  let parentReal: string;
+  let topLevelEntries: string[];
+  try {
+    parentReal = canonicalPath(parentRepo);
+    topLevelEntries = readdirSync(parentModules);
+  } catch {
+    return [];
+  }
+
+  const candidates: { name: string; path: string }[] = [];
+  for (const entry of topLevelEntries) {
+    const entryPath = join(parentModules, entry);
+    candidates.push({ name: entry, path: entryPath });
+    if (!entry.startsWith("@")) continue;
+    try {
+      if (!lstatSync(entryPath).isDirectory()) continue;
+      for (const child of readdirSync(entryPath)) {
+        candidates.push({ name: join(entry, child), path: join(entryPath, child) });
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const linked: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      if (!lstatSync(candidate.path).isSymbolicLink()) continue;
+      const realTarget = canonicalPath(resolve(dirname(candidate.path), readlinkSync(candidate.path)));
+      const relativeTarget = relative(parentReal, realTarget);
+      const targetOutsideRepo =
+        relativeTarget === ".." ||
+        relativeTarget.startsWith(`..${sep}`) ||
+        isAbsolute(relativeTarget);
+      if (!targetOutsideRepo) continue;
+
+      const destination = join(worktreePath, "node_modules", candidate.name);
+      if (existsSync(destination)) continue;
+      mkdirSync(dirname(destination), { recursive: true });
+      symlinkSync(realTarget, destination);
+      linked.push(candidate.name);
+    } catch {
+      continue;
+    }
+  }
+  return linked;
 }
 
 /**
@@ -307,16 +367,34 @@ export async function ensureWorktreeDeps(opts: {
   const startedAtMs = Date.now();
   const elapsed = () => Date.now() - startedAtMs;
   if (opts.abortSignal?.aborted) {
-    return { installed: false, skipped: "aborted", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "aborted",
+      error: null,
+      linkedLocalDeps: [],
+      durationMs: elapsed(),
+    };
   }
   if (!existsSync(join(opts.worktreePath, "package.json"))) {
-    return { installed: false, skipped: "no-manifest", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "no-manifest",
+      error: null,
+      linkedLocalDeps: [],
+      durationMs: elapsed(),
+    };
   }
   const hasLockfile =
     existsSync(join(opts.worktreePath, "bun.lock")) ||
     existsSync(join(opts.worktreePath, "bun.lockb"));
   if (!hasLockfile) {
-    return { installed: false, skipped: "no-lockfile", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "no-lockfile",
+      error: null,
+      linkedLocalDeps: [],
+      durationMs: elapsed(),
+    };
   }
   let out: GitOutcome;
   try {
@@ -334,11 +412,18 @@ export async function ensureWorktreeDeps(opts: {
       installed: false,
       skipped: null,
       error: `bun install could not be spawned: ${err instanceof Error ? err.message : String(err)}`,
+      linkedLocalDeps: [],
       durationMs: elapsed(),
     };
   }
   if (opts.abortSignal?.aborted) {
-    return { installed: false, skipped: "aborted", error: null, durationMs: elapsed() };
+    return {
+      installed: false,
+      skipped: "aborted",
+      error: null,
+      linkedLocalDeps: [],
+      durationMs: elapsed(),
+    };
   }
   if (out.exitCode !== 0) {
     const tail = (out.stderr.trim() || out.stdout.trim()).slice(-2000);
@@ -346,10 +431,21 @@ export async function ensureWorktreeDeps(opts: {
       installed: false,
       skipped: null,
       error: `bun install failed (exit ${out.exitCode}): ${tail}`,
+      linkedLocalDeps: [],
       durationMs: elapsed(),
     };
   }
-  return { installed: true, skipped: null, error: null, durationMs: elapsed() };
+  const parentRepo = repoPathFromWorktree(opts.worktreePath);
+  const linkedLocalDeps = parentRepo
+    ? reproduceLocalDepSymlinks(parentRepo, opts.worktreePath)
+    : [];
+  return {
+    installed: true,
+    skipped: null,
+    error: null,
+    linkedLocalDeps,
+    durationMs: elapsed(),
+  };
 }
 
 export interface RemoveWorktreeOptions {
