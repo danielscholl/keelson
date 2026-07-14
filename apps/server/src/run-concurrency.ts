@@ -102,7 +102,9 @@ export function resolveMaxConcurrentRuns(
 ): number {
   const raw = env.KEELSON_MAX_CONCURRENT_RUNS;
   if (raw === undefined || raw.trim() === "") return 4;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 1) return 4;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value)) return 4;
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 1) return 4;
   return n;
 }
