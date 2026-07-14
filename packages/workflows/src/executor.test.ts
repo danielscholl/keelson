@@ -2083,6 +2083,7 @@ import { bashHandler } from "./handlers/bash.ts";
 import { makeCancelHandler } from "./handlers/cancel.ts";
 import { makeCommandHandler } from "./handlers/command.ts";
 import { makeLoopHandler } from "./handlers/loop.ts";
+import { resolveBash } from "./handlers/shell.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
 
 // ---------------------------------------------------------------------------
