@@ -926,14 +926,12 @@ function Section({ section }: { section: BoardSection }) {
                   onClick: (e: ReactMouseEvent<HTMLDivElement>) => {
                     // A click on an interactive child (an action button, a title
                     // link, a copy affordance) is that child's — the card toggle
-                    // fires only on the card's own chrome. Guard `closest` against a
-                    // non-Element target, since a text node can be the event target.
-                    const target = e.target;
-                    if (
-                      target instanceof Element &&
-                      target.closest("button, a, input, select, textarea, label")
-                    )
-                      return;
+                    // fires only on the card's own chrome. A click target can be a
+                    // text node, so normalize to its element before probing
+                    // ancestors (skipping would wrongly toggle on a child click).
+                    const t = e.target;
+                    const el = t instanceof Element ? t : t instanceof Node ? t.parentElement : null;
+                    if (el?.closest("button, a, input, select, textarea, label")) return;
                     activateCard?.();
                   },
                   onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
