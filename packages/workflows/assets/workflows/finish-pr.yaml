@@ -533,7 +533,7 @@ nodes:
       echo "Retrying resolveReviewThread for $COUNT fixed-but-unresolved thread(s)."
       OK="$KEELSON_ARTIFACTS_DIR/.resolve-retry-ok.json"
       printf '[]\n' > "$OK"
-      jq -r '.[].threadId' "$RETRY" | while read -r TID; do
+      jq -r '.[].threadId' "$RETRY" | tr -d '\r' | while read -r TID; do
         [ -n "$TID" ] || continue
         if forge pr resolve-thread "$PR_NUM" --thread "$TID" >&2; then
           jq --arg id "$TID" '. + [$id]' "$OK" > "$OK.tmp" && mv "$OK.tmp" "$OK"
