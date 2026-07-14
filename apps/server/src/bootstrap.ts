@@ -263,8 +263,7 @@ export interface RibBootstrap {
   readonly probes: Map<string, () => Promise<RibAuthStatus>>;
   // Inbound action handlers keyed by rib id, dispatched by POST /api/ribs/:id/action.
   readonly actionHandlers: Map<string, (action: RibAction) => Promise<RibActionResult>>;
-  // Run-lifecycle listeners keyed by rib id — the dispatch target the workflow
-  // layer's onRibRunEvent seam is wired to at the composition root.
+  // Run-lifecycle listeners keyed by rib id, dispatched by the workflow layer's onRibRunEvent seam.
   readonly runEventHandlers: Map<string, (event: RibRunEvent) => Promise<void>>;
   // Agent discovery/resolution keyed by rib id — the GET /api/agents source.
   readonly agentListers: Map<string, () => Promise<readonly AgentSummary[]>>;

@@ -422,7 +422,8 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
     }
     if (rib.onRunEvent) {
       const handler = rib.onRunEvent.bind(rib);
-      runEventHandlers.set(rib.id, (event) => Promise.resolve(handler(event, ribCtx)));
+      // async wrapper so a sync throw from the hook rejects instead of escaping the caller's .catch
+      runEventHandlers.set(rib.id, async (event) => handler(event, ribCtx));
     }
     if (rib.listAgents) {
       const lister = rib.listAgents.bind(rib);

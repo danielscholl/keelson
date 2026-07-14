@@ -273,6 +273,32 @@ describe("applyRibs onRunEvent wiring", () => {
     expect(seen[0]?.hasExec).toBe(true);
   });
 
+  test("a hook that throws synchronously rejects instead of throwing at the caller", async () => {
+    const rib: Rib = {
+      id: "osdu",
+      displayName: "OSDU",
+      onRunEvent() {
+        throw new Error("sync explosion");
+      },
+    };
+    const result = applyRibs({
+      active: ["osdu"],
+      available: { osdu: rib },
+      ctx: { getExec: () => ({}) as never },
+    });
+    const handler = result.runEventHandlers.get("osdu");
+    if (!handler) throw new Error("expected a run-event handler for rib 'osdu'");
+    // Must not throw synchronously — the dispatch site attaches .catch to the return value.
+    const pending = handler({
+      workflowName: "osdu-cluster-create",
+      runId: "run-1",
+      status: "running",
+      inputs: {},
+      startedAt: "2026-07-13T12:00:00Z",
+    });
+    await expect(pending).rejects.toThrow("sync explosion");
+  });
+
   test("a rib without the hook registers no handler", () => {
     const result = applyRibs({
       active: ["bare"],
