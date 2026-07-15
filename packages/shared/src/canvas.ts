@@ -573,8 +573,14 @@ const rowsSectionSchema = z
     title: z.string().optional(),
     // Render each row as an inset card (a status list) instead of a borderless
     // feed: the tone glyph reads as a check/mark and the trailing value is
-    // left-aligned after a fixed label column.
-    boxed: z.boolean().optional(),
+    // left-aligned after a label column. This INVERTS what the two text fields
+    // mean, so it is described on `text`/`trailing` where an author reads them.
+    boxed: z
+      .boolean()
+      .describe(
+        "Render rows as inset label:value cards instead of a borderless feed. This inverts the two text fields: `text` becomes the left-hand column and `trailing` carries the value beside it, rather than a short right-aligned annotation.",
+      )
+      .optional(),
     items: z.array(
       z
         .object({
@@ -583,9 +589,19 @@ const rowsSectionSchema = z
           icon: z.string().min(1).optional(),
           glyph: canvasToneSchema.optional(),
           chip: canvasPillSchema.optional(),
-          text: z.string().min(1),
+          text: z
+            .string()
+            .min(1)
+            .describe(
+              "The row's content. In a `boxed` section this is the left-hand column of a label:value pair — the subject the row is about (a label, a command) — and the body belongs in `trailing`. In a normal feed row it is the full line.",
+            ),
           href: z.string().optional(),
-          trailing: z.string().optional(),
+          trailing: z
+            .string()
+            .describe(
+              "In a `boxed` section, the value shown beside `text`'s label, which carries the body. In a normal feed row, a short right-aligned annotation.",
+            )
+            .optional(),
           // Long-form body disclosed under the row on demand (pre-wrapped plain
           // text, not markdown) — the full record behind a capped one-line `text`.
           detail: z.string().min(1).max(4000).optional(),

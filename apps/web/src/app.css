@@ -4739,12 +4739,19 @@ a.cvb-card-title::after {
   content: "•";
   color: var(--magenta);
 }
+/* A boxed row is a label:value pair, so `text` is the label column and
+   `trailing` the value — the reverse of a feed row. 96px is the alignment floor
+   the labels share, not a ceiling: a label longer than the column has to be able
+   to claim width, or it wraps a word per line against `overflow-wrap: anywhere`. */
 .cvb-rows--boxed .cvb-row-text {
-  flex: 0 0 96px;
+  flex: 0 1 auto;
+  min-width: 96px;
+  max-width: 50%;
   overflow-wrap: anywhere;
 }
 .cvb-rows--boxed .cvb-row-trailing {
   flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   color: var(--fg);
 }
