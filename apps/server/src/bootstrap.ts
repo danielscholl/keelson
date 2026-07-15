@@ -218,6 +218,11 @@ export interface BootstrapRibsOptions {
   // Agent-turn factory. Defaults to the CLI-backed makeRibAgentTurn;
   // injectable so tests pass a fake instead of shelling a provider CLI.
   runAgentTurn?: (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn;
+  // Cross-rib tool grants. Defaults to resolving config.json + the env var, which
+  // reads the operator's real home — inject (even `new Map()`) to pin what a test
+  // grants, so a machine that holds a durable grant can't turn a default-deny
+  // assertion green.
+  crossRibGrants?: CrossRibGrants;
   // Lazy resolver for the policy engine the default makeRibAgentTurn consults
   // when gating a turn's projected tools. Lazy because the engine is built from
   // these same ribs' policies AFTER bootstrapRibs returns — the getter reads the
@@ -313,7 +318,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
   };
-  const crossRibGrants = resolveCrossRibGrants(loadKeelsonConfig());
+  const crossRibGrants = options.crossRibGrants ?? resolveCrossRibGrants(loadKeelsonConfig());
   const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
   // The CLI-backed agent-turn seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
@@ -1097,12 +1102,19 @@ function parseCrossRibCallTimeoutMs(
   return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
+// The one place a grant enters the map, so the env string and the config object
+// normalize identically. Both sources are hand-authored, and a stray space is
+// invisible in either — an untrimmed `"osdu_security "` would parse, store, and
+// then never match the check, denying a grant the operator believes they set.
 function addCrossRibGrant(
   grants: CrossRibGrants,
-  caller: string,
-  target: string,
-  names: readonly string[],
+  rawCaller: string,
+  rawTarget: string,
+  rawNames: readonly string[],
 ): void {
+  const caller = rawCaller.trim();
+  const target = rawTarget.trim();
+  const names = rawNames.map((name) => name.trim()).filter((name) => name.length > 0);
   if (!caller || !target || names.length === 0) return;
   let targetGrants = grants.get(caller);
   if (!targetGrants) {

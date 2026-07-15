@@ -40,6 +40,29 @@ describe("loadKeelsonConfig", () => {
     expect(loadKeelsonConfig(home)).toEqual({});
   });
 
+  // An unknown key is stripped rather than rejected, so a grant that does not
+  // round-trip through the reader would look like it took effect and quietly
+  // grant nothing.
+  test("retains crossRibGrants written to disk", () => {
+    writeConfig(
+      JSON.stringify({
+        providers: { copilot: true },
+        crossRibGrants: { chamber: { osdu: ["*"] }, squad: { osdu: ["osdu_release"] } },
+      }),
+    );
+    expect(loadKeelsonConfig(home).crossRibGrants).toEqual({
+      chamber: { osdu: ["*"] },
+      squad: { osdu: ["osdu_release"] },
+    });
+  });
+
+  test("ignores a malformed crossRibGrants rather than failing boot", () => {
+    writeConfig(
+      JSON.stringify({ defaultProvider: "copilot", crossRibGrants: { chamber: "osdu" } }),
+    );
+    expect(loadKeelsonConfig(home)).toEqual({});
+  });
+
   test("reads a valid config", () => {
     writeConfig(JSON.stringify({ providers: { claude: true }, defaultProvider: "claude" }));
     expect(loadKeelsonConfig(home)).toEqual({

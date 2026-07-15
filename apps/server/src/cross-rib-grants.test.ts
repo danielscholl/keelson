@@ -22,11 +22,8 @@ describe("resolveCrossRibGrants", () => {
 
   test("still denies what no source granted", () => {
     const grants = resolveCrossRibGrants(CHAMBER_OSDU, {});
-    // Not in the grant.
     expect(isCrossRibGrantAllowed(grants, "chamber", "osdu", "osdu_cluster_suspend")).toBe(false);
-    // Granted to chamber, not to squad.
     expect(isCrossRibGrantAllowed(grants, "squad", "osdu", "osdu_security")).toBe(false);
-    // No grants at all.
     expect(
       isCrossRibGrantAllowed(resolveCrossRibGrants({}, {}), "chamber", "osdu", "osdu_security"),
     ).toBe(false);
@@ -36,11 +33,8 @@ describe("resolveCrossRibGrants", () => {
     const grants = resolveCrossRibGrants(CHAMBER_OSDU, {
       KEELSON_CROSS_RIB_GRANTS: "chamber:osdu:osdu_events;squad:osdu:osdu_release",
     });
-    // From config.
     expect(isCrossRibGrantAllowed(grants, "chamber", "osdu", "osdu_security")).toBe(true);
-    // From env, merged into the same caller/target.
     expect(isCrossRibGrantAllowed(grants, "chamber", "osdu", "osdu_events")).toBe(true);
-    // From env, a caller config never mentions.
     expect(isCrossRibGrantAllowed(grants, "squad", "osdu", "osdu_release")).toBe(true);
   });
 
@@ -49,6 +43,16 @@ describe("resolveCrossRibGrants", () => {
     expect(isCrossRibGrantAllowed(grants, "chamber", "osdu", "osdu_security")).toBe(true);
     expect(isCrossRibGrantAllowed(grants, "chamber", "osdu", "anything_osdu_owns")).toBe(true);
     expect(isCrossRibGrantAllowed(grants, "chamber", "squad", "squad_code")).toBe(false);
+  });
+
+  // A stray space is invisible in a hand-authored config, and an untrimmed name
+  // would store fine and then never match — denying a grant the operator set.
+  test("normalizes whitespace around config names", () => {
+    const grants = resolveCrossRibGrants(
+      { crossRibGrants: { " chamber ": { " osdu ": [" osdu_security ", "  "] } } },
+      {},
+    );
+    expect(isCrossRibGrantAllowed(grants, "chamber", "osdu", "osdu_security")).toBe(true);
   });
 
   test("an env-only grant keeps working", () => {

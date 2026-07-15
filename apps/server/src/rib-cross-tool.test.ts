@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { CallToolResult, Rib, RibContext, ToolContext, ToolDefinition } from "@keelson/shared";
 import { z } from "zod";
-import { bootstrapRibs } from "./bootstrap.ts";
+import { bootstrapRibs, resolveCrossRibGrants } from "./bootstrap.ts";
 import type { PolicyEngine } from "./policy-engine.ts";
 
 type CapturedCallTool = NonNullable<RibContext["callTool"]>;
@@ -75,6 +75,10 @@ async function bootWithCaller(
   await bootstrapRibs({
     available: { ...available, caller },
     getPolicyEngine,
+    // Grants from this test's own env and nothing else. Left to resolve on its
+    // own, bootstrapRibs would read the developer's real config.json, where a
+    // durable grant could turn the default-deny assertions below green.
+    crossRibGrants: resolveCrossRibGrants({}, process.env),
   });
   if (!callTool) throw new Error("callTool was not captured");
   return callTool;
