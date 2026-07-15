@@ -37,6 +37,7 @@ so a typo never blocks startup.
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
+| `crossRibGrants` | object of `caller: { target: [tool] }` | Which ribs may call which other ribs' tools. Default-deny without an entry. See [Cross-rib grants](#cross-rib-grants). |
 | `gateways` | array | OpenAI-compatible endpoints registered as providers. Managed with `keelson gateway`, not by hand. See [Gateways](#gateways). |
 
 The built-in provider ids are `copilot`, `claude`, `pi`, `codex`, and `stub` (the
@@ -218,6 +219,34 @@ The policy engine gates tool calls. Three opt-in builtins cover the common cases
 variable; the [Governance guide](../governance/) covers what they do and how to
 resolve an approval.
 
+### Cross-rib grants
+
+A rib cannot reach another rib's tools by default. When one rib's agent turn asks
+for a tool a sibling rib owns, the harness refuses unless the operator has granted
+that `caller → target → tool` triple. Grant it in the config file, under
+`crossRibGrants`:
+
+```json
+{
+  "crossRibGrants": {
+    "chamber": {
+      "osdu": ["*"]
+    }
+  }
+}
+```
+
+That reads as: the Chamber rib may call the OSDU rib's tools. `"*"` covers every
+tool the target owns; list tool names instead to narrow it. A caller with no entry
+is denied, which is the default for every pair.
+
+Keep standing grants here rather than in `KEELSON_CROSS_RIB_GRANTS`. The two
+union, so either works, but an env-only grant lapses the moment the server starts
+from a shell that never exported it — and the capability it enabled goes quiet
+rather than failing loudly. The same grant gates both a rib's `callTool` and the
+tools projected onto a rib's agent turn, so a Chamber Mind that declares a
+capability backed by another rib needs this to reach it.
+
 ## MCP gateway
 
 The server exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io)
@@ -250,7 +279,9 @@ the config value, the same way `KEELSON_PROVIDERS` wins over `providers`.
 ## Environment variables
 
 The config file covers providers; these variables cover the rest and override
-the matching config value when set.
+the matching config value when set. `KEELSON_CROSS_RIB_GRANTS` is the one
+exception: it **unions** with the config file's `crossRibGrants` rather than
+replacing it, so a grant from either source stands.
 
 | Variable | Default | What it controls |
 |---|---|---|
@@ -269,7 +300,7 @@ the matching config value when set.
 | `KEELSON_GATEWAY_KEY` | unset | API key `keelson gateway add` reads when `--key` is omitted, so it stays out of shell history. See [Gateways](#gateways). |
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
 | `KEELSON_MAX_CONCURRENT_RUNS` | `4` | Process-wide ceiling on worktree-isolated workflow runs executing at once; further runs queue. Raise on a larger host. |
-| `KEELSON_CROSS_RIB_GRANTS` | unset | `;`-separated `caller:target:tool` grant triples (the tool field takes a comma-separated list or `*`); default-deny when unset. See [Governance](../governance/#cross-rib-grants). |
+| `KEELSON_CROSS_RIB_GRANTS` | unset | `;`-separated `caller:target:tool` grant triples (the tool field takes a comma-separated list or `*`); default-deny when unset. **Unions with** (does not override) the config file's `crossRibGrants`, which is the durable place for a standing grant — see [Cross-rib grants](#cross-rib-grants). |
 | `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` | `30000` | Timeout, in milliseconds, for one cross-rib tool call. See [Governance](../governance/#cross-rib-grants). |
 | `KEELSON_COPILOT_WARM_IDLE_MS` | `600000` | How long the Copilot language-server subprocess stays warm between turns before it is evicted, in milliseconds. `0` or negative disables warmth (every turn spawns fresh). |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
