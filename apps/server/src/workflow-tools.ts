@@ -169,9 +169,6 @@ const listInputSchema = z.object({
 const runInputSchema = z.object({
   name: z.string().min(1),
   arguments: z.string().optional(),
-  // A workflow's declared `inputs:`, the CLI's `--inputs k=v`. Without these a
-  // workflow carrying real parameters is CLI-only; the run API underneath always
-  // took them, so the gap was this schema alone.
   inputs: z.record(z.string().min(1), z.string()).optional(),
   project: z.string().min(1).optional(),
 });
@@ -355,7 +352,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowRun: ToolDefinition = {
     name: "workflow_run",
     description:
-      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). `inputs` is a map of the workflow\'s DECLARED named inputs, e.g. { lens: "release-status", service: "search" } — a workflow that takes them names them in its description. Use it whenever a workflow has named parameters rather than smuggling them through `arguments`. `arguments` is shorthand for inputs.ARGUMENTS, so pass one or the other, never both. Optional `project` targets a registered project by id or exact name. Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
+      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). `inputs` is a map of named values the workflow reads, e.g. { lens: "release-status", service: "search" } — a workflow that takes named parameters says so in its description. Use it for those rather than smuggling them through `arguments`. `arguments` is shorthand for inputs.ARGUMENTS, so pass one or the other, never both. Optional `project` targets a registered project by id or exact name. Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
     inputSchema: runInputSchema,
     state_changing: true,
     async execute(input, ctx) {

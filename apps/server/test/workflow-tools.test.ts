@@ -228,20 +228,12 @@ nodes:
     expect(result.content).toContain("resolved-sentinel-456");
   });
 
-  test("workflow_run passes declared inputs through to the run", async () => {
-    // The gap this closes: a workflow with named parameters was CLI-only, because
-    // the tool schema took no `inputs` — never because the run couldn't carry them.
+  test("workflow_run passes named inputs through to the run", async () => {
     writeWorkflow(
       "lens-refresh.yaml",
       `name: lens-refresh
 description: |
   Use when: re-composing a lens
-inputs:
-  lens:
-    description: the lens id
-    required: true
-  service:
-    description: the service
 nodes:
   - id: ok
     bash: echo "lens=$KEELSON_INPUTS_lens service=$KEELSON_INPUTS_service"
