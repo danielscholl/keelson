@@ -238,6 +238,7 @@ async function runTurn(
     abortSignal: controller.signal,
     ...(req.system ? { systemPrompt: req.system } : {}),
     ...(req.model ? { model: req.model } : {}),
+    ...(req.turnContext !== undefined ? { turnContext: req.turnContext } : {}),
     ...(req.allowedDirectories !== undefined ? { allowedDirectories: req.allowedDirectories } : {}),
     onSessionId: (id) => {
       if (id) capturedSessionId = id;

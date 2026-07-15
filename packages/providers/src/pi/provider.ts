@@ -132,6 +132,7 @@ export class PiProvider implements IAgentProvider {
             cwd,
             pushChunk: (chunk) => queue.push(chunk),
             ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+            ...(options.turnContext !== undefined ? { turnContext: options.turnContext } : {}),
             ...(options.evaluateToolCall !== undefined
               ? { evaluateToolCall: options.evaluateToolCall }
               : {}),

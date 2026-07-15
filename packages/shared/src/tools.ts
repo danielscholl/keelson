@@ -20,6 +20,8 @@ export interface ToolContext {
   cwd: string;
   emit: (chunk: MessageChunk) => void;
   abortSignal: AbortSignal;
+  // Caller-supplied context for the granting turn; the host carries it opaquely.
+  turnContext?: Readonly<Record<string, unknown>>;
 }
 
 // Provider adapters MUST `inputSchema.parse(input)` before calling

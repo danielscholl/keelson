@@ -158,6 +158,7 @@ export class ClaudeProvider implements IAgentProvider {
         cwd,
         emit: pushChunk,
         abortSignal: options?.abortSignal ?? controller.signal,
+        ...(options?.turnContext !== undefined ? { turnContext: options.turnContext } : {}),
       }),
       ...(options?.evaluateToolCall !== undefined
         ? { evaluateToolCall: options.evaluateToolCall }

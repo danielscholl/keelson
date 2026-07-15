@@ -313,6 +313,7 @@ async function runClaudeToolHandler(
   const ctx: ToolContext = {
     cwd: ctxIn.cwd,
     abortSignal: ctxIn.abortSignal,
+    ...(ctxIn.turnContext !== undefined ? { turnContext: ctxIn.turnContext } : {}),
     emit: (chunk) => {
       if (chunk.type === "tool_result") {
         resultContent = chunk.content;

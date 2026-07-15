@@ -97,6 +97,24 @@ describe("ToolDefinition contract", () => {
     controller.abort();
     expect(ctx.abortSignal.aborted).toBe(true);
   });
+
+  it("accepts opaque turn context and leaves it undefined when omitted", () => {
+    const turnContext = { room: "alpha" } as const;
+    const withContext: ToolContext = {
+      cwd: "/tmp",
+      emit: () => {},
+      abortSignal: new AbortController().signal,
+      turnContext,
+    };
+    const withoutContext: ToolContext = {
+      cwd: "/tmp",
+      emit: () => {},
+      abortSignal: new AbortController().signal,
+    };
+
+    expect(withContext.turnContext).toBe(turnContext);
+    expect(withoutContext.turnContext).toBeUndefined();
+  });
 });
 
 describe("inferToolFamily", () => {

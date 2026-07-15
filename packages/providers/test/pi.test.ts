@@ -438,6 +438,96 @@ describe("PiProvider", () => {
     });
   });
 
+  test("forwards and isolates tool turn context across concurrent turns", async () => {
+    const seen = new Map<string, Readonly<Record<string, unknown>> | undefined>();
+    let arrived = 0;
+    let releaseBoth!: () => void;
+    const bothArrived = new Promise<void>((resolve) => {
+      releaseBoth = resolve;
+    });
+    const inputSchema = z.object({ turn: z.string() });
+    const tool: ToolDefinition = {
+      name: "context_probe",
+      description: "Observe turn context",
+      inputSchema,
+      async execute(input, ctx) {
+        const { turn } = inputSchema.parse(input);
+        seen.set(turn, ctx.turnContext);
+        arrived += 1;
+        if (arrived === 2) releaseBoth();
+        await bothArrived;
+        ctx.emit({ type: "tool_result", toolUseId: "", content: turn });
+      },
+    };
+    const factory: PiSessionFactory = {
+      async createSession(params) {
+        const projected = params.customTools?.[0];
+        if (!projected) throw new Error("missing projected tool");
+        return {
+          subscribe: () => () => {},
+          async prompt(turn) {
+            await projected.execute(`call-${turn}`, { turn }, undefined);
+          },
+        };
+      },
+    };
+    const provider = new PiProvider({ factory });
+    const alpha = { room: "alpha" } as const;
+    const beta = { room: "beta" } as const;
+
+    await Promise.all([
+      collect(
+        provider.sendQuery("alpha", "/same-cwd", undefined, {
+          tools: [tool],
+          turnContext: alpha,
+        }),
+      ),
+      collect(
+        provider.sendQuery("beta", "/same-cwd", undefined, {
+          tools: [tool],
+          turnContext: beta,
+        }),
+      ),
+    ]);
+
+    expect(seen.get("alpha")).toBe(alpha);
+    expect(seen.get("beta")).toBe(beta);
+  });
+
+  test("omits tool turn context when the turn omits it", async () => {
+    let seen: Readonly<Record<string, unknown>> | undefined = { unexpected: true };
+    let hasTurnContext = true;
+    const tool: ToolDefinition = {
+      name: "context_probe",
+      description: "Observe turn context",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) {
+        seen = ctx.turnContext;
+        hasTurnContext = Object.hasOwn(ctx, "turnContext");
+        ctx.emit({ type: "tool_result", toolUseId: "", content: "ok" });
+      },
+    };
+    const factory: PiSessionFactory = {
+      async createSession(params) {
+        const projected = params.customTools?.[0];
+        if (!projected) throw new Error("missing projected tool");
+        return {
+          subscribe: () => () => {},
+          async prompt() {
+            await projected.execute("call-1", {}, undefined);
+          },
+        };
+      },
+    };
+
+    await collect(
+      new PiProvider({ factory }).sendQuery("hi", "/tmp", undefined, { tools: [tool] }),
+    );
+
+    expect(seen).toBeUndefined();
+    expect(hasTurnContext).toBe(false);
+  });
+
   test("an abort during session creation skips the turn entirely", async () => {
     const abort = new AbortController();
     let prompted = false;
