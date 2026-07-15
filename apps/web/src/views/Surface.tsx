@@ -15,13 +15,13 @@ import { postRibAction } from "../api.ts";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
 import { BoardBody, CardOverflowActions, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
-import { SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { HtmlStateView, SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
 import { useActiveProject } from "../hooks/useActiveProject.ts";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.ts";
-import { useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
+import { useHtmlFrameAction, useRibActionDispatch } from "../hooks/useRibActionDispatch.ts";
 import { useSettings } from "../hooks/useSettings.ts";
 import { useSnapshot } from "../hooks/useSnapshot.ts";
 import { useStreamingPulse } from "../hooks/useStreamingPulse.ts";
@@ -334,7 +334,13 @@ function SurfaceRegion({
     ...(onOpenSurface ? { onOpenSurface } : {}),
   });
 
-  const parsed = snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
+  // An html region's payload is markup, not a view: it never parses as a board,
+  // so it needs its own renderer rather than falling through to the structured
+  // one (which would fail-close on every frame).
+  const isHtml = resolveCanvasKind(region.key) === "html";
+  const onFrameAction = useHtmlFrameAction(ribId);
+
+  const parsed = !isHtml && snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
     parsed?.success && parsed.data.view === "board" ? parsed.data : null;
   const panelName = board?.title ?? region.title ?? region.key;
@@ -367,12 +373,15 @@ function SurfaceRegion({
     prevCollapseHint.current = collapseHint;
   }, [collapsible, collapseHint]);
 
-  const expand = () =>
-    openCanvas(
+  const expand = () => {
+    // An html region has no board to carry a title, so fall back to the region's
+    // own — otherwise the drawer opens untitled for every html panel.
+    const title = board?.title ?? region.title;
+    return openCanvas(
       {
         kind: resolveCanvasKind(region.key),
         source: { type: "snapshot", key: region.key },
-        ...(board?.title ? { title: board.title } : {}),
+        ...(title ? { title } : {}),
       },
       // So an Enter/launch button clicked in the expanded drawer behaves the same
       // way it does inline, instead of being swallowed with a success toast.
@@ -382,6 +391,7 @@ function SurfaceRegion({
         ...(onOpenSurface ? { onOpenSurface } : {}),
       },
     );
+  };
 
   // The gradient lane head: static identity (glyph + title) the rib supplies,
   // plus the board's live status/scope/pulse, and the region's own controls.
@@ -541,20 +551,26 @@ function SurfaceRegion({
   // mid-run) offer a one-shot manual load instead of a perpetual skeleton.
   const idle = snap.status === "empty" && !busy && Boolean(region.workflow) && !region.cadenceMs;
 
-  const body = board ? (
-    <BoardBody view={board} />
-  ) : idle ? (
+  // `idle` leads: it only fires on an empty key, where `board` is null anyway, so
+  // hoisting it above the kind split changes no structured behavior and gives an
+  // html region the same one-shot Load affordance.
+  const body = idle ? (
     <RegionIdle onLoad={runRefresh.trigger} error={runRefresh.error} />
+  ) : isHtml ? (
+    <HtmlStateView snapshot={snap} busy={busy} onAction={onFrameAction} />
+  ) : board ? (
+    <BoardBody view={board} />
   ) : (
     <SnapshotStateView snapshot={snap} busy={busy} />
   );
-  // Hidden only while there is nothing to say: no live frame yet, or a live
-  // board that parsed to zero sections (the rib's explicit empty signal). A
-  // payload that fails the view parse still renders its error state — hiding
-  // it would make producer bugs invisible.
-  const hidden =
-    (region.hideWhenEmpty ?? false) &&
-    (snap.status !== "live" || (board !== null && board.sections.length === 0));
+  // Hidden only while there is nothing to say: no live frame yet, a live board
+  // that parsed to zero sections (the rib's explicit empty signal), or html that
+  // is blank. A payload that fails its parse still renders its error state —
+  // hiding it would make producer bugs invisible.
+  const emptyBody = isHtml
+    ? typeof snap.data === "string" && snap.data.trim() === ""
+    : board !== null && board.sections.length === 0;
+  const hidden = (region.hideWhenEmpty ?? false) && (snap.status !== "live" || emptyBody);
   if (hidden) return null;
 
   return (

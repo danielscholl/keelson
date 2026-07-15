@@ -1,4 +1,5 @@
 import {
+  type CanvasHtmlAction,
   type OpenChatSeed,
   type RibAction,
   type RibActionResult,
@@ -173,6 +174,19 @@ export function useRibActionDispatch(
   );
 
   return useMemo(() => ({ run, reveal }), [run, reveal]);
+}
+
+// One stamp site for `origin: "canvas-html"`: `run` takes origin from its caller
+// and an omitted origin means a trusted board dispatch, so a second hand-rolled
+// stamp would silently give untrusted frame markup board-level trust.
+export function useHtmlFrameAction(ribId: string | null): (action: CanvasHtmlAction) => void {
+  const { run } = useRibActionDispatch(ribId);
+  return useCallback(
+    (action: CanvasHtmlAction) => {
+      if (ribId) void run({ type: action.type, payload: action.payload, origin: "canvas-html" });
+    },
+    [ribId, run],
+  );
 }
 
 // Cheap pre-check so non-directive `data` (undefined, a copy-on-reveal string)
