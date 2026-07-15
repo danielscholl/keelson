@@ -2,22 +2,39 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, describe, expect, mock, test } from "bun:test";
 import type { WorkflowDetail } from "@keelson/shared";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { NodeView, UseWorkflowRunResult } from "../src/hooks/useWorkflowRun.ts";
 
 let runResult: UseWorkflowRunResult;
 
-mock.module("../src/hooks/useWorkflowRun.ts", () => ({
+// mock.module patches the process-wide registry, and bun's test file order is not
+// stable, so these stubs must be handed back or any file loading these modules after
+// this one gets the stub instead of the real component.
+const USE_WORKFLOW_RUN = "../src/hooks/useWorkflowRun.ts";
+const DAG_GRAPH = "../src/components/Workflows/DagGraph.tsx";
+const RUN_TRACE = "../src/components/Workflows/RunTrace.tsx";
+
+const actualUseWorkflowRun = { ...(await import(USE_WORKFLOW_RUN)) };
+const actualDagGraph = { ...(await import(DAG_GRAPH)) };
+const actualRunTrace = { ...(await import(RUN_TRACE)) };
+
+afterAll(() => {
+  mock.module(USE_WORKFLOW_RUN, () => actualUseWorkflowRun);
+  mock.module(DAG_GRAPH, () => actualDagGraph);
+  mock.module(RUN_TRACE, () => actualRunTrace);
+});
+
+mock.module(USE_WORKFLOW_RUN, () => ({
   useWorkflowRun: () => runResult,
 }));
 
-mock.module("../src/components/Workflows/DagGraph.tsx", () => ({
+mock.module(DAG_GRAPH, () => ({
   DagGraph: () => <div data-testid="dag-graph" />,
 }));
 
-mock.module("../src/components/Workflows/RunTrace.tsx", () => ({
+mock.module(RUN_TRACE, () => ({
   fallbackStatusFromRun: (status: string) => {
     if (status === "cancelled") return "cancelled";
     if (status === "succeeded" || status === "failed") return "skipped";
