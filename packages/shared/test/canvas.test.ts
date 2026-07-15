@@ -1447,7 +1447,7 @@ describe("canvasViewSchema", () => {
   it("projects the boxed label:value contract into the generated JSON Schema", () => {
     const json = JSON.stringify(z.toJSONSchema(canvasViewSchema, { io: "input" }));
     expect(json).toContain("left-hand column of a label:value pair");
-    expect(json).toContain("the value shown beside");
+    expect(json).toContain("this field is the value beside `text`'s label");
     expect(json).toContain("inverts the two text fields");
   });
 

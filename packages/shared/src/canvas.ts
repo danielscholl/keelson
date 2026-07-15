@@ -598,7 +598,7 @@ const rowsSectionSchema = z
           trailing: z
             .string()
             .describe(
-              "In a `boxed` section, the value shown beside `text`'s label, which carries the body. In a normal feed row, a short right-aligned annotation.",
+              "In a `boxed` section, this field is the value beside `text`'s label, and this field carries the body. In a normal feed row, this field is a short right-aligned annotation.",
             )
             .optional(),
           // Long-form body disclosed under the row on demand (pre-wrapped plain
