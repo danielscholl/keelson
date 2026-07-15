@@ -1,4 +1,5 @@
 import {
+  type CanvasHtmlAction,
   type OpenChatSeed,
   type RibAction,
   type RibActionResult,
@@ -173,6 +174,24 @@ export function useRibActionDispatch(
   );
 
   return useMemo(() => ({ run, reveal }), [run, reveal]);
+}
+
+// The dispatcher for actions relayed OUT of a sandboxed html frame, for every
+// host that renders one (the drawer's html canvas, a surface's html region).
+//
+// It exists so the `origin: "canvas-html"` stamp has exactly one site. `run`
+// takes origin from its caller, and an omitted origin means a trusted board
+// dispatch — so a host that hand-rolled this and forgot the stamp would hand
+// untrusted frame markup board-level trust, silently. Only `type`/`payload`
+// come from the frame; it never sees or sets origin, so it can't claim "board".
+export function useHtmlFrameAction(ribId: string | null): (action: CanvasHtmlAction) => void {
+  const { run } = useRibActionDispatch(ribId);
+  return useCallback(
+    (action: CanvasHtmlAction) => {
+      if (ribId) void run({ type: action.type, payload: action.payload, origin: "canvas-html" });
+    },
+    [ribId, run],
+  );
 }
 
 // Cheap pre-check so non-directive `data` (undefined, a copy-on-reveal string)

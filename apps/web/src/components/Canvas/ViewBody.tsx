@@ -1,7 +1,13 @@
-import { type CanvasSource, type CanvasView, canvasViewSchema } from "@keelson/shared";
+import {
+  type CanvasHtmlAction,
+  type CanvasSource,
+  type CanvasView,
+  canvasViewSchema,
+} from "@keelson/shared";
 import { type SnapshotState, useSnapshot } from "../../hooks/useSnapshot.ts";
 import { BoardView } from "./BoardView.tsx";
 import { GraphView } from "./GraphView.tsx";
+import { SandboxedHtml } from "./SandboxedHtml.tsx";
 import { TableView } from "./TableView.tsx";
 
 // Closed catalog: a `view` discriminant maps to exactly one renderer. A new
@@ -65,6 +71,47 @@ export function SnapshotStateView({ snapshot, busy }: { snapshot: SnapshotState;
   }
   if (snapshot.status === "live") {
     return <ViewFromData data={snapshot.data} />;
+  }
+  return <CanvasSkeleton label={busy ? "Running…" : "Loading…"} />;
+}
+
+// Fail-closed gate for an `html` canvas, mirroring ViewFromData: the payload
+// must be markup, so a structured value renders a note rather than reaching the
+// frame as a stringified object.
+export function HtmlFromData({
+  data,
+  onAction,
+}: {
+  data: unknown;
+  onAction?: (action: CanvasHtmlAction) => void;
+}) {
+  if (typeof data !== "string") {
+    return (
+      <p className="canvas-drawer-note canvas-drawer-error">
+        This view couldn't be rendered — an html canvas needs string markup.
+      </p>
+    );
+  }
+  return <SandboxedHtml html={data} onAction={onAction} />;
+}
+
+// The SnapshotStateView twin for `canvasKind: "html"` keys. Same reason to
+// exist: a caller holding its own `useSnapshot` (a surface region) renders the
+// identical loading/error/live treatment without opening a second subscription.
+export function HtmlStateView({
+  snapshot,
+  busy,
+  onAction,
+}: {
+  snapshot: SnapshotState;
+  busy?: boolean;
+  onAction?: (action: CanvasHtmlAction) => void;
+}) {
+  if (snapshot.status === "error") {
+    return <p className="canvas-drawer-note canvas-drawer-error">Failed to load this snapshot.</p>;
+  }
+  if (snapshot.status === "live") {
+    return <HtmlFromData data={snapshot.data} onAction={onAction} />;
   }
   return <CanvasSkeleton label={busy ? "Running…" : "Loading…"} />;
 }

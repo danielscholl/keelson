@@ -3,7 +3,7 @@ import { ribIdFromKey } from "@keelson/shared";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { getRunArtifact } from "../../api.ts";
-import { useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
+import { useHtmlFrameAction, useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
@@ -399,16 +399,7 @@ function SnapshotBody({
 // its actions are a silent no-op rather than reaching an arbitrary one.
 function HtmlCanvas({ source }: { source: CanvasSource }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
-  const { run } = useRibActionDispatch(ribId);
-  const onAction = useCallback(
-    (action: CanvasHtmlAction) => {
-      // Stamp origin "canvas-html" so the owning rib can gate this untrusted
-      // frame-relayed verb. Only `type`/`payload` come from the frame; the frame
-      // never sees or sets `origin`, so it can't pass itself off as a board action.
-      if (ribId) void run({ type: action.type, payload: action.payload, origin: "canvas-html" });
-    },
-    [ribId, run],
-  );
+  const onAction = useHtmlFrameAction(ribId);
   return <HtmlBody source={source} onAction={onAction} />;
 }
 

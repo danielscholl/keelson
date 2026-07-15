@@ -3571,6 +3571,17 @@ button.tab:focus-visible {
   flex-direction: column;
   gap: 16px;
 }
+/* An html region's frame, like the drawer's: a designed page can't report its own
+   height across the sandbox, so give it a tall floor and let it scroll its own
+   content. Without a rule here it falls back to the 300x150 iframe default. */
+.surface-region-body .canvas-html-frame {
+  display: block;
+  width: 100%;
+  min-height: 60vh;
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+}
 .surface-region-glyph-chip {
   display: inline-flex;
   align-items: center;

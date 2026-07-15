@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import {
+  CANVAS_HTML_ACTION_CHANNEL,
   RIBS_VERSION_SNAPSHOT_KEY,
   type RibActionResponse,
   type RibSummary,
@@ -87,6 +88,25 @@ function board(title: string, statLabel: string, statValue: number) {
 
 function live(key: string, data: unknown) {
   snapStates[key] = { status: "live", data };
+}
+
+// A rib declaring one key as `canvasKind: "html"` — what routes a region to the
+// frame renderer instead of the structured one.
+function htmlRib(key: string): RibSummary {
+  return {
+    id: "demo",
+    displayName: "Demo",
+    registered: [],
+    views: [{ key, canvasKind: "html" }],
+    surfaces: [],
+    hasOnAction: true,
+  };
+}
+
+function postMessageTo(data: unknown, source: unknown) {
+  const e = new MessageEvent("message", { data });
+  Object.defineProperty(e, "source", { value: source, configurable: true });
+  window.dispatchEvent(e);
 }
 
 function renderSurface(
@@ -449,6 +469,49 @@ describe("Surface", () => {
     dialog = screen.getByRole("dialog");
     expect(dialog.querySelector("iframe.canvas-html-frame")).toBeNull();
     expect(dialog.textContent).toContain("Services");
+  });
+
+  test("an html-declared region renders its markup inline, not the view-parse error", () => {
+    live("rib:demo:html-panel", "<p>hi from html lens</p>");
+    ribSummaries = [htmlRib("rib:demo:html-panel")];
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      // hideRegionActions mirrors an authoring console (the Chamber surface): with
+      // no Expand control, the inline body is the ONLY way to see the page.
+      hideRegionActions: true,
+      layout: { rows: [{ columns: [{ key: "rib:demo:html-panel", title: "HTML Lens" }] }] },
+    });
+
+    const region = container.querySelector(".surface-region") as HTMLElement;
+    expect(region.querySelector("iframe.canvas-html-frame")).not.toBeNull();
+    expect(region.textContent).not.toContain("didn't match a known view type");
+  });
+
+  test("an html region's frame action is dispatched with origin canvas-html", async () => {
+    live("rib:demo:html-panel", "<p>hi</p>");
+    ribSummaries = [htmlRib("rib:demo:html-panel")];
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:html-panel", title: "HTML Lens" }] }] },
+    });
+
+    const frame = container.querySelector("iframe.canvas-html-frame") as HTMLIFrameElement;
+    const win = {} as Window;
+    Object.defineProperty(frame, "contentWindow", { value: win, configurable: true });
+    postMessageTo(
+      { channel: CANVAS_HTML_ACTION_CHANNEL, type: "suspend", payload: { cluster: "demo" } },
+      win,
+    );
+
+    // The stamp is the security boundary: an omitted origin means a trusted board
+    // dispatch, so untrusted frame markup must never reach the rib without it.
+    await waitFor(() => expect(postRibActionCalls.length).toBe(1));
+    expect(postRibActionCalls[0]).toEqual({
+      ribId: "demo",
+      action: { type: "suspend", payload: { cluster: "demo" }, origin: "canvas-html" },
+    });
   });
 
   test("no Explore control renders when onExplore is absent", () => {
