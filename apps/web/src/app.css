@@ -4690,7 +4690,7 @@ a.cvb-card-title::after {
 }
 
 /* boxed rows — a status list: each row is an inset card, the tone glyph reads
-   as a check/mark, and the value is left-aligned after a fixed label column. */
+   as a check/mark, and the value is left-aligned after a shared label column. */
 .cvb-rows--boxed {
   gap: 6px;
 }
@@ -4739,10 +4739,9 @@ a.cvb-card-title::after {
   content: "•";
   color: var(--magenta);
 }
-/* A boxed row is a label:value pair, so `text` is the label column and
-   `trailing` the value — the reverse of a feed row. 96px is the alignment floor
-   the labels share, not a ceiling: a label longer than the column has to be able
-   to claim width, or it wraps a word per line against `overflow-wrap: anywhere`. */
+/* 96px is the floor the labels align on, not a ceiling: a longer label must be
+   able to claim width, or it wraps a word per line against `overflow-wrap:
+   anywhere`. The 50% cap keeps it from crowding out the value. */
 .cvb-rows--boxed .cvb-row-text {
   flex: 0 1 auto;
   min-width: 96px;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import {
   CANVAS_HTML_ACTION_CHANNEL,
   canvasDocumentSchema,
@@ -1437,6 +1438,17 @@ describe("canvasViewSchema", () => {
     const [rows, cards] = v.view === "board" ? v.sections : [];
     expect(rows?.kind === "rows" && rows.boxed).toBe(true);
     expect(cards?.kind === "cards" && cards.boxed).toBe(true);
+  });
+
+  // `boxed` swaps what `text` and `trailing` mean, and the only reader who can
+  // act on that is the agent composing the board — which sees the projected JSON
+  // Schema, not this file. Assert the descriptions survive projection, so a
+  // change to how fields are emitted can't silently strip the contract.
+  it("projects the boxed label:value contract into the generated JSON Schema", () => {
+    const json = JSON.stringify(z.toJSONSchema(canvasViewSchema, { io: "input" }));
+    expect(json).toContain("left-hand column of a label:value pair");
+    expect(json).toContain("the value shown beside");
+    expect(json).toContain("inverts the two text fields");
   });
 
   it("parses a grid cards section with a ghost open-seat item", () => {

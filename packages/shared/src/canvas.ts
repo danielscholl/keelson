@@ -573,8 +573,7 @@ const rowsSectionSchema = z
     title: z.string().optional(),
     // Render each row as an inset card (a status list) instead of a borderless
     // feed: the tone glyph reads as a check/mark and the trailing value is
-    // left-aligned after a label column. This INVERTS what the two text fields
-    // mean, so it is described on `text`/`trailing` where an author reads them.
+    // left-aligned after a label column.
     boxed: z
       .boolean()
       .describe(
