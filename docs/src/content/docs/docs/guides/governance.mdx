@@ -188,6 +188,13 @@ grant, and the tools are simply absent rather than refused, so the agent cannot
 report the gap. If a rib's agent says it lacks a tool you expected it to have,
 check the grant before the rib.
 
+The turn's log is where that denial surfaces. When a rib explicitly requests
+sibling-owned tools no grant clears, the server writes one `[rib-agent-turn]`
+warning per caller and owner pair, naming the dropped tools and the grant that
+would clear them. A rib can also ask before it spends a turn: `getToolReachability`
+on the [rib contract](../../reference/rib-contract/) returns a per-name status, and
+`cross-rib-denied` is the missing grant.
+
 The check runs first, ahead of the policy stack, so an ungranted call never
 surfaces an approval prompt for a call that would be denied regardless. See
 [Configuration](../configuration/#cross-rib-grants) for the config key, the env

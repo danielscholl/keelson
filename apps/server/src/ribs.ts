@@ -56,6 +56,7 @@ import {
   type SnapshotManager,
   type SnapshotValidator,
   type ToolDefinition,
+  type ToolReachability,
   type WorkspaceLease,
 } from "@keelson/shared";
 import type { DynamicRegionStore } from "./dynamic-region-store.ts";
@@ -216,6 +217,12 @@ export interface ApplyRibsOptions {
     args: unknown,
     opts?: { signal?: AbortSignal; timeoutMs?: number },
   ) => Promise<CallToolResult>;
+  // Backs RibContext.getToolReachability: the operator floor's pre-flight verdict for
+  // tool names, scoped to the asking rib. Optional so older/test hosts omit the seam.
+  readonly getToolReachability?: (
+    ribId: string,
+    names: readonly string[],
+  ) => readonly ToolReachability[];
 }
 
 /**
@@ -389,6 +396,12 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
               args: unknown,
               o?: { signal?: AbortSignal; timeoutMs?: number },
             ) => opts.callTool!(rib.id, targetRibId, name, args, o),
+          }
+        : {}),
+      ...(opts.getToolReachability
+        ? {
+            getToolReachability: (names: readonly string[]) =>
+              opts.getToolReachability!(rib.id, names),
           }
         : {}),
     };

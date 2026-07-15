@@ -12,7 +12,11 @@ import type { MessageChunk, Rib, RibContext, ToolDefinition } from "@keelson/sha
 import { z } from "zod";
 import type { PolicyEngine } from "./policy-engine.ts";
 import { createPolicyEngine } from "./policy-engine.ts";
-import { type MakeRibAgentTurnDeps, makeRibAgentTurn } from "./rib-agent-turn.ts";
+import {
+  type MakeRibAgentTurnDeps,
+  makeRibAgentTurn,
+  makeToolReachability,
+} from "./rib-agent-turn.ts";
 import { applyRibs } from "./ribs.ts";
 import type { UsageStore } from "./usage-store.ts";
 
@@ -795,6 +799,302 @@ describe("makeRibAgentTurn — tool rails", () => {
   });
 });
 
+// Capture console.warn for one call, restoring it on both paths so a failing
+// assertion can't leave the suite's warn stubbed.
+async function captureWarnings<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; warnings: string[] }> {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message?: unknown, ...optionalParams: unknown[]) => {
+    warnings.push([message, ...optionalParams].map(String).join(" "));
+  };
+  try {
+    return { result: await fn(), warnings };
+  } finally {
+    console.warn = originalWarn;
+  }
+}
+
+describe("makeRibAgentTurn — cross-rib denial is observable", () => {
+  async function optionsAndWarnings(
+    req: Parameters<ReturnType<typeof makeRibAgentTurn>>[1],
+    deps: Partial<MakeRibAgentTurnDeps> = {},
+  ) {
+    let seen: SendQueryOptions | undefined;
+    const run = makeRun(fakeProvider({ onQuery: (c) => (seen = c.options) }), deps);
+    const { warnings } = await captureWarnings(() => run("chamber", req).result);
+    return { opts: seen, warnings };
+  }
+
+  const osduTools = ["osdu_security", "osdu_quality", "osdu_release"];
+  const ownedByOsdu = (name: string) => (name.startsWith("osdu_") ? "osdu" : "chamber");
+
+  it("warns ONCE per owning rib, naming caller, owner, and every dropped name", async () => {
+    const { opts, warnings } = await optionsAndWarnings(
+      { prompt: "hi", tools: osduTools.map((name) => ({ name })) },
+      {
+        getRegisteredTools: () => osduTools.map(fakeTool),
+        getToolOwner: ownedByOsdu,
+        isTurnToolGranted: () => false,
+      },
+    );
+    // Three sibling tools, ONE misconfigured grant — one line, not three.
+    expect(warnings).toHaveLength(1);
+    const warning = warnings[0] ?? "";
+    expect(warning).toContain("rib 'chamber'");
+    expect(warning).toContain("rib 'osdu'");
+    for (const name of osduTools) expect(warning).toContain(name);
+    // The remedy, so the operator need not read three repos to find it.
+    expect(warning).toContain("crossRibGrants");
+    // The warn is a signal, not a change of verdict: the tools are still dropped.
+    expect(opts?.tools).toBeUndefined();
+  });
+
+  it("warns once per owner when two sibling ribs are both denied", async () => {
+    const { warnings } = await optionsAndWarnings(
+      { prompt: "hi", tools: [{ name: "osdu_security" }, { name: "squad_dispatch" }] },
+      {
+        getRegisteredTools: () => [fakeTool("osdu_security"), fakeTool("squad_dispatch")],
+        getToolOwner: (name) => (name.startsWith("osdu_") ? "osdu" : "squad"),
+        isTurnToolGranted: () => false,
+      },
+    );
+    expect(warnings).toHaveLength(2);
+    expect(warnings.some((w) => w.includes("rib 'osdu'") && w.includes("osdu_security"))).toBe(
+      true,
+    );
+    expect(warnings.some((w) => w.includes("rib 'squad'") && w.includes("squad_dispatch"))).toBe(
+      true,
+    );
+  });
+
+  it("stays silent when the sibling tools ARE granted", async () => {
+    const { opts, warnings } = await optionsAndWarnings(
+      { prompt: "hi", tools: osduTools.map((name) => ({ name })) },
+      {
+        getRegisteredTools: () => osduTools.map(fakeTool),
+        getToolOwner: ownedByOsdu,
+        isTurnToolGranted: () => true,
+      },
+    );
+    expect(warnings).toEqual([]);
+    expect(opts?.tools?.map((t) => t.name)).toEqual(osduTools);
+  });
+
+  it("stays silent for the caller's own tools and harness-owned tools", async () => {
+    const { warnings } = await optionsAndWarnings(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }, { name: "note_project" }] },
+      {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens"), fakeTool("note_project")],
+        // Own tool → owner is the caller; harness tool → no owner at all.
+        getToolOwner: (name) => (name === "chamber_emit_lens" ? "chamber" : undefined),
+        isTurnToolGranted: () => false,
+      },
+    );
+    expect(warnings).toEqual([]);
+  });
+
+  it("stays silent for a denylist drop (a different, already-intentional gate)", async () => {
+    const { opts, warnings } = await optionsAndWarnings(
+      { prompt: "hi", tools: [{ name: "chamber_emit_lens" }] },
+      {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getToolOwner: () => "chamber",
+        denylist: ["chamber_emit_lens"],
+      },
+    );
+    expect(warnings).toEqual([]);
+    expect(opts?.tools).toBeUndefined();
+  });
+
+  it("stays silent when the rib requested no tools (no ambient catalog warn)", async () => {
+    const { warnings } = await optionsAndWarnings(
+      { prompt: "hi" },
+      {
+        getRegisteredTools: () => osduTools.map(fakeTool),
+        getToolOwner: ownedByOsdu,
+        isTurnToolGranted: () => false,
+      },
+    );
+    // The whole sibling-owned catalog is unreachable, but the rib asked for none
+    // of it — a text-only turn must not narrate the catalog it never wanted.
+    expect(warnings).toEqual([]);
+  });
+});
+
+describe("makeToolReachability — pre-flight against the operator floor", () => {
+  const reachabilityFor = (names: readonly string[], deps: Partial<MakeRibAgentTurnDeps> = {}) =>
+    makeToolReachability({ getRegisteredTools: () => [], ...deps })("chamber", names);
+
+  it("reports the caller's own registered tool as reachable", () => {
+    expect(
+      reachabilityFor(["chamber_emit_lens"], {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getToolOwner: () => "chamber",
+        isTurnToolGranted: () => false,
+      }),
+    ).toEqual([{ name: "chamber_emit_lens", status: "reachable", ownerRibId: "chamber" }]);
+  });
+
+  it("reports a harness-owned tool (no owning rib) as reachable, with no ownerRibId", () => {
+    expect(
+      reachabilityFor(["note_project"], {
+        getRegisteredTools: () => [fakeTool("note_project")],
+        getToolOwner: () => undefined,
+      }),
+    ).toEqual([{ name: "note_project", status: "reachable" }]);
+  });
+
+  it("reports an unregistered name as unregistered, not as a denial", () => {
+    expect(reachabilityFor(["nope"], { getToolOwner: () => "osdu" })).toEqual([
+      { name: "nope", status: "unregistered" },
+    ]);
+  });
+
+  it("calls an SDK built-in 'unregistered' while the turn still leaves it callable", async () => {
+    // `Read` is a provider SDK built-in: nothing registers it, so the floor has no
+    // verdict to give. Core cannot tell it from a typo, so the status must not claim
+    // reachable (false calm) OR denied (crying wolf on every chamber project room).
+    const deps: Partial<MakeRibAgentTurnDeps> = {
+      getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+      getToolOwner: (name) => (name === "chamber_emit_lens" ? "chamber" : undefined),
+      isTurnToolGranted: () => false,
+    };
+    expect(makeToolReachability(deps)("chamber", ["Read"])).toEqual([
+      { name: "Read", status: "unregistered" },
+    ]);
+
+    // The half that proves the contract matches observable turn behavior: the same
+    // name still rides the turn's allow-list, so the provider can resolve it.
+    let seen: SendQueryOptions | undefined;
+    const run = makeRun(fakeProvider({ onQuery: (c) => (seen = c.options) }), deps);
+    const { warnings } = await captureWarnings(
+      () => run("chamber", { prompt: "hi", tools: [{ name: "Read" }] }).result,
+    );
+    expect(seen?.allowedTools).toContain("Read");
+    // Never projected as a keelson tool def, and never narrated as a denial.
+    expect(seen?.tools?.map((t) => t.name) ?? []).not.toContain("Read");
+    expect(warnings).toEqual([]);
+  });
+
+  it("reports an ungranted sibling tool as cross-rib-denied, naming the owner", () => {
+    expect(
+      reachabilityFor(["osdu_security"], {
+        getRegisteredTools: () => [fakeTool("osdu_security")],
+        getToolOwner: () => "osdu",
+        isTurnToolGranted: () => false,
+      }),
+    ).toEqual([{ name: "osdu_security", status: "cross-rib-denied", ownerRibId: "osdu" }]);
+  });
+
+  it("reports a GRANTED sibling tool as reachable, still naming the owner", () => {
+    let gateCalled = false;
+    const verdict = reachabilityFor(["osdu_security"], {
+      getRegisteredTools: () => [fakeTool("osdu_security")],
+      getToolOwner: () => "osdu",
+      isTurnToolGranted: (caller, target, name) => {
+        gateCalled = true;
+        return caller === "chamber" && target === "osdu" && name === "osdu_security";
+      },
+    });
+    // The grant gate was CONSULTED with the caller/target/tool triple — without
+    // this, an always-reachable default would satisfy the verdict assertion alone.
+    expect(gateCalled).toBe(true);
+    expect(verdict).toEqual([{ name: "osdu_security", status: "reachable", ownerRibId: "osdu" }]);
+  });
+
+  it("reports a denylisted tool as denylisted", () => {
+    expect(
+      reachabilityFor(["chamber_emit_lens"], {
+        getRegisteredTools: () => [fakeTool("chamber_emit_lens")],
+        getToolOwner: () => "chamber",
+        denylist: ["chamber_emit_lens"],
+      }),
+    ).toEqual([{ name: "chamber_emit_lens", status: "denylisted", ownerRibId: "chamber" }]);
+  });
+
+  it("answers a batch in the caller's order, one verdict per name", () => {
+    const verdicts = reachabilityFor(["osdu_security", "nope", "chamber_emit_lens"], {
+      getRegisteredTools: () => [fakeTool("osdu_security"), fakeTool("chamber_emit_lens")],
+      getToolOwner: (name) => (name.startsWith("osdu_") ? "osdu" : "chamber"),
+      isTurnToolGranted: () => false,
+    });
+    expect(verdicts.map((v) => v.name)).toEqual(["osdu_security", "nope", "chamber_emit_lens"]);
+    expect(verdicts.map((v) => v.status)).toEqual([
+      "cross-rib-denied",
+      "unregistered",
+      "reachable",
+    ]);
+  });
+
+  it("prefers 'unregistered' over the cross-rib status — nothing to own", () => {
+    const [verdict] = reachabilityFor(["osdu_ghost"], {
+      getRegisteredTools: () => [],
+      getToolOwner: () => "osdu",
+      isTurnToolGranted: () => false,
+      denylist: ["osdu_ghost"],
+    });
+    expect(verdict?.status).toBe("unregistered");
+  });
+
+  it("prefers 'cross-rib-denied' over 'denylisted' when both apply", () => {
+    const [verdict] = reachabilityFor(["osdu_security"], {
+      getRegisteredTools: () => [fakeTool("osdu_security")],
+      getToolOwner: () => "osdu",
+      isTurnToolGranted: () => false,
+      denylist: ["osdu_security"],
+    });
+    expect(verdict?.status).toBe("cross-rib-denied");
+  });
+
+  it("fails OPEN with no owner resolver, matching the turn's own gate", () => {
+    expect(
+      reachabilityFor(["osdu_security"], {
+        getRegisteredTools: () => [fakeTool("osdu_security")],
+      }),
+    ).toEqual([{ name: "osdu_security", status: "reachable" }]);
+  });
+
+  it("AGREES with what the turn actually projects, for one shared deps object", async () => {
+    // The anti-drift guard. Both seams are built from the SAME deps — the wiring
+    // bootstrapRibs uses — so a change that moves one path's verdict without the
+    // other fails here rather than at a rib's next paid turn.
+    const names = ["chamber_emit_lens", "chamber_banned", "osdu_granted", "osdu_denied", "ghost"];
+    const deps: MakeRibAgentTurnDeps = {
+      getProvider: () => provider,
+      isRegisteredProvider: () => true,
+      listProviderIds: () => ["claude"],
+      defaultCwd: "/neutral",
+      getRegisteredTools: () => [
+        fakeTool("chamber_emit_lens"),
+        fakeTool("chamber_banned"),
+        fakeTool("osdu_granted"),
+        fakeTool("osdu_denied"),
+      ],
+      getToolOwner: (name) => (name.startsWith("osdu_") ? "osdu" : "chamber"),
+      isTurnToolGranted: (_caller, _target, name) => name === "osdu_granted",
+      denylist: ["chamber_banned"],
+    };
+    let seen: SendQueryOptions | undefined;
+    const provider = fakeProvider({ onQuery: (c) => (seen = c.options) });
+
+    const run = makeRibAgentTurn(deps);
+    await captureWarnings(
+      () => run("chamber", { prompt: "hi", tools: names.map((name) => ({ name })) }).result,
+    );
+    const projected = (seen?.tools ?? []).map((t) => t.name);
+    const reachable = makeToolReachability(deps)("chamber", names)
+      .filter((v) => v.status === "reachable")
+      .map((v) => v.name);
+
+    expect(reachable).toEqual(projected);
+    // Pin the shared verdict too, so a mutation that empties BOTH paths (making
+    // them trivially agree) still fails.
+    expect(projected).toEqual(["chamber_emit_lens", "osdu_granted"]);
+  });
+});
+
 describe("makeRibAgentTurn — response-phase redaction", () => {
   // The room default is a text-only turn (no tool rails); its prose still flows
   // through the response gate, so a secret the model echoes is scrubbed before
@@ -1264,6 +1564,52 @@ describe("applyRibs wiring", () => {
       runText: async () => ({ ok: true as const, data: "" }),
     }),
   };
+
+  it("exposes getToolReachability on the rib context, bound to the rib id", () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    let seenRibId = "";
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: fakeExecCtx,
+      getToolReachability: (ribId, names) => {
+        seenRibId = ribId;
+        return names.map((name) => ({ name, status: "cross-rib-denied" as const }));
+      },
+    });
+    expect(captured?.getToolReachability).toBeDefined();
+    // The rib passes no caller id — the harness binds its own, so a rib can't ask
+    // on another rib's behalf.
+    expect(captured?.getToolReachability?.(["osdu_security"])).toEqual([
+      { name: "osdu_security", status: "cross-rib-denied" },
+    ]);
+    expect(seenRibId).toBe("chamber");
+  });
+
+  it("omits getToolReachability when no resolver is supplied (older harness degrades)", () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    applyRibs({ active: ["chamber"], available: { chamber: rib }, ctx: fakeExecCtx });
+    // getExec is always present, so capture provably happened — getToolReachability
+    // being undefined is the real omission, not a never-ran registerTools.
+    expect(captured?.getExec).toBeDefined();
+    expect(captured?.getToolReachability).toBeUndefined();
+  });
 
   it("collects a rib's contributed policies, tagged with the rib id, and drops malformed ones", () => {
     const goodPolicy = {

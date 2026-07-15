@@ -22,6 +22,7 @@ import {
   type RibAgentTurnResult,
   type TokenUsage,
   type ToolDefinition,
+  type ToolReachability,
 } from "@keelson/shared";
 import { getRegisteredTools as liveRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
@@ -90,10 +91,11 @@ interface ResolvedDeps {
   getUsageStore?: () => UsageStore | undefined;
 }
 
-export function makeRibAgentTurn(
-  deps: MakeRibAgentTurnDeps = {},
-): (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn {
-  const resolved: ResolvedDeps = {
+// The one resolution of the injectable deps, shared by makeRibAgentTurn and
+// makeToolReachability so the pre-flight answer and the turn's own gate read the
+// identical denylist / owner / grant inputs and cannot drift apart.
+function resolveDeps(deps: MakeRibAgentTurnDeps): ResolvedDeps {
+  return {
     getProvider: deps.getProvider ?? getAgentProvider,
     hasProvider: deps.isRegisteredProvider ?? registryHasProvider,
     listProviderIds: deps.listProviderIds ?? (() => getProviderInfoList().map((p) => p.id)),
@@ -111,6 +113,12 @@ export function makeRibAgentTurn(
     ...(deps.getPolicyEngine ? { getPolicyEngine: deps.getPolicyEngine } : {}),
     ...(deps.getUsageStore ? { getUsageStore: deps.getUsageStore } : {}),
   };
+}
+
+export function makeRibAgentTurn(
+  deps: MakeRibAgentTurnDeps = {},
+): (ribId: string, req: RibAgentTurnRequest) => RibAgentTurn {
+  const resolved = resolveDeps(deps);
   // `ribId` scopes the turn's tool gate: it rides the policy event so a rib
   // policy can govern its own (or another rib's) turn. Provider routing stays
   // global.
@@ -401,9 +409,27 @@ async function toolOptions(
   if (req.tools !== undefined && req.tools.length > 0) {
     const requested = new Set(req.tools.map((t) => t.name));
     const catalog = deps.getRegisteredTools();
-    const matched = catalog
-      .filter((t) => requested.has(t.name))
-      .filter((t) => isToolReachableByRib(t, deps, meta.ribId));
+    const matched: ToolDefinition[] = [];
+    const crossRibDenied = new Map<string, string[]>();
+    for (const tool of catalog) {
+      if (!requested.has(tool.name)) continue;
+      if (isToolReachableByRib(tool, deps, meta.ribId)) {
+        matched.push(tool);
+        continue;
+      }
+      const owner = deps.getToolOwner?.(tool.name);
+      if (owner === undefined) continue;
+      const names = crossRibDenied.get(owner) ?? [];
+      names.push(tool.name);
+      crossRibDenied.set(owner, names);
+    }
+    // One line per owning rib, not per tool: a mind declaring eight of a sibling's
+    // tools is one misconfigured grant, and eight lines would read as eight faults.
+    for (const [owner, names] of crossRibDenied) {
+      console.warn(
+        `[rib-agent-turn] rib '${meta.ribId}' requested ${names.length} tool(s) owned by rib '${owner}' that no operator grant clears (${names.join(", ")}); they were not projected onto the turn. Grant them in config.json crossRibGrants or KEELSON_CROSS_RIB_GRANTS.`,
+      );
+    }
     // Gate through the unified policy engine when wired (denylist builtin + this
     // rib's policies); otherwise fall back to the local denylist floor. A gate
     // fault falls back to the denylist floor (not the whole turn) — this seam's
@@ -482,6 +508,36 @@ function isToolReachableByRib(
   const owner = deps.getToolOwner(tool.name);
   if (owner === undefined || owner === callerRibId) return true;
   return deps.isTurnToolGranted?.(callerRibId, owner, tool.name) === true;
+}
+
+// Backs RibContext.getToolReachability (packages/shared/src/rib.ts): the same
+// operator floor toolOptions applies to a turn's requested tools — registration,
+// then the cross-rib grant gate (via isToolReachableByRib itself), then the
+// denylist — answered without running a turn. Deliberately NOT the policy engine:
+// its projection is scoped to a resolved provider, which pre-flight doesn't have.
+// Construct it from the SAME deps object as makeRibAgentTurn so the two verdicts
+// cannot diverge. An unregistered name is reported as such, never as a denial:
+// toolOptions leaves it in `allowedTools`, so an SDK built-in stays callable.
+export function makeToolReachability(
+  deps: MakeRibAgentTurnDeps = {},
+): (ribId: string, names: readonly string[]) => readonly ToolReachability[] {
+  const resolved = resolveDeps(deps);
+  return (ribId, names) => {
+    const catalog = new Map(resolved.getRegisteredTools().map((t) => [t.name, t]));
+    return names.map((name): ToolReachability => {
+      const tool = catalog.get(name);
+      if (!tool) return { name, status: "unregistered" };
+      const owner = resolved.getToolOwner?.(name);
+      const ownerField = owner !== undefined ? { ownerRibId: owner } : {};
+      if (!isToolReachableByRib(tool, resolved, ribId)) {
+        return { name, status: "cross-rib-denied", ...ownerField };
+      }
+      if (resolved.denied.has(name)) {
+        return { name, status: "denylisted", ...ownerField };
+      }
+      return { name, status: "reachable", ...ownerField };
+    });
+  };
 }
 
 // KEELSON_WORKFLOW_TOOL_DENYLIST → tool names to drop from the projection.

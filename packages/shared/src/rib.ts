@@ -244,6 +244,20 @@ export interface RibProviderInfo {
   readonly displayName: string;
 }
 
+// One name's verdict from RibContext.getToolReachability: "reachable" means the floor
+// clears the name, "cross-rib-denied" / "denylisted" mean it drops it. "unregistered" is
+// NOT a denial — the harness registers no such tool, so the name still rides the turn as
+// an allow-list entry and whether it resolves is the provider's answer; an SDK built-in
+// like `Read` lands there and so does a typo, so only the caller can tell them apart.
+// When several could apply: unregistered, then cross-rib-denied, then denylisted.
+export interface ToolReachability {
+  name: string;
+  status: "reachable" | "cross-rib-denied" | "denylisted" | "unregistered";
+  // The rib that registered the tool. Absent for a harness-owned tool, an SDK
+  // built-in, or a name nothing registers.
+  ownerRibId?: string;
+}
+
 export type CallToolResult =
   | { ok: true; chunks: readonly MessageChunk[] }
   | { ok: false; error: string };
@@ -357,6 +371,16 @@ export interface RibContext {
     args: unknown,
     opts?: CallToolOptions,
   ) => Promise<CallToolResult>;
+  // Pre-flight: would these tool names project onto a turn THIS rib runs? Answers the
+  // OPERATOR FLOOR only — registration, the cross-rib grant gate, and the denylist floor
+  // — so a rib can check before spending a paid turn instead of learning from an agent
+  // that reports a capability it never had. It does NOT run the policy engine: policy
+  // projection is scoped to the resolved provider, and no provider exists yet at
+  // pre-flight (a turn may pin any). So `status: "reachable"` means the floor clears the
+  // tool, NOT that policy will allow it; a policy can still deny the tool at turn time.
+  // Sync, batched, and non-throwing — call it once with the full set. Optional so a rib
+  // built against an older harness degrades to no pre-flight check, not a throw.
+  getToolReachability?: (names: readonly string[]) => readonly ToolReachability[];
 }
 
 // The harness-owned snapshot key the SPA subscribes to as a manifest-revision
