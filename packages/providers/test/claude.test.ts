@@ -1361,43 +1361,53 @@ describe("ClaudeProvider — Phase 3 S2 tool wiring", () => {
         ctx.emit({ type: "tool_result", toolUseId: "", content: turn });
       },
     };
+    type ProjectedTool = (
+      args: unknown,
+      extra: unknown,
+    ) => Promise<{ content: unknown[]; isError?: boolean }>;
+    // ONE sdk, ONE factory, ONE provider for both turns — production shares a single
+    // factory across provider instances (claude/registration.ts:39-51), so a
+    // factory- or instance-scoped context regression is invisible to a test that
+    // builds a fresh one per branch.
+    //
+    // Each turn's projected tool is paired to its query synchronously: createQuery
+    // builds the MCP server and calls sdk.query with no await between them, so the
+    // pending handler at query time belongs to that call. Scenarios then start in
+    // query order, so the FIFO shift hands each one its own tool rather than the
+    // most recently built.
+    const calls: Array<{ turn: string; projected: ProjectedTool | undefined }> = [];
+    let pending: ProjectedTool | undefined;
+    const sdk = makeMockSdk({
+      scenario: async (push) => {
+        const call = calls.shift();
+        if (!call?.projected) throw new Error("missing projected tool");
+        await call.projected({ turn: call.turn }, {});
+        await pushSuccess(push);
+      },
+    });
+    sdk.module.createSdkMcpServer = (opts: {
+      name: string;
+      tools?: Array<{ handler: ProjectedTool }>;
+    }) => {
+      pending = opts.tools?.[0]?.handler;
+      return {};
+    };
+    const sdkQuery = sdk.module.query.bind(sdk.module);
+    sdk.module.query = (args: { prompt: string; options?: unknown }) => {
+      calls.push({ turn: args.prompt, projected: pending });
+      pending = undefined;
+      return sdkQuery(args as Parameters<typeof sdkQuery>[0]);
+    };
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
     const runTurn = (
       turn: string,
       turnContext: Readonly<Record<string, unknown>>,
-    ): Promise<MessageChunk[]> => {
-      let projected:
-        | ((args: unknown, extra: unknown) => Promise<{ content: unknown[]; isError?: boolean }>)
-        | undefined;
-      const sdk = makeMockSdk({
-        scenario: async (push) => {
-          if (!projected) throw new Error("missing projected tool");
-          await projected({ turn }, {});
-          await pushSuccess(push);
-        },
-      });
-      sdk.module.createSdkMcpServer = (opts: {
-        name: string;
-        tools?: Array<{
-          handler: (
-            args: unknown,
-            extra: unknown,
-          ) => Promise<{ content: unknown[]; isError?: boolean }>;
-        }>;
-      }) => {
-        projected = opts.tools?.[0]?.handler;
-        return {};
-      };
-      const provider = new ClaudeProvider({
-        getCredential: async () => "k",
-        queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
-      });
-      return drain(
-        provider.sendQuery("hi", "/same-cwd", undefined, {
-          tools: [tool],
-          turnContext,
-        }),
-      );
-    };
+    ): Promise<MessageChunk[]> =>
+      drain(provider.sendQuery(turn, "/same-cwd", undefined, { tools: [tool], turnContext }));
+
     const alpha = { room: "alpha" } as const;
     const beta = { room: "beta" } as const;
 
