@@ -71,6 +71,22 @@ const mcpSettingsSchema = z.object({
   requireToken: z.boolean().optional(),
 });
 
+// Cross-rib tool grants: `{ callerRibId: { targetRibId: [toolName, …] } }`, with
+// `"*"` standing for every tool the target owns. A rib cannot reach a sibling
+// rib's tools without one — the operator opts the caller in, per target.
+//
+// Held here as well as in KEELSON_CROSS_RIB_GRANTS because a grant is standing
+// operator intent, not a per-shell flag: an env-only grant silently lapses the
+// first time the server starts from a shell that never exported it, and the
+// capability it enables just goes quiet. The two sources union (see
+// resolveCrossRibGrants) rather than override, so config is durable and env can
+// still add one for a session.
+const crossRibGrantsSchema = z.record(
+  z.string(),
+  z.record(z.string(), z.array(z.string().min(1)).min(1)),
+);
+export type CrossRibGrantsConfig = z.infer<typeof crossRibGrantsSchema>;
+
 // Wire flavors a gateway speaks. Only "openai" (OpenAI Chat Completions, the
 // universal IR for OpenRouter / Ollama / vLLM / Azure / LiteLLM) is implemented
 // today; the enum is single-valued so adding "anthropic" later is a
@@ -165,6 +181,8 @@ const keelsonConfigSchema = z.object({
   claude: claudeSettingsSchema.optional(),
   codex: codexSettingsSchema.optional(),
   mcp: mcpSettingsSchema.optional(),
+  // Which ribs may call which other ribs' tools. Default-deny without an entry.
+  crossRibGrants: crossRibGrantsSchema.optional(),
   // OpenAI-compatible gateway endpoints, each registered as a provider named
   // for the gateway. Non-secret metadata only — the API key lives in the
   // keychain (see gatewayCredentialServiceId).

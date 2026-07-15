@@ -59,6 +59,7 @@ import type {
 import { recallRequestSchema, writebackRequestSchema } from "@keelson/shared";
 import {
   BUILT_IN_PROVIDER_IDS,
+  type KeelsonConfig,
   loadKeelsonConfig,
   resolveDefaultProvider,
   resolveEnabledProviders,
@@ -312,7 +313,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   const ctx: RibContext = {
     getExec: () => ({ runJSON, runText }),
   };
-  const crossRibGrants = parseCrossRibGrants(process.env.KEELSON_CROSS_RIB_GRANTS);
+  const crossRibGrants = resolveCrossRibGrants(loadKeelsonConfig());
   const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
   // The CLI-backed agent-turn seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
@@ -1096,6 +1097,28 @@ function parseCrossRibCallTimeoutMs(
   return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
+function addCrossRibGrant(
+  grants: CrossRibGrants,
+  caller: string,
+  target: string,
+  names: readonly string[],
+): void {
+  if (!caller || !target || names.length === 0) return;
+  let targetGrants = grants.get(caller);
+  if (!targetGrants) {
+    targetGrants = new Map();
+    grants.set(caller, targetGrants);
+  }
+  let toolGrants = targetGrants.get(target);
+  if (!toolGrants) {
+    toolGrants = new Set();
+    targetGrants.set(target, toolGrants);
+  }
+  for (const name of names) {
+    toolGrants.add(name);
+  }
+}
+
 export function parseCrossRibGrants(raw: string | undefined): CrossRibGrants {
   const grants: CrossRibGrants = new Map();
   if (raw === undefined || raw.trim() === "") return grants;
@@ -1108,19 +1131,24 @@ export function parseCrossRibGrants(raw: string | undefined): CrossRibGrants {
       .split(",")
       .map((name) => name.trim())
       .filter((name) => name.length > 0);
-    if (names.length === 0) continue;
-    let targetGrants = grants.get(caller);
-    if (!targetGrants) {
-      targetGrants = new Map();
-      grants.set(caller, targetGrants);
-    }
-    let toolGrants = targetGrants.get(target);
-    if (!toolGrants) {
-      toolGrants = new Set();
-      targetGrants.set(target, toolGrants);
-    }
-    for (const name of names) {
-      toolGrants.add(name);
+    addCrossRibGrant(grants, caller, target, names);
+  }
+  return grants;
+}
+
+// The grants in force: config.json's `crossRibGrants` unioned with
+// KEELSON_CROSS_RIB_GRANTS. A union, not an override, because the two answer
+// different questions — config is the standing grant that has to survive a
+// restart from any shell, env is a grant for one session. Either alone is
+// sufficient; neither can revoke the other (remove the grant to revoke it).
+export function resolveCrossRibGrants(
+  config: KeelsonConfig,
+  env: Record<string, string | undefined> = process.env,
+): CrossRibGrants {
+  const grants = parseCrossRibGrants(env.KEELSON_CROSS_RIB_GRANTS);
+  for (const [caller, targets] of Object.entries(config.crossRibGrants ?? {})) {
+    for (const [target, names] of Object.entries(targets)) {
+      addCrossRibGrant(grants, caller.trim(), target.trim(), names);
     }
   }
   return grants;

@@ -161,14 +161,37 @@ the contract for the shape.
 
 ## Cross-rib grants
 
-A rib can call another rib's tool, but a cross-rib call is **default-deny**: with
-no grant, it is refused before it reaches the policy engine. The operator opts a
-caller in by naming `caller:target:tool` triples (or `caller:target:*` for every
-tool a target owns) in `KEELSON_CROSS_RIB_GRANTS`. The grant check runs first,
-ahead of the policy stack, so an ungranted call never surfaces an approval prompt
-for a call that would be denied regardless. See
-[Configuration](../configuration/) for the grant string and the cross-rib call
-timeout.
+A rib can reach another rib's tool, but crossing that line is **default-deny**:
+with no grant, it is refused before it reaches the policy engine. The operator
+opts a caller in per `caller → target → tool`, in `config.json`:
+
+```json
+{
+  "crossRibGrants": {
+    "chamber": {
+      "osdu": ["*"]
+    }
+  }
+}
+```
+
+`"*"` covers every tool the target owns; list tool names to narrow it. The
+equivalent `KEELSON_CROSS_RIB_GRANTS` env string (`caller:target:tool` triples,
+`;`-separated) unions with the config rather than replacing it — prefer the config
+file for a standing grant, since an env-only grant lapses whenever the server
+starts from a shell that never exported it.
+
+The grant gates **two** paths: a rib's explicit `callTool`, and the tools
+projected onto a rib's agent turn. The second is easy to miss — a rib that offers
+an agent a capability backed by a sibling rib's tools gets nothing without the
+grant, and the tools are simply absent rather than refused, so the agent cannot
+report the gap. If a rib's agent says it lacks a tool you expected it to have,
+check the grant before the rib.
+
+The check runs first, ahead of the policy stack, so an ungranted call never
+surfaces an approval prompt for a call that would be denied regardless. See
+[Configuration](../configuration/#cross-rib-grants) for the config key, the env
+string, and the cross-rib call timeout.
 
 ## Related
 
