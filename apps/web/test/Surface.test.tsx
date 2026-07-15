@@ -488,6 +488,38 @@ describe("Surface", () => {
     expect(region.textContent).not.toContain("didn't match a known view type");
   });
 
+  test("hideWhenEmpty omits an html region whose markup is blank, and keeps one with content", () => {
+    live("rib:demo:blank", "   \n  ");
+    live("rib:demo:filled", "<p>real page</p>");
+    ribSummaries = [
+      {
+        ...htmlRib("rib:demo:blank"),
+        views: [
+          { key: "rib:demo:blank", canvasKind: "html" },
+          { key: "rib:demo:filled", canvasKind: "html" },
+        ],
+      },
+    ];
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:demo:blank", title: "Blank", hideWhenEmpty: true },
+              { key: "rib:demo:filled", title: "Filled", hideWhenEmpty: true },
+            ],
+          },
+        ],
+      },
+    });
+
+    const titles = [...container.querySelectorAll(".surface-region")].map((r) => r.textContent);
+    expect(titles.some((t) => t?.includes("Blank"))).toBe(false);
+    expect(titles.some((t) => t?.includes("Filled"))).toBe(true);
+  });
+
   test("an html region's frame action is dispatched with origin canvas-html", async () => {
     live("rib:demo:html-panel", "<p>hi</p>");
     ribSummaries = [htmlRib("rib:demo:html-panel")];
