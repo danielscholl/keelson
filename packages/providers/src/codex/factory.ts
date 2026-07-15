@@ -19,7 +19,7 @@ export interface CodexCreateThreadParams {
   // Resolved by the provider (defaults to workspace-write); always set.
   sandboxMode: CodexSandboxMode;
   networkAccessEnabled: boolean;
-  // "gpt-5.3-codex" etc. Omitted → codex uses its own ~/.codex default.
+  // "gpt-5.6-sol" etc. Omitted → codex uses its own ~/.codex default.
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
   // Codex thread id from a prior turn (persisted in ~/.codex/sessions).
