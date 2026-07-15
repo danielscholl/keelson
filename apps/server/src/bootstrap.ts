@@ -59,8 +59,10 @@ import type {
 import { recallRequestSchema, writebackRequestSchema } from "@keelson/shared";
 import {
   BUILT_IN_PROVIDER_IDS,
-  type KeelsonConfig,
+  type CrossRibGrants,
+  isCrossRibGrantAllowed,
   loadKeelsonConfig,
+  resolveCrossRibGrants,
   resolveDefaultProvider,
   resolveEnabledProviders,
 } from "@keelson/shared/config";
@@ -301,13 +303,22 @@ export interface RibBootstrap {
   // prompt nodes; held here (not registered in this pure function) so the many
   // tests that call bootstrapRibs don't accrue global registry state.
   readonly tools: ToolDefinition[];
+  // The grants this boot resolved and now enforces. Frozen here for the process
+  // lifetime, so it — not config.json, which may have been edited since — is what
+  // GET /api/ribs reports and doctor validates.
+  readonly crossRibGrants: CrossRibGrants;
   // Invoke every activated rib's optional `dispose()` hook. Errors from one
   // disposer log a warning and never block the rest — shutdown must
   // make forward progress.
   disposeAll(): Promise<void>;
 }
 
-export type CrossRibGrants = Map<string, Map<string, Set<string>>>;
+export {
+  type CrossRibGrants,
+  isCrossRibGrantAllowed,
+  parseCrossRibGrants,
+  resolveCrossRibGrants,
+} from "@keelson/shared/config";
 
 const DEFAULT_CROSS_RIB_CALL_TIMEOUT_MS = 30_000;
 
@@ -652,6 +663,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     docsContributions,
     policies,
     tools,
+    crossRibGrants,
     async disposeAll() {
       for (const d of disposers) {
         try {
@@ -1108,80 +1120,6 @@ function parseCrossRibCallTimeoutMs(
   if (raw === undefined) return fallback;
   const n = typeof raw === "number" ? raw : Number(raw.trim());
   return Number.isInteger(n) && n > 0 ? n : fallback;
-}
-
-// The one place a grant enters the map, so the env string and the config object
-// normalize identically. Both sources are hand-authored, and a stray space is
-// invisible in either — an untrimmed `"osdu_security "` would parse, store, and
-// then never match the check, denying a grant the operator believes they set.
-function addCrossRibGrant(
-  grants: CrossRibGrants,
-  rawCaller: string,
-  rawTarget: string,
-  rawNames: readonly string[],
-): void {
-  const caller = rawCaller.trim();
-  const target = rawTarget.trim();
-  const names = rawNames.map((name) => name.trim()).filter((name) => name.length > 0);
-  if (!caller || !target || names.length === 0) return;
-  let targetGrants = grants.get(caller);
-  if (!targetGrants) {
-    targetGrants = new Map();
-    grants.set(caller, targetGrants);
-  }
-  let toolGrants = targetGrants.get(target);
-  if (!toolGrants) {
-    toolGrants = new Set();
-    targetGrants.set(target, toolGrants);
-  }
-  for (const name of names) {
-    toolGrants.add(name);
-  }
-}
-
-export function parseCrossRibGrants(raw: string | undefined): CrossRibGrants {
-  const grants: CrossRibGrants = new Map();
-  if (raw === undefined || raw.trim() === "") return grants;
-  for (const segment of raw.split(";")) {
-    const trimmed = segment.trim();
-    if (!trimmed) continue;
-    const [caller, target, tools, ...rest] = trimmed.split(":").map((part) => part.trim());
-    if (!caller || !target || !tools || rest.length > 0) continue;
-    const names = tools
-      .split(",")
-      .map((name) => name.trim())
-      .filter((name) => name.length > 0);
-    addCrossRibGrant(grants, caller, target, names);
-  }
-  return grants;
-}
-
-// The grants in force: config.json's `crossRibGrants` unioned with
-// KEELSON_CROSS_RIB_GRANTS. A union, not an override, because the two answer
-// different questions — config is the standing grant that has to survive a
-// restart from any shell, env is a grant for one session. Either alone is
-// sufficient; neither can revoke the other (remove the grant to revoke it).
-export function resolveCrossRibGrants(
-  config: KeelsonConfig,
-  env: Record<string, string | undefined> = process.env,
-): CrossRibGrants {
-  const grants = parseCrossRibGrants(env.KEELSON_CROSS_RIB_GRANTS);
-  for (const [caller, targets] of Object.entries(config.crossRibGrants ?? {})) {
-    for (const [target, names] of Object.entries(targets)) {
-      addCrossRibGrant(grants, caller.trim(), target.trim(), names);
-    }
-  }
-  return grants;
-}
-
-export function isCrossRibGrantAllowed(
-  grants: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>,
-  callerRibId: string,
-  targetRibId: string,
-  name: string,
-): boolean {
-  const tools = grants.get(callerRibId)?.get(targetRibId);
-  return tools?.has(name) === true || tools?.has("*") === true;
 }
 
 // Workflow prompt-node handler. Env-gated:

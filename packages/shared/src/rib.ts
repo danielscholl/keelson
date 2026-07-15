@@ -702,7 +702,25 @@ export const ribSummarySchema = z
   .strict();
 export type RibSummary = z.infer<typeof ribSummarySchema>;
 
-export const listRibsResponseSchema = z.object({ ribs: z.array(ribSummarySchema) }).strict();
+// The cross-rib grants the server resolved at boot, in config.json's
+// `{ caller: { target: [tool, …] } }` shape ("*" = every tool the target owns).
+// Declared here rather than imported from config.ts: this module reaches the
+// browser bundle and config.ts pulls in node:fs.
+export const crossRibGrantsWireSchema = z.record(
+  z.string(),
+  z.record(z.string(), z.array(z.string())),
+);
+export type CrossRibGrantsWire = z.infer<typeof crossRibGrantsWireSchema>;
+
+// `crossRibGrants` is optional so a server that predates the field still parses
+// here, and absent stays distinguishable from an empty map: the former means
+// "not reported", the latter "reported, and there are none".
+export const listRibsResponseSchema = z
+  .object({
+    ribs: z.array(ribSummarySchema),
+    crossRibGrants: crossRibGrantsWireSchema.optional(),
+  })
+  .strict();
 export type ListRibsResponse = z.infer<typeof listRibsResponseSchema>;
 
 // Wire shape for the POST /api/ribs/:id/action response — the discriminated

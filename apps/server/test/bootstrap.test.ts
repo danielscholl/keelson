@@ -32,6 +32,7 @@ import {
   WRITEBACK_REQUEST_SCHEMA_VERSION,
   WRITEBACK_RESPONSE_SCHEMA_VERSION,
 } from "@keelson/shared";
+import { crossRibGrantsFromConfig, serializeCrossRibGrants } from "@keelson/shared/config";
 import { clearRegistry, getRegisteredTools } from "@keelson/skills";
 import { DEFAULT_TOOL_DENYLIST } from "@keelson/workflows";
 import { z } from "zod";
@@ -112,6 +113,32 @@ describe("parseCrossRibGrants", () => {
     expect(isCrossRibGrantAllowed(grants, "caller", "provider", "probe_tool")).toBe(true);
     expect(isCrossRibGrantAllowed(grants, "caller", "other", "probe_tool")).toBe(false);
     expect(isCrossRibGrantAllowed(grants, "other", "provider", "probe_tool")).toBe(false);
+  });
+});
+
+// The map crosses to doctor over GET /api/ribs and is compared there against
+// config.json, so the two shapes have to survive the round trip intact.
+describe("serializeCrossRibGrants / crossRibGrantsFromConfig", () => {
+  test("serializes the resolved map into the config.json object shape", () => {
+    expect(serializeCrossRibGrants(parseCrossRibGrants("caller:provider:a,b;c:d:*"))).toEqual({
+      caller: { provider: ["a", "b"] },
+      c: { d: ["*"] },
+    });
+    expect(serializeCrossRibGrants(new Map())).toEqual({});
+  });
+
+  test("round-trips back to a map that gates identically", () => {
+    const original = parseCrossRibGrants("caller:provider:probe_tool;caller:other:*");
+    const restored = crossRibGrantsFromConfig(serializeCrossRibGrants(original));
+
+    expect(isCrossRibGrantAllowed(restored, "caller", "provider", "probe_tool")).toBe(true);
+    expect(isCrossRibGrantAllowed(restored, "caller", "provider", "nope")).toBe(false);
+    expect(isCrossRibGrantAllowed(restored, "caller", "other", "anything")).toBe(true);
+  });
+
+  test("normalizes a config object exactly as the env parser does", () => {
+    const grants = crossRibGrantsFromConfig({ " caller ": { " provider ": [" probe_tool "] } });
+    expect(isCrossRibGrantAllowed(grants, "caller", "provider", "probe_tool")).toBe(true);
   });
 });
 

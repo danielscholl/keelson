@@ -247,6 +247,28 @@ rather than failing loudly. The same grant gates both a rib's `callTool` and the
 tools projected onto a rib's agent turn, so a Chamber Mind that declares a
 capability backed by another rib needs this to reach it.
 
+Grants are matched by exact string, and a grant that matches nothing is silently
+inert: a misspelled rib id, or a tool name the target renamed since you wrote the
+grant, parses and stores just fine and then never fires. `keelson doctor` is where
+you see this. Its `ribs` section reads the grants back from the running server,
+lists the ones that server is enforcing, and warns when one is inert, naming the
+rib or the tool that does not exist.
+
+The server resolves grants once, at startup. Doctor reports what that server is
+actually holding rather than what your files say a fresh one would hold, so it
+catches the two ways the two drift apart. A grant you added to the config file but
+have not restarted into is denied right now, and doctor tells you to restart. A
+grant the running server holds that the config file does not name works right now,
+and a restart reproduces it only if the environment supplies it again, so doctor
+tells you to write it into the config file if you want it held regardless. Doctor
+will not tell you which source that grant came from, and will not promise that a
+restart revokes it: the server records only what it resolved, never where each
+grant originated, and a restart inherits the shell it starts from. A config file
+that fails to parse is reported as
+unreadable rather than read as granting nothing. All of this needs the server up:
+with it down there are no grants in force to observe, so doctor skips the section
+rather than guessing.
+
 ## MCP gateway
 
 The server exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io)
