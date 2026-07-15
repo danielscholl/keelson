@@ -30,23 +30,23 @@ export const CODEX_DEFAULT_MODEL = "" as const;
 // inaccessible model.
 const CODEX_MODEL_CATALOG: readonly ModelInfo[] = [
   {
-    id: "gpt-5.5",
-    displayName: "GPT-5.5",
-    description: "OpenAI's latest model via Codex. Needs `codex login` or OPENAI_API_KEY.",
+    id: "gpt-5.6-sol",
+    displayName: "Sol",
+    description: "Most capable Codex model for complex coding work.",
     costTier: "high",
     supports: { tools: true, reasoningEffort: true },
   },
   {
-    id: "gpt-5.4",
-    displayName: "GPT-5.4",
-    description: "Prior-generation Codex model.",
+    id: "gpt-5.6-terra",
+    displayName: "Terra",
+    description: "Balanced Codex model for general coding work.",
     costTier: "mid",
     supports: { tools: true, reasoningEffort: true },
   },
   {
-    id: "gpt-5.4-mini",
-    displayName: "GPT-5.4 mini",
-    description: "Faster, lower-cost Codex model.",
+    id: "gpt-5.6-luna",
+    displayName: "Luna",
+    description: "Fast Codex model for lightweight coding tasks.",
     costTier: "low",
     supports: { tools: true, reasoningEffort: true },
   },
