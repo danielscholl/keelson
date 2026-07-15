@@ -169,8 +169,35 @@ const listInputSchema = z.object({
 const runInputSchema = z.object({
   name: z.string().min(1),
   arguments: z.string().optional(),
+  // A workflow's declared `inputs:`, the CLI's `--inputs k=v`. Without these a
+  // workflow carrying real parameters is CLI-only; the run API underneath always
+  // took them, so the gap was this schema alone.
+  inputs: z.record(z.string().min(1), z.string()).optional(),
   project: z.string().min(1).optional(),
 });
+
+// `arguments` is sugar for the ARGUMENTS input, so a caller can name it twice.
+// Refuse rather than pick a winner, matching the CLI's rule verbatim: a caller
+// passing both is confused about which they meant, and either guess silently
+// discards half of what they wrote.
+function resolveRunInputs(
+  args: string | undefined,
+  supplied: Record<string, string> | undefined,
+): { ok: true; inputs: Record<string, string> } | { ok: false; message: string } {
+  const inputs = { ...supplied };
+  if (args !== undefined) {
+    if (Object.hasOwn(inputs, "ARGUMENTS")) {
+      return {
+        ok: false,
+        message: "conflicting ARGUMENTS: pass either `arguments` or `inputs.ARGUMENTS`, not both",
+      };
+    }
+    inputs.ARGUMENTS = args;
+  }
+  // ARGUMENTS stays present-and-empty when unnamed: $ARGUMENTS interpolation and the
+  // dispatch message both read it unconditionally (see formatDispatchMessage).
+  return { ok: true, inputs: { ARGUMENTS: "", ...inputs } };
+}
 
 // Reuse the HTTP resume body schema (nodeId + text ≤ 16 KiB + optional pauseId)
 // so the chat path enforces the SAME reply-size cap as POST /resume — just add
@@ -320,7 +347,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         .join("\n\n");
       emitResult(
         ctx,
-        `${matches.length} workflow(s):\n\n${rendered}\n\nRun one with workflow_run(name, arguments).`,
+        `${matches.length} workflow(s):\n\n${rendered}\n\nRun one with workflow_run(name), passing free-form text as arguments and any named parameters the description mentions as inputs.`,
       );
     },
   };
@@ -328,7 +355,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
   const workflowRun: ToolDefinition = {
     name: "workflow_run",
     description:
-      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). Optional `project` targets a registered project by id or exact name. Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
+      'Start a deterministic workflow by name (discover names with workflow_list). Prefer this whenever the user asks to run a workflow — do NOT execute the name as a shell command. Names are matched leniently (case- and hyphen-insensitive), so "smoketest" resolves to "smoke-test". `arguments` is free-form text passed to the workflow as $ARGUMENTS (e.g. an issue number or a task description). `inputs` is a map of the workflow\'s DECLARED named inputs, e.g. { lens: "release-status", service: "search" } — a workflow that takes them names them in its description. Use it whenever a workflow has named parameters rather than smuggling them through `arguments`. `arguments` is shorthand for inputs.ARGUMENTS, so pass one or the other, never both. Optional `project` targets a registered project by id or exact name. Returns when the run pauses for approval, finishes, or has run long enough to report progress. If it pauses, relay the plan to the user and resume it with workflow_respond.',
     inputSchema: runInputSchema,
     state_changing: true,
     async execute(input, ctx) {
@@ -337,6 +364,14 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
         emitResult(ctx, `invalid input: ${parsed.error.message}`, true);
         return;
       }
+      // Before resolving anything: a caller who named ARGUMENTS twice gets told so
+      // rather than having it surface after a project lookup and a preflight.
+      const resolvedInputs = resolveRunInputs(parsed.data.arguments, parsed.data.inputs);
+      if (!resolvedInputs.ok) {
+        emitResult(ctx, resolvedInputs.message, true);
+        return;
+      }
+      const runInputs = resolvedInputs.inputs;
       const requested = parsed.data.name;
       let project: Project | undefined;
       if (parsed.data.project !== undefined) {
@@ -394,7 +429,7 @@ export function createWorkflowChatTools(deps: CreateWorkflowChatToolsDeps): Tool
 
       const started = controller.startRun({
         name,
-        inputs: { ARGUMENTS: parsed.data.arguments ?? "" },
+        inputs: runInputs,
         workingDir,
         ...(project ? { project: { id: project.id, rootPath: project.rootPath } } : {}),
       });

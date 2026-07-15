@@ -228,6 +228,100 @@ nodes:
     expect(result.content).toContain("resolved-sentinel-456");
   });
 
+  test("workflow_run passes declared inputs through to the run", async () => {
+    // The gap this closes: a workflow with named parameters was CLI-only, because
+    // the tool schema took no `inputs` — never because the run couldn't carry them.
+    writeWorkflow(
+      "lens-refresh.yaml",
+      `name: lens-refresh
+description: |
+  Use when: re-composing a lens
+inputs:
+  lens:
+    description: the lens id
+    required: true
+  service:
+    description: the service
+nodes:
+  - id: ok
+    bash: echo "lens=$KEELSON_INPUTS_lens service=$KEELSON_INPUTS_service"
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute(
+      { name: "lens-refresh", inputs: { lens: "release-status", service: "search" } },
+      ctx,
+    );
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("lens=release-status service=search");
+  });
+
+  test("workflow_run refuses ARGUMENTS named twice rather than picking a winner", async () => {
+    // The CLI's rule, so one contract holds across surfaces: either guess would
+    // silently discard half of what the caller wrote.
+    writeWorkflow(
+      "echo-args.yaml",
+      `name: echo-args
+description: |
+  Use when: echoing
+nodes:
+  - id: ok
+    bash: echo "args=$KEELSON_ARGUMENTS"
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const { ctx, chunks } = makeCtx(cwd);
+    await run.execute(
+      { name: "echo-args", arguments: "from-arguments", inputs: { ARGUMENTS: "from-inputs" } },
+      ctx,
+    );
+
+    const result = lastToolResult(chunks);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("conflicting ARGUMENTS");
+    // Refused before starting: neither value silently won.
+    expect(result.content).not.toContain("completed successfully");
+  });
+
+  test("workflow_run accepts ARGUMENTS through either spelling, and defaults it to empty", async () => {
+    writeWorkflow(
+      "echo-args.yaml",
+      `name: echo-args
+description: |
+  Use when: echoing
+nodes:
+  - id: ok
+    bash: echo "args=[$KEELSON_ARGUMENTS]"
+`,
+    );
+    const { tools, cwd, dispose } = makeRig();
+    activeDispose = dispose;
+    const run = toolByName(tools, "workflow_run");
+
+    const viaInputs = makeCtx(cwd);
+    await run.execute({ name: "echo-args", inputs: { ARGUMENTS: "via-inputs" } }, viaInputs.ctx);
+    expect(lastToolResult(viaInputs.chunks).content).toContain("args=[via-inputs]");
+
+    const viaArguments = makeCtx(cwd);
+    await run.execute({ name: "echo-args", arguments: "via-arguments" }, viaArguments.ctx);
+    expect(lastToolResult(viaArguments.chunks).content).toContain("args=[via-arguments]");
+
+    // Neither named: ARGUMENTS stays present-and-empty, as every caller before
+    // this change relied on.
+    const neither = makeCtx(cwd);
+    await run.execute({ name: "echo-args" }, neither.ctx);
+    expect(lastToolResult(neither.chunks).content).toContain("args=[]");
+  });
+
   test("workflow_run reports available names when nothing matches", async () => {
     writeWorkflow(
       "alpha.yaml",
