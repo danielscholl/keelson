@@ -18,6 +18,7 @@ import {
   ribClientEffectSchema,
   ribIdFromKey,
 } from "@keelson/shared";
+import { type CrossRibGrants, serializeCrossRibGrants } from "@keelson/shared/config";
 import type { Hono } from "hono";
 import { type DynamicRegionStore, mergeSurfaceRegions } from "./dynamic-region-store.ts";
 import type { RibManifest } from "./ribs.ts";
@@ -30,6 +31,10 @@ export interface RibsRoutesDeps {
   // Runtime-registered regions merged onto each rib's static surfaces. Optional
   // so test rigs without one serve the boot manifest verbatim.
   dynamicRegionStore?: Pick<DynamicRegionStore, "regionsFor">;
+  // The boot-resolved grants this server enforces. Optional so a test rig that
+  // omits it serves a response with the field absent (= "not reported"), which
+  // is what an older server looks like to a client.
+  crossRibGrants?: CrossRibGrants;
 }
 
 // GET /api/ribs + POST /api/ribs/:id/action. The SPA discovers active ribs and
@@ -37,7 +42,7 @@ export interface RibsRoutesDeps {
 // inbound half of the rib back-channel — loopback-trusted (guarded by the
 // /api/* CORS gate); there is no capability-token enforcement yet.
 export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
-  const { manifests, probes, actionHandlers, dynamicRegionStore } = deps;
+  const { manifests, probes, actionHandlers, dynamicRegionStore, crossRibGrants } = deps;
 
   app.get("/api/ribs", async (c) => {
     const ribs: RibSummary[] = await Promise.all(
@@ -78,7 +83,12 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
         };
       }),
     );
-    return c.json(listRibsResponseSchema.parse({ ribs }));
+    return c.json(
+      listRibsResponseSchema.parse({
+        ribs,
+        ...(crossRibGrants ? { crossRibGrants: serializeCrossRibGrants(crossRibGrants) } : {}),
+      }),
+    );
   });
 
   app.post("/api/ribs/:id/action", async (c) => {

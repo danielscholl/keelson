@@ -751,6 +751,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     probes: ribs.probes,
     actionHandlers: ribs.actionHandlers,
     dynamicRegionStore,
+    crossRibGrants: ribs.crossRibGrants,
   });
   agentsRoutes(app, {
     agentListers: ribs.agentListers,

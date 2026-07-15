@@ -10,6 +10,7 @@ import {
   BUILT_IN_PROVIDER_IDS,
   type KeelsonConfig,
   loadKeelsonConfig,
+  readKeelsonConfig,
   resolveDefaultProvider,
   resolveEnabledProviders,
   resolveMcpSettings,
@@ -109,6 +110,62 @@ describe("loadKeelsonConfig", () => {
     } finally {
       rmSync(other, { recursive: true, force: true });
     }
+  });
+});
+
+// loadKeelsonConfig collapses "declares nothing" and "could not be read" into the
+// same {}. readKeelsonConfig keeps them apart for the callers that assert something
+// about the file's contents, without changing what loadKeelsonConfig hands anyone.
+describe("readKeelsonConfig", () => {
+  let home: string;
+  const envBefore = process.env.KEELSON_CONFIG;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "keelson-config-read-"));
+    delete process.env.KEELSON_CONFIG;
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    if (envBefore === undefined) delete process.env.KEELSON_CONFIG;
+    else process.env.KEELSON_CONFIG = envBefore;
+  });
+
+  function writeConfig(body: string): void {
+    writeFileSync(join(home, "config.json"), body);
+  }
+
+  test("a missing file declares nothing, which is not a failure", () => {
+    expect(readKeelsonConfig(home)).toEqual({ ok: true, config: {} });
+  });
+
+  test("a valid file returns its config", () => {
+    writeConfig(JSON.stringify({ defaultProvider: "claude" }));
+    expect(readKeelsonConfig(home)).toEqual({ ok: true, config: { defaultProvider: "claude" } });
+  });
+
+  test("invalid JSON is a failure carrying the path and the reason", () => {
+    writeConfig("{ not json");
+    const result = readKeelsonConfig(home);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a failure");
+    expect(result.path).toBe(join(home, "config.json"));
+    expect(result.reason).toContain("invalid JSON");
+  });
+
+  test("a shape mismatch is a failure naming where it failed", () => {
+    writeConfig(JSON.stringify({ crossRibGrants: { chamber: { osdu: "osdu_security" } } }));
+    const result = readKeelsonConfig(home);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a failure");
+    expect(result.reason).toContain("crossRibGrants.chamber.osdu");
+  });
+
+  // The tolerant contract every other caller depends on is unchanged: whatever
+  // readKeelsonConfig rejects, loadKeelsonConfig still degrades to {}.
+  test("loadKeelsonConfig still degrades every failure readKeelsonConfig reports", () => {
+    writeConfig(JSON.stringify({ providers: { claude: "yes" } }));
+    expect(readKeelsonConfig(home).ok).toBe(false);
+    expect(loadKeelsonConfig(home)).toEqual({});
   });
 });
 

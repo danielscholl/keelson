@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Rib, RibActionResult, RibAuthStatus, RibContext } from "@keelson/shared";
+import type { CrossRibGrants } from "@keelson/shared/config";
 import { Hono } from "hono";
 import { bootstrapRibs, bootstrapWorkflows, prepareRibWorkflows } from "../src/bootstrap.ts";
 import { createDynamicRegionStore } from "../src/dynamic-region-store.ts";
@@ -28,7 +29,11 @@ afterEach(() => {
   else process.env.KEELSON_RIBS = ribsEnv;
 });
 
-async function makeRig(opts?: { available?: Record<string, Rib>; token?: string }) {
+async function makeRig(opts?: {
+  available?: Record<string, Rib>;
+  token?: string;
+  crossRibGrants?: CrossRibGrants;
+}) {
   const manager = createSnapshotManager();
   const dynamicRegionStore = createDynamicRegionStore({ onChange: () => {} });
   const available = opts?.available ?? { v2: ribV2 };
@@ -36,6 +41,9 @@ async function makeRig(opts?: { available?: Record<string, Rib>; token?: string 
     available,
     snapshotManager: manager,
     dynamicRegionStore,
+    // Pinned even when empty: the default resolves the operator's real config.json
+    // + env, so a machine holding a durable grant would leak into these assertions.
+    crossRibGrants: opts?.crossRibGrants ?? new Map(),
     getRibCredential: (ribId, serviceId) =>
       Promise.resolve(
         opts?.token !== undefined && ribId === "v2" && serviceId === "token"
@@ -49,6 +57,7 @@ async function makeRig(opts?: { available?: Record<string, Rib>; token?: string 
     probes: ribs.probes,
     actionHandlers: ribs.actionHandlers,
     dynamicRegionStore,
+    crossRibGrants: ribs.crossRibGrants,
   });
   return { app, manager, ribs, dynamicRegionStore };
 }
@@ -79,6 +88,44 @@ describe("GET /api/ribs", () => {
     expect(rib.hasOnAction).toBe(true);
     expect(rib.acceptsIngest).toBe(false);
     expect(rib.auth).toEqual({ authenticated: true });
+  });
+
+  // Doctor validates what the server ENFORCES, which is only knowable if the
+  // server reports the map it froze at boot. The Map has no JSON form, so the
+  // nested config.json shape is the wire contract.
+  test("reports the cross-rib grants it resolved at boot", async () => {
+    const { app } = await makeRig({
+      crossRibGrants: new Map([["chamber", new Map([["osdu", new Set(["osdu_security", "*"])]])]]),
+    });
+    const res = await app.fetch(get("/api/ribs"));
+    const body = (await res.json()) as { crossRibGrants?: unknown };
+    expect(body.crossRibGrants).toEqual({ chamber: { osdu: ["osdu_security", "*"] } });
+  });
+
+  test("reports an empty grant map as {}, distinguishable from not reporting", async () => {
+    const { app } = await makeRig();
+    const res = await app.fetch(get("/api/ribs"));
+    const body = (await res.json()) as { crossRibGrants?: unknown };
+    expect(body.crossRibGrants).toEqual({});
+  });
+
+  // An absent field is how an older server looks to a client; it must not be
+  // confusable with a server reporting zero grants.
+  test("omits crossRibGrants entirely when the routes are wired without a map", async () => {
+    const ribs = await bootstrapRibs({
+      available: { v2: ribV2 },
+      snapshotManager: createSnapshotManager(),
+      crossRibGrants: new Map(),
+    });
+    const app = new Hono();
+    ribsRoutes(app, {
+      manifests: ribs.manifests,
+      probes: ribs.probes,
+      actionHandlers: ribs.actionHandlers,
+    });
+    const res = await app.fetch(get("/api/ribs"));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect("crossRibGrants" in body).toBe(false);
   });
 
   test("serializes acceptsIngest when a rib opts into ingest", async () => {

@@ -184,32 +184,46 @@ const keelsonConfigSchema = z.object({
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;
 
-// Read <home>/config.json (or KEELSON_CONFIG, when set). Tolerant by design: a
-// missing file, unreadable file, non-JSON body, or shape mismatch all degrade
-// to {} with a warning rather than throwing — config must never block boot.
-export function loadKeelsonConfig(home: string = resolveKeelsonHome()): KeelsonConfig {
+export type ReadKeelsonConfigResult =
+  | { readonly ok: true; readonly config: KeelsonConfig }
+  | { readonly ok: false; readonly path: string; readonly reason: string };
+
+// Read <home>/config.json (or KEELSON_CONFIG, when set), keeping the failure
+// instead of degrading it. A caller that asserts something about the file's
+// contents needs "declares nothing" (absent file → ok with {}) apart from "could
+// not be read", which loadKeelsonConfig collapses into the same {}.
+export function readKeelsonConfig(home: string = resolveKeelsonHome()): ReadKeelsonConfigResult {
   const path = process.env.KEELSON_CONFIG?.trim() || join(home, CONFIG_FILE_NAME);
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
-  } catch {
-    return {};
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, config: {} };
+    return { ok: false, path, reason: (err as Error).message };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.warn(`[keelson] ignoring ${path}: invalid JSON (${(err as Error).message}).`);
-    return {};
+    return { ok: false, path, reason: `invalid JSON (${(err as Error).message})` };
   }
   const result = keelsonConfigSchema.safeParse(parsed);
   if (!result.success) {
     const issue = result.error.issues[0];
     const where = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
-    console.warn(`[keelson] ignoring ${path}: ${issue?.message ?? "invalid shape"}${where}.`);
-    return {};
+    return { ok: false, path, reason: `${issue?.message ?? "invalid shape"}${where}` };
   }
-  return result.data;
+  return { ok: true, config: result.data };
+}
+
+// Read <home>/config.json (or KEELSON_CONFIG, when set). Tolerant by design: a
+// missing file, unreadable file, non-JSON body, or shape mismatch all degrade
+// to {} with a warning rather than throwing — config must never block boot.
+export function loadKeelsonConfig(home: string = resolveKeelsonHome()): KeelsonConfig {
+  const result = readKeelsonConfig(home);
+  if (result.ok) return result.config;
+  console.warn(`[keelson] ignoring ${result.path}: ${result.reason}.`);
+  return {};
 }
 
 export interface ResolveEnabledProvidersOptions {
@@ -310,6 +324,112 @@ export function resolveMcpSettings(
     toolDenylist: [...new Set([...(m.toolDenylist ?? []), ...envList])],
     requireToken: env.KEELSON_MCP_REQUIRE_TOKEN === "1" ? true : m.requireToken === true,
   };
+}
+
+// The grants in force, resolved: caller rib id → target rib id → granted tool
+// names ("*" = every tool the target owns).
+export type CrossRibGrants = Map<string, Map<string, Set<string>>>;
+
+// The one place a grant enters the map, so the env string and the config object
+// normalize identically. Both sources are hand-authored, and a stray space is
+// invisible in either — an untrimmed `"osdu_security "` would parse, store, and
+// then never match the check, denying a grant the operator believes they set.
+function addCrossRibGrant(
+  grants: CrossRibGrants,
+  rawCaller: string,
+  rawTarget: string,
+  rawNames: readonly string[],
+): void {
+  const caller = rawCaller.trim();
+  const target = rawTarget.trim();
+  const names = rawNames.map((name) => name.trim()).filter((name) => name.length > 0);
+  if (!caller || !target || names.length === 0) return;
+  let targetGrants = grants.get(caller);
+  if (!targetGrants) {
+    targetGrants = new Map();
+    grants.set(caller, targetGrants);
+  }
+  let toolGrants = targetGrants.get(target);
+  if (!toolGrants) {
+    toolGrants = new Set();
+    targetGrants.set(target, toolGrants);
+  }
+  for (const name of names) {
+    toolGrants.add(name);
+  }
+}
+
+export function parseCrossRibGrants(raw: string | undefined): CrossRibGrants {
+  const grants: CrossRibGrants = new Map();
+  if (raw === undefined || raw.trim() === "") return grants;
+  for (const segment of raw.split(";")) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    const [caller, target, tools, ...rest] = trimmed.split(":").map((part) => part.trim());
+    if (!caller || !target || !tools || rest.length > 0) continue;
+    const names = tools
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+    addCrossRibGrant(grants, caller, target, names);
+  }
+  return grants;
+}
+
+function addConfigGrants(grants: CrossRibGrants, config: CrossRibGrantsConfig | undefined): void {
+  for (const [caller, targets] of Object.entries(config ?? {})) {
+    for (const [target, names] of Object.entries(targets)) {
+      addCrossRibGrant(grants, caller, target, names);
+    }
+  }
+}
+
+// A `{ caller: { target: [tool, …] } }` object to the resolved map, normalized
+// exactly as the env parser normalizes its half. Serves both config.json's
+// `crossRibGrants` and the identically-shaped map GET /api/ribs reports.
+export function crossRibGrantsFromConfig(config: CrossRibGrantsConfig | undefined): CrossRibGrants {
+  const grants: CrossRibGrants = new Map();
+  addConfigGrants(grants, config);
+  return grants;
+}
+
+// The inverse: a resolved map back to the wire/config object shape.
+export function serializeCrossRibGrants(
+  grants: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>,
+): CrossRibGrantsConfig {
+  const out: CrossRibGrantsConfig = {};
+  for (const [caller, targets] of grants) {
+    const byTarget: Record<string, string[]> = {};
+    for (const [target, tools] of targets) {
+      byTarget[target] = [...tools];
+    }
+    out[caller] = byTarget;
+  }
+  return out;
+}
+
+// The grants in force: config.json's `crossRibGrants` unioned with
+// KEELSON_CROSS_RIB_GRANTS. A union, not an override, because the two answer
+// different questions — config is the standing grant that has to survive a
+// restart from any shell, env is a grant for one session. Either alone is
+// sufficient; neither can revoke the other (remove the grant to revoke it).
+export function resolveCrossRibGrants(
+  config: KeelsonConfig,
+  env: Record<string, string | undefined> = process.env,
+): CrossRibGrants {
+  const grants = parseCrossRibGrants(env.KEELSON_CROSS_RIB_GRANTS);
+  addConfigGrants(grants, config.crossRibGrants);
+  return grants;
+}
+
+export function isCrossRibGrantAllowed(
+  grants: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>,
+  callerRibId: string,
+  targetRibId: string,
+  name: string,
+): boolean {
+  const tools = grants.get(callerRibId)?.get(targetRibId);
+  return tools?.has(name) === true || tools?.has("*") === true;
 }
 
 // Tolerant read of the gateways array from a raw config object: keep the

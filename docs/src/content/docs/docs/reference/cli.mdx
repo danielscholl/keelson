@@ -180,7 +180,7 @@ command). The options below apply to the one-shot form.
 
 | Command | Does |
 | --- | --- |
-| `keelson doctor` | Probe the toolchain, server, database, auth, and workflows. `--strict` exits non-zero on warnings too. |
+| `keelson doctor` | Probe the toolchain, server, database, auth, workflows, and ribs, including whether the [cross-rib grants](../../guides/configuration/#cross-rib-grants) the running server holds still resolve. `--strict` exits non-zero on warnings too. |
 | `keelson update` | Update the harness and GitHub-sourced ribs in place. `--check` reports the available version; `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
 | `keelson worktree prune` | Remove leftover isolated-run worktrees. `--dry-run` lists candidates; `--force` also removes dirty ones. |
 | `keelson version` | Print the CLI, Bun, and schema versions, plus each installed rib's version. |

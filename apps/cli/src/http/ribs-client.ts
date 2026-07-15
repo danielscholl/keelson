@@ -24,11 +24,14 @@ async function errorMessage(res: Response, label: string): Promise<string> {
   return `${label} failed: ${res.status} ${res.statusText}`;
 }
 
-export async function listRibs(baseUrl: string): Promise<RibSummary[]> {
+export async function fetchRibs(baseUrl: string): Promise<ListRibsResponse> {
   const res = await fetch(`${normalizeBase(baseUrl)}/api/ribs`, {
     headers: defaultHeaders(baseUrl),
   });
   if (!res.ok) throw new HttpError(res.status, await errorMessage(res, "GET /api/ribs"));
-  const body = (await res.json()) as ListRibsResponse;
-  return body.ribs;
+  return (await res.json()) as ListRibsResponse;
+}
+
+export async function listRibs(baseUrl: string): Promise<RibSummary[]> {
+  return (await fetchRibs(baseUrl)).ribs;
 }
