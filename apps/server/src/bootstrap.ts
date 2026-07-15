@@ -95,7 +95,11 @@ import {
   type PolicyEngine,
   type RibPolicyContribution,
 } from "./policy-engine.ts";
-import { makeRibAgentTurn } from "./rib-agent-turn.ts";
+import {
+  type MakeRibAgentTurnDeps,
+  makeRibAgentTurn,
+  makeToolReachability,
+} from "./rib-agent-turn.ts";
 import { discoverRibs } from "./rib-discovery.ts";
 import {
   applyRibs,
@@ -320,17 +324,20 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   };
   const crossRibGrants = options.crossRibGrants ?? resolveCrossRibGrants(loadKeelsonConfig());
   const toolIndex = new Map<string, { ribId: string; def: ToolDefinition }>();
+  // One deps object feeds both seams below, so on the default (non-injected) turn path
+  // the pre-flight answer and the gate the turn applies read identical owner/grant/
+  // denylist inputs.
+  const turnDeps: MakeRibAgentTurnDeps = {
+    getToolOwner: (name) => toolIndex.get(name)?.ribId,
+    isTurnToolGranted: (caller, target, name) =>
+      isCrossRibGrantAllowed(crossRibGrants, caller, target, name),
+    ...(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {}),
+    ...(options.getUsageStore ? { getUsageStore: options.getUsageStore } : {}),
+  };
   // The CLI-backed agent-turn seam (test override via options.runAgentTurn). Harmless
   // until a rib actually calls ctx.runAgentTurn — it only shells a CLI then.
-  const runAgentTurn =
-    options.runAgentTurn ??
-    makeRibAgentTurn({
-      getToolOwner: (name) => toolIndex.get(name)?.ribId,
-      isTurnToolGranted: (caller, target, name) =>
-        isCrossRibGrantAllowed(crossRibGrants, caller, target, name),
-      ...(options.getPolicyEngine ? { getPolicyEngine: options.getPolicyEngine } : {}),
-      ...(options.getUsageStore ? { getUsageStore: options.getUsageStore } : {}),
-    });
+  const runAgentTurn = options.runAgentTurn ?? makeRibAgentTurn(turnDeps);
+  const getToolReachability = makeToolReachability(turnDeps);
   // RibContext.refreshWorkflow resolver. Fires the EXISTING run facade with the
   // SAME (cwd, {}) the heartbeat uses so a refresh collapses onto an in-flight
   // heartbeat run; `origin: "scheduled"` forces scope=undefined so the rib's own
@@ -625,6 +632,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(acquireMutationLockSeam ? { acquireMutationLock: acquireMutationLockSeam } : {}),
     getProviders,
     callTool,
+    getToolReachability,
   });
   for (const tool of tools) {
     const owner = toolOwners.get(tool.name);
