@@ -33,6 +33,10 @@ import {
 interface MockSession extends CopilotSessionLike {
   // `envelope` merges fields beside `data` (e.g. agentId on sub-agent events).
   emit(event: string, data?: Record<string, unknown>, envelope?: Record<string, unknown>): void;
+  // This session's own config. The handle's lastSessionConfig() is a single slot,
+  // so a scenario driving CONCURRENT sessions must read its own rather than the
+  // most recent one.
+  readonly config: Record<string, unknown> | null;
   readonly sent: Array<{ prompt: string }>;
   readonly aborted: boolean;
   readonly disconnected: boolean;
@@ -119,7 +123,7 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
   let lastSession: MockSession | null = null;
   let lastClient: MockClient | null = null;
 
-  const makeSession = (): MockSession => {
+  const makeSession = (config: Record<string, unknown> | null = null): MockSession => {
     const handlers = new Map<string, Set<(event: unknown) => void>>();
     const sent: Array<{ prompt: string }> = [];
     let aborted = false;
@@ -131,6 +135,7 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
 
     const session: MockSession = {
       sessionId: "mock-session-id",
+      config,
       get sent() {
         return sent;
       },
@@ -221,16 +226,18 @@ function makeMockSdk(opts: MockSdkOptions = {}): MockSdkHandle {
       return [];
     }
     async createSession(config?: unknown): Promise<CopilotSessionLike> {
-      lastSessionConfig = (config as Record<string, unknown> | null) ?? null;
+      const own = (config as Record<string, unknown> | null) ?? null;
+      lastSessionConfig = own;
       if (opts.createSessionError) throw opts.createSessionError;
-      const session = makeSession();
+      const session = makeSession(own);
       lastSession = session;
       return session;
     }
     async resumeSession(_sessionId: string, config?: unknown): Promise<CopilotSessionLike> {
-      lastSessionConfig = (config as Record<string, unknown> | null) ?? null;
+      const own = (config as Record<string, unknown> | null) ?? null;
+      lastSessionConfig = own;
       if (opts.createSessionError) throw opts.createSessionError;
-      const session = makeSession();
+      const session = makeSession(own);
       lastSession = session;
       return session;
     }
@@ -2323,36 +2330,36 @@ describe("CopilotProvider — Phase 3 S2 tool wiring", () => {
         ctx.emit({ type: "tool_result", toolUseId: "", content: turn });
       },
     };
+    // ONE provider and ONE sdk for both turns — production registers a
+    // process-lifetime singleton whose warm client is instance state, so two
+    // providers could not cross-talk even if the context were hoisted off the
+    // per-call closure. The scenario reads its OWN session's config and prompt
+    // for the same reason: a shared last-write slot would race here.
+    const sdk = makeMockSdk({
+      scenario: async (session) => {
+        const turn = session.sent[0]?.prompt ?? "unknown";
+        const projected = (
+          session.config?.tools as
+            | Array<{
+                handler: (args: unknown, invocation: { toolCallId: string }) => Promise<string>;
+              }>
+            | undefined
+        )?.[0];
+        if (!projected) throw new Error("missing projected tool");
+        await projected.handler({ turn }, { toolCallId: `call-${turn}` });
+        session.emit("session.idle");
+      },
+    });
+    const provider = new CopilotProvider({
+      getCredential: async () => "real-token",
+      clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
     const runTurn = (
       turn: string,
       turnContext: Readonly<Record<string, unknown>>,
-    ): Promise<MessageChunk[]> => {
-      let sdk: MockSdkHandle;
-      sdk = makeMockSdk({
-        scenario: async (session) => {
-          const projected = (
-            sdk.lastSessionConfig()?.tools as
-              | Array<{
-                  handler: (args: unknown, invocation: { toolCallId: string }) => Promise<string>;
-                }>
-              | undefined
-          )?.[0];
-          if (!projected) throw new Error("missing projected tool");
-          await projected.handler({ turn }, { toolCallId: `call-${turn}` });
-          session.emit("session.idle");
-        },
-      });
-      const provider = new CopilotProvider({
-        getCredential: async () => "real-token",
-        clientFactory: new CopilotClientFactory({ sdkLoader: loaderFor(sdk).load }),
-      });
-      return drain(
-        provider.sendQuery("hi", "/same-cwd", undefined, {
-          tools: [tool],
-          turnContext,
-        }),
-      );
-    };
+    ): Promise<MessageChunk[]> =>
+      drain(provider.sendQuery(turn, "/same-cwd", undefined, { tools: [tool], turnContext }));
+
     const alpha = { room: "alpha" } as const;
     const beta = { room: "beta" } as const;
 
