@@ -1394,9 +1394,6 @@ describe("applyRibs wiring", () => {
     expect(seenRibId).toBe("chamber");
   });
 
-  // A rib whose declared views/surfaces are live objects it mutates at runtime has no
-  // other way to tell the SPA: the manifest is fetched once and cached, so without this
-  // seam the client renders the boot-time descriptor until a reload.
   it("exposes invalidateManifest on the rib context when the root supplies one", () => {
     let captured: RibContext | undefined;
     const rib: Rib = {
