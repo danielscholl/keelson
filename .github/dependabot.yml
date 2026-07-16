@@ -143,6 +143,18 @@ updates:
           - version-update:semver-major
 
   - package-ecosystem: npm
+    directory: "/packages/mcp"
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - packages/mcp
+
+  - package-ecosystem: npm
     directory: "/packages/skills"
     cooldown:
       default-days: 7
