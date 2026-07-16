@@ -32,10 +32,6 @@ function surface(id: string, regionKey: string): RibSurfaceDescriptor {
   } as RibSurfaceDescriptor;
 }
 
-// applyRibs parses and ownership-checks these arrays once, at activation. A rib may hold
-// them live and mutate them afterwards (the contract's live-descriptor pattern), and the
-// manifest is served from those same arrays — so the check has to run again here or a
-// post-boot push would be served unvalidated.
 describe("GET /api/ribs — descriptor ownership is re-checked per request", () => {
   it("serves a rib's own views", () => {
     const views: RibViewDescriptor[] = [
@@ -87,9 +83,8 @@ describe("GET /api/ribs — descriptor ownership is re-checked per request", () 
     expect(ownedSurfaces(manifest({ surfaces: [banner] }))).toEqual([]);
   });
 
-  // Activation rejects a duplicate id outright, but a live append can reintroduce one.
-  // The client keys nav tabs by id and routes to the first match, so a served duplicate
-  // is unreachable and only shadows the real surface.
+  // First wins because the client routes a nav tab to the first id match, so a later
+  // duplicate is unreachable regardless.
   it("keeps the first surface of a duplicated id and drops the later one", () => {
     const surfaces = [
       surface("chamber", "rib:chamber:presence"),

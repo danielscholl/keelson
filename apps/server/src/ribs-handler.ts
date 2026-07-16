@@ -28,12 +28,9 @@ import { type DynamicRegionStore, mergeSurfaceRegions } from "./dynamic-region-s
 import { allRegions, isInNamespace, type RibManifest, ribNamespace } from "./ribs.ts";
 import { isAllowedOrigin } from "./server-context.ts";
 
-// `views`/`surfaces` are read from the rib's own arrays on every request, and a rib may
-// hold them live and mutate them at runtime (the contract's live-descriptor pattern), so
-// the activation-time parse + ownership check cannot be the last word. Re-check here and
-// drop only the offending descriptor: a late push must not serve another rib's key, and a
-// malformed one must not throw the response parse below and blank the manifest for every
-// rib — the same "one broken rib can't blank the panel" rule the auth probe follows.
+// These are the rib's own arrays, which it may mutate after activation checked them, so
+// the checks run again here. Drop only the offending descriptor: a malformed one would
+// otherwise throw the response parse below and blank the manifest for every rib.
 export function ownedViews(m: RibManifest): RibViewDescriptor[] {
   const namespace = ribNamespace(m.id);
   return m.views.filter((view) => {
