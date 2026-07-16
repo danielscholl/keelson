@@ -4227,10 +4227,8 @@ button.cvb-action-field-model:disabled {
   width: 100%;
 }
 /* A composing ghost wakes in place — solid edge, background lift — so authoring
-   visibly takes the seat without the card leaving its grid cell. It waking is NOT it
-   being picked: the accent ring belongs to .is-selected alone, so a board that mixes
-   selectable cards with an always-open authoring ghost (Chamber's bench) doesn't read
-   the ghost as a selection nothing can clear. The form it holds is the wake signal. */
+   visibly takes the seat without the card leaving its grid cell. The accent ring is
+   .is-selected's alone; a board may mix selectable cards with an authoring ghost. */
 .cvb-card--ghost:has(.cvb-action-form) {
   border-style: solid;
   border-color: var(--border);
