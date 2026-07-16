@@ -367,7 +367,7 @@ if (-not $InstallRegistry) { $InstallRegistry = $env:NPM_CONFIG_REGISTRY }
 if (-not $InstallRegistry) { $InstallRegistry = Get-NpmrcRegistry $NpmrcPath }
 if (-not $InstallRegistry) { $InstallRegistry = Get-NpmrcRegistry (Join-Path $env:USERPROFILE ".npmrc") }
 if (-not $InstallRegistry -and (Get-Command npm -ErrorAction SilentlyContinue)) {
-  $NpmRegistryOutput = & npm config get registry 2>$null | Select-Object -Last 1
+  $NpmRegistryOutput = & npm config get registry --location=global 2>$null | Select-Object -Last 1
   if ($LASTEXITCODE -eq 0 -and $NpmRegistryOutput) {
     $InstallRegistry = $NpmRegistryOutput.Trim()
   }
