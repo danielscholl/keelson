@@ -343,9 +343,12 @@ function Assert-NpmRegistry([string]$Registry) {
     -not $Value -or
     $Value -match "[\\r\\n]" -or
     -not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$RegistryUri) -or
-    $RegistryUri.Scheme -notin @("http", "https")
+    $RegistryUri.Scheme -notin @("http", "https") -or
+    $RegistryUri.UserInfo -or
+    $RegistryUri.Query -or
+    $RegistryUri.Fragment
   ) {
-    throw "npm registry must be a single-line absolute http(s) URL"
+    throw "npm registry must be a single-line absolute http(s) URL without credentials, query, or fragment"
   }
   return $Value
 }
@@ -384,9 +387,7 @@ if (
   $InstallRegistry = $MicrosoftCfsRegistry
   Write-Host "public npm registry is unavailable; using the Microsoft CFS feed"
 }
-if ($InstallRegistry.TrimEnd("/").ToLowerInvariant() -ne $PublicRegistry.TrimEnd("/").ToLowerInvariant()) {
-  Set-NpmrcRegistry $NpmrcPath $InstallRegistry
-}
+Set-NpmrcRegistry $NpmrcPath $InstallRegistry
 
 # Merge cli + shared into the home manifest every run, preserving any ribs
 # added via \`keelson rib add\` — the same env-driven bun one-liner install.sh
