@@ -606,7 +606,7 @@ export function createRunEventDispatcher(
   return (ribId, event) => {
     const handler = handlers.get(ribId);
     if (!handler) return;
-    const key = `${ribId} ${event.runId}`;
+    const key = `${ribId}\0${event.runId}`;
     const prior = chains.get(key) ?? Promise.resolve();
     const next = prior
       .then(() => handler(event))
