@@ -9,6 +9,7 @@ import { delimiter, join, resolve } from "node:path";
 import cliPkg from "../package.json" with { type: "json" };
 import {
   applyManifestVersion,
+  parseMissingVersions,
   parseTagVersion,
   readWorkflowContents,
   reconcileManagedWorkflows,
@@ -19,6 +20,31 @@ import {
 import { spawnEnv } from "./spawn-env.ts";
 
 describe("update pure helpers", () => {
+  test("parseMissingVersions extracts quarantined pins from bun install output", () => {
+    const stderr = [
+      "bun install v1.3.13 (bf2e2cec)",
+      'error: No version matching "0.80.6" found for specifier "@earendil-works/pi-tui" (but package exists)',
+      "",
+      'error: No version matching "^0.144.1" found for specifier "@openai/codex-sdk" (but package exists)',
+      "error: @earendil-works/pi-tui@0.80.6 failed to resolve",
+      "error: @openai/codex-sdk@^0.144.1 failed to resolve",
+    ].join("\n");
+    expect(parseMissingVersions(stderr)).toEqual([
+      { pkg: "@earendil-works/pi-tui", range: "0.80.6" },
+      { pkg: "@openai/codex-sdk", range: "^0.144.1" },
+    ]);
+  });
+
+  test("parseMissingVersions dedupes repeats and ignores unrelated failures", () => {
+    const repeated =
+      'error: No version matching "1.0.0" found for specifier "left-pad" (but package exists)\n'.repeat(
+        3,
+      );
+    expect(parseMissingVersions(repeated)).toEqual([{ pkg: "left-pad", range: "1.0.0" }]);
+    expect(parseMissingVersions('error: package "ghost" not found')).toEqual([]);
+    expect(parseMissingVersions("")).toEqual([]);
+  });
+
   test("parseTagVersion strips a leading v and rejects non-semver", () => {
     expect(parseTagVersion("v0.2.0")).toBe("0.2.0");
     expect(parseTagVersion("0.2.0")).toBe("0.2.0");
@@ -337,6 +363,113 @@ describe("keelson update (e2e against a mock releases API)", () => {
         "new shared workflow\n",
       );
       expect(readFileSync(join(overlayDir, "customize.yaml"), "utf8")).toBe("my customization\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  function failingBunHarness(root: string, stderrText: string): Record<string, string> {
+    const fakeBin = join(root, "bin");
+    mkdirSync(fakeBin, { recursive: true });
+    const helper = join(fakeBin, "fail-bun.ts");
+    writeFileSync(
+      helper,
+      [
+        "const args = process.argv.slice(2);",
+        'if (args[0] === "install") {',
+        '  process.stderr.write(process.env.KEELSON_TEST_INSTALL_STDERR ?? "");',
+        "  process.exit(1);",
+        "}",
+        "const realBun = process.env.KEELSON_REAL_BUN;",
+        "if (!realBun) process.exit(42);",
+        "const proc = Bun.spawn([realBun, ...args], {",
+        '  stdin: "inherit",',
+        '  stdout: "inherit",',
+        '  stderr: "inherit",',
+        "});",
+        "process.exit(await proc.exited);",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(fakeBin, "bun"),
+      '#!/usr/bin/env sh\nexec "$KEELSON_REAL_BUN" "$KEELSON_FAKE_BUN_HELPER" "$@"\n',
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(fakeBin, "bun.cmd"),
+      '@echo off\r\n"%KEELSON_REAL_BUN%" "%KEELSON_FAKE_BUN_HELPER%" %*\r\n',
+    );
+    return {
+      KEELSON_REAL_BUN: process.execPath,
+      KEELSON_FAKE_BUN_HELPER: helper,
+      KEELSON_TEST_INSTALL_STDERR: stderrText,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+    };
+  }
+
+  test("quarantined-version install failure exits REGISTRY_STALE naming the sanitized registry", async () => {
+    latestTag = "v999.0.2";
+    const root = mkdtempSync(join(tmpdir(), "keelson-update-stale-"));
+    const home = join(root, "home");
+    try {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        join(home, "package.json"),
+        `${JSON.stringify({
+          name: "keelson-home",
+          private: true,
+          dependencies: {
+            "@keelson/cli":
+              "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
+          },
+        })}\n`,
+      );
+      writeFileSync(join(home, ".npmrc"), "registry=https://user:hunter2@feed.example.com/npm/\n");
+      const { stdout, exitCode } = await runCli(["--json", "update"], {
+        ...env(home),
+        ...failingBunHarness(
+          root,
+          'error: No version matching "9.9.9" found for specifier "left-pad" (but package exists)\nerror: left-pad@9.9.9 failed to resolve\n',
+        ),
+      });
+      expect(exitCode).toBe(1);
+      const out = JSON.parse(stdout.trim());
+      expect(out.ok).toBe(false);
+      expect(out.code).toBe("REGISTRY_STALE");
+      expect(out.error).toContain("left-pad@9.9.9");
+      expect(out.error).toContain("https://feed.example.com/npm/");
+      expect(out.error).not.toContain("hunter2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("an unrelated install failure stays INSTALL_FAILED", async () => {
+    latestTag = "v999.0.3";
+    const root = mkdtempSync(join(tmpdir(), "keelson-update-instfail-"));
+    const home = join(root, "home");
+    try {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        join(home, "package.json"),
+        `${JSON.stringify({
+          name: "keelson-home",
+          private: true,
+          dependencies: {
+            "@keelson/cli":
+              "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
+          },
+        })}\n`,
+      );
+      const { stdout, exitCode } = await runCli(["--json", "update"], {
+        ...env(home),
+        ...failingBunHarness(root, "error: tarball download failed\n"),
+      });
+      expect(exitCode).toBe(1);
+      const out = JSON.parse(stdout.trim());
+      expect(out.ok).toBe(false);
+      expect(out.code).toBe("INSTALL_FAILED");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

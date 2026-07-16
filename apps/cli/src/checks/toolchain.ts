@@ -5,6 +5,8 @@
 import { runText as defaultRunText, type ExecResult } from "@keelson/shared/exec";
 import { type ResolvedBash, resolveBash as resolveBashDefault } from "@keelson/workflows";
 
+import { resolveKeelsonHome } from "../home.ts";
+import { DEFAULT_NPM_REGISTRY, displayRegistry, effectiveRegistry } from "../npm-registry.ts";
 import type { CategoryResult, CheckResult } from "./types.ts";
 
 export type RunText = (
@@ -16,6 +18,7 @@ export type RunText = (
 export interface ToolchainDeps {
   runText?: RunText;
   resolveBash?: () => ResolvedBash;
+  effectiveRegistry?: () => string;
 }
 
 interface Probe {
@@ -77,6 +80,23 @@ async function runBashCheck(exec: RunText, resolve: () => ResolvedBash): Promise
   return { name, status: "ok", detail: firstLine(r.data) };
 }
 
+// A non-default registry is a supported environment (corporate vetting feeds),
+// not a defect — always "ok"; the hint carries the quarantine caveat.
+function registryCheck(effective: () => string): CheckResult {
+  const url = displayRegistry(effective());
+  const isDefault = url.replace(/\/+$/, "") === DEFAULT_NPM_REGISTRY;
+  return {
+    name: "npm registry",
+    status: "ok",
+    detail: url,
+    ...(isDefault
+      ? {}
+      : {
+          hint: "non-default registry — a vetting feed may withhold freshly published versions until its quarantine hold elapses",
+        }),
+  };
+}
+
 export async function runToolchainCheck(deps: ToolchainDeps = {}): Promise<CategoryResult> {
   const exec = deps.runText ?? defaultRunText;
   const resolveBash = deps.resolveBash ?? resolveBashDefault;
@@ -91,5 +111,8 @@ export async function runToolchainCheck(deps: ToolchainDeps = {}): Promise<Categ
     }),
   );
   const bash = await runBashCheck(exec, resolveBash);
-  return { category: "toolchain", checks: [...probeChecks, bash] };
+  const registry = registryCheck(
+    deps.effectiveRegistry ?? (() => effectiveRegistry(resolveKeelsonHome())),
+  );
+  return { category: "toolchain", checks: [...probeChecks, bash, registry] };
 }
