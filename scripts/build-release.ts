@@ -270,9 +270,87 @@ $BinDir = if ($env:KEELSON_BIN_DIR) { $env:KEELSON_BIN_DIR } else { Join-Path $e
 $Base = "https://github.com/${repo}/releases/download/v$KeelsonVersion"
 $CliTarball = if ($env:KEELSON_CLI_TARBALL) { $env:KEELSON_CLI_TARBALL } else { "$Base/keelson-cli.tgz" }
 $SharedTarball = if ($env:KEELSON_SHARED_TARBALL) { $env:KEELSON_SHARED_TARBALL } else { "$Base/keelson-shared.tgz" }
+$PublicRegistry = "https://registry.npmjs.org/"
+$BlockedPublicRegistryHosts = @("registry.npmjs.org", "registry.yarnpkg.com", "registry.npmmirror.com")
+$MicrosoftCfsRegistry = "https://packagefeedproxy.microsoft.io/npm/"
 
 if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
   throw "keelson requires Bun on PATH - install it from https://bun.sh and re-run."
+}
+
+function Expand-NpmrcEnvironment([string]$Value) {
+  return [regex]::Replace(
+    $Value,
+    "\\$\\{([A-Za-z_][A-Za-z0-9_]*)(\\?)?\\}",
+    [System.Text.RegularExpressions.MatchEvaluator]{
+      param($Match)
+      $EnvironmentValue = [Environment]::GetEnvironmentVariable($Match.Groups[1].Value)
+      if ($null -ne $EnvironmentValue) { return $EnvironmentValue }
+      if ($Match.Groups[2].Success) { return "" }
+      return $Match.Value
+    }
+  )
+}
+
+function Get-NpmrcRegistry([string]$Path) {
+  if (-not (Test-Path $Path)) { return $null }
+  $RegistryMatches = [regex]::Matches(
+    [IO.File]::ReadAllText($Path),
+    "(?im)^[ \\t]*registry[ \\t]*=[ \\t]*['""]?([^'""\\r\\n]+)"
+  )
+  $Registry = $null
+  foreach ($RegistryMatch in $RegistryMatches) {
+    $Value = (Expand-NpmrcEnvironment $RegistryMatch.Groups[1].Value).Trim()
+    if ($Value) { $Registry = $Value }
+  }
+  return $Registry
+}
+
+function Set-NpmrcRegistry([string]$Path, [string]$Registry) {
+  $Line = "registry=$Registry"
+  $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  if (-not (Test-Path $Path)) {
+    [IO.File]::WriteAllText($Path, $Line + [Environment]::NewLine, $Utf8NoBom)
+    return
+  }
+  $Content = [IO.File]::ReadAllText($Path)
+  if ($Content -match "(?im)^[ \\t]*registry[ \\t]*=") {
+    $Content = [regex]::Replace(
+      $Content,
+      "(?im)^[ \\t]*registry[ \\t]*=.*$",
+      [System.Text.RegularExpressions.MatchEvaluator]{ return $Line }
+    )
+  } else {
+    $Content = $Content.TrimEnd() + [Environment]::NewLine + $Line + [Environment]::NewLine
+  }
+  [IO.File]::WriteAllText($Path, $Content, $Utf8NoBom)
+}
+
+function Test-NpmRegistry([string]$Registry) {
+  try {
+    $Ping = $Registry.TrimEnd("/") + "/-/ping"
+    Invoke-WebRequest -UseBasicParsing -Uri $Ping -TimeoutSec 10 | Out-Null
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Assert-NpmRegistry([string]$Registry) {
+  $Value = $Registry.Trim()
+  $RegistryUri = $null
+  if (
+    -not $Value -or
+    $Value -match "[\\r\\n]" -or
+    -not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$RegistryUri) -or
+    $RegistryUri.Scheme -notin @("http", "https") -or
+    $RegistryUri.UserInfo -or
+    $RegistryUri.Query -or
+    $RegistryUri.Fragment
+  ) {
+    throw "npm registry must be a single-line absolute http(s) URL without credentials, query, or fragment"
+  }
+  return $Value
 }
 
 New-Item -ItemType Directory -Force -Path $KeelsonHome | Out-Null
@@ -281,6 +359,36 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 # resolves from any directory, even if a relative KEELSON_HOME was supplied.
 $KeelsonHome = (Resolve-Path $KeelsonHome).Path
 $BinDir = (Resolve-Path $BinDir).Path
+
+# Bun does not read npm's machine/global config, so bridge npm's effective
+# registry into this managed home. An explicit Keelson override wins. On
+# Microsoft-managed devices, fall back to the approved CFS feed only when the
+# public registry is configured but blocked by device policy.
+$NpmrcPath = Join-Path $KeelsonHome ".npmrc"
+$InstallRegistry = $env:KEELSON_NPM_REGISTRY
+if (-not $InstallRegistry) { $InstallRegistry = $env:NPM_CONFIG_REGISTRY }
+if (-not $InstallRegistry) { $InstallRegistry = Get-NpmrcRegistry $NpmrcPath }
+if (-not $InstallRegistry) { $InstallRegistry = Get-NpmrcRegistry (Join-Path $env:USERPROFILE ".npmrc") }
+if (-not $InstallRegistry -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+  $NpmRegistryOutput = & npm config get registry --location=global 2>$null | Select-Object -Last 1
+  if ($LASTEXITCODE -eq 0 -and $NpmRegistryOutput) {
+    $InstallRegistry = $NpmRegistryOutput.Trim()
+  }
+}
+if (-not $InstallRegistry) { $InstallRegistry = $PublicRegistry }
+$InstallRegistry = Expand-NpmrcEnvironment $InstallRegistry
+$InstallRegistry = Assert-NpmRegistry $InstallRegistry
+
+$InstallRegistryUri = [Uri]$InstallRegistry
+$NormalizedRegistryHost = $InstallRegistryUri.DnsSafeHost.ToLowerInvariant()
+if (
+  $BlockedPublicRegistryHosts -contains $NormalizedRegistryHost -and
+  -not (Test-NpmRegistry $InstallRegistry)
+) {
+  $InstallRegistry = $MicrosoftCfsRegistry
+  Write-Host "public npm registry is unavailable; using the Microsoft CFS feed"
+}
+Set-NpmrcRegistry $NpmrcPath $InstallRegistry
 
 # Merge cli + shared into the home manifest every run, preserving any ribs
 # added via \`keelson rib add\` — the same env-driven bun one-liner install.sh
@@ -299,10 +407,13 @@ try {
 }
 
 Push-Location $KeelsonHome
+$SavedRegistry = $env:NPM_CONFIG_REGISTRY
+$env:NPM_CONFIG_REGISTRY = $InstallRegistry
 try {
   bun install
   if ($LASTEXITCODE -ne 0) { throw "bun install failed (exit $LASTEXITCODE)" }
 } finally {
+  $env:NPM_CONFIG_REGISTRY = $SavedRegistry
   Pop-Location
 }
 
