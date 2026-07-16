@@ -312,6 +312,20 @@ function Test-NpmRegistry([string]$Registry) {
   }
 }
 
+function Assert-NpmRegistry([string]$Registry) {
+  $Value = $Registry.Trim()
+  $RegistryUri = $null
+  if (
+    -not $Value -or
+    $Value -match "[\\r\\n]" -or
+    -not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$RegistryUri) -or
+    $RegistryUri.Scheme -notin @("http", "https")
+  ) {
+    throw "npm registry must be a single-line absolute http(s) URL"
+  }
+  return $Value
+}
+
 New-Item -ItemType Directory -Force -Path $KeelsonHome | Out-Null
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 # Canonicalize to absolute paths so the launcher (which bakes in KEELSON_HOME)
@@ -335,6 +349,7 @@ if (-not $InstallRegistry -and (Get-Command npm -ErrorAction SilentlyContinue)) 
   }
 }
 if (-not $InstallRegistry) { $InstallRegistry = $PublicRegistry }
+$InstallRegistry = Assert-NpmRegistry $InstallRegistry
 
 $NormalizedRegistry = $InstallRegistry.TrimEnd("/").ToLowerInvariant()
 if (
