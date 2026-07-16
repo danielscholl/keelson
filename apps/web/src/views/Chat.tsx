@@ -67,6 +67,7 @@ import { resizeTextareaToContent } from "../lib/autoGrowTextarea.ts";
 import { parsePublishedArtifact, publishedCanvasResult } from "../lib/chatCanvas.ts";
 import { type ChatSeed, OPENING_PROMPT } from "../lib/exploreSeed.ts";
 import { formatTokens, hasSpend } from "../lib/formatTokens.ts";
+import { deriveProjectNameFromPath, isAbsoluteLocalPath } from "../lib/projectPath.ts";
 import {
   filterSlashCommands,
   filterWorkflowNames,
@@ -1258,19 +1259,13 @@ export function Chat({
         return ["Projects:", ...rows].join("\n");
       };
 
-      const slugifyName = (raw: string): string =>
-        raw
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]+/g, "-")
-          .replace(/^[-_]+|[-_]+$/g, "");
-
       if (trimmed.length === 0) return ok(formatList(projects));
 
       // URLs use only `tokens[0]` (with `tokens[1]` reserved for an
       // optional explicit name). Paths consume the entire rest-of-input so
       // an absolute path with spaces survives.
       const isUrl = /^(https?:|git@|ssh:)/.test(trimmed);
-      const isPath = trimmed.startsWith("/") || trimmed.startsWith("~");
+      const isPath = isAbsoluteLocalPath(trimmed);
 
       if (isUrl) {
         const url = tokens[0]!;
@@ -1286,8 +1281,7 @@ export function Chat({
 
       if (isPath) {
         const rootPath = trimmed;
-        const segs = rootPath.replace(/\/$/, "").split("/");
-        const derived = slugifyName(segs[segs.length - 1] ?? "");
+        const derived = deriveProjectNameFromPath(rootPath);
         if (!derived) return fail("could not derive a project name from the path");
         const project = await createProject({ name: derived, rootPath });
         await refreshProjects();
