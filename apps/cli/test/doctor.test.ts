@@ -45,13 +45,43 @@ describe("toolchain check", () => {
       resolveBash: bashOkResolver,
     });
     expect(result.category).toBe("toolchain");
-    expect(result.checks).toHaveLength(2);
+    expect(result.checks).toHaveLength(3);
     const bun = result.checks.find((c) => c.name.startsWith("bun"));
     const bash = result.checks.find((c) => c.name.startsWith("bash"));
     expect(bun?.status).toBe("ok");
     expect(bun?.detail).toBe("1.2.21");
     expect(bash?.status).toBe("ok");
     expect(bash?.detail).toBe("GNU bash, version 5.2.21");
+  });
+
+  test("default npm registry → ok without hint", async () => {
+    const result = await runToolchainCheck({
+      runText: fakeRunText({
+        bun: execOk("1.2.21"),
+        [BASH_CMD]: execOk("GNU bash, version 5.2.21"),
+      }),
+      resolveBash: bashOkResolver,
+      effectiveRegistry: () => "https://registry.npmjs.org/",
+    });
+    const registry = result.checks.find((c) => c.name === "npm registry");
+    expect(registry?.status).toBe("ok");
+    expect(registry?.detail).toBe("https://registry.npmjs.org/");
+    expect(registry?.hint).toBeUndefined();
+  });
+
+  test("non-default npm registry → ok with a quarantine hint, never a warn", async () => {
+    const result = await runToolchainCheck({
+      runText: fakeRunText({
+        bun: execOk("1.2.21"),
+        [BASH_CMD]: execOk("GNU bash, version 5.2.21"),
+      }),
+      resolveBash: bashOkResolver,
+      effectiveRegistry: () => "https://feed.example.com/npm/",
+    });
+    const registry = result.checks.find((c) => c.name === "npm registry");
+    expect(registry?.status).toBe("ok");
+    expect(registry?.detail).toBe("https://feed.example.com/npm/");
+    expect(registry?.hint).toContain("quarantine");
   });
 
   test("bun missing → warn with install hint", async () => {

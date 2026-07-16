@@ -9,6 +9,7 @@ import { delimiter, join, resolve } from "node:path";
 import cliPkg from "../package.json" with { type: "json" };
 import {
   applyManifestVersion,
+  parseMissingVersions,
   parseTagVersion,
   readWorkflowContents,
   reconcileManagedWorkflows,
@@ -19,6 +20,31 @@ import {
 import { spawnEnv } from "./spawn-env.ts";
 
 describe("update pure helpers", () => {
+  test("parseMissingVersions extracts quarantined pins from bun install output", () => {
+    const stderr = [
+      "bun install v1.3.13 (bf2e2cec)",
+      'error: No version matching "0.80.6" found for specifier "@earendil-works/pi-tui" (but package exists)',
+      "",
+      'error: No version matching "^0.144.1" found for specifier "@openai/codex-sdk" (but package exists)',
+      "error: @earendil-works/pi-tui@0.80.6 failed to resolve",
+      "error: @openai/codex-sdk@^0.144.1 failed to resolve",
+    ].join("\n");
+    expect(parseMissingVersions(stderr)).toEqual([
+      { pkg: "@earendil-works/pi-tui", range: "0.80.6" },
+      { pkg: "@openai/codex-sdk", range: "^0.144.1" },
+    ]);
+  });
+
+  test("parseMissingVersions dedupes repeats and ignores unrelated failures", () => {
+    const repeated =
+      'error: No version matching "1.0.0" found for specifier "left-pad" (but package exists)\n'.repeat(
+        3,
+      );
+    expect(parseMissingVersions(repeated)).toEqual([{ pkg: "left-pad", range: "1.0.0" }]);
+    expect(parseMissingVersions('error: package "ghost" not found')).toEqual([]);
+    expect(parseMissingVersions("")).toEqual([]);
+  });
+
   test("parseTagVersion strips a leading v and rejects non-semver", () => {
     expect(parseTagVersion("v0.2.0")).toBe("0.2.0");
     expect(parseTagVersion("0.2.0")).toBe("0.2.0");

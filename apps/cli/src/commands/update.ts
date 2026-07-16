@@ -9,6 +9,7 @@ import { isWorkflowYaml } from "@keelson/workflows";
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
+import { effectiveRegistry } from "../npm-registry.ts";
 import { emit } from "../output.ts";
 import { probeServer } from "../server-probe.ts";
 
@@ -123,16 +124,63 @@ async function fetchReleases(): Promise<ReleaseInfo[]> {
   return (await res.json()) as ReleaseInfo[];
 }
 
-// Run `bun <args>` in the home. JSON mode discards bun's chatter (the envelope
-// is the only stdout); human mode inherits its progress — mirrors rib.ts.
-async function runBun(args: string[], home: string, quiet: boolean): Promise<number> {
+// Run `bun <args>` in the home. Output is always captured so a failure can be
+// diagnosed; human mode also streams it through live, JSON mode stays silent
+// (the envelope is the only stdout).
+async function runBun(
+  args: string[],
+  home: string,
+  quiet: boolean,
+): Promise<{ code: number; output: string }> {
   const proc = Bun.spawn(["bun", ...args], {
     cwd: home,
-    stdout: quiet ? "ignore" : "inherit",
-    stderr: quiet ? "ignore" : "inherit",
+    stdout: "pipe",
+    stderr: "pipe",
     windowsHide: true,
   });
-  return await proc.exited;
+  const tee = async (
+    stream: ReadableStream<Uint8Array>,
+    sink: NodeJS.WriteStream | null,
+  ): Promise<string> => {
+    const decoder = new TextDecoder();
+    let text = "";
+    for await (const chunk of stream) {
+      if (sink) sink.write(chunk);
+      text += decoder.decode(chunk, { stream: true });
+    }
+    return text + decoder.decode();
+  };
+  const [out, err, code] = await Promise.all([
+    tee(proc.stdout, quiet ? null : process.stdout),
+    tee(proc.stderr, quiet ? null : process.stderr),
+    proc.exited,
+  ]);
+  return { code, output: `${out}${err}` };
+}
+
+export interface MissingVersion {
+  pkg: string;
+  range: string;
+}
+
+// bun emits this when the registry's packument lacks a version that npmjs has —
+// the fingerprint of a quarantine/vetting feed that hasn't admitted a fresh
+// publish yet, as opposed to a genuinely wrong pin.
+const MISSING_VERSION_RE =
+  /No version matching "([^"]+)" found for specifier "([^"]+)" \(but package exists\)/g;
+
+export function parseMissingVersions(output: string): MissingVersion[] {
+  const seen = new Set<string>();
+  const missing: MissingVersion[] = [];
+  for (const m of output.matchAll(MISSING_VERSION_RE)) {
+    const range = m[1] as string;
+    const pkg = m[2] as string;
+    const key = `${pkg}@${range}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    missing.push({ pkg, range });
+  }
+  return missing;
 }
 
 function installedCliVersion(home: string): string | null {
@@ -278,10 +326,19 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     `${JSON.stringify(applyManifestVersion(manifest, REPO, latest), null, 2)}\n`,
   );
 
-  const installCode = await runBun(["install"], home, opts.json);
-  if (installCode !== 0) {
+  const install = await runBun(["install"], home, opts.json);
+  if (install.code !== 0) {
+    const missing = parseMissingVersions(install.output);
+    if (missing.length > 0) {
+      const list = missing.map((m) => `${m.pkg}@${m.range}`).join(", ");
+      fail(
+        `v${latest} pins versions your npm registry (${effectiveRegistry(home)}) has not admitted yet: ${list} — if the registry is a vetting feed that quarantines fresh releases, retry after the hold elapses or use your organization's exception process`,
+        "REGISTRY_STALE",
+        opts.json,
+      );
+    }
     fail(
-      `bun install failed (exit ${installCode}) after re-pinning to v${latest}`,
+      `bun install failed (exit ${install.code}) after re-pinning to v${latest}`,
       "INSTALL_FAILED",
       opts.json,
     );
@@ -301,10 +358,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
 
   const ribs = opts.ribs ? ribDependencies(manifest) : [];
   if (ribs.length > 0) {
-    const ribCode = await runBun(["update", ...ribs], home, opts.json);
-    if (ribCode !== 0) {
+    const ribInstall = await runBun(["update", ...ribs], home, opts.json);
+    if (ribInstall.code !== 0) {
       fail(
-        `keelson updated to v${latest}, but advancing ribs (${ribs.join(", ")}) failed (exit ${ribCode}) — re-run \`keelson update\``,
+        `keelson updated to v${latest}, but advancing ribs (${ribs.join(", ")}) failed (exit ${ribInstall.code}) — re-run \`keelson update\``,
         "RIB_UPDATE_FAILED",
         opts.json,
       );
