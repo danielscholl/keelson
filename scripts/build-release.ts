@@ -296,7 +296,7 @@ function Get-NpmrcRegistry([string]$Path) {
   if (-not (Test-Path $Path)) { return $null }
   $RegistryMatches = [regex]::Matches(
     [IO.File]::ReadAllText($Path),
-    "(?im)^\\s*registry\\s*=\\s*['""]?([^'""\\r\\n]+)"
+    "(?im)^[ \\t]*registry[ \\t]*=[ \\t]*['""]?([^'""\\r\\n]+)"
   )
   $Registry = $null
   foreach ($RegistryMatch in $RegistryMatches) {
@@ -314,10 +314,10 @@ function Set-NpmrcRegistry([string]$Path, [string]$Registry) {
     return
   }
   $Content = [IO.File]::ReadAllText($Path)
-  if ($Content -match "(?im)^\\s*registry\\s*=") {
+  if ($Content -match "(?im)^[ \\t]*registry[ \\t]*=") {
     $Content = [regex]::Replace(
       $Content,
-      "(?im)^\\s*registry\\s*=.*$",
+      "(?im)^[ \\t]*registry[ \\t]*=.*$",
       [System.Text.RegularExpressions.MatchEvaluator]{ return $Line }
     )
   } else {
