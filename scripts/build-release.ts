@@ -315,7 +315,11 @@ function Set-NpmrcRegistry([string]$Path, [string]$Registry) {
   }
   $Content = [IO.File]::ReadAllText($Path)
   if ($Content -match "(?im)^\\s*registry\\s*=") {
-    $Content = [regex]::Replace($Content, "(?im)^\\s*registry\\s*=.*$", $Line)
+    $Content = [regex]::Replace(
+      $Content,
+      "(?im)^\\s*registry\\s*=.*$",
+      [System.Text.RegularExpressions.MatchEvaluator]{ return $Line }
+    )
   } else {
     $Content = $Content.TrimEnd() + [Environment]::NewLine + $Line + [Environment]::NewLine
   }
