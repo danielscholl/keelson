@@ -155,8 +155,11 @@ coordination path.
    `layout` of an optional collapsible `header`, an optional `banner`, one or
    more `rows` of `columns`, and an optional collapsible `footer`. Only the
    header and footer collapse. Beyond `id`, `title`, and `layout`, the
-   descriptor carries three optional flags: `subtitle` adds a header subtitle
-   line; `projectScoped` opts the surface into the host's shared `ProjectChip`,
+   descriptor carries four optional flags: `heading` sets the page H1
+   independently of `title` (which only names the nav tab), so a surface opts
+   into an H1 — and may make it differ from the tab — rather than the host
+   deriving one; `subtitle` adds a header subtitle line; `projectScoped` opts
+   the surface into the host's shared `ProjectChip`,
    so on select the host dispatches the rib's `select-project` action with the
    chosen project id and a per-project rib need not hand-roll a picker; and
    `hideRegionActions` opts an authoring-console surface out of the host's

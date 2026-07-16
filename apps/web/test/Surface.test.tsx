@@ -843,17 +843,29 @@ describe("Surface", () => {
     );
   });
 
-  test("no heading renders no H1 — the tab title is not a fallback", () => {
+  test("a projectScoped surface renders the header for its chip, with no H1 fallback from the tab title", () => {
+    live("rib:squad:crew", board("Crew", "Members", 0));
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      projectScoped: true,
+      layout: { header: { key: "rib:squad:crew" }, rows: [] },
+    });
+    // `title` is the tab name only; without a `heading` there is no H1.
+    expect(container.querySelector(".surface-identity-title")).toBeNull();
+    // The header slot renders so the project chip has a home (ribId derives from the key).
+    expect(container.querySelector(".surface-identity")).not.toBeNull();
+  });
+
+  test("a projectScoped surface with no derivable owner renders no empty header", () => {
     const { container } = renderSurface({
       id: "squad",
       title: "Squad",
       projectScoped: true,
       layout: { rows: [] },
     });
-    // `title` is the tab name only; without a `heading` there is no H1.
-    expect(container.querySelector(".surface-identity-title")).toBeNull();
-    // projectScoped still renders the header slot so the project chip has a home.
-    expect(container.querySelector(".surface-identity")).not.toBeNull();
+    // No region key → no ribId → no chip. projectScoped alone must not emit an empty header.
+    expect(container.querySelector(".surface-identity")).toBeNull();
   });
 
   test("a surface with no heading, subtitle, or project chip renders no header block", () => {
