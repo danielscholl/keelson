@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { RibSurfaceDescriptor, RibViewDescriptor } from "@keelson/shared";
-import type { RibManifest } from "./ribs.ts";
+import { allRegions, type RibManifest } from "./ribs.ts";
 import { ownedSurfaces, ownedViews } from "./ribs-handler.ts";
 
 function manifest(over: Partial<RibManifest> = {}): RibManifest {
@@ -85,6 +85,20 @@ describe("GET /api/ribs — descriptor ownership is re-checked per request", () 
       },
     } as RibSurfaceDescriptor;
     expect(ownedSurfaces(manifest({ surfaces: [banner] }))).toEqual([]);
+  });
+
+  // Activation rejects a duplicate id outright, but a live append can reintroduce one.
+  // The client keys nav tabs by id and routes to the first match, so a served duplicate
+  // is unreachable and only shadows the real surface.
+  it("keeps the first surface of a duplicated id and drops the later one", () => {
+    const surfaces = [
+      surface("chamber", "rib:chamber:presence"),
+      surface("chamber", "rib:chamber:impostor"),
+      surface("lenses", "rib:chamber:lenses"),
+    ];
+    const kept = ownedSurfaces(manifest({ surfaces }));
+    expect(kept.map((s) => s.id)).toEqual(["chamber", "lenses"]);
+    expect(allRegions(kept[0]!.layout).map((r) => r.key)).toEqual(["rib:chamber:presence"]);
   });
 
   it("drops a malformed surface rather than letting it throw the response parse", () => {

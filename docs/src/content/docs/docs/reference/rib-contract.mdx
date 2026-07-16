@@ -88,7 +88,7 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 | `callTool?(targetRibId, name, args, opts?)` | `Promise<CallToolResult>` | Governed cross-rib invocation of a sibling rib's owned tool. Denied by default, requires an operator grant (the config file's `crossRibGrants` or `KEELSON_CROSS_RIB_GRANTS`, unioned) and policy approval, resolves to `{ ok: false }` instead of throwing, and is bounded by `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` (default 30000 ms). `opts.signal` forwards caller cancellation and `opts.timeoutMs` overrides the timeout for that call. |
 | `getToolReachability?(names)` | `readonly ToolReachability[]` | Pre-flight: would these tool names project onto a turn this rib runs? Synchronous, batched, and non-throwing, so a rib can check the whole set once (at room start, say) rather than discovering the gap from an agent that reports a capability it never had. Each verdict carries `name`, a `status`, and the owning rib as `ownerRibId` when a rib owns the tool. `reachable` means the floor clears the name; `cross-rib-denied` and `denylisted` mean the floor drops it. `unregistered` is not a denial: the harness registers no such tool, so the name still rides the turn as an allow-list entry and whether it resolves is the provider's answer. A provider SDK built-in like `Read` lands there, and so does a typo, so the caller decides which it is (it knows which names it expects a rib to own). When several could apply, the order is `unregistered`, then `cross-rib-denied`, then `denylisted`. It answers the operator floor only: registration, the cross-rib grant gate, and the denylist. It does not run the policy engine, whose projection is scoped to a resolved provider that does not exist yet at pre-flight, so `reachable` means the floor clears the tool, not that policy will allow it. |
 | `registerRegion?(surfaceId, region)` | `() => void` | Adds a snapshot-backed region to one of the rib's own surfaces at runtime, returning an unregister handle. Layout-only: the rib still registers the region's key, which must be namespaced. Also nudges the client to re-fetch the manifest. |
-| `invalidateManifest?()` | `void` | Nudges the client to re-fetch the manifest — the same nudge `registerRegion` gives, without registering a region. Needed only for the live-descriptor pattern below: the client fetches `GET /api/ribs` once and caches it, so a rib that mutates its own declared `views`/`surfaces` must call this or the client keeps rendering the boot-time descriptor until a reload. Call it after the mutation and only when a value really changed — every call re-fetches for every subscribed client. |
+| `invalidateManifest?()` | `void` | Nudges the client to re-fetch the manifest — the same nudge `registerRegion` gives, without registering a region. Needed only for the live-descriptor mutations described under `views` and `surfaces` below: the client fetches `GET /api/ribs` once and caches it, so a rib that appends a view, or changes a declared region's presentation or mount-defaults, must call this or the client keeps rendering the boot-time descriptor until a reload. Call it after the mutation and only when a value really changed — every call re-fetches for every subscribed client. |
 | `refreshWorkflow?(workflowName, inputs?)` | `Promise<void>` | Re-runs one of the rib's own snapshot-bound producer workflows by name on demand; fresh output republishes to the bound key through the same publish→recompose bridge the cadence heartbeat uses. Optional string `inputs` ride to the run — an unbound per-item producer republishes through the rib's own tools instead of a bound key. Resolves (never throws) for an unknown name or failed run. |
 | `runWorkflow?(definition, inputs?, opts?)` | `Promise<RibWorkflowRunResult>` | Runs an in-memory workflow DAG the rib hands in (the same shape `contributeWorkflows` uses) on the shared executor, with the provider, memory, and policy gates already wired. Optional `inputs` ride the run and `opts.cwd` sets the working dir, defaulting to the keelson home. Resolves to the run's terminal `RibWorkflowRunResult` (never throws) for an invalid definition or a failed run. The caller owns trusting the definition: its `bash`/`script` nodes run as given. |
 | `acquireWorkspace?(req)` | `Promise<WorkspaceLease>` | Acquires an isolated, dependency-prepared checkout for a project and returns `{ id, path, branch, release }`. The lease is durable and enumerable until released, so mutation-heavy rib work can keep its checkout separate from the source project. This is checkout isolation, not a sandbox; tool policy and cwd choices still belong to the caller. |
@@ -152,16 +152,19 @@ coordination path.
    mismatch. Views are plain metadata, so the manifest is built without invoking
    rib code.
 
-   The host re-reads `views` and `surfaces` per manifest request, so a rib may hold
-   them as live arrays it mutates at runtime — how a rib adds a per-subject `html`
-   view, since the host resolves a key's `canvasKind` by exact match. The client
-   caches the manifest, so a rib that does this must call
-   `ctx.invalidateManifest?.()` after the mutation or the client keeps rendering the
-   boot-time descriptor until a reload. The same parse and namespace checks that
-   run at activation run again per request, so a descriptor pushed later is held to
-   the identical rule: one that is malformed, or whose key is outside the rib's
-   namespace, is dropped from the response (and warned) rather than served — and
-   cannot fail the manifest for other ribs.
+   The host re-reads `views` per manifest request, so a rib may hold that array live
+   and append to it at runtime — how a rib adds a per-subject `html` view, since the
+   host resolves a key's `canvasKind` by exact match. A view is pure presentation
+   (`key`, `canvasKind`, `title`), so nothing about it is derived at boot and a live
+   one is a complete one. The client caches the manifest, so a rib that appends must
+   call `ctx.invalidateManifest?.()` afterwards or the client keeps rendering the
+   boot-time descriptor until a reload.
+
+   The activation parse and namespace checks run again per request, so a descriptor
+   pushed later is held to the identical rule: one that is malformed, whose key is
+   outside the rib's namespace, or that duplicates a surface id, is dropped from the
+   response (and warned) rather than served — and cannot fail the manifest for other
+   ribs.
 
 4. **`surfaces`** are declarative `RibSurfaceDescriptor`s: a top-level nav tab with
    a `layout` of an optional `header`, an optional `banner`, one or
@@ -211,6 +214,18 @@ coordination path.
    chrome, not the rib's own verbs) and while the region is collapsed, and the
    board-card affordances `fields`/`expanded`/`inline` are rejected by the
    schema (a menu has no form to collect fields with).
+
+   Surfaces are read per manifest request like `views`, but they are **not** live
+   the same way, because the host derives things from them once at boot: a region's
+   `workflow` name hoists into a set that gates whether a refresh may run, and
+   `cadenceMs` becomes a heartbeat schedule. So a rib may mutate a **declared**
+   region's presentation and mount-defaults at runtime — `collapsed`, `title`,
+   `glyph`, `byline` — and call `ctx.invalidateManifest?.()`, and the client picks
+   them up on its next mount. Adding a region at runtime, or changing a `workflow`
+   or `cadenceMs` after boot, does not work that way: `/api/ribs` would show it while
+   its refresh is rejected as unbound and no heartbeat is ever scheduled. Add regions
+   with `registerRegion` instead — it is the runtime path the workflow and heartbeat
+   consumers actually track.
 
 5. **`contributeWorkflows(ctx)`** returns `RibWorkflowContribution`s merged into
    the catalog at activation: `{ definition, bindSnapshotKey?, validate? }`.

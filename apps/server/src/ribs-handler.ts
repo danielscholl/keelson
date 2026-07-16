@@ -53,6 +53,7 @@ export function ownedViews(m: RibManifest): RibViewDescriptor[] {
 
 export function ownedSurfaces(m: RibManifest): RibSurfaceDescriptor[] {
   const namespace = ribNamespace(m.id);
+  const seen = new Set<string>();
   return m.surfaces.filter((surface) => {
     if (!ribSurfaceDescriptorSchema.safeParse(surface).success) {
       console.warn(`[keelson] rib '${m.id}': dropping a malformed surface descriptor`);
@@ -65,6 +66,14 @@ export function ownedSurfaces(m: RibManifest): RibSurfaceDescriptor[] {
       );
       return false;
     }
+    // Activation rejects a duplicate id outright; here the first one declared wins,
+    // because the client keys its nav tabs by id and routes to the first match — so a
+    // later duplicate is unreachable anyway, and serving it only shadows.
+    if (seen.has(surface.id)) {
+      console.warn(`[keelson] rib '${m.id}': dropping a duplicate surface id '${surface.id}'`);
+      return false;
+    }
+    seen.add(surface.id);
     return true;
   });
 }
