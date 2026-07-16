@@ -141,6 +141,24 @@ describe("extractJsonValue", () => {
     expect(performance.now() - started).toBeLessThan(200);
   });
 
+  // An unclosed `[` opens a legal array, so unlike `{` it survives the head
+  // check and must not rescan the suffix once per bracket.
+  test("scans a large narration of unclosed brackets without pathological slowdown", () => {
+    const raw = `${"[".repeat(20000)}\n{"verdict":"READY TO MERGE"}`;
+    const started = performance.now();
+    expect(extractJsonValue(raw)).toEqual({ verdict: "READY TO MERGE" });
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  test("returns undefined for unclosed brackets with no answer", () => {
+    expect(extractJsonValue("[".repeat(20000))).toBeUndefined();
+  });
+
+  // An inner bracket can still close where an outer one never does.
+  test("finds a closing inner span inside an unclosed outer bracket", () => {
+    expect(extractJsonValue('Note: [["a"]')).toEqual(["a"]);
+  });
+
   // A deeply nested payload must not be reparsed once per level.
   test("scans a narrated deeply nested payload without pathological slowdown", () => {
     const depth = 8000;

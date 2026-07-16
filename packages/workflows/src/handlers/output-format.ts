@@ -65,14 +65,15 @@ function tryParse(text: string): unknown {
 // combination, so nothing outside a candidate may be read as structure.
 function lastEmbeddedObject(text: string): unknown {
   let found: unknown;
+  const neverCloses = new Set<number>();
   let i = 0;
   while (i < text.length) {
     const ch = text[i];
-    if (ch !== "{" && ch !== "[") {
+    if ((ch !== "{" && ch !== "[") || neverCloses.has(i)) {
       i++;
       continue;
     }
-    const end = jsonSpanEnd(text, i);
+    const end = jsonSpanEnd(text, i, neverCloses);
     if (end === undefined) {
       i++;
       continue;
@@ -94,22 +95,30 @@ function lastEmbeddedObject(text: string): unknown {
 // Index of the bracket closing the JSON object/array opened at `start`, or
 // undefined when the text there can't be one. String state starts fresh at
 // `start` — a stray quote in the narration says nothing about this candidate.
-function jsonSpanEnd(text: string, start: number): number | undefined {
+// Brackets left open at end of text are added to `neverCloses`.
+function jsonSpanEnd(text: string, start: number, neverCloses: Set<number>): number | undefined {
   if (!opensJsonValue(text, start)) return undefined;
   const closers: string[] = [];
+  const opens: number[] = [];
   for (let i = start; i < text.length; i++) {
     const ch = text[i];
     if (ch === '"') {
       const closed = stringEnd(text, i);
       if (closed === undefined) return undefined;
       i = closed;
-    } else if (ch === "{") closers.push("}");
-    else if (ch === "[") closers.push("]");
-    else if (ch === "}" || ch === "]") {
+    } else if (ch === "{" || ch === "[") {
+      closers.push(ch === "{" ? "}" : "]");
+      opens.push(i);
+    } else if (ch === "}" || ch === "]") {
       if (closers.pop() !== ch) return undefined;
+      opens.pop();
       if (closers.length === 0) return i;
     }
   }
+  // Reaching the end leaves these brackets open for good: a scan starting at one
+  // would read the same text from the same state, so it would run out too. Without
+  // this a run of unclosed `[` rescans the whole suffix once per bracket.
+  for (const open of opens) neverCloses.add(open);
   return undefined;
 }
 
