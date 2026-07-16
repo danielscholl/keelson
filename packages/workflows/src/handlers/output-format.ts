@@ -21,9 +21,12 @@
  *    prompt handler emits as structured node output; the executor re-encodes
  *    it to a JSON string for downstream `$nodeId.output.field` substitution.
  *
- * Three-branch extract: parse-as-is, strip ```json fences and retry, else
- * `undefined` — on that miss the handler keeps the raw text as `kind: "text"`,
- * preserving the substitute layer's existing JSON-parse failure mode.
+ * Four-branch extract: parse-as-is, strip ```json fences and retry, scan for
+ * the last balanced JSON object/array embedded in the reply, else `undefined`.
+ * The scan is what makes `output_format` usable on a node with tools: the
+ * handler concatenates every text chunk of the turn, so a tool-using model's
+ * between-call narration lands in front of its final answer and the whole
+ * blob never parses on its own.
  */
 
 const SUFFIX_HEADER =
@@ -49,7 +52,7 @@ export function extractJsonValue(raw: string): unknown {
     if (inner !== undefined) return inner;
   }
 
-  return undefined;
+  return lastEmbeddedObject(trimmed);
 }
 
 function tryParse(text: string): unknown {
@@ -58,4 +61,47 @@ function tryParse(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The last `{…}` / `[…]` in `text` that parses to an object or array — the
+ * model's final answer, picked out from behind its narration.
+ *
+ * One string-aware pass, matching brackets on a stack and parsing each pair as
+ * it closes; the last pair to close wins, so an enclosing object beats the
+ * arrays nested in it and a later sibling beats an earlier one. Candidates are
+ * taken per closed pair rather than per top-level pair because narration
+ * routinely leaves a bracket open (a quoted `if (x) {`), which would otherwise
+ * bury every answer that follows it.
+ */
+function lastEmbeddedObject(text: string): unknown {
+  let found: unknown;
+  const opens: number[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{" || ch === "[") {
+      opens.push(i);
+    } else if (ch === "}" || ch === "]") {
+      const open = opens.pop();
+      if (open === undefined) continue;
+      if (ch !== (text[open] === "{" ? "}" : "]")) {
+        opens.length = 0;
+        continue;
+      }
+      const value = tryParse(text.slice(open, i + 1));
+      if (value !== null && typeof value === "object") found = value;
+    }
+  }
+  return found;
 }
