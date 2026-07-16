@@ -29,8 +29,11 @@ generated branch, so it cannot infer the target PR from the current branch.
 
 ### What it needs
 
-- `gh` CLI authenticated with **repo write** scope and **GraphQL** access.
-- `jq` on `PATH` — several bash nodes use it (Git-for-Windows Bash does not ship it).
+- `gh` or `glab` authenticated with **write** scope on the repo. The bundled
+  `forge` shim resolves whichever is present and reads unresolved threads the
+  same way on either, through review-thread GraphQL on GitHub and MR
+  discussions on GitLab.
+- `jq` on `PATH`, since several bash nodes use it (Git-for-Windows Bash does not ship it).
 - A GitHub Copilot subscription (`provider: copilot`, `model: auto`).
 - A running Keelson server (`keelson start`) for approval pauses.
 
@@ -60,9 +63,9 @@ them against the ledger. The gate exits 0 only when all three hold:
 
 - the latest CI watch reports `CI_STATUS: PASS`;
 - `post-ci-threads.json` (the post-CI re-fetch) contains zero new, unhandled
-  threads — so a thread a bot adds *during* the CI watch blocks the round; and
-- `post-ci-retry.json` is empty — no fixed thread is still awaiting a successful
-  `resolveReviewThread`.
+  threads, so a thread a bot adds *during* the CI watch blocks the round; and
+- `post-ci-retry.json` is empty, meaning no fixed thread is still awaiting a
+  successful `resolveReviewThread`.
 
 If any of those fails, the gate fails into another round.
 
@@ -72,7 +75,7 @@ ledger entry are *new* (written to `threads.json` for full triage/reply/resolve)
 and a thread whose ledger entry is `replied: true, resolved: false, action:
 "fixed"` is a *resolve-retry* (written to `resolve-retry.json` for a resolve-only
 retry). `reply-resolve` records a thread into the ledger as soon as its reply is
-posted — carrying `replied: true` and `resolved: <bool>` — so a fixed thread
+posted (carrying `replied: true` and `resolved: <bool>`), so a fixed thread
 whose resolve failed is never re-replied, only re-resolved. That prevents
 duplicate replies while allowing a deliberate `wontfix`, `question`,
 `already-addressed`, or `invalid` reply to stay open on GitHub without forcing
@@ -86,11 +89,11 @@ without context.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS` — an explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
+| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS`. An explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
 | `fetch-state` | bash | Resolves the PR, refuses forks by emitting `is_fork`, checks out the head commit detached on round 1, pages the `reviewThreads` GraphQL query (via a shared `thread-lib.sh` it also sources into `post-ci-state`), and splits unresolved threads against `handled.json` into `threads.json` (new), `resolve-retry.json` (fixed-but-unresolved), and `all-unresolved-threads.json`, emitting `has_new`, `new_count`, `open_count`, and `retry_count`. |
 | `refuse-fork` | cancel | Stops the run cleanly when `fetch-state` reports a fork PR. |
 | `triage` | prompt | Runs only when there are new threads. Reads the cited code and classifies each new thread as `actionable-code-change`, `question`, `wontfix`, `already-addressed`, or `invalid`. |
-| `triage-gate` | bash | Fails closed if triage ids do not exactly match the fetched new-thread set, then emits `has_new`. |
+| `triage-gate` | bash | Fails closed if triage ids do not exactly match the fetched new-thread set, then emits `contentious` (how many verdicts are not `actionable-code-change`), `needs_review`, and `has_new`. |
 | `approve` | approval | Pauses once per round that has new threads, presenting all triage verdicts and capturing operator feedback before any branch mutation or public reply. |
 | `fix` | prompt | Applies actionable fixes on the detached PR head, runs narrow checks, commits by file name, composes replies for every new thread, and writes `results.json`. |
 | `validate` | bash | Soft-runs the discovered `verify.sh`, reporting `VALIDATION_STATUS` for the fixer. |
@@ -100,7 +103,7 @@ without context.
 | `reply-gate` | bash | Fail-closed honesty check: validates `results.json` against triage (a reply for every new thread, valid actions, and a `fixed` action only with actionable triage and a commit) before any public reply or resolve. |
 | `reply-resolve` | prompt | Replies on every result entry, resolves only entries marked `action: "fixed"`, writes `outcome.json`, and records each replied thread into `handled.json` with `replied: true` and `resolved: <bool>` (a fixed thread whose resolve failed is recorded `resolved: false`, never re-replied). |
 | `resolve-retry` | bash | Runs every round. For each `resolve-retry.json` thread (a prior-round fixed thread whose resolve failed), re-calls `resolveReviewThread` **without posting a reply** and flips its ledger entry to `resolved: true` on success. |
-| `await-ci` | bash | Runs every round, even when there were no new threads. Watches PR checks, reruns failed jobs at most once per head SHA (a per-SHA marker in `$ARTIFACTS_DIR` survives rounds, so an unchanged commit is not rerun on every round), and emits `CI_STATUS`. |
+| `await-ci` | bash | Runs every round, even when there were no new threads. Gates on the **required** checks discovered by `forge pr required-checks`; non-required checks are only logged for the audit trail. Reruns failed jobs at most once per head SHA (a per-SHA marker in `$ARTIFACTS_DIR` survives rounds, so an unchanged commit is not rerun on every round), and emits `CI_STATUS`. Discovery failure emits `UNKNOWN`; with no required checks configured it falls back to waiting for all checks to settle; a PR with no checks at all emits `UNKNOWN`, never a pass. |
 | `post-ci-state` | bash | Runs after the CI watch. Re-fetches GitHub's live unresolved threads and re-diffs them against the (resolve-retry-updated) ledger into `post-ci-threads.json` (new) and `post-ci-retry.json` (pending retries), so the gate reflects threads that arrived during the watch. Short-circuits to empty sets on a fork. |
 | `converge-check` | bash | Gate node. Succeeds only when CI passed, `post-ci-threads.json` has zero new threads, and `post-ci-retry.json` has zero pending resolve-retries. |
 | `report` | prompt | Runs after convergence or exhaust approval and writes the operator summary, counting resolutions from the ledger's `resolved` boolean rather than `action`. |
@@ -112,7 +115,7 @@ thread. All other dispositions get a reply and are recorded as handled by this
 run, but they stay unresolved on GitHub. If a fixed thread's reply posts but its
 `resolveReviewThread` call fails, the ledger records it `resolved: false`;
 `resolve-retry` re-attempts the resolve on later rounds without posting a second
-reply, so the ledger's `resolved` boolean — not `action` — is the true measure
+reply, so the ledger's `resolved` boolean, not `action`, is the true measure
 of what closed.
 </Aside>
 

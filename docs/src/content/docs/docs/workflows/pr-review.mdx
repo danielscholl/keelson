@@ -11,7 +11,7 @@ import { Aside } from "@astrojs/starlight/components";
 runs only the lanes that apply, then posts its findings as a **GitHub review with
 line-anchored inline comments and suggestion blocks**. It is read-only over the
 code by construction: every lane is capped to `Read`, `Glob`, and `Grep`, and the
-only step that touches the PR is the final `gh api …/reviews` call. To fix an
+only step that touches the PR is the final `forge pr review-batch` call. To fix an
 issue rather than review one, reach for [fix-issue](../fix-issue/); `pr-review`
 never mutates the branch it reads.
 
@@ -27,7 +27,8 @@ keelson workflow run pr-review --inputs ARGUMENTS="review pr 42"
 keelson workflow run pr-review --inputs ARGUMENTS="review this pr"   # from a PR branch
 ```
 
-It needs the `gh` CLI authenticated against the repo and a Copilot subscription
+It needs `gh` or `glab` authenticated against the repo (the bundled `forge` shim
+resolves whichever is present) and a Copilot subscription
 (it pins `provider: copilot`, `model: auto`). It posts a comment but never
 pushes code, so it needs no approval gate and no running server.
 
@@ -71,9 +72,9 @@ distills the lanes into the findings worth posting.
 | `error-handling` | prompt | Audits new and changed failure paths. Gated on the classifier. |
 | `test-coverage` | prompt | Checks that changed source has matching test changes. Gated on the classifier. |
 | `docs-impact` | prompt | Flags user-facing changes (flags, env vars, APIs) with no doc update. Gated on the classifier. |
-| `triage` | prompt | **`model: claude-opus-4.8`**, the `one_success` join: de-dupes the lanes, keeps only CRITICAL/HIGH/MEDIUM at ≥80 confidence, and emits a `verdict` (READY TO MERGE / NEEDS NITS / NEEDS FIXES) with typed `findings`. |
-| `build-review` | bash | Offline: anchors each finding to a line on the diff's new side and builds the GitHub Reviews API payload with `suggestion` blocks. No network. |
-| `post-review` | bash | Posts the payload via `gh api …/reviews` as line-anchored inline comments. |
+| `triage` | prompt | **`model: claude-opus-4.8`**, `allowed_tools: [Read, Glob, Grep]`, the `one_success` join: de-dupes the lanes, then adversarially refutes each candidate against `diff.patch` and the source. Survivors are CONFIRMED (confidence 85-100) or PLAUSIBLE (capped at 79, below the ≥80 keep line), so only CONFIRMED CRITICAL/HIGH/MEDIUM findings post. Emits a `verdict` (READY TO MERGE / NEEDS NITS / NEEDS FIXES) with typed `findings`. |
+| `build-review` | bash | Offline: anchors each finding to a line on the diff's new side and builds the review payload. A `suggestion` block is **gated**: an empty fix, or one byte-identical to the anchored line, posts as prose only. No network. |
+| `post-review` | bash | Posts the payload with `forge pr review-batch` as line-anchored inline comments. **Idempotent by content hash**: skips when a prior review already carries the same `keelson:pr-review:<hash>` marker. |
 
 ### The parts worth a second look
 
@@ -97,14 +98,23 @@ model's built-in write and shell tools are denied mid-review regardless of what
 it tries. The only write in the whole run is the final posted review.
 
 **A triage gate stands between the lanes and the PR.** The lanes are
-deliberately noisy; an opus `triage` judge then de-dupes their findings, scores
-each for confidence that it is a real, in-scope issue, and keeps only
-CRITICAL/HIGH/MEDIUM findings at 80% confidence or higher. Everything less
-certain is dropped as noise, and every LOW-severity finding is dropped outright.
-Only what survives is anchored to a diff line and posted, so the PR author sees a
-short list of high-signal inline comments rather than four lanes' worth of raw
-output. `build-review` also hashes the kept findings' stable identity into the
-review body, so a re-review does not repost the same comments.
+deliberately noisy; an opus `triage` judge then de-dupes their findings and
+actively tries to **refute** each one. It is the only judge granted
+`allowed_tools: [Read, Glob, Grep]`, because refuting a claim means reading
+`diff.patch` and the source it points at. A candidate dies when the code already
+handles the case, the claim misreads the diff, the issue predates the PR, or a
+linter or CI gate already catches it. A survivor is **CONFIRMED** when the judge
+traced the failure in real code (confidence 85-100), or **PLAUSIBLE** when it
+could not refute the claim but could not trace it either.
+
+The cap is the mechanic worth copying: PLAUSIBLE is pinned at 79, deliberately
+one point below the `>= 80` keep line, so an untraced finding cannot post. The
+judge must re-trace a PLAUSIBLE candidate up to CONFIRMED or let it drop. That
+turns "I could not disprove it" into silence rather than a comment, and it is why
+the PR author sees a short list of traced defects instead of four lanes' worth of
+raw output. LOW-severity findings are dropped outright. `build-review` also
+hashes the kept findings' stable identity into the review body, so a re-review
+does not repost the same comments.
 
 **The lanes share state through files, not prompts.** `scope` writes the diff to
 `$ARTIFACTS_DIR/diff.patch` and each lane reads that file directly, rather than
@@ -129,9 +139,9 @@ single failed lane does not strand the review. Whatever ran gets triaged.
   node, and a section feeding `triage`'s prompt.
 - **Change the rail.** Widen `allowed_tools` if a lane needs to run a linter, or
   keep it read-only and let `triage` recommend commands instead.
-- **Repoint the output.** Swap the `post-review` step's `gh api …/reviews` call
-  for a different sink (a single summary comment, a file) without touching the
-  classify, lane, or triage logic.
+- **Repoint the output.** Swap the `post-review` step's `forge pr review-batch`
+  call for a different sink (a single summary comment, a file) without touching
+  the classify, lane, or triage logic.
 
 ## Related
 

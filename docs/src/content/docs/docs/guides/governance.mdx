@@ -159,6 +159,15 @@ duplicate prompts. A malformed policy is dropped with a warning rather than
 crashing the boot. See [`contributePolicies`](../../reference/rib-contract/) in
 the contract for the shape.
 
+On the `workflow` surface the context also carries `workflowName` and `nodeId`,
+so a rib policy can scope itself to its own workflow's node rather than firing on
+every workflow-surface turn. Both are absent everywhere else, and on an older
+harness that does not populate them, where they read as `undefined`: a check like
+`ctx.workflowName === "x"` does not error there, it simply stops matching, so a
+policy that must hold against an older harness decides for itself whether an
+absent name fails open or closed. The [rib contract](../../reference/rib-contract/)
+documents the full context.
+
 ## Cross-rib grants
 
 A rib can reach another rib's tool, but crossing that line is **default-deny**:
@@ -177,12 +186,12 @@ opts a caller in per `caller → target → tool`, in `config.json`:
 
 `"*"` covers every tool the target owns; list tool names to narrow it. The
 equivalent `KEELSON_CROSS_RIB_GRANTS` env string (`caller:target:tool` triples,
-`;`-separated) unions with the config rather than replacing it — prefer the config
+`;`-separated) unions with the config rather than replacing it. Prefer the config
 file for a standing grant, since an env-only grant lapses whenever the server
 starts from a shell that never exported it.
 
 The grant gates **two** paths: a rib's explicit `callTool`, and the tools
-projected onto a rib's agent turn. The second is easy to miss — a rib that offers
+projected onto a rib's agent turn. The second is easy to miss: a rib that offers
 an agent a capability backed by a sibling rib's tools gets nothing without the
 grant, and the tools are simply absent rather than refused, so the agent cannot
 report the gap. If a rib's agent says it lacks a tool you expected it to have,

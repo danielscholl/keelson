@@ -72,8 +72,11 @@ the split is deliberate.
 
 **The workflow layer substitutes text.** In prompts, `when:` conditions, and
 cancel reasons, `$nodeId.output` expands to the upstream node's output, and
-`$nodeId.output.field` reaches into JSON output. Workflow inputs arrive the
-same way, as `$inputs.<name>` and `$ARGUMENTS`. Substitution is a single
+`$nodeId.output.field` reaches into JSON output. In prompt and cancel bodies,
+workflow inputs arrive the same way, as `$inputs.<name>` and `$ARGUMENTS`. A
+`when:` condition resolves only `$nodeId.output` refs, and the loader rejects
+`$inputs.*`, `$ARGUMENTS`, or `$ARTIFACTS_DIR` inside one outright: encode the
+input through a producer node and compare its output. Substitution is a single
 atomic pass: if an upstream output happens to contain `$something.output`,
 the marker stays literal text instead of expanding again.
 

@@ -6,7 +6,7 @@
 
 **The hull. Not the crew.**
 
-Keelson is a local control plane for coding agents. It turns agent work from one-off chats into durable, repeatable runs with persistent state, workflows with deterministic control flow, provider routing, governance hooks, and a typed extension model called ribs. The same capabilities are available from a browser UI, an interactive terminal, one-shot prompts, or MCP.
+Keelson is a local agent harness for coding agents. It turns agent work from one-off chats into durable, repeatable runs with persistent state, workflows with deterministic control flow, provider routing, governance hooks, and a typed extension model called ribs. The same capabilities are available from a browser UI, an interactive terminal, one-shot prompts, or MCP.
 
 Most agent tools are centered on a single chat, model, or editor session. Keelson is centered on the local harness around that work. It keeps state on your machine, captures repeatable tasks as workflows, and lets new capabilities attach as packages instead of forks.
 
@@ -15,7 +15,7 @@ Most agent tools are centered on a single chat, model, or editor session. Keelso
 | Capability | What it means |
 | --- | --- |
 | Durable agent workbench | Agent chats, workflow runs, outputs, projects, and memory survive beyond a single terminal, editor, or model session. |
-| Local control plane | One server on your laptop owns the state, providers, API, WebSocket stream, MCP endpoint, and browser UI. |
+| Local harness | One server on your laptop owns the state, providers, API, WebSocket stream, MCP endpoint, and browser UI. |
 | One capability set, many surfaces | Reach the same tools, conversations, and runs from a browser UI, an interactive terminal, one-shot prompts, or the MCP endpoint. |
 | Provider routing | Route Copilot, Claude, Codex, Pi, and OpenAI-compatible gateways through one interface. |
 | Deterministic workflows | Capture repeatable work with explicit control flow, approvals, shell/script steps, and agent turns. |
@@ -145,7 +145,7 @@ keelson gateway add ollama http://localhost:11434/v1 --model qwen3
 
 ## Use Keelson from other agents with MCP
 
-Your own coding agent can drive Keelson through the local MCP endpoint — running workflows, reading Keelson's own docs, and using any installed rib's tools — so it orchestrates work through Keelson instead of doing everything itself.
+Your own coding agent can drive Keelson through the local MCP endpoint (running workflows, reading Keelson's own docs, and using any installed rib's tools), so it orchestrates work through Keelson instead of doing everything itself.
 
 Wire one up with a single command from the repo you want to work in:
 
@@ -153,7 +153,7 @@ Wire one up with a single command from the repo you want to work in:
 keelson connect claude      # or: copilot, codex, or 'all'
 ```
 
-`keelson connect` registers the MCP server in that agent's own config and drops a small, portable skill into that agent's skills directory that teaches the agent when to reach for Keelson. It writes machine-global by default, so the connection follows you into every repo; pass `--local` to commit repo-scoped wiring into the current directory instead. It records what it wrote, so reversing it is exact — it removes only Keelson's own entry, never a sibling MCP server or a file you already had:
+`keelson connect` registers the MCP server in that agent's own config and drops a small, portable skill into that agent's skills directory that teaches the agent when to reach for Keelson. It writes machine-global by default, so the connection follows you into every repo; pass `--local` to commit repo-scoped wiring into the current directory instead. It records what it wrote, so reversing it is exact: it removes only Keelson's own entry, never a sibling MCP server or a file you already had:
 
 ```bash
 keelson connect --list      # show what's connected
@@ -177,7 +177,7 @@ http://127.0.0.1:7878/api/mcp
 }
 ```
 
-Once connected, an agent can call `keelson_docs` to learn how Keelson behaves — no source checkout required — and `workflow_list` / `workflow_run` to drive automations. The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
+Once connected, an agent can call `keelson_docs` to learn how Keelson behaves (no source checkout required) and `workflow_list` / `workflow_run` to drive automations. The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
 
 ## CLI reference
 
@@ -257,7 +257,7 @@ Keelson does not store provider secrets in the home directory. Provider keys and
 ## Acknowledgments
 
 Keelson's workflow engine borrows its schema and DAG concepts from
-[Archon](https://github.com/coleam00/Archon) (MIT, by Cole Medin) — a
+[Archon](https://github.com/coleam00/Archon) (MIT, by Cole Medin), a
 well-thought-out project; go support his
 [channel](https://www.youtube.com/@ColeMedin). Full attribution lives in
 [NOTICE](NOTICE).

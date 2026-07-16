@@ -82,14 +82,14 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 | `getExec()` | `RibExec` | Process-exec with `runJSON` / `runText`. The one accessor always present. |
 | `getSnapshotManager?()` | `SnapshotManager` | Register, recompose, and read snapshot keys. Scoped to the rib's namespace. |
 | `getCredential?(serviceId)` | `Promise<string \| undefined>` | Read-only, resolves a keychain entry under `rib_<id>_<serviceId>`. A rib cannot read another rib's secrets. |
-| `getDataDir?()` | `string` | Absolute path to the rib's private data directory under the keelson home, named `rib-<id>` (`<home>/rib-<rib-id>`). Path only — the rib creates it when it writes. |
+| `getDataDir?()` | `string` | Absolute path to the rib's private data directory under the keelson home, named `rib-<id>` (`<home>/rib-<rib-id>`). Path only: the rib creates it when it writes. |
 | `getProjects?()` | `readonly Project[]` | Read-only snapshot of the operator's project records at call time. Use to offer project selection and pass `project.rootPath` as `RibAgentTurnRequest.cwd`. Optional: a rib built against an older harness degrades to no project selection, not a throw. |
-| `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, credentials, and the policy engine's `tool_result`/response redaction (the same gates the workflow `prompt` path runs). The return `RibAgentTurn` is a settled dual-handle `{ stream, result }`: `result` settles once with the authoritative text, usage, and status and is the source of truth, while `stream` forwards the provider's live `tool_use`/`tool_result` chunks so a rib can trace a mind mid-turn, then appends the settled text tail and a terminal `done`. A rib takes text from `result`, never reassembling it from the stream. `req.allowedDirectories` sets confinement roots for the turn: file and shell path args that canonicalize outside them are denied by the always-registered `builtin:path_confinement` policy (realpath-resolved against symlink escape), while empty or absent leaves the turn unconfined; it is wired on this rib-agent-turn path via the Claude provider. Requested sibling rib tools project only when an operator grant clears `caller:target:tool` (or the target's `*`), from the config file's `crossRibGrants` or `KEELSON_CROSS_RIB_GRANTS` — the two union; self tools and SDK built-ins keep their existing behavior. |
+| `runAgentTurn?(req)` | `RibAgentTurn` | Runs one agent turn through the provider registry, inheriting provider pinning, credentials, and the policy engine's `tool_result`/response redaction (the same gates the workflow `prompt` path runs). The return `RibAgentTurn` is a settled dual-handle `{ stream, result }`: `result` settles once with the authoritative text, usage, status, `sessionId`, and `stopReason`, and is the source of truth, while `stream` forwards the provider's live `tool_use`/`tool_result` chunks so a rib can trace a long-running turn as it happens, then appends the settled text tail and a terminal `done`. When the result carries an error, the stream also yields an `{ type: "error", message }` chunk before that terminal `done`, so a rib draining the stream never reads a failed turn as clean. A rib takes text from `result`, never reassembling it from the stream. `result.stopReason` is `"end" \| "max_tokens" \| "aborted" \| "timeout" \| "error"`: it mirrors `status` on aborted, timeout, and error, while `end` and `max_tokens` come only from providers that report a finish reason. Derive truncation as `stopReason === "max_tokens"`. `result.sessionId` is the provider's backend session id; pass it as the next turn's `req.resumeSessionId` to continue that session. Providers whose `capabilities.sessionResume` is false ignore it. `req.turnContext` is an opaque `Readonly<Record<string, unknown>>` forwarded verbatim to tool executions and interpreted only by the calling rib. An omitted `req.cwd` runs the turn in a neutral non-repo directory, never the server's cwd. A turn that omits `tools`, `allowedTools`, and `disallowedTools` is locked to `allowedTools: []`, text-only rather than reaching ambient built-ins. A turn that carries real spend records a usage-ledger row under the owning rib id. `req.allowedDirectories` sets confinement roots for the turn: file and shell path args that canonicalize outside them are denied by the always-registered `builtin:path_confinement` policy (realpath-resolved against symlink escape), while empty or absent leaves the turn unconfined; it is wired on this rib-agent-turn path via the Claude provider. Requested sibling rib tools project only when an operator grant clears `caller:target:tool` (or the target's `*`), from the config file's `crossRibGrants` or `KEELSON_CROSS_RIB_GRANTS`, and the two union; self tools and SDK built-ins keep their existing behavior. |
 | `callTool?(targetRibId, name, args, opts?)` | `Promise<CallToolResult>` | Governed cross-rib invocation of a sibling rib's owned tool. Denied by default, requires an operator grant (the config file's `crossRibGrants` or `KEELSON_CROSS_RIB_GRANTS`, unioned) and policy approval, resolves to `{ ok: false }` instead of throwing, and is bounded by `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` (default 30000 ms). `opts.signal` forwards caller cancellation and `opts.timeoutMs` overrides the timeout for that call. |
-| `getToolReachability?(names)` | `readonly ToolReachability[]` | Pre-flight: would these tool names project onto a turn this rib runs? Synchronous, batched, and non-throwing, so a rib can check the whole set once (at room start, say) rather than discovering the gap from an agent that reports a capability it never had. Each verdict carries `name`, a `status`, and the owning rib as `ownerRibId` when a rib owns the tool. `reachable` means the floor clears the name; `cross-rib-denied` and `denylisted` mean the floor drops it. `unregistered` is not a denial: the harness registers no such tool, so the name still rides the turn as an allow-list entry and whether it resolves is the provider's answer. A provider SDK built-in like `Read` lands there, and so does a typo, so the caller decides which it is (it knows which names it expects a rib to own). When several could apply, the order is `unregistered`, then `cross-rib-denied`, then `denylisted`. It answers the operator floor only: registration, the cross-rib grant gate, and the denylist. It does not run the policy engine, whose projection is scoped to a resolved provider that does not exist yet at pre-flight, so `reachable` means the floor clears the tool, not that policy will allow it. |
+| `getToolReachability?(names)` | `readonly ToolReachability[]` | Pre-flight: would these tool names project onto a turn this rib runs? Synchronous, batched, and non-throwing, so a rib can check the whole set once (at start-up, say) rather than discovering the gap from an agent that reports a capability it never had. Each verdict carries `name`, a `status`, and the owning rib as `ownerRibId` when a rib owns the tool. `reachable` means the floor clears the name; `cross-rib-denied` and `denylisted` mean the floor drops it. `unregistered` is not a denial: the harness registers no such tool, so the name still rides the turn as an allow-list entry and whether it resolves is the provider's answer. A provider SDK built-in like `Read` lands there, and so does a typo, so the caller decides which it is (it knows which names it expects a rib to own). When several could apply, the order is `unregistered`, then `cross-rib-denied`, then `denylisted`. It answers the operator floor only: registration, the cross-rib grant gate, and the denylist. It does not run the policy engine, whose projection is scoped to a resolved provider that does not exist yet at pre-flight, so `reachable` means the floor clears the tool, not that policy will allow it. |
 | `registerRegion?(surfaceId, region)` | `() => void` | Adds a snapshot-backed region to one of the rib's own surfaces at runtime, returning an unregister handle. Layout-only: the rib still registers the region's key, which must be namespaced. Also nudges the client to re-fetch the manifest. |
-| `invalidateManifest?()` | `void` | Nudges the client to re-fetch the manifest — the same nudge `registerRegion` gives, without registering a region. Needed only for the live-descriptor mutations described under `views` and `surfaces` below: the client fetches `GET /api/ribs` once and caches it, so a rib that appends a view, or changes a declared region's presentation or mount-defaults, must call this or the client keeps rendering the boot-time descriptor until a reload. Call it after the mutation and only when a value really changed — every call re-fetches for every subscribed client. |
-| `refreshWorkflow?(workflowName, inputs?)` | `Promise<void>` | Re-runs one of the rib's own snapshot-bound producer workflows by name on demand; fresh output republishes to the bound key through the same publish→recompose bridge the cadence heartbeat uses. Optional string `inputs` ride to the run — an unbound per-item producer republishes through the rib's own tools instead of a bound key. Resolves (never throws) for an unknown name or failed run. |
+| `invalidateManifest?()` | `void` | Nudges the client to re-fetch the manifest, the same nudge `registerRegion` gives, without registering a region. Needed only for the live-descriptor mutations described under `views` and `surfaces` below: the client fetches `GET /api/ribs` once and caches it, so a rib that appends a view, or changes a declared region's presentation or mount-defaults, must call this or the client keeps rendering the boot-time descriptor until a reload. Call it after the mutation and only when a value really changed: every call re-fetches for every subscribed client. |
+| `refreshWorkflow?(workflowName, inputs?)` | `Promise<void>` | Re-runs one of the rib's own snapshot-bound producer workflows by name on demand; fresh output republishes to the bound key through the same publish→recompose bridge the cadence heartbeat uses. Optional string `inputs` ride to the run; an unbound per-item producer republishes through the rib's own tools instead of a bound key. Resolves (never throws) for an unknown name or failed run. |
 | `runWorkflow?(definition, inputs?, opts?)` | `Promise<RibWorkflowRunResult>` | Runs an in-memory workflow DAG the rib hands in (the same shape `contributeWorkflows` uses) on the shared executor, with the provider, memory, and policy gates already wired. Optional `inputs` ride the run and `opts.cwd` sets the working dir, defaulting to the keelson home. Resolves to the run's terminal `RibWorkflowRunResult` (never throws) for an invalid definition or a failed run. The caller owns trusting the definition: its `bash`/`script` nodes run as given. |
 | `acquireWorkspace?(req)` | `Promise<WorkspaceLease>` | Acquires an isolated, dependency-prepared checkout for a project and returns `{ id, path, branch, release }`. The lease is durable and enumerable until released, so mutation-heavy rib work can keep its checkout separate from the source project. This is checkout isolation, not a sandbox; tool policy and cwd choices still belong to the caller. |
 | `acquireMutationLock?(req)` | `Promise<MutationLock>` | Acquires an advisory per-project lock before mutating a project's live checkout directly. A second holder fails fast naming the current holder and purpose. Lease-held worktrees are isolated and do not need it. |
@@ -99,7 +99,7 @@ satisfies the interface, and a rib that needs an absent accessor fails closed.
 | `getSidecar?()` | `Promise<unknown> \| unknown` | Opaque resolver; each rib narrows and casts at its own edge. |
 
 Before a rib mutates a project's live checkout (`Project.rootPath`) directly, it
-should hold `ctx.acquireMutationLock` for that project — or lease an isolated
+should hold `ctx.acquireMutationLock` for that project, or lease an isolated
 worktree with `ctx.acquireWorkspace`. Retain the returned handle and release it
 in a `finally` so the lock never leaks, and fail closed when the seam is absent
 (an older harness) rather than mutating unguarded:
@@ -153,8 +153,8 @@ coordination path.
    rib code.
 
    The host re-reads `views` per manifest request, so a rib may hold that array live
-   and append to it at runtime — how a rib adds a per-subject `html` view, since the
-   host resolves a key's `canvasKind` by exact match. A view is pure presentation
+   and append to it at runtime, which is how a rib adds a per-subject `html` view,
+   since the host resolves a key's `canvasKind` by exact match. A view is pure presentation
    (`key`, `canvasKind`, `title`), so nothing about it is derived at boot and a live
    one is a complete one. The client caches the manifest, so a rib that appends must
    call `ctx.invalidateManifest?.()` afterwards or the client keeps rendering the
@@ -163,7 +163,7 @@ coordination path.
    The activation parse and namespace checks run again per request, so a descriptor
    pushed later is held to the identical rule: one that is malformed, whose key is
    outside the rib's namespace, or that duplicates a surface id, is dropped from the
-   response (and warned) rather than served — and cannot fail the manifest for other
+   response (and warned) rather than served, and cannot fail the manifest for other
    ribs.
 
 4. **`surfaces`** are declarative `RibSurfaceDescriptor`s: a top-level nav tab with
@@ -175,7 +175,7 @@ coordination path.
    Beyond `id`, `title`, and `layout`, the
    descriptor carries four optional flags: `heading` sets the page H1
    independently of `title` (which only names the nav tab), so a surface opts
-   into an H1 — and may make it differ from the tab — rather than the host
+   into an H1 (and may make it differ from the tab) rather than the host
    deriving one; `subtitle` adds a header subtitle line; `projectScoped` opts
    the surface into the host's shared `ProjectChip`,
    so on select the host dispatches the rib's `select-project` action with the
@@ -187,8 +187,8 @@ coordination path.
    collapsed?, live?, hideWhenEmpty?, headActions? }`:
    `key` is namespaced; `workflow` is the catalog workflow a region's refresh
    re-runs; `workflowArgs` are string inputs that ride each of those refresh
-   runs, so one producer can serve many regions (e.g. a per-lens re-author
-   workflow keyed by the lens id) — args-bearing regions refresh client-side
+   runs, so one producer can serve many regions (e.g. a per-item re-author
+   workflow keyed by the item id); args-bearing regions refresh client-side
    only, while the surface is open, never on the server heartbeat; `cadenceMs`
    is the auto-refresh interval (floored to 30s, run on
    open and on a heartbeat); `glyph` is a `{ char, tone? }` chip for the region
@@ -196,19 +196,19 @@ coordination path.
    `registerRegion`; regions sharing a `group` string are kept contiguous in the
    surface rather than interleaved by arrival order; `groupTitle` is a section
    heading rendered for that group's zone; `byline` is a context line shown
-   beneath the region head's title (e.g. a per-lens subject); `collapsible` and
+   beneath the region head's title (e.g. a per-item subject); `collapsible` and
    `collapsed` control whether the region can be collapsed and its initial
    collapse state (honored on header, footer, and row-column regions; banner
    regions cannot collapse); `live` opts the region head into a freshness dot the
    host pulses while frames stream in on the region's key and quiets once they
    stop (reduced-motion keeps the lit dot without the motion; default off);
    `hideWhenEmpty` renders the region (head and body) only once its snapshot is
-   live with content — a board that composes `sections: []` stays hidden, so a
+   live with content: a board that composes `sections: []` stays hidden, so a
    rib can gate first-run panels on having something to say (banner regions
    can't carry it, and avoid it on on-demand workflow regions, whose Load
    affordance would be unreachable; default off); `headActions` (1–8 items) are
    rib-supplied verbs on the region head itself, rendered as a ⋯ menu and
-   dispatched to the rib's `onAction` exactly like board actions — destructive
+   dispatched to the rib's `onAction` exactly like board actions. Destructive
    ones confirm first, the menu renders even when the surface sets
    `hideRegionActions` (that flag suppresses the host's explore/select/expand
    chrome, not the rib's own verbs) and while the region is collapsed, and the
@@ -219,12 +219,12 @@ coordination path.
    the same way, because the host derives things from them once at boot: a region's
    `workflow` name hoists into a set that gates whether a refresh may run, and
    `cadenceMs` becomes a heartbeat schedule. So a rib may mutate a **declared**
-   region's presentation and mount-defaults at runtime — `collapsed`, `title`,
-   `glyph`, `byline` — and call `ctx.invalidateManifest?.()`, and the client picks
+   region's presentation and mount-defaults at runtime (`collapsed`, `title`,
+   `glyph`, `byline`) and call `ctx.invalidateManifest?.()`, and the client picks
    them up on its next mount. Adding a region at runtime, or changing a `workflow`
    or `cadenceMs` after boot, does not work that way: `/api/ribs` would show it while
    its refresh is rejected as unbound and no heartbeat is ever scheduled. Add regions
-   with `registerRegion` instead — it is the runtime path the workflow and heartbeat
+   with `registerRegion` instead: it is the runtime path the workflow and heartbeat
    consumers actually track.
 
 5. **`contributeWorkflows(ctx)`** returns `RibWorkflowContribution`s merged into
@@ -237,7 +237,7 @@ coordination path.
 
 6. **`contributeDocs(ctx)`** returns the `RibDocsSource`s the rib adds to the
    harness docs catalog, collected once at activation like `contributeWorkflows`.
-   Each source is `{ title, summary, llmsFullUrl?, content? }` — an
+   Each source is `{ title, summary, llmsFullUrl?, content? }`: either an
    `llms-full.txt` corpus the harness fetches and caches, or inline `content`.
    The `keelson_docs` tool surfaces every source: it lists them, indexes one into
    its H1 topics, and returns a single topic on demand, so the whole corpus never
@@ -255,7 +255,7 @@ coordination path.
    so a rib policy can scope a decision to its **own** workflow's node rather than
    firing on every workflow-surface turn (which is all `ctx.surface === "workflow"`
    tells it). Both are absent on other surfaces and on an older harness that
-   doesn't populate them, where they read as `undefined` — a scope check such as
+   doesn't populate them, where they read as `undefined`. A scope check such as
    `ctx.workflowName === "x"` then simply stops matching, so a policy that must
    stay correct against an older harness chooses its own absent-field fallback.
 
@@ -268,8 +268,7 @@ coordination path.
    dispatch; gate `canvas-html`-origin verbs to a safe subset, because iframe
    markup and scripts are untrusted (rib- or LLM-authored, and a frame script
    can post on load without a user gesture). It returns `{ ok: true, data? }` or
-   `{ ok: false, error }`. This path is loopback-trusted today; the
-   capability-token envelope is a later milestone.
+   `{ ok: false, error }`. This path is loopback-trusted.
 
    A successful action may place a recognized client effect in `data`:
    `open-chat` opens a fresh seeded conversation, `run-workflow` launches a
@@ -291,22 +290,22 @@ coordination path.
    payload as untrusted user data and narrow it at the rib boundary.
 
 9. **`onRunEvent(event, ctx)`** delivers run-lifecycle notifications for the
-   rib's own contributed workflows — every run stamped with the rib's id,
+   rib's own contributed workflows: every run stamped with the rib's id,
    whoever started it (a board effect, the Workflows surface, a cadence
    refresh). `event` is `{ workflowName, runId, status, inputs, startedAt,
    completedAt?, error? }` with `status` one of `running | succeeded | failed |
    cancelled`: one `running` at each launch and one terminal event when that
-   launch settles. Delivery is once per launch, not once per run — resuming a
+   launch settles. Delivery is once per launch, not once per run: resuming a
    failed or cancelled run emits a fresh pair with the same `runId`, and
    launches never interleave: a launch's terminal event arrives before any
    later launch's `running`, so the latest event is always current. `inputs`
    are the run's inputs, so a rib can reconstruct dispatch context for runs it
    didn't start; `error` carries the run-level failure message. The hook is
    fail-soft and fire-and-forget: a throwing or rejecting hook is caught and
-   logged, never affecting the run — and invocations for one run are
+   logged, never affecting the run. Invocations for one run are
    serialized, so a slow async handler settles before the next event's
-   invocation starts. Delivery is not guaranteed — a server
-   restart mid-run drops the terminal event — so derive state that tolerates a
+   invocation starts. Delivery is not guaranteed (a server
+   restart mid-run drops the terminal event), so derive state that tolerates a
    missed event (pair it with the observed system state or a staleness window).
 
 10. **`listAgents(ctx)` / `resolveAgent(slug, ctx)`** offer named chat agents,
@@ -338,9 +337,22 @@ coordination path.
 
 ## Validation rules
 
-The harness validates each candidate against the contract at activation and
-fails closed. A rib that fails any check is skipped with one warning in the boot
-log; a broken rib costs you that rib, never the harness.
+The harness validates each candidate against the contract and fails closed, but
+where a failure lands depends on when it is caught.
+
+- **At discovery**, a shape failure costs you that rib and nothing else: a bad
+  id, a bad `displayName`, a hook that is not a function, an import that throws,
+  or a duplicate id is warned and skipped, and the harness boots without it.
+- **At activation**, a key outside `rib:<id>:*`, a rib whose declared `id`
+  diverges from its manifest key, a duplicate rib id, or a duplicate surface id
+  throws, and the throw is not caught: the server fails to boot. This is
+  deliberate. Those are code bugs, and a thrown error in test or development
+  beats a silently inactive rib in production.
+- **Per request**, the view and surface descriptors served from `GET /api/ribs`
+  are checked again, because a rib may mutate its own arrays after activation. A
+  descriptor that is malformed, out of namespace, or a duplicate surface id is
+  dropped and warned rather than served, so it cannot blank the manifest for
+  every other rib.
 
 | Rule | Enforced where |
 | --- | --- |
@@ -375,8 +387,10 @@ dependency you install. Choose rib sources the way you choose any package.
    ribs activate. Unset means activate all. Installed and active are distinct
    states: a package can be present in the home but filtered out per process.
 
-3. **Validate.** Each candidate is checked against the rules above. A failure is
-   one warning, not a crash.
+3. **Validate.** Each candidate is checked against the rules above. A shape
+   failure caught at discovery is one warning and a skipped rib. A namespace
+   violation, an id that diverges from its manifest key, a duplicate rib id, or
+   a duplicate surface id throws at activation and fails boot.
 
 4. **Register.** `registerTools` runs and its tools join the shared registry.
    `composeBundle`, if declared, is registered as the composer under `rib.id`
@@ -397,11 +411,14 @@ dependency you install. Choose rib sources the way you choose any package.
 A rib never edits the SPA. The browser discovers active ribs through two
 endpoints, both typed in `@keelson/shared`:
 
-- `GET /api/ribs` returns `ListRibsResponse` (`{ ribs: RibSummary[] }`). Each
-  `RibSummary` is `{ id, displayName, registered, views, surfaces, hasOnAction,
-  acceptsIngest?, auth? }`. `views` and `surfaces` are always present (possibly
-  empty); `auth` appears only when the rib declares `authStatus`. Consumers treat
-  absent `acceptsIngest` as `false`.
+- `GET /api/ribs` returns `ListRibsResponse` (`{ ribs: RibSummary[],
+  crossRibGrants? }`). Each `RibSummary` is `{ id, displayName, registered,
+  views, surfaces, hasOnAction, acceptsIngest?, auth? }`. `views` and `surfaces`
+  are always present (possibly empty); `auth` appears only when the rib declares
+  `authStatus`. Consumers treat absent `acceptsIngest` as `false`.
+  `crossRibGrants` is the operator's grant map, `Record<caller, Record<target,
+  string[]>>`. Absent and empty differ: absent means "not reported" (an older
+  server), an empty map means "reported, and there are none".
 - `POST /api/ribs/:id/action` returns `RibActionResponse`, the discriminated
   `RibActionResult` the rib's `onAction` produced.
 - `GET /api/agents` returns `ListAgentsResponse` (`{ agents: AgentRef[] }`), the

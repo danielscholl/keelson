@@ -19,14 +19,23 @@ capability, not a reimplementation, and never sees the secrets behind it.
 ## What is exposed
 
 The gateway serves the same registry the chat agent reads: every active rib's
-tools, plus the core tools `keelson_docs`, `workflow_list`, and `workflow_status`.
-Those three are read-only and always exposed: present even with zero ribs
-installed, and unaffected by `exposeStateChanging`. By default the gateway exposes
-the mutating surface too: `workflow_run` and `workflow_respond`, along with a rib's
-mutating tools (a rib's cluster-suspend action, say), alongside the read-only
-tools. Restrict it to read-only with `exposeStateChanging: false` when you want a
-narrower surface. A hidden or denied tool is reported as unknown, so the endpoint
-never reveals what it is withholding.
+tools, plus the harness's own. Six of those are read-only and always exposed,
+present even with zero ribs installed and unaffected by `exposeStateChanging`:
+`keelson_docs`, `workflow_list`, `workflow_status`, `run_list`, `run_status`, and
+`run_events`. By default the gateway exposes the mutating surface too:
+`workflow_run`, `workflow_respond`, `workflow_resume`, `workspace_lease`,
+`workspace_release`, `run_cancel`, and `run_steer`, plus a rib's mutating tools,
+served alongside the read-only ones. Restrict it to read-only with
+`exposeStateChanging: false` when you want a narrower surface. A hidden or denied
+tool is reported as unknown, so the endpoint never reveals what it is
+withholding.
+
+Tool input schemas are emitted with `z.toJSONSchema(..., { reused: "ref" })`, so
+a sub-schema used more than once lands in `$defs` and is referenced by `$ref`
+rather than inlined. A client that does not resolve `$ref` will break on those
+tools. `tools/list` also sets the `readOnlyHint` and `destructiveHint`
+annotations, so a client can tell the two halves of the registry apart without
+calling anything.
 
 <Aside type="note" title="Open on loopback by default">
 A fresh endpoint serves the full registry (state-changing tools included) on
@@ -39,8 +48,8 @@ hides tools by name. See [Configuration](../configuration/#mcp-gateway) for ever
 
 `keelson connect` wires a coding agent to the endpoint for you. It registers the
 MCP server in that agent's own config and drops a small, portable skill that
-teaches the agent when to reach for Keelson. Writes are machine-global by default —
-the connection follows you into every repo — so run it once from anywhere:
+teaches the agent when to reach for Keelson. Writes are machine-global by default,
+so the connection follows you into every repo. Run it once from anywhere:
 
 ```bash
 keelson connect claude      # or: copilot, codex, or 'all'
@@ -54,8 +63,8 @@ It handles three agents today, each wired at its native location:
 | `copilot` | `~/.copilot/mcp-config.json` | HTTP |
 | `codex` | `~/.codex/config.toml` | the `keelson mcp` stdio bridge |
 
-Claude has no dedicated global MCP file — its user scope lives inside
-`~/.claude.json`, its whole state file — so Keelson drives Claude's own `claude mcp`
+Claude has no dedicated global MCP file: its user scope lives inside
+`~/.claude.json`, its whole state file, so Keelson drives Claude's own `claude mcp`
 CLI rather than hand-editing it. Codex speaks only stdio, so it gets the bridge
 instead of the HTTP URL; the bridge resolves the server URL and token on each launch,
 so the wiring survives a restart or a non-default port.
@@ -67,9 +76,9 @@ points the agent at `keelson_docs` and the workflow tools, so it stays correct a
 you install or remove ribs.
 
 Prefer to commit the wiring into a repo? `keelson connect claude --local` writes the
-repo-scoped equivalents instead — a project `.mcp.json` for Claude and the skill
-under the repo's `.claude/skills` (Claude) or `.agents/skills` (Copilot, Codex) — so
-teammates inherit it through version control.
+repo-scoped equivalents instead: a project `.mcp.json` for Claude, and the skill
+under the repo's `.claude/skills` for Claude or `.agents/skills` for Copilot and
+Codex. Teammates then inherit it through version control.
 
 `keelson connect` records what it wrote, so reversing it is exact:
 
@@ -104,7 +113,8 @@ HTTP MCP client straight at the endpoint:
 ```
 
 The endpoint is JSON-only: it answers `POST` with a single JSON-RPC reply and
-returns 405 for `GET`, since there is no server-to-client event stream.
+answers any non-POST method with 405, since there is no server-to-client event
+stream.
 
 Any client that connects receives the server's `initialize`-time instructions,
 which point it at `keelson_docs` and the workflow tools, so even a hand-wired,
@@ -133,8 +143,9 @@ to that recorded server, never to an explicit `--base-url` target.
 Four settings narrow the endpoint, in `~/.keelson/config.json` under `mcp`:
 
 - `exposeStateChanging: false` restricts the endpoint to read-only tools, hiding
-  `workflow_run`, `workflow_respond`, and a rib's mutating tools. On by default
-  (`KEELSON_MCP_EXPOSE_STATE_CHANGING=0` forces it off).
+  `workflow_run`, `workflow_respond`, `workflow_resume`, `workspace_lease`,
+  `workspace_release`, `run_cancel`, `run_steer`, and a rib's mutating tools. On
+  by default (`KEELSON_MCP_EXPOSE_STATE_CHANGING=0` forces it off).
 - `requireToken: true` gates every request behind the bearer token in
   `server.json`. Off by default, since the bind is already loopback-only.
 - `toolDenylist` removes named tools, whatever the flags above allow.

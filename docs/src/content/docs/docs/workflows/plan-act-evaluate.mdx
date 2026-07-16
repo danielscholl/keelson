@@ -26,8 +26,10 @@ keelson workflow run plan-act-evaluate --inputs ARGUMENTS="add a --json flag to 
 keelson workflow run plan-act-evaluate --inputs ARGUMENTS="42"          # plan onto an existing issue
 ```
 
-It needs `gh` authenticated against a repo with Issues enabled, a Copilot
-subscription, and a running server (the approval gate pauses). The change lands
+It needs `gh` or `glab` authenticated against a repo with issues enabled (the
+bundled `forge` shim resolves whichever is present), a Copilot subscription, and
+a running server (the approval gate pauses). The **delegate** mode is
+GitHub-only; on any other forge the workflow pins itself to **local**. The change lands
 best on a repo with CI, since CI is the authoritative check. The **delegate**
 path additionally needs the Copilot coding agent enabled on the repo or org (it
 must appear as `copilot-swe-agent` in the assignable actors).
@@ -66,16 +68,17 @@ the issue to Copilot. Both arms reconverge on one node that reads the PR's CI.
 | | `plan` | prompt | **Read-only** (`allowed_tools: [Read, Glob, Grep]`): authors the plan as text. Cannot write, branch, or commit. |
 | | `publish-plan` | bash | Records the plan as a GitHub issue (new, or a comment on the one you named), and as the `plan.md` review surface. |
 | Gate | `approve-plan` | approval | Pauses on the plan. The reply both approves and **chooses the path**. |
-| Act | `select-mode` | prompt | Typed JSON: `local` (an approval) or `delegate` (the reviewer said "delegate"). |
+| Act | `detect-forge` | bash | Runs `forge caps`, which prints the forge resolved for this repo (`github` or `gitlab`). |
+| | `select-mode` | prompt | Typed JSON, reading both the reply and `detect-forge`: `local` (an approval) or `delegate` (the reviewer said "delegate"). A non-GitHub forge **forces `local`**, overriding any request to delegate. |
 | Act · local | `act-local` | prompt | **`when: mode == 'local'`**: implements on a branch, commits by name. |
 | | `evaluate` | loop | Review-and-improve loop (`max_iterations: 5`, `until: EVALUATION_COMPLETE`) on the project's own checks. |
 | | `open-pr` | prompt | Pushes the branch and opens a draft PR linking the plan issue. |
 | Act · delegate | `act-delegate` | bash | **`when: mode == 'delegate'`**: assigns the issue to `copilot-swe-agent` via the GitHub API. |
 | | `await-copilot` | bash | Polls until Copilot opens its PR (or its head SHA settles), captures the PR number. |
-| Evaluate | `ci-signals` | bash | **Reconverges both arms** (`trigger_rule: one_success`): `gh pr checks`, classified PASS / FAIL / NONE / PENDING_APPROVAL. |
+| Evaluate | `ci-signals` | bash | **Reconverges both arms** (`trigger_rule: one_success`): `forge pr checks`, classified PASS / FAIL / NONE / PENDING_APPROVAL. |
 | Audit · delegate | `capture-diff` | bash | **`when: delegate`**: pulls the PR diff for review. |
 | | `self-review` | prompt | Read-only contributor-model review of Copilot's PR. |
-| | `pr-review` | prompt | Renders a formal PR review: `gh pr review --approve` or `--request-changes` (which feeds Copilot). |
+| | `pr-review` | prompt | Renders a formal PR review: `forge pr review --approve` or `--request-changes` (which feeds Copilot). |
 | Audit | `report` | bash | **Deterministic** 6-element audit trail (goal, plan, changeset, evidence, judgment, outcome) joined on `one_success`. |
 
 ### The parts worth a second look
@@ -94,7 +97,10 @@ implementer, local or cloud.
 **One reply does two jobs.** `approve-plan` captures the reviewer's response, and
 `select-mode` reads it: an approval routes to `local`, the word "delegate" routes
 to Copilot. The gate is also the branch selector, so the human picks *who acts*
-without a second prompt.
+without a second prompt. The forge has the final say: `detect-forge` runs
+`forge caps` first, and on anything but GitHub (gitlab, say) `select-mode` is
+required to return `local`, since agent delegation is GitHub-only. On GitLab the
+delegate arm is unreachable and a request to delegate is overridden.
 
 **Two arms, one reconvergence.** `select-mode` splits the DAG with `when:` gates.
 The local arm implements, loops to self-improve, and opens a PR; the delegate arm
@@ -104,7 +110,7 @@ review tail (`capture-diff`, `self-review`, `pr-review`) hangs off that join,
 because only Copilot's PR needs an external reviewer; the local arm already
 reviewed itself in the loop.
 
-**CI is the truth, not the agent.** `ci-signals` reads `gh pr checks`, an
+**CI is the truth, not the agent.** `ci-signals` reads `forge pr checks`, an
 objective system signal, and classifies it carefully: it distinguishes "no CI on
 this repo" from "CI exists but is gated behind maintainer approval" (the common
 case for a bot's PR), so the audit trail never claims green when a human just
@@ -121,7 +127,7 @@ A facts-only audit trail can do neither.
 - **[Approval gate](../../guides/authoring-workflows/#approval-gate)**: `approve-plan`, whose captured reply also routes the branch.
 - **[Classify, then branch](../../guides/authoring-workflows/#classify-then-branch)**: `select-mode` into two arms, reconverged by `ci-signals` on `one_success`.
 - **[Loop until done](../../guides/authoring-workflows/#loop-until-done)**: `evaluate` is a real `loop` node, in contrast to fix-issue's unrolled triad.
-- **External signal as the gate**: `gh pr checks` as the authoritative check, over the agent's own confidence.
+- **External signal as the gate**: `forge pr checks` as the authoritative check, over the agent's own confidence.
 
 ## Adapt it
 

@@ -18,6 +18,13 @@ default. It is plain JSON, optional, and read at server boot. A missing file
 falls back to the defaults silently; a malformed one is ignored with a warning,
 so a typo never blocks startup.
 
+Only a broken shape warns, though: invalid JSON, or a key whose value is the
+wrong type. An unrecognized top-level key is accepted and dropped **without** a
+warning, so a misspelled key (`crossRibGrant` for `crossRibGrants`) reads as a
+clean file whose setting silently never applies. Check spelling with `keelson
+doctor`, which reports what the server actually resolved rather than what the
+file appears to say.
+
 ```jsonc
 // ~/.keelson/config.json
 {
@@ -32,7 +39,7 @@ so a typo never blocks startup.
 | Key | Type | What it does |
 |---|---|---|
 | `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. |
-| `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. |
+| `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. Falls back when it is not. See [The default provider](#the-default-provider). |
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
@@ -71,6 +78,23 @@ A provider is enabled by the first of these that has an opinion:
 So `KEELSON_PROVIDERS=stub` gives you an offline run with no keys regardless of
 what `config.json` says, and the config file is the durable setting for everyday
 use.
+
+## The default provider
+
+`defaultProvider` is a preference, not a guarantee: it is honored only when that
+provider actually registered. Resolution walks a chain, taking the first that
+holds:
+
+1. `defaultProvider`, when it is registered and is not `workflow`. That id names
+   an internal meta-provider, not an agent, so it is rejected as a default.
+2. `copilot`, if registered.
+3. The first registered provider that is neither `stub` nor `workflow`.
+4. `stub`, if registered.
+
+So a `defaultProvider` naming a provider you never enabled, or misspelled, does
+not error. It falls through the chain to whatever is loaded. `keelson doctor`
+prints the resolved default and where it came from, which is how you catch the
+difference between the default you asked for and the one you got.
 
 ## Claude credentials
 
@@ -242,7 +266,7 @@ is denied, which is the default for every pair.
 
 Keep standing grants here rather than in `KEELSON_CROSS_RIB_GRANTS`. The two
 union, so either works, but an env-only grant lapses the moment the server starts
-from a shell that never exported it — and the capability it enabled goes quiet
+from a shell that never exported it, and the capability it enabled goes quiet
 rather than failing loudly. The same grant gates both a rib's `callTool` and the
 tools projected onto a rib's agent turn, so a Chamber Mind that declares a
 capability backed by another rib needs this to reach it.
@@ -273,8 +297,8 @@ rather than guessing.
 
 The server exposes its tool registry over the [Model Context Protocol](https://modelcontextprotocol.io)
 at `/api/mcp`, so another agent can call your ribs' tools. It comes up with the
-server, tokenless on loopback and exposing its full tool registry — state-changing
-tools included — by default. The `mcp` block tunes it; [Using keelson over
+server, tokenless on loopback and exposing its full tool registry (state-changing
+tools included) by default. The `mcp` block tunes it; [Using keelson over
 MCP](../using-mcp/) is the task guide.
 
 ```jsonc
@@ -322,7 +346,7 @@ replacing it, so a grant from either source stands.
 | `KEELSON_GATEWAY_KEY` | unset | API key `keelson gateway add` reads when `--key` is omitted, so it stays out of shell history. See [Gateways](#gateways). |
 | `KEELSON_WORKFLOW_PROMPT_TIMEOUT_S` | `600` | Per-node timeout, in seconds, for workflow `prompt` nodes. |
 | `KEELSON_MAX_CONCURRENT_RUNS` | `4` | Process-wide ceiling on worktree-isolated workflow runs executing at once; further runs queue. Raise on a larger host. |
-| `KEELSON_CROSS_RIB_GRANTS` | unset | `;`-separated `caller:target:tool` grant triples (the tool field takes a comma-separated list or `*`); default-deny when unset. **Unions with** (does not override) the config file's `crossRibGrants`, which is the durable place for a standing grant — see [Cross-rib grants](#cross-rib-grants). |
+| `KEELSON_CROSS_RIB_GRANTS` | unset | `;`-separated `caller:target:tool` grant triples (the tool field takes a comma-separated list or `*`); default-deny when unset. **Unions with** (does not override) the config file's `crossRibGrants`, which is the durable place for a standing grant. See [Cross-rib grants](#cross-rib-grants). |
 | `KEELSON_CROSS_RIB_CALL_TIMEOUT_MS` | `30000` | Timeout, in milliseconds, for one cross-rib tool call. See [Governance](../governance/#cross-rib-grants). |
 | `KEELSON_COPILOT_WARM_IDLE_MS` | `600000` | How long the Copilot language-server subprocess stays warm between turns before it is evicted, in milliseconds. `0` or negative disables warmth (every turn spawns fresh). |
 | `KEELSON_RIBS` | all discovered | Comma-separated rib ids to activate. |
@@ -332,7 +356,9 @@ replacing it, so a grant from either source stands.
 | `KEELSON_MCP_DENYLIST` | unset | Comma-separated tool names to hide over MCP. Merged with `mcp.toolDenylist`. |
 | `KEELSON_WORKSPACE` | `~/keelson` | Root for project workspaces. |
 | `KEELSON_DISABLE_MUTATION_LOCK` | unset | Emergency operator bypass: set to a non-empty value other than `0` / `false` to disable per-project mutation-lock enforcement (concurrent runs may then mutate the same live checkout). Leave unset in normal operation. |
-| `KEELSON_BASH` | auto-detected | Path to a POSIX shell for `bash` workflow nodes (Windows). |
+| `KEELSON_BASH` | auto-detected | Path to a POSIX shell for `bash` workflow nodes. Honored first on every platform; Git Bash autodetection is the Windows-only fallback, then `bash` from `PATH`. |
+| `KEELSON_FORGE` | unset | The forge selection the `bash` and `loop` node shim resolves. |
+| `KEELSON_DISABLE_SCHEDULER` | unset | Set to `1` to stop cadence and producer schedules from starting. |
 
 ## Confirm what loaded
 

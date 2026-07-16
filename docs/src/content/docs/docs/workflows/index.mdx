@@ -8,10 +8,10 @@ sidebar:
 import { Aside } from "@astrojs/starlight/components";
 import WorkflowCards from "../../../../components/WorkflowCards.astro";
 
-Keelson ships eleven workflows. They are real, runnable, and the place the
+Keelson ships ten workflows. They are real, runnable, and the place the
 [authoring recipes](../guides/authoring-workflows/) show up composed: a
 three-line approval-gate recipe is one thing, the same gate sitting inside a
-twenty-five-node investigate-and-implement pipeline is where the shape clicks. This
+thirty-node investigate-and-implement pipeline is where the shape clicks. This
 catalog groups what ships by the job it does, and each one gets a full
 node-by-node walkthrough.
 
@@ -20,7 +20,7 @@ documentation.
 
 ## Where these come from
 
-The eleven are **bundled** starters: they ship with the package and seed into
+The ten are **bundled** starters: they ship with the package and seed into
 your home (`<home>/workflows/`) on first run, so `keelson workflow list` shows
 them as `global` once seeded. Copy and edit one freely; the bundled original
 stays as a clean fallback. See [scopes](../reference/workflow-nodes/#scopes) for
@@ -35,9 +35,10 @@ keelson workflow run fix-issue --inputs ARGUMENTS="42"
 
 <Aside type="note" title="What the Copilot workflows need">
 Eight of the ten set `provider: copilot` and `model: auto`, so they need a
-GitHub Copilot subscription registered. The GitHub-facing ones (`fix-issue`,
-`pr-review`, `plan-act-evaluate`, `finish-pr`) also drive
-the `gh` CLI, so it must be installed and authenticated. The approval and
+GitHub Copilot subscription registered. The forge-coupled ones (`fix-issue`,
+`pr-review`, `plan-act-evaluate`, `finish-pr`) run on GitHub or GitLab through
+the bundled `forge` shim, which needs `gh` or `glab` installed and
+authenticated. The approval and
 interactive workflows pause for a human, which needs a running server (`keelson
 start`). The other two pin no provider: `smoke-test` runs provider-free on the
 stub with no credentials, and `design-artifact` leaves the provider open so
@@ -57,7 +58,7 @@ has a full walkthrough.
 
 Exploration workflows: turn a fuzzy idea into a validated requirements doc,
 pressure-test a build by pitting a generator against an evaluator, or stress-test
-any artifact — a claim, design, or plan — to a consensus verdict.
+any artifact (a claim, design, or plan) to a consensus verdict.
 
 <WorkflowCards names={["interactive-prd", "adversarial-build", "adversarial-review"]} />
 

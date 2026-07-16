@@ -84,8 +84,8 @@ keelson restart
 
 Restart stops the running server (the same graceful-then-signal path as `stop`)
 and starts a fresh background server, reporting its URL. If nothing is running it
-just starts one. A stop that genuinely fails — a stale record, an unmanaged
-server holding the port — aborts the restart rather than launching a second
+just starts one. A stop that genuinely fails (a stale record, an unmanaged
+server holding the port) aborts the restart rather than launching a second
 server alongside it.
 
 ## The MCP endpoint
@@ -93,7 +93,7 @@ server alongside it.
 The same server speaks the [Model Context Protocol](https://modelcontextprotocol.io)
 at `/api/mcp`, so other agents (Claude Code, Cursor, the Codex CLI) can call your
 ribs' tools. It mounts automatically with the server and, on loopback with no
-token, exposes the full tool registry — state-changing tools included — by default
+token, exposes the full tool registry by default, state-changing tools included
 (`exposeStateChanging: false` restricts it to read-only). `keelson status` reports
 its URL when it is mounted.
 
