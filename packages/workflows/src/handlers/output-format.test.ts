@@ -110,6 +110,25 @@ describe("extractJsonValue", () => {
     expect(extractJsonValue(raw)).toEqual({ verdict: "NEEDS FIXES" });
   });
 
+  // Prose quotes carry no structure, so an odd count of them must not invert
+  // the parity of everything that follows.
+  test("an unmatched quote in the narration does not hide the answer", () => {
+    const raw = 'The token starts with "foo\n{"verdict":"READY"}';
+    expect(extractJsonValue(raw)).toEqual({ verdict: "READY" });
+  });
+
+  test("an unmatched quote on the answer's own line does not hide it", () => {
+    const raw = 'He said "hi: {"verdict":"READY"}';
+    expect(extractJsonValue(raw)).toEqual({ verdict: "READY" });
+  });
+
+  // A raw newline can't occur inside a JSON string, so reaching one proves the
+  // scan mis-read a prose quote as an opening delimiter.
+  test("a raw newline abandons a string opened inside stray narration brackets", () => {
+    const raw = 'code: { "unterminated\n{"verdict":"READY"}';
+    expect(extractJsonValue(raw)).toEqual({ verdict: "READY" });
+  });
+
   test("scans a large narration without pathological slowdown", () => {
     const raw = `${"{".repeat(20000)}\n{"verdict":"READY TO MERGE"}`;
     const started = performance.now();

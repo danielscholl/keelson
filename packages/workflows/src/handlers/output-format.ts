@@ -67,12 +67,17 @@ function tryParse(text: string): unknown {
  * The last `{…}` / `[…]` in `text` that parses to an object or array — the
  * model's final answer, picked out from behind its narration.
  *
- * One string-aware pass, matching brackets on a stack and parsing each pair as
- * it closes; the last pair to close wins, so an enclosing object beats the
- * arrays nested in it and a later sibling beats an earlier one. Candidates are
- * taken per closed pair rather than per top-level pair because narration
- * routinely leaves a bracket open (a quoted `if (x) {`), which would otherwise
- * bury every answer that follows it.
+ * One pass, matching brackets on a stack and parsing each pair as it closes;
+ * the last pair to close wins, so an enclosing object beats the arrays nested
+ * in it and a later sibling beats an earlier one. Candidates are taken per
+ * closed pair rather than per top-level pair because narration routinely
+ * leaves a bracket open (a quoted `if (x) {`), which would otherwise bury
+ * every answer that follows it.
+ *
+ * Quotes count only inside an open bracket, and a raw newline — which no JSON
+ * string may contain — abandons the string. Prose is not JSON, so its quotes
+ * carry no structure: reading them as delimiters lets one stray `"` in the
+ * narration invert the parity of everything after it and swallow the answer.
  */
 function lastEmbeddedObject(text: string): unknown {
   let found: unknown;
@@ -83,13 +88,16 @@ function lastEmbeddedObject(text: string): unknown {
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (inString) {
-      if (escaped) escaped = false;
+      if (ch === "\n") {
+        inString = false;
+        escaped = false;
+      } else if (escaped) escaped = false;
       else if (ch === "\\") escaped = true;
       else if (ch === '"') inString = false;
       continue;
     }
     if (ch === '"') {
-      inString = true;
+      if (opens.length > 0) inString = true;
     } else if (ch === "{" || ch === "[") {
       opens.push(i);
     } else if (ch === "}" || ch === "]") {
