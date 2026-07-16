@@ -237,6 +237,9 @@ export interface BootstrapRibsOptions {
   // Backs RibContext.registerRegion. Owned by the composition root (it also
   // feeds the GET /api/ribs merge), so it's threaded in rather than created here.
   dynamicRegionStore?: DynamicRegionStore;
+  // Backs RibContext.invalidateManifest. Owned by the composition root for the same
+  // reason as the store above: it re-publishes that root's manifest-revision beacon.
+  invalidateManifest?: () => void;
   // Lazy resolver for the in-process WorkflowController backing
   // RibContext.refreshWorkflow. Lazy because the controller is built AFTER
   // bootstrapRibs returns — the getter reads the composition root's late-bound
@@ -635,6 +638,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     ...(options.getRibDataDir ? { getRibDataDir: options.getRibDataDir } : {}),
     ...(options.getProjects ? { getProjects: options.getProjects } : {}),
     ...(options.dynamicRegionStore ? { dynamicRegionStore: options.dynamicRegionStore } : {}),
+    ...(options.invalidateManifest ? { invalidateManifest: options.invalidateManifest } : {}),
     ...(refreshWorkflow ? { refreshWorkflow } : {}),
     ...(runWorkflowSeam ? { runWorkflow: runWorkflowSeam } : {}),
     ...(getMemory ? { getMemory } : {}),

@@ -169,6 +169,11 @@ export interface ApplyRibsOptions {
   // Backs RibContext.registerRegion so a rib can add surface regions at runtime.
   // Optional so unit tests for applyRibs without a manifest store stay simple.
   readonly dynamicRegionStore?: DynamicRegionStore;
+  // Backs RibContext.invalidateManifest: re-publish the manifest-revision beacon so
+  // subscribed SPAs re-fetch GET /api/ribs. Not rib-scoped — the beacon is global and
+  // the manifest is served whole. Optional so applyRibs unit tests without a snapshot
+  // manager stay simple.
+  readonly invalidateManifest?: () => void;
   // Backs RibContext.refreshWorkflow; rib-id-scoped for parity/future per-rib
   // scoping. Optional so unit-test rigs without a controller stay deterministic
   // — absent leaves the seam off the ctx, cadence-only.
@@ -348,6 +353,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
       ...(opts.dynamicRegionStore
         ? { registerRegion: opts.dynamicRegionStore.registerForRib(rib.id, surfaceIds) }
         : {}),
+      ...(opts.invalidateManifest ? { invalidateManifest: opts.invalidateManifest } : {}),
       ...(opts.refreshWorkflow
         ? {
             refreshWorkflow: (workflowName: string, inputs?: Record<string, string>) =>

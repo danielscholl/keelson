@@ -1394,6 +1394,63 @@ describe("applyRibs wiring", () => {
     expect(seenRibId).toBe("chamber");
   });
 
+  // A rib whose declared views/surfaces are live objects it mutates at runtime has no
+  // other way to tell the SPA: the manifest is fetched once and cached, so without this
+  // seam the client renders the boot-time descriptor until a reload.
+  it("exposes invalidateManifest on the rib context when the root supplies one", () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    let bumps = 0;
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+      invalidateManifest: () => {
+        bumps++;
+      },
+    });
+    expect(captured?.invalidateManifest).toBeDefined();
+    captured?.invalidateManifest?.();
+    expect(bumps).toBe(1);
+  });
+
+  it("omits invalidateManifest when none is supplied (older-harness degrade, not a throw)", () => {
+    let captured: RibContext | undefined;
+    const rib: Rib = {
+      id: "chamber",
+      displayName: "Chamber",
+      registerTools: (ctx) => {
+        captured = ctx;
+        return [];
+      },
+    };
+    applyRibs({
+      active: ["chamber"],
+      available: { chamber: rib },
+      ctx: {
+        getExec: () => ({
+          runJSON: async <T>() => ({ ok: true as const, data: undefined as T }),
+          runText: async () => ({ ok: true as const, data: "" }),
+        }),
+      },
+    });
+    expect(captured?.invalidateManifest).toBeUndefined();
+    // The optional-call shape a rib uses must be a no-op, not a crash.
+    expect(() => captured?.invalidateManifest?.()).not.toThrow();
+  });
+
   it("omits runAgentTurn when none is supplied (fails closed for the rib)", () => {
     let captured: RibContext | undefined;
     const rib: Rib = {

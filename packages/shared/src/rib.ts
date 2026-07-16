@@ -306,6 +306,14 @@ export interface RibContext {
   // rib declared; `region.key` must be under `rib:<id>:*`. Optional so a rib
   // built against an older harness degrades to no dynamic regions, not a throw.
   registerRegion?: (surfaceId: string, region: RibSurfaceRegion) => () => void;
+  // Nudge the SPA to re-fetch the manifest, the same nudge registerRegion gives.
+  // A rib whose declared `views`/`surfaces` are live objects it mutates at runtime
+  // has no other way to say so: the client fetches GET /api/ribs once and caches it,
+  // so without this it renders the boot-time descriptor until a reload. Call it after
+  // the mutation, and only when a value really changed — every call re-fetches for
+  // every subscribed client. Optional so a rib built against an older harness
+  // degrades to reload-only, not a throw.
+  invalidateManifest?: () => void;
   // Re-run THIS rib's own snapshot-bound producer workflow by name on demand;
   // fresh structured output republishes to the bound key through the same
   // publish->recompose bridge the cadence/heartbeat refresh uses. Optional

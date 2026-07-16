@@ -303,6 +303,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     ribsRoot: paths.ribsRoot,
     snapshotManager,
     dynamicRegionStore,
+    // The same beacon the region store's onChange bumps: a rib that mutates its own
+    // declared descriptors needs the identical nudge, without registering a region.
+    invalidateManifest: () => void snapshotManager.recompose(RIBS_VERSION_SNAPSHOT_KEY),
     getRibCredential: (ribId, serviceId) =>
       createRibCredentialAccessor(credentialStore, ribId)(serviceId),
     getRibDataDir: (ribId) => ribDataDir(ribId, KEELSON_HOME),
