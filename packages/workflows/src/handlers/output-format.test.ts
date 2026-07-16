@@ -122,17 +122,31 @@ describe("extractJsonValue", () => {
     expect(extractJsonValue(raw)).toEqual({ verdict: "READY" });
   });
 
-  // A raw newline can't occur inside a JSON string, so reaching one proves the
-  // scan mis-read a prose quote as an opening delimiter.
-  test("a raw newline abandons a string opened inside stray narration brackets", () => {
+  test("a string left open in stray narration brackets does not hide the answer", () => {
     const raw = 'code: { "unterminated\n{"verdict":"READY"}';
     expect(extractJsonValue(raw)).toEqual({ verdict: "READY" });
   });
 
-  test("scans a large narration without pathological slowdown", () => {
+  // Streamed chunks are concatenated without a separator, so an unmatched
+  // opener and an unmatched quote can share the answer's line.
+  test("an unmatched opener and quote on the answer's line do not hide it", () => {
+    const raw = 'code: { "unfinished {"verdict":"READY"}';
+    expect(extractJsonValue(raw)).toEqual({ verdict: "READY" });
+  });
+
+  test("scans a large narration of unclosed braces without pathological slowdown", () => {
     const raw = `${"{".repeat(20000)}\n{"verdict":"READY TO MERGE"}`;
     const started = performance.now();
     expect(extractJsonValue(raw)).toEqual({ verdict: "READY TO MERGE" });
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  // A deeply nested payload must not be reparsed once per level.
+  test("scans a narrated deeply nested payload without pathological slowdown", () => {
+    const depth = 8000;
+    const raw = `Done.\n${"[".repeat(depth)}0${"]".repeat(depth)}`;
+    const started = performance.now();
+    expect(extractJsonValue(raw)).not.toBeUndefined();
     expect(performance.now() - started).toBeLessThan(200);
   });
 });
