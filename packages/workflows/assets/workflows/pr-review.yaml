@@ -325,7 +325,7 @@ nodes:
     depends_on: [code-review, error-handling, test-coverage, docs-impact]
     trigger_rule: one_success
     context: fresh
-    model: claude-opus-4.8
+    model: claude-opus-4-8
     allowed_tools: [Read, Glob, Grep]
     output_format:
       type: object

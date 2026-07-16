@@ -23,7 +23,7 @@ description: |
 
 # Model `auto` (the workflow default) lets Copilot route each node and keeps most
 # of this workflow portable. The high-leverage REASONING nodes — investigate,
-# plan, and triage — are pinned to `claude-opus-4.8` instead: their judgment
+# plan, and triage — are pinned to `claude-opus-4-8` instead: their judgment
 # drives the whole run, and pinning also makes the model DETERMINISTIC. Copilot
 # never reports which concrete model `auto` resolved (only the `pi` provider emits
 # the resolved-model chunk), so an `auto` node's actual model is unobservable —
@@ -165,7 +165,7 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.issue_type == 'bug'"
     context: fresh
-    model: claude-opus-4.8
+    model: claude-opus-4-8
     # Bug investigation has the same chunk-sparse, single-turn shape as planning.
     idle_timeout: 1800000
     prompt: |
@@ -226,7 +226,7 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.issue_type != 'bug'"
     context: fresh
-    model: claude-opus-4.8
+    model: claude-opus-4-8
     # Single-turn large-codebase planning can sit >600s between provider chunks.
     # Match the heavy edit nodes' idle budget so chunk-sparse work can finish.
     idle_timeout: 1800000
@@ -330,7 +330,7 @@ nodes:
     depends_on: [plan-ready, extract-brief, criteria-count]
     when: "$criteria-count.output > '0'"
     context: fresh
-    model: claude-opus-4.8
+    model: claude-opus-4-8
     allowed_tools: []
     output_format:
       type: object
@@ -670,7 +670,7 @@ nodes:
   # DAG layer, so this costs ~one review's wall-clock), a triage judge keeps only
   # high-confidence real defects (dropping false positives), a fixer applies just
   # those, and a re-review closes the loop. The `triage` judge is pinned to
-  # `claude-opus-4.8` (it is the decision gate); the three lenses are pinned to
+  # `claude-opus-4-8` (it is the decision gate); the three lenses are pinned to
   # `gpt-5.6-terra` for review quality and a deterministic, observable model
   # (account-dependent id — drop to `auto` if it isn't in the Copilot list).
   # ─────────────────────────────────────────────────────────────────────────
@@ -742,7 +742,7 @@ nodes:
     depends_on: [review-correctness, review-conventions, review-coverage]
     trigger_rule: one_success
     context: fresh
-    model: claude-opus-4.8
+    model: claude-opus-4-8
     output_format:
       type: object
       required: [ship_ready, summary, must_fix]
@@ -993,7 +993,7 @@ nodes:
   - id: triage-ci
     depends_on: [await-ci]
     context: fresh
-    model: claude-opus-4.8
+    model: claude-opus-4-8
     output_format:
       type: object
       required: [ci_status, actionable, summary]
