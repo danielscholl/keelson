@@ -727,15 +727,21 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           error: "a tool invoked by this node returned an error",
         };
       } else if (nodeOutputFormat !== undefined) {
-        // output_format → structured output only when the reply parses to a JSON
+        // output_format → structured output only when the reply yields a JSON
         // object or array. A bare scalar (null/true/42/"x") or a non-JSON reply
-        // stays raw text — the substitute layer's existing miss path, and the
-        // shape the canvas/typed-view renderers expect.
+        // fails the node: it promised a shape downstream substitution and bash
+        // consumers parse, so passing the prose on turns a legible miss here
+        // into an inscrutable parse error in some later node.
         const value = extractJsonValue(assistantText);
         result =
           value !== null && typeof value === "object"
             ? { status: "succeeded", output: { kind: "structured", value } }
-            : { status: "succeeded", output: { kind: "text", text: assistantText } };
+            : {
+                status: "failed",
+                output: { kind: "text", text: assistantText },
+                error:
+                  "node declares output_format but the reply contained no JSON object or array",
+              };
       } else {
         result = {
           status: "succeeded",

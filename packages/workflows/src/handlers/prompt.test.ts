@@ -1690,7 +1690,7 @@ describe("makePromptHandler", () => {
       expect(value).toEqual({ kind: "feature" });
     });
 
-    test("non-JSON reply is preserved as-is (substitute layer's existing failure mode)", async () => {
+    test("non-JSON reply fails the node, preserving the text for the trace", async () => {
       const { provider } = makeSpyProvider({
         chunks: [{ type: "text", content: "I think this is a bug." }, { type: "done" }],
       });
@@ -1704,11 +1704,13 @@ describe("makePromptHandler", () => {
         output_format: { type: "object" },
       } as unknown as DagNode;
       const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("output_format");
       const text = result.output.kind === "text" ? result.output.text : "";
       expect(text).toBe("I think this is a bug.");
     });
 
-    test("a bare JSON scalar stays text, not structured", async () => {
+    test("a bare JSON scalar fails the node, not structured", async () => {
       const { provider } = makeSpyProvider({
         chunks: [{ type: "text", content: "null" }, { type: "done" }],
       });
@@ -1722,9 +1724,34 @@ describe("makePromptHandler", () => {
         output_format: { type: "object" },
       } as unknown as DagNode;
       const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("failed");
       expect(result.output.kind).toBe("text");
       const text = result.output.kind === "text" ? result.output.text : "";
       expect(text).toBe("null");
+    });
+
+    test("narration streamed before the answer still yields structured output", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [
+          { type: "text", content: "I'll check the diff first." },
+          { type: "text", content: '\n{"kind":"bug"}' },
+          { type: "done" },
+        ],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: { type: "object" },
+      } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("succeeded");
+      expect(result.output.kind).toBe("structured");
+      const value = result.output.kind === "structured" ? result.output.value : undefined;
+      expect(value).toEqual({ kind: "bug" });
     });
   });
 });
