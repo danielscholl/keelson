@@ -271,11 +271,7 @@ $Base = "https://github.com/${repo}/releases/download/v$KeelsonVersion"
 $CliTarball = if ($env:KEELSON_CLI_TARBALL) { $env:KEELSON_CLI_TARBALL } else { "$Base/keelson-cli.tgz" }
 $SharedTarball = if ($env:KEELSON_SHARED_TARBALL) { $env:KEELSON_SHARED_TARBALL } else { "$Base/keelson-shared.tgz" }
 $PublicRegistry = "https://registry.npmjs.org/"
-$BlockedPublicRegistries = @(
-  "https://registry.npmjs.org",
-  "https://registry.yarnpkg.com",
-  "https://registry.npmmirror.com"
-)
+$BlockedPublicRegistryHosts = @("registry.npmjs.org", "registry.yarnpkg.com", "registry.npmmirror.com")
 $MicrosoftCfsRegistry = "https://packagefeedproxy.microsoft.io/npm/"
 
 if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
@@ -379,9 +375,10 @@ if (-not $InstallRegistry) { $InstallRegistry = $PublicRegistry }
 $InstallRegistry = Expand-NpmrcEnvironment $InstallRegistry
 $InstallRegistry = Assert-NpmRegistry $InstallRegistry
 
-$NormalizedRegistry = $InstallRegistry.TrimEnd("/").ToLowerInvariant()
+$InstallRegistryUri = [Uri]$InstallRegistry
+$NormalizedRegistryHost = $InstallRegistryUri.DnsSafeHost.ToLowerInvariant()
 if (
-  $BlockedPublicRegistries -contains $NormalizedRegistry -and
+  $BlockedPublicRegistryHosts -contains $NormalizedRegistryHost -and
   -not (Test-NpmRegistry $InstallRegistry)
 ) {
   $InstallRegistry = $MicrosoftCfsRegistry
