@@ -270,9 +270,46 @@ $BinDir = if ($env:KEELSON_BIN_DIR) { $env:KEELSON_BIN_DIR } else { Join-Path $e
 $Base = "https://github.com/${repo}/releases/download/v$KeelsonVersion"
 $CliTarball = if ($env:KEELSON_CLI_TARBALL) { $env:KEELSON_CLI_TARBALL } else { "$Base/keelson-cli.tgz" }
 $SharedTarball = if ($env:KEELSON_SHARED_TARBALL) { $env:KEELSON_SHARED_TARBALL } else { "$Base/keelson-shared.tgz" }
+$PublicRegistry = "https://registry.npmjs.org/"
+$MicrosoftCfsRegistry = "https://packagefeedproxy.microsoft.io/npm/"
 
 if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
   throw "keelson requires Bun on PATH - install it from https://bun.sh and re-run."
+}
+
+function Get-NpmrcRegistry([string]$Path) {
+  if (-not (Test-Path $Path)) { return $null }
+  $RegistryMatches = [regex]::Matches(
+    (Get-Content -Raw $Path),
+    "(?im)^\\s*registry\\s*=\\s*['""]?([^'""\\r\\n]+)"
+  )
+  if ($RegistryMatches.Count -eq 0) { return $null }
+  return $RegistryMatches[$RegistryMatches.Count - 1].Groups[1].Value.Trim()
+}
+
+function Set-NpmrcRegistry([string]$Path, [string]$Registry) {
+  $Line = "registry=$Registry"
+  if (-not (Test-Path $Path)) {
+    Set-Content -Path $Path -Value $Line -Encoding ascii
+    return
+  }
+  $Content = Get-Content -Raw $Path
+  if ($Content -match "(?im)^\\s*registry\\s*=") {
+    $Content = [regex]::Replace($Content, "(?im)^\\s*registry\\s*=.*$", $Line)
+  } else {
+    $Content = $Content.TrimEnd() + [Environment]::NewLine + $Line + [Environment]::NewLine
+  }
+  Set-Content -Path $Path -Value $Content -NoNewline -Encoding ascii
+}
+
+function Test-NpmRegistry([string]$Registry) {
+  try {
+    $Ping = $Registry.TrimEnd("/") + "/-/ping"
+    Invoke-WebRequest -UseBasicParsing -Uri $Ping -TimeoutSec 10 | Out-Null
+    return $true
+  } catch {
+    return $false
+  }
 }
 
 New-Item -ItemType Directory -Force -Path $KeelsonHome | Out-Null
@@ -281,6 +318,35 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 # resolves from any directory, even if a relative KEELSON_HOME was supplied.
 $KeelsonHome = (Resolve-Path $KeelsonHome).Path
 $BinDir = (Resolve-Path $BinDir).Path
+
+# Bun does not read npm's machine/global config, so bridge npm's effective
+# registry into this managed home. An explicit Keelson override wins. On
+# Microsoft-managed devices, fall back to the approved CFS feed only when the
+# public registry is configured but blocked by device policy.
+$NpmrcPath = Join-Path $KeelsonHome ".npmrc"
+$InstallRegistry = $env:KEELSON_NPM_REGISTRY
+if (-not $InstallRegistry) { $InstallRegistry = $env:NPM_CONFIG_REGISTRY }
+if (-not $InstallRegistry) { $InstallRegistry = Get-NpmrcRegistry $NpmrcPath }
+if (-not $InstallRegistry) { $InstallRegistry = Get-NpmrcRegistry (Join-Path $env:USERPROFILE ".npmrc") }
+if (-not $InstallRegistry -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+  $NpmRegistryOutput = & npm config get registry 2>$null | Select-Object -Last 1
+  if ($LASTEXITCODE -eq 0 -and $NpmRegistryOutput) {
+    $InstallRegistry = $NpmRegistryOutput.Trim()
+  }
+}
+if (-not $InstallRegistry) { $InstallRegistry = $PublicRegistry }
+
+$NormalizedRegistry = $InstallRegistry.TrimEnd("/").ToLowerInvariant()
+if (
+  $NormalizedRegistry -eq $PublicRegistry.TrimEnd("/").ToLowerInvariant() -and
+  -not (Test-NpmRegistry $InstallRegistry)
+) {
+  $InstallRegistry = $MicrosoftCfsRegistry
+  Write-Host "public npm registry is unavailable; using the Microsoft CFS feed"
+}
+if ($InstallRegistry.TrimEnd("/").ToLowerInvariant() -ne $PublicRegistry.TrimEnd("/").ToLowerInvariant()) {
+  Set-NpmrcRegistry $NpmrcPath $InstallRegistry
+}
 
 # Merge cli + shared into the home manifest every run, preserving any ribs
 # added via \`keelson rib add\` — the same env-driven bun one-liner install.sh
@@ -299,10 +365,13 @@ try {
 }
 
 Push-Location $KeelsonHome
+$SavedRegistry = $env:NPM_CONFIG_REGISTRY
+$env:NPM_CONFIG_REGISTRY = $InstallRegistry
 try {
   bun install
   if ($LASTEXITCODE -ne 0) { throw "bun install failed (exit $LASTEXITCODE)" }
 } finally {
+  $env:NPM_CONFIG_REGISTRY = $SavedRegistry
   Pop-Location
 }
 
