@@ -4226,13 +4226,13 @@ button.cvb-action-field-model:disabled {
   justify-content: center;
   width: 100%;
 }
-/* A composing ghost wakes in place — solid brand edge, background lift — so
-   authoring visibly takes the seat without the card leaving its grid cell. */
+/* A composing ghost wakes in place — solid edge, background lift — so authoring
+   visibly takes the seat without the card leaving its grid cell. The accent ring is
+   .is-selected's alone; a board may mix selectable cards with an authoring ghost. */
 .cvb-card--ghost:has(.cvb-action-form) {
   border-style: solid;
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  border-color: var(--border);
   background: var(--card-2);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .cvb-card--ghost .cvb-action-form {
   text-align: left;
