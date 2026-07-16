@@ -306,6 +306,14 @@ export interface RibContext {
   // rib declared; `region.key` must be under `rib:<id>:*`. Optional so a rib
   // built against an older harness degrades to no dynamic regions, not a throw.
   registerRegion?: (surfaceId: string, region: RibSurfaceRegion) => () => void;
+  // Nudge the SPA to re-fetch the manifest, the same nudge registerRegion gives.
+  // A rib whose declared `views`/`surfaces` are live objects it mutates at runtime
+  // has no other way to say so: the client fetches GET /api/ribs once and caches it,
+  // so without this it renders the boot-time descriptor until a reload. Call it after
+  // the mutation, and only when a value really changed — every call re-fetches for
+  // every subscribed client. Optional so a rib built against an older harness
+  // degrades to reload-only, not a throw.
+  invalidateManifest?: () => void;
   // Re-run THIS rib's own snapshot-bound producer workflow by name on demand;
   // fresh structured output republishes to the bound key through the same
   // publish->recompose bridge the cadence/heartbeat refresh uses. Optional
@@ -392,7 +400,7 @@ export const RIBS_VERSION_SNAPSHOT_KEY = "keelson:ribs:version";
 // A view a rib declares so the harness surfaces a live canvas for one of the
 // rib's snapshot keys with no per-rib UI code. `canvasKind` is the closed
 // base enum; the payload published under `key` must satisfy the matching
-// renderer (the client gate fail-closes on a mismatch). Static metadata, not
+// renderer (the client gate fail-closes on a mismatch). Plain metadata, not
 // a hook — the manifest is built without invoking rib code.
 export const ribViewDescriptorSchema = z
   .object({
@@ -606,13 +614,20 @@ export interface Rib {
   // same data layer its `composeBundle` snapshot draws from.
   registerTools?(ctx: RibContext): readonly ToolDefinition[];
   composeBundle?(ctx: RibContext): Promise<unknown>;
-  // Static view descriptors honored by the canvas-kind registry. Each `key` must
-  // live under the rib's namespace (`rib:<id>` or `rib:<id>:*`); the harness
-  // rejects out-of-namespace keys at activation.
+  // View descriptors honored by the canvas-kind registry. Each `key` must live
+  // under the rib's namespace (`rib:<id>` or `rib:<id>:*`). Read per manifest
+  // request, so a rib may hold this array live and append to it at runtime (then
+  // call invalidateManifest) — a view carries no boot-derived state, so a live one
+  // is a complete one. The harness re-checks every descriptor when serving, not
+  // only at activation, and drops one it does not own.
   views?: readonly RibViewDescriptor[];
-  // Static surface descriptors — primary nav tabs that lay out region-bound
-  // boards. Each region `key` must live under the rib's namespace, like view
-  // keys; the harness rejects out-of-namespace keys at activation.
+  // Surface descriptors — primary nav tabs that lay out region-bound boards. Each
+  // region `key` must live under the rib's namespace, like view keys, and ids must
+  // be unique. Also read per request, but only a declared region's presentation and
+  // mount-defaults are safely mutable at runtime: region `workflow` names and
+  // `cadenceMs` are read once at boot, so a region added or rebound later would
+  // serve unbound and never get a heartbeat. Add regions with
+  // RibContext.registerRegion instead.
   surfaces?: readonly RibSurfaceDescriptor[];
   // Declares support for the conventional `ingest` action from host surfaces.
   acceptsIngest?: boolean;

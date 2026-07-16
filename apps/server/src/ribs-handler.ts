@@ -12,17 +12,68 @@ import {
   type RibActionResult,
   type RibAuthStatus,
   type RibSummary,
+  type RibSurfaceDescriptor,
+  type RibViewDescriptor,
   ribActionResponseSchema,
   ribActionSchema,
   ribAuthStatusSchema,
   ribClientEffectSchema,
   ribIdFromKey,
+  ribSurfaceDescriptorSchema,
+  ribViewDescriptorSchema,
 } from "@keelson/shared";
 import { type CrossRibGrants, serializeCrossRibGrants } from "@keelson/shared/config";
 import type { Hono } from "hono";
 import { type DynamicRegionStore, mergeSurfaceRegions } from "./dynamic-region-store.ts";
-import type { RibManifest } from "./ribs.ts";
+import { allRegions, isInNamespace, type RibManifest, ribNamespace } from "./ribs.ts";
 import { isAllowedOrigin } from "./server-context.ts";
+
+// These are the rib's own arrays, which it may mutate after activation checked them, so
+// the checks run again here. Drop only the offending descriptor: a malformed one would
+// otherwise throw the response parse below and blank the manifest for every rib.
+export function ownedViews(m: RibManifest): RibViewDescriptor[] {
+  const namespace = ribNamespace(m.id);
+  return m.views.filter((view) => {
+    if (!ribViewDescriptorSchema.safeParse(view).success) {
+      console.warn(`[keelson] rib '${m.id}': dropping a malformed view descriptor`);
+      return false;
+    }
+    if (!isInNamespace(namespace, view.key)) {
+      console.warn(
+        `[keelson] rib '${m.id}': dropping view '${view.key}' — outside '${namespace}:*'`,
+      );
+      return false;
+    }
+    return true;
+  });
+}
+
+export function ownedSurfaces(m: RibManifest): RibSurfaceDescriptor[] {
+  const namespace = ribNamespace(m.id);
+  const seen = new Set<string>();
+  return m.surfaces.filter((surface) => {
+    if (!ribSurfaceDescriptorSchema.safeParse(surface).success) {
+      console.warn(`[keelson] rib '${m.id}': dropping a malformed surface descriptor`);
+      return false;
+    }
+    const escaped = allRegions(surface.layout).find((r) => !isInNamespace(namespace, r.key));
+    if (escaped) {
+      console.warn(
+        `[keelson] rib '${m.id}': dropping surface '${surface.id}' — region '${escaped.key}' is outside '${namespace}:*'`,
+      );
+      return false;
+    }
+    // Activation rejects a duplicate id outright; here the first one declared wins,
+    // because the client keys its nav tabs by id and routes to the first match — so a
+    // later duplicate is unreachable anyway, and serving it only shadows.
+    if (seen.has(surface.id)) {
+      console.warn(`[keelson] rib '${m.id}': dropping a duplicate surface id '${surface.id}'`);
+      return false;
+    }
+    seen.add(surface.id);
+    return true;
+  });
+}
 
 export interface RibsRoutesDeps {
   manifests: readonly RibManifest[];
@@ -69,10 +120,10 @@ export function ribsRoutes(app: Hono, deps: RibsRoutesDeps): void {
           id: m.id,
           displayName: m.displayName,
           registered: [...m.registered],
-          views: [...m.views],
+          views: ownedViews(m),
           // Merge runtime regions onto each static surface (no-op when none): a
           // newly-authored panel appears here without a server restart.
-          surfaces: m.surfaces.map((s) =>
+          surfaces: ownedSurfaces(m).map((s) =>
             dynamicRegionStore
               ? mergeSurfaceRegions(s, dynamicRegionStore.regionsFor(m.id, s.id))
               : s,
