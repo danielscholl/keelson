@@ -826,17 +826,44 @@ describe("Surface", () => {
     expect(postRibActionCalls).toEqual([{ ribId: "demo", action: { type: "open-room" } }]);
   });
 
-  test("renders the surface title and subtitle as a page-identity slot", () => {
+  test("renders an explicit heading (not the tab title) and subtitle as a page-identity slot", () => {
     const { container } = renderSurface({
-      id: "chamber",
-      title: "Chamber",
+      id: "cimpl",
+      // `title` names the nav tab; the H1 comes from `heading` and may differ from it.
+      title: "CIMPL",
+      heading: "OSDU Community Implementation",
       subtitle: "3 rooms · 2 lenses",
       layout: { rows: [] },
     });
-    expect(container.querySelector(".surface-identity-title")?.textContent).toBe("Chamber");
+    expect(container.querySelector(".surface-identity-title")?.textContent).toBe(
+      "OSDU Community Implementation",
+    );
     expect(container.querySelector(".surface-identity-subtitle")?.textContent).toBe(
       "3 rooms · 2 lenses",
     );
+  });
+
+  test("no heading renders no H1 — the tab title is not a fallback", () => {
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      projectScoped: true,
+      layout: { rows: [] },
+    });
+    // `title` is the tab name only; without a `heading` there is no H1.
+    expect(container.querySelector(".surface-identity-title")).toBeNull();
+    // projectScoped still renders the header slot so the project chip has a home.
+    expect(container.querySelector(".surface-identity")).not.toBeNull();
+  });
+
+  test("a surface with no heading, subtitle, or project chip renders no header block", () => {
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: { rows: [] },
+    });
+    // Nothing to anchor — the tab already names it, so the page-identity header is absent.
+    expect(container.querySelector(".surface-identity")).toBeNull();
   });
 
   test("renders a run of zoneTitle rows under one titled zone heading", () => {

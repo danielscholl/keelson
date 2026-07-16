@@ -117,10 +117,15 @@ export function Surface({
   );
   return (
     <div className="page surface-page">
-      {(descriptor.title || descriptor.subtitle || descriptor.projectScoped) && (
+      {/* The page-identity header is opt-in: `title` names the nav tab, not this H1. A
+          surface earns a header only by carrying real identity — an explicit `heading`
+          (its H1, which may differ from the tab), a `subtitle`, or the project chip. A
+          surface that sets none (an authoring console the tab already names) gets no
+          header block at all. */}
+      {(descriptor.heading || descriptor.subtitle || descriptor.projectScoped) && (
         <header className="surface-identity">
           <div className="surface-identity-text">
-            {descriptor.title && <h1 className="surface-identity-title">{descriptor.title}</h1>}
+            {descriptor.heading && <h1 className="surface-identity-title">{descriptor.heading}</h1>}
             {descriptor.subtitle && (
               <p className="surface-identity-subtitle">{descriptor.subtitle}</p>
             )}
