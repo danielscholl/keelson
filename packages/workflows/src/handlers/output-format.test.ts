@@ -154,6 +154,40 @@ describe("extractJsonValue", () => {
     expect(extractJsonValue("[".repeat(20000))).toBeUndefined();
   });
 
+  test("scans narration ending in a mismatched closer without pathological slowdown", () => {
+    const raw = `${"[".repeat(20000)}}\n{"verdict":"READY TO MERGE"}`;
+    const started = performance.now();
+    expect(extractJsonValue(raw)).toEqual({ verdict: "READY TO MERGE" });
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  // Brackets that balance around garbage: every start yields a full span, so
+  // only rejecting the garbage where it stands keeps this linear.
+  test("scans balanced-but-invalid nesting without pathological slowdown", () => {
+    const depth = 8000;
+    const raw = `${"[".repeat(depth)}x${"]".repeat(depth)}\n{"verdict":"READY TO MERGE"}`;
+    const started = performance.now();
+    expect(extractJsonValue(raw)).toEqual({ verdict: "READY TO MERGE" });
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  test("accepts the scalar types a JSON value may hold", () => {
+    const raw = 'Result:\n{"a":-1.5e-3,"b":true,"c":false,"d":null,"e":[0,{"f":[]}],"g":""}';
+    expect(extractJsonValue(raw)).toEqual({
+      a: -1.5e-3,
+      b: true,
+      c: false,
+      d: null,
+      e: [0, { f: [] }],
+      g: "",
+    });
+  });
+
+  test("rejects trailing commas and unquoted keys", () => {
+    expect(extractJsonValue("note {a: 1}")).toBeUndefined();
+    expect(extractJsonValue('note {"a": 1,}')).toBeUndefined();
+  });
+
   // An inner bracket can still close where an outer one never does.
   test("finds a closing inner span inside an unclosed outer bracket", () => {
     expect(extractJsonValue('Note: [["a"]')).toEqual(["a"]);

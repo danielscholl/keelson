@@ -65,15 +65,15 @@ function tryParse(text: string): unknown {
 // combination, so nothing outside a candidate may be read as structure.
 function lastEmbeddedObject(text: string): unknown {
   let found: unknown;
-  const neverCloses = new Set<number>();
+  const doomed = new Set<number>();
   let i = 0;
   while (i < text.length) {
     const ch = text[i];
-    if ((ch !== "{" && ch !== "[") || neverCloses.has(i)) {
+    if ((ch !== "{" && ch !== "[") || doomed.has(i)) {
       i++;
       continue;
     }
-    const end = jsonSpanEnd(text, i, neverCloses);
+    const end = jsonSpanEnd(text, i, doomed);
     if (end === undefined) {
       i++;
       continue;
@@ -92,45 +92,128 @@ function lastEmbeddedObject(text: string): unknown {
   return found;
 }
 
-// Index of the bracket closing the JSON object/array opened at `start`, or
-// undefined when the text there can't be one. String state starts fresh at
-// `start` — a stray quote in the narration says nothing about this candidate.
-// Brackets left open at end of text are added to `neverCloses`.
-function jsonSpanEnd(text: string, start: number, neverCloses: Set<number>): number | undefined {
-  if (!opensJsonValue(text, start)) return undefined;
-  const closers: string[] = [];
+type Expect = "value" | "value-or-close" | "key" | "key-or-close" | "colon" | "comma-or-close";
+
+/**
+ * Index of the bracket closing the JSON value opened at `start`, or undefined
+ * when the text there isn't one. Recognizes the grammar rather than counting
+ * brackets, so garbage is rejected where it stands instead of by a later parse
+ * of the whole span. String state starts fresh at `start` — a stray quote in
+ * the narration says nothing about this candidate.
+ *
+ * Brackets still open when a scan gives up are added to `doomed`. Each would
+ * read the same text from the same state, so each is beyond saving too, and
+ * without that the reply's suffix is rescanned once per bracket.
+ */
+function jsonSpanEnd(text: string, start: number, doomed: Set<number>): number | undefined {
+  const stack: string[] = [];
   const opens: number[] = [];
-  for (let i = start; i < text.length; i++) {
+  let expect: Expect = "value";
+  let i = start;
+
+  const abandon = (): undefined => {
+    for (const open of opens) doomed.add(open);
+    return undefined;
+  };
+
+  while (i < text.length) {
     const ch = text[i];
-    if (ch === '"') {
+    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+      i++;
+      continue;
+    }
+    const top = stack[stack.length - 1];
+
+    if (expect === "colon") {
+      if (ch !== ":") return abandon();
+      i++;
+      expect = "value";
+    } else if (expect === "key" || expect === "key-or-close") {
+      if (ch === "}" && expect === "key-or-close" && top === "{") {
+        stack.pop();
+        opens.pop();
+        if (stack.length === 0) return i;
+        i++;
+        expect = "comma-or-close";
+        continue;
+      }
+      if (ch !== '"') return abandon();
       const closed = stringEnd(text, i);
-      if (closed === undefined) return undefined;
-      i = closed;
-    } else if (ch === "{" || ch === "[") {
-      closers.push(ch === "{" ? "}" : "]");
-      opens.push(i);
-    } else if (ch === "}" || ch === "]") {
-      if (closers.pop() !== ch) return undefined;
-      opens.pop();
-      if (closers.length === 0) return i;
+      if (closed === undefined) return abandon();
+      i = closed + 1;
+      expect = "colon";
+    } else if (expect === "comma-or-close") {
+      if (ch === ",") {
+        i++;
+        expect = top === "{" ? "key" : "value";
+      } else if ((ch === "}" && top === "{") || (ch === "]" && top === "[")) {
+        stack.pop();
+        opens.pop();
+        if (stack.length === 0) return i;
+        i++;
+      } else return abandon();
+    } else {
+      if (ch === "]" && expect === "value-or-close" && top === "[") {
+        stack.pop();
+        opens.pop();
+        if (stack.length === 0) return i;
+        i++;
+        expect = "comma-or-close";
+        continue;
+      }
+      if (ch === "{" || ch === "[") {
+        stack.push(ch);
+        opens.push(i);
+        i++;
+        expect = ch === "{" ? "key-or-close" : "value-or-close";
+        continue;
+      }
+      const closed = scalarEnd(text, i);
+      if (closed === undefined) return abandon();
+      i = closed + 1;
+      expect = "comma-or-close";
     }
   }
-  // Reaching the end leaves these brackets open for good: a scan starting at one
-  // would read the same text from the same state, so it would run out too. Without
-  // this a run of unclosed `[` rescans the whole suffix once per bracket.
-  for (const open of opens) neverCloses.add(open);
-  return undefined;
+  return abandon();
 }
 
-const ARRAY_HEAD = /["{[\]\-0-9tfn]/;
+function scalarEnd(text: string, start: number): number | undefined {
+  if (text[start] === '"') return stringEnd(text, start);
+  if (text.startsWith("true", start)) return start + 3;
+  if (text.startsWith("false", start)) return start + 4;
+  if (text.startsWith("null", start)) return start + 3;
+  return numberEnd(text, start);
+}
 
-// An object opens with a key or closes immediately; an array opens with a value
-// or closes. Rejecting the rest here is what keeps a run of prose braces from
-// costing a full scan apiece.
-function opensJsonValue(text: string, start: number): boolean {
-  const head = firstNonSpace(text, start + 1);
-  if (head === undefined) return false;
-  return text[start] === "{" ? head === '"' || head === "}" : ARRAY_HEAD.test(head);
+function numberEnd(text: string, start: number): number | undefined {
+  let i = start;
+  if (text[i] === "-") i++;
+  const whole = digitsEnd(text, i);
+  if (whole === i) return undefined;
+  i = whole;
+  if (text[i] === ".") {
+    const frac = digitsEnd(text, i + 1);
+    if (frac === i + 1) return undefined;
+    i = frac;
+  }
+  if (text[i] === "e" || text[i] === "E") {
+    let exp = i + 1;
+    if (text[exp] === "+" || text[exp] === "-") exp++;
+    const digits = digitsEnd(text, exp);
+    if (digits === exp) return undefined;
+    i = digits;
+  }
+  return i - 1;
+}
+
+function digitsEnd(text: string, from: number): number {
+  let i = from;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === undefined || ch < "0" || ch > "9") break;
+    i++;
+  }
+  return i;
 }
 
 // Index of the quote closing the string opened at `open`. A raw newline ends the
@@ -141,14 +224,6 @@ function stringEnd(text: string, open: number): number | undefined {
     if (ch === "\\") i++;
     else if (ch === '"') return i;
     else if (ch === "\n") return undefined;
-  }
-  return undefined;
-}
-
-function firstNonSpace(text: string, from: number): string | undefined {
-  for (let i = from; i < text.length; i++) {
-    const ch = text[i];
-    if (ch !== " " && ch !== "\t" && ch !== "\n" && ch !== "\r") return ch;
   }
   return undefined;
 }
