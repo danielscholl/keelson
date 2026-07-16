@@ -93,11 +93,13 @@ jobs:
             dist/release/install.ps1
           fail_on_unmatched_files: true
 
-  # Catch a silently-dropped release: if a release PR merges without its
-  # `autorelease: pending` label (a GitHub label-API flake at PR-creation time
-  # can strip it), release-please bumps the manifest on main but never tags or
-  # publishes — a green run with no release. Assert the manifest version has a
-  # matching GitHub Release so that turns into a red build instead of a gap.
+  # Catch a silently-dropped release: merging a release PR while a release-please
+  # run is in flight crashes that run — it tries to update the PR that just merged
+  # out from under it — after it opens the next release PR but before it applies
+  # `autorelease: pending`. Merging that unlabeled PR bumps the manifest on main
+  # but never tags or publishes, and every later run re-proposes forever. Assert
+  # the manifest version has a matching Release so that turns red instead of
+  # looping.
   verify-release:
     name: Verify release exists for manifest version
     needs: release-please
@@ -125,5 +127,5 @@ jobs:
             echo "attempt ${attempt}: ${tag} not visible yet; retrying in 5s"
             sleep 5
           done
-          echo "::error::.release-please-manifest.json is at ${version} but no ${tag} release exists — a release was silently dropped. Most likely a release PR merged without its 'autorelease: pending' label; re-label the merged release PR and re-run this workflow to recover it." >&2
+          echo "::error::.release-please-manifest.json is at ${version} but no ${tag} release exists — a release was silently dropped. Most likely a release PR merged without its 'autorelease: pending' label. To recover: re-label that merged PR 'autorelease: pending' and re-run this workflow, then CLOSE any newer release PR — built with no ${tag} to anchor against, it rewrites the entire changelog as one bogus release." >&2
           exit 1
