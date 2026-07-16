@@ -492,6 +492,8 @@ export const ribSurfaceDescriptorSchema = z
   .object({
     id: z.string().min(1),
     title: z.string().min(1),
+    // The surface's H1, opt-in and independent of `title` (the nav tab). Absent = no H1.
+    heading: z.string().min(1).max(200).optional(),
     subtitle: z.string().min(1).max(200).optional(),
     // Opt the surface into the host's first-class project picker: the SPA renders
     // the shared ProjectChip in the surface header and, on select, dispatches the

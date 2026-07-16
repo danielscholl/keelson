@@ -826,17 +826,72 @@ describe("Surface", () => {
     expect(postRibActionCalls).toEqual([{ ribId: "demo", action: { type: "open-room" } }]);
   });
 
-  test("renders the surface title and subtitle as a page-identity slot", () => {
+  test("renders an explicit heading (not the tab title) and subtitle as a page-identity slot", () => {
+    const { container } = renderSurface({
+      id: "cimpl",
+      // `title` names the nav tab; the H1 comes from `heading` and may differ from it.
+      title: "CIMPL",
+      heading: "OSDU Community Implementation",
+      subtitle: "3 rooms · 2 lenses",
+      layout: { rows: [] },
+    });
+    expect(container.querySelector(".surface-identity-title")?.textContent).toBe(
+      "OSDU Community Implementation",
+    );
+    expect(container.querySelector(".surface-identity-subtitle")?.textContent).toBe(
+      "3 rooms · 2 lenses",
+    );
+  });
+
+  test("renders a subtitle-only header — subtitle alone anchors it, still no H1", () => {
     const { container } = renderSurface({
       id: "chamber",
       title: "Chamber",
       subtitle: "3 rooms · 2 lenses",
       layout: { rows: [] },
     });
-    expect(container.querySelector(".surface-identity-title")?.textContent).toBe("Chamber");
+    // No heading and not projectScoped: the subtitle term is the only thing rendering the
+    // header, so this fails if that term is dropped from the render condition.
+    expect(container.querySelector(".surface-identity")).not.toBeNull();
     expect(container.querySelector(".surface-identity-subtitle")?.textContent).toBe(
       "3 rooms · 2 lenses",
     );
+    expect(container.querySelector(".surface-identity-title")).toBeNull();
+  });
+
+  test("a projectScoped surface renders the header with the chip, and no H1 fallback from the tab title", () => {
+    live("rib:squad:crew", board("Crew", "Members", 0));
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      projectScoped: true,
+      layout: { header: { key: "rib:squad:crew" }, rows: [] },
+    });
+    // `title` is the tab name only; without a `heading` there is no H1.
+    expect(container.querySelector(".surface-identity-title")).toBeNull();
+    // The chip itself renders (ribId derives from the region key) — not just its container.
+    expect(container.querySelector(".surface-identity .chat-model-chip")).not.toBeNull();
+  });
+
+  test("a projectScoped surface with no derivable owner renders no empty header", () => {
+    const { container } = renderSurface({
+      id: "squad",
+      title: "Squad",
+      projectScoped: true,
+      layout: { rows: [] },
+    });
+    // No region key → no ribId → no chip. projectScoped alone must not emit an empty header.
+    expect(container.querySelector(".surface-identity")).toBeNull();
+  });
+
+  test("a surface with no heading, subtitle, or project chip renders no header block", () => {
+    const { container } = renderSurface({
+      id: "chamber",
+      title: "Chamber",
+      layout: { rows: [] },
+    });
+    // Nothing to anchor — the tab already names it, so the page-identity header is absent.
+    expect(container.querySelector(".surface-identity")).toBeNull();
   });
 
   test("renders a run of zoneTitle rows under one titled zone heading", () => {

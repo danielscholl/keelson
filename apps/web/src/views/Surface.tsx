@@ -117,10 +117,12 @@ export function Surface({
   );
   return (
     <div className="page surface-page">
-      {(descriptor.title || descriptor.subtitle || descriptor.projectScoped) && (
+      {/* `title` is the nav tab, not this H1. The chip term also requires `ribId`, so a
+          projectScoped surface with no derivable owner can't force an empty header. */}
+      {(descriptor.heading || descriptor.subtitle || (descriptor.projectScoped && ribId)) && (
         <header className="surface-identity">
           <div className="surface-identity-text">
-            {descriptor.title && <h1 className="surface-identity-title">{descriptor.title}</h1>}
+            {descriptor.heading && <h1 className="surface-identity-title">{descriptor.heading}</h1>}
             {descriptor.subtitle && (
               <p className="surface-identity-subtitle">{descriptor.subtitle}</p>
             )}
