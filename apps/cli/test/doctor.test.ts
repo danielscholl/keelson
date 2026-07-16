@@ -84,6 +84,20 @@ describe("toolchain check", () => {
     expect(registry?.hint).toContain("quarantine");
   });
 
+  test("registry credentials never reach the doctor report", async () => {
+    const result = await runToolchainCheck({
+      runText: fakeRunText({
+        bun: execOk("1.2.21"),
+        [BASH_CMD]: execOk("GNU bash, version 5.2.21"),
+      }),
+      resolveBash: bashOkResolver,
+      effectiveRegistry: () => "https://user:hunter2@feed.example.com/npm/?token=abc",
+    });
+    const registry = result.checks.find((c) => c.name === "npm registry");
+    expect(registry?.detail).toBe("https://feed.example.com/npm/");
+    expect(JSON.stringify(registry)).not.toContain("hunter2");
+  });
+
   test("bun missing → warn with install hint", async () => {
     const result = await runToolchainCheck({
       runText: fakeRunText({

@@ -56,8 +56,8 @@ jobs:
 
   # Non-required guard: a bun.lock pin younger than the ~7-day quarantine
   # window corporate vetting feeds apply fails fresh installs behind those
-  # feeds until it ages in (#641). Red here informs release timing; it does
-  # not block merges.
+  # feeds until it ages in. Red here informs release timing; it does not
+  # block merges.
   pin-age:
     name: Dependency pin age
     runs-on: ubuntu-latest

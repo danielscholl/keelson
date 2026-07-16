@@ -5,10 +5,10 @@
 
 // Flags bun.lock pins younger than the quarantine window corporate vetting
 // feeds apply to fresh npm publishes — a release whose youngest pin has aged
-// past the window installs cleanly behind those feeds (issue #641).
+// past the window installs cleanly behind those feeds.
 
 const WINDOW_DAYS = 7;
-const MAX_LOOKUPS = 100;
+const CONCURRENCY = 8;
 const REGISTRY = "https://registry.npmjs.org";
 
 interface Pin {
@@ -30,6 +30,24 @@ export function parseAddedPins(diff: string): Pin[] {
     }
   }
   return [...pins.values()];
+}
+
+async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        results[i] = await fn(items[i] as T);
+      }
+    }),
+  );
+  return results;
 }
 
 async function publishedAt(pkg: string, version: string): Promise<Date | null> {
@@ -56,44 +74,36 @@ if (import.meta.main) {
     console.log("no new registry pins in bun.lock");
     process.exit(0);
   }
-  const checked = pins.slice(0, MAX_LOOKUPS);
-  if (checked.length < pins.length) {
-    console.log(`capped: checking the first ${MAX_LOOKUPS} of ${pins.length} new pins`);
-  }
-  let young = 0;
-  let failures = 0;
-  for (const { pkg, version } of checked) {
-    let published: Date | null;
+  console.log(`checking ${pins.length} new pin(s) against ${REGISTRY}`);
+  const verdicts = await mapLimit(pins, CONCURRENCY, async ({ pkg, version }) => {
     try {
-      published = await publishedAt(pkg, version);
+      const published = await publishedAt(pkg, version);
+      if (!published) return { pkg, version, ageDays: null, error: "no publish date" };
+      return { pkg, version, ageDays: (Date.now() - published.getTime()) / 86_400_000 };
     } catch (err) {
-      failures += 1;
-      console.log(
-        `lookup failed for ${pkg}@${version}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      continue;
+      return {
+        pkg,
+        version,
+        ageDays: null,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
-    if (!published) {
-      console.log(`no publish date for ${pkg}@${version} — skipped`);
-      continue;
-    }
-    const ageDays = (Date.now() - published.getTime()) / 86_400_000;
-    if (ageDays < WINDOW_DAYS) {
-      young += 1;
-      console.log(
-        `::warning file=bun.lock::${pkg}@${version} was published ${ageDays.toFixed(1)} days ago — quarantine feeds holding releases for ${WINDOW_DAYS} days cannot install it yet`,
-      );
-    }
+  });
+  const young = verdicts.filter((v) => v.ageDays !== null && v.ageDays < WINDOW_DAYS);
+  const unverified = verdicts.filter((v) => v.ageDays === null);
+  for (const v of young) {
+    console.log(
+      `::warning file=bun.lock::${v.pkg}@${v.version} was published ${v.ageDays?.toFixed(1)} days ago — quarantine feeds holding releases for ${WINDOW_DAYS} days cannot install it yet`,
+    );
   }
-  if (failures === checked.length) {
-    console.log("every registry lookup failed — skipping the pin-age check");
-    process.exit(0);
+  for (const v of unverified) {
+    console.log(`::warning file=bun.lock::${v.pkg}@${v.version} could not be verified: ${v.error}`);
   }
-  if (young > 0) {
+  if (young.length > 0 || unverified.length > 0) {
     console.error(
-      `${young} new pin(s) are younger than ${WINDOW_DAYS} days; fresh installs behind quarantine feeds will fail until they age in (not a merge blocker — a heads-up for release timing)`,
+      `${young.length} pin(s) younger than ${WINDOW_DAYS} days, ${unverified.length} unverifiable — fresh installs behind quarantine feeds may fail until pins age in (not a merge blocker; a heads-up for release timing)`,
     );
     process.exit(1);
   }
-  console.log(`all ${checked.length - failures} checked pins are at least ${WINDOW_DAYS} days old`);
+  console.log(`all ${pins.length} new pins are at least ${WINDOW_DAYS} days old`);
 }

@@ -9,7 +9,7 @@ import { isWorkflowYaml } from "@keelson/workflows";
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
-import { effectiveRegistry } from "../npm-registry.ts";
+import { displayRegistry, effectiveRegistry } from "../npm-registry.ts";
 import { emit } from "../output.ts";
 import { probeServer } from "../server-probe.ts";
 
@@ -332,7 +332,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     if (missing.length > 0) {
       const list = missing.map((m) => `${m.pkg}@${m.range}`).join(", ");
       fail(
-        `v${latest} pins versions your npm registry (${effectiveRegistry(home)}) has not admitted yet: ${list} — if the registry is a vetting feed that quarantines fresh releases, retry after the hold elapses or use your organization's exception process`,
+        `v${latest} pins versions your npm registry (${displayRegistry(effectiveRegistry(home))}) has not admitted yet: ${list} — if the registry is a vetting feed that quarantines fresh releases, retry after the hold elapses or use your organization's exception process`,
         "REGISTRY_STALE",
         opts.json,
       );

@@ -6,7 +6,7 @@ import { runText as defaultRunText, type ExecResult } from "@keelson/shared/exec
 import { type ResolvedBash, resolveBash as resolveBashDefault } from "@keelson/workflows";
 
 import { resolveKeelsonHome } from "../home.ts";
-import { DEFAULT_NPM_REGISTRY, effectiveRegistry } from "../npm-registry.ts";
+import { DEFAULT_NPM_REGISTRY, displayRegistry, effectiveRegistry } from "../npm-registry.ts";
 import type { CategoryResult, CheckResult } from "./types.ts";
 
 export type RunText = (
@@ -83,7 +83,7 @@ async function runBashCheck(exec: RunText, resolve: () => ResolvedBash): Promise
 // A non-default registry is a supported environment (corporate vetting feeds),
 // not a defect — always "ok"; the hint carries the quarantine caveat.
 function registryCheck(effective: () => string): CheckResult {
-  const url = effective();
+  const url = displayRegistry(effective());
   const isDefault = url.replace(/\/+$/, "") === DEFAULT_NPM_REGISTRY;
   return {
     name: "npm registry",

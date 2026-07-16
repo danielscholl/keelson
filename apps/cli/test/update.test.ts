@@ -368,6 +368,113 @@ describe("keelson update (e2e against a mock releases API)", () => {
     }
   });
 
+  function failingBunHarness(root: string, stderrText: string): Record<string, string> {
+    const fakeBin = join(root, "bin");
+    mkdirSync(fakeBin, { recursive: true });
+    const helper = join(fakeBin, "fail-bun.ts");
+    writeFileSync(
+      helper,
+      [
+        "const args = process.argv.slice(2);",
+        'if (args[0] === "install") {',
+        '  process.stderr.write(process.env.KEELSON_TEST_INSTALL_STDERR ?? "");',
+        "  process.exit(1);",
+        "}",
+        "const realBun = process.env.KEELSON_REAL_BUN;",
+        "if (!realBun) process.exit(42);",
+        "const proc = Bun.spawn([realBun, ...args], {",
+        '  stdin: "inherit",',
+        '  stdout: "inherit",',
+        '  stderr: "inherit",',
+        "});",
+        "process.exit(await proc.exited);",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(fakeBin, "bun"),
+      '#!/usr/bin/env sh\nexec "$KEELSON_REAL_BUN" "$KEELSON_FAKE_BUN_HELPER" "$@"\n',
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(fakeBin, "bun.cmd"),
+      '@echo off\r\n"%KEELSON_REAL_BUN%" "%KEELSON_FAKE_BUN_HELPER%" %*\r\n',
+    );
+    return {
+      KEELSON_REAL_BUN: process.execPath,
+      KEELSON_FAKE_BUN_HELPER: helper,
+      KEELSON_TEST_INSTALL_STDERR: stderrText,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+    };
+  }
+
+  test("quarantined-version install failure exits REGISTRY_STALE naming the sanitized registry", async () => {
+    latestTag = "v999.0.2";
+    const root = mkdtempSync(join(tmpdir(), "keelson-update-stale-"));
+    const home = join(root, "home");
+    try {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        join(home, "package.json"),
+        `${JSON.stringify({
+          name: "keelson-home",
+          private: true,
+          dependencies: {
+            "@keelson/cli":
+              "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
+          },
+        })}\n`,
+      );
+      writeFileSync(join(home, ".npmrc"), "registry=https://user:hunter2@feed.example.com/npm/\n");
+      const { stdout, exitCode } = await runCli(["--json", "update"], {
+        ...env(home),
+        ...failingBunHarness(
+          root,
+          'error: No version matching "9.9.9" found for specifier "left-pad" (but package exists)\nerror: left-pad@9.9.9 failed to resolve\n',
+        ),
+      });
+      expect(exitCode).toBe(1);
+      const out = JSON.parse(stdout.trim());
+      expect(out.ok).toBe(false);
+      expect(out.code).toBe("REGISTRY_STALE");
+      expect(out.error).toContain("left-pad@9.9.9");
+      expect(out.error).toContain("https://feed.example.com/npm/");
+      expect(out.error).not.toContain("hunter2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("an unrelated install failure stays INSTALL_FAILED", async () => {
+    latestTag = "v999.0.3";
+    const root = mkdtempSync(join(tmpdir(), "keelson-update-instfail-"));
+    const home = join(root, "home");
+    try {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        join(home, "package.json"),
+        `${JSON.stringify({
+          name: "keelson-home",
+          private: true,
+          dependencies: {
+            "@keelson/cli":
+              "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
+          },
+        })}\n`,
+      );
+      const { stdout, exitCode } = await runCli(["--json", "update"], {
+        ...env(home),
+        ...failingBunHarness(root, "error: tarball download failed\n"),
+      });
+      expect(exitCode).toBe(1);
+      const out = JSON.parse(stdout.trim());
+      expect(out.ok).toBe(false);
+      expect(out.code).toBe("INSTALL_FAILED");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("already on the latest release exits 0, updated:false", async () => {
     latestTag = `v${CURRENT}`;
     const home = installedHome();

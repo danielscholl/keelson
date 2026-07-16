@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_NPM_REGISTRY,
+  displayRegistry,
   effectiveRegistry,
   parseNpmrcRegistry,
 } from "../src/npm-registry.ts";
@@ -35,6 +36,43 @@ describe("parseNpmrcRegistry", () => {
   test("returns null for content without a registry line", () => {
     expect(parseNpmrcRegistry("")).toBeNull();
     expect(parseNpmrcRegistry("save-exact=true\n")).toBeNull();
+  });
+
+  test("last assignment wins, matching npmrc INI semantics", () => {
+    const content = "registry=https://first.example.com/\nregistry=https://second.example.com/\n";
+    expect(parseNpmrcRegistry(content)).toBe("https://second.example.com/");
+  });
+
+  test("strips surrounding quotes", () => {
+    expect(parseNpmrcRegistry('registry="https://quoted.example.com/"')).toBe(
+      "https://quoted.example.com/",
+    );
+    expect(parseNpmrcRegistry("registry='https://quoted.example.com/'")).toBe(
+      "https://quoted.example.com/",
+    );
+  });
+
+  test("expands ${VAR}, leaves undefined literal, empties undefined ${VAR?}", () => {
+    const env = { CORP_FEED: "https://corp.example.com/npm/" };
+    expect(parseNpmrcRegistry("registry=${CORP_FEED}", env)).toBe("https://corp.example.com/npm/");
+    expect(parseNpmrcRegistry("registry=${MISSING_FEED}", env)).toBe("${MISSING_FEED}");
+    // ${VAR?} expanding to empty leaves an earlier assignment standing.
+    expect(
+      parseNpmrcRegistry("registry=https://kept.example.com/\nregistry=${MISSING_FEED?}", env),
+    ).toBe("https://kept.example.com/");
+  });
+});
+
+describe("displayRegistry", () => {
+  test("strips userinfo, query, and fragment", () => {
+    expect(displayRegistry("https://user:hunter2@feed.example.com/npm/?token=abc#frag")).toBe(
+      "https://feed.example.com/npm/",
+    );
+  });
+
+  test("leaves clean URLs and non-URL strings untouched", () => {
+    expect(displayRegistry("https://registry.npmjs.org/")).toBe("https://registry.npmjs.org/");
+    expect(displayRegistry("not a url")).toBe("not a url");
   });
 });
 
