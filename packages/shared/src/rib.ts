@@ -492,11 +492,7 @@ export const ribSurfaceDescriptorSchema = z
   .object({
     id: z.string().min(1),
     title: z.string().min(1),
-    // An optional page heading rendered as the surface's H1, independent of `title`
-    // (which only names the nav tab). The host mandates no H1 — a surface opts in by
-    // setting this, and may make it differ from the tab (tab "CIMPL", heading "OSDU
-    // Community Implementation"). Absent = no H1; an authoring console whose tab already
-    // names it just omits it.
+    // The surface's H1, opt-in and independent of `title` (the nav tab). Absent = no H1.
     heading: z.string().min(1).max(200).optional(),
     subtitle: z.string().min(1).max(200).optional(),
     // Opt the surface into the host's first-class project picker: the SPA renders

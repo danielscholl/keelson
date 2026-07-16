@@ -397,6 +397,31 @@ describe("rib surface descriptor schema", () => {
     expect(s.subtitle).toBe("3 rooms · 2 lenses");
   });
 
+  it("round-trips an optional surface heading independent of the tab title", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      heading: "OSDU Community Implementation",
+      layout: { rows: [] },
+    });
+    expect(s.heading).toBe("OSDU Community Implementation");
+    // Omitting it yields no heading (the tab title is not a fallback).
+    expect(
+      ribSurfaceDescriptorSchema.parse({ id: "x", title: "X", layout: { rows: [] } }).heading,
+    ).toBeUndefined();
+  });
+
+  it("rejects an over-long surface heading", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "x",
+        title: "X",
+        heading: "x".repeat(201),
+        layout: { rows: [] },
+      }).success,
+    ).toBe(false);
+  });
+
   it("round-trips the hideRegionActions opt-out (default undefined)", () => {
     const opted = ribSurfaceDescriptorSchema.parse({
       id: "chamber",
