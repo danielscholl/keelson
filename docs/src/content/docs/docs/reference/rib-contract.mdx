@@ -157,7 +157,11 @@ coordination path.
    view, since the host resolves a key's `canvasKind` by exact match. The client
    caches the manifest, so a rib that does this must call
    `ctx.invalidateManifest?.()` after the mutation or the client keeps rendering the
-   boot-time descriptor until a reload.
+   boot-time descriptor until a reload. The same parse and namespace checks that
+   run at activation run again per request, so a descriptor pushed later is held to
+   the identical rule: one that is malformed, or whose key is outside the rib's
+   namespace, is dropped from the response (and warned) rather than served — and
+   cannot fail the manifest for other ribs.
 
 4. **`surfaces`** are declarative `RibSurfaceDescriptor`s: a top-level nav tab with
    a `layout` of an optional `header`, an optional `banner`, one or

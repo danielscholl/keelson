@@ -313,7 +313,7 @@ export function applyRibs(opts: ApplyRibsOptions): ApplyRibsResult {
 
     // Per-rib context: a namespace-scoped snapshot facade (so a rib can only
     // touch `rib:<id>:*` keys) and a credential reader scoped to this rib.
-    const namespace = `rib:${rib.id}`;
+    const namespace = ribNamespace(rib.id);
     const scoped = opts.snapshotManager
       ? createScopedSnapshotManager(opts.snapshotManager, rib.id)
       : undefined;
@@ -704,8 +704,18 @@ function isPolicy(value: unknown): value is Policy {
   });
 }
 
+// The one ownership rule. Shared with the manifest handler's per-request re-check, so
+// the activation boundary and the serving boundary can never disagree on what a rib owns.
+export function isInNamespace(namespace: string, key: string): boolean {
+  return key === namespace || key.startsWith(`${namespace}:`);
+}
+
+export function ribNamespace(ribId: string): string {
+  return `rib:${ribId}`;
+}
+
 function assertInNamespace(ribId: string, namespace: string, key: string, label: string): void {
-  if (key !== namespace && !key.startsWith(`${namespace}:`)) {
+  if (!isInNamespace(namespace, key)) {
     throw new Error(`rib '${ribId}' ${label} '${key}' must be under '${namespace}:*'`);
   }
 }
