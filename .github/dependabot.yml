@@ -10,12 +10,18 @@
 #
 # One npm entry per workspace because Dependabot scans the `directory`
 # only, not the workspace tree.
+#
+# npm entries carry a 7-day cooldown, matching bunfig.toml's
+# minimumReleaseAge: releases must only pin versions old enough to have
+# cleared corporate vetting feeds' quarantine holds.
 
 version: 2
 updates:
   # Root workspace (Biome, TypeScript, @types/node)
   - package-ecosystem: npm
     directory: "/"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
@@ -33,6 +39,8 @@ updates:
 
   - package-ecosystem: npm
     directory: "/apps/cli"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
@@ -48,6 +56,8 @@ updates:
 
   - package-ecosystem: npm
     directory: "/apps/server"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
@@ -63,6 +73,8 @@ updates:
 
   - package-ecosystem: npm
     directory: "/apps/web"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
@@ -88,6 +100,8 @@ updates:
 
   - package-ecosystem: npm
     directory: "/packages/shared"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
@@ -98,6 +112,8 @@ updates:
 
   - package-ecosystem: npm
     directory: "/packages/workflows"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
@@ -108,6 +124,8 @@ updates:
 
   - package-ecosystem: npm
     directory: "/packages/providers"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
@@ -125,7 +143,21 @@ updates:
           - version-update:semver-major
 
   - package-ecosystem: npm
+    directory: "/packages/mcp"
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - packages/mcp
+
+  - package-ecosystem: npm
     directory: "/packages/skills"
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
       day: monday
