@@ -188,9 +188,10 @@ function scalarEnd(text: string, start: number): number | undefined {
 function numberEnd(text: string, start: number): number | undefined {
   let i = start;
   if (text[i] === "-") i++;
-  const whole = digitsEnd(text, i);
-  if (whole === i) return undefined;
-  i = whole;
+  const first = text[i];
+  if (first === undefined || first < "0" || first > "9") return undefined;
+  // JSON allows a leading zero only as the whole integer part: 0 and 0.5, never 01.
+  i = first === "0" ? i + 1 : digitsEnd(text, i);
   if (text[i] === ".") {
     const frac = digitsEnd(text, i + 1);
     if (frac === i + 1) return undefined;
@@ -216,14 +217,37 @@ function digitsEnd(text: string, from: number): number {
   return i;
 }
 
-// Index of the quote closing the string opened at `open`. A raw newline ends the
-// search: no JSON string holds one, so the candidate is not JSON.
+const ESCAPABLE = new Set(['"', "\\", "/", "b", "f", "n", "r", "t"]);
+
+// Index of the quote closing the string opened at `open`. Raw control characters
+// and unknown escapes end the search: no JSON string holds one, so the candidate
+// is not JSON.
 function stringEnd(text: string, open: number): number | undefined {
   for (let i = open + 1; i < text.length; i++) {
     const ch = text[i];
-    if (ch === "\\") i++;
-    else if (ch === '"') return i;
-    else if (ch === "\n") return undefined;
+    if (ch === undefined || ch < " ") return undefined;
+    if (ch === '"') return i;
+    if (ch !== "\\") continue;
+    const escaped = text[i + 1];
+    if (escaped === undefined) return undefined;
+    if (escaped === "u") {
+      if (!isHex4(text, i + 2)) return undefined;
+      i += 5;
+    } else {
+      if (!ESCAPABLE.has(escaped)) return undefined;
+      i++;
+    }
   }
   return undefined;
+}
+
+function isHex4(text: string, from: number): boolean {
+  for (let i = from; i < from + 4; i++) {
+    const ch = text[i];
+    if (ch === undefined) return false;
+    if (!((ch >= "0" && ch <= "9") || (ch >= "a" && ch <= "f") || (ch >= "A" && ch <= "F"))) {
+      return false;
+    }
+  }
+  return true;
 }

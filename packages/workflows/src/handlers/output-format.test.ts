@@ -171,6 +171,36 @@ describe("extractJsonValue", () => {
     expect(performance.now() - started).toBeLessThan(200);
   });
 
+  // The scan stays linear only while everything it accepts also parses: a
+  // scalar it waves through re-parses every enclosing span and fails each time.
+  // Each case is JSON.parse-invalid, so a slow run here means the scan is loose.
+  describe.each([
+    ["a leading zero", "01"],
+    ["a raw carriage return", `"a${String.fromCharCode(13)}b"`],
+    ["a raw tab", `"a${String.fromCharCode(9)}b"`],
+    ["a raw NUL", `"a${String.fromCharCode(0)}b"`],
+    ["an unknown escape", '"\\q"'],
+    ["a truncated \\u escape", '"\\u12"'],
+    ["a non-hex \\u escape", '"\\uZZZZ"'],
+  ])("rejecting %s", (_label, scalar) => {
+    test("keeps a narrated nested span linear", () => {
+      const depth = 4000;
+      const raw = `${"[".repeat(depth)}${scalar}${"]".repeat(depth)}\n{"verdict":"READY"}`;
+      const started = performance.now();
+      expect(extractJsonValue(raw)).toEqual({ verdict: "READY" });
+      expect(performance.now() - started).toBeLessThan(200);
+    });
+
+    test("is not returned as a value", () => {
+      expect(extractJsonValue(`note [${scalar}]`)).toBeUndefined();
+    });
+  });
+
+  test("accepts the escapes a JSON string may hold", () => {
+    const raw = 'note {"a":"q\\"\\\\\\/\\b\\f\\n\\r\\t\\u00e9"}';
+    expect(extractJsonValue(raw)).toEqual({ a: 'q"\\/\b\f\n\r\té' });
+  });
+
   test("accepts the scalar types a JSON value may hold", () => {
     const raw = 'Result:\n{"a":-1.5e-3,"b":true,"c":false,"d":null,"e":[0,{"f":[]}],"g":""}';
     expect(extractJsonValue(raw)).toEqual({
