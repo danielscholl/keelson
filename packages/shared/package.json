@@ -1,6 +1,6 @@
 {
   "name": "@keelson/shared",
-  "version": "0.75.0",
+  "version": "0.75.1",
   "description": "Shared types, zod schemas, and the Rib extension contract for the Keelson local agent harness.",
   "license": "Apache-2.0",
   "author": "Daniel Scholl",
