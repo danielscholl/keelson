@@ -271,35 +271,59 @@ $Base = "https://github.com/${repo}/releases/download/v$KeelsonVersion"
 $CliTarball = if ($env:KEELSON_CLI_TARBALL) { $env:KEELSON_CLI_TARBALL } else { "$Base/keelson-cli.tgz" }
 $SharedTarball = if ($env:KEELSON_SHARED_TARBALL) { $env:KEELSON_SHARED_TARBALL } else { "$Base/keelson-shared.tgz" }
 $PublicRegistry = "https://registry.npmjs.org/"
+$BlockedPublicRegistries = @(
+  "https://registry.npmjs.org",
+  "https://registry.yarnpkg.com",
+  "https://registry.npmmirror.com"
+)
 $MicrosoftCfsRegistry = "https://packagefeedproxy.microsoft.io/npm/"
 
 if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
   throw "keelson requires Bun on PATH - install it from https://bun.sh and re-run."
 }
 
+function Expand-NpmrcEnvironment([string]$Value) {
+  return [regex]::Replace(
+    $Value,
+    "\\$\\{([A-Za-z_][A-Za-z0-9_]*)(\\?)?\\}",
+    [System.Text.RegularExpressions.MatchEvaluator]{
+      param($Match)
+      $EnvironmentValue = [Environment]::GetEnvironmentVariable($Match.Groups[1].Value)
+      if ($null -ne $EnvironmentValue) { return $EnvironmentValue }
+      if ($Match.Groups[2].Success) { return "" }
+      return $Match.Value
+    }
+  )
+}
+
 function Get-NpmrcRegistry([string]$Path) {
   if (-not (Test-Path $Path)) { return $null }
   $RegistryMatches = [regex]::Matches(
-    (Get-Content -Raw $Path),
+    [IO.File]::ReadAllText($Path),
     "(?im)^\\s*registry\\s*=\\s*['""]?([^'""\\r\\n]+)"
   )
-  if ($RegistryMatches.Count -eq 0) { return $null }
-  return $RegistryMatches[$RegistryMatches.Count - 1].Groups[1].Value.Trim()
+  $Registry = $null
+  foreach ($RegistryMatch in $RegistryMatches) {
+    $Value = (Expand-NpmrcEnvironment $RegistryMatch.Groups[1].Value).Trim()
+    if ($Value) { $Registry = $Value }
+  }
+  return $Registry
 }
 
 function Set-NpmrcRegistry([string]$Path, [string]$Registry) {
   $Line = "registry=$Registry"
+  $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
   if (-not (Test-Path $Path)) {
-    Set-Content -Path $Path -Value $Line -Encoding ascii
+    [IO.File]::WriteAllText($Path, $Line + [Environment]::NewLine, $Utf8NoBom)
     return
   }
-  $Content = Get-Content -Raw $Path
+  $Content = [IO.File]::ReadAllText($Path)
   if ($Content -match "(?im)^\\s*registry\\s*=") {
     $Content = [regex]::Replace($Content, "(?im)^\\s*registry\\s*=.*$", $Line)
   } else {
     $Content = $Content.TrimEnd() + [Environment]::NewLine + $Line + [Environment]::NewLine
   }
-  Set-Content -Path $Path -Value $Content -NoNewline -Encoding ascii
+  [IO.File]::WriteAllText($Path, $Content, $Utf8NoBom)
 }
 
 function Test-NpmRegistry([string]$Registry) {
@@ -349,11 +373,12 @@ if (-not $InstallRegistry -and (Get-Command npm -ErrorAction SilentlyContinue)) 
   }
 }
 if (-not $InstallRegistry) { $InstallRegistry = $PublicRegistry }
+$InstallRegistry = Expand-NpmrcEnvironment $InstallRegistry
 $InstallRegistry = Assert-NpmRegistry $InstallRegistry
 
 $NormalizedRegistry = $InstallRegistry.TrimEnd("/").ToLowerInvariant()
 if (
-  $NormalizedRegistry -eq $PublicRegistry.TrimEnd("/").ToLowerInvariant() -and
+  $BlockedPublicRegistries -contains $NormalizedRegistry -and
   -not (Test-NpmRegistry $InstallRegistry)
 ) {
   $InstallRegistry = $MicrosoftCfsRegistry
