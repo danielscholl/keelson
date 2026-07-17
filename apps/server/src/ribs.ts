@@ -87,6 +87,9 @@ export interface RibWorkflowContribution {
   readonly definition: unknown;
   readonly bindSnapshotKey?: string;
   readonly publish?: (value: unknown) => void;
+  // Absolute path of the YAML file a folder-discovered contribution was loaded
+  // from; absent for contributeWorkflows entries. Diagnostics only.
+  readonly sourcePath?: string;
 }
 
 // A docs source a rib contributed (Rib.contributeDocs), tagged with the owning

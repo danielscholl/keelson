@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -41,10 +41,12 @@ import {
   bootstrapPromptHandler,
   bootstrapProviders,
   bootstrapRibs,
+  bootstrapWorkflows,
   isCrossRibGrantAllowed,
   parseCrossRibGrants,
   parsePromptTimeoutMs,
   parseToolDenylist,
+  prepareRibWorkflows,
   registerRibTools,
 } from "../src/bootstrap.ts";
 import type { MemoryStore } from "../src/memory-store.ts";
@@ -1062,7 +1064,7 @@ describe("bootstrapRibs", () => {
 
     test("walks the discovery root and activates a healthy fixture rib", async () => {
       process.env.KEELSON_RIBS = "test";
-      const available = await discoverRibs({ root: fixtureRoot });
+      const { ribs: available } = await discoverRibs({ root: fixtureRoot });
       const { manifests } = await bootstrapRibs({ available });
       expect(manifests.map((m) => m.id)).toEqual(["test"]);
       expect(manifests[0]?.registered).toEqual(["test.tool"]);
@@ -1070,14 +1072,14 @@ describe("bootstrapRibs", () => {
 
     test("a throwing import warns and skips; healthy ribs still activate", async () => {
       process.env.KEELSON_RIBS = "test,broken";
-      const available = await discoverRibs({ root: fixtureRoot });
+      const { ribs: available } = await discoverRibs({ root: fixtureRoot });
       const { manifests } = await bootstrapRibs({ available });
       expect(manifests.map((m) => m.id)).toEqual(["test"]);
     });
 
     test("a non-object default export is skipped", async () => {
       process.env.KEELSON_RIBS = "bad-default";
-      const available = await discoverRibs({ root: fixtureRoot });
+      const { ribs: available } = await discoverRibs({ root: fixtureRoot });
       const { manifests } = await bootstrapRibs({ available });
       expect(manifests).toEqual([]);
     });
@@ -1086,19 +1088,19 @@ describe("bootstrapRibs", () => {
       // Filter to both candidate ids so neither suffix nor declared id can
       // route past the divergence check.
       process.env.KEELSON_RIBS = "id-mismatch,other";
-      const available = await discoverRibs({ root: fixtureRoot });
+      const { ribs: available } = await discoverRibs({ root: fixtureRoot });
       const { manifests } = await bootstrapRibs({ available });
       expect(manifests).toEqual([]);
     });
 
     test("a missing discovery root returns no ribs without throwing", async () => {
-      const available = await discoverRibs({ root: join(fixtureRoot, "does-not-exist") });
-      expect(available).toEqual({});
+      const discovered = await discoverRibs({ root: join(fixtureRoot, "does-not-exist") });
+      expect(discovered).toEqual({ ribs: {}, dirs: {} });
     });
 
     test("a rib whose declared hook is not a function is skipped", async () => {
       process.env.KEELSON_RIBS = "bad-hook";
-      const available = await discoverRibs({ root: fixtureRoot });
+      const { ribs: available } = await discoverRibs({ root: fixtureRoot });
       const { manifests } = await bootstrapRibs({ available });
       expect(manifests).toEqual([]);
     });
@@ -1108,11 +1110,206 @@ describe("bootstrapRibs", () => {
       const tempRoot = await mkdtemp(join(tmpdir(), "keelson-discovery-"));
       try {
         await symlink(join(fixtureRoot, "rib-test"), join(tempRoot, "rib-test"), "dir");
-        const available = await discoverRibs({ root: tempRoot });
+        const { ribs: available } = await discoverRibs({ root: tempRoot });
         const { manifests } = await bootstrapRibs({ available });
         expect(manifests.map((m) => m.id)).toEqual(["test"]);
       } finally {
         await rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("rib folder workflows", () => {
+    const fixtureRoot = join(import.meta.dir, "fixtures", "rib-discovery");
+
+    const workflowYaml = (name: string): string =>
+      `name: ${name}\ndescription: fixture\nnodes:\n  - id: step\n    bash: echo hi\n`;
+
+    test("discovery reports package dirs and bootstrap merges the rib's workflows/ YAML", async () => {
+      process.env.KEELSON_RIBS = "test";
+      const discovered = await discoverRibs({ root: fixtureRoot });
+      expect(discovered.dirs.test).toBe(join(fixtureRoot, "rib-test"));
+      const boot = await bootstrapRibs({ available: discovered.ribs, ribDirs: discovered.dirs });
+      const prepared = prepareRibWorkflows(boot.workflowContributions);
+      expect(prepared.definitions.map((d) => d.name)).toContain("rib-hello");
+      expect(prepared.provenance.get("rib-hello")).toEqual({ ribId: "test", background: false });
+    });
+
+    test("a broken YAML file is skipped while a valid sibling still loads", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(join(tempDir, "workflows", "good.yaml"), workflowYaml("wf-good"));
+        await writeFile(join(tempDir, "workflows", "bad.yaml"), "name: [unclosed\n");
+        const boot = await bootstrapRibs({
+          available: { wf: fakeRib("wf") },
+          ribDirs: { wf: tempDir },
+        });
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        expect(prepared.definitions.map((d) => d.name)).toEqual(["wf-good"]);
+        // The load failure rides the notice channel too, so a broken packaged
+        // workflow surfaces in the UI rather than only in server logs.
+        expect(boot.workflowNotices.length).toBe(1);
+        expect(boot.workflowNotices[0]?.level).toBe("error");
+        expect(boot.workflowNotices[0]?.filename).toContain("bad.yaml");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("a code contribution beats the rib's own same-named folder YAML", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(join(tempDir, "workflows", "dup.yaml"), workflowYaml("wf-dup"));
+        const rib: Rib = {
+          id: "wf",
+          displayName: "wf",
+          contributeWorkflows: () => [
+            {
+              definition: {
+                name: "wf-dup",
+                description: "from-code",
+                nodes: [{ id: "step", bash: "echo code" }],
+              },
+            },
+          ],
+        };
+        const boot = await bootstrapRibs({ available: { wf: rib }, ribDirs: { wf: tempDir } });
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        const dups = prepared.definitions.filter((d) => d.name === "wf-dup");
+        expect(dups.length).toBe(1);
+        expect(dups[0]?.description).toBe("from-code");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("two same-named YAML files in one rib keep the first file, not the last", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(
+          join(tempDir, "workflows", "a-first.yaml"),
+          "name: same-name\ndescription: from-first-file\nnodes:\n  - id: step\n    bash: echo a\n",
+        );
+        await writeFile(
+          join(tempDir, "workflows", "b-second.yaml"),
+          "name: same-name\ndescription: from-second-file\nnodes:\n  - id: step\n    bash: echo b\n",
+        );
+        const boot = await bootstrapRibs({
+          available: { wf: fakeRib("wf") },
+          ribDirs: { wf: tempDir },
+        });
+        expect(boot.workflowContributions).toHaveLength(2);
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        expect(prepared.definitions).toHaveLength(1);
+        expect(prepared.definitions[0]?.description).toBe("from-first-file");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("an earlier rib's folder YAML beats a later rib's same-named code contribution", async () => {
+      process.env.KEELSON_RIBS = "alpha,beta";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(join(tempDir, "workflows", "dup.yaml"), workflowYaml("cross-dup"));
+        const beta: Rib = {
+          id: "beta",
+          displayName: "beta",
+          contributeWorkflows: () => [
+            {
+              definition: {
+                name: "cross-dup",
+                description: "from-beta-code",
+                nodes: [{ id: "step", bash: "echo beta" }],
+              },
+            },
+          ],
+        };
+        const boot = await bootstrapRibs({
+          available: { alpha: fakeRib("alpha"), beta },
+          ribDirs: { alpha: tempDir },
+        });
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        const dups = prepared.definitions.filter((d) => d.name === "cross-dup");
+        expect(dups.length).toBe(1);
+        expect(dups[0]?.description).toBe("fixture");
+        expect(prepared.provenance.get("cross-dup")?.ribId).toBe("alpha");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("a rib excluded by KEELSON_RIBS contributes no folder workflows", async () => {
+      process.env.KEELSON_RIBS = "other";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(join(tempDir, "workflows", "hidden.yaml"), workflowYaml("wf-hidden"));
+        const boot = await bootstrapRibs({
+          available: { wf: fakeRib("wf"), other: fakeRib("other") },
+          ribDirs: { wf: tempDir },
+        });
+        expect(boot.workflowContributions).toEqual([]);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("a rib without a workflows folder contributes nothing and does not warn", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        const boot = await bootstrapRibs({
+          available: { wf: fakeRib("wf") },
+          ribDirs: { wf: tempDir },
+        });
+        expect(boot.workflowContributions).toEqual([]);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("prepareRibWorkflows keeps the first of two cross-rib same-named contributions", () => {
+      const definition = (desc: string) => ({
+        name: "shared-name",
+        description: desc,
+        nodes: [{ id: "step", bash: "echo hi" }],
+      });
+      const prepared = prepareRibWorkflows([
+        { ribId: "alpha", definition: definition("from-alpha") },
+        { ribId: "beta", definition: definition("from-beta") },
+      ]);
+      expect(prepared.definitions.length).toBe(1);
+      expect(prepared.definitions[0]?.description).toBe("from-alpha");
+      expect(prepared.provenance.get("shared-name")?.ribId).toBe("alpha");
+      expect(prepared.notices.length).toBe(1);
+      expect(prepared.notices[0]?.level).toBe("warning");
+    });
+
+    test("rib notices surface through the catalog's discoveryNotices", async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        const catalog = bootstrapWorkflows({
+          workflowDir: tempDir,
+          ribNotices: [
+            {
+              level: "error",
+              filename: "/rib/workflows/bad.yaml",
+              message: "failed to load: nope",
+            },
+          ],
+        });
+        const notices = catalog.discoveryNotices();
+        expect(notices.some((n) => n.filename === "/rib/workflows/bad.yaml")).toBe(true);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
       }
     });
   });

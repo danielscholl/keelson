@@ -64,7 +64,7 @@ specific place in the harness. The figure shows the main destinations:
 | `registerTools` | Tools for the shared registry. They reach the chat agent with no further wiring; a workflow `prompt` node opts each one in by name. |
 | `composeBundle` | A snapshot composer under the rib's key namespace. The browser renders the published data as live boards. |
 | `views`, `surfaces` | Static declarations of how those snapshots appear, up to a full top-level tab in the browser. |
-| `contributeWorkflows` | Workflow definitions merged into the catalog at activation, optionally bound so a run's output republishes a snapshot key. |
+| `contributeWorkflows` | Workflow definitions built in code and merged into the catalog at activation, optionally bound so a run's output republishes a snapshot key. A rib can also ship static definitions as plain YAML files in a `workflows/` folder at its package root; they merge with the same rib provenance, no hook required. |
 | `contributePolicies` | Governance policies merged into the harness policy engine at activation, evaluated at each turn's hook points. |
 | `contributeDocs` | Documentation sources the rib folds into the harness docs catalog, listed and sliced on demand by the `keelson_docs` tool, so an installed rib extends what the agent can read about itself. |
 | `onAction` | A handler for inbound actions over the loopback API, so a board's buttons can reach the rib. |

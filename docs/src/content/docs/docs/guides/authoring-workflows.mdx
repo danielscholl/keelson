@@ -41,11 +41,14 @@ keelson workflow run test-triage --watch
 | bundled | shipped with keelson (read-only) | The starter set, always present. |
 | global | `<home>/workflows/` | Every project and conversation. |
 | project | `<root>/.keelson/workflows/` | Only that project. |
+| rib | `workflows/` inside an installed rib package | Every project and conversation. |
 
-A later scope shadows a same-named earlier one: project over global over
-bundled. The
-catalog hot-reloads, so a saved file is runnable immediately, with no restart.
-The workflow's `name:` field is its catalog key and must match the filename.
+A later file scope shadows a same-named earlier one: project over global over
+bundled. Rib entries fill in around the file set, so any same-named file in the
+three file scopes overrides a rib entry. The catalog hot-reloads the file
+scopes, so a saved file is runnable immediately, with no restart; rib entries
+load at server boot with the rest of rib activation. The workflow's `name:`
+field is its catalog key and must match the filename.
 
 Give every workflow the structured description block so the UI cards and
 `workflow list` render it scannably:

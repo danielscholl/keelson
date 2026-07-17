@@ -161,7 +161,9 @@ The catalog draws from three layers, lowest precedence first: the **bundled**
 starters that ship with keelson (read-only), your **global**
 `<home>/workflows/`, and a **project**'s `.keelson/workflows/`. A later layer
 shadows an earlier one by name, and installed ribs contribute their own at
-activation. On first run the bundled starters are also copied into your home, so
+activation, either built in code through the rib contract or shipped as plain
+YAML files in the rib package's `workflows/` folder. On first run the bundled
+starters are also copied into your home, so
 they list as `global` once seeded, while the bundled layer keeps them
 discoverable in a fresh checkout. The [Workflows catalog](../../workflows/)
 documents the ones that ship. A rib-contributed workflow can additionally bind its

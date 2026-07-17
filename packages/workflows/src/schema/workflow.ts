@@ -147,10 +147,13 @@ export type WorkflowExecutionResult =
  * - `bundled` — embedded in the package's defaults
  * - `global`  — user-level, discovered at `~/.keelson/workflows/`
  * - `project` — repo-local, discovered at `<repoRoot>/.keelson/workflows/`
+ * - `rib`     — shipped in an installed rib's `workflows/` folder
  *
- * Precedence for same-named files: `bundled` < `global` < `project`.
+ * Precedence for same-named files: `bundled` < `global` < `project`. `rib`
+ * entries never ride the same discovery pass — the server merges them into
+ * the catalog after the filesystem set, which wins name collisions.
  */
-export type WorkflowSource = "bundled" | "global" | "project";
+export type WorkflowSource = "bundled" | "global" | "project" | "rib";
 
 /** A workflow definition paired with its discovery source. */
 export interface WorkflowWithSource {

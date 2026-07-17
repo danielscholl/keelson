@@ -80,6 +80,7 @@ import {
   type PromptToolCallGate,
   type PromptToolGate,
   type PromptToolResultGate,
+  parseWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
@@ -206,6 +207,11 @@ export interface BootstrapRibsOptions {
   // node_modules/@keelson directory discovery scans. Defaults to the keelson
   // home's rib tree (resolveRibsRoot). Ignored when `available` is supplied.
   ribsRoot?: string;
+  // Rib id → package directory, for ribs whose `workflows/` folder should be
+  // scanned for static YAML contributions. Discovery fills this automatically;
+  // an embedder passing `available` supplies it explicitly or gets no folder
+  // scan (degrade, not throw — the contract's usual posture).
+  ribDirs?: Readonly<Record<string, string>>;
   // Shared SnapshotManager passed into RibContext and used to auto-register
   // each rib's `composeBundle`. Optional so unit tests for parseRibList /
   // applyRibs don't need to spin up a manager.
@@ -295,6 +301,11 @@ export interface RibBootstrap {
   >;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
+  // Load errors/warnings from each activated rib's `workflows/` folder, in the
+  // catalog's notice shape so the composition root can merge them into
+  // WorkflowCatalog.discoveryNotices() — a broken packaged workflow must
+  // surface in the UI, not only in server logs.
+  readonly workflowNotices: WorkflowDiscoveryNotice[];
   // Rib-contributed docs sources, tagged by owning rib — folded into the
   // DocsCatalog behind keelson_docs at the composition root.
   readonly docsContributions: RibDocsContribution[];
@@ -327,8 +338,12 @@ const DEFAULT_CROSS_RIB_CALL_TIMEOUT_MS = 30_000;
 
 export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
-  const available =
-    options.available ?? (await discoverRibs(options.ribsRoot ? { root: options.ribsRoot } : {}));
+  const discovered =
+    options.available === undefined
+      ? await discoverRibs(options.ribsRoot ? { root: options.ribsRoot } : {})
+      : undefined;
+  const available = options.available ?? discovered?.ribs ?? {};
+  const ribDirs = options.ribDirs ?? discovered?.dirs ?? {};
   const active = requested.length > 0 ? requested : Object.keys(available);
   const snapshotManager = options.snapshotManager;
   // The template ctx carries only exec/sidecar; applyRibs layers a scoped
@@ -653,6 +668,18 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     const owner = toolOwners.get(tool.name);
     if (owner) toolIndex.set(tool.name, { ribId: owner, def: tool });
   }
+  // Ordering is load-bearing for prepareRibWorkflows' first-wins dedupe:
+  // interleave per rib in activation order, each rib's code entries before its
+  // folder YAML, so collisions resolve by activation order and code-over-YAML
+  // within one rib.
+  const orderedContributions: RibWorkflowContribution[] = [];
+  const workflowNotices: WorkflowDiscoveryNotice[] = [];
+  for (const manifest of manifests) {
+    for (const contribution of workflowContributions) {
+      if (contribution.ribId === manifest.id) orderedContributions.push(contribution);
+    }
+    collectRibFolderWorkflows(manifest, ribDirs, orderedContributions, workflowNotices);
+  }
   return {
     manifests,
     probes,
@@ -663,7 +690,8 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandListers,
     commandInvokers,
     commandCompleters,
-    workflowContributions,
+    workflowContributions: orderedContributions,
+    workflowNotices,
     docsContributions,
     policies,
     tools,
@@ -679,6 +707,71 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       }
     },
   };
+}
+
+// Boot-time only, unlike the hot-reloading file catalog: a YAML edit inside a
+// rib package lands on restart, like the rest of rib activation. Parses per
+// file rather than through discoverWorkflows, whose by-name map would silently
+// keep the last of two same-named files — every file must reach
+// prepareRibWorkflows so its first-wins dedupe can warn on the collision.
+function collectRibFolderWorkflows(
+  manifest: RibManifest,
+  ribDirs: Readonly<Record<string, string>>,
+  contributions: RibWorkflowContribution[],
+  notices: WorkflowDiscoveryNotice[],
+): void {
+  const packageDir = ribDirs[manifest.id];
+  if (!packageDir) return;
+  const dir = path.join(packageDir, "workflows");
+  let names: string[];
+  try {
+    names = fs
+      .readdirSync(dir)
+      .filter((n) => n.endsWith(".yaml") || n.endsWith(".yml"))
+      .sort();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] rib '${manifest.id}' workflows folder unreadable: ${msg}`);
+      notices.push({ level: "error", filename: dir, message: `failed to read: ${msg}` });
+    }
+    return;
+  }
+  for (const name of names) {
+    const filePath = path.join(dir, name);
+    let content: string;
+    try {
+      content = fs.readFileSync(filePath, "utf-8");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] rib '${manifest.id}' workflow ${filePath}: ${msg}`);
+      notices.push({ level: "error", filename: filePath, message: `failed to load: ${msg}` });
+      continue;
+    }
+    const result = parseWorkflow(content, filePath);
+    for (const warning of result.warnings) {
+      const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
+      console.warn(
+        `[keelson] rib '${manifest.id}' workflow ${filePath}${nodeRef}: ${warning.message}`,
+      );
+      notices.push(toDiscoveryNotice(warning));
+    }
+    if (result.error) {
+      console.warn(`[keelson] rib '${manifest.id}' workflow ${filePath}: ${result.error.error}`);
+      notices.push({
+        level: "error",
+        filename: filePath,
+        message: `failed to load: ${result.error.error}`,
+      });
+      continue;
+    }
+    contributions.push({
+      ribId: manifest.id,
+      definition: result.workflow,
+      sourcePath: filePath,
+    });
+  }
 }
 
 // Register a rib bootstrap's collected tools into the shared tool registry so
@@ -722,17 +815,32 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
   // Workflow name → owning rib id + background flag, so the catalog can stamp
   // each entry's source/origin. Name-keyed to match the catalog merge.
   provenance: Map<string, RibWorkflowProvenance>;
+  // Rejections (invalid definition, duplicate name) in the catalog's notice
+  // shape, so the composition root can surface them through discoveryNotices.
+  notices: WorkflowDiscoveryNotice[];
 } {
   const definitions: WorkflowDefinition[] = [];
   const bindings = new Map<WorkflowDefinition, RibWorkflowBinding>();
   const boundKeys = new Map<string, string>();
   const provenance = new Map<string, RibWorkflowProvenance>();
+  const notices: WorkflowDiscoveryNotice[] = [];
+  // Name → contributing rib for first-wins dedupe. bootstrapRibs orders
+  // contributions per rib in activation order (code entries before that rib's
+  // folder YAML), so a rib's code contribution beats its own same-named YAML
+  // and a cross-rib collision keeps the earlier-activated rib's.
+  const claimed = new Map<string, string>();
   for (const contribution of contributions) {
     const parsed = workflowDefinitionSchema.safeParse(contribution.definition);
     if (!parsed.success) {
+      const detail = parsed.error.issues[0]?.message ?? "schema violation";
       console.warn(
-        `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${parsed.error.issues[0]?.message ?? "schema violation"}; skipping`,
+        `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${detail}; skipping`,
       );
+      notices.push({
+        level: "error",
+        filename: contribution.sourcePath ?? `<rib:${contribution.ribId}>`,
+        message: `invalid workflow: ${detail}`,
+      });
       continue;
     }
     const definition = parsed.data as WorkflowDefinition;
@@ -745,8 +853,29 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       console.warn(
         `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${invariantError}; skipping`,
       );
+      notices.push({
+        level: "error",
+        filename: contribution.sourcePath ?? `<rib:${contribution.ribId}>`,
+        message: `invalid workflow: ${invariantError}`,
+      });
       continue;
     }
+    const prior = claimed.get(definition.name);
+    if (prior !== undefined) {
+      const where = contribution.sourcePath ? ` (${contribution.sourcePath})` : "";
+      const message =
+        prior === contribution.ribId
+          ? `rib '${contribution.ribId}' workflow '${definition.name}'${where} duplicates the rib's own earlier contribution; skipping`
+          : `rib '${contribution.ribId}' workflow '${definition.name}'${where} collides with rib '${prior}'; skipping`;
+      console.warn(`[keelson] ${message}`);
+      notices.push({
+        level: "warning",
+        filename: contribution.sourcePath ?? `<rib:${contribution.ribId}>`,
+        message,
+      });
+      continue;
+    }
+    claimed.set(definition.name, contribution.ribId);
     definitions.push(definition);
     const background = Boolean(contribution.publish);
     provenance.set(definition.name, { ribId: contribution.ribId, background });
@@ -757,7 +886,7 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       }
     }
   }
-  return { definitions, bindings, boundKeys, provenance };
+  return { definitions, bindings, boundKeys, provenance, notices };
 }
 
 export interface BootstrapWorkflowsOptions {
@@ -785,6 +914,10 @@ export interface BootstrapWorkflowsOptions {
   // Rib id → display name, from the activated manifests, so a rib-sourced entry
   // carries a human label for the UI badge.
   ribNames?: ReadonlyMap<string, string>;
+  // Boot-time rib workflow notices (folder load errors, rejected or duplicate
+  // contributions) folded into discoveryNotices so they surface in the UI, not
+  // only in server logs. Static per process, unlike the rescanning file set.
+  ribNotices?: readonly WorkflowDiscoveryNotice[];
 }
 
 // Where a catalog entry came from + whether it's a background producer. Always
@@ -918,7 +1051,7 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
       ...(bundledDir ? [{ dir: bundledDir, source: "bundled" as const }] : []),
       { dir, source: "global" },
     ]);
-    const notices: WorkflowDiscoveryNotice[] = [];
+    const notices: WorkflowDiscoveryNotice[] = [...(opts.ribNotices ?? [])];
     for (const error of result.errors) {
       console.warn(`[workflows] failed to load ${error.filename}: ${error.error}`);
       notices.push({

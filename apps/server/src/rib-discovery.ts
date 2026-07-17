@@ -14,6 +14,14 @@ export interface DiscoverRibsOptions {
   root?: string;
 }
 
+// `dirs` maps each discovered rib id to its package directory so activation
+// can find package-relative assets (the `workflows/` folder) without
+// re-deriving discovery paths.
+export interface RibDiscovery {
+  ribs: Record<string, Rib>;
+  dirs: Record<string, string>;
+}
+
 export const HOOK_FIELDS = [
   "registerTools",
   "composeBundle",
@@ -33,7 +41,7 @@ export const HOOK_FIELDS = [
 
 export const ARRAY_FIELDS = ["views", "surfaces"] as const;
 
-export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Record<string, Rib>> {
+export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<RibDiscovery> {
   const root = opts.root ?? join(process.cwd(), "node_modules", "@keelson");
   let names: string[];
   try {
@@ -41,10 +49,11 @@ export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Reco
   } catch (err) {
     // Missing root is the common no-ribs-installed case; warning here would be boot-time noise.
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return {};
+    if (code === "ENOENT" || code === "ENOTDIR") return { ribs: {}, dirs: {} };
     throw err;
   }
   const out: Record<string, Rib> = {};
+  const dirs: Record<string, string> = {};
   for (const name of names) {
     if (!name.startsWith("rib-")) continue;
     const entry = join(root, name);
@@ -125,6 +134,7 @@ export async function discoverRibs(opts: DiscoverRibsOptions = {}): Promise<Reco
       continue;
     }
     out[candidate.id] = exported as Rib;
+    dirs[candidate.id] = entry;
   }
-  return out;
+  return { ribs: out, dirs };
 }
