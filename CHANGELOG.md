@@ -12,6 +12,7 @@ conventional commit subjects; earlier entries were written by hand in the
 ### Fixed
 
 * **ribs:** escape the NUL separator in the run-event chain key ([#661](https://github.com/danielscholl/keelson/issues/661)) ([e4dc44b](https://github.com/danielscholl/keelson/commit/e4dc44b4c27d4c9043839cbf1e323dec4e785438))
+* **workflows:** pin the real Claude model id in the bundled workflows ([#663](https://github.com/danielscholl/keelson/issues/663)) ([633eb6e](https://github.com/danielscholl/keelson/commit/633eb6e61964b28d7c9eb4a0a78971fb03b81518))
 
 
 ### Documentation
