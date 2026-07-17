@@ -433,6 +433,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     extra: ribWorkflows.definitions,
     ribProvenance: ribWorkflows.provenance,
     ribNames: new Map(ribs.manifests.map((m) => [m.id, m.displayName])),
+    ribNotices: [...ribs.workflowNotices, ...ribWorkflows.notices],
   });
   // Composition-root ownership of in-flight runs — the shutdown handler
   // drains via this same handle so a SIGINT can abort active executions and

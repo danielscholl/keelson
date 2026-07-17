@@ -41,6 +41,7 @@ import {
   bootstrapPromptHandler,
   bootstrapProviders,
   bootstrapRibs,
+  bootstrapWorkflows,
   isCrossRibGrantAllowed,
   parseCrossRibGrants,
   parsePromptTimeoutMs,
@@ -1147,6 +1148,11 @@ describe("bootstrapRibs", () => {
         });
         const prepared = prepareRibWorkflows(boot.workflowContributions);
         expect(prepared.definitions.map((d) => d.name)).toEqual(["wf-good"]);
+        // The load failure rides the notice channel too, so a broken packaged
+        // workflow surfaces in the UI rather than only in server logs.
+        expect(boot.workflowNotices.length).toBe(1);
+        expect(boot.workflowNotices[0]?.level).toBe("error");
+        expect(boot.workflowNotices[0]?.filename).toContain("bad.yaml");
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }
@@ -1283,6 +1289,28 @@ describe("bootstrapRibs", () => {
       expect(prepared.definitions.length).toBe(1);
       expect(prepared.definitions[0]?.description).toBe("from-alpha");
       expect(prepared.provenance.get("shared-name")?.ribId).toBe("alpha");
+      expect(prepared.notices.length).toBe(1);
+      expect(prepared.notices[0]?.level).toBe("warning");
+    });
+
+    test("rib notices surface through the catalog's discoveryNotices", async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        const catalog = bootstrapWorkflows({
+          workflowDir: tempDir,
+          ribNotices: [
+            {
+              level: "error",
+              filename: "/rib/workflows/bad.yaml",
+              message: "failed to load: nope",
+            },
+          ],
+        });
+        const notices = catalog.discoveryNotices();
+        expect(notices.some((n) => n.filename === "/rib/workflows/bad.yaml")).toBe(true);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     });
   });
 });

@@ -301,6 +301,11 @@ export interface RibBootstrap {
   >;
   // Raw workflow contributions, narrowed + merged into the catalog separately.
   readonly workflowContributions: RibWorkflowContribution[];
+  // Load errors/warnings from each activated rib's `workflows/` folder, in the
+  // catalog's notice shape so the composition root can merge them into
+  // WorkflowCatalog.discoveryNotices() — a broken packaged workflow must
+  // surface in the UI, not only in server logs.
+  readonly workflowNotices: WorkflowDiscoveryNotice[];
   // Rib-contributed docs sources, tagged by owning rib — folded into the
   // DocsCatalog behind keelson_docs at the composition root.
   readonly docsContributions: RibDocsContribution[];
@@ -668,11 +673,12 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   // folder YAML, so collisions resolve by activation order and code-over-YAML
   // within one rib.
   const orderedContributions: RibWorkflowContribution[] = [];
+  const workflowNotices: WorkflowDiscoveryNotice[] = [];
   for (const manifest of manifests) {
     for (const contribution of workflowContributions) {
       if (contribution.ribId === manifest.id) orderedContributions.push(contribution);
     }
-    collectRibFolderWorkflows(manifest, ribDirs, orderedContributions);
+    collectRibFolderWorkflows(manifest, ribDirs, orderedContributions, workflowNotices);
   }
   return {
     manifests,
@@ -685,6 +691,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandInvokers,
     commandCompleters,
     workflowContributions: orderedContributions,
+    workflowNotices,
     docsContributions,
     policies,
     tools,
@@ -711,6 +718,7 @@ function collectRibFolderWorkflows(
   manifest: RibManifest,
   ribDirs: Readonly<Record<string, string>>,
   contributions: RibWorkflowContribution[],
+  notices: WorkflowDiscoveryNotice[],
 ): void {
   const packageDir = ribDirs[manifest.id];
   if (!packageDir) return;
@@ -726,6 +734,7 @@ function collectRibFolderWorkflows(
     if (code !== "ENOENT" && code !== "ENOTDIR") {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[keelson] rib '${manifest.id}' workflows folder unreadable: ${msg}`);
+      notices.push({ level: "error", filename: dir, message: `failed to read: ${msg}` });
     }
     return;
   }
@@ -737,6 +746,7 @@ function collectRibFolderWorkflows(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[keelson] rib '${manifest.id}' workflow ${filePath}: ${msg}`);
+      notices.push({ level: "error", filename: filePath, message: `failed to load: ${msg}` });
       continue;
     }
     const result = parseWorkflow(content, filePath);
@@ -745,9 +755,15 @@ function collectRibFolderWorkflows(
       console.warn(
         `[keelson] rib '${manifest.id}' workflow ${filePath}${nodeRef}: ${warning.message}`,
       );
+      notices.push(toDiscoveryNotice(warning));
     }
     if (result.error) {
       console.warn(`[keelson] rib '${manifest.id}' workflow ${filePath}: ${result.error.error}`);
+      notices.push({
+        level: "error",
+        filename: filePath,
+        message: `failed to load: ${result.error.error}`,
+      });
       continue;
     }
     contributions.push({
@@ -799,11 +815,15 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
   // Workflow name → owning rib id + background flag, so the catalog can stamp
   // each entry's source/origin. Name-keyed to match the catalog merge.
   provenance: Map<string, RibWorkflowProvenance>;
+  // Rejections (invalid definition, duplicate name) in the catalog's notice
+  // shape, so the composition root can surface them through discoveryNotices.
+  notices: WorkflowDiscoveryNotice[];
 } {
   const definitions: WorkflowDefinition[] = [];
   const bindings = new Map<WorkflowDefinition, RibWorkflowBinding>();
   const boundKeys = new Map<string, string>();
   const provenance = new Map<string, RibWorkflowProvenance>();
+  const notices: WorkflowDiscoveryNotice[] = [];
   // Name → contributing rib for first-wins dedupe. bootstrapRibs orders
   // contributions per rib in activation order (code entries before that rib's
   // folder YAML), so a rib's code contribution beats its own same-named YAML
@@ -812,9 +832,15 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
   for (const contribution of contributions) {
     const parsed = workflowDefinitionSchema.safeParse(contribution.definition);
     if (!parsed.success) {
+      const detail = parsed.error.issues[0]?.message ?? "schema violation";
       console.warn(
-        `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${parsed.error.issues[0]?.message ?? "schema violation"}; skipping`,
+        `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${detail}; skipping`,
       );
+      notices.push({
+        level: "error",
+        filename: contribution.sourcePath ?? `<rib:${contribution.ribId}>`,
+        message: `invalid workflow: ${detail}`,
+      });
       continue;
     }
     const definition = parsed.data as WorkflowDefinition;
@@ -827,16 +853,26 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       console.warn(
         `[keelson] rib '${contribution.ribId}' contributed an invalid workflow: ${invariantError}; skipping`,
       );
+      notices.push({
+        level: "error",
+        filename: contribution.sourcePath ?? `<rib:${contribution.ribId}>`,
+        message: `invalid workflow: ${invariantError}`,
+      });
       continue;
     }
     const prior = claimed.get(definition.name);
     if (prior !== undefined) {
       const where = contribution.sourcePath ? ` (${contribution.sourcePath})` : "";
-      console.warn(
+      const message =
         prior === contribution.ribId
-          ? `[keelson] rib '${contribution.ribId}' workflow '${definition.name}'${where} duplicates the rib's own earlier contribution; skipping`
-          : `[keelson] rib '${contribution.ribId}' workflow '${definition.name}'${where} collides with rib '${prior}'; skipping`,
-      );
+          ? `rib '${contribution.ribId}' workflow '${definition.name}'${where} duplicates the rib's own earlier contribution; skipping`
+          : `rib '${contribution.ribId}' workflow '${definition.name}'${where} collides with rib '${prior}'; skipping`;
+      console.warn(`[keelson] ${message}`);
+      notices.push({
+        level: "warning",
+        filename: contribution.sourcePath ?? `<rib:${contribution.ribId}>`,
+        message,
+      });
       continue;
     }
     claimed.set(definition.name, contribution.ribId);
@@ -850,7 +886,7 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       }
     }
   }
-  return { definitions, bindings, boundKeys, provenance };
+  return { definitions, bindings, boundKeys, provenance, notices };
 }
 
 export interface BootstrapWorkflowsOptions {
@@ -878,6 +914,10 @@ export interface BootstrapWorkflowsOptions {
   // Rib id → display name, from the activated manifests, so a rib-sourced entry
   // carries a human label for the UI badge.
   ribNames?: ReadonlyMap<string, string>;
+  // Boot-time rib workflow notices (folder load errors, rejected or duplicate
+  // contributions) folded into discoveryNotices so they surface in the UI, not
+  // only in server logs. Static per process, unlike the rescanning file set.
+  ribNotices?: readonly WorkflowDiscoveryNotice[];
 }
 
 // Where a catalog entry came from + whether it's a background producer. Always
@@ -1011,7 +1051,7 @@ export function bootstrapWorkflows(opts: BootstrapWorkflowsOptions): WorkflowCat
       ...(bundledDir ? [{ dir: bundledDir, source: "bundled" as const }] : []),
       { dir, source: "global" },
     ]);
-    const notices: WorkflowDiscoveryNotice[] = [];
+    const notices: WorkflowDiscoveryNotice[] = [...(opts.ribNotices ?? [])];
     for (const error of result.errors) {
       console.warn(`[workflows] failed to load ${error.filename}: ${error.error}`);
       notices.push({
