@@ -235,6 +235,17 @@ coordination path.
    producer-side fail-closed gate (a zod `.parse`) run before the frame is
    cached or broadcast.
 
+   A rib can also ship **static workflows with no code at all**: YAML files in
+   a `workflows/` folder at the package root are discovered at activation,
+   validated by the same loader as every other YAML source, and merged into the
+   catalog with the rib's provenance (include the folder in the package's npm
+   `files`). Use the folder for fixed definitions; use `contributeWorkflows`
+   when a definition is computed at activation or bound to a snapshot key,
+   since binding needs the code-side `validate`. On a name collision the rib's
+   code entry wins over its own YAML file, and any same-named workflow file in
+   the bundled, global, or project scope overrides a rib entry. Folder
+   workflows load at server boot, like the rest of rib activation.
+
 6. **`contributeDocs(ctx)`** returns the `RibDocsSource`s the rib adds to the
    harness docs catalog, collected once at activation like `contributeWorkflows`.
    Each source is `{ title, summary, llmsFullUrl?, content? }`: either an
@@ -394,8 +405,9 @@ dependency you install. Choose rib sources the way you choose any package.
 
 4. **Register.** `registerTools` runs and its tools join the shared registry.
    `composeBundle`, if declared, is registered as the composer under `rib.id`
-   (lazy). `contributeWorkflows` are merged into the catalog. `views`,
-   `surfaces`, and `authStatus` become discoverable through `GET /api/ribs`.
+   (lazy). `contributeWorkflows` entries and any YAML files in the package's
+   `workflows/` folder are merged into the catalog. `views`, `surfaces`, and
+   `authStatus` become discoverable through `GET /api/ribs`.
 
 5. **Run.** Tools serve chat and workflow `prompt` nodes. The browser renders
    views and surfaces from cached snapshots and re-runs region workflows on

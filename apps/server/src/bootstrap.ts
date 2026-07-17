@@ -206,6 +206,11 @@ export interface BootstrapRibsOptions {
   // node_modules/@keelson directory discovery scans. Defaults to the keelson
   // home's rib tree (resolveRibsRoot). Ignored when `available` is supplied.
   ribsRoot?: string;
+  // Rib id → package directory, for ribs whose `workflows/` folder should be
+  // scanned for static YAML contributions. Discovery fills this automatically;
+  // an embedder passing `available` supplies it explicitly or gets no folder
+  // scan (degrade, not throw — the contract's usual posture).
+  ribDirs?: Readonly<Record<string, string>>;
   // Shared SnapshotManager passed into RibContext and used to auto-register
   // each rib's `composeBundle`. Optional so unit tests for parseRibList /
   // applyRibs don't need to spin up a manager.
@@ -327,8 +332,12 @@ const DEFAULT_CROSS_RIB_CALL_TIMEOUT_MS = 30_000;
 
 export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise<RibBootstrap> {
   const requested = parseRibList(process.env.KEELSON_RIBS);
-  const available =
-    options.available ?? (await discoverRibs(options.ribsRoot ? { root: options.ribsRoot } : {}));
+  const discovered =
+    options.available === undefined
+      ? await discoverRibs(options.ribsRoot ? { root: options.ribsRoot } : {})
+      : undefined;
+  const available = options.available ?? discovered?.ribs ?? {};
+  const ribDirs = options.ribDirs ?? discovered?.dirs ?? {};
   const active = requested.length > 0 ? requested : Object.keys(available);
   const snapshotManager = options.snapshotManager;
   // The template ctx carries only exec/sidecar; applyRibs layers a scoped
@@ -653,6 +662,11 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     const owner = toolOwners.get(tool.name);
     if (owner) toolIndex.set(tool.name, { ribId: owner, def: tool });
   }
+  // Static YAML workflows from each activated rib's `workflows/` folder join
+  // the code contributions AFTER them, so prepareRibWorkflows' first-wins
+  // dedupe lets a rib's contributeWorkflows entry beat its own same-named
+  // YAML file.
+  collectRibFolderWorkflows(manifests, ribDirs, workflowContributions);
   return {
     manifests,
     probes,
@@ -679,6 +693,42 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
       }
     },
   };
+}
+
+// Scan each activated rib's `workflows/` folder for static YAML workflow
+// contributions — the file-based tier of the two ways a rib ships workflows
+// (contributeWorkflows is the code tier: dynamic definitions and snapshot
+// binding). The loader applies the same schema + DAG validation every other
+// YAML source gets; a broken file warns and is skipped like any other rib
+// activation failure, and a missing folder is simply no contributions.
+// Boot-time only, like the rest of rib activation — YAML edits land on
+// restart.
+function collectRibFolderWorkflows(
+  manifests: readonly RibManifest[],
+  ribDirs: Readonly<Record<string, string>>,
+  contributions: RibWorkflowContribution[],
+): void {
+  for (const manifest of manifests) {
+    const packageDir = ribDirs[manifest.id];
+    if (!packageDir) continue;
+    const result = discoverWorkflows([{ dir: path.join(packageDir, "workflows"), source: "rib" }]);
+    for (const error of result.errors) {
+      console.warn(`[keelson] rib '${manifest.id}' workflow ${error.filename}: ${error.error}`);
+    }
+    for (const warning of result.warnings) {
+      const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
+      console.warn(
+        `[keelson] rib '${manifest.id}' workflow ${warning.filename}${nodeRef}: ${warning.message}`,
+      );
+    }
+    for (const entry of result.workflows) {
+      contributions.push({
+        ribId: manifest.id,
+        definition: entry.workflow,
+        sourcePath: entry.path,
+      });
+    }
+  }
 }
 
 // Register a rib bootstrap's collected tools into the shared tool registry so
@@ -727,6 +777,10 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
   const bindings = new Map<WorkflowDefinition, RibWorkflowBinding>();
   const boundKeys = new Map<string, string>();
   const provenance = new Map<string, RibWorkflowProvenance>();
+  // Name → contributing rib for first-wins dedupe: a rib's code contribution
+  // beats its own same-named folder YAML (bootstrapRibs appends folder entries
+  // after code entries), and a cross-rib collision keeps the earlier rib's.
+  const claimed = new Map<string, string>();
   for (const contribution of contributions) {
     const parsed = workflowDefinitionSchema.safeParse(contribution.definition);
     if (!parsed.success) {
@@ -747,6 +801,17 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
       );
       continue;
     }
+    const prior = claimed.get(definition.name);
+    if (prior !== undefined) {
+      const where = contribution.sourcePath ? ` (${contribution.sourcePath})` : "";
+      console.warn(
+        prior === contribution.ribId
+          ? `[keelson] rib '${contribution.ribId}' workflow '${definition.name}'${where} duplicates the rib's own earlier contribution; skipping`
+          : `[keelson] rib '${contribution.ribId}' workflow '${definition.name}'${where} collides with rib '${prior}'; skipping`,
+      );
+      continue;
+    }
+    claimed.set(definition.name, contribution.ribId);
     definitions.push(definition);
     const background = Boolean(contribution.publish);
     provenance.set(definition.name, { ribId: contribution.ribId, background });

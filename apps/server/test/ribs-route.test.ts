@@ -566,10 +566,11 @@ describe("rib workflow contribution + binding", () => {
       },
     ];
     const { definitions, bindings } = prepareRibWorkflows(contributions);
-    expect(definitions).toHaveLength(2);
+    // The first contributor wins at prepare time; the later duplicate is
+    // dropped with a warning instead of riding into the catalog merge.
+    expect(definitions).toHaveLength(1);
     const catalog = bootstrapWorkflows({ workflowDir: wfDir, extra: definitions });
     const accepted = catalog.get("dup");
-    // The catalog keeps the first contributor; its def still owns a binding.
     expect(accepted?.description).toBe("from a");
     expect(accepted ? bindings.has(accepted) : false).toBe(true);
   });

@@ -43,7 +43,13 @@ Every hook is optional — implement any subset:
 
 - **Tools** (`registerTools`) — reach chat and workflow `prompt` nodes.
 - **Snapshots, views, surfaces** — live panels and a top-level nav tab, no per-rib UI code.
-- **Workflows** (`contributeWorkflows`) — catalog entries, optionally bound to a snapshot key.
+- **Workflows** — two tiers. Static: ship plain YAML files in a `workflows/`
+  folder at the package root and the harness merges them into the catalog at
+  boot, tagged with the rib's id (include the folder in your package's `files`).
+  Dynamic: `contributeWorkflows` returns definitions built in code — use it when
+  a definition is computed at activation or bound to a snapshot key (the
+  fail-closed `validate` on a bound key is a function, so binding stays in
+  code). A code entry wins over a same-named YAML file.
 - **Policies** (`contributePolicies`) — ask / deny / redact rules in the governance stack.
 - **Agents and slash commands** — seeded chats and composer commands.
 

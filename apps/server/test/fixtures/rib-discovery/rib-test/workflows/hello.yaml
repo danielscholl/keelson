@@ -1,0 +1,6 @@
+name: rib-hello
+description: Fixture workflow shipped in the rib-test package's workflows folder.
+
+nodes:
+  - id: hello
+    bash: echo hello
