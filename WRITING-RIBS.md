@@ -49,7 +49,8 @@ Every hook is optional — implement any subset:
   Dynamic: `contributeWorkflows` returns definitions built in code — use it when
   a definition is computed at activation or bound to a snapshot key (the
   fail-closed `validate` on a bound key is a function, so binding stays in
-  code). A code entry wins over a same-named YAML file.
+  code). Within one rib a code entry wins over its own same-named YAML file;
+  across ribs, activation order wins regardless of source format.
 - **Policies** (`contributePolicies`) — ask / deny / redact rules in the governance stack.
 - **Agents and slash commands** — seeded chats and composer commands.
 

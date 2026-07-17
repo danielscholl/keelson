@@ -80,6 +80,7 @@ import {
   type PromptToolCallGate,
   type PromptToolGate,
   type PromptToolResultGate,
+  parseWorkflow,
   validateWorkflowInvariants,
   type WorkflowDefinition,
   type WorkflowLoadWarning,
@@ -702,7 +703,10 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
 }
 
 // Boot-time only, unlike the hot-reloading file catalog: a YAML edit inside a
-// rib package lands on restart, like the rest of rib activation.
+// rib package lands on restart, like the rest of rib activation. Parses per
+// file rather than through discoverWorkflows, whose by-name map would silently
+// keep the last of two same-named files — every file must reach
+// prepareRibWorkflows so its first-wins dedupe can warn on the collision.
 function collectRibFolderWorkflows(
   manifest: RibManifest,
   ribDirs: Readonly<Record<string, string>>,
@@ -710,21 +714,46 @@ function collectRibFolderWorkflows(
 ): void {
   const packageDir = ribDirs[manifest.id];
   if (!packageDir) return;
-  const result = discoverWorkflows([{ dir: path.join(packageDir, "workflows"), source: "rib" }]);
-  for (const error of result.errors) {
-    console.warn(`[keelson] rib '${manifest.id}' workflow ${error.filename}: ${error.error}`);
+  const dir = path.join(packageDir, "workflows");
+  let names: string[];
+  try {
+    names = fs
+      .readdirSync(dir)
+      .filter((n) => n.endsWith(".yaml") || n.endsWith(".yml"))
+      .sort();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] rib '${manifest.id}' workflows folder unreadable: ${msg}`);
+    }
+    return;
   }
-  for (const warning of result.warnings) {
-    const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
-    console.warn(
-      `[keelson] rib '${manifest.id}' workflow ${warning.filename}${nodeRef}: ${warning.message}`,
-    );
-  }
-  for (const entry of result.workflows) {
+  for (const name of names) {
+    const filePath = path.join(dir, name);
+    let content: string;
+    try {
+      content = fs.readFileSync(filePath, "utf-8");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[keelson] rib '${manifest.id}' workflow ${filePath}: ${msg}`);
+      continue;
+    }
+    const result = parseWorkflow(content, filePath);
+    for (const warning of result.warnings) {
+      const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
+      console.warn(
+        `[keelson] rib '${manifest.id}' workflow ${filePath}${nodeRef}: ${warning.message}`,
+      );
+    }
+    if (result.error) {
+      console.warn(`[keelson] rib '${manifest.id}' workflow ${filePath}: ${result.error.error}`);
+      continue;
+    }
     contributions.push({
       ribId: manifest.id,
-      definition: entry.workflow,
-      sourcePath: entry.path,
+      definition: result.workflow,
+      sourcePath: filePath,
     });
   }
 }

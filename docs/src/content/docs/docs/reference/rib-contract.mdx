@@ -235,16 +235,19 @@ coordination path.
    producer-side fail-closed gate (a zod `.parse`) run before the frame is
    cached or broadcast.
 
-   A rib can also ship **static workflows with no code at all**: YAML files in
+   A rib can also ship **static workflows with no hook code**: YAML files in
    a `workflows/` folder at the package root are discovered at activation,
    validated by the same loader as every other YAML source, and merged into the
    catalog with the rib's provenance (include the folder in the package's npm
-   `files`). Use the folder for fixed definitions; use `contributeWorkflows`
-   when a definition is computed at activation or bound to a snapshot key,
-   since binding needs the code-side `validate`. On a name collision the rib's
-   code entry wins over its own YAML file, and any same-named workflow file in
-   the bundled, global, or project scope overrides a rib entry. Folder
-   workflows load at server boot, like the rest of rib activation.
+   `files`). The package still needs its default-exported `Rib` object to be
+   discoverable; only the workflows themselves need no code. Use the folder
+   for fixed definitions; use `contributeWorkflows` when a definition is
+   computed at activation or bound to a snapshot key, since binding needs the
+   code-side `validate`. On a name collision the rib's code entry wins over
+   its own YAML file, a collision across ribs keeps the earlier-activated
+   rib's entry, and any same-named workflow file in the bundled, global, or
+   project scope overrides a rib entry. Folder workflows load at server boot,
+   like the rest of rib activation.
 
 6. **`contributeDocs(ctx)`** returns the `RibDocsSource`s the rib adds to the
    harness docs catalog, collected once at activation like `contributeWorkflows`.

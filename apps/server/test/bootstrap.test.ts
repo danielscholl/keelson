@@ -1181,6 +1181,32 @@ describe("bootstrapRibs", () => {
       }
     });
 
+    test("two same-named YAML files in one rib keep the first file, not the last", async () => {
+      process.env.KEELSON_RIBS = "wf";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(
+          join(tempDir, "workflows", "a-first.yaml"),
+          "name: same-name\ndescription: from-first-file\nnodes:\n  - id: step\n    bash: echo a\n",
+        );
+        await writeFile(
+          join(tempDir, "workflows", "b-second.yaml"),
+          "name: same-name\ndescription: from-second-file\nnodes:\n  - id: step\n    bash: echo b\n",
+        );
+        const boot = await bootstrapRibs({
+          available: { wf: fakeRib("wf") },
+          ribDirs: { wf: tempDir },
+        });
+        expect(boot.workflowContributions).toHaveLength(2);
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        expect(prepared.definitions).toHaveLength(1);
+        expect(prepared.definitions[0]?.description).toBe("from-first-file");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
     test("an earlier rib's folder YAML beats a later rib's same-named code contribution", async () => {
       process.env.KEELSON_RIBS = "alpha,beta";
       const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
