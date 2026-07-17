@@ -662,11 +662,17 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     const owner = toolOwners.get(tool.name);
     if (owner) toolIndex.set(tool.name, { ribId: owner, def: tool });
   }
-  // Static YAML workflows from each activated rib's `workflows/` folder join
-  // the code contributions AFTER them, so prepareRibWorkflows' first-wins
-  // dedupe lets a rib's contributeWorkflows entry beat its own same-named
-  // YAML file.
-  collectRibFolderWorkflows(manifests, ribDirs, workflowContributions);
+  // Ordering is load-bearing for prepareRibWorkflows' first-wins dedupe:
+  // interleave per rib in activation order, each rib's code entries before its
+  // folder YAML, so collisions resolve by activation order and code-over-YAML
+  // within one rib.
+  const orderedContributions: RibWorkflowContribution[] = [];
+  for (const manifest of manifests) {
+    for (const contribution of workflowContributions) {
+      if (contribution.ribId === manifest.id) orderedContributions.push(contribution);
+    }
+    collectRibFolderWorkflows(manifest, ribDirs, orderedContributions);
+  }
   return {
     manifests,
     probes,
@@ -677,7 +683,7 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
     commandListers,
     commandInvokers,
     commandCompleters,
-    workflowContributions,
+    workflowContributions: orderedContributions,
     docsContributions,
     policies,
     tools,
@@ -695,39 +701,31 @@ export async function bootstrapRibs(options: BootstrapRibsOptions = {}): Promise
   };
 }
 
-// Scan each activated rib's `workflows/` folder for static YAML workflow
-// contributions — the file-based tier of the two ways a rib ships workflows
-// (contributeWorkflows is the code tier: dynamic definitions and snapshot
-// binding). The loader applies the same schema + DAG validation every other
-// YAML source gets; a broken file warns and is skipped like any other rib
-// activation failure, and a missing folder is simply no contributions.
-// Boot-time only, like the rest of rib activation — YAML edits land on
-// restart.
+// Boot-time only, unlike the hot-reloading file catalog: a YAML edit inside a
+// rib package lands on restart, like the rest of rib activation.
 function collectRibFolderWorkflows(
-  manifests: readonly RibManifest[],
+  manifest: RibManifest,
   ribDirs: Readonly<Record<string, string>>,
   contributions: RibWorkflowContribution[],
 ): void {
-  for (const manifest of manifests) {
-    const packageDir = ribDirs[manifest.id];
-    if (!packageDir) continue;
-    const result = discoverWorkflows([{ dir: path.join(packageDir, "workflows"), source: "rib" }]);
-    for (const error of result.errors) {
-      console.warn(`[keelson] rib '${manifest.id}' workflow ${error.filename}: ${error.error}`);
-    }
-    for (const warning of result.warnings) {
-      const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
-      console.warn(
-        `[keelson] rib '${manifest.id}' workflow ${warning.filename}${nodeRef}: ${warning.message}`,
-      );
-    }
-    for (const entry of result.workflows) {
-      contributions.push({
-        ribId: manifest.id,
-        definition: entry.workflow,
-        sourcePath: entry.path,
-      });
-    }
+  const packageDir = ribDirs[manifest.id];
+  if (!packageDir) return;
+  const result = discoverWorkflows([{ dir: path.join(packageDir, "workflows"), source: "rib" }]);
+  for (const error of result.errors) {
+    console.warn(`[keelson] rib '${manifest.id}' workflow ${error.filename}: ${error.error}`);
+  }
+  for (const warning of result.warnings) {
+    const nodeRef = warning.nodeId ? ` (node ${warning.nodeId})` : "";
+    console.warn(
+      `[keelson] rib '${manifest.id}' workflow ${warning.filename}${nodeRef}: ${warning.message}`,
+    );
+  }
+  for (const entry of result.workflows) {
+    contributions.push({
+      ribId: manifest.id,
+      definition: entry.workflow,
+      sourcePath: entry.path,
+    });
   }
 }
 
@@ -777,9 +775,10 @@ export function prepareRibWorkflows(contributions: readonly RibWorkflowContribut
   const bindings = new Map<WorkflowDefinition, RibWorkflowBinding>();
   const boundKeys = new Map<string, string>();
   const provenance = new Map<string, RibWorkflowProvenance>();
-  // Name → contributing rib for first-wins dedupe: a rib's code contribution
-  // beats its own same-named folder YAML (bootstrapRibs appends folder entries
-  // after code entries), and a cross-rib collision keeps the earlier rib's.
+  // Name → contributing rib for first-wins dedupe. bootstrapRibs orders
+  // contributions per rib in activation order (code entries before that rib's
+  // folder YAML), so a rib's code contribution beats its own same-named YAML
+  // and a cross-rib collision keeps the earlier-activated rib's.
   const claimed = new Map<string, string>();
   for (const contribution of contributions) {
     const parsed = workflowDefinitionSchema.safeParse(contribution.definition);

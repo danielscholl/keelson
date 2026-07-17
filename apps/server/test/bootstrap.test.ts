@@ -1181,6 +1181,39 @@ describe("bootstrapRibs", () => {
       }
     });
 
+    test("an earlier rib's folder YAML beats a later rib's same-named code contribution", async () => {
+      process.env.KEELSON_RIBS = "alpha,beta";
+      const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
+      try {
+        await mkdir(join(tempDir, "workflows"));
+        await writeFile(join(tempDir, "workflows", "dup.yaml"), workflowYaml("cross-dup"));
+        const beta: Rib = {
+          id: "beta",
+          displayName: "beta",
+          contributeWorkflows: () => [
+            {
+              definition: {
+                name: "cross-dup",
+                description: "from-beta-code",
+                nodes: [{ id: "step", bash: "echo beta" }],
+              },
+            },
+          ],
+        };
+        const boot = await bootstrapRibs({
+          available: { alpha: fakeRib("alpha"), beta },
+          ribDirs: { alpha: tempDir },
+        });
+        const prepared = prepareRibWorkflows(boot.workflowContributions);
+        const dups = prepared.definitions.filter((d) => d.name === "cross-dup");
+        expect(dups.length).toBe(1);
+        expect(dups[0]?.description).toBe("fixture");
+        expect(prepared.provenance.get("cross-dup")?.ribId).toBe("alpha");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
     test("a rib excluded by KEELSON_RIBS contributes no folder workflows", async () => {
       process.env.KEELSON_RIBS = "other";
       const tempDir = await mkdtemp(join(tmpdir(), "keelson-rib-wf-"));
