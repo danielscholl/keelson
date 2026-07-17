@@ -45,15 +45,19 @@ as a versioned public contract.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/ribs` | The active ribs. Returns `ListRibsResponse` (`{ ribs: RibSummary[] }`). |
+| `GET` | `/api/ribs` | The active ribs. Returns `ListRibsResponse` (`{ ribs: RibSummary[], crossRibGrants? }`). `crossRibGrants` is the operator's grant map, `Record<caller, Record<target, string[]>>`; absent means "not reported" (an older server), an empty map means "reported, and there are none". |
 | `POST` | `/api/ribs/:id/action` | Dispatch an action to a rib's `onAction`. Returns `RibActionResponse`. Loopback-trusted. |
 | `GET` | `/api/tools` | The shared tool registry, including rib tools, with `family` and the advisory `state_changing` / `requires_confirmation` flags. |
-| `POST` | `/api/mcp` | The MCP gateway: the same tool registry over the Model Context Protocol, for external agents. Tokenless and exposing state-changing tools by default (restrict with `exposeStateChanging: false`); `GET` returns 405 (no SSE stream). See [Using keelson over MCP](../../guides/using-mcp/). |
+| `POST` | `/api/mcp` | The MCP gateway: the same tool registry over the Model Context Protocol, for external agents. Tokenless and exposing state-changing tools by default (restrict with `exposeStateChanging: false`); it answers any non-POST with 405 (no SSE stream). See [Using keelson over MCP](../../guides/using-mcp/). |
 
-The harness also registers state-changing workspace tools. `workspace_lease`
+The harness also registers its own tools alongside the ribs'. `workspace_lease`
 creates a durable isolated checkout for a project, and `workspace_release`
-removes that checkout by lease id. Both appear in `/api/tools` and MCP with
-`state_changing: true`.
+removes that checkout by lease id; both are `state_changing: true`. The op
+registry contributes five more: the read-only `run_list`, `run_status`, and
+`run_events`, plus the state-changing `run_cancel` and `run_steer`. They reach
+any long-running operation a rib put on the registry with
+[`registerOp`](../rib-contract/#the-context-the-harness-injects). All seven
+appear in `/api/tools` and MCP.
 
 See [The Rib contract](../rib-contract/#wire-shapes) for the rib wire shapes.
 

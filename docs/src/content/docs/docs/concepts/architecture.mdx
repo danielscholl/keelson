@@ -84,7 +84,7 @@ server is the composition root that wires them together at startup.
   <Card title="apps/server">
     The HTTP and WebSocket server on port 7878, and the composition root. It
     wires the snapshot manager, providers, credentials, and ribs, and owns the
-    SQLite store and the redaction pipeline.
+    SQLite store and the policy engine.
   </Card>
   <Card title="apps/web">
     The React SPA. Renders the built-in Chat, Workflows, Memory, and Usage
@@ -101,7 +101,8 @@ server is the composition root that wires them together at startup.
   </Card>
   <Card title="packages/providers">
     The coding-agent SDKs behind one interface: Copilot, Claude, Codex, the
-    multi-vendor Pi, and a no-auth stub for offline use.
+    multi-vendor Pi, a no-auth stub for offline use, and any configured
+    OpenAI-compatible gateway.
   </Card>
   <Card title="The keelson home">
     The runtime home at `~/.keelson`: the SQLite database, the bundled starter
@@ -120,8 +121,8 @@ rib can bind to it.
 <Steps>
 
 1. **Bootstrap providers.** Build the provider registry over the enabled
-   provider SDKs (Copilot, Claude, Codex, Pi, and the offline stub), each
-   resolving its own credentials.
+   provider SDKs (Copilot, Claude, Codex, Pi, and the offline stub) plus any
+   configured OpenAI-compatible gateway, each resolving its own credentials.
 
 2. **Create the snapshot manager.** Stand up the generic streaming substrate that
    ribs publish boards through, before any rib can bind to it.
@@ -152,7 +153,7 @@ rib can bind to it.
 
 10. **Mount the MCP gateway.** When `mcp.enabled` (the default), the server mounts
     `/api/mcp`, exposing the now-populated tool registry to external agents over
-    the Model Context Protocol — state-changing tools included by default.
+    the Model Context Protocol. State-changing tools are included by default.
 
 11. **Schedule surfaces and serve.** A heartbeat scheduler keeps snapshot-backed
     regions fresh on their cadence, then Bun serves the HTTP and WebSocket routes

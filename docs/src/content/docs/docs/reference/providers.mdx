@@ -72,8 +72,8 @@ are provider-neutral: a provider consumes what it supports and ignores the rest.
 
 ## The provider matrix
 
-Five providers ship built in. Out of the box only Copilot loads; the rest are
-opt-in (see [Configuration](../../guides/configuration/)).
+Five agent providers ship built in. Out of the box only Copilot loads; the rest
+are opt-in (see [Configuration](../../guides/configuration/)).
 
 | Provider | id | Resume | Stream | Tool projection | Auth |
 | --- | --- | --- | --- | --- | --- |
@@ -95,6 +95,11 @@ A few rows need their footnote:
 - **Stub** is the offline echo provider: no credentials, no tool calls,
   deterministic output. It exists so every loop can be verified without keys.
 
+A sixth id, `workflow`, is also registered as a built-in, but it is an internal
+meta-provider, not an agent an operator selects. It carries no models and runs no
+turn of its own, and `defaultProvider: "workflow"` is rejected, so it never
+appears as a choice. The five rows above are the selectable set.
+
 <Aside type="note" title="Self-managed auth">
 Copilot and Claude store their credential in the keelson keychain and have a
 sign-in surface in the app. Codex and Pi manage their own credentials
@@ -103,9 +108,42 @@ there is nothing in the keelson keychain for them; `keelson doctor` reports
 whether each found a credential.
 </Aside>
 
+## Model catalogs
+
+`capabilities.models` is a curated baseline, and the catalogs below are
+hand-maintained: neither SDK exposes a programmatic `models.list()`, so the ids
+mirror what each vendor's own CLI offers. `GET /api/providers/:id/models` returns
+the live list the picker prefers.
+
+**Claude.** The default is `claude-opus-4-8`.
+
+| id | Name | Cost tier |
+| --- | --- | --- |
+| `claude-fable-5` | Fable | high |
+| `claude-opus-4-8` | Opus | mid |
+| `claude-sonnet-5` | Sonnet | mid |
+| `claude-haiku-4-5` | Haiku | low |
+
+**Codex.** The default is `""`, which sends no model on the wire and lets codex
+resolve the account's own `~/.codex` default rather than forcing one it may not
+be able to reach.
+
+| id | Name | Cost tier |
+| --- | --- | --- |
+| `gpt-5.6-sol` | Sol | high |
+| `gpt-5.6-terra` | Terra | mid |
+| `gpt-5.6-luna` | Luna | low |
+
+**Copilot and Pi publish no static catalog**, by design. Copilot exposes only its
+default, the synthetic `auto`, which delegates routing to Copilot and is always
+valid: GitHub rotates its live catalog and retires concrete ids, so listing them
+would advertise models that no longer exist. Pi is multi-vendor and resolves its
+catalog live from the vendors your credentials authenticate, so there is no fixed
+list to publish.
+
 ## Gateway providers
 
-Beyond the five built-ins, any **OpenAI-compatible** endpoint can be registered
+Beyond the built-ins, any **OpenAI-compatible** endpoint can be registered
 as a provider at runtime. A gateway (OpenRouter, a local Ollama or vLLM, Azure
 OpenAI, a LiteLLM proxy) is added with `keelson gateway add` and shows up in the
 picker under its own name, so the model picker treats it like a built-in.

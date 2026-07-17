@@ -69,6 +69,13 @@ rib that fails validation at boot is skipped with a single warning in the log,
 never a crash, so the boot log is the audit trail for what activated and what
 did not.
 
+Active is still not the same as connected. Two ribs that are both installed and
+both active cannot call each other's tools: crossing that line is default-deny,
+and you grant it per `caller → target → tool` with `crossRibGrants` in
+`config.json`. This is the first thing a second rib runs into, and the denial is
+quiet, so reach for [cross-rib grants](../governance/#cross-rib-grants) when a
+rib seems to be missing a capability you expected it to have.
+
 ## Update
 
 ```sh
@@ -91,3 +98,5 @@ keelson rib remove chamber     # by rib id
   and the boundary the harness enforces.
 - [The Rib contract](../../reference/rib-contract/): the precise interface a rib
   implements.
+- [Governance](../governance/#cross-rib-grants): granting one rib access to
+  another's tools, and the rest of the policy engine.

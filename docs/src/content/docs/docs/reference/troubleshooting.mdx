@@ -145,6 +145,26 @@ The CLI's exit codes are stable, so the number tells you the category:
 | `3` | Server required but down | A rib, project, or status command run while the server is off. Start it, or pass `--base-url`. |
 | `4` | Not found | A workflow or rib name that is not in the catalog. Check `keelson workflow list` or `keelson rib list`. |
 
+## `keelson update` says my registry has not admitted a version
+
+The update re-pinned to the new release, but `bun install` could not resolve the
+versions that release pins, and the error names them. This is the signature of a
+vetting feed: a corporate npm mirror that quarantines freshly published packages
+for a hold period before admitting them, so a version that exists on the public
+registry is not yet resolvable through yours.
+
+Confirm which registry you are on:
+
+```sh
+keelson doctor
+```
+
+The toolchain category's `npm registry` check reports the effective registry.
+A non-default one is a supported environment, not a defect, so the check stays
+`ok` and carries the quarantine caveat as its hint. When that is what you see,
+retry once the hold elapses, or use your organization's exception process to
+admit the pinned versions early.
+
 ## A bash workflow node fails on Windows
 
 The `bash` node and `loop` `until_bash` need a POSIX shell. Install

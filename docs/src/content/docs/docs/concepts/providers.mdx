@@ -32,10 +32,10 @@ touching the harness.
 
 ## What ships
 
-Keelson ships five built-in providers, plus a gateway mechanism that registers
-any OpenAI-compatible endpoint as a named provider at runtime. Which built-in
-providers load is your choice; by default only Copilot does, and the rest are
-opt-in through configuration.
+Keelson ships five built-in agent providers, plus a gateway mechanism that
+registers any OpenAI-compatible endpoint as a named provider at runtime. Which
+built-in providers load is your choice; by default only Copilot does, and the
+rest are opt-in through configuration.
 
 | Provider | What it is | Credentials |
 | --- | --- | --- |
@@ -49,6 +49,14 @@ opt-in through configuration.
 The stub is why you can try the harness, run a workflow, and exercise the CLI's
 server-down fallback with no keys at all. It is for verification, not for real
 work: it echoes rather than reasons.
+
+The registry also holds one id you will never pick, `workflow`. It is an internal
+meta-provider the harness uses for its own plumbing, with no models and no turn
+of its own, and it is not selectable as a default. The five above are the agents.
+
+Which models each one offers varies, and two of them have no fixed list at all.
+The [providers reference](../../reference/providers/#model-catalogs) publishes the
+current catalogs.
 
 ## Chosen per turn, and per node
 

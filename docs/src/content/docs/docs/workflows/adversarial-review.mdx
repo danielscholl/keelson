@@ -1,31 +1,31 @@
 ---
 title: adversarial-review
-description: Stress-tests an arbitrary artifact — a claim, design, analysis, plan, or diff. Three adversarial reviewers attack it in parallel, an independent node re-verifies their load-bearing claims against source, and a synthesizer issues one consensus verdict.
+description: Stress-tests an arbitrary artifact (a claim, design, analysis, plan, or diff). Three adversarial reviewers attack it in parallel, an independent node re-verifies their load-bearing claims against source, and a synthesizer issues one consensus verdict.
 sidebar:
   order: 10
 ---
 
 import { Aside } from "@astrojs/starlight/components";
 
-`adversarial-review` takes an artifact you hand it — a claim, a design doc, a
-root-cause analysis, a plan, a spec, a diff — and drives it to a consensus
+`adversarial-review` takes an artifact you hand it (a claim, a design doc, a
+root-cause analysis, a plan, a spec, a diff) and drives it to a consensus
 verdict. Three **adversarial reviewers** attack it in parallel from distinct
 lenses (logic, evidence, risk), an independent **verifier** re-checks their
 load-bearing claims against source, and a **synthesizer** issues one verdict:
-`CONFIRMED`, `CONFIRMED-WITH-CHANGES`, or `REFUTED` — with the surviving claims,
+`CONFIRMED`, `CONFIRMED-WITH-CHANGES`, or `REFUTED`, with the surviving claims,
 the dissent, and what stays unverified.
 
 It is a *reviewer*, not a builder: distinct from
 [adversarial-build](../adversarial-build/) (which writes an app) and
 [pr-review](../pr-review/) (which posts to GitHub). Its shape encodes a lesson
-from running the pattern by hand — parallel independent reviewers can't take
+from running the pattern by hand: parallel independent reviewers can't take
 turns clearing their throats, and a separate verifier is needed because a
 debate's own citations are often wrong.
 
 ## Invoke it
 
 ```sh
-# A file path — no argument-channel limit:
+# A file path, with no argument-channel limit:
 keelson workflow run adversarial-review --arguments docs/design/some-proposal.md
 
 # …or inline text, for something short:
@@ -33,18 +33,18 @@ keelson workflow run adversarial-review --arguments "Claim: dropping detached on
 ```
 
 The argument is either a path to a file or the artifact text itself. Inline text
-travels the argument channel, which caps at 16 KiB — for anything larger pass a
+travels the argument channel, which caps at 16 KiB; for anything larger pass a
 path, which is read up to a ~1 MB limit (`intake` rejects a larger file rather
 than review only a prefix, and a large file is also bounded by the reviewers'
 model context). Run it from the repository the artifact is about, so `verify` can
 read the source it cites. It needs a Copilot subscription; the verdict is the
-final node's printed output — it lands in the run record.
+final node's printed output, and it lands in the run record.
 
 ## The shape
 
 Six nodes: `intake` captures the artifact, three reviewers fan out in parallel
 over it, `verify` converges on their claims and checks them against source, and
-`synthesize` issues the verdict. Only the reviewers run concurrently — the rest
+`synthesize` issues the verdict. Only the reviewers run concurrently; the rest
 is sequential. The reviewers never see each other's work; the only thing that
 crosses between stages is each node's output.
 
@@ -53,9 +53,9 @@ crosses between stages is each node's output.
 | Node | Kind | What it does |
 | --- | --- | --- |
 | `intake` | bash | Captures the artifact (file path or inline text), rejects empty or truncated input, and emits it as its output for the rest to inline. |
-| `reviewer-logic` | prompt | Attacks internal soundness — does the conclusion follow, what is assumed — with a per-claim verdict. No tools. |
+| `reviewer-logic` | prompt | Attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
 | `reviewer-evidence` | prompt | Separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
-| `reviewer-risk` | prompt | Assumes the artifact is adopted and finds what breaks — edge cases, omissions, the riskiest step. No tools. |
+| `reviewer-risk` | prompt | Assumes the artifact is adopted and finds what breaks: edge cases, omissions, the riskiest step. No tools. |
 | `verify` | prompt | Re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. |
 | `synthesize` | prompt | Weighs the lenses against the verification and issues the verdict with dissent. No tools. |
 
@@ -67,7 +67,7 @@ throat-clearing a turn-based debate produces and gets three genuinely separate
 attacks instead of a conversation that converges too early.
 
 **The verifier trusts no one.** `verify` re-derives the checkable claims from
-source rather than relaying the reviewers' — or the artifact's — citations. It is
+source rather than relaying the reviewers' citations, or the artifact's. It is
 the load-bearing node: a debate's participants are confidently wrong often
 enough that an independent source check is what separates a verdict from a
 vibe. Claims it cannot check with its tools it marks `UNVERIFIABLE-HERE` rather
@@ -75,17 +75,17 @@ than guessing.
 
 **Minimal privilege for untrusted input.** The artifact can carry
 prompt-injection, so the reviewers and the synthesizer run with **no tools at
-all** — it reaches them inlined as `$intake.output`, so no prompt node reads it
+all**. It reaches them inlined as `$intake.output`, so no prompt node reads it
 from disk. No-tools removes the *side-effect* surface (injected text can't write
 files or run shell), but it does not stop the artifact from trying to steer a
 verdict, so every prompt also frames the artifact as untrusted data to review,
 not instructions to follow. The deterministic `intake` bash node reads a
 user-supplied path; only `verify` holds filesystem tools, and only to check
-source claims — the one node where reading the repo is the point.
+source claims, the one node where reading the repo is the point.
 
 **The verdict is weighted to evidence.** Synthesis is told to weight the verifier
 over the reviewers wherever they conflict, and to surface dissent rather than
-smooth it over — a split panel reads as a split verdict, not a false consensus.
+smooth it over: a split panel reads as a split verdict, not a false consensus.
 
 ## Patterns it demonstrates
 
@@ -97,13 +97,13 @@ smooth it over — a split panel reads as a split verdict, not a false consensus
 - **Add a lens.** A fourth reviewer is one more node `depends_on: [intake]` with
   `allowed_tools: []`; add it to `verify`'s and `synthesize`'s references.
 - **Cross-vendor tension.** Pin a different `provider:` / `model:` per reviewer
-  for genuine diversity — the same rule the Chamber's review strategy enforces.
+  for genuine diversity, so no single vendor's blind spot goes unchallenged.
 - **A stronger judge.** Pin a stronger `model:` on `synthesize` when the verdict
   needs to hold more weight than the reviewers.
 
 ## Related
 
-- [adversarial-build](../adversarial-build/): the builder cousin — a generator against an evaluator.
+- [adversarial-build](../adversarial-build/): the builder cousin, a generator against an evaluator.
 - [pr-review](../pr-review/): the fan-out → synthesize sibling that posts to GitHub.
 - [Authoring workflows](../../guides/authoring-workflows/): the read-only rail and safe-output recipes.
 - [Workflow nodes](../../reference/workflow-nodes/): `depends_on`, `trigger_rule`, `allowed_tools`, and `$nodeId.output`.

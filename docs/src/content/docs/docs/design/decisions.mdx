@@ -101,7 +101,7 @@ A rib's tools already reach the chat agent and workflow `prompt` nodes through o
 registry. The server re-exposes that same registry over the Model Context Protocol
 at `/api/mcp`, so an external agent can call a rib's real capability rather than a
 reimplementation. The endpoint is loopback-bound and tokenless out of the box, and
-it exposes the full registry — state-changing tools included; a read-only
+it exposes the full registry, state-changing tools included. A read-only
 restriction, a bearer token, and a denylist are each one config flip away.
 
 Exposing the registry rather than hand-writing a bridge means a rib reaches
@@ -109,7 +109,7 @@ external agents the same way it reaches chat: register a tool once and every
 consumer sees it. Keelson is a single-user, local-only harness bound to loopback,
 so the MCP surface mirrors the reach the chat agent already has rather than carving
 out a narrower one. When you proxy the endpoint outward, or install a rib with
-destructive tools, lock it down deliberately — `exposeStateChanging: false` for
+destructive tools, lock it down deliberately: `exposeStateChanging: false` for
 read-only, `requireToken` for a token, `toolDenylist` to hide tools by name.
 
 ## Lenient on vocabulary, strict on structure

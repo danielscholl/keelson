@@ -43,7 +43,7 @@ immediately, with no server restart.
 | `worktree` | no | `{ enabled, branch }` pins git-worktree isolation per run; `branch` accepts `{workflow}` and `{run_id_short}`. |
 | `requiresProject` | no | `true` marks a repo-scoped workflow; `workflow_run` refuses to start it unless the resolved working directory is a git repo. |
 | `mutates_checkout` | no | `false` marks a read-only workflow; a non-isolated run against a project's live checkout then skips the per-project mutation lock (it can't clash with a mutating run). Defaults to mutating. |
-| `effort`, `thinking` | no | Claude-only reasoning controls. |
+| `converge` | no | `{ gate, max_rounds, on_exhaust }` re-runs a subgraph until a gate node passes. See [converge](#converge). |
 
 The loader **accepts but ignores** these workflow-level fields, dropping them
 with a warning so a cross-runtime file still loads: `sandbox`, `betas`,
@@ -172,7 +172,9 @@ A shell script. Its stdout becomes the node output.
 The body runs **raw**: an upstream node's output arrives as
 `KEELSON_NODE_<id>_OUTPUT` (the id's hyphens become underscores), not by
 substitution. `$<id>.output` does **not** expand inside a `bash` body. That split
-is the [security boundary](#data-flow), not a style rule.
+is the [security boundary](#data-flow), not a style rule. The one exception is
+`$converge.round`, which carries no upstream text and does expand in a shell
+body (see [converge](#converge)).
 
 ### `script`
 
@@ -277,6 +279,57 @@ also ignored, with a warning, on a node that does not take one: `bash`, `script`
 An unknown reference, an empty output, or a failed JSON access resolves to the
 empty string, so write conditions that fail closed.
 
+## Converge
+
+`converge:` is a workflow-level field that re-runs part of the graph until a
+gate node passes. It is the shape for work that has to be checked and redone
+until it is right: fix, validate, check, repeat.
+
+```yaml
+converge:
+  gate: converge-check
+  max_rounds: 8
+  on_exhaust: approval
+```
+
+| Field | Required | Value |
+| --- | --- | --- |
+| `gate` | yes | The id of the node that decides convergence. Passing ends the rounds. |
+| `max_rounds` | yes | Integer `1` to `10`. The hard ceiling on rounds. |
+| `on_exhaust` | no | `fail` (default) ends the run failed; `approval` pauses for a human decision instead. |
+
+The **subgraph** is the gate node plus every node it transitively depends on.
+Everything else in the workflow is held back until the gate passes.
+
+<Steps>
+
+1. The subgraph runs, in dependency order, as round 1.
+2. If the gate node **succeeds**, the run converged. The rest of the workflow
+   runs once and the rounds stop.
+3. If the gate node **fails** and rounds remain, the subgraph's node outputs are
+   discarded and the whole subgraph runs again as the next round. A failing gate
+   is the signal to redo the work, not an error.
+4. When `max_rounds` is spent without the gate passing, `on_exhaust` decides:
+   `fail` fails the run, `approval` pauses so a human can accept the state or
+   let it fail. Nodes outside the subgraph are skipped either way.
+
+</Steps>
+
+Any node in the subgraph can read the current round number as
+`$converge.round`, including a `bash` or `script` body, the one marker that does
+expand there. Outside a converge run it resolves to the empty string.
+
+Two constraints the loader enforces on the gate:
+
+- The gate **cannot be a `loop` node**, which manages its own iteration.
+- The gate **cannot declare `retry:`**. A failing gate triggers another round,
+  which is the retry, and stacking one on the other would re-run the gate
+  against unchanged work.
+
+The bundled `finish-pr` workflow is the worked example: its gate re-checks CI
+and review threads each round, so the fix-and-push subgraph repeats until the PR
+is genuinely clean, escalating to an approval at the round cap.
+
 ## Data flow
 
 Upstream output reaches a downstream node through one of two channels, and the
@@ -292,6 +345,7 @@ cancel reasons:
 | `$<id>.output` | The full text output of an upstream node. The node must be an ancestor via `depends_on`. |
 | `$<id>.output.<field>` | A field of the upstream output after JSON parsing (empty string when the output is not JSON). |
 | `$ARTIFACTS_DIR` | The per-run scratch directory (in prompt text). |
+| `$converge.round` | The current [converge](#converge) round number, starting at `1`. The only marker that also expands in a `bash` or `script` body, since it carries no upstream text. Empty string outside a converge run. |
 | `$memory.recall.items` | JSON array (stringified) of recalled memory rows. Requires a node-level `memory.recall:` block; resolves to `[]` when recall did not run. |
 | `$memory.recall.trace` | Trace ID string recorded for the recall query. Empty string when unavailable or when recall did not run. |
 
@@ -301,16 +355,24 @@ Substitution is a single atomic pass: if an upstream output itself contains
 `$something.output`, that marker stays literal instead of expanding again.
 
 **Shell nodes read the environment instead.** A `bash` or `script` node runs its
-body exactly as written, with upstream output delivered as environment
-variables, never spliced into the source:
+body as written (`$converge.round` aside), with upstream output delivered as
+environment variables, never spliced into the source:
 
 | Variable | Carries |
 | --- | --- |
-| `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). |
+| `KEELSON_NODE_<id>_OUTPUT` | The upstream node's output (non-alphanumeric characters in the id are normalized to `_`). Capped, see below. |
+| `KEELSON_NODE_<id>_OUTPUT_FILE` | Path to the untruncated output, set only when that output was capped. Best-effort: omitted when the run has no artifacts directory or the write fails. |
 | `KEELSON_ARTIFACTS_DIR` | The per-run scratch directory. |
 | `KEELSON_INPUTS_<key>` | One variable per workflow input; non-alphanumeric characters in the key are normalized to `_`. |
 | `KEELSON_ARGUMENTS` | The full free-form text the run was started with (equivalent to `$ARGUMENTS` in prompt substitution). |
 | `ARTIFACTS_DIR` | Same path as `KEELSON_ARTIFACTS_DIR`; provided so workflows ported from Archon can use the shorter name without modification. |
+
+An env value over 16 KiB is truncated to its first 8 KiB and last 8 KiB, joined
+by an inline `[keelson: ...]` marker, because the OS caps the size of a single
+environment entry. A truncated node output is also written in full to
+`<artifacts dir>/node-outputs/<id>.txt` and that path published as
+`KEELSON_NODE_<id>_OUTPUT_FILE`, so a node that needs the whole text reads the
+file instead of the variable.
 
 <Aside type="note" title="Why two channels">
 Prompt text is interpreted by a model that treats it as language; shell source
@@ -320,7 +382,7 @@ and not one.
 </Aside>
 
 Reserved node ids, because they collide with substitution namespaces: `inputs`,
-`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`.
+`ARGUMENTS`, `ARTIFACTS_DIR`, `memory`, `converge`.
 
 ## Validation rules
 
@@ -335,7 +397,9 @@ These errors block a save or run:
 - Per-node schema violations.
 - Duplicate node ids, unknown `depends_on` targets, dependency cycles.
 - Reserved workflow names (`runs`) or node ids (`inputs`, `ARGUMENTS`,
-  `ARTIFACTS_DIR`, `memory`).
+  `ARTIFACTS_DIR`, `memory`, `converge`).
+- A `converge.gate` that names no node in the workflow, or a gate that is a
+  `loop` node or declares `retry:`.
 - A `$<id>.output` reference to a node that is not an ancestor (a forward or
   sibling reference), which would otherwise silently resolve to the empty
   string at run time.

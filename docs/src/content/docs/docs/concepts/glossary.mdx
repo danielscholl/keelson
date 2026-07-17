@@ -1,19 +1,20 @@
 ---
 title: Glossary
-description: The vocabulary used across the documentation, with the two overloaded terms disambiguated.
+description: The vocabulary used across the documentation, with the overloaded terms disambiguated.
 sidebar:
   order: 6
 ---
 
 The terms below appear throughout the documentation and the codebase. Two of
-them, *surface* and *command*, carry two meanings each; their entries say
+them, *surface* and *command*, carry more than one meaning; their entries say
 which is which.
 
 ## The harness
 
 - **harness**: the part that ships in the keelson repository: the server, the
   CLI, the browser app, the store, and the contracts. It is the same on every
-  install, finished and deliberately capability-empty.
+  install and useful on its own: Chat, Workflows, and Memory work with a single
+  provider and no ribs. It ships with no rib tools until you install one.
 - **keelson (the name)**: the beam fastened over a ship's keel, the spine the
   frames bolt onto. The harness is the beam and ribs are the frames. The
   metaphor lives in the name and the figures; the APIs use the plain terms in
@@ -35,8 +36,11 @@ which is which.
   each turn, drawing on tools that installed ribs registered and a provider you
   pick per turn. See [Chat](../chat/).
 - **provider**: a coding-agent SDK behind the one `IAgentProvider` interface:
-  Copilot, Claude, Codex, Pi, the stub, or a configured gateway (any OpenAI-compatible endpoint). Swappable per chat turn and per
-  workflow node. See [Providers](../providers/).
+  Copilot, Claude, Codex, Pi, the stub, or a configured gateway. Swappable per
+  chat turn and per workflow node. See [Providers](../providers/).
+- **gateway**: any OpenAI-compatible endpoint registered as a provider, so a
+  local model served by Ollama or vLLM routes through the same interface as a
+  vendor SDK. See [Configuration](../../guides/configuration/#gateways).
 - **stub provider**: the offline echo provider. No credentials, no tool
   calls, deterministic output; exists so every loop can be verified without
   keys.
@@ -60,10 +64,13 @@ which is which.
 - **rib id**: the lowercase kebab-case identity inferred from the package
   name. The declared id must match the package suffix or discovery skips the
   rib.
-- **discovery**: the boot-time scan of the home's `@keelson` scope. Failed
-  validation skips one rib with a warning, never the boot.
+- **discovery**: the boot-time scan of the home's `@keelson` scope. A package
+  whose shape fails validation is skipped with a warning, never taking the boot
+  with it.
 - **activation**: a discovered rib that validated and registered.
   `KEELSON_RIBS` filters which discovered ribs activate; unset activates all.
+  Unlike discovery, activation is strict: an out-of-namespace key, a duplicate
+  rib id, or a duplicate surface id throws and fails the boot.
 - **tool**: a typed function the agent can call, declared with a zod input
   schema. Tool names are global across ribs; first claim wins.
 - **tool family**: the prefix before the first underscore in a tool name,
@@ -71,6 +78,27 @@ which is which.
   collisions.
 - **action**: an inbound message to a rib over the loopback API; how a
   board's buttons reach the rib that owns the board.
+- **cross-rib grant**: the operator's `crossRibGrants` entry in `config.json`
+  permitting one rib to call another's tool. The default is deny, so two
+  installed, active ribs still cannot reach each other until a grant names the
+  caller, the target, and the tool. See [Governance](../../guides/governance/).
+- **policy**: a governance rule evaluated at every turn's hook points, returning
+  allow, deny, or ask. The harness composes its builtins with the policies ribs
+  contribute behind one engine. See [Governance](../../guides/governance/).
+- **op**: a long-running rib operation registered on the durable op registry. It
+  returns a handle immediately, streams log and progress frames, and settles
+  once, so the generic `run_*` tools can poll it and it survives a restart.
+- **workspace lease**: an isolated, dependency-prepared checkout a rib acquires
+  for mutation-heavy work, held until released. Checkout isolation, not a
+  sandbox.
+- **mutation lock**: an advisory per-project lock taken before mutating a
+  project's live checkout directly. A lease-held worktree is already isolated
+  and does not need one.
+- **docs source**: an `llms-full.txt` corpus a rib contributes, which the
+  `keelson_docs` tool lists, indexes, and slices on demand, so an installed rib
+  extends what the agent can look up about itself.
+- **agent (named)**: a reusable turn template a rib offers for direct chat, a
+  system prompt plus an optional model, opened as a fresh seeded conversation.
 - **auth probe**: a rib's optional `authStatus` hook, reporting whether its
   external system is reachable and signed in.
 
@@ -83,9 +111,11 @@ which is which.
 - **node**: one unit of execution. Seven kinds in three families: agent
   (`prompt`, `command`, `loop`), deterministic (`bash`, `script`), and
   control (`approval`, `cancel`).
-- **command**: two senses. A *CLI command* is `keelson <verb>`. A *named
+- **command**: three senses. A *CLI command* is `keelson <verb>`. A *named
   command* is a reusable prompt file in the home's `commands/` directory,
-  which a workflow `command` node runs. Workflow pages mean the second.
+  which a workflow `command` node runs. A *slash command* is a verb a rib
+  contributes to the chat composer, which resolves to an effect the surface
+  performs. Workflow pages mean the second.
 - **run**: one execution of a workflow, durable as a record: a run row plus
   a row per node with output, timing, and error.
 - **edge**: a `depends_on` declaration. Edges carry both ordering and data:
@@ -115,8 +145,9 @@ which is which.
   section vocabulary with semantic tones.
 - **region**: one slot in a rib surface's layout, bound to a snapshot key,
   optionally naming the workflow that refreshes it.
-- **cadence**: a region's auto-refresh interval while its surface is open,
-  floored at thirty seconds.
+- **cadence**: a region's auto-refresh interval, floored at thirty seconds. A
+  server heartbeat honors it even when no browser tab is open; a region that
+  carries `workflowArgs` refreshes client-side only, while its surface is open.
 - **memory**: a typed, reviewed row of accumulated knowledge: a decision,
   lesson, constraint, or failure. See
   [Memory and state](../memory-and-state/).

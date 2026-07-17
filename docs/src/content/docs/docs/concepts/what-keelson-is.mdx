@@ -43,9 +43,11 @@ This page is the fastest way to decide whether Keelson fits before you read on.
 - **Not a replacement for provider auth or sandboxing.** Each provider keeps its
   own credentials and execution model; Keelson routes to them, it does not
   reimplement them.
-- **Not a resumable job engine.** Runs are durable as records, not as processes:
-  a paused run is held by the running server, and a restart fails a stale run
-  rather than faking a resume.
+- **Not a long-running job scheduler.** Runs are durable as records, not as
+  processes. A *paused* run is held by the running server, so a restart fails it
+  rather than faking a resume. An interrupted run is a different case: `keelson
+  workflow resume` re-enters a failed or cancelled run from its last completed
+  node, reusing the outputs already recorded.
 
 ## Maturity and limits
 
@@ -59,7 +61,7 @@ detail behind each one.
 | Local server, Chat, Workflows, Memory | Works | The standalone harness is usable with a single provider. |
 | Usage ledger | Works | Per-turn token counts across chat, workflows, and ribs; no cost estimation. |
 | Offline trial | Stub only | The `stub` provider needs no keys: good for wiring, not real tool use. |
-| Workflow resume | Records persist, processes do not | Do not restart the server while a run waits on approval if you expect to resume it. |
+| Workflow resume | Interrupted runs resume, pauses do not survive | `keelson workflow resume` re-enters a failed or cancelled run. Do not restart the server while a run waits on approval. |
 | Rib boundary | Namespaces and credentials only | Not isolation; choose rib sources the way you choose any dependency. |
 | MCP endpoint | Loopback and tokenless by default, exposing state-changing tools | Restrict to read-only, or require a token, when you proxy it out or add a destructive rib. |
 | Console redaction | Wired, not active | Treat console output as unredacted for now. |

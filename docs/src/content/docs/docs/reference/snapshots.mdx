@@ -109,7 +109,7 @@ A `Cell` is a bare scalar (`string | number | boolean | null`) or a wrapped
 `{ value?, tone?, badges?, href? }`, where each badge is `{ text, tone? }`. A wrapped
 cell must render something: a value or at least one badge. An `href` renders the
 cell's value as an external link, but only a safe `http(s)://` URL becomes an
-anchor — other schemes fall back to plain text.
+anchor. Other schemes fall back to plain text.
 
 ### graph
 
@@ -151,16 +151,16 @@ one-level layout wrapper that nests leaf sections side by side.
 | `segments` | `items: [{ label, n, tone? }]` | A summary pulse. |
 | `bars` | `inline?`, `items: [{ label, value, total, tone?, trailing?, href? }]` | Meters and offender lists. A safe `http(s)://` `href` makes the whole bar row a link; other schemes fall back to plain text. |
 | `table` | `columns`, `rows`, `caption?` | The same table shape as the view. |
-| `cards` | `boxed?`, `grid?`, `columns?`, `items: [{ title, titleTone?, mono?, stacked?, dot?, pill?, href?, action?, selected?, bar?, fields?, actions?, footnote?, ghost?, reason? }]` | Rich item cards. A card may carry `actions: ActionItem[]` for inline per-card buttons, distinct from a standalone `actions` section. `action: { type, payload? }` makes the whole card body a select/toggle target that dispatches to the owning rib like a button — for pick benches where the card is the selection control (its own `actions` buttons keep working, layered above); `selected` marks the card chosen with a brand ring and is conveyed to assistive tech as a pressed toggle, so it reads even on an inline board with no dispatcher. `stacked` renders the card's fields as a column (one per line) instead of the inline `·`-joined meta row — for line-oriented readouts. `grid` lays the cards out side by side as an auto-fit grid instead of the stacked full-width column — for fixed-capacity rosters where the row is the bench; the host owns the responsive column count, and an open fields-form stays inside its card's column. `columns` (2–6) declares a fixed bench capacity: the host lays exactly that many set-size tracks per row when the panel is wide enough (fewer when narrow) instead of stretching cards to fill the row; a producer that declares capacity typically rounds the roster up with trailing decorative ghost seats (ghost cards without actions — the host hides them from assistive tech and drops them when the panel can't fit full capacity) so the bench reads as full rows. A `ghost` card renders as an open-seat placeholder (dashed border, centered body) — the empty-seat affordance in a grid bench, e.g. an authoring launchpad or an unfilled casting slot; while a ghost card's form is open it sheds the dashes for a solid brand edge. |
+| `cards` | `boxed?`, `grid?`, `columns?`, `items: [{ title, titleTone?, mono?, stacked?, dot?, pill?, href?, action?, selected?, bar?, fields?, actions?, footnote?, ghost?, reason? }]` | Rich item cards. A card may carry `actions: ActionItem[]` for inline per-card buttons, distinct from a standalone `actions` section. `action: { type, payload? }` makes the whole card body a select/toggle target that dispatches to the owning rib like a button, for pick benches where the card is the selection control (its own `actions` buttons keep working, layered above); `selected` marks the card chosen with a brand ring and is conveyed to assistive tech as a pressed toggle, so it reads even on an inline board with no dispatcher. `stacked` renders the card's fields as a column (one per line) instead of the inline `·`-joined meta row, for line-oriented readouts. `grid` lays the cards out side by side as an auto-fit grid instead of the stacked full-width column, for fixed-capacity rosters where the row is the bench; the host owns the responsive column count, and an open fields-form stays inside its card's column. `columns` (2–6) declares a fixed bench capacity: the host lays exactly that many set-size tracks per row when the panel is wide enough (fewer when narrow) instead of stretching cards to fill the row; a producer that declares capacity typically rounds the roster up with trailing decorative ghost seats (ghost cards without actions: the host hides them from assistive tech and drops them when the panel can't fit full capacity) so the bench reads as full rows. A `ghost` card renders as an open-seat placeholder (dashed border, centered body): the empty-seat affordance in a grid bench, e.g. an authoring launchpad or an unfilled casting slot; while a ghost card's form is open it sheds the dashes for a solid brand edge. |
 | `rows` | `boxed?`, `items: [{ icon?, glyph?, chip?, text, href?, trailing?, detail? }]` | A status or feed list. A row with `detail` (long-form plain text, up to 4,000 chars) renders as a disclosure that expands beneath the row. |
-| `actions` | `wrap?`, `tabs?`, `items: ActionItem[]` | Buttons. `wrap` lays them out as an inline wrapping row of compact chips (a selection strip) instead of a full-width stacked column; an action whose form is open breaks to its own full-width line. `tabs` renders a single-select strip instead: opening one action's form closes the others', and the open form is a stable full-width panel beneath the whole strip (at rest none is active unless an item sets `defaultOpen`; clicking the active tab closes it; takes precedence over `wrap`, and `expanded` is inert). Only this layout renders an item's `subtitle` — a second muted line under the tab's label. See below. |
+| `actions` | `wrap?`, `tabs?`, `items: ActionItem[]` | Buttons. `wrap` lays them out as an inline wrapping row of compact chips (a selection strip) instead of a full-width stacked column; an action whose form is open breaks to its own full-width line. `tabs` renders a single-select strip instead: opening one action's form closes the others', and the open form is a stable full-width panel beneath the whole strip (at rest none is active unless an item sets `defaultOpen`; clicking the active tab closes it; takes precedence over `wrap`, and `expanded` is inert). Only this layout renders an item's `subtitle`: a second muted line under the tab's label. See below. |
 | `grid` | `cells: [{ label, href?, badge?: { text, tone? } }]` | A dense at-a-glance matrix. Omit `badge` for a cell that is a bare labelled link, so a set of `href` cells reads as a compact strip rather than a stack of rows. |
 | `chart` | `yLabel?`, `series: [{ label, points: [{ x, y }] }]` (1 to 6 series, unique labels, unique `x` per series) | A deterministic line/timeseries plot. Series wear the fixed-order categorical palette by index, never cycled: fold a seventh series into an "other" bucket. All-numeric `x` scales linearly; any string `x` renders as ordered categories in first-appearance order. Endpoint dots always mark line ends; direct endpoint labels appear up to 4 series, a legend appears for 2+, and hovering shows a crosshair with per-series values. Single y-axis by construction; pair the chart with a `table` section when exact values matter. |
 | `seats` | `items: [{ tone?, filled?, label? }]` | A fixed-capacity identity row an actor roster fills. A dashed empty seat becomes solid when `filled`; a `label` (the actor's name) becomes the seat's tooltip and accessible name, and an unlabelled seat is decorative (`aria-hidden`). Identity colour never renders without a name (see [Tones](#tones)). |
-| `journey` | `items: [{ title, text? }]` | A numbered step strip (numbers derive from order) that says what will happen next — replaces stacks of "nothing here yet" placeholder chrome on first-run surfaces. |
+| `journey` | `items: [{ title, text? }]` | A numbered step strip (numbers derive from order) that says what will happen next. Replaces stacks of "nothing here yet" placeholder chrome on first-run surfaces. |
 | `columns` | `columns: [{ weight?, sections: LeafSection[] }]` | Lays leaf sections side by side. One level deep only. |
 
-A card `field` is `{ label?, value, tone?, href?, copyable?, copyAction? }` —
+A card `field` is `{ label?, value, tone?, href?, copyable?, copyAction? }`,
 or `{ label?, people: [{ name, tone? }] }`, which renders identity-toned names
 in the value slot (a dot per name, the name itself in ink); a field carries
 exactly one of `value` / `people`. A card may also carry a
@@ -190,7 +190,7 @@ namespace, and reaches the rib's `onAction`.
 ActionItem = {
   type,                 // a rib-defined verb the base never enumerates
   label,
-  subtitle?,            // a second muted line under the label — rendered only by the tabs layout
+  subtitle?,            // a second muted line under the label, rendered only by the tabs layout
   glyph?, tone?,
   destructive?,         // marks the action dangerous: a simple confirm
   inline?,              // surface a destructive card action as a visible button, not the overflow menu
@@ -198,9 +198,9 @@ ActionItem = {
   hint?,                // descriptive hover tooltip (WHAT it does), any state; joins with reason when disabled
   disabled?, reason?,   // gate the button (dim + seal); reason is the tooltip WHY, only with disabled: true
   expanded?,            // render fields as an always-open hero form (inert without fields)
-  defaultOpen?,         // in a tabs strip, open the first enabled, field-bearing item marked true on first render — except a solo model-picker, which opens as a popover rather than a form and never seeds; the operator's toggles win after (inert elsewhere and without fields)
+  defaultOpen?,         // in a tabs strip, open the first enabled, field-bearing item marked true on first render, except a solo model-picker, which opens as a popover rather than a form and never seeds; the operator's toggles win after (inert elsewhere and without fields)
   submitLabel?,         // the fields form's submit button text, defaulting to label (inert without fields)
-  submitTone?,          // tone for the fields form's submit button only, defaulting to tone — for a neutral tab whose submit is the board's primary verb (inert without fields)
+  submitTone?,          // tone for the fields form's submit button only, defaulting to tone, for a neutral tab whose submit is the board's primary verb (inert without fields)
   payload?,             // opaque rib-defined context, dispatched verbatim
   fields?: ActionField[]   // input collected before dispatch
 }
@@ -217,9 +217,9 @@ must be unique. It is mutually exclusive with `multiline`. `defaultValue`
 pre-fills the control; for a select it must name an option value or `""`.
 `half` renders the field at half width so adjacent half fields share a two-track
 row (a lone half field keeps its own row). `segmented` renders `options` as a
-single-select segment strip instead of a select — a non-required field leads
+single-select segment strip instead of a select (a non-required field leads
 with a clear segment labelled by `placeholder`, dispatching `""` like the
-select's empty option — and is rejected without `options`.
+select's empty option) and is rejected without `options`.
 
 `modelPicker` (`{ providerField?, providerDefault? }`) renders the host's live
 provider/model catalog as a searchable picker instead of a producer-supplied
@@ -228,10 +228,10 @@ chosen model id; `providerField` names a companion payload key that carries the
 chosen model's provider id, and `providerDefault` seeds that key so an untouched
 submit re-affirms the current provider/model pair rather than clearing it. A
 non-required picker offers `placeholder` as its clear row (dispatching `""` for
-both keys), and `defaultValue` may be any model id — on- or off-catalog — so a
+both keys), and `defaultValue` may be any model id (on- or off-catalog), so a
 hand-pinned model stays visible. It is mutually exclusive with `multiline` and
 `options`. `providerField` must not collide with the field's own `name`, any
-sibling field's `name`, or another `modelPicker` field's `providerField` — every
+sibling field's `name`, or another `modelPicker` field's `providerField`: every
 one of those lands in the same dispatched payload map, so a collision would
 silently overwrite a value; the schema rejects it at publish. When the picker is
 the action's **only** field and the action is not `expanded`, the host skips the
@@ -257,7 +257,7 @@ cast cannot run it). `reason` is the human explanation of why, surfaced as a
 tooltip, and is valid only alongside `disabled: true`. A producer that recomputes
 preconditions re-emits both on each recompose, so a state change flips the gate.
 
-`hint` is a short descriptive tooltip — what the action does — surfaced on hover
+`hint` is a short descriptive tooltip (what the action does), surfaced on hover
 whether the action is enabled or disabled, so a producer can remind the operator
 what an unfamiliar button is for. Unlike `reason` it needs no `disabled`; on a
 disabled action the host shows both, the hint then the reason.
@@ -272,7 +272,7 @@ the action's label, glyph, and tone, for a hero action whose input is the
 affordance. It is inert without `fields`.
 
 `submitLabel` overrides the text on a `fields` form's submit button, which
-otherwise carries the action's `label` — so a tab named for its mode ("Debate")
+otherwise carries the action's `label`, so a tab named for its mode ("Debate")
 can submit with a verb ("Convene"). It applies to every action form and is inert
 without `fields`.
 

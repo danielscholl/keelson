@@ -77,16 +77,21 @@ the browser either has a renderer for that shape or refuses politely.
 | --- | --- |
 | `markdown` | Formatted text. |
 | `view` | A typed visualization: a `table`, a `graph` of nodes and edges, or a `board`. |
-| `html` | Untrusted rib-supplied markup rendered in a sandboxed iframe. The host owns the document shell (a CSP with `connect-src 'none'` blocks script-initiated network connections; a bridge script is injected first). Frame script calls `keelson.action(type, payload)` to post typed actions back; the rib's handler receives them with `origin: "canvas-html"`. The shell stamps the app's resolved theme as `data-theme` on the frame's root element and pushes later toggles into the frame, so markup styled through `:root[data-theme]` token overrides re-themes live. |
+| `html` | Untrusted rib-supplied markup rendered in a sandboxed iframe. The host owns the document shell (a CSP with `connect-src 'none'` blocks script-initiated network connections; a bridge script is injected first). Frame script calls `keelson.action(type, payload)` to post typed actions back; the rib's handler receives them with `origin: "canvas-html"`, which the host stamps itself after reading only `type` and `payload` off the frame message, so a frame can never claim `"board"`. The markup is untrusted (rib- or LLM-authored, and frame script can post on load without a user gesture), so a rib's `onAction` should gate frame-origin verbs to a safe subset. The shell stamps the app's resolved theme as `data-theme` on the frame's root element and pushes later toggles into the frame, so markup styled through `:root[data-theme]` token overrides re-themes live. |
 
 The `board` is the workhorse: a dashboard composed from a fixed section
 vocabulary, stats, segments, bars, tables, cards, rows, actions, a grid, a chart
 (a deterministic line or timeseries plot), seats (a fixed-capacity identity row),
 and a journey (a numbered next-steps strip), with one level of columns for layout. Sections carry **tones**, a small
-semantic palette (`ok`, `warn`, `error`, `neutral`, and a few decorative
-accents), so status reads consistently across every rib's boards. An
-`actions` section is how a board gets buttons: each action posts back to the
-rib that owns the board's key, and the rib's handler decides what it means.
+closed palette: a semantic core (`ok`, `warn`, `error`, `neutral`), a few
+decorative accents, and five reserved identity hues. The identity hues are not
+decorative. A rib that renders the same actors repeatedly assigns one per actor
+at creation and persists it, never hashing per render and never seating an actor
+in a status hue, so a face keeps its color while status is free to change under
+it. An `actions` section is one way a board gets buttons: each action posts back
+to the rib that owns the board's key, and the rib's handler decides what it
+means. Cards carry their own actions (a whole card body can be one), and a
+region head carries a menu of rib verbs. All of them reach the same handler.
 
 <Aside type="note" title="Closed is the feature">
 A rib cannot invent a renderer, and that is the point. The closed vocabulary
@@ -108,15 +113,54 @@ contract:
   rows of columns, and a footer. The rib declares titles and glyphs; the
   harness owns every pixel of chrome.
 
+The two are not independent. A region's canvas kind is resolved from the rib's
+`views` entry for the same key, defaulting to `view` when no entry claims it, so
+a key a rib declares as `html` renders as sandboxed markup inline on the surface
+rather than only in the canvas drawer. One declaration governs both placements.
+
+A surface's own fields say how the tab presents itself. `title` names the nav
+tab. `heading` is an opt-in H1, independent of the title, and a surface that
+omits it renders no H1 at all. `subtitle` sits beneath the heading,
+`projectScoped` opts the surface into the host's shared project picker, and
+`hideRegionActions` opts an authoring console out of the host's per-region
+chrome. Banner regions are the one constrained slot: a banner never collapses
+and never hides.
+
 A rib can also add regions at runtime via `ctx.registerRegion(surfaceId, region)` (where `ctx` is the `RibContext` passed to `activate`). The call appends the region to the named surface grouped by `region.group` and returns an unregister handle; the harness bumps the manifest-revision beacon so subscribed browsers re-fetch the layout without a page reload. `surfaceId` must name a surface the rib declared statically; `region.key` must be under `rib:<id>:*`. The method is optional on older harnesses. A rib should guard with `ctx.registerRegion?.(...)` so it degrades cleanly.
+
+That call is the only way to add a region later, because views and surfaces are
+live in different degrees. A rib may append to its `views` array at runtime and
+call `ctx.invalidateManifest?.()`, since a view carries no boot-derived state and
+a live one is a complete one. A region's `workflow` name and `cadenceMs` are read
+once at boot, when the harness walks every manifest to derive which workflows may
+refresh which region and which regions the heartbeat owns. A region a rib pushes
+onto its own descriptor after that walk would serve unbound and never get a
+heartbeat, however live the manifest looks.
 
 A region can also name a **workflow**: the catalog workflow whose run
 repopulates the region's key. That single field is what makes boards
-operable. The refresh button on a region runs the workflow; a `cadenceMs` on
-the region (floored at thirty seconds) lets the harness re-run it on a
-heartbeat while the surface is open. Data freshness becomes visible and
-demand-driven: a board composes when someone is looking at it, not on a
-daemon's schedule.
+operable. The refresh button on a region runs the workflow, and a `cadenceMs`
+on the region (floored at thirty seconds) asks for the same run on a schedule.
+The harness keeps that schedule itself. A single server heartbeat re-runs
+cadence-bearing regions even when no tab is mounted, so a board is fresh when
+someone arrives instead of blank while it composes. The heartbeat is
+deliberately cheap: a tick admits at most two new runs, and it reads staleness
+from each frame's `composedAt`, so an operator's refresh and a server tick
+suppress each other rather than double-run. `KEELSON_DISABLE_SCHEDULER=1` turns
+it off.
+
+One case stays client-driven. A region carrying `workflowArgs` refreshes only
+while its surface is open, because the heartbeat would fire the run with empty
+inputs and hand an args-expecting producer nothing.
+
+Freshness stays visible either way. Every frame carries its composition time, so
+a board reports how old it is rather than implying it is live.
+
+Beyond `key`, `workflow`, and `cadenceMs`, a region carries presentation fields
+the harness honors: `workflowArgs`, `group` and `groupTitle`, `byline`,
+`collapsible` and `collapsed`, `live`, `hideWhenEmpty`, and `headActions`
+(menu-only verbs on the region head). The
+[rib contract](../../reference/rib-contract/) documents each one.
 
 ## One substrate, no exceptions
 

@@ -31,7 +31,7 @@ source during development; an installed harness almost always lands on
 | Path | What |
 | --- | --- |
 | `keelson.db` | The SQLite store: conversations, workflow runs and node outputs, projects and notebooks, memory rows. |
-| `config.json` | Provider enablement and defaults. Optional; a missing file falls back to defaults. |
+| `config.json` | The operator's settings: provider enablement and defaults, cross-rib grants, the MCP gateway block, registered gateways, and the Claude and Codex provider blocks. Optional; a missing file falls back to defaults. |
 | `server.json` | The running server's record: URL, pid, version, schema version, start timestamp, shutdown token, and (when MCP token-gating is enabled) an MCP token. Written on start, cleaned on stop. |
 | `workflows/` | Your global workflow YAML files. |
 | `commands/` | Named markdown prompt files a workflow `command` node runs. |

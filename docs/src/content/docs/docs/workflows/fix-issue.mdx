@@ -31,7 +31,8 @@ keelson workflow run fix-issue --inputs ARGUMENTS="42"
 keelson workflow run fix-issue --inputs ARGUMENTS="fix the SQLite timestamp bug"
 ```
 
-It needs the `gh` CLI authenticated, a Copilot subscription, and a **running
+It needs `gh` or `glab` authenticated (the bundled `forge` shim resolves
+whichever is present), a Copilot subscription, and a **running
 server** (`keelson start`) because the approval gate pauses the run. It mutates
 the working tree (branch, commits, push, PR), so it sets `worktree.enabled`:
 every run executes in an isolated git worktree and cannot trample your editor
@@ -70,15 +71,16 @@ only when the pushed PR's checks pass.
 
 | Phase | Node | Kind | What it does |
 | --- | --- | --- | --- |
-| Fetch & classify | `extract-issue` | prompt | Parses the issue number from `$ARGUMENTS`, or searches `gh issue list` for the best match. |
-| | `fetch-issue` | bash | `gh issue view` to JSON, stashes the number in the scratch dir. |
-| | `extract-brief` | bash | Extracts the issue's acceptance-criteria section into `$ARTIFACTS_DIR/brief.json` (empty criteria when absent — never fails the run). |
+| Fetch & classify | `extract-issue` | prompt | Parses the issue number from `$ARGUMENTS`, or searches `forge issue list` for the best match. |
+| | `fetch-issue` | bash | `forge issue view` to JSON, stashes the number in the scratch dir. |
+| | `detect-base` | bash | Resolves the repository's default branch with `forge repo view --json defaultBranchRef`, falling back to `origin/HEAD` then `main`, and writes it to `$ARTIFACTS_DIR/.default-branch`. Never assumes `main`. |
+| | `extract-brief` | bash | Extracts the issue's acceptance-criteria section into `$ARTIFACTS_DIR/brief.json` (empty criteria when absent, never fails the run). |
 | | `classify` | prompt | Typed JSON: `issue_type` (bug, feature, …), a title, and reasoning. |
 | Plan | `investigate` | prompt | **`when: issue_type == 'bug'`**, **`model: claude-opus-4.8`**: root-cause analysis into `plan.md`. |
 | | `plan` | prompt | **`when: issue_type != 'bug'`**, **`model: claude-opus-4.8`**: an implementation plan into the *same* `plan.md`. |
 | | `plan-ready` | bash | Funnel (`trigger_rule: one_success`): asserts `plan.md` exists and has tasks, then prints it. |
 | | `criteria-count` | bash | Prints the brief's acceptance-criteria count so the next node can gate on it. |
-| | `coverage-check` | prompt | **`when: criteria-count > 0`**, **`model: claude-opus-4.8`**: semantic judge — maps each brief criterion to the plan step that covers it or **MISSING**. Returns typed JSON only; skipped entirely when the brief has no criteria. |
+| | `coverage-check` | prompt | **`when: criteria-count > 0`**, **`model: claude-opus-4.8`**: semantic judge that maps each brief criterion to the plan step that covers it or **MISSING**. Returns typed JSON only; skipped entirely when the brief has no criteria. |
 | | `coverage-ready` | bash | Funnel (`trigger_rule: all_done`): writes the judge's output to `coverage.json` when criteria exist, and removes the artifact otherwise. |
 | Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. The criteria-coverage checklist is appended here. |
 | Implement | `implement` | prompt | **`model: gpt-5.6-sol`**: Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
@@ -86,10 +88,10 @@ only when the pushed PR's checks pass.
 | | `fix-validation` | prompt | If it failed, fixes only what broke and commits; if it passed, stops. |
 | | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
 | Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, captures the PR number and URL. |
-| | `enforce-draft` | bash | Verifies the new PR is a draft; if it came up ready, runs `gh pr ready --undo` to force it back to draft, and fails the run if it cannot confirm the draft state. |
-| Review loop | `review-correctness` | prompt | **`model: gpt-5.6-terra`**: one of three **independent, parallel** reviewers — hunts correctness defects in `git diff main...HEAD`. Does not edit. |
-| | `review-conventions` | prompt | **`model: gpt-5.6-terra`**: independent reviewer — checks the diff against `CLAUDE.md` / `CONTRIBUTING.md` (comment policy, conventions). |
-| | `review-coverage` | prompt | **`model: gpt-5.6-terra`**: independent reviewer — flags new behavior left untested, and tests authored but never wired in. |
+| | `enforce-draft` | bash | Verifies the new PR is a draft; if it came up ready, runs `forge pr ready --undo` to force it back to draft, and fails the run if it cannot confirm the draft state. |
+| Review loop | `review-correctness` | prompt | **`model: gpt-5.6-terra`**: one of three **independent, parallel** reviewers. Hunts correctness defects in `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD`. Does not edit. |
+| | `review-conventions` | prompt | **`model: gpt-5.6-terra`**: independent reviewer that checks the diff against `CLAUDE.md` / `CONTRIBUTING.md` (comment policy, conventions). |
+| | `review-coverage` | prompt | **`model: gpt-5.6-terra`**: independent reviewer that flags new behavior left untested, and tests authored but never wired in. |
 | | `triage` | prompt | **`model: claude-opus-4.8`**, typed JSON: de-dupes the findings, keeps only CRITICAL/HIGH at ≥80 confidence, drops false positives. |
 | | `apply-fixes` | prompt | Applies only the triaged must-fix issues, commits, pushes. No-ops when triage is clean. |
 | | `re-review` | prompt | Closes the loop: confirms each must-fix is resolved with no new defect; fixes any straggler. |
@@ -97,7 +99,7 @@ only when the pushed PR's checks pass.
 | CI gate | `await-ci` | bash | Watches the pushed PR's CI; reruns failed jobs **once** to shake out flakes. **Exits 0** so the run continues whether CI passed or not. |
 | | `triage-ci` | prompt | **`model: claude-opus-4.8`**, typed JSON: classifies each CI failure as *actionable* (caused by this PR) or *unrelated/flaky*. |
 | | `fix-ci` | prompt | Fixes only the actionable failures on the PR branch and pushes. No-ops when triage finds none. |
-| | `finalize-pr` | bash | Re-checks CI and runs `gh pr ready` to promote the draft **only when every check is green**; a red or check-less PR stays a draft. |
+| | `finalize-pr` | bash | Re-checks CI and runs `forge pr ready` to promote the draft **only when every check is green**; a red or check-less PR stays a draft. |
 | Report | `report` | prompt | The operator summary: issue, branch, PR, what changed, the validation status, and the final CI and PR state. |
 
 ### The parts worth a second look
@@ -130,19 +132,19 @@ workflow carries no assumption about the stack, which is what makes it portable.
 **Operational guardrails live in the prompts.** The implement and fix prompts
 forbid `git add -A` (stage by name) and forbid committing anything under
 `$ARTIFACTS_DIR`, so scratch files never leak into the PR. They also commit each
-task's code *and its tests together, immediately* — never carrying uncommitted
+task's code *and its tests together, immediately*, never carrying uncommitted
 work forward, where a timeout would erase it. These are the kind of hard-won
 rules a generic "implement the plan" prompt omits.
 
 **Review is a panel, not a self-check.** Phase 7 does not ask one agent to grade
-its own homework. Three independent reviewers — correctness, conventions, and
-coverage — run in parallel (they share a DAG layer, so the panel costs about one
+its own homework. Three independent reviewers (correctness, conventions, and
+coverage) run in parallel (they share a DAG layer, so the panel costs about one
 review's wall-clock), and a `triage` judge keeps only high-confidence
 CRITICAL/HIGH findings, dropping the false positives a lone self-review acts on.
 `apply-fixes` fixes exactly those, and `re-review` confirms the loop closed. The
 reasoning nodes (`investigate`, `plan`, `triage`, `triage-ci`) are pinned to
 `claude-opus-4.8`, `implement` is pinned to `gpt-5.6-sol` for the node doing the
-actual edits, and the three review lenses are pinned to `gpt-5.6-terra` — every
+actual edits, and the three review lenses are pinned to `gpt-5.6-terra`. Every
 model-driven node runs a chosen, deterministic model rather than `auto`.
 
 **The CI gate fixes only its own mess.** Once the PR is pushed, its real CI
@@ -151,9 +153,9 @@ watches it and reruns failed jobs once to rule out a flake; `triage-ci` then
 classifies each failure as caused by *this* PR or pre-existing/flaky. `fix-ci`
 touches only the actionable ones. Auto-editing someone else's failing test to
 force green would be worse than failing loud, so an unrelated red leaves the PR a
-draft for a human. `finalize-pr` promotes the draft to ready with `gh pr ready`
-only when every check passes, and never claims ready if the promotion itself
-fails.
+draft for a human. `finalize-pr` promotes the draft to ready with
+`forge pr ready` only when every check passes, and never claims ready if the
+promotion itself fails.
 
 ## Patterns it demonstrates
 
@@ -175,7 +177,7 @@ fails.
   lenses are pinned to `gpt-5.6-terra` and `triage` to `claude-opus-4.8`; retarget
   either to whatever your Copilot account exposes, or drop a lens back to `auto`.
   `implement` carries a separate `model: gpt-5.6-sol` pin, the node doing the
-  actual edits. All three ids are account-dependent — swap or drop any to `auto`
+  actual edits. All three ids are account-dependent: swap or drop any to `auto`
   if it does not appear in your Copilot model list.
 - **Swap the gate for autonomy.** Remove `approve-plan` (and point `implement`
   at `plan-ready`) for an unattended run, at the cost of the safety interlock.
