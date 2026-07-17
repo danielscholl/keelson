@@ -72,7 +72,7 @@ distills the lanes into the findings worth posting.
 | `error-handling` | prompt | Audits new and changed failure paths. Gated on the classifier. |
 | `test-coverage` | prompt | Checks that changed source has matching test changes. Gated on the classifier. |
 | `docs-impact` | prompt | Flags user-facing changes (flags, env vars, APIs) with no doc update. Gated on the classifier. |
-| `triage` | prompt | **`model: claude-opus-4.8`**, `allowed_tools: [Read, Glob, Grep]`, the `one_success` join: de-dupes the lanes, then adversarially refutes each candidate against `diff.patch` and the source. Survivors are CONFIRMED (confidence 85-100) or PLAUSIBLE (capped at 79, below the ≥80 keep line), so only CONFIRMED CRITICAL/HIGH/MEDIUM findings post. Emits a `verdict` (READY TO MERGE / NEEDS NITS / NEEDS FIXES) with typed `findings`. |
+| `triage` | prompt | **`model: claude-opus-4-8`**, `allowed_tools: [Read, Glob, Grep]`, the `one_success` join: de-dupes the lanes, then adversarially refutes each candidate against `diff.patch` and the source. Survivors are CONFIRMED (confidence 85-100) or PLAUSIBLE (capped at 79, below the ≥80 keep line), so only CONFIRMED CRITICAL/HIGH/MEDIUM findings post. Emits a `verdict` (READY TO MERGE / NEEDS NITS / NEEDS FIXES) with typed `findings`. |
 | `build-review` | bash | Offline: anchors each finding to a line on the diff's new side and builds the review payload. A `suggestion` block is **gated**: an empty fix, or one byte-identical to the anchored line, posts as prose only. No network. |
 | `post-review` | bash | Posts the payload with `forge pr review-batch` as line-anchored inline comments. **Idempotent by content hash**: skips when a prior review already carries the same `keelson:pr-review:<hash>` marker. |
 

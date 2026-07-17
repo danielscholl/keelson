@@ -174,7 +174,7 @@ nodes:
     depends_on: [fetch-state]
     when: "$fetch-state.output.has_new == 'true'"
     context: fresh
-    model: claude-opus-4.8
+    model: claude-opus-4-8
     output_format:
       type: object
       required: [threads]

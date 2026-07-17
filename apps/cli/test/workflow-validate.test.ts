@@ -106,12 +106,12 @@ describe("pr-review workflow node graph", () => {
     expect(ids).toContain("post-review");
   });
 
-  test("triage node is pinned to claude-opus-4.8", () => {
+  test("triage node is pinned to claude-opus-4-8", () => {
     const filename = `${WORKFLOWS}/pr-review.yaml`;
     const content = readFileSync(filename, "utf-8");
     const result = parseWorkflow(content, filename);
     const triage = result.workflow?.nodes.find((n) => n.id === "triage");
-    expect(triage?.model).toBe("claude-opus-4.8");
+    expect(triage?.model).toBe("claude-opus-4-8");
   });
 
   test("no node posts a plain comment; post-review uses the batched review verb", () => {
