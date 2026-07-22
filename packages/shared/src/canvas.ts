@@ -418,6 +418,14 @@ export const canvasActionItemSchema = z
     // a disabled action can't run): on a disabled action the UI shows both, the
     // hint then the reason.
     hint: z.string().min(1).optional(),
+    // Mark a toggle action as currently ON — a chosen state (a brand ring, and
+    // `aria-pressed` so it reaches assistive tech, mirroring a card's `selected`).
+    // It lets a toggle's label name the capability once — "Can edit", pressed or not —
+    // instead of swapping between describing the current state and describing what a
+    // click will do, which reads as two different things on the same control. Absent
+    // leaves the button untoggled with no pressed semantics at all, so a plain verb
+    // action is unaffected.
+    selected: z.boolean().optional(),
     // Render the action non-interactive — dimmed and unclickable, its form sealed
     // — when a precondition the state can't satisfy fails (a capability-gated tab
     // whose current cast can't run it). `reason` is the human explanation of WHY
@@ -629,7 +637,13 @@ const actionsSectionSchema = z
     tabs: z.boolean().optional(),
     items: z.array(canvasActionItemSchema),
   })
-  .strict();
+  .strict()
+  // A tabs strip owns its own active state (the open item), so a `selected` item
+  // inside one would paint a second, competing "this is the current one" — fail at
+  // publish rather than render two answers to the same question.
+  .refine((s) => !s.tabs || !s.items.some((i) => i.selected), {
+    message: "a tabs section's items carry no `selected` — the strip owns its active state",
+  });
 // A dense grid of labelled cells, each optionally carrying a small toned badge —
 // for a compact at-a-glance matrix (a per-service grade grid, a status board)
 // where `cards` would be too heavy, or a dense strip of labelled links. Cells

@@ -3928,6 +3928,18 @@ button.tab:focus-visible {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
+/* A toggle action that is currently ON — the same brand ring a selected card
+   wears, so "chosen" reads identically whichever control carries it. Paired with
+   aria-pressed, so the state is not carried by colour alone. */
+.cvb-action-button.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--card-2));
+  color: var(--fg-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.cvb-action-button.is-selected:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--accent) 16%, var(--card-2));
+}
 .cvb-action-glyph {
   display: inline-flex;
   width: 14px;

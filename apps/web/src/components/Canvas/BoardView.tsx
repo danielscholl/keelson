@@ -307,11 +307,14 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
       {!expanded && (
         <button
           type="button"
-          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}`}
+          className={`cvb-action-button${item.destructive ? " is-destructive" : ""}${item.disabled ? " is-disabled" : ""}${item.selected ? " is-selected" : ""}`}
           data-tone={item.tone}
           disabled={nativelyDisabled}
           aria-disabled={ariaDisabled}
           aria-expanded={hasFields ? open : undefined}
+          // Only a producer-declared toggle carries pressed semantics; a plain verb
+          // action stays a plain button rather than announcing an unasked-for state.
+          aria-pressed={item.selected === undefined ? undefined : item.selected}
           title={tooltip}
           onClick={onButtonClick}
         >

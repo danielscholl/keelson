@@ -609,6 +609,40 @@ describe("canvasViewSchema", () => {
     ).toBe("board");
   });
 
+  it("parses a selected toggle action, and keeps it out of a tabs strip", () => {
+    // A toggle whose label names the capability once, with the pressed state carrying
+    // whether it is granted.
+    expect(
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            wrap: true,
+            items: [
+              { type: "set-tier", label: "Can edit", selected: true },
+              { type: "set-tier", label: "Can publish", selected: false },
+            ],
+          },
+        ],
+      }).view,
+    ).toBe("board");
+    // A tabs strip already shows which item is active; a `selected` item inside one
+    // would paint a second, competing answer.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            tabs: true,
+            items: [{ type: "pick", label: "One", selected: true }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("rejects a card action missing a type or carrying an extra key (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({

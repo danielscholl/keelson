@@ -1731,4 +1731,68 @@ describe("create-form affordances", () => {
     // Without submitTone the submit keeps wearing the item's own tone.
     expect(screen.getByRole("button", { name: "Author" }).getAttribute("data-tone")).toBe("brand");
   });
+
+  test("a selected toggle carries its state to assistive tech, not just to the eye", async () => {
+    const view = {
+      view: "board",
+      sections: [
+        {
+          kind: "actions",
+          wrap: true,
+          items: [
+            { type: "set-tier", label: "Can edit", selected: true },
+            { type: "set-tier", label: "Can publish", selected: false },
+            { type: "convene", label: "Convene" },
+          ],
+        },
+      ],
+    } as CanvasBoardView;
+    render(
+      <BoardActionProvider run={okRun} reveal={okReveal}>
+        <BoardView view={view} />
+      </BoardActionProvider>,
+    );
+    const on = screen.getByRole("button", { name: "Can edit" });
+    const off = screen.getByRole("button", { name: "Can publish" });
+    expect(on.getAttribute("aria-pressed")).toBe("true");
+    expect(off.getAttribute("aria-pressed")).toBe("false");
+    expect(on.className).toContain("is-selected");
+    expect(off.className).not.toContain("is-selected");
+    // A plain verb action declares no toggle, so it announces no pressed state at all.
+    expect(screen.getByRole("button", { name: "Convene" }).getAttribute("aria-pressed")).toBeNull();
+  });
+
+  test("a selected toggle still dispatches on click", async () => {
+    const calls: RibAction[] = [];
+    const run = async (a: RibAction): Promise<RibActionResult> => {
+      calls.push(a);
+      return { ok: true };
+    };
+    render(
+      <BoardActionProvider run={run} reveal={okReveal}>
+        <BoardView
+          view={
+            {
+              view: "board",
+              sections: [
+                {
+                  kind: "actions",
+                  items: [
+                    {
+                      type: "scope-set",
+                      label: "Can edit",
+                      selected: true,
+                      payload: { on: false },
+                    },
+                  ],
+                },
+              ],
+            } as CanvasBoardView
+          }
+        />
+      </BoardActionProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Can edit" }));
+    await waitFor(() => expect(calls).toEqual([{ type: "scope-set", payload: { on: false } }]));
+  });
 });
