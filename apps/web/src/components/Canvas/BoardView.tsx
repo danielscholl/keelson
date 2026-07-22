@@ -312,9 +312,7 @@ function ActionItemButton({ item, open: controlledOpen, onOpenChange }: ActionIt
           disabled={nativelyDisabled}
           aria-disabled={ariaDisabled}
           aria-expanded={hasFields ? open : undefined}
-          // Only a producer-declared toggle carries pressed semantics; a plain verb
-          // action stays a plain button rather than announcing an unasked-for state.
-          aria-pressed={item.selected === undefined ? undefined : item.selected}
+          aria-pressed={item.selected}
           title={tooltip}
           onClick={onButtonClick}
         >
