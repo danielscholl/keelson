@@ -646,9 +646,11 @@ describe("canvasViewSchema", () => {
     }
   });
 
-  it("rejects a selected action that is also destructive (it would route to a menu)", () => {
-    // A destructive card action without `inline` renders as an overflow menu item — a
-    // plain button with no pressed state — so its declared toggle state would vanish.
+  it("rejects a selected action that is also destructive (a state is not a verb)", () => {
+    // Rejected in every context, so the reason has to hold in every context: a toggle
+    // holds a state and a destructive verb is a one-shot action. Where a destructive
+    // action renders varies — inline on a board, an overflow menu item on a card — and
+    // only the latter would also lose the pressed state outright.
     expect(() =>
       canvasViewSchema.parse({
         view: "board",
