@@ -628,15 +628,41 @@ describe("canvasViewSchema", () => {
       }).view,
     ).toBe("board");
     // A tabs strip already shows which item is active; a `selected` item inside one
-    // would paint a second, competing answer.
+    // would paint a second, competing answer. Presence, not truthiness — `false` still
+    // renders an off toggle's pressed semantics, so it is rejected too.
+    for (const selected of [true, false]) {
+      expect(() =>
+        canvasViewSchema.parse({
+          view: "board",
+          sections: [
+            {
+              kind: "actions",
+              tabs: true,
+              items: [{ type: "pick", label: "One", selected }],
+            },
+          ],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("rejects a selected action that carries fields (a form has no button to press)", () => {
+    // An expanded action renders no trigger and a solo picker's trigger opens a
+    // popover, so a declared pressed state would silently vanish on both.
     expect(() =>
       canvasViewSchema.parse({
         view: "board",
         sections: [
           {
             kind: "actions",
-            tabs: true,
-            items: [{ type: "pick", label: "One", selected: true }],
+            items: [
+              {
+                type: "set-model",
+                label: "Model",
+                selected: true,
+                fields: [{ name: "model", label: "Model", modelPicker: {} }],
+              },
+            ],
           },
         ],
       }),
