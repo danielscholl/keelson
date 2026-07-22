@@ -212,8 +212,9 @@ coordination path.
    ones confirm first, the menu renders even when the surface sets
    `hideRegionActions` (that flag suppresses the host's explore/select/expand
    chrome, not the rib's own verbs) and while the region is collapsed, and the
-   board-card affordances `fields`/`expanded`/`inline` are rejected by the
-   schema (a menu has no form to collect fields with).
+   board-card affordances `fields`/`expanded`/`inline`/`selected` are rejected
+   by the schema (a menu has no form to collect fields with, and its items are
+   plain buttons carrying no pressed state for a toggle to sit in).
 
    Surfaces are read per manifest request like `views`, but they are **not** live
    the same way, because the host derives things from them once at boot: a region's
