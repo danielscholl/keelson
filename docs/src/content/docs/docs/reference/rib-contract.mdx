@@ -379,7 +379,7 @@ where a failure lands depends on when it is caught.
 | `canvasKind` is the closed `markdown` / `view` / `html` enum; a payload that mismatches its renderer is rejected client-side. | `canvasKindSchema`, client gate |
 | A bound workflow's output is run through `validate` before caching or broadcast; an invalid payload is dropped and the prior value kept. | `SnapshotValidator`, fail-closed |
 | `cadenceMs` is an integer of at least 30000. | `surfaceRegionSchema` |
-| `headActions` carries 1–8 board-action-shaped items with no `fields`/`expanded`/`inline`; `workflowArgs` values are strings. | `surfaceRegionSchema` |
+| `headActions` carries 1–8 board-action-shaped items with no `fields`/`expanded`/`inline`/`selected` (a menu has no form and no pressed state); `workflowArgs` values are strings. | `surfaceRegionSchema` |
 
 <Aside type="caution" title="The boundary is not a sandbox">
 These rules protect against collisions and accidents and keep one rib's secrets

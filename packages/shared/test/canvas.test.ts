@@ -646,6 +646,22 @@ describe("canvasViewSchema", () => {
     }
   });
 
+  it("rejects a selected action that is also destructive (it would route to a menu)", () => {
+    // A destructive card action without `inline` renders as an overflow menu item — a
+    // plain button with no pressed state — so its declared toggle state would vanish.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [{ type: "purge", label: "Purge", selected: true, destructive: true }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("rejects a selected action that carries fields (a form has no button to press)", () => {
     // An expanded action renders no trigger and a solo picker's trigger opens a
     // popover, so a declared pressed state would silently vanish on both.

@@ -442,6 +442,13 @@ export const canvasActionItemSchema = z
   // a `selected` declared there would be silently dropped. Fail at publish instead.
   .refine((a) => a.selected === undefined || a.fields === undefined, {
     message: "a selected toggle carries no fields — only a click-dispatching action can be pressed",
+  })
+  // A destructive action is a one-shot verb, not a state to sit in, and on a card it
+  // routes to the overflow menu unless `inline` — menu items are plain buttons with no
+  // pressed state, so a toggle's would be lost there the same way. Keeping the two apart
+  // also keeps the danger treatment from fighting the selected ring.
+  .refine((a) => a.selected === undefined || !a.destructive, {
+    message: "a selected toggle is not destructive — a destructive verb routes to a menu instead",
   });
 
 // The leaf board sections — every primitive except the layout-only `columns`.
