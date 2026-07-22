@@ -197,7 +197,7 @@ ActionItem = {
   confirm?: Confirm,    // typed/irreversible confirm-dialog metadata, distinct from the boolean destructive
   hint?,                // descriptive hover tooltip (WHAT it does), any state; joins with reason when disabled
   disabled?, reason?,   // gate the button (dim + seal); reason is the tooltip WHY, only with disabled: true
-  selected?,            // a toggle's ON state (brand ring + aria-pressed). Absent ≠ false: absent is a plain verb action with no pressed semantics, false is an off toggle. Only on a click-dispatching action: no fields, not destructive, not in a tabs strip (which owns its own active state) and not a headAction — each of those renders through a control with no pressed state
+  selected?,            // a toggle's ON state (brand ring + aria-pressed). Absent ≠ false: absent is a plain verb action with no pressed semantics, false is an off toggle. Only on a click-dispatching action, and each exclusion for its own reason: no fields (an expanded action draws no trigger, a solo picker's opens a popover), not destructive (a one-shot verb, and non-inline on a card it becomes a menu item), not inside a tabs strip (which owns its own active state), never a headAction (always a menu item)
   expanded?,            // render fields as an always-open hero form (inert without fields)
   defaultOpen?,         // in a tabs strip, open the first enabled, field-bearing item marked true on first render, except a solo model-picker, which opens as a popover rather than a form and never seeds; the operator's toggles win after (inert elsewhere and without fields)
   submitLabel?,         // the fields form's submit button text, defaulting to label (inert without fields)

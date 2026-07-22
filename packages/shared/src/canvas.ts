@@ -443,12 +443,12 @@ export const canvasActionItemSchema = z
   .refine((a) => a.selected === undefined || a.fields === undefined, {
     message: "a selected toggle carries no fields — only a click-dispatching action can be pressed",
   })
-  // A destructive action is a one-shot verb, not a state to sit in, and on a card it
-  // routes to the overflow menu unless `inline` — menu items are plain buttons with no
-  // pressed state, so a toggle's would be lost there the same way. Keeping the two apart
-  // also keeps the danger treatment from fighting the selected ring.
+  // A toggle holds a state; a destructive verb is a one-shot action. Their treatments
+  // also fight — the danger colour and the selected ring land on the same button — and a
+  // non-inline destructive card action renders as an overflow menu item, which has no
+  // pressed state at all. Keep them apart rather than pick a winner per context.
   .refine((a) => a.selected === undefined || !a.destructive, {
-    message: "a selected toggle is not destructive — a destructive verb routes to a menu instead",
+    message: "a selected toggle is not destructive — a toggle holds a state, destructive is a verb",
   });
 
 // The leaf board sections — every primitive except the layout-only `columns`.
