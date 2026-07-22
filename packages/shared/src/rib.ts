@@ -467,9 +467,11 @@ export const surfaceRegionSchema = z
     // Rib-supplied verbs on the region head itself, rendered as a ⋯ menu and
     // dispatched through POST /api/ribs/:id/action exactly like board actions
     // (destructive ones confirm first). Menu-only presentation: the board-card
-    // affordances `fields`/`expanded`/`inline` are REJECTED here — a menu has
-    // no form, so a field-collecting action would dispatch with its fields
-    // silently absent. Rendered even when the surface sets hideRegionActions —
+    // affordances `fields`/`expanded`/`inline`/`selected` are REJECTED here — a
+    // menu has no form, so a field-collecting action would dispatch with its
+    // fields silently absent, and its items are menu buttons with no pressed
+    // state, so a toggle's would be lost the same way. Rendered even when the
+    // surface sets hideRegionActions —
     // that flag suppresses the HOST's chrome (explore/select/expand), not the
     // rib's own verbs — and while collapsed, so a folded panel can still be
     // retired.
@@ -480,9 +482,13 @@ export const surfaceRegionSchema = z
       .refine(
         (items) =>
           items.every(
-            (a) => a.fields === undefined && a.expanded === undefined && a.inline === undefined,
+            (a) =>
+              a.fields === undefined &&
+              a.expanded === undefined &&
+              a.inline === undefined &&
+              a.selected === undefined,
           ),
-        { message: "head actions are menu verbs — fields/expanded/inline don't apply" },
+        { message: "head actions are menu verbs — fields/expanded/inline/selected don't apply" },
       )
       .optional(),
   })

@@ -418,6 +418,10 @@ export const canvasActionItemSchema = z
     // a disabled action can't run): on a disabled action the UI shows both, the
     // hint then the reason.
     hint: z.string().min(1).optional(),
+    // A toggle action's ON state — a brand ring plus `aria-pressed`, mirroring a card's
+    // `selected`. Absent and `false` are NOT the same: absent leaves a plain verb action
+    // with no pressed semantics at all, while `false` announces an off toggle.
+    selected: z.boolean().optional(),
     // Render the action non-interactive — dimmed and unclickable, its form sealed
     // — when a precondition the state can't satisfy fails (a capability-gated tab
     // whose current cast can't run it). `reason` is the human explanation of WHY
@@ -431,6 +435,20 @@ export const canvasActionItemSchema = z
   .strict()
   .refine((a) => !a.reason || a.disabled === true, {
     message: "reason explains why an action is disabled — set disabled: true alongside it",
+  })
+  // A toggle dispatches on click, so it is the button itself that carries the pressed
+  // state. An action that opens a form has no such button — an `expanded` one renders no
+  // trigger at all, and a solo picker's trigger opens a popover instead of toggling — so
+  // a `selected` declared there would be silently dropped. Fail at publish instead.
+  .refine((a) => a.selected === undefined || a.fields === undefined, {
+    message: "a selected toggle carries no fields — only a click-dispatching action can be pressed",
+  })
+  // A toggle holds a state; a destructive verb is a one-shot action. Their treatments
+  // also fight — the danger colour and the selected ring land on the same button — and a
+  // non-inline destructive card action renders as an overflow menu item, which has no
+  // pressed state at all. Keep them apart rather than pick a winner per context.
+  .refine((a) => a.selected === undefined || !a.destructive, {
+    message: "a selected toggle is not destructive — a toggle holds a state, destructive is a verb",
   });
 
 // The leaf board sections — every primitive except the layout-only `columns`.
@@ -629,7 +647,14 @@ const actionsSectionSchema = z
     tabs: z.boolean().optional(),
     items: z.array(canvasActionItemSchema),
   })
-  .strict();
+  .strict()
+  // A tabs strip owns its own active state (the open item), so a `selected` item
+  // inside one would paint a second, competing "this is the current one" — fail at
+  // publish rather than render two answers to the same question. Presence, not
+  // truthiness: `selected: false` still renders an off toggle's pressed semantics.
+  .refine((s) => !s.tabs || !s.items.some((i) => i.selected !== undefined), {
+    message: "a tabs section's items carry no `selected` — the strip owns its active state",
+  });
 // A dense grid of labelled cells, each optionally carrying a small toned badge —
 // for a compact at-a-glance matrix (a per-service grade grid, a status board)
 // where `cards` would be too heavy, or a dense strip of labelled links. Cells

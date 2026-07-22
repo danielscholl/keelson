@@ -609,6 +609,84 @@ describe("canvasViewSchema", () => {
     ).toBe("board");
   });
 
+  it("parses a selected toggle action, and keeps it out of a tabs strip", () => {
+    // A toggle whose label names the capability once, with the pressed state carrying
+    // whether it is granted.
+    expect(
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            wrap: true,
+            items: [
+              { type: "set-tier", label: "Can edit", selected: true },
+              { type: "set-tier", label: "Can publish", selected: false },
+            ],
+          },
+        ],
+      }).view,
+    ).toBe("board");
+    // A tabs strip already shows which item is active; a `selected` item inside one
+    // would paint a second, competing answer. Presence, not truthiness — `false` still
+    // renders an off toggle's pressed semantics, so it is rejected too.
+    for (const selected of [true, false]) {
+      expect(() =>
+        canvasViewSchema.parse({
+          view: "board",
+          sections: [
+            {
+              kind: "actions",
+              tabs: true,
+              items: [{ type: "pick", label: "One", selected }],
+            },
+          ],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("rejects a selected action that is also destructive (a state is not a verb)", () => {
+    // Rejected in every context, so the reason has to hold in every context: a toggle
+    // holds a state and a destructive verb is a one-shot action. Where a destructive
+    // action renders varies — inline on a board, an overflow menu item on a card — and
+    // only the latter would also lose the pressed state outright.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [{ type: "purge", label: "Purge", selected: true, destructive: true }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a selected action that carries fields (a form has no button to press)", () => {
+    // An expanded action renders no trigger and a solo picker's trigger opens a
+    // popover, so a declared pressed state would silently vanish on both.
+    expect(() =>
+      canvasViewSchema.parse({
+        view: "board",
+        sections: [
+          {
+            kind: "actions",
+            items: [
+              {
+                type: "set-model",
+                label: "Model",
+                selected: true,
+                fields: [{ name: "model", label: "Model", modelPicker: {} }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("rejects a card action missing a type or carrying an extra key (strict)", () => {
     expect(() =>
       canvasViewSchema.parse({

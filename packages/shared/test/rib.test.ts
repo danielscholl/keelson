@@ -272,6 +272,10 @@ describe("rib surface descriptor schema", () => {
     ).toBe(false);
     expect(ribSurfaceDescriptorSchema.safeParse(region({ expanded: true })).success).toBe(false);
     expect(ribSurfaceDescriptorSchema.safeParse(region({ inline: true })).success).toBe(false);
+    // Head actions render only as menu items, which are plain buttons carrying no
+    // pressed state — a declared toggle state would be lost the same way.
+    expect(ribSurfaceDescriptorSchema.safeParse(region({ selected: true })).success).toBe(false);
+    expect(ribSurfaceDescriptorSchema.safeParse(region({ selected: false })).success).toBe(false);
   });
 
   it("carries an optional live flag on header, banner, and column regions", () => {
