@@ -87,6 +87,58 @@ function postMessageTo(data: unknown, source: unknown) {
   window.dispatchEvent(e);
 }
 
+describe("CanvasProvider / useCanvas — log kind", () => {
+  const LOG: CanvasDocument = {
+    kind: "log",
+    source: { type: "inline", text: "\x1b[32mAll secrets configured\x1b[0m" },
+    title: "provision",
+  };
+
+  test("renders terminal output verbatim with ANSI resolved, not as markdown", () => {
+    render(
+      <CanvasProvider>
+        <Opener doc={LOG} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    // The escape is consumed by the renderer, never shown as literal text.
+    expect(dialog.textContent).toContain("All secrets configured");
+    expect(dialog.textContent).not.toContain("[32m");
+    // …and it renders as a styled span in a monospace block, not markdown.
+    expect(dialog.querySelector(".code-block pre.code-block-body .ansi-text")).not.toBeNull();
+    expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("All secrets configured");
+  });
+
+  test("a snapshot-sourced log renders as terminal too, not through the markdown fallback", () => {
+    // `log` is a valid rib view kind, so a snapshot payload reaches this branch;
+    // it must not fall back to the markdown renderer.
+    const priorSnapshot = snapshotImpl;
+    snapshotImpl = {
+      status: "live",
+      data: "\x1b[32mdone\x1b[0m `not code`",
+      version: 1,
+      composedAt: null,
+    };
+    try {
+      render(
+        <CanvasProvider>
+          <Opener
+            doc={{ kind: "log", source: { type: "snapshot", key: "rib:x:logs" }, title: "logs" }}
+          />
+        </CanvasProvider>,
+      );
+      fireEvent.click(screen.getByText("open"));
+      const dialog = screen.getByRole("dialog");
+      expect(dialog.querySelector(".code-block pre.code-block-body .ansi-text")).not.toBeNull();
+      expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("done");
+      expect(dialog.textContent).not.toContain("[32m");
+    } finally {
+      snapshotImpl = priorSnapshot;
+    }
+  });
+});
+
 describe("CanvasProvider / useCanvas", () => {
   test("opens inline markdown and closes via the close button", () => {
     render(
@@ -1037,6 +1089,22 @@ describe("RunTrace canvas affordances", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Open plan-ready output in canvas" }));
     expect(screen.getByRole("dialog").textContent).toContain("=== PLAN ===");
+  });
+
+  test("bash node's logLines render through the log dispatch, ANSI resolved not markdown", () => {
+    renderTrace([{ id: "bash-out", type: "bash" }], {
+      "bash-out": node({
+        nodeId: "bash-out",
+        status: "succeeded",
+        type: "bash",
+        logLines: ["\x1b[32mdone\x1b[0m `not code`"],
+      }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open bash-out output in canvas" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector(".ansi-text")).not.toBeNull();
+    expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("done");
+    expect(dialog.textContent).not.toContain("[32m");
   });
 
   test("approval callout offers an open-<file> artifact affordance from $ARTIFACTS_DIR refs", async () => {

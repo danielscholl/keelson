@@ -6,6 +6,7 @@ import { getRunArtifact } from "../../api.ts";
 import { useHtmlFrameAction, useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
+import { AnsiText } from "../AnsiText.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { useCanvasKindForKey } from "../RibsProvider.tsx";
 import { BoardActionProvider } from "./BoardActionContext.tsx";
@@ -201,6 +202,8 @@ function CanvasBody({
       );
     case "html":
       return <HtmlCanvas key={sourceKey(doc.source)} source={doc.source} />;
+    case "log":
+      return <LogBody source={doc.source} />;
     default: {
       const exhaustive: never = doc.kind;
       return exhaustive;
@@ -313,6 +316,47 @@ function MarkdownBody({ source }: { source: CanvasSource }) {
   }
   // CanvasSource is inline | artifact | snapshot — all handled above. A new
   // member makes this a compile error rather than a silent blank render.
+  const exhaustive: never = source;
+  return exhaustive;
+}
+
+// Terminal output rendered verbatim with ANSI resolved. A node's stdout is not
+// markdown — parsing it as such turns raw SGR escapes into literal garbage and
+// lets stray backticks/pipes reflow the output.
+function LogBody({ source }: { source: CanvasSource }) {
+  // The scroll + terminal typography live on `code-block-body`; `code-block`
+  // alone is `overflow: hidden`, which would clip long log lines.
+  const renderLog = (text: string) => (
+    <div className="code-block">
+      <pre className="code-block-body">
+        <AnsiText text={text} />
+      </pre>
+    </div>
+  );
+  if (source.type === "inline") return renderLog(source.text);
+  if (source.type === "artifact") {
+    return (
+      <ArtifactBody
+        key={`${source.runId}/${source.path}`}
+        runId={source.runId}
+        path={source.path}
+        render={renderLog}
+      />
+    );
+  }
+  if (source.type === "snapshot") {
+    return (
+      <SnapshotBody
+        key={source.key}
+        snapshotKey={source.key}
+        // Terminal text either way: a non-string payload renders as JSON in the
+        // same monospace block rather than falling back to the markdown renderer.
+        render={(data) =>
+          renderLog(typeof data === "string" ? data : JSON.stringify(data, null, 2))
+        }
+      />
+    );
+  }
   const exhaustive: never = source;
   return exhaustive;
 }

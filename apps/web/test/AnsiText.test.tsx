@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { render } from "@testing-library/react";
-import { AnsiText } from "../src/components/Workflows/AnsiText.tsx";
+import { AnsiText } from "../src/components/AnsiText.tsx";
 
 describe("AnsiText", () => {
   test("renders plain text with no styling spans", () => {

@@ -15,7 +15,7 @@ import { postRibAction } from "../api.ts";
 import { BoardActionProvider } from "../components/Canvas/BoardActionContext.tsx";
 import { BoardBody, CardOverflowActions, Segments } from "../components/Canvas/BoardView.tsx";
 import { useCanvas } from "../components/Canvas/CanvasHost.tsx";
-import { HtmlStateView, SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
+import { HtmlStateView, LogStateView, SnapshotStateView } from "../components/Canvas/ViewBody.tsx";
 import { ProjectChip } from "../components/Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../components/Chat/ProjectPickerPopover.tsx";
 import { useCanvasKindForKey } from "../components/RibsProvider.tsx";
@@ -339,10 +339,13 @@ function SurfaceRegion({
   // An html region's payload is markup, not a view: it never parses as a board,
   // so it needs its own renderer rather than falling through to the structured
   // one (which would fail-close on every frame).
-  const isHtml = resolveCanvasKind(region.key) === "html";
+  const regionKind = resolveCanvasKind(region.key);
+  const isHtml = regionKind === "html";
+  const isLog = regionKind === "log";
   const onFrameAction = useHtmlFrameAction(ribId);
 
-  const parsed = !isHtml && snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
+  const parsed =
+    !isHtml && !isLog && snap.status === "live" ? canvasViewSchema.safeParse(snap.data) : null;
   const board: CanvasBoardView | null =
     parsed?.success && parsed.data.view === "board" ? parsed.data : null;
   const panelName = board?.title ?? region.title ?? region.key;
@@ -560,6 +563,8 @@ function SurfaceRegion({
     <RegionIdle onLoad={runRefresh.trigger} error={runRefresh.error} />
   ) : isHtml ? (
     <HtmlStateView snapshot={snap} busy={busy} onAction={onFrameAction} />
+  ) : isLog ? (
+    <LogStateView snapshot={snap} busy={busy} />
   ) : board ? (
     <BoardBody view={board} />
   ) : (
@@ -569,9 +574,10 @@ function SurfaceRegion({
   // that parsed to zero sections (the rib's explicit empty signal), or html that
   // is blank. A payload that fails its parse still renders its error state —
   // hiding it would make producer bugs invisible.
-  const emptyBody = isHtml
-    ? typeof snap.data === "string" && snap.data.trim() === ""
-    : board !== null && board.sections.length === 0;
+  const emptyBody =
+    isHtml || isLog
+      ? typeof snap.data === "string" && snap.data.trim() === ""
+      : board !== null && board.sections.length === 0;
   const hidden = (region.hideWhenEmpty ?? false) && (snap.status !== "live" || emptyBody);
   if (hidden) return null;
 

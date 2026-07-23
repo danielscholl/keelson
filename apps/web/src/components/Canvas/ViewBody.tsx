@@ -5,6 +5,7 @@ import {
   canvasViewSchema,
 } from "@keelson/shared";
 import { type SnapshotState, useSnapshot } from "../../hooks/useSnapshot.ts";
+import { AnsiText } from "../AnsiText.tsx";
 import { BoardView } from "./BoardView.tsx";
 import { GraphView } from "./GraphView.tsx";
 import { SandboxedHtml } from "./SandboxedHtml.tsx";
@@ -112,6 +113,26 @@ export function HtmlStateView({
   }
   if (snapshot.status === "live") {
     return <HtmlFromData data={snapshot.data} onAction={onAction} />;
+  }
+  return <CanvasSkeleton label={busy ? "Running…" : "Loading…"} />;
+}
+
+// The SnapshotStateView twin for `canvasKind: "log"` keys — terminal output
+// rendered verbatim with ANSI resolved, never parsed as a board or markdown. A
+// non-string payload renders as JSON so a mis-shaped frame is still readable.
+export function LogStateView({ snapshot, busy }: { snapshot: SnapshotState; busy?: boolean }) {
+  if (snapshot.status === "error") {
+    return <p className="canvas-drawer-note canvas-drawer-error">Failed to load this snapshot.</p>;
+  }
+  if (snapshot.status === "live") {
+    const data = snapshot.data;
+    return (
+      <div className="code-block">
+        <pre className="code-block-body">
+          <AnsiText text={typeof data === "string" ? data : JSON.stringify(data, null, 2)} />
+        </pre>
+      </div>
+    );
   }
   return <CanvasSkeleton label={busy ? "Running…" : "Loading…"} />;
 }

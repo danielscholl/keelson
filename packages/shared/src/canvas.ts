@@ -13,7 +13,9 @@ import { z } from "zod";
 // (workflow trace, chat, memory, ribs) hand it a document. `markdown` and
 // `view` (see canvasViewSchema) render directly; `html` renders untrusted markup
 // in a sandboxed iframe (see canvasHtmlActionSchema for its action back-channel).
-export const canvasKindSchema = z.enum(["markdown", "view", "html"]);
+// `log` is terminal output (a workflow node's stdout/stderr): rendered verbatim
+// in a monospace block with ANSI escapes resolved, never parsed as markdown.
+export const canvasKindSchema = z.enum(["markdown", "view", "html", "log"]);
 export type CanvasKind = z.infer<typeof canvasKindSchema>;
 
 // Discriminated on `type`. `snapshot` rides the existing SnapshotManager and
