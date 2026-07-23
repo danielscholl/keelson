@@ -215,7 +215,10 @@ function AppInner() {
         />
       )}
       {stayRun && (
+        // Key by run so a second stay launch remounts rather than reusing the
+        // prior run's fetched schema (or its fetch error).
         <RunDrawer
+          key={stayRun.runId}
           workflowName={stayRun.workflowName}
           runId={stayRun.runId}
           projectId={activeProjectId}
