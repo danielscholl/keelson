@@ -341,7 +341,17 @@ function LogBody({ source }: { source: CanvasSource }) {
     );
   }
   if (source.type === "snapshot") {
-    return <SnapshotBody key={source.key} snapshotKey={source.key} />;
+    return (
+      <SnapshotBody
+        key={source.key}
+        snapshotKey={source.key}
+        // Terminal text either way: a non-string payload renders as JSON in the
+        // same monospace block rather than falling back to the markdown renderer.
+        render={(data) =>
+          renderLog(typeof data === "string" ? data : JSON.stringify(data, null, 2))
+        }
+      />
+    );
   }
   const exhaustive: never = source;
   return exhaustive;

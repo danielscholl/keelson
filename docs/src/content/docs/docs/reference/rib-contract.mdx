@@ -144,10 +144,13 @@ coordination path.
 
 3. **`views`** are declarative `RibViewDescriptor`s: `{ key, canvasKind, title? }`.
    `key` must be namespaced. `canvasKind` is the closed enum `markdown` |
-   `view` | `html` (`html` renders untrusted, rib-authored markup in a
+   `view` | `html` | `log` (`html` renders untrusted, rib-authored markup in a
    sandboxed iframe; the frame can post structured actions back to the host,
    which are relayed to the owning rib's `onAction` with `origin: "canvas-html"`
-   so the rib can gate them to a safe subset). The payload published under `key`
+   so the rib can gate them to a safe subset. `log` renders terminal output
+   verbatim in a monospace block with ANSI escapes resolved — never parsed as
+   markdown; its payload should be a string, and a non-string payload renders as
+   formatted JSON). The payload published under `key`
    must satisfy the renderer for that kind; the client gate fail-closes on a
    mismatch. Views are plain metadata, so the manifest is built without invoking
    rib code.
@@ -377,7 +380,7 @@ where a failure lands depends on when it is caught.
 | Snapshot keys a rib registers are namespaced; registering outside the namespace throws, and reading another rib's keys returns nothing. | `SnapshotManager`, scoped per rib |
 | Credentials resolve only under `rib_<id>_*`, read-only. | `getCredential` |
 | Tool names are global; a collision loses (skipped with a warning). | shared tool registry |
-| `canvasKind` is the closed `markdown` / `view` / `html` enum; a payload that mismatches its renderer is rejected client-side. | `canvasKindSchema`, client gate |
+| `canvasKind` is the closed `markdown` / `view` / `html` / `log` enum; a payload that mismatches its renderer is rejected client-side. | `canvasKindSchema`, client gate |
 | A bound workflow's output is run through `validate` before caching or broadcast; an invalid payload is dropped and the prior value kept. | `SnapshotValidator`, fail-closed |
 | `cadenceMs` is an integer of at least 30000. | `surfaceRegionSchema` |
 | `headActions` carries 1–8 board-action-shaped items with no `fields`/`expanded`/`inline`/`selected` (a menu has no form and no pressed state); `workflowArgs` values are strings. | `surfaceRegionSchema` |

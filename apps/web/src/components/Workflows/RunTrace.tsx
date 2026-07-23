@@ -289,8 +289,6 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
             className="trace-canvas-btn"
             onClick={() =>
               openCanvas({
-                // Prompt/approval bodies are authored markdown; bash/generic
-                // nodes stream terminal output, which must render verbatim.
                 kind: isPromptish ? "markdown" : "log",
                 source: { type: "inline", text: canvasText },
                 title: schema.id,

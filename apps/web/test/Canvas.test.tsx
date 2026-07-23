@@ -109,6 +109,34 @@ describe("CanvasProvider / useCanvas — log kind", () => {
     expect(dialog.querySelector("pre.code-block .ansi-text")).not.toBeNull();
     expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("All secrets configured");
   });
+
+  test("a snapshot-sourced log renders as terminal too, not through the markdown fallback", () => {
+    // `log` is a valid rib view kind, so a snapshot payload reaches this branch;
+    // it must not fall back to the markdown renderer.
+    const priorSnapshot = snapshotImpl;
+    snapshotImpl = {
+      status: "ok",
+      data: "\x1b[32mdone\x1b[0m `not code`",
+      version: 1,
+      composedAt: null,
+    } as SnapshotState;
+    try {
+      render(
+        <CanvasProvider>
+          <Opener
+            doc={{ kind: "log", source: { type: "snapshot", key: "rib:x:logs" }, title: "logs" }}
+          />
+        </CanvasProvider>,
+      );
+      fireEvent.click(screen.getByText("open"));
+      const dialog = screen.getByRole("dialog");
+      expect(dialog.querySelector("pre.code-block .ansi-text")).not.toBeNull();
+      expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("done");
+      expect(dialog.textContent).not.toContain("[32m");
+    } finally {
+      snapshotImpl = priorSnapshot;
+    }
+  });
 });
 
 describe("CanvasProvider / useCanvas", () => {
