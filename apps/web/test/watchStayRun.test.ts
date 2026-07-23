@@ -70,4 +70,40 @@ describe("watchStayRun", () => {
     await watchStayRun("x", "r1", { ...deps, maxPolls: 3 });
     expect(toasts).toEqual([]);
   });
+
+  test("backs off after the ramp so a long run still reaches a terminal toast", async () => {
+    const slept: number[] = [];
+    const toasts: { kind: string; message: string }[] = [];
+    let calls = 0;
+    await watchStayRun("cluster-delete", "r1", {
+      getRun: async () => ({
+        status: ++calls < 5 ? "running" : "succeeded",
+        error: null,
+      }),
+      toast: { push: (t) => toasts.push(t) },
+      intervalMs: 1500,
+      maxIntervalMs: 15_000,
+      rampAfterPolls: 2,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    expect(slept).toEqual([1500, 1500, 15_000, 15_000, 15_000]);
+    expect(toasts).toEqual([{ kind: "ok", message: "cluster-delete ✓" }]);
+  });
+
+  test("the default horizon outlives a cluster provision", async () => {
+    const slept: number[] = [];
+    await watchStayRun("x", "r1", {
+      getRun: async () => ({ status: "running", error: null }),
+      toast: { push: () => {} },
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    // A `cimpl up` runs for tens of minutes; a five-minute cap would settle
+    // after dismissal with no toast at all.
+    const totalMs = slept.reduce((a, b) => a + b, 0);
+    expect(totalMs).toBeGreaterThan(60 * 60_000);
+  });
 });
