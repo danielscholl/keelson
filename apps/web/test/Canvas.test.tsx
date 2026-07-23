@@ -106,7 +106,7 @@ describe("CanvasProvider / useCanvas — log kind", () => {
     expect(dialog.textContent).toContain("All secrets configured");
     expect(dialog.textContent).not.toContain("[32m");
     // …and it renders as a styled span in a monospace block, not markdown.
-    expect(dialog.querySelector("pre.code-block .ansi-text")).not.toBeNull();
+    expect(dialog.querySelector(".code-block pre.code-block-body .ansi-text")).not.toBeNull();
     expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("All secrets configured");
   });
 
@@ -130,7 +130,7 @@ describe("CanvasProvider / useCanvas — log kind", () => {
       );
       fireEvent.click(screen.getByText("open"));
       const dialog = screen.getByRole("dialog");
-      expect(dialog.querySelector("pre.code-block .ansi-text")).not.toBeNull();
+      expect(dialog.querySelector(".code-block pre.code-block-body .ansi-text")).not.toBeNull();
       expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("done");
       expect(dialog.textContent).not.toContain("[32m");
     } finally {

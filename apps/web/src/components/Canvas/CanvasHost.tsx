@@ -324,10 +324,14 @@ function MarkdownBody({ source }: { source: CanvasSource }) {
 // markdown — parsing it as such turns raw SGR escapes into literal garbage and
 // lets stray backticks/pipes reflow the output.
 function LogBody({ source }: { source: CanvasSource }) {
+  // The scroll + terminal typography live on `code-block-body`; `code-block`
+  // alone is `overflow: hidden`, which would clip long log lines.
   const renderLog = (text: string) => (
-    <pre className="code-block">
-      <AnsiText text={text} />
-    </pre>
+    <div className="code-block">
+      <pre className="code-block-body">
+        <AnsiText text={text} />
+      </pre>
+    </div>
   );
   if (source.type === "inline") return renderLog(source.text);
   if (source.type === "artifact") {
