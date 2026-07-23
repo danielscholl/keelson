@@ -6205,16 +6205,16 @@ a.cvb-card-title::after {
    blue panel borders) doesn't translate into the light-mode product surface
    no matter what dark color we pick for the fill. The fix is structural,
    not chromatic:
-     1. strip rich's inline backgrounds so the drawer's own surface shows
-        through — no purple "carpet" effect,
+     1. strip rich's inline backgrounds so the host surface (trace or drawer)
+        shows through — no purple "carpet" effect,
      2. remap the 16-color ANSI fg palette to muted lavender-family tones
         so panel borders + status text feel native instead of imported.
    Pygments truecolor fg escapes (from rich's Syntax module) still come
    through unchanged. They were tuned for a dark base; with the bg stripped
-   they paint on the drawer surface and stay legible because their HSL
+   they paint on the host surface and stay legible because their HSL
    lightness is generally low enough. A proper fix would switch rich's
    syntax theme upstream, but that's a server change for another pass. */
-:root[data-theme="light"] .cluster-op-drawer-log-line span[style*="background"] {
+:root[data-theme="light"] .ansi-text span[style*="background"] {
   background: transparent !important;
 }
 
@@ -6225,7 +6225,7 @@ a.cvb-card-title::after {
    variation (pink keys, green values, etc.) — the class-based ANSI palette
    above still drives panel borders, status text, and the rest of the log,
    so semantic color is preserved where it matters. */
-:root[data-theme="light"] .cluster-op-drawer-log-line span[style*="color"] {
+:root[data-theme="light"] .ansi-text span[style*="color"] {
   color: #211b34 !important;
 }
 
