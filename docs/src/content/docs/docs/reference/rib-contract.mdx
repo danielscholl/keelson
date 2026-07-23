@@ -291,8 +291,9 @@ coordination path.
    A successful action may place a recognized client effect in `data`:
    `open-chat` opens a fresh seeded conversation, `run-workflow` launches a
    catalog workflow (its optional `stay` flag keeps the operator on the current
-   surface instead of focusing the Workflows tab, so a run kicked off from a rib
-   surface can be watched in that surface's own live panel), `open-canvas` opens
+   surface instead of focusing the Workflows tab — the run streams into a
+   slide-over drawer beside the board that launched it, and the board's own
+   snapshot key updates in place when the workflow publishes), `open-canvas` opens
    a snapshot in the canvas drawer, and
    `open-surface` switches the active surface tab. The `open-surface` shape is
    `{ effect: "open-surface", surfaceId, regionKey? }`, where `surfaceId` is the

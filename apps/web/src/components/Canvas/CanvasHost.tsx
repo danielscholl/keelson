@@ -1,8 +1,9 @@
 import type { CanvasDocument, CanvasHtmlAction, CanvasSource, OpenChatSeed } from "@keelson/shared";
 import { ribIdFromKey } from "@keelson/shared";
 import type { ReactNode } from "react";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { getRunArtifact } from "../../api.ts";
+import { useDrawerDismiss } from "../../hooks/useDrawerDismiss.ts";
 import { useHtmlFrameAction, useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
@@ -71,15 +72,6 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   );
   const close = useCallback(() => setState(null), []);
 
-  useEffect(() => {
-    if (!state) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [state, close]);
-
   return (
     <CanvasContext.Provider value={{ openCanvas, close }}>
       {children}
@@ -110,39 +102,7 @@ function CanvasDrawer({
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
-  const dialogRef = useRef<HTMLElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  // Move focus into the dialog on open and restore it to the opener on close,
-  // so a keyboard/SR user lands in the modal and returns to where they were
-  // (the drawer only mounts while open, so mount/unmount bracket the lifetime).
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
-    return () => opener?.focus();
-  }, []);
-
-  // Trap Tab/Shift+Tab within the dialog: the page beneath the sheet isn't
-  // inert, so without this Tab would walk focus to controls hidden behind it.
-  const onKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const root = dialogRef.current;
-    if (!root) return;
-    const focusable = root.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    );
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (!first || !last) return;
-    const active = document.activeElement;
-    if (e.shiftKey && (active === first || !root.contains(active))) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }, []);
+  const { dialogRef, closeRef, onKeyDown } = useDrawerDismiss(onClose);
 
   return (
     <>
