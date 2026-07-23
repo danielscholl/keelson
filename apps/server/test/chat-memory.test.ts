@@ -232,7 +232,7 @@ describe("chat memory recall", () => {
     expect(sp).toContain(RECALL_SECTION_HEADING);
     expect(sp).toContain(seed);
     // Recall section appears before the seed.
-    expect(sp.indexOf("## Relevant prior memory")).toBeLessThan(sp.indexOf(seed));
+    expect(sp.indexOf(RECALL_SECTION_HEADING)).toBeLessThan(sp.indexOf(seed));
   });
 
   test("leaves systemPrompt untouched when recall returns no items", async () => {
