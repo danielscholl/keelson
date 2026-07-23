@@ -2,13 +2,10 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// Renders text that MAY carry ANSI SGR escapes as styled spans, driving the
-// .ansi-*-fg/bg + .ansi-<decoration> palette in app.css. Named/256-palette
-// colors map to classes (anser emits "ansi-green"; we suffix "-fg"); 24-bit
-// truecolor — Rich's Syntax/pygments output — has no class, so it rides an
-// inline rgb() style the light-mode override keeps legible. Plain text with no
-// escapes renders as-is (anser yields a single classless chunk), so this is a
-// safe drop-in wherever a plain string was rendered before.
+// Renders text that may contain ANSI SGR escapes as styled spans. Named/256
+// colors map to the .ansi-*-fg/bg classes in app.css; 24-bit truecolor has no
+// class, so it rides an inline rgb() style (see the light-mode override there).
+// Plain text is a classless passthrough — a safe drop-in for a rendered string.
 
 import Anser from "anser";
 import { type CSSProperties, Fragment } from "react";

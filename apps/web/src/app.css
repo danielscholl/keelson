@@ -6209,10 +6209,10 @@ a.cvb-card-title::after {
         shows through — no purple "carpet" effect,
      2. remap the 16-color ANSI fg palette to muted lavender-family tones
         so panel borders + status text feel native instead of imported.
-   Pygments truecolor fg escapes (from rich's Syntax module) still come
-   through unchanged. They were tuned for a dark base; with the bg stripped
-   they paint on the host surface and stay legible because their HSL
-   lightness is generally low enough. A proper fix would switch rich's
+   Pygments truecolor fg escapes (from rich's Syntax module) are dark-base
+   tuned. In dark mode they come through unchanged and stay legible once the bg
+   is stripped; in light mode the color override below re-inks them to a dark
+   ink so near-white tokens don't vanish. A proper fix would switch rich's
    syntax theme upstream, but that's a server change for another pass. */
 :root[data-theme="light"] .ansi-text span[style*="background"] {
   background: transparent !important;
