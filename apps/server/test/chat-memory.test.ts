@@ -31,7 +31,6 @@ import { openDatabase } from "../src/db/init.ts";
 import type { MemoryStore } from "../src/memory-store.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 
-// Heading the recall section leads with — the marker for "memory was injected".
 const RECALL_SECTION_HEADING = "## Relevant prior memory";
 
 function makeMemStore(): ConversationStore {
@@ -254,10 +253,8 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    // The recall section is prepended ABOVE the seed, so "not injected" means the
-    // prompt still leads with the seed. Asserting the whole prompt instead would
-    // also pin the guidance sections (canvas/docs) that ride on which tools happen
-    // to be registered this turn — ambient state this test doesn't control.
+    // Not whole-prompt equality: the guidance sections ride on which tools are
+    // registered this turn — ambient state this test doesn't control.
     expect(captured?.systemPrompt?.startsWith("seed-only")).toBe(true);
     expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
