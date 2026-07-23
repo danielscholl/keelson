@@ -21,11 +21,8 @@ export interface RunDrawerProps {
   onOpenInWorkflows: (workflowName: string, runId: string) => void;
 }
 
-// A `stay` launch keeps the operator on the surface they acted from, so the
-// run needs somewhere to be watched that isn't the Workflows tab. This is that
-// place: the live trace — ANSI intact, node output expandable — beside the
-// board whose button started it. The board itself needs no refresh; its
-// snapshot key updates over its own socket when the workflow publishes.
+// Deliberately publishes nothing back to the launching board on completion: the
+// board's snapshot key updates over its own socket when the workflow publishes.
 export function RunDrawer({
   workflowName,
   runId,

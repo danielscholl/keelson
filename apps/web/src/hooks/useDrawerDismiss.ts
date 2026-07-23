@@ -67,10 +67,13 @@ export function useDrawerDismiss(onClose: () => void): DrawerDismiss {
     const last = focusable[focusable.length - 1];
     if (!first || !last) return;
     const active = document.activeElement;
-    if (e.shiftKey && (active === first || !root.contains(active))) {
+    // Focus outside the dialog is a boundary in both directions — a programmatic
+    // move out would otherwise let forward Tab walk the background controls.
+    const outside = !root.contains(active);
+    if (e.shiftKey && (active === first || outside)) {
       e.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && active === last) {
+    } else if (!e.shiftKey && (active === last || outside)) {
       e.preventDefault();
       first.focus();
     }
