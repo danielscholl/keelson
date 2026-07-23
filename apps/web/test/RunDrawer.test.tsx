@@ -10,6 +10,7 @@ import type { NodeView, UseWorkflowRunResult } from "../src/hooks/useWorkflowRun
 let runResult: UseWorkflowRunResult;
 let detail: Promise<WorkflowDetail>;
 const traceProps: Array<Record<string, unknown>> = [];
+const detailCalls: Array<[string, string | undefined]> = [];
 
 // mock.module patches the process-wide registry and bun's file order isn't
 // stable, so every stub is handed back in afterAll.
@@ -37,7 +38,13 @@ mock.module(RUN_TRACE, () => ({
   },
 }));
 
-mock.module(API, () => ({ ...actualApi, getWorkflowDetail: () => detail }));
+mock.module(API, () => ({
+  ...actualApi,
+  getWorkflowDetail: (name: string, projectId?: string) => {
+    detailCalls.push([name, projectId]);
+    return detail;
+  },
+}));
 
 const { RunDrawer } = await import("../src/components/Workflows/RunDrawer.tsx");
 
@@ -47,7 +54,10 @@ const workflow: WorkflowDetail = {
   nodes: [{ id: "delete", type: "bash" }],
 };
 
-function result(overrides: Partial<UseWorkflowRunResult["run"]> = {}): UseWorkflowRunResult {
+function result(
+  overrides: Partial<UseWorkflowRunResult["run"]> = {},
+  hook: Partial<UseWorkflowRunResult> = {},
+): UseWorkflowRunResult {
   return {
     run: {
       runId: "run-abcdef12",
@@ -69,6 +79,7 @@ function result(overrides: Partial<UseWorkflowRunResult["run"]> = {}): UseWorkfl
     cancel: async () => {},
     resumeRun: async () => {},
     resume: async () => {},
+    ...hook,
   };
 }
 
@@ -144,6 +155,48 @@ describe("RunDrawer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close run" }));
     expect(closed).toBe(2);
+  });
+
+  test("scopes the schema fetch to the run's own project, not the active one", async () => {
+    detailCalls.length = 0;
+    runResult = result({ projectId: "proj-run" });
+    detail = Promise.resolve(workflow);
+    mount({ projectId: "proj-active" });
+
+    await screen.findByTestId("run-trace");
+    // A stay launch can resolve a project the surface isn't scoped to; fetching
+    // with the surface's id would 404 or return a shadowing global workflow.
+    expect(detailCalls).toEqual([["osdu-cluster-delete", "proj-run"]]);
+  });
+
+  test("defers the schema fetch until the run has hydrated", async () => {
+    detailCalls.length = 0;
+    runResult = result({ status: "loading", projectId: null }, { status: "loading" });
+    detail = Promise.resolve(workflow);
+    const view = mount({ projectId: "proj-active" });
+    expect(detailCalls).toEqual([]);
+
+    runResult = result({ projectId: "proj-run" });
+    view.rerender(
+      <RunDrawer
+        workflowName="osdu-cluster-delete"
+        runId="run-abcdef12"
+        projectId="proj-active"
+        onClose={() => {}}
+        onOpenInWorkflows={() => {}}
+      />,
+    );
+    await screen.findByTestId("run-trace");
+    expect(detailCalls).toEqual([["osdu-cluster-delete", "proj-run"]]);
+  });
+
+  test("reports a failed run hydration instead of an idle-looking run", async () => {
+    runResult = result({ status: "loading" }, { status: "error", error: "run 404" });
+    detail = Promise.resolve(workflow);
+    mount();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Failed to load run: run 404");
   });
 
   test("hands the run to the Workflows tab on request", async () => {

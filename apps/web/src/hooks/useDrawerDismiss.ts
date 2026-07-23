@@ -3,10 +3,16 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import type React from "react";
-import { type RefObject, useCallback, useEffect, useRef } from "react";
+import { type RefObject, useCallback, useEffect, useId, useRef } from "react";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Open drawers, oldest first. A drawer can open another over itself (the run
+// drawer's trace opens a canvas on ⤢), and both listen on `document`, so
+// without this one Escape would collapse the whole stack instead of peeling
+// off the topmost dialog.
+const openDrawers: string[] = [];
 
 export interface DrawerDismiss {
   // Attach to the dialog element — bounds the focus trap.
@@ -24,14 +30,25 @@ export interface DrawerDismiss {
 export function useDrawerDismiss(onClose: () => void): DrawerDismiss {
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const token = useId();
+
+  useEffect(() => {
+    openDrawers.push(token);
+    return () => {
+      const i = openDrawers.lastIndexOf(token);
+      if (i !== -1) openDrawers.splice(i, 1);
+    };
+  }, [token]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (openDrawers[openDrawers.length - 1] !== token) return;
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, token]);
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;

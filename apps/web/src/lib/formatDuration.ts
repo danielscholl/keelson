@@ -2,9 +2,6 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-// Elapsed milliseconds → the compact label the run surfaces share (node rows,
-// DAG nodes, run headers). Returns "" for absent/invalid input so callers can
-// render it unconditionally.
 export function formatDuration(ms?: number | null): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return "";
   if (ms < 1000) return `${Math.round(ms)}ms`;

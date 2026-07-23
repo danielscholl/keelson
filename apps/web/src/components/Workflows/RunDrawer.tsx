@@ -34,17 +34,25 @@ export function RunDrawer({
   onOpenInWorkflows,
 }: RunDrawerProps) {
   const { dialogRef, closeRef, onKeyDown } = useDrawerDismiss(onClose);
-  const { run, nodes, cancel, resume } = useWorkflowRun(runId);
+  const { run, nodes, status, error, cancel, resume } = useWorkflowRun(runId);
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+
+  // The launcher may have resolved a project the surface isn't currently
+  // scoped to, and an unscoped fetch only sees global workflows — so wait for
+  // the run to hydrate and take its own project. `projectId` is the fallback
+  // for a run whose scope is genuinely global.
+  const hydrated = status !== "loading";
+  const scopeId = run.projectId ?? projectId ?? undefined;
 
   // The trace renders in DAG declaration order, so it needs the schema — but a
   // schema that fails to load must not blank the drawer; the header still
   // carries status, elapsed, and Cancel.
   useEffect(() => {
+    if (!hydrated) return;
     let cancelled = false;
-    getWorkflowDetail(workflowName, projectId ?? undefined).then(
+    getWorkflowDetail(workflowName, scopeId).then(
       (detail) => {
         if (!cancelled) setWorkflow(detail);
       },
@@ -55,7 +63,7 @@ export function RunDrawer({
     return () => {
       cancelled = true;
     };
-  }, [workflowName, projectId]);
+  }, [workflowName, scopeId, hydrated]);
 
   const isRunning = run.status === "running" || run.status === "paused" || run.status === "loading";
 
@@ -126,6 +134,15 @@ export function RunDrawer({
             </button>
           </div>
         </header>
+
+        {status === "error" && (
+          <div className="run-error" role="alert">
+            <span className="run-error-glyph" aria-hidden="true">
+              ✕
+            </span>
+            <span>Failed to load run: {error}</span>
+          </div>
+        )}
 
         {run.status === "failed" && run.error && (
           <div className="run-error" role="alert">
