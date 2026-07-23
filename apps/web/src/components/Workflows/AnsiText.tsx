@@ -8,7 +8,7 @@
 // Plain text is a classless passthrough — a safe drop-in for a rendered string.
 
 import Anser from "anser";
-import { type CSSProperties, Fragment } from "react";
+import { type CSSProperties, Fragment, memo, useMemo } from "react";
 
 function spanAttrs(entry: Anser.AnserJsonEntry): {
   className?: string;
@@ -33,16 +33,20 @@ function spanAttrs(entry: Anser.AnserJsonEntry): {
   };
 }
 
-export function AnsiText({ text }: { text: string }) {
-  const chunks = Anser.ansiToJson(text, { use_classes: true, remove_empty: true });
-  // Key by each chunk's start offset — stable and unique within a render, and
-  // not the array index (which would tie identity to position).
-  let offset = 0;
-  const parts = chunks.map((entry) => {
-    const key = `${offset}:${entry.content.length}`;
-    offset += entry.content.length;
-    return { entry, key };
-  });
+// Memoized on `text`: a streaming run re-renders as each log frame lands, and
+// reparsing the whole cumulative trace on every one of those is quadratic.
+export const AnsiText = memo(function AnsiText({ text }: { text: string }) {
+  const parts = useMemo(() => {
+    const chunks = Anser.ansiToJson(text, { use_classes: true, remove_empty: true });
+    // Key by each chunk's start offset — stable and unique within a render, and
+    // not the array index (which would tie identity to position).
+    let offset = 0;
+    return chunks.map((entry) => {
+      const key = `${offset}:${entry.content.length}`;
+      offset += entry.content.length;
+      return { entry, key };
+    });
+  }, [text]);
   return (
     <span className="ansi-text">
       {parts.map(({ entry, key }) => {
@@ -57,4 +61,4 @@ export function AnsiText({ text }: { text: string }) {
       })}
     </span>
   );
-}
+});

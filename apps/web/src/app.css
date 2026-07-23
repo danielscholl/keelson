@@ -6187,13 +6187,21 @@ a.cvb-card-title::after {
 .ansi-bright-white-fg, .ansi-palette-15-fg { color: var(--fg); }
 
 .ansi-black-bg, .ansi-palette-0-bg { background-color: var(--bg-soft); }
-.ansi-red-bg, .ansi-palette-1-bg { background-color: var(--red); color: var(--bg); }
-.ansi-green-bg, .ansi-palette-2-bg { background-color: var(--green); color: var(--bg); }
-.ansi-yellow-bg, .ansi-palette-3-bg { background-color: var(--yellow); color: var(--bg); }
-.ansi-blue-bg, .ansi-palette-4-bg { background-color: var(--cyan); color: var(--bg); }
-.ansi-magenta-bg, .ansi-palette-5-bg { background-color: var(--magenta); color: var(--bg); }
-.ansi-cyan-bg, .ansi-palette-6-bg { background-color: var(--cyan); color: var(--bg); }
-.ansi-white-bg, .ansi-palette-7-bg { background-color: var(--fg); color: var(--bg); }
+.ansi-red-bg, .ansi-palette-1-bg { background-color: var(--red); }
+.ansi-green-bg, .ansi-palette-2-bg { background-color: var(--green); }
+.ansi-yellow-bg, .ansi-palette-3-bg { background-color: var(--yellow); }
+.ansi-blue-bg, .ansi-palette-4-bg { background-color: var(--cyan); }
+.ansi-magenta-bg, .ansi-palette-5-bg { background-color: var(--magenta); }
+.ansi-cyan-bg, .ansi-palette-6-bg { background-color: var(--cyan); }
+.ansi-white-bg, .ansi-palette-7-bg { background-color: var(--fg); }
+
+/* Contrasting ink for a filled background, applied only when the span carries
+   no foreground class — a combined fg+bg SGR must keep the foreground it asked
+   for, which a blanket `color` on the -bg rules would override by source order.
+   Black/palette-0 is excluded: its fill is --bg-soft, so --bg ink would vanish. */
+.ansi-text span[class*="-bg"]:not([class*="-fg"]):not(.ansi-black-bg):not(.ansi-palette-0-bg) {
+  color: var(--bg);
+}
 
 .ansi-bold { font-weight: 600; }
 .ansi-dim { opacity: 0.65; }

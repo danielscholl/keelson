@@ -35,6 +35,14 @@ describe("AnsiText", () => {
     expect(container.querySelector(".ansi-truecolor-fg")).toBeNull();
   });
 
+  test("a combined fg+bg SGR keeps both classes so the foreground survives", () => {
+    // The -bg palette rules only force a contrasting ink when no -fg class is
+    // present, so both must be emitted for the requested foreground to win.
+    const { container } = render(<AnsiText text={"\x1b[31;42mon\x1b[0m"} />);
+    const span = container.querySelector("span.ansi-red-fg.ansi-green-bg");
+    expect(span?.textContent).toBe("on");
+  });
+
   test("preserves surrounding plain text across styled chunks", () => {
     const { container } = render(<AnsiText text={"a \x1b[31mb\x1b[0m c"} />);
     expect(container.textContent).toBe("a b c");
