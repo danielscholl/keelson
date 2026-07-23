@@ -9,6 +9,7 @@ import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
 import { ToolCallsBlock, toolCallsFromContentParts } from "../Chat/ToolCallsBlock.tsx";
 import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
+import { AnsiText } from "./AnsiText.tsx";
 import { ApprovalComposer } from "./ApprovalComposer.tsx";
 
 // When the run has reached terminal status, downstream nodes the hook
@@ -354,7 +355,9 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
           )}
           {textBlocks.length > 0 && isPromptish && <MarkdownContent source={textFromBlocks} />}
           {textBlocks.length > 0 && !isPromptish && (
-            <pre className="code-block">{textFromBlocks}</pre>
+            <pre className="code-block">
+              <AnsiText text={textFromBlocks} />
+            </pre>
           )}
           {toolCalls.length > 0 && (
             <ToolCallsBlock
@@ -363,7 +366,11 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
               autoExpand={false}
             />
           )}
-          {view.logLines.length > 0 && <pre className="code-block">{view.logLines.join("\n")}</pre>}
+          {view.logLines.length > 0 && (
+            <pre className="code-block">
+              <AnsiText text={view.logLines.join("\n")} />
+            </pre>
+          )}
         </div>
       )}
     </div>
