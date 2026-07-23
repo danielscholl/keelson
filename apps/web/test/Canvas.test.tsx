@@ -87,6 +87,30 @@ function postMessageTo(data: unknown, source: unknown) {
   window.dispatchEvent(e);
 }
 
+describe("CanvasProvider / useCanvas — log kind", () => {
+  const LOG: CanvasDocument = {
+    kind: "log",
+    source: { type: "inline", text: "\x1b[32mAll secrets configured\x1b[0m" },
+    title: "provision",
+  };
+
+  test("renders terminal output verbatim with ANSI resolved, not as markdown", () => {
+    render(
+      <CanvasProvider>
+        <Opener doc={LOG} />
+      </CanvasProvider>,
+    );
+    fireEvent.click(screen.getByText("open"));
+    const dialog = screen.getByRole("dialog");
+    // The escape is consumed by the renderer, never shown as literal text.
+    expect(dialog.textContent).toContain("All secrets configured");
+    expect(dialog.textContent).not.toContain("[32m");
+    // …and it renders as a styled span in a monospace block, not markdown.
+    expect(dialog.querySelector("pre.code-block .ansi-text")).not.toBeNull();
+    expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("All secrets configured");
+  });
+});
+
 describe("CanvasProvider / useCanvas", () => {
   test("opens inline markdown and closes via the close button", () => {
     render(

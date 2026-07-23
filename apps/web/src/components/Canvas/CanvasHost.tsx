@@ -6,6 +6,7 @@ import { getRunArtifact } from "../../api.ts";
 import { useHtmlFrameAction, useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
+import { AnsiText } from "../AnsiText.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { useCanvasKindForKey } from "../RibsProvider.tsx";
 import { BoardActionProvider } from "./BoardActionContext.tsx";
@@ -201,6 +202,8 @@ function CanvasBody({
       );
     case "html":
       return <HtmlCanvas key={sourceKey(doc.source)} source={doc.source} />;
+    case "log":
+      return <LogBody source={doc.source} />;
     default: {
       const exhaustive: never = doc.kind;
       return exhaustive;
@@ -313,6 +316,33 @@ function MarkdownBody({ source }: { source: CanvasSource }) {
   }
   // CanvasSource is inline | artifact | snapshot — all handled above. A new
   // member makes this a compile error rather than a silent blank render.
+  const exhaustive: never = source;
+  return exhaustive;
+}
+
+// Terminal output rendered verbatim with ANSI resolved. A node's stdout is not
+// markdown — parsing it as such turns raw SGR escapes into literal garbage and
+// lets stray backticks/pipes reflow the output.
+function LogBody({ source }: { source: CanvasSource }) {
+  const renderLog = (text: string) => (
+    <pre className="code-block">
+      <AnsiText text={text} />
+    </pre>
+  );
+  if (source.type === "inline") return renderLog(source.text);
+  if (source.type === "artifact") {
+    return (
+      <ArtifactBody
+        key={`${source.runId}/${source.path}`}
+        runId={source.runId}
+        path={source.path}
+        render={renderLog}
+      />
+    );
+  }
+  if (source.type === "snapshot") {
+    return <SnapshotBody key={source.key} snapshotKey={source.key} />;
+  }
   const exhaustive: never = source;
   return exhaustive;
 }

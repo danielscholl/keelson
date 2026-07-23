@@ -4,12 +4,12 @@ import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowR
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
+import { AnsiText } from "../AnsiText.tsx";
 import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { MarkdownContent } from "../Chat/MarkdownContent.tsx";
 import { ThinkingBlock } from "../Chat/ThinkingBlock.tsx";
 import { ToolCallsBlock, toolCallsFromContentParts } from "../Chat/ToolCallsBlock.tsx";
 import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
-import { AnsiText } from "./AnsiText.tsx";
 import { ApprovalComposer } from "./ApprovalComposer.tsx";
 
 // When the run has reached terminal status, downstream nodes the hook
@@ -289,7 +289,9 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
             className="trace-canvas-btn"
             onClick={() =>
               openCanvas({
-                kind: "markdown",
+                // Prompt/approval bodies are authored markdown; bash/generic
+                // nodes stream terminal output, which must render verbatim.
+                kind: isPromptish ? "markdown" : "log",
                 source: { type: "inline", text: canvasText },
                 title: schema.id,
               })
