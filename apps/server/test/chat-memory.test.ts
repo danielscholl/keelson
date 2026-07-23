@@ -31,6 +31,9 @@ import { openDatabase } from "../src/db/init.ts";
 import type { MemoryStore } from "../src/memory-store.ts";
 import { createProjectsStore } from "../src/projects-store.ts";
 
+// Heading the recall section leads with — the marker for "memory was injected".
+const RECALL_SECTION_HEADING = "## Relevant prior memory";
+
 function makeMemStore(): ConversationStore {
   return createConversationStore(openDatabase({ path: ":memory:" }));
 }
@@ -200,7 +203,7 @@ describe("chat memory recall", () => {
 
     expect(captured?.systemPrompt).toBeDefined();
     const sp = captured!.systemPrompt!;
-    expect(sp).toContain("## Relevant prior memory");
+    expect(sp).toContain(RECALL_SECTION_HEADING);
     expect(sp).toContain("port: listens on 7878");
     expect(sp).toContain("stub provider: use KEELSON_PROVIDERS=stub");
   });
@@ -227,7 +230,7 @@ describe("chat memory recall", () => {
     });
 
     const sp = captured!.systemPrompt!;
-    expect(sp).toContain("## Relevant prior memory");
+    expect(sp).toContain(RECALL_SECTION_HEADING);
     expect(sp).toContain(seed);
     // Recall section appears before the seed.
     expect(sp.indexOf("## Relevant prior memory")).toBeLessThan(sp.indexOf(seed));
@@ -251,7 +254,12 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt).toBe("seed-only");
+    // The recall section is prepended ABOVE the seed, so "not injected" means the
+    // prompt still leads with the seed. Asserting the whole prompt instead would
+    // also pin the guidance sections (canvas/docs) that ride on which tools happen
+    // to be registered this turn — ambient state this test doesn't control.
+    expect(captured?.systemPrompt?.startsWith("seed-only")).toBe(true);
+    expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
   });
 
   test("warn-and-continues on recall failure without surfacing an error frame", async () => {
@@ -275,7 +283,8 @@ describe("chat memory recall", () => {
       abortSignal: new AbortController().signal,
     });
 
-    expect(captured?.systemPrompt).toBe("seed");
+    expect(captured?.systemPrompt?.startsWith("seed")).toBe(true);
+    expect(captured?.systemPrompt).not.toContain(RECALL_SECTION_HEADING);
     // No error frames in the stream — recall failure stays observable in logs
     // but never reaches the client.
     expect(sent.some((f) => (f as { event: { type: string } }).event.type === "error")).toBe(false);
