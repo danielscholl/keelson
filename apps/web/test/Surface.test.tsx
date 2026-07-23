@@ -103,6 +103,19 @@ function htmlRib(key: string): RibSummary {
   };
 }
 
+// A rib declaring one key as `canvasKind: "log"` — what routes a region to the
+// terminal renderer instead of the structured one.
+function logRib(key: string): RibSummary {
+  return {
+    id: "demo",
+    displayName: "Demo",
+    registered: [],
+    views: [{ key, canvasKind: "log" }],
+    surfaces: [],
+    hasOnAction: true,
+  };
+}
+
 function postMessageTo(data: unknown, source: unknown) {
   const e = new MessageEvent("message", { data });
   Object.defineProperty(e, "source", { value: source, configurable: true });
@@ -509,6 +522,59 @@ describe("Surface", () => {
             columns: [
               { key: "rib:demo:blank", title: "Blank", hideWhenEmpty: true },
               { key: "rib:demo:filled", title: "Filled", hideWhenEmpty: true },
+            ],
+          },
+        ],
+      },
+    });
+
+    const titles = [...container.querySelectorAll(".surface-region")].map((r) => r.textContent);
+    expect(titles.some((t) => t?.includes("Blank"))).toBe(false);
+    expect(titles.some((t) => t?.includes("Filled"))).toBe(true);
+  });
+
+  test("a log-declared region renders its live payload as ANSI terminal output inline, not the view-parse error", () => {
+    live("rib:demo:log-panel", "Building `pkg`\n[32mOK[0m");
+    ribSummaries = [logRib("rib:demo:log-panel")];
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:demo:log-panel", title: "Log Lens" }] }] },
+    });
+
+    const region = container.querySelector(".surface-region") as HTMLElement;
+    expect(region.querySelector(".ansi-text")).not.toBeNull();
+    expect(region.querySelector("span.ansi-green-fg")?.textContent).toBe("OK");
+    // The escape sequence itself never renders as visible text — only its effect
+    // (the colored span) does.
+    expect(region.textContent).not.toContain("[32m");
+    // A backtick in the payload proves this is verbatim terminal output, not
+    // markdown reflowed through a renderer.
+    expect(region.textContent).toContain("Building `pkg`");
+    expect(region.textContent).not.toContain("didn't match a known view type");
+  });
+
+  test("hideWhenEmpty omits a log region whose output is blank, and keeps one with content", () => {
+    live("rib:demo:log-blank", "   \n  ");
+    live("rib:demo:log-filled", "hello world");
+    ribSummaries = [
+      {
+        ...logRib("rib:demo:log-blank"),
+        views: [
+          { key: "rib:demo:log-blank", canvasKind: "log" },
+          { key: "rib:demo:log-filled", canvasKind: "log" },
+        ],
+      },
+    ];
+    const { container } = renderSurface({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        rows: [
+          {
+            columns: [
+              { key: "rib:demo:log-blank", title: "Blank", hideWhenEmpty: true },
+              { key: "rib:demo:log-filled", title: "Filled", hideWhenEmpty: true },
             ],
           },
         ],

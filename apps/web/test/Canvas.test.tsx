@@ -115,11 +115,11 @@ describe("CanvasProvider / useCanvas — log kind", () => {
     // it must not fall back to the markdown renderer.
     const priorSnapshot = snapshotImpl;
     snapshotImpl = {
-      status: "ok",
+      status: "live",
       data: "\x1b[32mdone\x1b[0m `not code`",
       version: 1,
       composedAt: null,
-    } as SnapshotState;
+    };
     try {
       render(
         <CanvasProvider>
@@ -1089,6 +1089,22 @@ describe("RunTrace canvas affordances", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Open plan-ready output in canvas" }));
     expect(screen.getByRole("dialog").textContent).toContain("=== PLAN ===");
+  });
+
+  test("bash node's logLines render through the log dispatch, ANSI resolved not markdown", () => {
+    renderTrace([{ id: "bash-out", type: "bash" }], {
+      "bash-out": node({
+        nodeId: "bash-out",
+        status: "succeeded",
+        type: "bash",
+        logLines: ["\x1b[32mdone\x1b[0m `not code`"],
+      }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open bash-out output in canvas" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector(".ansi-text")).not.toBeNull();
+    expect(dialog.querySelector("span.ansi-green-fg")?.textContent).toBe("done");
+    expect(dialog.textContent).not.toContain("[32m");
   });
 
   test("approval callout offers an open-<file> artifact affordance from $ARTIFACTS_DIR refs", async () => {

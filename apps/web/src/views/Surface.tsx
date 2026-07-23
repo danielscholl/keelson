@@ -341,8 +341,6 @@ function SurfaceRegion({
   // one (which would fail-close on every frame).
   const regionKind = resolveCanvasKind(region.key);
   const isHtml = regionKind === "html";
-  // Terminal output: it never parses as a board, so it needs its own renderer
-  // rather than fail-closing through the structured one.
   const isLog = regionKind === "log";
   const onFrameAction = useHtmlFrameAction(ribId);
 
