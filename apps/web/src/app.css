@@ -3044,13 +3044,9 @@ button.tab:focus-visible {
   max-width: none;
 }
 
-/* Run drawer — a `stay` launch watched beside the surface that started it, so
-   unlike the canvas sheet it hugs the right edge and leaves the board visible.
-   Reuses the canvas keyframes and the .canvas-drawer-close control.
-
-   One level BELOW the canvas pair (1000/1001): the run drawer's trace opens a
-   canvas over itself, and the canvas is width-capped, so at 1001 the uncovered
-   strip of this drawer would sit above that backdrop and stay clickable. */
+/* Run drawer. Stays below the canvas pair (1000/1001): its trace can open a
+   canvas over itself, and the canvas is width-capped — at equal z-index this
+   drawer's uncovered strip would sit above the canvas backdrop, still clickable. */
 .run-drawer-backdrop {
   position: fixed;
   inset: 0;
