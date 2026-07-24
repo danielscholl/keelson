@@ -26,7 +26,11 @@ interface CanvasOpenOptions {
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
   // Likewise a run-workflow directive: the opener supplies the launch handler so
   // a drawer launch button isn't swallowed with a success toast.
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }
 
 interface CanvasApi {
@@ -38,7 +42,11 @@ interface CanvasState {
   doc: CanvasDocument;
   footer: ReactNode;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }
 
 const CanvasContext = createContext<CanvasApi | null>(null);
@@ -98,7 +106,11 @@ function CanvasDrawer({
   doc: CanvasDocument;
   footer: ReactNode;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
@@ -145,7 +157,11 @@ function CanvasBody({
 }: {
   doc: CanvasDocument;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }) {
   switch (doc.kind) {
     case "markdown":
@@ -181,7 +197,11 @@ function ViewCanvas({
 }: {
   source: CanvasSource;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
   const { openCanvas, close } = useCanvas();
@@ -203,9 +223,9 @@ function ViewCanvas({
     [onOpenChat, close],
   );
   const onLaunchWorkflowAndClose = useCallback(
-    (workflow: string, args: Record<string, string>) => {
+    (workflow: string, args: Record<string, string>, stay?: boolean) => {
       if (!onLaunchWorkflow) return;
-      const pending = Promise.resolve(onLaunchWorkflow(workflow, args));
+      const pending = Promise.resolve(onLaunchWorkflow(workflow, args, stay));
       close();
       return pending;
     },

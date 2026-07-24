@@ -339,9 +339,14 @@ describe("CanvasProvider / useCanvas", () => {
     };
     postRibActionImpl = async () => ({
       ok: true,
-      data: { effect: "run-workflow", workflow: "chamber-genesis", args: { topic: "nav" } },
+      data: {
+        effect: "run-workflow",
+        workflow: "chamber-genesis",
+        args: { topic: "nav" },
+        stay: true,
+      },
     });
-    const launches: Array<{ workflow: string; args: Record<string, string> }> = [];
+    const launches: Array<{ workflow: string; args: Record<string, string>; stay?: boolean }> = [];
     function LaunchOpener() {
       const { openCanvas } = useCanvas();
       return (
@@ -350,7 +355,9 @@ describe("CanvasProvider / useCanvas", () => {
           onClick={() =>
             openCanvas(
               { kind: "view", source: { type: "snapshot", key: "rib:demo:panel" }, title: "b" },
-              { onLaunchWorkflow: (workflow, args) => launches.push({ workflow, args }) },
+              {
+                onLaunchWorkflow: (workflow, args, stay) => launches.push({ workflow, args, stay }),
+              },
             )
           }
         >
@@ -367,7 +374,11 @@ describe("CanvasProvider / useCanvas", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Launch" }));
     // The launch handler fires, and the drawer closes (navigate-away to Workflows).
     await waitFor(() =>
-      expect(launches).toEqual([{ workflow: "chamber-genesis", args: { topic: "nav" } }]),
+      // `stay` must survive the canvas wrapper: without it a stay launch from a
+      // drawer board silently takes the Workflows-tab handoff instead of the drawer.
+      expect(launches).toEqual([
+        { workflow: "chamber-genesis", args: { topic: "nav" }, stay: true },
+      ]),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
