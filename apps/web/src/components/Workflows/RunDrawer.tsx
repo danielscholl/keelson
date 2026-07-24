@@ -30,7 +30,7 @@ export function RunDrawer({
   onClose,
   onOpenInWorkflows,
 }: RunDrawerProps) {
-  const { dialogRef, closeRef, onKeyDown } = useDrawerDismiss(onClose);
+  const { dialogRef, closeRef } = useDrawerDismiss(onClose);
   const { run, nodes, status, error, cancel, resume } = useWorkflowRun(runId);
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -91,7 +91,6 @@ export function RunDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={`${workflowName} run`}
-        onKeyDown={onKeyDown}
       >
         <header className="run-drawer-header">
           <div className="run-drawer-ident">

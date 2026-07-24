@@ -7,9 +7,9 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useDrawerDismiss } from "../src/hooks/useDrawerDismiss.ts";
 
 function Drawer({ name, onClose, extra }: { name: string; onClose: () => void; extra?: boolean }) {
-  const { dialogRef, closeRef, onKeyDown } = useDrawerDismiss(onClose);
+  const { dialogRef, closeRef } = useDrawerDismiss(onClose);
   return (
-    <aside ref={dialogRef} role="dialog" aria-label={name} onKeyDown={onKeyDown}>
+    <aside ref={dialogRef} role="dialog" aria-label={name}>
       <button ref={closeRef} type="button">
         close {name}
       </button>
@@ -57,29 +57,42 @@ describe("useDrawerDismiss", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "close focus" }));
   });
 
+  // The page beneath isn't inert, so a programmatic focus move out (or an
+  // element unmounting under focus) must not let Tab walk background controls.
+  // Every key event here is dispatched FROM the background element, which is
+  // where the browser dispatches it — a dialog-scoped handler never sees it.
   describe("Tab treats focus outside the dialog as a boundary in both directions", () => {
-    // The page beneath isn't inert, so a programmatic focus move out (or an
-    // element unmounting under focus) must not let Tab walk background controls.
     function setup() {
       const outside = document.createElement("button");
       document.body.appendChild(outside);
-      const view = render(<Drawer name="trap" onClose={() => {}} extra />);
-      const dialog = screen.getByRole("dialog");
+      render(<Drawer name="trap" onClose={() => {}} extra />);
       outside.focus();
-      return { view, dialog, outside };
+      return { outside };
     }
 
     test("forward Tab re-enters at the first control", () => {
-      const { dialog, outside } = setup();
-      fireEvent.keyDown(dialog, { key: "Tab" });
+      const { outside } = setup();
+      fireEvent.keyDown(outside, { key: "Tab" });
       expect(document.activeElement).toBe(screen.getByRole("button", { name: "close trap" }));
       outside.remove();
     });
 
     test("Shift+Tab re-enters at the last control", () => {
-      const { dialog, outside } = setup();
-      fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+      const { outside } = setup();
+      fireEvent.keyDown(outside, { key: "Tab", shiftKey: true });
       expect(document.activeElement).toBe(screen.getByTestId("last"));
+      outside.remove();
+    });
+
+    test("Tab still cycles when focus is inside the dialog", () => {
+      const { outside } = setup();
+      const close = screen.getByRole("button", { name: "close trap" });
+      const last = screen.getByTestId("last");
+      last.focus();
+      fireEvent.keyDown(last, { key: "Tab" });
+      expect(document.activeElement).toBe(close);
+      fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(last);
       outside.remove();
     });
   });

@@ -114,7 +114,7 @@ function CanvasDrawer({
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
-  const { dialogRef, closeRef, onKeyDown } = useDrawerDismiss(onClose);
+  const { dialogRef, closeRef } = useDrawerDismiss(onClose);
 
   return (
     <>
@@ -125,7 +125,6 @@ function CanvasDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onKeyDown={onKeyDown}
       >
         <header className="canvas-drawer-header">
           <span className="canvas-drawer-title">{title}</span>
