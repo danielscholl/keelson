@@ -53,8 +53,6 @@ function AppInner() {
   // remounts naturally (surface→chat tab swap); a `/mind` fired from inside Chat
   // would otherwise race the command flow's input reset, so force the remount.
   const [seedNonce, setSeedNonce] = useState(0);
-  // A `stay` launch watched in place: the run drawer slides over the surface
-  // that started it instead of stealing the tab.
   const [stayRun, setStayRun] = useState<{ workflowName: string; runId: string } | null>(null);
   const pausedRunCount = usePausedRunCount();
   const pendingMemoryCount = usePendingMemoryCount();
