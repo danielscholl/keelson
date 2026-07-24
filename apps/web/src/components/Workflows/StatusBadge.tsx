@@ -31,6 +31,16 @@ function statusClass(status: NodeViewStatus): string {
   }
 }
 
+// Run-level status → the badge's node-level vocabulary. `paused` reuses the
+// node-level `awaiting` color since both use the same magenta accent.
+export function statusBadgeStatus(
+  s: "loading" | "unknown" | "running" | "paused" | "succeeded" | "failed" | "cancelled",
+): NodeViewStatus | "pending" | "running" {
+  if (s === "loading" || s === "unknown") return "pending";
+  if (s === "paused") return "awaiting";
+  return s;
+}
+
 export function StatusBadge({ status, label }: StatusBadgeProps) {
   const klass = statusClass(status as NodeViewStatus);
   return (

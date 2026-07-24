@@ -2,6 +2,7 @@ import type { WorkflowNodeSummary } from "@keelson/shared";
 import { useEffect, useId, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { formatDuration } from "../../lib/formatDuration.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, hasSpend } from "../../lib/formatTokens.ts";
 import { AnsiText } from "../AnsiText.tsx";
@@ -22,15 +23,6 @@ export function fallbackStatusFromRun(status: RunViewState["status"]): NodeViewS
   if (status === "cancelled") return "cancelled";
   if (status === "succeeded" || status === "failed") return "skipped";
   return "pending";
-}
-
-function formatDuration(ms?: number | null): string {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return "";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes}m ${seconds}s`;
 }
 
 // Maps node-type → trace-head chip className. Mirrors DagNode's same map

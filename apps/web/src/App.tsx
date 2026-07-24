@@ -6,6 +6,7 @@ import { CanvasProvider } from "./components/Canvas/CanvasHost.tsx";
 import { RibsProvider, useRibsContext } from "./components/RibsProvider.tsx";
 import { ToastHost, useToast } from "./components/Toast.tsx";
 import { type ActiveTab, type SurfaceTab, TopBar } from "./components/TopBar.tsx";
+import { RunDrawer } from "./components/Workflows/RunDrawer.tsx";
 import { useActiveProject } from "./hooks/useActiveProject.ts";
 import { useConversation } from "./hooks/useConversation.ts";
 import { usePausedRunCount } from "./hooks/usePausedRunCount.ts";
@@ -52,6 +53,7 @@ function AppInner() {
   // remounts naturally (surface→chat tab swap); a `/mind` fired from inside Chat
   // would otherwise race the command flow's input reset, so force the remount.
   const [seedNonce, setSeedNonce] = useState(0);
+  const [stayRun, setStayRun] = useState<{ workflowName: string; runId: string } | null>(null);
   const pausedRunCount = usePausedRunCount();
   const pendingMemoryCount = usePendingMemoryCount();
 
@@ -98,13 +100,13 @@ function AppInner() {
           activeProjectId,
           listProjects,
           startWorkflowRun,
-          // `stay` launches the run but keeps the operator on the current surface
-          // (watched in that surface's own panel) instead of focusing Workflows. A
-          // "started" toast stands in for the tab handoff, and watchStayRun then
-          // surfaces failure — otherwise a stay launch that fails would be silent.
+          // `stay` launches the run but keeps the operator on the current surface,
+          // watching it in a slide-over drawer instead of focusing Workflows.
+          // watchStayRun still runs: the drawer is dismissable at any moment, so
+          // the toast is what guarantees the outcome reaches the operator.
           onOpened: stay
             ? (name, runId) => {
-                toast.push({ kind: "info", message: `${name} started` });
+                setStayRun({ workflowName: name, runId });
                 void watchStayRun(name, runId, { getRun: getWorkflowRun, toast });
               }
             : handleOpenWorkflowRun,
@@ -208,6 +210,21 @@ function AppInner() {
           pendingSeed={pendingSeed}
           onSeedConsumed={() => setPendingSeed(null)}
           onOpenSeededChat={handleExplore}
+        />
+      )}
+      {stayRun && (
+        // Key by run so a second stay launch remounts rather than reusing the
+        // prior run's fetched schema (or its fetch error).
+        <RunDrawer
+          key={stayRun.runId}
+          workflowName={stayRun.workflowName}
+          runId={stayRun.runId}
+          projectId={activeProjectId}
+          onClose={() => setStayRun(null)}
+          onOpenInWorkflows={(name, runId) => {
+            setStayRun(null);
+            handleOpenWorkflowRun(name, runId);
+          }}
         />
       )}
       {/* App-level: a policy ASK can pause a turn on any surface. */}

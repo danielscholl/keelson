@@ -1,8 +1,9 @@
 import type { CanvasDocument, CanvasHtmlAction, CanvasSource, OpenChatSeed } from "@keelson/shared";
 import { ribIdFromKey } from "@keelson/shared";
 import type { ReactNode } from "react";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { getRunArtifact } from "../../api.ts";
+import { useDrawerDismiss } from "../../hooks/useDrawerDismiss.ts";
 import { useHtmlFrameAction, useRibActionDispatch } from "../../hooks/useRibActionDispatch.ts";
 import { useSnapshot } from "../../hooks/useSnapshot.ts";
 import { snapshotToMarkdown } from "../../lib/exploreSeed.ts";
@@ -25,7 +26,11 @@ interface CanvasOpenOptions {
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
   // Likewise a run-workflow directive: the opener supplies the launch handler so
   // a drawer launch button isn't swallowed with a success toast.
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }
 
 interface CanvasApi {
@@ -37,7 +42,11 @@ interface CanvasState {
   doc: CanvasDocument;
   footer: ReactNode;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }
 
 const CanvasContext = createContext<CanvasApi | null>(null);
@@ -71,15 +80,6 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   );
   const close = useCallback(() => setState(null), []);
 
-  useEffect(() => {
-    if (!state) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [state, close]);
-
   return (
     <CanvasContext.Provider value={{ openCanvas, close }}>
       {children}
@@ -106,43 +106,15 @@ function CanvasDrawer({
   doc: CanvasDocument;
   footer: ReactNode;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
   onClose: () => void;
 }) {
   const title = doc.title ?? "Canvas";
-  const dialogRef = useRef<HTMLElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  // Move focus into the dialog on open and restore it to the opener on close,
-  // so a keyboard/SR user lands in the modal and returns to where they were
-  // (the drawer only mounts while open, so mount/unmount bracket the lifetime).
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
-    return () => opener?.focus();
-  }, []);
-
-  // Trap Tab/Shift+Tab within the dialog: the page beneath the sheet isn't
-  // inert, so without this Tab would walk focus to controls hidden behind it.
-  const onKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const root = dialogRef.current;
-    if (!root) return;
-    const focusable = root.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    );
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (!first || !last) return;
-    const active = document.activeElement;
-    if (e.shiftKey && (active === first || !root.contains(active))) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }, []);
+  const { dialogRef, closeRef } = useDrawerDismiss(onClose);
 
   return (
     <>
@@ -153,7 +125,6 @@ function CanvasDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onKeyDown={onKeyDown}
       >
         <header className="canvas-drawer-header">
           <span className="canvas-drawer-title">{title}</span>
@@ -185,7 +156,11 @@ function CanvasBody({
 }: {
   doc: CanvasDocument;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }) {
   switch (doc.kind) {
     case "markdown":
@@ -221,7 +196,11 @@ function ViewCanvas({
 }: {
   source: CanvasSource;
   onOpenChat?: (seed: OpenChatSeed) => void | Promise<void>;
-  onLaunchWorkflow?: (workflow: string, args: Record<string, string>) => void | Promise<void>;
+  onLaunchWorkflow?: (
+    workflow: string,
+    args: Record<string, string>,
+    stay?: boolean,
+  ) => void | Promise<void>;
 }) {
   const ribId = source.type === "snapshot" ? ribIdFromKey(source.key) : null;
   const { openCanvas, close } = useCanvas();
@@ -243,9 +222,9 @@ function ViewCanvas({
     [onOpenChat, close],
   );
   const onLaunchWorkflowAndClose = useCallback(
-    (workflow: string, args: Record<string, string>) => {
+    (workflow: string, args: Record<string, string>, stay?: boolean) => {
       if (!onLaunchWorkflow) return;
-      const pending = Promise.resolve(onLaunchWorkflow(workflow, args));
+      const pending = Promise.resolve(onLaunchWorkflow(workflow, args, stay));
       close();
       return pending;
     },

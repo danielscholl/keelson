@@ -3044,6 +3044,88 @@ button.tab:focus-visible {
   max-width: none;
 }
 
+/* Run drawer. Stays below the canvas pair (1000/1001): its trace can open a
+   canvas over itself, and the canvas is width-capped — at equal z-index this
+   drawer's uncovered strip would sit above the canvas backdrop, still clickable. */
+.run-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 28, 0.45);
+  z-index: 998;
+  animation: credentials-fade-in 120ms ease-out;
+}
+
+.run-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  height: 100vh;
+  width: min(760px, 92vw);
+  background: var(--bg);
+  border-left: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-popover);
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  animation: credentials-slide-in 180ms ease-out;
+}
+
+/* Wraps rather than overflows: the meta row (status, elapsed, Cancel, Open in
+   Workflows, Close) is wider than the drawer on a phone, and the control that
+   would slide off-screen is the close button. */
+.run-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.run-drawer-ident {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.run-drawer-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-drawer-slug {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.run-drawer-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.run-drawer-meta .duration {
+  font-family: ui-monospace, monospace;
+}
+
+.run-drawer-body {
+  flex: 1 1 0;
+  overflow-y: auto;
+  background: var(--card);
+  padding: 16px;
+}
+
 .canvas-drawer-header {
   display: flex;
   align-items: center;
@@ -8881,7 +8963,9 @@ a.cvb-card-title::after {
 /* Generic workflow button — distinct from the `.btn-run` catalog primary. */
 .pane-body .btn,
 .inputs-actions .btn,
-.run-meta .btn {
+.run-meta .btn,
+.run-drawer-meta .btn,
+.run-drawer-body .btn {
   background: var(--card-2); color: var(--fg);
   border: 1px solid var(--border);
   padding: 5px 14px; border-radius: 6px;
@@ -8889,19 +8973,27 @@ a.cvb-card-title::after {
 }
 .pane-body .btn:hover,
 .inputs-actions .btn:hover,
-.run-meta .btn:hover { border-color: var(--accent); }
+.run-meta .btn:hover,
+.run-drawer-meta .btn:hover,
+.run-drawer-body .btn:hover { border-color: var(--accent); }
 .pane-body .btn.primary,
-.inputs-actions .btn.primary {
+.inputs-actions .btn.primary,
+.run-drawer-body .btn.primary {
   background: var(--accent); border-color: var(--accent); color: white; font-weight: 600;
 }
 .pane-body .btn.primary:hover,
-.inputs-actions .btn.primary:hover { filter: brightness(1.1); }
+.inputs-actions .btn.primary:hover,
+.run-drawer-body .btn.primary:hover { filter: brightness(1.1); }
 .pane-body .btn.danger:hover,
 .inputs-actions .btn.danger:hover,
-.run-meta .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+.run-meta .btn.danger:hover,
+.run-drawer-meta .btn.danger:hover,
+.run-drawer-body .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
 .pane-body .btn:disabled,
 .inputs-actions .btn:disabled,
-.run-meta .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.run-meta .btn:disabled,
+.run-drawer-meta .btn:disabled,
+.run-drawer-body .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Trace rows (right pane in run view). */
 .trace { display: flex; flex-direction: column; gap: 8px; }

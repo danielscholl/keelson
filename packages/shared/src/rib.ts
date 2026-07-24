@@ -792,8 +792,8 @@ export const ribClientEffectSchema = z.discriminatedUnion("effect", [
       workflow: z.string().min(1),
       args: z.record(z.string(), z.string()).optional(),
       // Launch the run but keep the operator on the current surface instead of
-      // focusing the Workflows tab — so a task kicked off from a rib surface can be
-      // watched in that surface's own live panel. Absent = focus Workflows (default).
+      // focusing the Workflows tab — the run streams into a slide-over drawer
+      // beside the board that launched it. Absent = focus Workflows (default).
       stay: z.boolean().optional(),
     })
     .strict(),

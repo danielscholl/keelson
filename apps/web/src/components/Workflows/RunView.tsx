@@ -2,6 +2,7 @@ import type { Project, TokenUsage, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useId, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
+import { formatDuration } from "../../lib/formatDuration.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, sumTokenSpend } from "../../lib/formatTokens.ts";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
@@ -10,28 +11,9 @@ import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
 import { DagGraph } from "./DagGraph.tsx";
 import { fallbackStatusFromRun, RunTrace } from "./RunTrace.tsx";
 import { StartComposer, type StartRequest } from "./StartComposer.tsx";
-import { StatusBadge } from "./StatusBadge.tsx";
+import { StatusBadge, statusBadgeStatus } from "./StatusBadge.tsx";
 
 const RUN_VIEW_PROJECT_PICKER_POPOVER_ID = "run-view-project-picker-popover";
-
-function formatDuration(ms?: number | null): string {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return "";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes}m ${seconds}s`;
-}
-
-function statusBadgeStatus(
-  s: "loading" | "unknown" | "running" | "paused" | "succeeded" | "failed" | "cancelled",
-): NodeViewStatus | "pending" | "running" {
-  if (s === "loading" || s === "unknown") return "pending";
-  // Run-level `paused` reuses the node-level `awaiting` badge color since
-  // both use the same magenta accent.
-  if (s === "paused") return "awaiting";
-  return s;
-}
 
 export interface RunViewProps {
   // Workflow schema is required so the graph + trace can render in
