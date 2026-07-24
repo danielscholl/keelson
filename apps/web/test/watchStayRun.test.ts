@@ -82,7 +82,7 @@ describe("watchStayRun", () => {
       }),
       toast: { push: (t) => toasts.push(t) },
       intervalMs: 1500,
-      maxIntervalMs: 15_000,
+      rampedIntervalMs: 15_000,
       rampAfterPolls: 2,
       sleep: async (ms) => {
         slept.push(ms);

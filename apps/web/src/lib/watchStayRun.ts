@@ -12,11 +12,11 @@ export interface WatchStayRunDeps {
   getRun: (runId: string) => Promise<{ status: string; error: string | null }>;
   toast: { push: (t: { kind: "ok" | "error" | "info"; message: string }) => unknown };
   // Poll cadence + cap, injectable so a test needn't wait real time. The cadence
-  // backs off from `intervalMs` to `maxIntervalMs` after `rampAfterPolls`, which
+  // steps from `intervalMs` to `rampedIntervalMs` after `rampAfterPolls`, which
   // is what buys a horizon long enough for a cluster provision or teardown
   // without polling every 1.5s for hours. Defaults reach ~2h.
   intervalMs?: number;
-  maxIntervalMs?: number;
+  rampedIntervalMs?: number;
   rampAfterPolls?: number;
   maxPolls?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -33,13 +33,13 @@ export async function watchStayRun(
     getRun,
     toast,
     intervalMs = 1500,
-    maxIntervalMs = 15_000,
+    rampedIntervalMs = 15_000,
     rampAfterPolls = 40,
     maxPolls = 520,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   } = deps;
   for (let i = 0; i < maxPolls; i++) {
-    await sleep(i < rampAfterPolls ? intervalMs : Math.max(intervalMs, maxIntervalMs));
+    await sleep(i < rampAfterPolls ? intervalMs : rampedIntervalMs);
     let run: { status: string; error: string | null };
     try {
       run = await getRun(runId);
