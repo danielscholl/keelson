@@ -55,6 +55,10 @@ export interface PromptHandlerSendOptions {
   abortSignal?: AbortSignal;
   tools?: readonly { name: string; [k: string]: unknown }[];
   model?: string;
+  // Reasoning tier (structural mirror of @keelson/providers `reasoningEffort`).
+  // Copilot and Codex consume it on reasoning models; Claude ignores it. Absent
+  // leaves the model's own default in place.
+  reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
   systemPrompt?: string;
   // SDK-level whitelist / blacklist by tool name (built-ins + MCP). Empty
   // `allowedTools` array means the model has no tools at all.
@@ -333,6 +337,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       } else if (typeof workflowModelRaw === "string" && workflowModelRaw.length > 0) {
         model = workflowModelRaw;
       }
+      // Same chain as model, minus a provider-level default: providers apply
+      // their own per-model default when this is absent.
+      const effort =
+        readEffort((node as { effort?: unknown }).effort) ?? readEffort(ctx.workflow.effort);
       const nodeAllowed = readStringArray(node, "allowed_tools");
       const nodeDenied = readStringArray(node, "denied_tools");
       const nodeHooks = readHooksField(node);
@@ -559,6 +567,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             abortSignal: handlerExit.signal,
             ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
             ...(model !== undefined ? { model } : {}),
+            ...(effort !== undefined ? { reasoningEffort: effort } : {}),
             ...(effectiveSystemPrompt !== undefined ? { systemPrompt: effectiveSystemPrompt } : {}),
             ...(nodeAllowed !== undefined ? { allowedTools: nodeAllowed } : {}),
             ...(nodeDenied !== undefined ? { disallowedTools: nodeDenied } : {}),
@@ -828,6 +837,20 @@ function stripMcpPrefix(name: string): string {
   const serverEnd = name.indexOf("__", 5);
   if (serverEnd < 0) return name;
   return name.slice(serverEnd + 2);
+}
+
+const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh"] as const;
+
+type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+// `max` is the schema's legacy spelling of the top tier; providers only know
+// `xhigh`.
+function readEffort(value: unknown): ReasoningEffort | undefined {
+  if (typeof value !== "string") return undefined;
+  const level = value === "max" ? "xhigh" : value;
+  return REASONING_EFFORTS.includes(level as ReasoningEffort)
+    ? (level as ReasoningEffort)
+    : undefined;
 }
 
 // Pulls `node.hooks` defensively. The schema enforces the

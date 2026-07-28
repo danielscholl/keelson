@@ -174,7 +174,8 @@ nodes:
     depends_on: [fetch-state]
     when: "$fetch-state.output.has_new == 'true'"
     context: fresh
-    model: claude-opus-4-8
+    model: claude-opus-4.8
+    effort: xhigh
     output_format:
       type: object
       required: [threads]
@@ -276,6 +277,7 @@ nodes:
     when: "$triage-gate.output.has_new == 'true'"
     context: fresh
     model: gpt-5.6-sol
+    effort: xhigh
     idle_timeout: 1800000
     prompt: |
       You are fixing the round $converge.round actionable PR review threads.
@@ -374,6 +376,7 @@ nodes:
     depends_on: [validate]
     context: fresh
     model: gpt-5.6-sol
+    effort: xhigh
     idle_timeout: 1800000
     prompt: |
       Review the validation output below.

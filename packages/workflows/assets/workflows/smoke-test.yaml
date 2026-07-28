@@ -23,12 +23,12 @@ description: |
 nodes:
   # ─── AI node types ──────────────────────────────────────────────────────
 
-  # 1. prompt: inline prompt + effort. Verifies reasoningEffort reaches the
-  #    SDK. `allowed_tools` is intentionally omitted — it's a Claude-only
-  #    field and the smoke-test has to validate cleanly under every provider.
+  # 1. prompt: inline prompt. `allowed_tools` and `effort` are intentionally
+  #    omitted — this workflow pins no provider or model, and both fields reach
+  #    an SDK that may reject them (`effort` errors on models with no reasoning
+  #    tier, including Copilot's `auto`).
   - id: prompt-node
     prompt: "Reply with exactly the single word 'ok' and nothing else."
-    effort: low
     idle_timeout: 30000
 
   # 2. command: named command file (.keelson/commands/e2e-echo-command.md).

@@ -247,7 +247,8 @@ These apply across kinds (some only to agent nodes, as noted).
 | `always_run` | all | `true` re-executes the node on a resumed run even if it previously succeeded (default `false`). Use it for a gate or validation that should re-check rather than replay a stale pass. |
 | `fail_on_tool_error` | agent | `true` fails the node if any invoked tool errored. |
 | `idle_timeout` | agent | Milliseconds of stream silence before the node fails. |
-| `systemPrompt`, `effort`, `thinking` | agent | Claude-only per-node controls. `effort` is `low` / `medium` / `high` / `max`; `thinking` is `adaptive` / `enabled` / `disabled`. |
+| `effort` | agent | Reasoning tier, forwarded as `reasoningEffort`: `none` / `low` / `medium` / `high` / `xhigh` (`max` is a legacy alias for `xhigh`). Overrides the workflow-level `effort` on `prompt` and `command` nodes; a `loop` node's own value is dropped, so loop iterations take the workflow value. Copilot and Codex consume it on reasoning models; Claude ignores it. Omit it to take the model's own default — a model with no reasoning tier, such as Copilot's `auto`, errors on any value. |
+| `systemPrompt`, `thinking` | agent | Claude-only per-node controls. `thinking` is `adaptive` / `enabled` / `disabled`. |
 | `memory`, `notebook` | all | Recall/writeback blocks wired to the memory store and the project notebook. |
 | `hooks` | agent | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
 

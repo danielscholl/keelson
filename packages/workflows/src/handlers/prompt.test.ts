@@ -85,6 +85,7 @@ interface BuildCtxOptions {
   nodeId?: string;
   workflowProvider?: string;
   workflowModel?: string;
+  workflowEffort?: string;
   notebook?: NotebookAdapter;
 }
 
@@ -96,6 +97,7 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     nodes: [],
     ...(opts.workflowProvider !== undefined ? { provider: opts.workflowProvider } : {}),
     ...(opts.workflowModel !== undefined ? { model: opts.workflowModel } : {}),
+    ...(opts.workflowEffort !== undefined ? { effort: opts.workflowEffort } : {}),
   } as unknown as WorkflowDefinition;
   return {
     runId: opts.runId ?? "test-run",
@@ -169,6 +171,62 @@ describe("makePromptHandler", () => {
     expect(result.status).toBe("succeeded");
     expect(calls).toHaveLength(1);
     expect(seen).toEqual({ runId: "test-run", model: "claude-sonnet-4-6", provider: "claude" });
+  });
+
+  test("forwards a node's effort to the provider as reasoningEffort", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const node = { id: "n1", prompt: "", effort: "xhigh" } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(calls[0]?.options?.reasoningEffort).toBe("xhigh");
+  });
+
+  test("node effort overrides the workflow's, and `max` normalizes to xhigh", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const node = { id: "n1", prompt: "", effort: "max" } as unknown as DagNode;
+    const result = await handler.handle(node, buildCtx({ workflowEffort: "low" }));
+    expect(result.status).toBe("succeeded");
+    expect(calls[0]?.options?.reasoningEffort).toBe("xhigh");
+  });
+
+  test("falls back to the workflow's effort when the node sets none", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx({ workflowEffort: "high" }));
+    expect(result.status).toBe("succeeded");
+    expect(calls[0]?.options?.reasoningEffort).toBe("high");
+  });
+
+  test("omits reasoningEffort entirely when neither node nor workflow sets it", async () => {
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("succeeded");
+    // Absent, not undefined — the provider must fall through to the model's own
+    // default rather than see an explicit tier.
+    expect(calls[0]?.options && "reasoningEffort" in calls[0].options).toBe(false);
   });
 
   test("emits node_chunk events for every non-done chunk", async () => {
