@@ -106,12 +106,12 @@ describe("pr-review workflow node graph", () => {
     expect(ids).toContain("post-review");
   });
 
-  test("triage node is pinned to claude-opus-4-8", () => {
+  test("triage node is pinned to claude-opus-4.8", () => {
     const filename = `${WORKFLOWS}/pr-review.yaml`;
     const content = readFileSync(filename, "utf-8");
     const result = parseWorkflow(content, filename);
     const triage = result.workflow?.nodes.find((n) => n.id === "triage");
-    expect(triage?.model).toBe("claude-opus-4-8");
+    expect(triage?.model).toBe("claude-opus-4.8");
   });
 
   test("no node posts a plain comment; post-review uses the batched review verb", () => {
@@ -298,6 +298,37 @@ describe("bundled workflows are forge-portable (no direct gh)", () => {
         .split("\n")
         .map((line, i) => ({ line, n: i + 1 }))
         .filter(({ line }) => GH_CALL.test(line));
+      expect(offenders.map((o) => `${file}:${o.n}: ${o.line.trim()}`)).toEqual([]);
+    });
+  }
+});
+
+describe("bundled workflows pin Copilot-spelled Anthropic model ids", () => {
+  const WORKFLOWS = resolve(
+    import.meta.dir,
+    "..",
+    "..",
+    "..",
+    "packages",
+    "workflows",
+    "assets",
+    "workflows",
+  );
+
+  // Anthropic model ids have two spellings: the Copilot catalog uses a dotted
+  // minor (`claude-opus-4.8`), the Claude Agent SDK provider a hyphenated one
+  // (`claude-opus-4-8`). Every bundled workflow runs `provider: copilot`, and
+  // nothing validates a pin against the catalog, so an SDK-spelled id here only
+  // fails once the node runs.
+  const files = readdirSync(WORKFLOWS).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
+  const SDK_SPELLED_ID = /\bclaude-[a-z]+-\d+-\d+/;
+  for (const file of files) {
+    test(`${file} uses the dotted Copilot id`, () => {
+      const content = readFileSync(resolve(WORKFLOWS, file), "utf-8");
+      const offenders = content
+        .split("\n")
+        .map((line, i) => ({ line, n: i + 1 }))
+        .filter(({ line }) => SDK_SPELLED_ID.test(line));
       expect(offenders.map((o) => `${file}:${o.n}: ${o.line.trim()}`)).toEqual([]);
     });
   }
