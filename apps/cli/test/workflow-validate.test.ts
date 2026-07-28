@@ -317,19 +317,28 @@ describe("bundled workflows pin Copilot-spelled Anthropic model ids", () => {
 
   // Anthropic model ids have two spellings: the Copilot catalog uses a dotted
   // minor (`claude-opus-4.8`), the Claude Agent SDK provider a hyphenated one
-  // (`claude-opus-4-8`). Every bundled workflow runs `provider: copilot`, and
-  // nothing validates a pin against the catalog, so an SDK-spelled id here only
-  // fails once the node runs.
+  // (`claude-opus-4-8`). Nothing validates a pin against the catalog, so an
+  // SDK-spelled id on a Copilot node only fails once that node runs. Scoped to
+  // nodes whose effective provider is copilot — the hyphenated form is correct
+  // under the claude provider.
   const files = readdirSync(WORKFLOWS).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
   const SDK_SPELLED_ID = /\bclaude-[a-z]+-\d+-\d+/;
   for (const file of files) {
     test(`${file} uses the dotted Copilot id`, () => {
-      const content = readFileSync(resolve(WORKFLOWS, file), "utf-8");
-      const offenders = content
-        .split("\n")
-        .map((line, i) => ({ line, n: i + 1 }))
-        .filter(({ line }) => SDK_SPELLED_ID.test(line));
-      expect(offenders.map((o) => `${file}:${o.n}: ${o.line.trim()}`)).toEqual([]);
+      const filename = `${WORKFLOWS}/${file}`;
+      const result = parseWorkflow(readFileSync(filename, "utf-8"), filename);
+      const workflowProvider = (result.workflow as { provider?: string } | null)?.provider;
+      const offenders = (result.workflow?.nodes ?? [])
+        .filter((n) => {
+          const { model, provider } = n as { model?: string; provider?: string };
+          return (
+            (provider ?? workflowProvider) === "copilot" &&
+            model !== undefined &&
+            SDK_SPELLED_ID.test(model)
+          );
+        })
+        .map((n) => `${file}: ${n.id} pins ${(n as { model?: string }).model}`);
+      expect(offenders).toEqual([]);
     });
   }
 
