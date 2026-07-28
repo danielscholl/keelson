@@ -144,10 +144,11 @@ CRITICAL/HIGH findings, dropping the false positives a lone self-review acts on.
 `apply-fixes` fixes exactly those, and `re-review` confirms the loop closed. The
 reasoning nodes (`investigate`, `plan`, `triage`, `triage-ci`) are pinned to
 `claude-opus-4.8`, `implement` is pinned to `gpt-5.6-sol` for the node doing the
-actual edits, and the three review lenses are pinned to `gpt-5.6-terra`. Every
-model-driven node runs a chosen, deterministic model rather than `auto`, and
-each carries `effort: xhigh` — a model pin alone would still leave the node on
-that model's default tier.
+actual edits, and the three review lenses are pinned to `gpt-5.6-terra`. Each of
+those nodes runs a chosen, deterministic model rather than `auto`, and each also
+carries `effort: xhigh` — a model pin alone would still leave the node on that
+model's default tier. The remaining prompt nodes stay on `auto` and let Copilot
+route them.
 
 **The CI gate fixes only its own mess.** Once the PR is pushed, its real CI
 runs on every target the project covers, not just the local box. `await-ci`
