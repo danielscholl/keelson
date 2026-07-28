@@ -64,7 +64,7 @@ shape is incidental; the coverage is the point.
 
 | Node | Kind | What it covers |
 | --- | --- | --- |
-| `prompt-node` | prompt | An inline agent turn with `effort`, verifying reasoning effort reaches the SDK. |
+| `prompt-node` | prompt | An inline agent turn. Pins no model or `effort`, so it validates cleanly under every provider. |
 | `command-node` | command | A named markdown command (`e2e-echo-command`) from the home. |
 | `loop-node` | loop | An agent loop bounded by `max_iterations: 2` so it cannot hang CI. |
 | `bash-json-node` | bash | A shell node emitting JSON, which unlocks dot-access downstream. |

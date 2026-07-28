@@ -332,4 +332,21 @@ describe("bundled workflows pin Copilot-spelled Anthropic model ids", () => {
       expect(offenders.map((o) => `${file}:${o.n}: ${o.line.trim()}`)).toEqual([]);
     });
   }
+
+  // A node that pins a concrete model has opted out of Copilot's routing, so it
+  // must also pin the reasoning tier — otherwise it silently takes the model's
+  // default (medium) no matter how deliberate the model choice was.
+  for (const file of files) {
+    test(`${file} pins effort wherever it pins a model`, () => {
+      const filename = `${WORKFLOWS}/${file}`;
+      const result = parseWorkflow(readFileSync(filename, "utf-8"), filename);
+      const bare = (result.workflow?.nodes ?? [])
+        .filter((n) => {
+          const { model, effort } = n as { model?: string; effort?: string };
+          return model !== undefined && model !== "auto" && effort === undefined;
+        })
+        .map((n) => `${file}: ${n.id}`);
+      expect(bare).toEqual([]);
+    });
+  }
 });

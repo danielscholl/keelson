@@ -41,8 +41,12 @@ export const TRIGGER_RULES: readonly TriggerRule[] = triggerRuleSchema.options;
 // Claude SDK option schemas
 // ---------------------------------------------------------------------------
 
-/** Claude Agent SDK effort level — controls reasoning depth. Different from Codex modelReasoningEffort. */
-export const effortLevelSchema = z.enum(["low", "medium", "high", "max"]);
+/**
+ * Reasoning depth, forwarded to the provider as `reasoningEffort`. Values mirror
+ * @keelson/shared's reasoningEffortLevelSchema; `max` is a legacy alias for
+ * `xhigh`, normalized where the node is read.
+ */
+export const effortLevelSchema = z.enum(["none", "low", "medium", "high", "xhigh", "max"]);
 
 export type EffortLevel = z.infer<typeof effortLevelSchema>;
 

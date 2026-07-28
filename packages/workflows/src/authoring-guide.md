@@ -58,9 +58,13 @@ Optional:
   project.
 - `converge` — `{ gate, max_rounds, on_exhaust }` re-runs the gate node's
   dependency subgraph until the gate completes or the round budget exhausts.
-- `effort` (`low`|`medium`|`high`|`max`) and `thinking`
-  (`adaptive`|`enabled`|`disabled` or `{type, budgetTokens}`) — claude-only
-  reasoning controls.
+- `effort` (`none`|`low`|`medium`|`high`|`xhigh`; `max` is a legacy alias for
+  `xhigh`) — reasoning tier, forwarded as `reasoningEffort`. A node's own
+  `effort` overrides this. Consumed by copilot on reasoning models; other
+  providers ignore it. Omit it to take the model's own default; a model with no
+  reasoning tier (Copilot's `auto`) errors on any value.
+- `thinking` (`adaptive`|`enabled`|`disabled` or `{type, budgetTokens}`) —
+  claude-only reasoning control.
 
 Accepted but ignored at runtime (the loader warns and drops them): `sandbox`,
 `betas`, `fallbackModel`, `additionalDirectories`.
@@ -183,7 +187,8 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
   pass). Off by default: a succeeded node is skipped on resume.
 - `fail_on_tool_error: true` — fail the node if any invoked tool errored.
 - `idle_timeout` — ms of AI-stream silence before the node fails.
-- `systemPrompt`, `effort`, `thinking` — claude-only per-node controls.
+- `effort` — reasoning tier for this node; overrides the workflow-level value.
+- `systemPrompt`, `thinking` — claude-only per-node controls.
 - `memory` / `notebook` — recall/writeback blocks wired to the memory store
   and project notebook.
 - `hooks` — fully honored only by the claude provider.

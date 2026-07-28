@@ -166,6 +166,7 @@ nodes:
     when: "$classify.output.issue_type == 'bug'"
     context: fresh
     model: claude-opus-4.8
+    effort: xhigh
     # Bug investigation has the same chunk-sparse, single-turn shape as planning.
     idle_timeout: 1800000
     prompt: |
@@ -227,6 +228,7 @@ nodes:
     when: "$classify.output.issue_type != 'bug'"
     context: fresh
     model: claude-opus-4.8
+    effort: xhigh
     # Single-turn large-codebase planning can sit >600s between provider chunks.
     # Match the heavy edit nodes' idle budget so chunk-sparse work can finish.
     idle_timeout: 1800000
@@ -331,6 +333,7 @@ nodes:
     when: "$criteria-count.output > '0'"
     context: fresh
     model: claude-opus-4.8
+    effort: xhigh
     allowed_tools: []
     output_format:
       type: object
@@ -437,6 +440,7 @@ nodes:
     # (Copilot never reports what `auto` resolved). Account-dependent id — must
     # appear in the live Copilot list; swap or drop to `auto` if unavailable.
     model: gpt-5.6-sol
+    effort: xhigh
     # Large changes run many edit+check cycles; a tight cap kills a run mid-task
     # and loses uncommitted work. Generous here; the per-task checks stay scoped
     # (below) so this budget is for real work, not full-suite thrash.
@@ -679,6 +683,7 @@ nodes:
     depends_on: [enforce-draft]
     context: fresh
     model: gpt-5.6-terra
+    effort: xhigh
     prompt: |
       You are one of three INDEPENDENT reviewers of the branch that was just
       opened as a PR. Your lens is CORRECTNESS only.
@@ -701,6 +706,7 @@ nodes:
     depends_on: [enforce-draft]
     context: fresh
     model: gpt-5.6-terra
+    effort: xhigh
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
 
@@ -722,6 +728,7 @@ nodes:
     depends_on: [enforce-draft]
     context: fresh
     model: gpt-5.6-terra
+    effort: xhigh
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
 
@@ -743,6 +750,7 @@ nodes:
     trigger_rule: one_success
     context: fresh
     model: claude-opus-4.8
+    effort: xhigh
     output_format:
       type: object
       required: [ship_ready, summary, must_fix]
@@ -994,6 +1002,7 @@ nodes:
     depends_on: [await-ci]
     context: fresh
     model: claude-opus-4.8
+    effort: xhigh
     output_format:
       type: object
       required: [ci_status, actionable, summary]
