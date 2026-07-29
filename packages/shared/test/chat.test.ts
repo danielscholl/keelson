@@ -229,22 +229,19 @@ describe("clientMessageSchema", () => {
     ).toThrow();
   });
 
-  it.each([
-    "none",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-  ] as const)("accepts reasoningEffort=%s (F10.6)", (level) => {
-    const msg = clientMessageSchema.parse({
-      type: "request",
-      providerId: "copilot",
-      prompt: "hi",
-      reasoningEffort: level,
-    });
-    if (msg.type !== "request") throw new Error("expected request");
-    expect(msg.reasoningEffort).toBe(level);
-  });
+  it.each(["none", "low", "medium", "high", "xhigh"] as const)(
+    "accepts reasoningEffort=%s (F10.6)",
+    (level) => {
+      const msg = clientMessageSchema.parse({
+        type: "request",
+        providerId: "copilot",
+        prompt: "hi",
+        reasoningEffort: level,
+      });
+      if (msg.type !== "request") throw new Error("expected request");
+      expect(msg.reasoningEffort).toBe(level);
+    },
+  );
 
   it("rejects unknown reasoningEffort tiers (F10.6)", () => {
     expect(() =>
