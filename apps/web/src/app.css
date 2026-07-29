@@ -9066,6 +9066,9 @@ a.cvb-card-title::after {
   overflow: auto;
   max-height: 220px;
   white-space: pre-wrap;
+  /* Compact jq output has no spaces for pre-wrap to break on; without this a
+     single long JSON line overflows into a horizontal scroll. */
+  overflow-wrap: anywhere;
 }
 
 .typing-dots {

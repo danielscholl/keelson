@@ -3516,6 +3516,19 @@ function dispatchRunEvent(args: DispatchArgs): void {
     case "node_started":
       nodeStart.set(event.nodeId, new Date().toISOString());
       nodeAccumulators.set(event.nodeId, createContentPartsAccumulator());
+      // Drop any prior launch's row: a REST hydrate racing this relaunch must
+      // not read the old terminal output back into the SPA (mergeNode prefers
+      // a terminal snapshot), and WorkflowNodeStatus has no non-terminal value
+      // to upsert instead. node_done recreates the row at terminal status.
+      try {
+        store.deleteNodeOutput(runId, event.nodeId);
+      } catch (err) {
+        console.warn(
+          `[workflows] failed to clear stale row for ${runId}:${event.nodeId} at node_started: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
       subscribers.broadcast(runId, {
         type: "node_started",
         nodeId: event.nodeId,

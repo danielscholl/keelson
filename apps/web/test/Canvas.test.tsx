@@ -1260,6 +1260,9 @@ describe("RunTrace canvas affordances", () => {
     // Auto-opens the plan, with the approval composer docked inside the drawer.
     await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("FETCHED PLAN"));
     expect(screen.getByRole("button", { name: /View plan/ })).toBeTruthy();
+    // A .md artifact renders through the markdown kind, not the log kind's
+    // AnsiText-wrapped code block.
+    expect(screen.getByRole("dialog").querySelector(".ansi-text")).toBeNull();
     const approve = within(screen.getByRole("dialog")).getByRole("button", {
       name: /Approve & continue/,
     });
@@ -1267,6 +1270,68 @@ describe("RunTrace canvas affordances", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("approve"));
     // The action closes the drawer.
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  test("pausing on an approval with a non-markdown artifact (e.g. triage.json) docks it in the log kind", async () => {
+    artifactImpl = async () => ({ path: "triage.json", content: '{"severity":"high"}' });
+    const onSubmit = mock(async () => {});
+    const onAbandon = mock(async () => {});
+    render(
+      <CanvasProvider>
+        <RunTrace
+          schemaNodes={[{ id: "approve-triage", type: "approval" }]}
+          nodes={{
+            "approve-triage": node({
+              nodeId: "approve-triage",
+              status: "awaiting",
+              type: "approval",
+              awaitingMessage: "Triage is ready at `$ARTIFACTS_DIR/triage.json`.",
+            }),
+          }}
+          runId="r1"
+          streaming
+          awaitingNodeId="approve-triage"
+          onSubmitApproval={onSubmit}
+          onAbandon={onAbandon}
+        />
+      </CanvasProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").textContent).toContain('"severity":"high"'),
+    );
+    // A .json artifact would be mangled by the markdown renderer, so it must
+    // route through the log kind's AnsiText-wrapped code block instead.
+    expect(screen.getByRole("dialog").querySelector(".ansi-text")).not.toBeNull();
+  });
+
+  test("secondary artifact chips pick canvas kind by extension too", async () => {
+    const contents: Record<string, string> = {
+      "triage.json": '{"status":"open"}',
+      "notes.md": "# Notes",
+    };
+    artifactImpl = async (_runId, path) => ({ path, content: contents[path] ?? "" });
+    renderTrace(
+      [{ id: "approve-multi", type: "approval" }],
+      {
+        "approve-multi": node({
+          nodeId: "approve-multi",
+          status: "awaiting",
+          type: "approval",
+          awaitingMessage:
+            "Review `$ARTIFACTS_DIR/triage.json` and `$ARTIFACTS_DIR/notes.md` before approving.",
+        }),
+      },
+      "approve-multi",
+    );
+    fireEvent.click(screen.getByText("open triage.json"));
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").textContent).toContain('"status":"open"'),
+    );
+    expect(screen.getByRole("dialog").querySelector(".ansi-text")).not.toBeNull();
+
+    fireEvent.click(screen.getByText("open notes.md"));
+    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("# Notes"));
+    expect(screen.getByRole("dialog").querySelector(".ansi-text")).toBeNull();
   });
 });
 

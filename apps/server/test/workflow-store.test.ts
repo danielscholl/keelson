@@ -358,6 +358,39 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.nodes[0]!.error).toBeNull();
   });
 
+  test("deleteNodeOutput clears a prior launch's terminal row before a relaunch resumes", () => {
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    store.createRun({
+      runId: "r1",
+      workflowName: "x",
+      inputs: {},
+      startedAt: "ts",
+      conversationId: mintConv(db),
+    });
+
+    // A prior launch left a terminal row for this node.
+    store.upsertNodeOutput({
+      runId: "r1",
+      nodeId: "n",
+      status: "succeeded",
+      outputText: "stale from prior launch",
+      contentParts: null,
+      startedAt: "2025-01-01T00:00:01.000Z",
+      completedAt: "2025-01-01T00:00:02.000Z",
+      error: null,
+    });
+    expect(store.getRun("r1")!.nodes).toHaveLength(1);
+
+    // node_started for the relaunch clears it — a REST hydrate racing the
+    // relaunch must not see the previous launch's output.
+    expect(store.deleteNodeOutput("r1", "n")).toBe(true);
+    expect(store.getRun("r1")!.nodes).toHaveLength(0);
+
+    // Deleting again (e.g. a node with no prior row) is a no-op, not an error.
+    expect(store.deleteNodeOutput("r1", "n")).toBe(false);
+  });
+
   test("deleting a workflow_runs row cascades to its node outputs", () => {
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
