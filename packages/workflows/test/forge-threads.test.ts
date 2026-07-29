@@ -57,10 +57,15 @@ function threadState(
       replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
     })
   | . as $open
+  | ($open | map(select(.replyCount == 0 or .lastAuthor == .author))) as $new
+  | ([$new[].threadId]) as $newIds
   | {
       open: $open,
-      new: ($open | map(select(.replyCount == 0 or .lastAuthor == .author))),
-      retry: ($open | map(select((.threadId as $id | $retryIds | index($id)) != null)))
+      new: $new,
+      retry: ($open | map(select(
+          ((.threadId as $id | $retryIds | index($id)) != null)
+          and ((.threadId as $id | $newIds | index($id)) == null)
+        )))
     }`;
   const d = mkdtempSync(join(tmpdir(), "keelson-forge-ledger-"));
   tmps.push(d);
@@ -336,6 +341,24 @@ shimDescribe("resolve-pr thread-state classification (new vs answered vs retry)"
       "T-invalid",
     ]);
     expect(state.new).toHaveLength(0);
+  });
+
+  test("a reviewer follow-up pulls a retry-eligible thread out of the retry lane", () => {
+    // Overlap case: the failed-resolve ledger entry says retry, but the
+    // reviewer commented after our reply — resolving under the PRIOR approval
+    // would close an unanswered follow-up. New wins; retry excludes it.
+    const handled = JSON.stringify([
+      {
+        threadId: "T-reopened",
+        action: "replied-only",
+        decision: "invalid",
+        replied: true,
+        resolved: false,
+      },
+    ]);
+    const state = threadState(payload(thread("T-reopened", ["bot", "operator", "bot"])), handled);
+    expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual(["T-reopened"]);
+    expect(state.retry).toHaveLength(0);
   });
 });
 

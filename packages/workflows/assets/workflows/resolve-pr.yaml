@@ -110,10 +110,18 @@ nodes:
               replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
             })
           | . as $open
+          | ($open | map(select(.replyCount == 0 or .lastAuthor == .author))) as $new
+          | ([$new[].threadId]) as $newIds
+          # A reviewer follow-up reopens a thread OUT of the retry lane: its
+          # stale ledger entry must not resolve it under the prior approval
+          # before the follow-up is triaged.
           | {
               open: $open,
-              new: ($open | map(select(.replyCount == 0 or .lastAuthor == .author))),
-              retry: ($open | map(select((.threadId as $id | $retryIds | index($id)) != null)))
+              new: $new,
+              retry: ($open | map(select(
+                  ((.threadId as $id | $retryIds | index($id)) != null)
+                  and ((.threadId as $id | $newIds | index($id)) == null)
+                )))
             }
         ' "$COMBINED" > "$STATE_OUT"
         rm -f "$COMBINED"
