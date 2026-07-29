@@ -136,7 +136,7 @@ export function RunView({
       // Only nodes that actually ran on a provider; backfill the model from the
       // node's declared `model:` when the runtime reported none.
       if (v.provider === undefined && v.model === undefined) continue;
-      const label = formatProviderModel(v.provider, v.model, declaredByNode.get(id));
+      const label = formatProviderModel(v.provider, v.model, declaredByNode.get(id), v.effort);
       if (label !== null) labels.add(label);
     }
     return labels.size === 1 ? [...labels][0] : null;

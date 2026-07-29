@@ -1405,6 +1405,46 @@ describe("makePromptHandler", () => {
       expect(result.provider).toBeUndefined();
       expect(result.model).toBeUndefined();
     });
+
+    test("records the node's effort over the workflow default", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", effort: "xhigh" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx({ workflowEffort: "low" }));
+      expect(result.effort).toBe("xhigh");
+    });
+
+    test("falls back to the workflow effort and normalizes `max` to the provider spelling", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx({ workflowEffort: "max" }));
+      expect(result.effort).toBe("xhigh");
+    });
+
+    test("omits effort when neither node nor workflow declares one", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx());
+      expect(result.effort).toBeUndefined();
+    });
   });
 
   test("times out even when the provider ignores its abortSignal (hung provider)", async () => {
@@ -1660,6 +1700,7 @@ describe("makePromptHandler", () => {
       prompt: "",
       provider: "not-a-real-provider",
       model: "gpt-5",
+      effort: "high",
     } as unknown as DagNode;
     const result = await handler.handle(node, buildCtx());
     expect(result.status).toBe("failed");
@@ -1669,6 +1710,7 @@ describe("makePromptHandler", () => {
     // the requested provider/model.
     expect(result.provider).toBeUndefined();
     expect(result.model).toBeUndefined();
+    expect(result.effort).toBeUndefined();
   });
 
   describe("output_format", () => {

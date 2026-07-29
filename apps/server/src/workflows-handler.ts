@@ -29,8 +29,10 @@ import {
   type MessageChunk,
   type NodeOutputRow,
   type Project,
+  type ReasoningEffortLevel,
   type RibRunEvent,
   type RibWorkflowRunResult,
+  reasoningEffortLevelSchema,
   recallRequestSchema,
   refreshWorkflowBodySchema,
   resumeWorkflowRunBodySchema,
@@ -3064,9 +3066,10 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           error: null,
           usage: null,
           // The terminal node_done write recreates the row with the resolved
-          // provider/model; the transient awaiting snapshot carries neither.
+          // provenance; the transient awaiting snapshot carries none of it.
           provider: null,
           model: null,
+          effort: null,
         });
       } catch (err) {
         console.warn(
@@ -3186,9 +3189,10 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
           error: null,
           usage: null,
           // The loop node's terminal node_done write carries the resolved
-          // provider/model; the per-iteration awaiting snapshot carries neither.
+          // provenance; the per-iteration awaiting snapshot carries none of it.
           provider: null,
           model: null,
+          effort: null,
         });
       } catch (err) {
         console.warn(
@@ -3430,6 +3434,13 @@ function sanitizeProvenanceField(v: unknown): string | null {
     : trimmed;
 }
 
+// Effort is a closed enum on the wire, so the trust-boundary check is a parse
+// rather than the length cap the free-string ids get.
+function sanitizeEffort(v: unknown): ReasoningEffortLevel | null {
+  const result = reasoningEffortLevelSchema.safeParse(v);
+  return result.success ? result.data : null;
+}
+
 interface NodeUsageAttribution {
   runId: string;
   nodeId: string;
@@ -3577,6 +3588,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
       const usage = coerceTokenUsage(event.result.usage) ?? null;
       const provider = sanitizeProvenanceField(event.result.provider);
       const model = sanitizeProvenanceField(event.result.model);
+      const effort = sanitizeEffort(event.result.effort);
       store.upsertNodeOutput({
         runId,
         nodeId: event.nodeId,
@@ -3589,6 +3601,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
         usage,
         provider,
         model,
+        effort,
       });
       subscribers.broadcast(runId, {
         type: "node_done",
@@ -3598,6 +3611,7 @@ function dispatchRunEvent(args: DispatchArgs): void {
         ...(usage !== null ? { usage } : {}),
         ...(provider !== null ? { provider } : {}),
         ...(model !== null ? { model } : {}),
+        ...(effort !== null ? { effort } : {}),
       });
       // Snapshot bridge: a structured node output becomes the latest frame
       // on the run-scoped snapshot key.

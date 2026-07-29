@@ -8,7 +8,12 @@
 
 import { z } from "zod";
 import { briefSchema } from "./brief.ts";
-import { contentBlockSchema, messageChunkSchema, tokenUsageSchema } from "./chat.ts";
+import {
+  contentBlockSchema,
+  messageChunkSchema,
+  reasoningEffortLevelSchema,
+  tokenUsageSchema,
+} from "./chat.ts";
 
 // Run-level status. `running` is the value the store writes on POST; the
 // executor's RunStatus union ("succeeded" | "failed" | "cancelled") flows in
@@ -143,6 +148,10 @@ export const nodeOutputRowSchema = z
     // and hand-built fixtures keep parsing.
     provider: z.string().nullable().default(null),
     model: z.string().nullable().default(null),
+    // Effective reasoning tier the node ran at, normalized to the provider
+    // spelling. Null when the node declared none — providers then apply their
+    // own per-model default, which they don't report back.
+    effort: reasoningEffortLevelSchema.nullable().default(null),
   })
   .strict();
 export type NodeOutputRow = z.infer<typeof nodeOutputRowSchema>;
@@ -315,6 +324,8 @@ export const workflowFrameSchema = z.discriminatedUnion("type", [
       // shows them without a reload. Omitted for non-LLM nodes.
       provider: z.string().optional(),
       model: z.string().optional(),
+      // Effective reasoning tier, omitted when the node declared none.
+      effort: reasoningEffortLevelSchema.optional(),
     })
     .strict(),
   z

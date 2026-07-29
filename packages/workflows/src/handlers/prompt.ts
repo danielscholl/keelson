@@ -766,6 +766,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       if (providerResolved) {
         if (recordedProviderId !== undefined) result.provider = recordedProviderId;
         if (model !== undefined) result.model = model;
+        if (effort !== undefined) result.effort = effort;
       }
 
       try {

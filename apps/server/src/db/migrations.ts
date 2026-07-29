@@ -390,6 +390,13 @@ const migrations: Migration[] = [
       db.exec("ALTER TABLE workflow_runs ADD COLUMN brief_json TEXT;");
     },
   },
+  {
+    version: 12,
+    description: "workflow node provenance: effective reasoning effort per LLM node",
+    up: (db) => {
+      db.exec("ALTER TABLE workflow_node_outputs ADD COLUMN effort TEXT;");
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

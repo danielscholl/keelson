@@ -147,7 +147,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
   // reported none. Before then, fall through to the static declared-model chip.
   const hasRuntimeProvenance = view.provider !== undefined || view.model !== undefined;
   const runtimeProvenance = hasRuntimeProvenance
-    ? formatProviderModel(view.provider, view.model, schema.model)
+    ? formatProviderModel(view.provider, view.model, schema.model, view.effort)
     : null;
   const isPromptish = schema.type === "prompt" || schema.type === "approval";
 
