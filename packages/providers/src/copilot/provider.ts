@@ -55,6 +55,7 @@ export const COPILOT_CAPABILITIES: ProviderCapabilities = {
   sessionResume: true,
   streaming: true,
   tools: true,
+  reasoningEffort: true,
   // Only the synthetic "auto" — GitHub rotates the live catalogue and retires
   // concrete ids (e.g. gpt-5, which then 404s at session.create), so listing
   // them here would advertise models that no longer exist. "auto" delegates the

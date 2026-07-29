@@ -1,6 +1,7 @@
 import type {
   ContentBlock,
   MessageChunk,
+  ReasoningEffortLevel,
   TokenUsage,
   WorkflowFrame,
   WorkflowNodeStatus,
@@ -59,6 +60,10 @@ export interface NodeView {
   // for non-LLM nodes and before the node terminates.
   provider?: string;
   model?: string;
+  // Effective reasoning tier the node ran at. Same live/snapshot sourcing as
+  // provider/model; absent when the node declared none, in which case the
+  // provider applied its own per-model default and never reported it back.
+  effort?: ReasoningEffortLevel;
 }
 
 export interface RunView {
@@ -235,6 +240,7 @@ function hydrateFromSnapshot(snapshot: WorkflowRunDetail): {
       ...(row.usage !== null ? { usage: row.usage } : {}),
       ...(row.provider !== null ? { provider: row.provider } : {}),
       ...(row.model !== null ? { model: row.model } : {}),
+      ...(row.effort !== null ? { effort: row.effort } : {}),
     };
   }
   // awaitingNodeId is derived from the nodes map at the hook boundary;
@@ -543,7 +549,7 @@ function isLiveNodeEmpty(node: NodeView | undefined): boolean {
   );
 }
 
-function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
+export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   // Reconnect-after-disconnect repair: pick the more-advanced status and
   // the longer content. Status preference order:
   //   1. Either side that's terminal wins (snapshot terminal + live still
@@ -630,6 +636,11 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     usage: liveSide.usage ?? snapshotSide.usage,
     provider: liveSide.provider ?? snapshotSide.provider,
     model: liveSide.model ?? snapshotSide.model,
+    // Presence, not nullishness: node_done writes the key even when it carries
+    // no tier, so a re-run at a lower tier (or on a provider that ignores the
+    // option) must clear the snapshot's value rather than fall back to it. A
+    // live side that never saw node_done has no key and defers to the snapshot.
+    effort: Object.hasOwn(liveSide, "effort") ? liveSide.effort : snapshotSide.effort,
   };
 }
 
@@ -733,9 +744,10 @@ export function applyFrame(
             ...(frame.usage !== undefined ? { usage: frame.usage } : {}),
             // node_done is authoritative for provenance: set it from the frame
             // (absent → cleared, like `error`), so a re-run/resume that drops a
-            // node's provider/model propagates the clear without a full reload.
+            // node's provenance propagates the clear without a full reload.
             provider: frame.provider,
             model: frame.model,
+            effort: frame.effort,
             // Approval node resolved — clear its message so the callout
             // doesn't linger after resume.
             awaitingMessage: undefined,

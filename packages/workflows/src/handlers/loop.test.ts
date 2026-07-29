@@ -790,6 +790,31 @@ describe("makeLoopHandler — provider/model provenance", () => {
     expect(result.provider).toBe("copilot");
     expect(result.model).toBe("gpt-5");
   });
+
+  test("carries the iterations' effort so a loop node isn't the one blank chip in the trace", async () => {
+    const { handler: promptHandler } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "<promise>DONE</promise>" },
+      provider: "copilot",
+      model: "gpt-5",
+      effort: "xhigh",
+    }));
+    const handler = makeLoopHandler({ promptHandler });
+    const result = await handler.handle(loopNode({}), buildCtx());
+    expect(result.effort).toBe("xhigh");
+  });
+
+  test("reports no effort when the iterations reported none", async () => {
+    const { handler: promptHandler } = makeRecorderHandler(() => ({
+      status: "succeeded",
+      output: { kind: "text", text: "<promise>DONE</promise>" },
+      provider: "copilot",
+      model: "gpt-5",
+    }));
+    const handler = makeLoopHandler({ promptHandler });
+    const result = await handler.handle(loopNode({}), buildCtx());
+    expect(result.effort).toBeUndefined();
+  });
 });
 
 describe("makeLoopHandler — output_format is filtered from iteration prompts", () => {

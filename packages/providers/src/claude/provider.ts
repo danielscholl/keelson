@@ -74,6 +74,7 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
   sessionResume: true,
   streaming: true,
   tools: true,
+  reasoningEffort: false,
   // Same source of truth as listModels(); providerInfoSchema's bare-id
   // shape gets projected here so the two don't drift.
   models: CLAUDE_MODEL_CATALOG.map((m) => m.id),

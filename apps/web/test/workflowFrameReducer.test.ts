@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { WorkflowFrame } from "@keelson/shared";
-import { applyFrame, type NodeView, type RunView } from "../src/hooks/useWorkflowRun.ts";
+import { applyFrame, mergeNode, type NodeView, type RunView } from "../src/hooks/useWorkflowRun.ts";
 
 // Drives the pure frame reducer with plain state closures — no React, no WS.
 function harness() {
@@ -78,5 +78,34 @@ describe("applyFrame converge relaunch", () => {
     h.apply({ type: "node_started", nodeId: "fetch-state" });
     expect(h.node("fetch-state")?.contentParts).toEqual([{ type: "text", text: "early" }]);
     expect(h.node("fetch-state")?.status).toBe("running");
+  });
+});
+
+describe("mergeNode effort", () => {
+  const base = (partial: Partial<NodeView> & { nodeId: string }): NodeView => ({
+    status: "succeeded",
+    contentParts: [],
+    thinkingText: "",
+    logLines: [],
+    ...partial,
+  });
+
+  test("a node_done carrying no tier clears the snapshot's stale one", () => {
+    const snapshot = base({ nodeId: "n1", provider: "copilot", effort: "xhigh" });
+    // What applyFrame writes for a node_done with no effort: key present, value undefined.
+    const live = base({ nodeId: "n1", provider: "copilot", effort: undefined });
+    expect(mergeNode(snapshot, live).effort).toBeUndefined();
+  });
+
+  test("a live side that never saw node_done defers to the snapshot", () => {
+    const snapshot = base({ nodeId: "n1", provider: "copilot", effort: "xhigh" });
+    const live = base({ nodeId: "n1", status: "running" });
+    expect(mergeNode(snapshot, live).effort).toBe("xhigh");
+  });
+
+  test("a live tier wins over the snapshot's", () => {
+    const snapshot = base({ nodeId: "n1", effort: "low" });
+    const live = base({ nodeId: "n1", effort: "xhigh" });
+    expect(mergeNode(snapshot, live).effort).toBe("xhigh");
   });
 });

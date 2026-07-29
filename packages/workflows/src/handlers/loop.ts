@@ -202,11 +202,13 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
       // real id.
       let loopProvider: string | undefined;
       let loopModel: string | undefined;
+      let loopEffort: string | undefined;
       const finalize = (result: NodeResult): NodeResult => ({
         ...result,
         ...(loopUsage !== undefined ? { usage: loopUsage } : {}),
         ...(loopProvider !== undefined ? { provider: loopProvider } : {}),
         ...(loopModel !== undefined ? { model: loopModel } : {}),
+        ...(loopEffort !== undefined ? { effort: loopEffort } : {}),
       });
 
       for (let i = 1; i <= loop.max_iterations; i++) {
@@ -253,6 +255,7 @@ export function makeLoopHandler(opts: MakeLoopHandlerOptions): NodeHandler {
         loopUsage = addNodeUsage(loopUsage, result.usage);
         if (result.provider !== undefined) loopProvider = result.provider;
         if (result.model !== undefined) loopModel = result.model;
+        if (result.effort !== undefined) loopEffort = result.effort;
         if (result.status !== "succeeded") return finalize(result);
 
         const text =

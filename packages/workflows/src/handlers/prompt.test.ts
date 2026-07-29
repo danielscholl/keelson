@@ -36,7 +36,7 @@ interface SpyProviderOptions {
   // When set, makeSpyProvider exposes `getCapabilities()` returning this
   // shape so the model-resolution chain can fall through to a provider
   // default. Omit to keep the prior structural-subset behavior.
-  capabilities?: { defaultModel?: string };
+  capabilities?: { defaultModel?: string; reasoningEffort?: boolean };
 }
 
 function makeSpyProvider(opts: SpyProviderOptions = {}): {
@@ -1405,6 +1405,82 @@ describe("makePromptHandler", () => {
       expect(result.provider).toBeUndefined();
       expect(result.model).toBeUndefined();
     });
+
+    test("records the node's effort over the workflow default", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { reasoningEffort: true },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", effort: "xhigh" } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx({ workflowEffort: "low" }));
+      expect(result.effort).toBe("xhigh");
+    });
+
+    test("falls back to the workflow effort and normalizes `max` to the provider spelling", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { reasoningEffort: true },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx({ workflowEffort: "max" }));
+      expect(result.effort).toBe("xhigh");
+    });
+
+    test("omits effort when neither node nor workflow declares one", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { reasoningEffort: true },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx());
+      expect(result.effort).toBeUndefined();
+    });
+
+    test("omits effort when the provider does not consume reasoningEffort", async () => {
+      // claude / pi / gateways take the option and drop it — the turn ran at the
+      // SDK's own default, so reporting the declared tier would be a false claim.
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { reasoningEffort: false },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "claude",
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx({ workflowEffort: "xhigh" }));
+      expect(result.effort).toBeUndefined();
+      // Still forwarded — the provider is free to start honoring it; only the
+      // provenance claim is withheld.
+      expect(calls[0]!.options?.reasoningEffort).toBe("xhigh");
+      expect(result.provider).toBe("claude");
+    });
+
+    test("omits effort when the provider declares no capabilities at all", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const result = await handler.handle(stubNode, buildCtx({ workflowEffort: "xhigh" }));
+      expect(result.effort).toBeUndefined();
+    });
   });
 
   test("times out even when the provider ignores its abortSignal (hung provider)", async () => {
@@ -1660,6 +1736,7 @@ describe("makePromptHandler", () => {
       prompt: "",
       provider: "not-a-real-provider",
       model: "gpt-5",
+      effort: "high",
     } as unknown as DagNode;
     const result = await handler.handle(node, buildCtx());
     expect(result.status).toBe("failed");
@@ -1669,6 +1746,7 @@ describe("makePromptHandler", () => {
     // the requested provider/model.
     expect(result.provider).toBeUndefined();
     expect(result.model).toBeUndefined();
+    expect(result.effort).toBeUndefined();
   });
 
   describe("output_format", () => {

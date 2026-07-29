@@ -138,6 +138,8 @@ export interface NodeResult {
   provider?: string;
   /** Effective model the node ran on — the provider's resolved model when it reports one, else the requested node/workflow/default model. Absent for non-LLM nodes. */
   model?: string;
+  /** Effective reasoning tier the node ran at, normalized to the provider spelling (`max` → `xhigh`). Absent for non-LLM nodes and when neither node nor workflow declared one. */
+  effort?: string;
 }
 
 export interface NodeHandler {

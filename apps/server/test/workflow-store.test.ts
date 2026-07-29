@@ -168,6 +168,7 @@ describe("SQLite WorkflowStore", () => {
       usage: null,
       provider: "copilot",
       model: "auto",
+      effort: "xhigh",
     });
     // A bash node reports neither.
     store.upsertNodeOutput({
@@ -182,13 +183,16 @@ describe("SQLite WorkflowStore", () => {
       usage: null,
       provider: null,
       model: null,
+      effort: null,
     });
 
     const run = store.getRun("r1");
     expect(run!.nodes[0]!.provider).toBe("copilot");
     expect(run!.nodes[0]!.model).toBe("auto");
+    expect(run!.nodes[0]!.effort).toBe("xhigh");
     expect(run!.nodes[1]!.provider).toBeNull();
     expect(run!.nodes[1]!.model).toBeNull();
+    expect(run!.nodes[1]!.effort).toBeNull();
 
     // Re-upsert (resume / re-run) overwrites the provenance, not duplicates it.
     store.upsertNodeOutput({
@@ -203,11 +207,15 @@ describe("SQLite WorkflowStore", () => {
       usage: null,
       provider: "claude",
       model: "claude-sonnet-4-6",
+      effort: null,
     });
     const reread = store.getRun("r1");
     expect(reread!.nodes).toHaveLength(2);
     expect(reread!.nodes[0]!.provider).toBe("claude");
     expect(reread!.nodes[0]!.model).toBe("claude-sonnet-4-6");
+    // The re-run declared no effort — the prior tier must not survive as a
+    // stale claim about the turn that just ran.
+    expect(reread!.nodes[0]!.effort).toBeNull();
   });
 
   test("getRunUsageTotals sums tokens and counts only nodes carrying usage", () => {

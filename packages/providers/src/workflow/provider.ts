@@ -18,6 +18,7 @@ export const WORKFLOW_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,
   streaming: false,
   tools: false,
+  reasoningEffort: false,
   models: [],
   defaultModel: "",
 };

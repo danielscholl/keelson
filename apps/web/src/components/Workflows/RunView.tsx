@@ -128,18 +128,26 @@ export function RunView({
   // Run-level provenance chip: collapse to one `provider · model` label only
   // when every node that reported one agrees. Nodes can pin different
   // providers/models, so a mixed run shows nothing here (the per-node trace
-  // chips carry the detail) rather than misclaiming a single one.
+  // chips carry the detail) rather than misclaiming a single one. Effort is
+  // agreed separately and appended only if it too is uniform — workflows
+  // routinely pin a tier on their heavyweight nodes alone, and folding that
+  // into the same key would drop the chip for a run whose provider/model never
+  // varied.
   const runProvenance = useMemo(() => {
     const declaredByNode = new Map(workflow.nodes.map((n) => [n.id, n.model]));
     const labels = new Set<string>();
+    const efforts = new Set<string | undefined>();
     for (const [id, v] of Object.entries(nodes)) {
       // Only nodes that actually ran on a provider; backfill the model from the
       // node's declared `model:` when the runtime reported none.
       if (v.provider === undefined && v.model === undefined) continue;
       const label = formatProviderModel(v.provider, v.model, declaredByNode.get(id));
       if (label !== null) labels.add(label);
+      efforts.add(v.effort);
     }
-    return labels.size === 1 ? [...labels][0] : null;
+    if (labels.size !== 1) return null;
+    const effort = efforts.size === 1 ? [...efforts][0] : undefined;
+    return formatProviderModel(undefined, [...labels][0], undefined, effort);
   }, [nodes, workflow.nodes]);
 
   const handleCancel = async () => {

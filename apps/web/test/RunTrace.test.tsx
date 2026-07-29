@@ -83,6 +83,31 @@ describe("RunTrace — per-node model", () => {
     expect(screen.getByTitle("Ran on copilot · auto")).toBeDefined();
   });
 
+  test("appends the reasoning tier the node ran at", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt", model: "auto" }];
+    const nodes: Record<string, NodeView> = {
+      reason: node({
+        nodeId: "reason",
+        type: "prompt",
+        provider: "copilot",
+        model: "claude-opus-4.8",
+        effort: "xhigh",
+      }),
+    };
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />);
+    expect(screen.getByText("copilot · claude-opus-4.8 · xhigh")).toBeDefined();
+    expect(screen.getByTitle("Ran on copilot · claude-opus-4.8 · xhigh")).toBeDefined();
+  });
+
+  test("omits the tier segment when the node declared no effort", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt", model: "auto" }];
+    const nodes: Record<string, NodeView> = {
+      reason: node({ nodeId: "reason", type: "prompt", provider: "copilot", model: "auto" }),
+    };
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />);
+    expect(screen.getByText("copilot · auto")).toBeDefined();
+  });
+
   test("node usage popover shows context and cache rows from reported usage", () => {
     const schemaNodes: WorkflowNodeSummary[] = [{ id: "reason", type: "prompt" }];
     const nodes: Record<string, NodeView> = {
