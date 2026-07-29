@@ -89,7 +89,11 @@ nodes:
         # GraphQL) and GitLab (MR discussions).
         forge pr threads "$PR_NUM" --unresolved > "$COMBINED"
         jq --slurpfile handled "$HANDLED" '
-          ($handled[0] // []) as $ledger
+          # The ledger is append-only across rounds; only a thread'\''s LATEST
+          # entry decides retry eligibility (an old failed-resolve entry must
+          # not outvote a newer non-resolvable verdict). group_by is stable,
+          # so .[-1] per group is the last-appended entry.
+          (($handled[0] // []) | group_by(.threadId) | map(.[-1])) as $ledger
           | ([$ledger[]?
               | select(.replied == true and (.resolved != true)
                   and (.action == "fixed" or .decision == "invalid" or .decision == "already-addressed"))
@@ -915,12 +919,15 @@ nodes:
       ## Inputs
 
       - PR number: `$ARTIFACTS_DIR/.pr-number`
-      - Handled ledger: `$ARTIFACTS_DIR/handled.json` — each entry carries
-        `replied` (bool) and `resolved` (bool). `resolved` is the authoritative
-        signal: a resolvable thread (action `fixed`, or decision `invalid` /
-        `already-addressed`) whose `resolveReviewThread` call failed is recorded
-        with `resolved: false`, so it is still open on the forge. Count
-        resolutions from `resolved`, never from `action` or `decision`.
+      - Handled ledger: `$ARTIFACTS_DIR/handled.json` — append-only across
+        rounds, so a re-triaged thread has multiple entries; count every metric
+        from each thread's LATEST entry only (last occurrence per `threadId`).
+        Each entry carries `replied` (bool) and `resolved` (bool). `resolved`
+        is the authoritative signal: a resolvable thread (action `fixed`, or
+        decision `invalid` / `already-addressed`) whose `resolveReviewThread`
+        call failed is recorded with `resolved: false`, so it is still open on
+        the forge. Count resolutions from `resolved`, never from `action` or
+        `decision`.
       - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
       - Post-CI new-thread set: `$ARTIFACTS_DIR/post-ci-threads.json`
       - Pending resolve-retries: `$ARTIFACTS_DIR/post-ci-retry.json`

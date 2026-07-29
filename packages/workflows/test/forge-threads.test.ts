@@ -41,7 +41,7 @@ function threadState(
   threadsJson: string,
   handledJson = "[]",
 ): { open: unknown[]; new: unknown[]; retry: unknown[] } {
-  const program = `($handled[0] // []) as $ledger
+  const program = `(($handled[0] // []) | group_by(.threadId) | map(.[-1])) as $ledger
   | ([$ledger[]?
       | select(.replied == true and (.resolved != true)
           and (.action == "fixed" or .decision == "invalid" or .decision == "already-addressed"))
@@ -358,6 +358,35 @@ shimDescribe("resolve-pr thread-state classification (new vs answered vs retry)"
     ]);
     const state = threadState(payload(thread("T-reopened", ["bot", "operator", "bot"])), handled);
     expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual(["T-reopened"]);
+    expect(state.retry).toHaveLength(0);
+  });
+
+  test("only a thread's latest ledger entry decides retry eligibility", () => {
+    // Append-only ledger: round 1 replied `invalid` and the resolve failed;
+    // the reviewer followed up and round 2 re-triaged it `wontfix`. The stale
+    // invalid entry must not drag the thread back into the retry lane once we
+    // hold the last comment again.
+    const handled = JSON.stringify([
+      {
+        threadId: "T-retriaged",
+        action: "replied-only",
+        decision: "invalid",
+        replied: true,
+        resolved: false,
+      },
+      {
+        threadId: "T-retriaged",
+        action: "replied-only",
+        decision: "wontfix",
+        replied: true,
+        resolved: false,
+      },
+    ]);
+    const state = threadState(
+      payload(thread("T-retriaged", ["bot", "operator", "bot", "operator"])),
+      handled,
+    );
+    expect(state.new).toHaveLength(0);
     expect(state.retry).toHaveLength(0);
   });
 });
