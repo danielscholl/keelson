@@ -42,7 +42,6 @@ function threadState(
   handledJson = "[]",
 ): { open: unknown[]; new: unknown[]; retry: unknown[] } {
   const program = `($handled[0] // []) as $ledger
-  | ([$ledger[]?.threadId] | unique) as $handledIds
   | ([$ledger[]?
       | select(.replied == true and (.resolved != true)
           and (.action == "fixed" or .decision == "invalid" or .decision == "already-addressed"))
@@ -60,10 +59,7 @@ function threadState(
   | . as $open
   | {
       open: $open,
-      new: ($open | map(select(
-          ((.threadId as $id | $handledIds | index($id)) == null)
-          and (.replyCount == 0 or .lastAuthor == .author)
-        ))),
+      new: ($open | map(select(.replyCount == 0 or .lastAuthor == .author))),
       retry: ($open | map(select((.threadId as $id | $retryIds | index($id)) != null)))
     }`;
   const d = mkdtempSync(join(tmpdir(), "keelson-forge-ledger-"));
@@ -284,12 +280,16 @@ shimDescribe("resolve-pr thread-state classification (new vs answered vs retry)"
     expect(threadState(`[${bare}]`).new).toHaveLength(0);
   });
 
-  test("ledger entries dedupe within a run regardless of last author", () => {
+  test("a reviewer follow-up reopens a thread this run already handled", () => {
+    // The ledger must NOT gate `new`: after this run replies (ledger entry
+    // written), a reviewer follow-up during the CI watch puts the reviewer
+    // back on the last comment — post-ci-state must count it as new so
+    // converge-check cannot declare success over an unanswered follow-up.
     const handled = JSON.stringify([
       { threadId: "T-followup", action: "replied-only", decision: "wontfix", replied: true },
     ]);
     const state = threadState(payload(thread("T-followup", ["bot", "operator", "bot"])), handled);
-    expect(state.new).toHaveLength(0);
+    expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual(["T-followup"]);
   });
 
   test("retry covers fixed AND approved invalid/already-addressed rebuttals, not wontfix", () => {

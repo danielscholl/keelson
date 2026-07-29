@@ -73,10 +73,11 @@ nodes:
       echo "Round $ROUND: fetching PR #$PR_NUM state" >&2
 
       # Written once, sourced by fetch-state and post-ci-state so the two never
-      # drift. The handled ledger is per-run (it dies with the artifacts dir),
-      # so `new` must come from the thread itself: no replies yet, or the
-      # reviewer holds the last comment — an answered thread is skipped across
-      # runs and hand-replies, and a reviewer follow-up reopens triage.
+      # drift. `new` comes from the thread itself, never the ledger: no replies
+      # yet, or the reviewer holds the last comment — so an answered thread is
+      # skipped across runs and hand-replies, and a reviewer follow-up reopens
+      # triage even mid-run, after this run already replied. The per-run ledger
+      # (it dies with the artifacts dir) feeds only the resolve-retry lane.
       cat > "$KEELSON_ARTIFACTS_DIR/thread-lib.sh" <<'THREADLIB'
       fetch_thread_state() {
         local PR_NUM="$1" STATE_OUT="$2"
@@ -89,7 +90,6 @@ nodes:
         forge pr threads "$PR_NUM" --unresolved > "$COMBINED"
         jq --slurpfile handled "$HANDLED" '
           ($handled[0] // []) as $ledger
-          | ([$ledger[]?.threadId] | unique) as $handledIds
           | ([$ledger[]?
               | select(.replied == true and (.resolved != true)
                   and (.action == "fixed" or .decision == "invalid" or .decision == "already-addressed"))
@@ -112,10 +112,7 @@ nodes:
           | . as $open
           | {
               open: $open,
-              new: ($open | map(select(
-                  ((.threadId as $id | $handledIds | index($id)) == null)
-                  and (.replyCount == 0 or .lastAuthor == .author)
-                ))),
+              new: ($open | map(select(.replyCount == 0 or .lastAuthor == .author))),
               retry: ($open | map(select((.threadId as $id | $retryIds | index($id)) != null)))
             }
         ' "$COMBINED" > "$STATE_OUT"
@@ -585,11 +582,11 @@ nodes:
       - Record a thread into `$ARTIFACTS_DIR/handled.json` as soon as its reply is
         posted, carrying `replied: true` and `resolved: <bool>` — `resolved: true`
         ONLY when a resolvable thread's resolve call SUCCEEDED,
-        otherwise `resolved: false`. Recording on reply (not on full resolve) is
-        deliberate: it stops the NEXT round from re-posting the same reply. A
-        resolvable thread whose resolve failed is recorded with `resolved: false`
-        so a later round retries the resolve ONLY — that thread is never
-        re-triaged or re-replied.
+        otherwise `resolved: false`. The posted reply itself is what stops the
+        next round from re-triaging (our comment becomes the thread's last);
+        the ledger exists for the resolve-retry lane: a resolvable thread whose
+        resolve failed is recorded with `resolved: false` so a later round
+        retries the resolve ONLY, without posting another reply.
 
       ## Steps
 
