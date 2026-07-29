@@ -72,20 +72,11 @@ nodes:
       echo "$PR_NUM" > "$KEELSON_ARTIFACTS_DIR/.pr-number"
       echo "Round $ROUND: fetching PR #$PR_NUM state" >&2
 
-      # GraphQL paging + handled-ledger diff, written once and sourced by both
-      # fetch-state and post-ci-state so the two never drift. Unresolved threads
-      # split three ways: `new` (needs triage/reply this round), `retry` (a
-      # resolvable thread whose reply posted but resolve failed → resolve-only),
-      # and the rest of `open` (already answered, awaiting the reviewer).
-      #
-      # "New" is derived from the thread itself, not only the per-run ledger:
-      # the ledger lives in the run's artifacts dir and dies with it, so a
-      # second run against the same PR would otherwise re-triage and re-reply
-      # every still-open thread it answered last time. A thread is new only
-      # when the ball is in OUR court — no replies yet, or the LAST comment is
-      # the thread's own reviewer again (a follow-up reopens triage). A thread
-      # whose last comment is anyone else (this run via the ledger, a prior
-      # run, or an operator replying by hand) is answered, not new.
+      # Written once, sourced by fetch-state and post-ci-state so the two never
+      # drift. The handled ledger is per-run (it dies with the artifacts dir),
+      # so `new` must come from the thread itself: no replies yet, or the
+      # reviewer holds the last comment — an answered thread is skipped across
+      # runs and hand-replies, and a reviewer follow-up reopens triage.
       cat > "$KEELSON_ARTIFACTS_DIR/thread-lib.sh" <<'THREADLIB'
       fetch_thread_state() {
         local PR_NUM="$1" STATE_OUT="$2"
@@ -111,7 +102,11 @@ nodes:
               commentId: (.comments.nodes[0].databaseId // null),
               body: ([.comments.nodes[].body] | join("\n\n---\n\n")),
               author: (.comments.nodes[0].author.login // "unknown"),
-              lastAuthor: (.comments.nodes[-1].author.login // "unknown"),
+              # lastComment is the forge-reported TRUE final comment; the
+              # comments window is capped (first:50 on GitHub), so its last
+              # node is only a fallback for older shims.
+              lastAuthor: ((.lastComment.nodes // [])[-1].author.login
+                // .comments.nodes[-1].author.login // "unknown"),
               replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
             })
           | . as $open
@@ -542,8 +537,11 @@ nodes:
         exit 1
       fi
       # Valid action; a 'fixed' resolve requires actionable triage AND a commit;
-      # a non-empty reply; and a commentId that is the thread's OWN reply target
-      # (so a swapped id can't post the response on the wrong thread).
+      # a decision equal to the APPROVED triage decision (resolvability is
+      # derived from it downstream, so a drifted decision could resolve a
+      # thread the operator never signed off on); a non-empty reply; and a
+      # commentId that is the thread's OWN reply target (so a swapped id can't
+      # post the response on the wrong thread).
       BAD=$(jq -r --slurpfile tri "$T" --slurpfile th "$TH" '
         ($tri[0].threads | map({ (.threadId): .decision }) | add) as $dec
         | ($th[0] | map({ (.threadId): .commentId }) | add) as $cid
@@ -552,6 +550,7 @@ nodes:
                 (.action != "fixed" and .action != "replied-only")
                 or (.action == "fixed" and (($dec[.threadId]) != "actionable-code-change"))
                 or (.action == "fixed" and (((.commit // "") | tostring | length) == 0))
+                or (.decision != ($dec[.threadId]))
                 or (((.reply // "") | tostring | length) == 0)
                 or (.commentId != ($cid[.threadId]))
               )
@@ -559,7 +558,7 @@ nodes:
       ' "$R")
       if [ -n "$BAD" ]; then
         echo "honesty gate failed for thread(s): $BAD" >&2
-        echo "(each result: action fixed|replied-only; a 'fixed' action requires actionable triage + a commit; a non-empty reply; and a commentId matching the thread's own comment)." >&2
+        echo "(each result: action fixed|replied-only; a 'fixed' action requires actionable triage + a commit; decision must equal the approved triage decision; a non-empty reply; and a commentId matching the thread's own comment)." >&2
         exit 1
       fi
       echo "honesty gate OK: $(jq 'length' "$R") result(s) validated against triage before reply/resolve."

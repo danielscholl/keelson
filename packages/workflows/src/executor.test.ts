@@ -2122,6 +2122,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
       threadId: string;
       commentId: number;
       action: string;
+      decision: string;
       commit: string | null;
       reply: string;
     }[];
@@ -2251,7 +2252,16 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
       ciStatus: "PASS",
       threads: [{ threadId: "t1", commentId: 1 }],
       triage: [{ threadId: "t1", decision: "actionable-code-change" }],
-      results: [{ threadId: "t1", commentId: 1, action: "fixed", commit: "c1", reply: "r1" }],
+      results: [
+        {
+          threadId: "t1",
+          commentId: 1,
+          action: "fixed",
+          decision: "actionable-code-change",
+          commit: "c1",
+          reply: "r1",
+        },
+      ],
       postCiThreads: [],
     });
     const summary = await run;
@@ -2285,8 +2295,22 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
         { threadId: "t2", decision: "invalid" },
       ],
       results: [
-        { threadId: "t1", commentId: 1, action: "fixed", commit: "c1", reply: "r1" },
-        { threadId: "t2", commentId: 2, action: "replied-only", commit: null, reply: "r2" },
+        {
+          threadId: "t1",
+          commentId: 1,
+          action: "fixed",
+          decision: "actionable-code-change",
+          commit: "c1",
+          reply: "r1",
+        },
+        {
+          threadId: "t2",
+          commentId: 2,
+          action: "replied-only",
+          decision: "invalid",
+          commit: null,
+          reply: "r2",
+        },
       ],
       postCiThreads: [],
     });

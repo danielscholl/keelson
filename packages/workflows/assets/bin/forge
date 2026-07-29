@@ -461,7 +461,7 @@ threads_github() {                   # <pr>
   local pr="$1" repo owner name cursor="" page has_next out="[]"
   repo=$(gh repo view --json nameWithOwner -q '.nameWithOwner'); owner="${repo%%/*}"; name="${repo##*/}"
   while :; do
-    page=$(gh api graphql -f query='query($o:String!,$n:String!,$pr:Int!,$c:String){repository(owner:$o,name:$n){pullRequest(number:$pr){reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id isResolved path line comments(first:50){nodes{databaseId body author{login}}}}}}}}' \
+    page=$(gh api graphql -f query='query($o:String!,$n:String!,$pr:Int!,$c:String){repository(owner:$o,name:$n){pullRequest(number:$pr){reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id isResolved path line comments(first:50){nodes{databaseId body author{login}}} lastComment: comments(last:1){nodes{author{login}}}}}}}}' \
       -f o="$owner" -f n="$name" -F pr="$pr" ${cursor:+-f c="$cursor"})
     out=$(jq -s '.[0] + [ .[1].data.repository.pullRequest.reviewThreads.nodes[] ]' <(printf '%s' "$out") <(printf '%s' "$page"))
     has_next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
@@ -483,7 +483,8 @@ threads_gitlab() {                   # <mr>
               isResolved: ([ .notes[] | select(.resolvable == true) ] | length > 0 and all(.resolved == true)),
               path: ($anchor.position.new_path // $anchor.position.old_path // null),
               line: ($anchor.position.new_line // $anchor.position.old_line // null),
-              comments: { nodes: [ .notes[] | select(.system != true) | { databaseId: .id, body: .body, author: { login: .author.username } } ] }
+              comments: { nodes: [ .notes[] | select(.system != true) | { databaseId: .id, body: .body, author: { login: .author.username } } ] },
+              lastComment: { nodes: [ ([ .notes[] | select(.system != true) ] | last // empty) | { author: { login: .author.username } } ] }
             }
         ]'
 }

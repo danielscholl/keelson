@@ -53,7 +53,8 @@ function threadState(
       commentId: (.comments.nodes[0].databaseId // null),
       body: ([.comments.nodes[].body] | join("\\n\\n---\\n\\n")),
       author: (.comments.nodes[0].author.login // "unknown"),
-      lastAuthor: (.comments.nodes[-1].author.login // "unknown"),
+      lastAuthor: ((.lastComment.nodes // [])[-1].author.login
+        // .comments.nodes[-1].author.login // "unknown"),
       replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
     })
   | . as $open
@@ -179,6 +180,8 @@ exit 1
       databaseId: 501,
       author: { login: "coderabbit" },
     });
+    // The classification's authoritative last-author field (see thread-lib).
+    expect(byId.abc111.lastComment.nodes[0]).toMatchObject({ author: { login: "coderabbit" } });
     // Removed-line comment falls back to old_path/old_line (the adversarial fix).
     expect(byId.abc333).toMatchObject({ path: "src/c.ts", line: 88 });
     // Resolved, system, and individual_note discussions are excluded.
@@ -214,7 +217,7 @@ exit 1
 });
 
 shimDescribe("resolve-pr thread-state classification (new vs answered vs retry)", () => {
-  const thread = (id: string, authors: string[]) =>
+  const thread = (id: string, authors: string[], lastAuthor?: string) =>
     JSON.stringify({
       id,
       isResolved: false,
@@ -227,6 +230,7 @@ shimDescribe("resolve-pr thread-state classification (new vs answered vs retry)"
           author: { login },
         })),
       },
+      lastComment: { nodes: [{ author: { login: lastAuthor ?? authors[authors.length - 1] } }] },
     });
   const payload = (...threads: string[]) => `[${threads.join(",")}]`;
 
@@ -245,6 +249,39 @@ shimDescribe("resolve-pr thread-state classification (new vs answered vs retry)"
       "T-fresh",
       "T-followup",
     ]);
+  });
+
+  test("lastComment wins over the capped comments window (>50-comment truncation)", () => {
+    // GitHub's comments(first:50) window truncates long threads, so
+    // comments.nodes[-1] can be comment #50, not the true last. The shim's
+    // lastComment (comments(last:1)) is authoritative for classification.
+    const state = threadState(
+      payload(
+        // Window ends on our reply, but the reviewer truly commented last → new.
+        thread("T-truncated-followup", ["bot", "operator"], "bot"),
+        // Window ends on the reviewer, but our reply is truly last → answered.
+        thread("T-truncated-answered", ["bot", "operator", "bot"], "operator"),
+      ),
+    );
+    expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual([
+      "T-truncated-followup",
+    ]);
+  });
+
+  test("threads without lastComment fall back to the comments window", () => {
+    const bare = JSON.stringify({
+      id: "T-old-shim",
+      isResolved: false,
+      path: "a.md",
+      line: 1,
+      comments: {
+        nodes: [
+          { databaseId: 1, body: "c0", author: { login: "bot" } },
+          { databaseId: 2, body: "c1", author: { login: "operator" } },
+        ],
+      },
+    });
+    expect(threadState(`[${bare}]`).new).toHaveLength(0);
   });
 
   test("ledger entries dedupe within a run regardless of last author", () => {
