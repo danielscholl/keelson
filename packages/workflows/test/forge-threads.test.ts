@@ -34,17 +34,45 @@ const readLog = (p: string): string => {
     return "";
   }
 };
-// Run the ACTUAL resolve-pr ledger mapping over a threads payload, to prove the
-// shim's gh-shaped output is forge-agnostic downstream.
-function ledgerMap(threadsJson: string): unknown {
-  const program = `map(select(.isResolved == false)) | map({
-    threadId: .id, path: .path, line: (.line // null),
-    commentId: (.comments.nodes[0].databaseId // null),
-    body: ([.comments.nodes[].body] | join("\\n\\n---\\n\\n")),
-    author: (.comments.nodes[0].author.login // "unknown")
-  })`;
+// Run the ACTUAL resolve-pr thread-state mapping (thread-lib.sh's jq, verbatim
+// modulo shell quoting) over a threads payload, to prove the shim's gh-shaped
+// output is forge-agnostic downstream and to pin the new/retry classification.
+function threadState(
+  threadsJson: string,
+  handledJson = "[]",
+): { open: unknown[]; new: unknown[]; retry: unknown[] } {
+  const program = `(($handled[0] // []) | group_by(.threadId) | map(.[-1])) as $ledger
+  | ([$ledger[]?
+      | select(.replied == true and (.resolved != true)
+          and (.action == "fixed" or .decision == "invalid" or .decision == "already-addressed"))
+      | .threadId] | unique) as $retryIds
+  | map(select(.isResolved == false))
+  | map({
+      threadId: .id, path: .path, line: (.line // null),
+      commentId: (.comments.nodes[0].databaseId // null),
+      body: ([.comments.nodes[].body] | join("\\n\\n---\\n\\n")),
+      author: (.comments.nodes[0].author.login // "unknown"),
+      lastAuthor: ((.lastComment.nodes // [])[-1].author.login
+        // .comments.nodes[-1].author.login // "unknown"),
+      replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
+    })
+  | . as $open
+  | ($open | map(select(.replyCount == 0 or .lastAuthor == .author))) as $new
+  | ([$new[].threadId]) as $newIds
+  | {
+      open: $open,
+      new: $new,
+      retry: ($open | map(select(
+          ((.threadId as $id | $retryIds | index($id)) != null)
+          and ((.threadId as $id | $newIds | index($id)) == null)
+        )))
+    }`;
+  const d = mkdtempSync(join(tmpdir(), "keelson-forge-ledger-"));
+  tmps.push(d);
+  const handledPath = join(d, "handled.json");
+  writeFileSync(handledPath, handledJson);
   const p = Bun.spawnSync({
-    cmd: ["jq", "-c", program],
+    cmd: ["jq", "-c", "--slurpfile", "handled", handledPath, program],
     stdin: Buffer.from(threadsJson),
     stdout: "pipe",
     stderr: "pipe",
@@ -153,6 +181,8 @@ exit 1
       databaseId: 501,
       author: { login: "coderabbit" },
     });
+    // The classification's authoritative last-author field (see thread-lib).
+    expect(byId.abc111.lastComment.nodes[0]).toMatchObject({ author: { login: "coderabbit" } });
     // Removed-line comment falls back to old_path/old_line (the adversarial fix).
     expect(byId.abc333).toMatchObject({ path: "src/c.ts", line: 88 });
     // Resolved, system, and individual_note discussions are excluded.
@@ -163,7 +193,7 @@ exit 1
 
   test("resolve-pr's ledger mapping runs unchanged over the shim output", () => {
     const out = runForge(["pr", "threads", "42", "--unresolved"], { env: glabThreads() }).stdout;
-    const mapped = ledgerMap(out) as Array<{
+    const mapped = threadState(out).open as Array<{
       threadId: string;
       path: string;
       line: number;
@@ -184,6 +214,180 @@ exit 1
       line: 88,
       commentId: 503,
     });
+  });
+});
+
+shimDescribe("resolve-pr thread-state classification (new vs answered vs retry)", () => {
+  const thread = (id: string, authors: string[], lastAuthor?: string) =>
+    JSON.stringify({
+      id,
+      isResolved: false,
+      path: "a.md",
+      line: 1,
+      comments: {
+        nodes: authors.map((login, i) => ({
+          databaseId: i + 1,
+          body: `c${i}`,
+          author: { login },
+        })),
+      },
+      lastComment: { nodes: [{ author: { login: lastAuthor ?? authors[authors.length - 1] } }] },
+    });
+  const payload = (...threads: string[]) => `[${threads.join(",")}]`;
+
+  test("a thread whose last comment is not the reviewer's is answered, not new", () => {
+    // The cross-run double-reply bug: the per-run ledger is gone, but the
+    // thread itself shows our reply last — it must not be re-triaged.
+    const state = threadState(
+      payload(
+        thread("T-fresh", ["bot"]),
+        thread("T-answered", ["bot", "operator"]),
+        thread("T-followup", ["bot", "operator", "bot"]),
+      ),
+    );
+    expect(state.open).toHaveLength(3);
+    expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual([
+      "T-fresh",
+      "T-followup",
+    ]);
+  });
+
+  test("lastComment wins over the capped comments window (>50-comment truncation)", () => {
+    // GitHub's comments(first:50) window truncates long threads, so
+    // comments.nodes[-1] can be comment #50, not the true last. The shim's
+    // lastComment (comments(last:1)) is authoritative for classification.
+    const state = threadState(
+      payload(
+        // Window ends on our reply, but the reviewer truly commented last → new.
+        thread("T-truncated-followup", ["bot", "operator"], "bot"),
+        // Window ends on the reviewer, but our reply is truly last → answered.
+        thread("T-truncated-answered", ["bot", "operator", "bot"], "operator"),
+      ),
+    );
+    expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual([
+      "T-truncated-followup",
+    ]);
+  });
+
+  test("threads without lastComment fall back to the comments window", () => {
+    const bare = JSON.stringify({
+      id: "T-old-shim",
+      isResolved: false,
+      path: "a.md",
+      line: 1,
+      comments: {
+        nodes: [
+          { databaseId: 1, body: "c0", author: { login: "bot" } },
+          { databaseId: 2, body: "c1", author: { login: "operator" } },
+        ],
+      },
+    });
+    expect(threadState(`[${bare}]`).new).toHaveLength(0);
+  });
+
+  test("a reviewer follow-up reopens a thread this run already handled", () => {
+    // The ledger must NOT gate `new`: after this run replies (ledger entry
+    // written), a reviewer follow-up during the CI watch puts the reviewer
+    // back on the last comment — post-ci-state must count it as new so
+    // converge-check cannot declare success over an unanswered follow-up.
+    const handled = JSON.stringify([
+      { threadId: "T-followup", action: "replied-only", decision: "wontfix", replied: true },
+    ]);
+    const state = threadState(payload(thread("T-followup", ["bot", "operator", "bot"])), handled);
+    expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual(["T-followup"]);
+  });
+
+  test("retry covers fixed AND approved invalid/already-addressed rebuttals, not wontfix", () => {
+    const handled = JSON.stringify([
+      {
+        threadId: "T-fixed",
+        action: "fixed",
+        decision: "actionable-code-change",
+        replied: true,
+        resolved: false,
+      },
+      {
+        threadId: "T-invalid",
+        action: "replied-only",
+        decision: "invalid",
+        replied: true,
+        resolved: false,
+      },
+      {
+        threadId: "T-wontfix",
+        action: "replied-only",
+        decision: "wontfix",
+        replied: true,
+        resolved: false,
+      },
+      {
+        threadId: "T-done",
+        action: "replied-only",
+        decision: "already-addressed",
+        replied: true,
+        resolved: true,
+      },
+    ]);
+    const state = threadState(
+      payload(
+        thread("T-fixed", ["bot", "operator"]),
+        thread("T-invalid", ["bot", "operator"]),
+        thread("T-wontfix", ["bot", "operator"]),
+      ),
+      handled,
+    );
+    expect(state.retry.map((t) => (t as { threadId: string }).threadId)).toEqual([
+      "T-fixed",
+      "T-invalid",
+    ]);
+    expect(state.new).toHaveLength(0);
+  });
+
+  test("a reviewer follow-up pulls a retry-eligible thread out of the retry lane", () => {
+    // Overlap case: the failed-resolve ledger entry says retry, but the
+    // reviewer commented after our reply — resolving under the PRIOR approval
+    // would close an unanswered follow-up. New wins; retry excludes it.
+    const handled = JSON.stringify([
+      {
+        threadId: "T-reopened",
+        action: "replied-only",
+        decision: "invalid",
+        replied: true,
+        resolved: false,
+      },
+    ]);
+    const state = threadState(payload(thread("T-reopened", ["bot", "operator", "bot"])), handled);
+    expect(state.new.map((t) => (t as { threadId: string }).threadId)).toEqual(["T-reopened"]);
+    expect(state.retry).toHaveLength(0);
+  });
+
+  test("only a thread's latest ledger entry decides retry eligibility", () => {
+    // Append-only ledger: round 1 replied `invalid` and the resolve failed;
+    // the reviewer followed up and round 2 re-triaged it `wontfix`. The stale
+    // invalid entry must not drag the thread back into the retry lane once we
+    // hold the last comment again.
+    const handled = JSON.stringify([
+      {
+        threadId: "T-retriaged",
+        action: "replied-only",
+        decision: "invalid",
+        replied: true,
+        resolved: false,
+      },
+      {
+        threadId: "T-retriaged",
+        action: "replied-only",
+        decision: "wontfix",
+        replied: true,
+        resolved: false,
+      },
+    ]);
+    const state = threadState(
+      payload(thread("T-retriaged", ["bot", "operator", "bot", "operator"])),
+      handled,
+    );
+    expect(state.new).toHaveLength(0);
+    expect(state.retry).toHaveLength(0);
   });
 });
 
