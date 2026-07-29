@@ -125,17 +125,12 @@ describe("lifecycleSchema", () => {
 });
 
 describe("reviewStatusSchema", () => {
-  it.each([
-    "pending",
-    "confirmed",
-    "evidence_only",
-    "restricted",
-    "rejected",
-    "stale",
-    "merged",
-  ])("accepts %s", (v) => {
-    expect(reviewStatusSchema.parse(v)).toBe(v);
-  });
+  it.each(["pending", "confirmed", "evidence_only", "restricted", "rejected", "stale", "merged"])(
+    "accepts %s",
+    (v) => {
+      expect(reviewStatusSchema.parse(v)).toBe(v);
+    },
+  );
 
   it("rejects unknown review_status", () => {
     expect(() => reviewStatusSchema.parse("approved")).toThrow();
@@ -143,16 +138,12 @@ describe("reviewStatusSchema", () => {
 });
 
 describe("reviewActionKindSchema", () => {
-  it.each([
-    "confirm",
-    "evidence_only",
-    "restrict",
-    "reject",
-    "merge",
-    "mark_stale",
-  ])("accepts %s", (v) => {
-    expect(reviewActionKindSchema.parse(v)).toBe(v);
-  });
+  it.each(["confirm", "evidence_only", "restrict", "reject", "merge", "mark_stale"])(
+    "accepts %s",
+    (v) => {
+      expect(reviewActionKindSchema.parse(v)).toBe(v);
+    },
+  );
 
   it("rejects unknown action", () => {
     expect(() => reviewActionKindSchema.parse("approve")).toThrow();
@@ -315,23 +306,23 @@ describe("memorySchema", () => {
       expect(result.success).toBe(false);
     });
 
-    it.each([
-      "user_confirmed",
-      "imported",
-    ] as const)("accepts canUseAsInstruction=true with provenance=%s", (provenance) => {
-      const result = memorySchema.safeParse(
-        makeMemory({
-          provenance,
-          usePolicy: {
-            canUseAsInstruction: true,
-            canUseAsEvidence: true,
-            requiresUserConfirmation: false,
-            doNotInjectAutomatically: false,
-          },
-        }),
-      );
-      expect(result.success).toBe(true);
-    });
+    it.each(["user_confirmed", "imported"] as const)(
+      "accepts canUseAsInstruction=true with provenance=%s",
+      (provenance) => {
+        const result = memorySchema.safeParse(
+          makeMemory({
+            provenance,
+            usePolicy: {
+              canUseAsInstruction: true,
+              canUseAsEvidence: true,
+              requiresUserConfirmation: false,
+              doNotInjectAutomatically: false,
+            },
+          }),
+        );
+        expect(result.success).toBe(true);
+      },
+    );
 
     it("permits canUseAsInstruction=false with any provenance", () => {
       const result = memorySchema.safeParse(
@@ -463,14 +454,12 @@ describe("writebackProvenanceSchema", () => {
     expect(writebackProvenanceSchema.parse(v)).toBe(v);
   });
 
-  it.each([
-    "user_confirmed",
-    "imported",
-    "superseded",
-    "disputed",
-  ])("rejects %s (review-queue / lifecycle-only provenance)", (v) => {
-    expect(() => writebackProvenanceSchema.parse(v)).toThrow();
-  });
+  it.each(["user_confirmed", "imported", "superseded", "disputed"])(
+    "rejects %s (review-queue / lifecycle-only provenance)",
+    (v) => {
+      expect(() => writebackProvenanceSchema.parse(v)).toThrow();
+    },
+  );
 });
 
 describe("writebackMemoryDraftSchema", () => {
@@ -492,14 +481,12 @@ describe("writebackMemoryDraftSchema", () => {
     });
   });
 
-  it.each([
-    "user_confirmed",
-    "imported",
-    "superseded",
-    "disputed",
-  ])("rejects provenance=%s — closes the review-bypass hole", (provenance) => {
-    expect(() => writebackMemoryDraftSchema.parse(makeDraft({ provenance }))).toThrow();
-  });
+  it.each(["user_confirmed", "imported", "superseded", "disputed"])(
+    "rejects provenance=%s — closes the review-bypass hole",
+    (provenance) => {
+      expect(() => writebackMemoryDraftSchema.parse(makeDraft({ provenance }))).toThrow();
+    },
+  );
 
   it("enforces the 4 KB cap on summary", () => {
     expect(() =>
