@@ -250,36 +250,32 @@ nodes:
       fi
 
       # Human-readable round summary for the approval canvas; triage.json stays
-      # the machine artifact downstream nodes consume.
-      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number")
-      {
-        echo "# Triage — round $converge.round, PR #$PR_NUM"
-        echo
-        jq -r '
-          (.threads | length) as $total
-          | ([.threads[] | select(.decision == "actionable-code-change")] | length) as $fix
-          | "**\($total) new thread\(if $total == 1 then "" else "s" end).** "
-            + "Fix and push: \($fix) · Reply only, left open: \($total - $fix)."
-        ' "$KEELSON_ARTIFACTS_DIR/triage.json"
-        echo
-        echo "| # | Decision | Location | Reviewer |"
-        echo "|---|----------|----------|----------|"
-        jq -r --slurpfile th "$KEELSON_ARTIFACTS_DIR/threads.json" '
-          ($th[0] | map({(.threadId): .}) | add) as $by_id
-          | .threads
-          | to_entries[]
-          | .value as $t
-          | ($t.path + (if $t.line then ":\($t.line)" else "" end) | gsub("\\|"; "\\|")) as $loc
-          | "| \(.key + 1) | \($t.decision) | `\($loc)` | \($by_id[$t.threadId].author // "unknown") |"
-        ' "$KEELSON_ARTIFACTS_DIR/triage.json"
-        jq -r '
-          .threads | to_entries[] | .value as $t
-          | "\n## \(.key + 1) — \($t.decision)\n\n"
-            + "`\($t.path)\(if $t.line then ":\($t.line)" else "" end)`\n\n"
-            + "**Reasoning:** \($t.reasoning | gsub("\n"; " "))\n\n"
-            + "**Planned reply:** \($t.reply_hint | gsub("\n"; " "))"
-        ' "$KEELSON_ARTIFACTS_DIR/triage.json"
-      } > "$KEELSON_ARTIFACTS_DIR/triage.md"
+      # the machine artifact downstream nodes consume. Presentation only, so a
+      # generation failure warns instead of failing the gate — the honesty
+      # check above is the only fail-closed part of this node.
+      if ! jq -r --slurpfile th "$KEELSON_ARTIFACTS_DIR/threads.json" --arg round "$converge.round" '
+        ($th[0] | map({(.threadId): .}) | add) as $by_id
+        | (.threads | length) as $total
+        | ([.threads[] | select(.decision == "actionable-code-change")] | length) as $fix
+        | def loc(t): t.path + (if t.line then ":\(t.line)" else "" end);
+        [ "# Triage — round \($round)",
+          "",
+          "**\($total) new thread\(if $total == 1 then "" else "s" end).** "
+            + "Fix and push: \($fix) · Reply only, left open: \($total - $fix).",
+          "",
+          "| # | Decision | Location | Reviewer |",
+          "|---|----------|----------|----------|" ]
+        + [ .threads | to_entries[] | .value as $t
+            | "| \(.key + 1) | \($t.decision) | `\(loc($t) | gsub("\\|"; "\\|"))` | \($by_id[$t.threadId].author // "unknown") |" ]
+        + [ .threads | to_entries[] | .value as $t
+            | "\n## \(.key + 1) — \($t.decision)\n\n"
+              + "`\(loc($t))`\n\n"
+              + "**Reasoning:** \($t.reasoning | gsub("\n"; " "))\n\n"
+              + "**Planned reply:** \($t.reply_hint | gsub("\n"; " "))" ]
+        | join("\n")
+      ' "$KEELSON_ARTIFACTS_DIR/triage.json" > "$KEELSON_ARTIFACTS_DIR/triage.md"; then
+        echo "triage.md generation failed; the approval canvas will fall back to triage.json." >&2
+      fi
 
       jq -c --slurpfile fetched "$KEELSON_ARTIFACTS_DIR/threads.json" '
         ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
