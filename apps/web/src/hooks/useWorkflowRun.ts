@@ -644,7 +644,8 @@ function totalTextLength(parts: ContentBlock[]): number {
   return n;
 }
 
-function applyFrame(
+// Exported for the frame-reducer unit tests; the hook is the only app caller.
+export function applyFrame(
   frame: WorkflowFrame,
   setRun: React.Dispatch<React.SetStateAction<RunView>>,
   setNodes: React.Dispatch<React.SetStateAction<Record<string, NodeView>>>,
@@ -664,12 +665,18 @@ function applyFrame(
     case "node_started":
       setNodes((prev) => {
         const base = prev[frame.nodeId] ?? emptyNode(frame.nodeId);
+        // A relaunch of a settled node (a converge round or a retry) starts a
+        // fresh view: the executor resets the node's outputs, so accumulating
+        // onto the prior launch's text/logs/usage would concatenate rounds and
+        // report wall-clock-since-round-1 as the node's duration.
+        const relaunch = NODE_TERMINAL_STATUSES.has(base.status);
+        const carried = relaunch ? emptyNode(frame.nodeId) : base;
         return {
           ...prev,
           [frame.nodeId]: {
-            ...base,
+            ...carried,
             status: "running",
-            startedAt: base.startedAt ?? Date.now(),
+            startedAt: relaunch ? Date.now() : (base.startedAt ?? Date.now()),
           },
         };
       });

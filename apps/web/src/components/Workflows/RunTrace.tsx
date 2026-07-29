@@ -103,6 +103,13 @@ function stripArtifactRefs(message: string): string {
     .trim();
 }
 
+// The markdown renderer would mangle a non-markdown artifact (a workflow can
+// point its approval at a .json triage file), so pick the canvas kind from the
+// extension and let everything else render as a log.
+function artifactCanvasKind(path: string): "markdown" | "log" {
+  return /\.(md|markdown|mdx)$/i.test(path) ? "markdown" : "log";
+}
+
 interface TraceRowProps {
   schema: WorkflowNodeSummary;
   view: NodeView;
@@ -184,7 +191,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
     if (!runId || !primaryArtifact || !onSubmitApproval || !onAbandon) return;
     openCanvas(
       {
-        kind: "markdown",
+        kind: artifactCanvasKind(primaryArtifact),
         source: { type: "artifact", runId, path: primaryArtifact },
         title: primaryArtifact,
       },
@@ -320,7 +327,7 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
                           className="canvas-open-link"
                           onClick={() =>
                             openCanvas({
-                              kind: "markdown",
+                              kind: artifactCanvasKind(rel),
                               source: { type: "artifact", runId, path: rel },
                               title: rel,
                             })
