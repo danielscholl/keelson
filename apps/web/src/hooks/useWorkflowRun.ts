@@ -549,7 +549,7 @@ function isLiveNodeEmpty(node: NodeView | undefined): boolean {
   );
 }
 
-function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
+export function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
   // Reconnect-after-disconnect repair: pick the more-advanced status and
   // the longer content. Status preference order:
   //   1. Either side that's terminal wins (snapshot terminal + live still
@@ -636,7 +636,11 @@ function mergeNode(snapshotSide: NodeView, liveSide: NodeView): NodeView {
     usage: liveSide.usage ?? snapshotSide.usage,
     provider: liveSide.provider ?? snapshotSide.provider,
     model: liveSide.model ?? snapshotSide.model,
-    effort: liveSide.effort ?? snapshotSide.effort,
+    // Presence, not nullishness: node_done writes the key even when it carries
+    // no tier, so a re-run at a lower tier (or on a provider that ignores the
+    // option) must clear the snapshot's value rather than fall back to it. A
+    // live side that never saw node_done has no key and defers to the snapshot.
+    effort: Object.hasOwn(liveSide, "effort") ? liveSide.effort : snapshotSide.effort,
   };
 }
 
