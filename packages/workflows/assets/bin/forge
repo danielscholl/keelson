@@ -326,8 +326,14 @@ cmd_required_checks() {             # forge pr required-checks <n>
   repo=$(gh repo view --json nameWithOwner -q '.nameWithOwner') \
     || die "could not resolve GitHub repository" 1
   encoded=$(printf '%s' "$base" | jq -sRr @uri)
-  protection=$(gh api "repos/${repo}/branches/${encoded}/protection/required_status_checks" 2>/dev/null || printf '{}')
-  rules=$(gh api "repos/${repo}/rules/branches/${encoded}" 2>/dev/null || printf '[]')
+  # gh api prints the HTTP error body to stdout before exiting non-zero, so an
+  # inline `|| printf` fallback would concatenate two JSON documents; reset the
+  # captured value on failure instead, and validate it before jq --argjson.
+  protection=$(gh api "repos/${repo}/branches/${encoded}/protection/required_status_checks" 2>/dev/null) \
+    || protection='{}'
+  printf '%s' "$protection" | jq -e . >/dev/null 2>&1 || protection='{}'
+  rules=$(gh api "repos/${repo}/rules/branches/${encoded}" 2>/dev/null) || rules='[]'
+  printf '%s' "$rules" | jq -e . >/dev/null 2>&1 || rules='[]'
   jq -nr --argjson protection "$protection" --argjson rules "$rules" '
     [ $protection.contexts[]?,
       $protection.checks[]?.context,

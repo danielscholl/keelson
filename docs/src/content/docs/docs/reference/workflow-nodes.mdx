@@ -327,7 +327,7 @@ Two constraints the loader enforces on the gate:
   which is the retry, and stacking one on the other would re-run the gate
   against unchanged work.
 
-The bundled `finish-pr` workflow is the worked example: its gate re-checks CI
+The bundled `resolve-pr` workflow is the worked example: its gate re-checks CI
 and review threads each round, so the fix-and-push subgraph repeats until the PR
 is genuinely clean, escalating to an approval at the round cap.
 

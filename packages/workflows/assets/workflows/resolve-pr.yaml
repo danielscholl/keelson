@@ -1,14 +1,15 @@
-name: finish-pr
+name: resolve-pr
 provider: copilot
 model: auto
 description: |
-  Use when: User wants to drive an existing same-repo PR to CI-green with no
-            unhandled unresolved review threads.
-  Triggers: "finish PR #123", "converge pr", "get this PR green",
-            "drive PR to green", "handle bot review until clean".
+  Use when: User wants an existing same-repo PR driven to a mergeable state —
+            review threads handled, fixes pushed, CI green.
+  Triggers: "resolve PR #123", "finish pr", "get this PR green",
+            "handle the review comments", "drive PR to merge".
   Does: Fetches unresolved review threads each round via GraphQL -> filters out
-        threads already handled by this run -> triages new threads -> pauses for
-        a batched human approval every round that has new threads -> fixes
+        threads already handled by this run -> triages new threads (fix / reply
+        with evidence) -> pauses for approval ONLY when a round would publicly
+        push back on a reviewer (wontfix / invalid / question) -> fixes
         actionable threads -> validates and pushes -> replies on every handled
         thread -> resolves ONLY fixed threads -> waits for CI -> repeats until CI
         passes and a clean round observes no new threads, or escalates at the
@@ -53,7 +54,7 @@ nodes:
       if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
         # This run executes in an isolated worktree on a generated branch, so the
         # target PR cannot be inferred from the current branch — require it.
-        echo "finish-pr needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'finish pr 42'." >&2
+        echo "resolve-pr needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'resolve pr 42'." >&2
         exit 1
       fi
       # `|| true` so a no-digit input yields an empty PR_NUM and reaches the
@@ -166,7 +167,7 @@ nodes:
     depends_on: [fetch-state]
     when: "$fetch-state.output.is_fork == 'true'"
     cancel: |
-      finish-pr only supports same-repo PRs because it pushes commits back to
+      resolve-pr only supports same-repo PRs because it pushes commits back to
       the PR head branch. Fork PRs must be handled manually or by a workflow
       with explicit fork-remote credentials.
 
@@ -247,6 +248,39 @@ nodes:
         echo "triaged: $TRIAGED" >&2
         exit 1
       fi
+
+      # Human-readable round summary for the approval canvas; triage.json stays
+      # the machine artifact downstream nodes consume.
+      PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number")
+      {
+        echo "# Triage — round $converge.round, PR #$PR_NUM"
+        echo
+        jq -r '
+          (.threads | length) as $total
+          | ([.threads[] | select(.decision == "actionable-code-change")] | length) as $fix
+          | "**\($total) new thread\(if $total == 1 then "" else "s" end).** "
+            + "Fix and push: \($fix) · Reply only, left open: \($total - $fix)."
+        ' "$KEELSON_ARTIFACTS_DIR/triage.json"
+        echo
+        echo "| # | Decision | Location | Reviewer |"
+        echo "|---|----------|----------|----------|"
+        jq -r --slurpfile th "$KEELSON_ARTIFACTS_DIR/threads.json" '
+          ($th[0] | map({(.threadId): .}) | add) as $by_id
+          | .threads
+          | to_entries[]
+          | .value as $t
+          | ($t.path + (if $t.line then ":\($t.line)" else "" end) | gsub("\\|"; "\\|")) as $loc
+          | "| \(.key + 1) | \($t.decision) | `\($loc)` | \($by_id[$t.threadId].author // "unknown") |"
+        ' "$KEELSON_ARTIFACTS_DIR/triage.json"
+        jq -r '
+          .threads | to_entries[] | .value as $t
+          | "\n## \(.key + 1) — \($t.decision)\n\n"
+            + "`\($t.path)\(if $t.line then ":\($t.line)" else "" end)`\n\n"
+            + "**Reasoning:** \($t.reasoning | gsub("\n"; " "))\n\n"
+            + "**Planned reply:** \($t.reply_hint | gsub("\n"; " "))"
+        ' "$KEELSON_ARTIFACTS_DIR/triage.json"
+      } > "$KEELSON_ARTIFACTS_DIR/triage.md"
+
       jq -c --slurpfile fetched "$KEELSON_ARTIFACTS_DIR/threads.json" '
         ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
         | {
@@ -256,19 +290,30 @@ nodes:
           }
       ' "$KEELSON_ARTIFACTS_DIR/triage.json"
 
+  # Pauses only when the round would publicly push back on a reviewer without
+  # changing code (question / wontfix / already-addressed / invalid verdicts).
+  # An all-actionable round — every thread gets the fix it asked for — proceeds
+  # unattended; `fix` tolerates the skip via none_failed_min_one_success and
+  # sees an empty approval-feedback section.
   - id: approve
     depends_on: [triage-gate]
-    when: "$triage-gate.output.has_new == 'true'"
+    when: "$triage-gate.output.needs_review == 'true'"
     approval:
+      # Approval bodies are delivered raw (no substitution): the literal
+      # `$ARTIFACTS_DIR/<path>` line is the machine hint the SPA turns into the
+      # auto-opened review canvas, so no dynamic markers belong here.
       message: |
-        Round $converge.round: a new batch of review threads has been triaged and
-        is ready to act on. Review ALL verdicts before any branch mutation or
-        public reply — actionable-code-change threads will be fixed, committed,
-        and pushed; question / wontfix / already-addressed / invalid threads get a
-        factual reply only and are never auto-resolved. This batched approval
-        gates every round that mutates the PR.
+        Some of this round's threads are triaged as reply-only (question /
+        wontfix / already-addressed / invalid) — the workflow is about to
+        publicly disagree with or decline a reviewer without changing code.
+        Review the verdicts in the triage summary, then approve to proceed, or
+        type adjustments (e.g. "thread 2 is right — fix it instead of
+        replying").
 
-        Triage file: $ARTIFACTS_DIR/triage.json
+        Actionable threads are fixed, committed, and pushed; reply-only threads
+        get a factual reply and are never auto-resolved.
+
+        $ARTIFACTS_DIR/triage.md
       capture_response: true
 
   - id: fix
@@ -283,6 +328,9 @@ nodes:
       You are fixing the round $converge.round actionable PR review threads.
 
       ## Approval feedback
+
+      (Empty when this round needed no approval — an all-actionable batch runs
+      unattended. "approve" means proceed as triaged.)
 
       $approve.output
 
@@ -600,13 +648,20 @@ nodes:
         ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
       }
 
+      # Discovery failure is NOT terminal: emitting UNKNOWN here would fail the
+      # converge gate every round on a PR that is actually green. Fall back to
+      # gating on EVERY check, strictly — with the required set unknown, nothing
+      # may ride the advisory carve-outs (pending-past-deadline / cancelled).
+      DISCOVERY_STRICT=0
       if ! REQUIRED=$(forge pr required-checks "$PR_NUM" 2> "$KEELSON_ARTIFACTS_DIR/.ci-required.err"); then
         cat "$KEELSON_ARTIFACTS_DIR/.ci-required.err" 2>/dev/null || true
-        echo "CI_STATUS: UNKNOWN — could not discover required checks"
-        exit 0
+        echo "Required-check discovery failed; gating on every check with no advisory carve-outs."
+        REQUIRED=""
+        DISCOVERY_STRICT=1
       fi
       if [ -z "$REQUIRED" ]; then
-        echo "No required checks configured; waiting for all checks to settle within the deadline."
+        [ "$DISCOVERY_STRICT" = 1 ] \
+          || echo "No required checks configured; waiting for all checks to settle within the deadline."
         ATTEMPT=1
         MAX_ATTEMPTS=60
         while :; do
@@ -638,16 +693,34 @@ nodes:
           echo "CI_STATUS: FAIL"
           exit 0
         fi
-        jq -r '
-          def state: ((.state // .bucket // "unknown") | ascii_downcase);
-          .[]
-          | if ((.bucket // "" | ascii_downcase) == "pending")
-            then "treated as advisory: \(.name) — pending past deadline"
-            elif state == "cancelled" or state == "canceled" or state == "timed_out"
-            then "treated as advisory: \(.name) — \(state)"
-            else empty
-            end
-        ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
+        if [ "$DISCOVERY_STRICT" = 1 ]; then
+          if jq -e '
+            def state: ((.state // .bucket // "") | ascii_downcase);
+            any(.[]?; ((.bucket // "" | ascii_downcase) == "pending")
+              or state == "cancelled" or state == "canceled" or state == "timed_out")
+          ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json" >/dev/null; then
+            jq -r '
+              def state: ((.state // .bucket // "unknown") | ascii_downcase);
+              .[]
+              | select(((.bucket // "" | ascii_downcase) == "pending")
+                  or state == "cancelled" or state == "canceled" or state == "timed_out")
+              | "not green and possibly required: \(.name) — \(state)"
+            ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
+            echo "CI_STATUS: FAIL"
+            exit 0
+          fi
+        else
+          jq -r '
+            def state: ((.state // .bucket // "unknown") | ascii_downcase);
+            .[]
+            | if ((.bucket // "" | ascii_downcase) == "pending")
+              then "treated as advisory: \(.name) — pending past deadline"
+              elif state == "cancelled" or state == "canceled" or state == "timed_out"
+              then "treated as advisory: \(.name) — \(state)"
+              else empty
+              end
+          ' "$KEELSON_ARTIFACTS_DIR/.ci-snapshot.json"
+        fi
         echo "CI_STATUS: PASS"
         exit 0
       fi
@@ -759,10 +832,21 @@ nodes:
 
       if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ] && [ "$RETRY_COUNT" -eq 0 ]; then
         echo "Converged: CI passed, no new unresolved threads after CI, and no pending resolve-retries."
+        rm -f "$KEELSON_ARTIFACTS_DIR/.last-gate-state"
         exit 0
       fi
 
+      GATE_STATE="ci=$CI_STATUS new=$NEW_COUNT retry=$RETRY_COUNT"
+      LAST_STATE=$(cat "$KEELSON_ARTIFACTS_DIR/.last-gate-state" 2>/dev/null || true)
+      printf '%s\n' "$GATE_STATE" > "$KEELSON_ARTIFACTS_DIR/.last-gate-state"
+
       echo "Not converged: CI_STATUS=${CI_STATUS:-UNKNOWN}, new_threads=$NEW_COUNT, resolve_retries=$RETRY_COUNT, open_threads=$OPEN_COUNT"
+      [ "$CI_STATUS" != "PASS" ] && echo "- CI is not green (status: ${CI_STATUS:-UNKNOWN})."
+      [ "$NEW_COUNT" -gt 0 ] && echo "- $NEW_COUNT new thread(s) appeared during the CI watch and need a triage round."
+      [ "$RETRY_COUNT" -gt 0 ] && echo "- $RETRY_COUNT fixed thread(s) still await a successful resolve call."
+      if [ -n "$LAST_STATE" ] && [ "$GATE_STATE" = "$LAST_STATE" ]; then
+        echo "- Stalled: identical blockers to the previous round; more rounds will not change this without operator action."
+      fi
       exit 1
 
   - id: report
@@ -770,7 +854,7 @@ nodes:
     context: fresh
     model: auto
     prompt: |
-      Produce the final finish-pr summary.
+      Produce the final resolve-pr summary.
 
       ## Inputs
 
@@ -795,7 +879,7 @@ nodes:
       ## Output format
 
       ```
-      ## finish-pr - PR #<N>
+      ## resolve-pr - PR #<N>
 
       ### Summary
 

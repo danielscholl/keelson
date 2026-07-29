@@ -2086,7 +2086,7 @@ import { makeLoopHandler } from "./handlers/loop.ts";
 import { makeScriptHandler } from "./handlers/script.ts";
 
 // ---------------------------------------------------------------------------
-// finish-pr — drives the real converge loop with its deterministic jq gates
+// resolve-pr — drives the real converge loop with its deterministic jq gates
 // (triage-gate, reply-gate, converge-check) run for real and the gh/git/CI nodes
 // canned. Covers: the converge gate reading the post-CI re-fetch rather than the
 // start-of-round thread set, the has_new fan-out into fix/reply, resolve-retry
@@ -2094,7 +2094,7 @@ import { makeScriptHandler } from "./handlers/script.ts";
 // cancellation, and round-cap exhaustion.
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
+describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => {
   interface Thread {
     threadId: string;
     commentId: number;
@@ -2229,7 +2229,7 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     const controller = new AbortController();
     const cancel = makeCancelHandler({ requestCancel: () => controller.abort() });
     const run = runWorkflow({
-      workflow: loadBundled("finish-pr"),
+      workflow: loadBundled("resolve-pr"),
       runId: "run-cpr",
       inputs: { ARGUMENTS: "converge pr 42" },
       cwd: artifactsDir,
@@ -2256,8 +2256,10 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     });
     const summary = await run;
     expect(summary.status).toBe("succeeded");
-    // has_new drove the whole mutation chain.
-    expect(approvalCalls).toEqual(["approve"]);
+    // An all-actionable round runs unattended: every thread gets the fix it
+    // asked for, so no approval pause — the fix chain tolerates the skip.
+    expect(approvalCalls).toEqual([]);
+    expect(summary.nodes.approve.state).toBe("skipped");
     expect(summary.nodes.triage.state).toBe("completed");
     expect(summary.nodes.fix.state).toBe("completed");
     expect(summary.nodes.push.state).toBe("completed");
@@ -2268,6 +2270,35 @@ describe.skipIf(!hasJq)("runWorkflow — finish-pr converge loop gates", () => {
     expect(summary.nodes["converge-check"].state).toBe("completed");
     expect(summary.nodes.report.state).toBe("completed");
     expect(convergeCheckCalls()).toBe(1);
+  });
+
+  test("a round with reply-only verdicts pauses for approval before mutating", async () => {
+    const { run, approvalCalls } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [
+        { threadId: "t1", commentId: 1 },
+        { threadId: "t2", commentId: 2 },
+      ],
+      triage: [
+        { threadId: "t1", decision: "actionable-code-change" },
+        { threadId: "t2", decision: "invalid" },
+      ],
+      results: [
+        { threadId: "t1", commentId: 1, action: "fixed", commit: "c1", reply: "r1" },
+        { threadId: "t2", commentId: 2, action: "replied-only", commit: null, reply: "r2" },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    // The invalid verdict makes the round contentious: the workflow is about to
+    // publicly push back on a reviewer, so the batched approval gates it.
+    expect(approvalCalls).toEqual(["approve"]);
+    expect(summary.nodes.approve.state).toBe("completed");
+    expect(summary.nodes.fix.state).toBe("completed");
+    expect(summary.nodes["reply-resolve"].state).toBe("completed");
+    expect(summary.nodes["converge-check"].state).toBe("completed");
   });
 
   test("a clean round with no new threads and CI PASS converges immediately", async () => {

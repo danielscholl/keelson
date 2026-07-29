@@ -211,9 +211,10 @@ export function reconcileManagedWorkflows(
   overlayDir: string,
   previous: ReadonlyMap<string, string>,
   next: ReadonlyMap<string, string>,
-): { refreshed: string[]; conflicts: string[] } {
+): { refreshed: string[]; conflicts: string[]; removed: string[] } {
   const refreshed: string[] = [];
   const conflicts: string[] = [];
+  const removed: string[] = [];
 
   for (const [name, nextContent] of next) {
     const overlayPath = join(overlayDir, name);
@@ -238,7 +239,24 @@ export function reconcileManagedWorkflows(
     } catch {}
   }
 
-  return { refreshed, conflicts };
+  // A name in `previous` but absent from `next` was renamed or retired
+  // upstream. An unmodified overlay copy would linger in the catalog beside
+  // its successor, so remove it; a customized copy is operator work and stays.
+  for (const [name, prevContent] of previous) {
+    if (next.has(name)) continue;
+    const overlayPath = join(overlayDir, name);
+    if (!existsSync(overlayPath)) continue;
+    try {
+      if (readFileSync(overlayPath, "utf8") !== prevContent) {
+        conflicts.push(name);
+        continue;
+      }
+      rmSync(overlayPath, { force: true });
+      removed.push(name);
+    } catch {}
+  }
+
+  return { refreshed, conflicts, removed };
 }
 
 function fail(message: string, code: string, json: boolean): never {
@@ -346,8 +364,9 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
 
   let refreshed: string[] = [];
   let conflicts: string[] = [];
+  let removed: string[] = [];
   try {
-    ({ refreshed, conflicts } = reconcileManagedWorkflows(
+    ({ refreshed, conflicts, removed } = reconcileManagedWorkflows(
       keelsonPaths(home).workflowsDir,
       previous,
       readWorkflowContents(bundleDir),
@@ -377,6 +396,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     updated: true,
     ribsUpdated: ribs,
     refreshedWorkflows: refreshed,
+    removedWorkflows: removed,
     restartRequired: server !== null,
     home,
     workflowConflicts: conflicts,
@@ -390,6 +410,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
       );
     if (refreshed.length > 0)
       process.stdout.write(`refreshed ${refreshed.length} workflow(s): ${refreshed.join(", ")}\n`);
+    if (removed.length > 0)
+      process.stdout.write(
+        `removed ${removed.length} retired workflow(s): ${removed.join(", ")}\n`,
+      );
     for (const name of conflicts)
       process.stdout.write(
         `kept your customized ${name} (bundle updated; review to adopt the new version)\n`,

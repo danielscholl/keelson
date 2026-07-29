@@ -125,6 +125,7 @@ describe("reconcileManagedWorkflows", () => {
     expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
       refreshed: ["fix-issue.yaml"],
       conflicts: [],
+      removed: [],
     });
     expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("new bundle\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -139,6 +140,7 @@ describe("reconcileManagedWorkflows", () => {
     expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
       refreshed: [],
       conflicts: ["fix-issue.yaml"],
+      removed: [],
     });
     expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("my customization\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -153,19 +155,51 @@ describe("reconcileManagedWorkflows", () => {
     expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
       refreshed: [],
       conflicts: [],
+      removed: [],
     });
     rmSync(overlayDir, { recursive: true, force: true });
   });
 
   test("does not create an overlay for a bundle-only workflow", () => {
     const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
-    const next = new Map([["finish-pr.yaml", "new bundle\n"]]);
+    const next = new Map([["resolve-pr.yaml", "new bundle\n"]]);
 
     expect(reconcileManagedWorkflows(overlayDir, new Map(), next)).toEqual({
       refreshed: [],
       conflicts: [],
+      removed: [],
+    });
+    expect(existsSync(join(overlayDir, "resolve-pr.yaml"))).toBe(false);
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("removes an unmodified overlay for a workflow retired from the bundle", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const previous = new Map([["finish-pr.yaml", "old bundle\n"]]);
+    const next = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
+    writeFileSync(join(overlayDir, "finish-pr.yaml"), "old bundle\n");
+
+    expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
+      refreshed: [],
+      conflicts: [],
+      removed: ["finish-pr.yaml"],
     });
     expect(existsSync(join(overlayDir, "finish-pr.yaml"))).toBe(false);
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("keeps and reports a customized overlay for a retired workflow", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const previous = new Map([["finish-pr.yaml", "old bundle\n"]]);
+    const next = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
+    writeFileSync(join(overlayDir, "finish-pr.yaml"), "my customization\n");
+
+    expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
+      refreshed: [],
+      conflicts: ["finish-pr.yaml"],
+      removed: [],
+    });
+    expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("my customization\n");
     rmSync(overlayDir, { recursive: true, force: true });
   });
 

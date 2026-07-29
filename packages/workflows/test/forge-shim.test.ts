@@ -128,6 +128,32 @@ esac
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("");
   });
+
+  // Real `gh api` prints the HTTP error body to STDOUT before exiting non-zero
+  // (a 404 on the branch-protection endpoint is the no-classic-protection case).
+  // The captured value must be discarded, not concatenated with a fallback into
+  // invalid JSON that crashes jq --argjson.
+  test("GitHub tolerates gh api printing an error body to stdout on failure", () => {
+    const FAKE = `#!/usr/bin/env bash
+case "$*" in
+  "pr view 42 --json baseRefName -q .baseRefName") echo "main" ;;
+  "repo view --json nameWithOwner -q .nameWithOwner") echo "o/r" ;;
+  "api repos/o/r/branches/main/protection/required_status_checks")
+    echo '{"message":"Not Found","status":"404"}'
+    echo "gh: Not Found (HTTP 404)" >&2
+    exit 1 ;;
+  "api repos/o/r/rules/branches/main") echo '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"lint"}]}}]' ;;
+  *) exit 1 ;;
+esac
+`;
+    const dir = fakeBinDir({ gh: FAKE });
+    tmps.push(dir);
+    const r = runForge(["pr", "required-checks", "42"], {
+      env: { PATH: pathWith(dir), KEELSON_FORGE: "github" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("lint");
+  });
 });
 
 // ── GitLab translation + output normalization ───────────────────────────────
