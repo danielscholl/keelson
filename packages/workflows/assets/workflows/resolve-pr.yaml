@@ -6,14 +6,17 @@ description: |
             review threads handled, fixes pushed, CI green.
   Triggers: "resolve PR #123", "finish pr", "get this PR green",
             "handle the review comments", "drive PR to merge".
-  Does: Fetches unresolved review threads each round via GraphQL -> filters out
-        threads already handled by this run -> triages new threads (fix / reply
-        with evidence) -> pauses for approval ONLY when a round would publicly
-        push back on a reviewer (wontfix / invalid / question) -> fixes
-        actionable threads -> validates and pushes -> replies on every handled
-        thread -> resolves ONLY fixed threads -> waits for CI -> repeats until CI
-        passes and a clean round observes no new threads, or escalates at the
-        round cap.
+  Does: Fetches unresolved review threads each round via GraphQL -> skips
+        threads already answered (by this run, a prior run, or a human — any
+        thread whose last comment is not the reviewer's) -> triages new threads
+        (fix / reply with evidence, flagging rebuttals whose cited evidence
+        this PR itself changes) -> pauses for approval ONLY when a round would
+        publicly push back on a reviewer (wontfix / invalid / question) ->
+        fixes actionable threads -> validates and pushes -> replies on every
+        handled thread -> resolves fixed threads plus approved invalid /
+        already-addressed rebuttals (question / wontfix stay open for the
+        reviewer) -> waits for CI -> repeats until CI passes and a clean round
+        observes no new threads, or escalates at the round cap.
   NOT for: Fork PRs, which cannot be pushed safely by this workflow.
            Creating a PR from an issue (use fix-issue).
            Reviewing a PR without changing it (use pr-review).
@@ -70,11 +73,19 @@ nodes:
       echo "Round $ROUND: fetching PR #$PR_NUM state" >&2
 
       # GraphQL paging + handled-ledger diff, written once and sourced by both
-      # fetch-state and post-ci-state so the two never drift. The ledger diff
-      # splits unresolved threads three ways: `new` (no ledger entry at all →
-      # full triage/reply/resolve), `retry` (a fixed thread whose reply posted
-      # but resolve failed → resolve-only), and the rest of `open` (already
-      # replied, intentionally left open).
+      # fetch-state and post-ci-state so the two never drift. Unresolved threads
+      # split three ways: `new` (needs triage/reply this round), `retry` (a
+      # resolvable thread whose reply posted but resolve failed → resolve-only),
+      # and the rest of `open` (already answered, awaiting the reviewer).
+      #
+      # "New" is derived from the thread itself, not only the per-run ledger:
+      # the ledger lives in the run's artifacts dir and dies with it, so a
+      # second run against the same PR would otherwise re-triage and re-reply
+      # every still-open thread it answered last time. A thread is new only
+      # when the ball is in OUR court — no replies yet, or the LAST comment is
+      # the thread's own reviewer again (a follow-up reopens triage). A thread
+      # whose last comment is anyone else (this run via the ledger, a prior
+      # run, or an operator replying by hand) is answered, not new.
       cat > "$KEELSON_ARTIFACTS_DIR/thread-lib.sh" <<'THREADLIB'
       fetch_thread_state() {
         local PR_NUM="$1" STATE_OUT="$2"
@@ -88,7 +99,10 @@ nodes:
         jq --slurpfile handled "$HANDLED" '
           ($handled[0] // []) as $ledger
           | ([$ledger[]?.threadId] | unique) as $handledIds
-          | ([$ledger[]? | select(.replied == true and (.resolved != true) and .action == "fixed") | .threadId] | unique) as $retryIds
+          | ([$ledger[]?
+              | select(.replied == true and (.resolved != true)
+                  and (.action == "fixed" or .decision == "invalid" or .decision == "already-addressed"))
+              | .threadId] | unique) as $retryIds
           | map(select(.isResolved == false))
           | map({
               threadId: .id,
@@ -97,12 +111,16 @@ nodes:
               commentId: (.comments.nodes[0].databaseId // null),
               body: ([.comments.nodes[].body] | join("\n\n---\n\n")),
               author: (.comments.nodes[0].author.login // "unknown"),
+              lastAuthor: (.comments.nodes[-1].author.login // "unknown"),
               replyCount: (((.comments.nodes | length) - 1) | if . < 0 then 0 else . end)
             })
           | . as $open
           | {
               open: $open,
-              new: ($open | map(select((.threadId as $id | $handledIds | index($id)) == null))),
+              new: ($open | map(select(
+                  ((.threadId as $id | $handledIds | index($id)) == null)
+                  and (.replyCount == 0 or .lastAuthor == .author)
+                ))),
               retry: ($open | map(select((.threadId as $id | $retryIds | index($id)) != null)))
             }
         ' "$COMBINED" > "$STATE_OUT"
@@ -185,7 +203,8 @@ nodes:
           type: array
           items:
             type: object
-            required: [threadId, path, decision, reasoning, reply_hint]
+            required:
+              [threadId, path, decision, reasoning, reply_hint, evidence_changed_by_pr]
             properties:
               threadId: { type: string }
               path: { type: string }
@@ -202,6 +221,7 @@ nodes:
                   ]
               reasoning: { type: string }
               reply_hint: { type: string }
+              evidence_changed_by_pr: { type: boolean }
     prompt: |
       You are triaging only the new unresolved PR review threads for round
       $converge.round.
@@ -227,11 +247,30 @@ nodes:
       `invalid`, put the evidence in `reasoning` / `reply_hint`, and never
       change code to satisfy it.
 
+      ## Check whether the PR changed your evidence
+
+      Before you cite any file as evidence against a reviewer, check whether
+      this PR itself modifies it: read the PR's base
+      (`forge pr view <n> --json baseRefName -q .baseRefName`, with `<n>` from
+      `$ARTIFACTS_DIR/.pr-number`) and run
+      `git diff origin/<base>...HEAD -- <file>`. Set `evidence_changed_by_pr`
+      to true when the lines you rely on are added or edited by this PR, and
+      false otherwise. When it is true, `reasoning` and `reply_hint` MUST say
+      the PR changes that text — a rebuttal that quotes a rule this same PR
+      rewrote, as if it were standing policy, misleads the reviewer even when
+      it is accurate against HEAD.
+
+      A reviewer who is right about the pre-PR state of a rule the PR
+      deliberately changes is not wrong: that is `wontfix` (explain the
+      change and why it is intended), never `invalid`. And when honoring the
+      reviewer costs one small compliant edit (a label, a date, a rename),
+      prefer `actionable-code-change` over arguing.
+
       ## Output
 
       For each thread, fill `threadId`, `path`, `line` (null if absent),
-      `decision`, `reasoning` (one sentence), and `reply_hint` (the gist of the
-      reply).
+      `decision`, `reasoning` (one sentence), `reply_hint` (the gist of the
+      reply), and `evidence_changed_by_pr`.
 
       Write the triage JSON to `$ARTIFACTS_DIR/triage.json` and print it.
 
@@ -270,6 +309,9 @@ nodes:
         + [ .threads | to_entries[] | .value as $t
             | "\n## \(.key + 1) — \($t.decision)\n\n"
               + "`\(loc($t))`\n\n"
+              + (if $t.evidence_changed_by_pr == true
+                 then "**⚠ The cited evidence is modified by this PR itself — verify the rebuttal is disclosed as such.**\n\n"
+                 else "" end)
               + "**Reasoning:** \($t.reasoning | gsub("\n"; " "))\n\n"
               + "**Planned reply:** \($t.reply_hint | gsub("\n"; " "))" ]
         | join("\n")
@@ -306,8 +348,11 @@ nodes:
         type adjustments (e.g. "thread 2 is right — fix it instead of
         replying").
 
-        Actionable threads are fixed, committed, and pushed; reply-only threads
-        get a factual reply and are never auto-resolved.
+        Actionable threads are fixed, committed, pushed, and resolved. On your
+        approval, invalid and already-addressed threads are replied to and then
+        resolved — they assert nothing needs to change, and this approval is
+        the human sign-off on that. Question and wontfix threads get a factual
+        reply and stay open for the reviewer.
 
         $ARTIFACTS_DIR/triage.md
       capture_response: true
@@ -360,6 +405,9 @@ nodes:
       - Commit per thread or per logical group with a conventional message.
       - For `question`, `wontfix`, `already-addressed`, and `invalid`, make no
         code change; compose a factual reply only.
+      - When a triage entry has `evidence_changed_by_pr: true`, the reply MUST
+        state that this PR itself modifies the cited text (name the file), not
+        present it as standing policy the reviewer overlooked.
 
       ## Results file
 
@@ -521,22 +569,28 @@ nodes:
     context: fresh
     model: auto
     prompt: |
-      Post replies, resolve only fixed threads, and update the handled ledger for
-      round $converge.round.
+      Post replies, resolve the threads this run settled, and update the
+      handled ledger for round $converge.round.
 
       ## Invariant
 
       - Post a reply on every entry in `$ARTIFACTS_DIR/results.json`.
-      - Resolve (via `forge pr resolve-thread`) only entries where `action == "fixed"`.
-      - Never resolve a `replied-only` thread.
+      - A thread is RESOLVABLE when its `action == "fixed"` OR its `decision`
+        is `invalid` or `already-addressed`. Fixed threads got the change they
+        asked for; invalid / already-addressed assert nothing needs to change,
+        and the operator signed off on that at the approval gate.
+      - Resolve (via `forge pr resolve-thread`) every resolvable entry, AFTER
+        its reply posts — the reply is the evidence trail for the resolution.
+      - Never resolve a `question` or `wontfix` thread: those await the
+        reviewer, and closing them would be dishonest PR state.
       - Record a thread into `$ARTIFACTS_DIR/handled.json` as soon as its reply is
         posted, carrying `replied: true` and `resolved: <bool>` — `resolved: true`
-        ONLY when a `fixed` thread's resolve call SUCCEEDED,
+        ONLY when a resolvable thread's resolve call SUCCEEDED,
         otherwise `resolved: false`. Recording on reply (not on full resolve) is
         deliberate: it stops the NEXT round from re-posting the same reply. A
-        `fixed` thread whose resolve failed is recorded with `resolved: false` so
-        a later round retries the resolve ONLY — that thread is never re-triaged
-        or re-replied.
+        resolvable thread whose resolve failed is recorded with `resolved: false`
+        so a later round retries the resolve ONLY — that thread is never
+        re-triaged or re-replied.
 
       ## Steps
 
@@ -546,22 +600,24 @@ nodes:
          `forge pr reply {prNumber} --thread {threadId} --comment {commentId} --body "{reply text}"`
          (`forge` routes to the right forge; `--comment` carries the first
          comment's databaseId that the GitHub path needs.)
-      3. For each entry where `action == "fixed"`, resolve the thread:
+      3. For each resolvable entry (`action == "fixed"`, or `decision` of
+         `invalid` / `already-addressed`), resolve the thread:
          `forge pr resolve-thread {prNumber} --thread {threadId}`.
       4. Write `$ARTIFACTS_DIR/outcome.json`:
          `{ "replied": [...], "resolved": [...], "left_open": [...] }`
       5. Append to `$ARTIFACTS_DIR/handled.json` one entry per thread whose reply
          posted, preserving existing entries and recording `threadId`,
          `commentId`, `action`, `decision`, `commit`, `reply`, `replied: true`,
-         `resolved` (true ONLY when a `fixed` thread's resolve succeeded, else
+         `resolved` (true ONLY when a resolvable thread's resolve succeeded, else
          false), and `round: $converge.round`. Record every replied thread —
-         INCLUDING a `fixed` thread whose resolve failed (with `resolved: false`),
-         so it is retried resolve-only and never re-replied.
+         INCLUDING a resolvable thread whose resolve failed (with
+         `resolved: false`), so it is retried resolve-only and never re-replied.
       6. Print a summary: how many replied, resolved, left open, and newly
          recorded in handled.json.
 
-  # Resolve-only retry path for threads that were replied+fixed in a prior round
-  # but whose resolveReviewThread call failed. fetch-state records these into
+  # Resolve-only retry path for resolvable threads (fixed, or approved
+  # invalid / already-addressed rebuttals) replied to in a prior round whose
+  # resolveReviewThread call failed. fetch-state records these into
   # resolve-retry.json; this node re-calls resolveReviewThread WITHOUT posting
   # another reply (no duplicate comments), and flips the ledger entry to
   # resolved on success so a resolved thread stops being retried.
@@ -573,11 +629,11 @@ nodes:
       HANDLED="$KEELSON_ARTIFACTS_DIR/handled.json"
       PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number")
       if [ ! -f "$RETRY" ] || [ "$(jq 'length' "$RETRY" 2>/dev/null || echo 0)" -eq 0 ]; then
-        echo "No fixed-but-unresolved threads to retry this round."
+        echo "No resolvable-but-unresolved threads to retry this round."
         exit 0
       fi
       COUNT=$(jq 'length' "$RETRY")
-      echo "Retrying resolveReviewThread for $COUNT fixed-but-unresolved thread(s)."
+      echo "Retrying resolveReviewThread for $COUNT resolvable-but-unresolved thread(s)."
       OK="$KEELSON_ARTIFACTS_DIR/.resolve-retry-ok.json"
       printf '[]\n' > "$OK"
       jq -r '.[].threadId' "$RETRY" | tr -d '\r' | while read -r TID; do
@@ -817,7 +873,7 @@ nodes:
       set -euo pipefail
       # Gate on the post-CI re-fetch, NOT fetch-state's start-of-round threads.json:
       # NEW_COUNT counts threads that appeared (e.g. a bot on push) with no ledger
-      # entry, RETRY_COUNT counts fixed threads still awaiting a successful resolve.
+      # entry, RETRY_COUNT counts resolvable threads still awaiting a successful resolve.
       NEW_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json" 2>/dev/null || echo 0)
       RETRY_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json" 2>/dev/null || echo 0)
       OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json" 2>/dev/null || echo 0)
@@ -839,7 +895,7 @@ nodes:
       echo "Not converged: CI_STATUS=${CI_STATUS:-UNKNOWN}, new_threads=$NEW_COUNT, resolve_retries=$RETRY_COUNT, open_threads=$OPEN_COUNT"
       [ "$CI_STATUS" != "PASS" ] && echo "- CI is not green (status: ${CI_STATUS:-UNKNOWN})."
       [ "$NEW_COUNT" -gt 0 ] && echo "- $NEW_COUNT new thread(s) appeared during the CI watch and need a triage round."
-      [ "$RETRY_COUNT" -gt 0 ] && echo "- $RETRY_COUNT fixed thread(s) still await a successful resolve call."
+      [ "$RETRY_COUNT" -gt 0 ] && echo "- $RETRY_COUNT resolvable thread(s) still await a successful resolve call."
       if [ -n "$LAST_STATE" ] && [ "$GATE_STATE" = "$LAST_STATE" ]; then
         echo "- Stalled: identical blockers to the previous round; more rounds will not change this without operator action."
       fi
@@ -857,10 +913,10 @@ nodes:
       - PR number: `$ARTIFACTS_DIR/.pr-number`
       - Handled ledger: `$ARTIFACTS_DIR/handled.json` — each entry carries
         `replied` (bool) and `resolved` (bool). `resolved` is the authoritative
-        signal: a `fixed` thread whose `resolveReviewThread` call failed is
-        recorded with `resolved: false`, so it is still open on the forge even
-        though `action == "fixed"`. Count resolutions from `resolved`, never from
-        `action`.
+        signal: a resolvable thread (action `fixed`, or decision `invalid` /
+        `already-addressed`) whose `resolveReviewThread` call failed is recorded
+        with `resolved: false`, so it is still open on the forge. Count
+        resolutions from `resolved`, never from `action` or `decision`.
       - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
       - Post-CI new-thread set: `$ARTIFACTS_DIR/post-ci-threads.json`
       - Pending resolve-retries: `$ARTIFACTS_DIR/post-ci-retry.json`
@@ -882,18 +938,20 @@ nodes:
       - Rounds completed: <count or latest round>
       - Threads replied to: <count of handled.json entries with replied == true>
       - Threads resolved: <count of handled.json entries with resolved == true>
-      - Threads left open after reply: <count of handled.json entries with
-        replied == true and resolved != true — includes wontfix / question /
-        already-addressed / invalid replies AND any fixed thread whose resolve
-        has not yet succeeded>
+      - Threads awaiting the reviewer: <count of handled.json entries with
+        replied == true, resolved != true, and decision question / wontfix —
+        left open deliberately>
       - Latest CI: PASS / FAIL / UNKNOWN
 
       ### Notes
 
-      <Anything the operator needs to know. Call out any fixed-but-unresolved
-      threads (replied == true, resolved == false, action == "fixed") — these
-      still need a resolve — and any exhaust approval if this report ran after a
-      human override.>
+      <Anything the operator needs to know. Call out any resolvable-but-
+      unresolved threads (replied == true, resolved == false, action "fixed" or
+      decision invalid / already-addressed) — these still need a resolve. If
+      question / wontfix threads remain open, say plainly that they are the
+      remaining merge blockers when the repo requires all threads resolved, and
+      that closing them is the reviewer's or operator's call. Note any exhaust
+      approval if this report ran after a human override.>
       ```
 
       Print this report and also write it to `$ARTIFACTS_DIR/report.md`.
