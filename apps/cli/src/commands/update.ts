@@ -211,9 +211,11 @@ export function reconcileManagedWorkflows(
   overlayDir: string,
   previous: ReadonlyMap<string, string>,
   next: ReadonlyMap<string, string>,
-): { refreshed: string[]; conflicts: string[] } {
+): { refreshed: string[]; conflicts: string[]; removed: string[]; retiredKept: string[] } {
   const refreshed: string[] = [];
   const conflicts: string[] = [];
+  const removed: string[] = [];
+  const retiredKept: string[] = [];
 
   for (const [name, nextContent] of next) {
     const overlayPath = join(overlayDir, name);
@@ -238,7 +240,29 @@ export function reconcileManagedWorkflows(
     } catch {}
   }
 
-  return { refreshed, conflicts };
+  // An empty `next` means the post-install bundle read failed (or the dir is
+  // genuinely missing) — the shipped bundle is never legitimately empty, so
+  // treating it as "everything retired" would delete every unmodified overlay.
+  if (next.size === 0) return { refreshed, conflicts, removed, retiredKept };
+
+  // A name in `previous` but absent from `next` was renamed or retired
+  // upstream. An unmodified overlay copy would linger in the catalog beside
+  // its successor, so remove it; a customized copy is operator work and stays.
+  for (const [name, prevContent] of previous) {
+    if (next.has(name)) continue;
+    const overlayPath = join(overlayDir, name);
+    if (!existsSync(overlayPath)) continue;
+    try {
+      if (readFileSync(overlayPath, "utf8") !== prevContent) {
+        retiredKept.push(name);
+        continue;
+      }
+      rmSync(overlayPath, { force: true });
+      removed.push(name);
+    } catch {}
+  }
+
+  return { refreshed, conflicts, removed, retiredKept };
 }
 
 function fail(message: string, code: string, json: boolean): never {
@@ -346,8 +370,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
 
   let refreshed: string[] = [];
   let conflicts: string[] = [];
+  let removed: string[] = [];
+  let retiredKept: string[] = [];
   try {
-    ({ refreshed, conflicts } = reconcileManagedWorkflows(
+    ({ refreshed, conflicts, removed, retiredKept } = reconcileManagedWorkflows(
       keelsonPaths(home).workflowsDir,
       previous,
       readWorkflowContents(bundleDir),
@@ -377,9 +403,11 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     updated: true,
     ribsUpdated: ribs,
     refreshedWorkflows: refreshed,
+    removedWorkflows: removed,
     restartRequired: server !== null,
     home,
     workflowConflicts: conflicts,
+    retiredKeptWorkflows: retiredKept,
     ...(installed !== latest ? { warning: `installed ${installed}, expected ${latest}` } : {}),
   });
   if (!opts.json) {
@@ -390,9 +418,17 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
       );
     if (refreshed.length > 0)
       process.stdout.write(`refreshed ${refreshed.length} workflow(s): ${refreshed.join(", ")}\n`);
+    if (removed.length > 0)
+      process.stdout.write(
+        `removed ${removed.length} retired workflow(s): ${removed.join(", ")}\n`,
+      );
     for (const name of conflicts)
       process.stdout.write(
         `kept your customized ${name} (bundle updated; review to adopt the new version)\n`,
+      );
+    for (const name of retiredKept)
+      process.stdout.write(
+        `kept your customized ${name} (retired from the bundle; remove it manually if unwanted)\n`,
       );
     if (server !== null)
       process.stdout.write("restart the server (`keelson restart`) to load the update\n");

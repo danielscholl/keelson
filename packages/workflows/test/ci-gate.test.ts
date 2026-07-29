@@ -71,7 +71,7 @@ esac
 }
 
 shimDescribe("CI advisory gate", () => {
-  for (const workflow of ["finish-pr", "fix-issue"]) {
+  for (const workflow of ["resolve-pr", "fix-issue"]) {
     test(`${workflow}: zero required checks with a failing check emits FAIL`, () => {
       const result = runAdvisoryGate(
         workflow,
@@ -85,22 +85,49 @@ shimDescribe("CI advisory gate", () => {
     });
   }
 
-  // A failed discovery must not read as "nothing is required" — that would route a
-  // real failure down the advisory path and pass it.
-  for (const workflow of ["finish-pr", "fix-issue"]) {
-    test(`${workflow}: required-check discovery failure emits UNKNOWN, never PASS`, () => {
-      const result = runAdvisoryGate(
-        workflow,
-        "await-ci",
-        '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"}]',
-        { requiredChecksFail: true },
-      );
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("CI_STATUS: UNKNOWN");
-      expect(result.stdout).not.toContain("CI_STATUS: PASS");
-      expect(result.stdout).not.toContain("CI_STATUS: FAIL");
-    });
-  }
+  // fix-issue's gate is a one-shot draft/ready decision, so a failed discovery
+  // stays fail-closed as UNKNOWN (the PR just stays a draft). resolve-pr's gate
+  // drives a converge loop where UNKNOWN can never converge, so it falls back to
+  // gating on EVERY check — strictly: with the required set unknown, nothing may
+  // ride the advisory carve-outs.
+  test("fix-issue: required-check discovery failure emits UNKNOWN, never PASS", () => {
+    const result = runAdvisoryGate(
+      "fix-issue",
+      "await-ci",
+      '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"}]',
+      { requiredChecksFail: true },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CI_STATUS: UNKNOWN");
+    expect(result.stdout).not.toContain("CI_STATUS: PASS");
+    expect(result.stdout).not.toContain("CI_STATUS: FAIL");
+  });
+
+  test("resolve-pr: discovery failure with every check green emits PASS", () => {
+    const result = runAdvisoryGate(
+      "resolve-pr",
+      "await-ci",
+      '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"}]',
+      { requiredChecksFail: true },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("gating on every check");
+    expect(result.stdout).toContain("CI_STATUS: PASS");
+    expect(result.stdout).not.toContain("CI_STATUS: UNKNOWN");
+  });
+
+  test("resolve-pr: discovery failure denies the advisory carve-out to a cancelled check", () => {
+    const result = runAdvisoryGate(
+      "resolve-pr",
+      "await-ci",
+      '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"},{"name":"Windows tests","bucket":"cancel","state":"CANCELLED"}]',
+      { requiredChecksFail: true },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("not green and possibly required: Windows tests — cancelled");
+    expect(result.stdout).toContain("CI_STATUS: FAIL");
+    expect(result.stdout).not.toContain("treated as advisory");
+  });
 
   test("finalize-pr leaves the PR a draft when discovery fails", () => {
     const result = runAdvisoryGate(

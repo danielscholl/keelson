@@ -36,7 +36,7 @@ keelson workflow run fix-issue --inputs ARGUMENTS="42"
 <Aside type="note" title="What the Copilot workflows need">
 Eight of the ten set `provider: copilot` and `model: auto`, so they need a
 GitHub Copilot subscription registered. The forge-coupled ones (`fix-issue`,
-`pr-review`, `plan-act-evaluate`, `finish-pr`) run on GitHub or GitLab through
+`pr-review`, `plan-act-evaluate`, `resolve-pr`) run on GitHub or GitLab through
 the bundled `forge` shim, which needs `gh` or `glab` installed and
 authenticated. The approval and
 interactive workflows pause for a human, which needs a running server (`keelson
@@ -52,7 +52,7 @@ plan-first lifecycle, and a PR convergence loop that drives a PR to a clean
 finish. Each composes gates, loops, and branches into a real pipeline, and each
 has a full walkthrough.
 
-<WorkflowCards names={["fix-issue", "pr-review", "plan-act-evaluate", "finish-pr"]} />
+<WorkflowCards names={["fix-issue", "pr-review", "plan-act-evaluate", "resolve-pr"]} />
 
 ## Plan and shape
 

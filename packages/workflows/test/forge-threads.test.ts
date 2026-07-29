@@ -34,7 +34,7 @@ const readLog = (p: string): string => {
     return "";
   }
 };
-// Run the ACTUAL finish-pr ledger mapping over a threads payload, to prove the
+// Run the ACTUAL resolve-pr ledger mapping over a threads payload, to prove the
 // shim's gh-shaped output is forge-agnostic downstream.
 function ledgerMap(threadsJson: string): unknown {
   const program = `map(select(.isResolved == false)) | map({
@@ -161,7 +161,7 @@ exit 1
     expect(byId.ind888).toBeUndefined();
   });
 
-  test("finish-pr's ledger mapping runs unchanged over the shim output", () => {
+  test("resolve-pr's ledger mapping runs unchanged over the shim output", () => {
     const out = runForge(["pr", "threads", "42", "--unresolved"], { env: glabThreads() }).stdout;
     const mapped = ledgerMap(out) as Array<{
       threadId: string;
