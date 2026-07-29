@@ -145,7 +145,8 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
   // Once the node has run (has a runtime provider/model), show what it ran on,
   // backfilling the model from the declared `schema.model` when the runtime
   // reported none. Before then, fall through to the static declared-model chip.
-  const hasRuntimeProvenance = view.provider !== undefined || view.model !== undefined;
+  const hasRuntimeProvenance =
+    view.provider !== undefined || view.model !== undefined || view.effort !== undefined;
   const runtimeProvenance = hasRuntimeProvenance
     ? formatProviderModel(view.provider, view.model, schema.model, view.effort)
     : null;

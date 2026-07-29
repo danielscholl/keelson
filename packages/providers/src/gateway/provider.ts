@@ -161,6 +161,7 @@ export class GatewayProvider implements IAgentProvider {
       // OpenAI function-calling -> keelson tools is deferred; start conservative
       // so the picker doesn't advertise tool support we don't wire.
       tools: false,
+      reasoningEffort: false,
       models: opts.model ? [opts.model] : [],
       defaultModel: opts.model ?? "",
     };

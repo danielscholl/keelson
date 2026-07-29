@@ -67,6 +67,7 @@ export const PI_CAPABILITIES: ProviderCapabilities = {
   // Keelson tools project into the session as pi custom tools; pi's own
   // built-in read/bash/edit/write stay disabled (no keelson rails).
   tools: true,
+  reasoningEffort: false,
   models: PI_MODEL_CATALOG.map((m) => m.id),
   defaultModel: PI_DEFAULT_MODEL,
 };

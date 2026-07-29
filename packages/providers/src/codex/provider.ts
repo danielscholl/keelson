@@ -62,6 +62,7 @@ export const CODEX_CAPABILITIES: ProviderCapabilities = {
   // keelson-tool-projection capability is false (codex still acts agentically;
   // that surfaces through command_execution / file_change events).
   tools: false,
+  reasoningEffort: true,
   models: CODEX_MODEL_CATALOG.map((m) => m.id),
   defaultModel: CODEX_DEFAULT_MODEL,
 };

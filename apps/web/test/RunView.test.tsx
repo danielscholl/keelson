@@ -170,3 +170,35 @@ describe("RunView resume", () => {
     expect(screen.queryByRole("button", { name: /Resume/ })).toBeNull();
   });
 });
+
+describe("RunView provenance chip", () => {
+  test("appends the tier when every node that ran agrees on it", () => {
+    runResult = result({
+      collect: node({ nodeId: "collect", provider: "copilot", model: "auto", effort: "xhigh" }),
+      verify: node({ nodeId: "verify", provider: "copilot", model: "auto", effort: "xhigh" }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+    expect(screen.getByText("copilot · auto · xhigh")).toBeDefined();
+  });
+
+  test("keeps the chip when only the tier varies across nodes", () => {
+    // The shape every bundled workflow that uses `effort:` has — one provider
+    // and model throughout, a tier pinned on the heavyweight nodes only.
+    runResult = result({
+      collect: node({ nodeId: "collect", provider: "copilot", model: "auto", effort: "xhigh" }),
+      verify: node({ nodeId: "verify", provider: "copilot", model: "auto" }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+    expect(screen.getByText("copilot · auto")).toBeDefined();
+  });
+
+  test("drops the chip when the provider/model itself varies", () => {
+    runResult = result({
+      collect: node({ nodeId: "collect", provider: "copilot", model: "auto" }),
+      verify: node({ nodeId: "verify", provider: "claude", model: "claude-opus-4-8" }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+    expect(screen.queryByText(/copilot · auto/)).toBeNull();
+    expect(screen.queryByText(/claude · claude-opus-4-8/)).toBeNull();
+  });
+});

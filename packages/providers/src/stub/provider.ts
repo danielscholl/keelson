@@ -22,6 +22,7 @@ export const STUB_CAPABILITIES: ProviderCapabilities = {
   sessionResume: false,
   streaming: true,
   tools: false,
+  reasoningEffort: false,
   // Single dev-only id so the picker has something to render.
   models: ["stub-echo"],
   // Empty → the picker shows "(default)" and no model is sent on the wire.

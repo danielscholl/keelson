@@ -55,6 +55,7 @@ describe("GatewayProvider.getCapabilities", () => {
       sessionResume: false,
       streaming: true,
       tools: false,
+      reasoningEffort: false,
       models: ["m1"],
       defaultModel: "m1",
     });

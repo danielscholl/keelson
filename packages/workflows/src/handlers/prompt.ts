@@ -47,8 +47,10 @@ export interface PromptHandlerProvider {
   // Optional structural mirror of `IAgentProvider.getCapabilities()`.
   // Consulted as the final fallback in the model-resolution chain so the
   // routing decision stays visible to Keelson rather than deferring to
-  // the SDK's own default. Spy / fake providers may omit it.
-  getCapabilities?(): { defaultModel?: string };
+  // the SDK's own default, and to decide whether a resolved `effort` is worth
+  // reporting — a provider that ignores `reasoningEffort` ran at its own
+  // default, so claiming a tier would be false. Spy / fake providers may omit it.
+  getCapabilities?(): { defaultModel?: string; reasoningEffort?: boolean };
 }
 
 export interface PromptHandlerSendOptions {
@@ -487,6 +489,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // couldn't be resolved (unknown `provider:` id) must not claim it "ran on"
       // that provider/model — it never opened a session.
       let providerResolved = false;
+      // Whether the resolved provider forwards reasoningEffort to its SDK.
+      // Providers that ignore the option (claude, pi, gateways) must not have a
+      // tier reported against their turns — the turn ran at the SDK's default.
+      let effortConsumed = false;
       // Set when any tool the turn invoked returned an error result; consulted
       // after the stream when the node opts into `fail_on_tool_error`.
       let toolErrored = false;
@@ -541,6 +547,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         try {
           const provider = opts.getProvider(effectiveProviderId);
           providerResolved = true;
+          effortConsumed = provider.getCapabilities?.().reasoningEffort === true;
           if (model === undefined) {
             const defaultModel = provider.getCapabilities?.().defaultModel;
             if (typeof defaultModel === "string" && defaultModel.length > 0) {
@@ -766,7 +773,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       if (providerResolved) {
         if (recordedProviderId !== undefined) result.provider = recordedProviderId;
         if (model !== undefined) result.model = model;
-        if (effort !== undefined) result.effort = effort;
+        if (effort !== undefined && effortConsumed) result.effort = effort;
       }
 
       try {

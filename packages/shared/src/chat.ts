@@ -223,6 +223,11 @@ export const providerCapabilitiesSchema = z
     sessionResume: z.boolean(),
     streaming: z.boolean(),
     tools: z.boolean(),
+    // Whether the provider forwards SendQueryOptions.reasoningEffort to its
+    // SDK at all. A provider that ignores it must leave this false so callers
+    // never report a tier the turn never ran at. Defaulted so an out-of-tree
+    // provider that predates the field reads as "does not consume it".
+    reasoningEffort: z.boolean().default(false),
     // Curated baseline; live list comes from GET /api/providers/:id/models.
     models: z.array(z.string()).default([]),
     // Empty string means "let the SDK decide" (no model sent on the wire).
