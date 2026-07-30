@@ -498,8 +498,6 @@ nodes:
         WHY=$(printf '%s' "$finding" | jq -r '.why')
         FIX=$(printf '%s' "$finding" | jq -r '.fix')
 
-        # Conventional-comment prefix, not a severity tag: the review posts
-        # under a personal account and should read like its owner wrote it.
         case "$SEV" in
           CRITICAL|HIGH) PREFIX="blocking" ;;
           *) PREFIX="nit" ;;
@@ -530,17 +528,18 @@ nodes:
         fi
       done < <(jq -c '.findings[]' "$TRIAGE_JSON" 2>/dev/null || true)
 
-      # Assemble review body. No branding and no verdict banner: the triage
-      # summary IS the body, written in the posting engineer's voice, and the
-      # only machine artifact is the invisible idempotency marker.
+      # Assemble the body with real newlines and hand it to jq verbatim:
+      # printf '%b' would interpret backslashes in the model-written summary
+      # (\c truncates the whole body, \n breaks prose mid-sentence).
+      NL=$'\n'
       BODY="${SUMMARY}"
       if [ -n "$FALLBACK" ]; then
-        BODY="${BODY}\n\nA few notes that don't sit on changed lines:\n${FALLBACK}"
+        BODY="${BODY}${NL}${NL}A few notes that don't sit on changed lines:${NL}${FALLBACK}"
       fi
-      BODY="${BODY}\n\n<!-- keelson:pr-review:${HASH} -->"
+      BODY="${BODY}${NL}${NL}<!-- keelson:pr-review:${HASH} -->"
 
       jq -n \
-        --arg body "$(printf '%b' "$BODY")" \
+        --arg body "$BODY" \
         --argjson comments "$COMMENTS" \
         '{event:"COMMENT", body:$body, comments:$comments}' \
         > "$PAYLOAD"

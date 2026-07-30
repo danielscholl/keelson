@@ -192,7 +192,10 @@ describe("pr-review workflow node graph", () => {
 
     type Comment = { path: string; line: number; body: string };
 
-    async function runBuildReview(findings: unknown[]): Promise<{ comments: Comment[] }> {
+    async function runBuildReview(
+      findings: unknown[],
+      summary = "test",
+    ): Promise<{ event: string; body: string; comments: Comment[] }> {
       const dir = mkdtempSync(join(tmpdir(), "keelson-pr-review-build-"));
       tmps.push(dir);
       writeFileSync(join(dir, "diff.patch"), DIFF_FIXTURE);
@@ -203,7 +206,7 @@ describe("pr-review workflow node graph", () => {
           KEELSON_ARTIFACTS_DIR: dir,
           KEELSON_NODE_triage_OUTPUT: JSON.stringify({
             verdict: "NEEDS NITS",
-            summary: "test",
+            summary,
             findings,
           }),
         },
@@ -268,6 +271,47 @@ describe("pr-review workflow node graph", () => {
           expect(comment?.body).not.toContain("```suggestion");
         }
       }
+    }, 15000);
+
+    test("posts an engineer-voiced body: summary verbatim, prefixes, fallback lead-in, marker", async () => {
+      // Backslash sequences in the model-written summary must survive verbatim;
+      // printf '%b' would truncate at \c and break the line at \n.
+      const summary = String.raw`Checked the \n handling and the \c path; both hold up.`;
+      const findings = [
+        {
+          path: "foo.py",
+          line: 2,
+          severity: "MEDIUM",
+          confidence: 90,
+          what: "m",
+          why: "w",
+          fix: "",
+        },
+        { path: "foo.py", line: 3, severity: "HIGH", confidence: 95, what: "h", why: "w", fix: "" },
+        {
+          path: "gone.py",
+          line: 9,
+          severity: "CRITICAL",
+          confidence: 95,
+          what: "c",
+          why: "w",
+          fix: "",
+        },
+      ];
+
+      const payload = await runBuildReview(findings, summary);
+
+      expect(payload.body.startsWith(summary)).toBe(true);
+      expect(payload.body).not.toContain("Smart PR Review");
+      expect(payload.body).not.toContain("Verdict:");
+      expect(payload.body).toContain("A few notes that don't sit on changed lines:");
+      expect(payload.body).toContain("- blocking: `gone.py` — c");
+      expect(payload.body).toMatch(/<!-- keelson:pr-review:[0-9a-f]{64} -->/);
+
+      const medium = payload.comments.find((cm) => cm.line === 2);
+      const high = payload.comments.find((cm) => cm.line === 3);
+      expect(medium?.body.startsWith("nit: ")).toBe(true);
+      expect(high?.body.startsWith("blocking: ")).toBe(true);
     }, 15000);
   });
 });
