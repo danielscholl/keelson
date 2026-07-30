@@ -181,7 +181,9 @@ nodes:
       - **Code review**: always run UNLESS the diff is empty or only touches
         non-code files (README only, .yaml only, license).
       - **Error handling**: run if the diff touches code with try/catch, error
-        handling, async/await, or adds new failure paths.
+        handling, async/await, or adds new failure paths — or changes retry,
+        cleanup, teardown, timeout, cancellation, or failure-recovery
+        behavior, including in CI workflow, infra, and script files.
       - **Test coverage**: run if the diff touches source code (i.e. anything
         other than tests / docs / config).
       - **Docs impact**: run if the diff adds, removes, or renames public
@@ -205,6 +207,12 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.run_code_review == 'true'"
     context: fresh
+    # The always-on finder is the recall ceiling — triage can only filter what
+    # it surfaces. Pin the strongest coding model at full effort, from a
+    # different family than the opus triage judge so finder and judge don't
+    # share blind spots.
+    model: gpt-5.6-sol
+    effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     prompt: |
       You are a senior reviewer. Do a correctness-and-conventions pass on the
@@ -218,13 +226,29 @@ nodes:
 
       1. Read `CLAUDE.md` for project conventions before reading the diff.
       2. Read the diff patch file. For each hunk worth flagging, write one finding.
-      3. Look for: correctness bugs, race conditions, missing input validation,
+      3. Weight the hunt by cost of failure, highest first:
+         - auth, permissions, and trust-boundary changes
+         - data loss, corruption, and irreversible state changes
+         - rollback safety, retries, partial failure, and idempotency gaps
+         - race conditions, ordering assumptions, and stale state
+         - empty-state, null, timeout, and degraded-dependency behavior
+         - version or constant drift between files that must agree (a bump
+           applied in one place but not its siblings)
+         - observability gaps that would hide a failure
+         Then the classic pass: correctness bugs, missing input validation,
          dead code, broken invariants, naming inconsistencies, CLAUDE.md drift.
       4. Also check the footguns reviews miss: moved or extracted code that
-         dropped a guard or condition on the way, flipped config defaults,
-         narrowed lock or transaction scope, and version/constant drift between
-         files that must agree (a bump applied in one place but not its siblings).
-      5. Skip anything stylistic that Biome / TS will catch on its own.
+         dropped a guard or condition on the way, flipped config defaults, and
+         narrowed lock or transaction scope.
+      5. After your first plausible finding, keep digging before you finalize:
+         second-order failures, empty-state behavior, retries, stale state,
+         and rollback paths.
+      6. Skip anything stylistic that Biome / TS will catch on its own, and
+         skip speculative concerns you cannot tie to a concrete failure
+         scenario in THIS diff.
+      7. When a claim rests on inferred behavior of an external API, library,
+         or runtime that you did not verify in this repo, label it INFERRED
+         in the finding and cap its confidence at 60.
 
       ## Output
 
@@ -255,6 +279,9 @@ nodes:
       - Does the caller learn enough to recover (or fail loudly)?
       - Are any `catch` blocks swallowing errors silently?
       - Are promise rejections / async stack traces preserved?
+      - For operational changes (CI workflows, infra, scripts): do cleanup and
+        teardown paths still run on failure and cancellation, are retries
+        idempotent, and can a later run recover from a partial failure?
 
       ## Output
 
@@ -391,7 +418,8 @@ nodes:
       PLAUSIBLE cap sits below the keep line, so only CONFIRMED findings
       post; re-trace a PLAUSIBLE candidate to CONFIRMED or let it drop. Drop
       everything else as noise, including all LOW-severity findings and
-      pedantic nitpicks. Rank most severe first and cap the list at 10; when the cap
+      pedantic nitpicks. Prefer one strong finding over several weak ones;
+      never dilute a serious issue with filler. Rank most severe first and cap the list at 10; when the cap
       forces a cut, correctness findings outrank test-coverage and docs
       findings of equal severity. For each kept finding emit:
       - path: the file path exactly as it appears in the diff

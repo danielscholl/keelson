@@ -68,7 +68,7 @@ distills the lanes into the findings worth posting.
 | `extract-pr` | prompt | Parses the PR number out of `$ARGUMENTS`, or emits the literal `CURRENT` for the next node to resolve. |
 | `scope` | bash | Resolves the number (`CURRENT` becomes the current branch's PR), then writes `pr.json`, `diff.patch`, `changed-files.txt`, and a `scope.md` brief into the run's scratch dir. |
 | `classify` | prompt | Returns typed JSON: which of the four lanes to run, a complexity bucket, and the reasoning. |
-| `code-review` | prompt | Correctness and conventions pass over the diff. Runs unless the PR is non-code. |
+| `code-review` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: the always-on finder is the recall ceiling, so it gets the strongest coding model, from a different family than the triage judge. Hunts highest-cost failures first (trust boundaries, irreversible state, idempotency gaps), labels unverified external-API claims INFERRED, and runs unless the PR is non-code. |
 | `error-handling` | prompt | Audits new and changed failure paths. Gated on the classifier. |
 | `test-coverage` | prompt | Checks that changed source has matching test changes. Gated on the classifier. |
 | `docs-impact` | prompt | Flags user-facing changes (flags, env vars, APIs) with no doc update. Gated on the classifier. |
