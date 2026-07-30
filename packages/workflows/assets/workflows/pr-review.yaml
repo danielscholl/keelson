@@ -43,6 +43,12 @@ description: |
 
 # Repo-scoped: the run's working directory must be a git repository.
 requiresProject: true
+# Read-only, but verification still needs the right tree: the scope node checks
+# the PR head out inside the isolated worktree, so lanes and the triage judge
+# read the code under review — never the operator's live checkout, which may be
+# stale (refuting findings against code that already merged) or mid-edit.
+worktree:
+  enabled: true
 
 nodes:
   # ─────────────────────────────────────────────────────────────────────────
@@ -62,8 +68,7 @@ nodes:
       Rules:
       - If the message contains an explicit PR number ("#42", "PR 42", "42"),
         extract it.
-      - If the message is ambiguous, return the literal string CURRENT — the
-        next node will resolve it from the current branch.
+      - If the message is ambiguous, return the literal string CURRENT.
 
       CRITICAL: Output ONLY the bare integer, or the literal CURRENT. No quotes,
       no markdown, no explanation.
@@ -75,14 +80,17 @@ nodes:
       RAW=$(printf '%s' "$KEELSON_NODE_extract_pr_OUTPUT" | tr -d "'\"\`\n " )
 
       if [ "$RAW" = "CURRENT" ] || [ -z "$RAW" ]; then
-        # Resolve from the current branch.
-        PR_NUM=$(forge pr view --json number -q '.number' 2>/dev/null || echo "")
-      else
-        PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1)
+        # This run executes in an isolated worktree on a generated branch, so the
+        # target PR cannot be inferred from the current branch — require it.
+        echo "pr-review needs an explicit PR number: it runs in an isolated worktree on a generated branch and cannot infer the PR from the current branch. Invoke like 'review pr 42'." >&2
+        exit 1
       fi
+      # `|| true` so a no-digit input yields an empty PR_NUM and reaches the
+      # explicit check below, rather than tripping `set -o pipefail` (grep exits 1).
+      PR_NUM=$(printf '%s' "$RAW" | grep -oE '[0-9]+' | head -1 || true)
 
       if [ -z "$PR_NUM" ]; then
-        echo "Could not resolve a PR number — pass one like 'review pr 42' or run from a PR branch." >&2
+        echo "Could not parse a PR number from '$RAW'; pass one like 'review pr 42'." >&2
         exit 1
       fi
 
@@ -94,6 +102,11 @@ nodes:
 
       # Make sure we have the base branch locally for diff comparison.
       git fetch origin "$BASE" --quiet 2>/dev/null || true
+
+      # Put the worktree on the PR head: lanes verify findings by reading this
+      # tree, and the worktree's start-point ref may be stale — and never
+      # contains the PR's own changes.
+      forge pr checkout "$PR_NUM" --detach >&2
 
       DIFF_STAT=$(forge pr diff "$PR_NUM" --name-only 2>/dev/null || true)
       DIFF_BODY=$(forge pr diff "$PR_NUM" 2>/dev/null || true)
@@ -111,6 +124,7 @@ nodes:
       - Title: $(jq -r '.title' "$KEELSON_ARTIFACTS_DIR/pr.json")
       - Author: $(jq -r '.author.login' "$KEELSON_ARTIFACTS_DIR/pr.json")
       - Base → Head: ${BASE} ← ${HEAD}
+      - Reviewed at: $(git rev-parse --short HEAD)
       - Files changed: ${FILE_COUNT}
       - Diff lines: ${LINE_COUNT}
       - URL: $(jq -r '.url' "$KEELSON_ARTIFACTS_DIR/pr.json")
@@ -216,7 +230,8 @@ nodes:
     allowed_tools: [Read, Glob, Grep]
     prompt: |
       You are a senior reviewer. Do a correctness-and-conventions pass on the
-      PR diff at `$ARTIFACTS_DIR/diff.patch`.
+      PR diff at `$ARTIFACTS_DIR/diff.patch`. The working tree is checked out
+      at the PR head, so repo files already reflect the diff applied.
 
       ## Scope
 
@@ -405,8 +420,8 @@ nodes:
       $docs-impact.output
 
       De-duplicate the candidates, then ADVERSARIALLY VERIFY each unique one:
-      read `$ARTIFACTS_DIR/diff.patch` and the relevant source files and
-      actively try to REFUTE it. A candidate is refuted when the code already
+      read `$ARTIFACTS_DIR/diff.patch` and the relevant source files — the
+      working tree is checked out at the PR head — and actively try to REFUTE it. A candidate is refuted when the code already
       handles the claimed case, the claim misreads the diff, the issue is
       pre-existing rather than introduced by this PR, or a
       linter/type-checker/CI gate already catches it. A survivor is CONFIRMED
