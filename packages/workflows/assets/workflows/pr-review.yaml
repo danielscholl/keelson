@@ -105,8 +105,19 @@ nodes:
 
       # Put the worktree on the PR head: lanes verify findings by reading this
       # tree, and the worktree's start-point ref may be stale — and never
-      # contains the PR's own changes.
-      forge pr checkout "$PR_NUM" --detach >&2
+      # contains the PR's own changes. Fail closed when isolation fell back to
+      # the live checkout (worktree creation failure, or isolation disabled):
+      # only this run's own worktree sits on a keelson/pr-review/* branch, and
+      # detaching the operator's checkout would trample their working state.
+      case "$(git rev-parse --abbrev-ref HEAD)" in
+        keelson/pr-review/*)
+          forge pr checkout "$PR_NUM" --detach >&2
+          ;;
+        *)
+          echo "refusing to check out the PR head: this is not the run's isolated worktree (worktree creation may have failed, or isolation was disabled). pr-review needs worktree isolation to review the PR head safely." >&2
+          exit 1
+          ;;
+      esac
 
       DIFF_STAT=$(forge pr diff "$PR_NUM" --name-only 2>/dev/null || true)
       DIFF_BODY=$(forge pr diff "$PR_NUM" 2>/dev/null || true)
