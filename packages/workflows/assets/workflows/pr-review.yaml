@@ -12,6 +12,12 @@
 # de-dupes findings, adversarially verifies each one against the diff and
 # repo, and drops refuted / confidence < 80 / LOW findings before the review
 # is assembled and posted as line-anchored inline comments.
+#
+# The posted review reads like the posting engineer wrote it: the triage
+# summary is the whole body (no product heading, no verdict banner) and
+# inline comments carry conventional-comment prefixes (blocking:/nit:)
+# instead of severity tags. The hidden idempotency marker is the only
+# machine-readable trace.
 
 name: pr-review
 provider: copilot
@@ -406,7 +412,14 @@ nodes:
       - only MEDIUM present → "NEEDS NITS"
       - no findings (empty list) → "READY TO MERGE"
 
-      summary is one sentence on the PR's overall health.
+      summary is the exact text posted as the review body, written in the
+      first-person voice of the engineer whose account posts it. Two or
+      three plain sentences grounded in this PR: what you actually checked,
+      what you concluded, and, when comments survive, what they cover and
+      whether any of them block merging. No headings, no bold, no bullet
+      lists, no sign-off. Never use the words "verdict", "severity",
+      "confidence", "lane", or "finding" (say "comments" instead), and
+      never mention AI, automation, or this review being generated.
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 5: BUILD REVIEW PAYLOAD
@@ -457,6 +470,13 @@ nodes:
         WHY=$(printf '%s' "$finding" | jq -r '.why')
         FIX=$(printf '%s' "$finding" | jq -r '.fix')
 
+        # Conventional-comment prefix, not a severity tag: the review posts
+        # under a personal account and should read like its owner wrote it.
+        case "$SEV" in
+          CRITICAL|HIGH) PREFIX="blocking" ;;
+          *) PREFIX="nit" ;;
+        esac
+
         if cut -f1,2 "$ARTIFACTS/anchorable.txt" 2>/dev/null | grep -qxF "${PATH_F}"$'\t'"${LINE_F}"; then
           # A suggestion block replaces the anchored line when applied, so gate
           # it: no fix, or a fix byte-identical to the line's current content (a
@@ -467,9 +487,9 @@ nodes:
             "$ARTIFACTS/anchorable.txt")
           FIX_T=$(printf '%s' "$FIX" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
           if [ -n "$FIX_T" ] && [ "$FIX" != "$CURRENT" ]; then
-            BODY=$(printf '**%s** — %s\n\n%s\n\n```suggestion\n%s\n```' "$SEV" "$WHAT" "$WHY" "$FIX")
+            BODY=$(printf '%s: %s\n\n%s\n\n```suggestion\n%s\n```' "$PREFIX" "$WHAT" "$WHY" "$FIX")
           else
-            BODY=$(printf '**%s** — %s\n\n%s' "$SEV" "$WHAT" "$WHY")
+            BODY=$(printf '%s: %s\n\n%s' "$PREFIX" "$WHAT" "$WHY")
           fi
           COMMENT=$(jq -n \
             --arg p "$PATH_F" \
@@ -478,14 +498,16 @@ nodes:
             '{path:$p, line:$l, side:"RIGHT", body:$b}')
           COMMENTS=$(printf '%s' "$COMMENTS" | jq ". + [$COMMENT]")
         else
-          FALLBACK="${FALLBACK}"$'\n'"- **${SEV}** \`${PATH_F}\` — ${WHAT}"
+          FALLBACK="${FALLBACK}"$'\n'"- ${PREFIX}: \`${PATH_F}\` — ${WHAT}"
         fi
       done < <(jq -c '.findings[]' "$TRIAGE_JSON" 2>/dev/null || true)
 
-      # Assemble review body.
-      BODY="## Smart PR Review\n\n**Verdict: ${VERDICT}**\n\n${SUMMARY}"
+      # Assemble review body. No branding and no verdict banner: the triage
+      # summary IS the body, written in the posting engineer's voice, and the
+      # only machine artifact is the invisible idempotency marker.
+      BODY="${SUMMARY}"
       if [ -n "$FALLBACK" ]; then
-        BODY="${BODY}\n\n### Findings not anchorable to the diff\n${FALLBACK}"
+        BODY="${BODY}\n\nA few notes that don't sit on changed lines:\n${FALLBACK}"
       fi
       BODY="${BODY}\n\n<!-- keelson:pr-review:${HASH} -->"
 
