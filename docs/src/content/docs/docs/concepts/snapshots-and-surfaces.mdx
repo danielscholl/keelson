@@ -135,29 +135,34 @@ a live one is a complete one. A region's `workflow` name and `cadenceMs` are rea
 once at boot, when the harness walks every manifest to derive which workflows may
 refresh which region and which regions the heartbeat owns. A region a rib pushes
 onto its own descriptor after that walk would serve unbound and never get a
-heartbeat, however live the manifest looks.
+heartbeat, however live the manifest looks. `serverRefresh` is also read during
+that boot-time derivation.
 
 A region can also name a **workflow**: the catalog workflow whose run
 repopulates the region's key. That single field is what makes boards
 operable. The refresh button on a region runs the workflow, and a `cadenceMs`
 on the region (floored at thirty seconds) asks for the same run on a schedule.
-The harness keeps that schedule itself. A single server heartbeat re-runs
-cadence-bearing regions even when no tab is mounted, so a board is fresh when
-someone arrives instead of blank while it composes. The heartbeat is
-deliberately cheap: a tick admits at most two new runs, and it reads staleness
-from each frame's `composedAt`, so an operator's refresh and a server tick
-suppress each other rather than double-run. `KEELSON_DISABLE_SCHEDULER=1` turns
-it off.
+The harness keeps that schedule itself. A single server heartbeat uses the
+declared cadence while a tab subscribes to the region's key. With no subscriber,
+it backs off to six times that cadence instead of stopping, so an idle board
+stays warm without refreshing at its viewed rate. The heartbeat is deliberately
+cheap: a tick admits at most two new runs, and it reads staleness from each
+frame's `composedAt`, so an operator's refresh and a server tick suppress each
+other rather than double-run. `KEELSON_DISABLE_SCHEDULER=1` turns it off.
 
-One case stays client-driven. A region carrying `workflowArgs` refreshes only
+Two cases stay client-driven. A region carrying `workflowArgs` refreshes only
 while its surface is open, because the heartbeat would fire the run with empty
-inputs and hand an args-expecting producer nothing.
+inputs and hand an args-expecting producer nothing. One boot summary warning
+lists every such key. A region with `serverRefresh: false` also stays off the
+heartbeat, silently because the rib declared that intent. Its client cadence
+still applies while the surface is open.
 
 Freshness stays visible either way. Every frame carries its composition time, so
 a board reports how old it is rather than implying it is live.
 
-Beyond `key`, `workflow`, and `cadenceMs`, a region carries presentation fields
-the harness honors: `workflowArgs`, `group` and `groupTitle`, `byline`,
+Beyond `key`, `workflow`, and `cadenceMs`, a region carries `workflowArgs`,
+the server-only `serverRefresh` flag, and presentation fields the harness honors:
+`group` and `groupTitle`, `byline`,
 `collapsible` and `collapsed`, `live`, `hideWhenEmpty`, and `headActions`
 (menu-only verbs on the region head). The
 [rib contract](../../reference/rib-contract/) documents each one.

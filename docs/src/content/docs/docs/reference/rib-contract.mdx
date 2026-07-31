@@ -186,15 +186,19 @@ coordination path.
    `hideRegionActions` opts an authoring-console surface out of the host's
    per-region explore, select, and open-full chrome (board actions and
    head-action menus still flow). Each region is `{ key, workflow?, workflowArgs?,
-   cadenceMs?, title?, glyph?, group?, groupTitle?, byline?, collapsible?,
+   serverRefresh?, cadenceMs?, title?, glyph?, group?, groupTitle?, byline?, collapsible?,
    collapsed?, live?, hideWhenEmpty?, headActions? }`:
    `key` is namespaced; `workflow` is the catalog workflow a region's refresh
    re-runs; `workflowArgs` are string inputs that ride each of those refresh
    runs, so one producer can serve many regions (e.g. a per-item re-author
-   workflow keyed by the item id); args-bearing regions refresh client-side
-   only, while the surface is open, never on the server heartbeat; `cadenceMs`
-   is the auto-refresh interval (floored to 30s, run on
-   open and on a heartbeat); `glyph` is a `{ char, tone? }` chip for the region
+   workflow keyed by the item id); the heartbeat cannot supply args, so
+   args-bearing regions refresh only while the surface is open and one boot
+   summary warning lists every affected key; `serverRefresh: false` explicitly
+   opts a region out of the heartbeat without a warning, while an absent value
+   keeps server refresh enabled; `cadenceMs` is the auto-refresh interval
+   (floored to 30s and run on open). For server-refreshed regions, the heartbeat
+   uses that cadence while the key has a live subscriber and six times that
+   cadence while idle; `glyph` is a `{ char, tone? }` chip for the region
    head; `group` is a clustering hint used when adding regions at runtime via
    `registerRegion`; regions sharing a `group` string are kept contiguous in the
    surface rather than interleaved by arrival order; `groupTitle` is a section
@@ -222,11 +226,11 @@ coordination path.
    Surfaces are read per manifest request like `views`, but they are **not** live
    the same way, because the host derives things from them once at boot: a region's
    `workflow` name hoists into a set that gates whether a refresh may run, and
-   `cadenceMs` becomes a heartbeat schedule. So a rib may mutate a **declared**
+   `cadenceMs` plus `serverRefresh` determine its heartbeat schedule. So a rib may mutate a **declared**
    region's presentation and mount-defaults at runtime (`collapsed`, `title`,
    `glyph`, `byline`) and call `ctx.invalidateManifest?.()`, and the client picks
    them up on its next mount. Adding a region at runtime, or changing a `workflow`
-   or `cadenceMs` after boot, does not work that way: `/api/ribs` would show it while
+   `cadenceMs`, or `serverRefresh` after boot does not work that way: `/api/ribs` would show it while
    its refresh is rejected as unbound and no heartbeat is ever scheduled. Add regions
    with `registerRegion` instead: it is the runtime path the workflow and heartbeat
    consumers actually track.
@@ -384,6 +388,7 @@ where a failure lands depends on when it is caught.
 | `canvasKind` is the closed `markdown` / `view` / `html` / `log` enum; for `view` and `html` a payload that mismatches its renderer is rejected client-side, while `log` tolerates a non-string payload and formats it as JSON. | `canvasKindSchema`, client gate |
 | A bound workflow's output is run through `validate` before caching or broadcast; an invalid payload is dropped and the prior value kept. | `SnapshotValidator`, fail-closed |
 | `cadenceMs` is an integer of at least 30000. | `surfaceRegionSchema` |
+| `serverRefresh`, when present, is boolean; `false` opts the region out of the server heartbeat. | `surfaceRegionSchema`, scheduler derivation |
 | `headActions` carries 1–8 board-action-shaped items with no `fields`/`expanded`/`inline`/`selected` (a menu has no form and no pressed state); `workflowArgs` values are strings. | `surfaceRegionSchema` |
 
 <Aside type="caution" title="The boundary is not a sandbox">
