@@ -204,9 +204,10 @@ nodes:
       - For a plan/fix/design: where is it under-specified enough to go wrong on
         implementation? What is the riskiest step?
       - Is the scope right — over-built, or missing a load-bearing piece?
-      - Is the chosen approach the right one at all? Name the strongest
-        alternative the artifact ignores, and whether the choice made actually
-        beats it.
+      - For an artifact that chooses an approach or design: is the choice the
+        right one at all? Name the strongest alternative it ignores, and
+        whether the choice made actually beats it. Skip this for an artifact
+        that makes no such choice — never invent an alternative to attack.
 
       ## Output (markdown)
 
