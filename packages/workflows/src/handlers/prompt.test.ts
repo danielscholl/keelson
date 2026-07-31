@@ -134,6 +134,50 @@ describe("makePromptHandler", () => {
     expect(result.output.kind === "text" ? result.output.text : "").toBe("Hello world");
   });
 
+  test("separates text blocks without splitting contiguous deltas", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "text", content: "Hel" },
+        { type: "text", content: "lo" },
+        { type: "tool_use", id: "t1", toolName: "inspect" },
+        { type: "text", content: "world" },
+        { type: "tool_result", toolUseId: "t1", content: "ok" },
+        { type: "text", content: "done" },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("Hello\n\nworld\n\ndone");
+  });
+
+  test("empty text chunks add no leading or trailing separator", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "text", content: "" },
+        { type: "tool_use", id: "t1", toolName: "inspect" },
+        { type: "text", content: "" },
+        { type: "tool_result", toolUseId: "t1", content: "ok" },
+        { type: "text", content: "answer" },
+        { type: "text", content: "" },
+        { type: "tool_use", id: "t2", toolName: "inspect" },
+        { type: "text", content: "" },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("succeeded");
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("answer");
+  });
+
   test("requestGate deny fails the node before opening a provider session", async () => {
     const { provider, calls } = makeSpyProvider({
       chunks: [{ type: "text", content: "should not run" }, { type: "done" }],
@@ -603,6 +647,31 @@ describe("makePromptHandler", () => {
     // The gate saw the FULL assembled text and the node's effective provider.
     expect(seenText).toBe("the secret is hunter2");
     expect(seenProvider).toBe("claude");
+  });
+
+  test("evaluateResponse receives all text blocks and substitutes the whole output", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "text", content: "Reviewing " },
+        { type: "text", content: "changes." },
+        { type: "tool_use", id: "t1", toolName: "inspect" },
+        { type: "text", content: "Found hunter2" },
+        { type: "done" },
+      ],
+    });
+    let seenText: string | undefined;
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+      evaluateResponse: async (text) => {
+        seenText = text;
+        return { outcome: "allow", data: "[REDACTED RESPONSE]" };
+      },
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(seenText).toBe("Reviewing changes.\n\nFound hunter2");
+    expect(result.status).toBe("succeeded");
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("[REDACTED RESPONSE]");
   });
 
   test("threads the workflow name + node id to the policy gates", async () => {
@@ -2028,7 +2097,9 @@ describe("makePromptHandler", () => {
       const { provider } = makeSpyProvider({
         chunks: [
           { type: "text", content: "I'll check the diff first." },
-          { type: "text", content: '\n{"kind":"bug"}' },
+          { type: "tool_use", id: "t1", toolName: "inspect" },
+          { type: "tool_result", toolUseId: "t1", content: "done" },
+          { type: "text", content: '{"kind":"bug"}' },
           { type: "done" },
         ],
       });
