@@ -740,6 +740,40 @@ nodes:
     model: gpt-5.6-terra
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+         findings:
+          type: array
+          items:
+            type: object
+            required: [location, severity, confidence, what, why, fix]
+            properties:
+              location: { type: string }
+              severity:
+                type: string
+                enum: [CRITICAL, HIGH, MEDIUM, LOW]
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+         findings:
+          type: array
+          items:
+            type: object
+            required: [location, severity, confidence, what, why, fix]
+            properties:
+              location: { type: string }
+              severity: { type: string }
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
     prompt: |
       You are one of three INDEPENDENT reviewers of the branch this run just
       opened as a draft PR. Your lens is CORRECTNESS only. The working tree IS
@@ -780,13 +814,10 @@ nodes:
          runtime you did not verify in this repo, label it INFERRED and cap its
          confidence at 60.
 
-      Output a numbered list; each finding:
-      - `path:line` — severity (CRITICAL | HIGH | MEDIUM | LOW) — confidence (0-100)
-      - **What**: one sentence
-      - **Why it matters**: the concrete failure scenario — the input, state, or
-        sequence that triggers it and the wrong outcome, not "could cause issues"
-      - **Suggested fix**: one or two lines
-      If you find nothing real, output exactly "No correctness issues found."
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `location` (`path:line`), `severity`, `confidence`
+      (0-100), `what`, `why` (the concrete failure scenario), and `fix`. Return
+      `{"findings":[]}` when you find nothing real.
 
   - id: review-conventions
     depends_on: [capture-diff]
@@ -794,6 +825,40 @@ nodes:
     model: gpt-5.6-terra
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+         type: array
+         items:
+           type: object
+           required: [location, severity, confidence, rule, why, fix]
+           properties:
+             location: { type: string }
+             severity:
+               type: string
+               enum: [CRITICAL, HIGH, MEDIUM, LOW]
+             confidence: { type: integer }
+             rule: { type: string }
+             why: { type: string }
+             fix: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+         type: array
+         items:
+           type: object
+           required: [location, severity, confidence, rule, why, fix]
+           properties:
+             location: { type: string }
+             severity: { type: string }
+             confidence: { type: integer }
+             rule: { type: string }
+             why: { type: string }
+             fix: { type: string }
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
 
@@ -807,9 +872,10 @@ nodes:
          correctness and test coverage — other reviewers own those. Ignore
          pre-existing issues on unchanged lines.
 
-      Output a numbered list; each finding: `path:line` · severity · confidence
-      (0-100) · the rule it violates (quoted) · suggested fix. If none, output
-      exactly "No convention issues found."
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `location` (`path:line`), `severity`, `confidence`
+      (0-100), `rule` (quoted), `why`, and `fix`. Return `{"findings":[]}` when
+      you find no convention issues.
 
   - id: review-coverage
     depends_on: [capture-diff]
@@ -817,6 +883,40 @@ nodes:
     model: gpt-5.6-terra
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+       findings:
+         type: array
+         items:
+           type: object
+           required: [location, severity, confidence, what, why, test]
+           properties:
+             location: { type: string }
+             severity:
+               type: string
+               enum: [CRITICAL, HIGH, MEDIUM, LOW]
+             confidence: { type: integer }
+             what: { type: string }
+             why: { type: string }
+             test: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+       findings:
+         type: array
+         items:
+           type: object
+           required: [location, severity, confidence, what, why, test]
+           properties:
+             location: { type: string }
+             severity: { type: string }
+             confidence: { type: integer }
+             what: { type: string }
+             why: { type: string }
+             test: { type: string }
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
 
@@ -840,9 +940,10 @@ nodes:
       4. Only expect coverage the project's own conventions would — do not demand
          tests a repo without a suite couldn't have. Ignore correctness and style.
 
-      Output a numbered list; each finding: the untested `path`/behavior ·
-      severity · confidence (0-100) · the specific test to add. If coverage is
-      adequate, output exactly "Coverage adequate."
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `location`, `severity`, `confidence` (0-100), `what`
+      (the untested behavior), `why`, and `test` (the specific test to add).
+      Return `{"findings":[]}` when coverage is adequate.
 
   - id: triage
     depends_on: [review-correctness, review-conventions, review-coverage]
@@ -870,8 +971,13 @@ nodes:
               fix: { type: string }
     prompt: |
       You are the review triage judge. Three independent reviewers produced the
-      findings below (a section may be empty if that reviewer did not run).
-      Verify the candidates against the actual code; keep only what survives.
+      sections below. An empty `findings` array means a reviewer ran and found
+      nothing. The ungated Correctness reviewer is load-bearing: if the
+      Correctness section is not a findings object (including prose, empty, or
+      malformed output), it produced no verdict. In that case, set `ship_ready`
+      to false and make `summary` say explicitly that the correctness reviewer
+      produced no verdict. Verify the candidates against the actual code; keep
+      only what survives.
 
       ## Correctness
       $review-correctness.output
@@ -899,7 +1005,8 @@ nodes:
       let it drop. Drop everything else as noise, including pedantic nitpicks.
       Prefer one strong finding over several weak ones; never dilute a serious
       issue with filler. Set `ship_ready` to true exactly when `must_fix` is
-      empty. `summary` is one sentence on the branch's health.
+      empty and the Correctness section is a findings object. `summary` is one
+      sentence on the branch's health.
 
   - id: apply-fixes
     depends_on: [triage]

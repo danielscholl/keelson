@@ -246,6 +246,42 @@ nodes:
     model: gpt-5.6-sol
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+         findings:
+          type: array
+          items:
+            type: object
+            required: [path, line, severity, confidence, what, why, fix]
+            properties:
+              path: { type: string }
+              line: { type: integer }
+              severity:
+                type: string
+                enum: [CRITICAL, HIGH, MEDIUM, LOW]
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+         findings:
+          type: array
+          items:
+            type: object
+            required: [path, line, severity, confidence, what, why, fix]
+            properties:
+              path: { type: string }
+              line: { type: integer }
+              severity: { type: string }
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
     prompt: |
       You are a senior reviewer. Do a correctness-and-conventions pass on the
       PR diff at `$ARTIFACTS_DIR/diff.patch`. The working tree is checked out
@@ -283,20 +319,52 @@ nodes:
          or runtime that you did not verify in this repo, label it INFERRED
          in the finding and cap its confidence at 60.
 
-      ## Output
-
-      Markdown list. Each finding:
-      - `path:line` — `severity` (CRITICAL | HIGH | MEDIUM | LOW) — `confidence` (0-100)
-      - **What**: one sentence
-      - **Why it matters**: the concrete failure scenario — the input, state, or
-        sequence that triggers it and the wrong outcome, not "could cause issues"
-      - **Suggested fix**: one or two lines, code where useful
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `path`, `line`, `severity`, `confidence` (0-100),
+      `what`, `why` (the concrete failure scenario), and `fix`. Return
+      `{"findings":[]}` when you find nothing real.
 
   - id: error-handling
     depends_on: [classify]
     when: "$classify.output.run_error_handling == 'true'"
     context: fresh
     allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+         type: array
+         items:
+           type: object
+           required: [path, line, severity, confidence, what, why, fix]
+           properties:
+             path: { type: string }
+             line: { type: integer }
+             severity:
+               type: string
+               enum: [CRITICAL, HIGH, MEDIUM, LOW]
+             confidence: { type: integer }
+             what: { type: string }
+             why: { type: string }
+             fix: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+         type: array
+         items:
+           type: object
+           required: [path, line, severity, confidence, what, why, fix]
+           properties:
+             path: { type: string }
+             line: { type: integer }
+             severity: { type: string }
+             confidence: { type: integer }
+             what: { type: string }
+             why: { type: string }
+             fix: { type: string }
     prompt: |
       Audit the error-handling story of the PR.
 
@@ -316,16 +384,52 @@ nodes:
         teardown paths still run on failure and cancellation, are retries
         idempotent, and can a later run recover from a partial failure?
 
-      ## Output
-
-      Same finding shape as the code review (path:line, severity, confidence (0-100), what, why, fix).
-      If the diff has no new error paths worth flagging, say so in one line.
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `path`, `line`, `severity`, `confidence` (0-100),
+      `what`, `why`, and `fix`. Return `{"findings":[]}` when the diff has no
+      new error paths worth flagging.
 
   - id: test-coverage
     depends_on: [classify]
     when: "$classify.output.run_test_coverage == 'true'"
     context: fresh
     allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+       findings:
+         type: array
+         items:
+           type: object
+           required: [path, line, severity, confidence, what, why, fix]
+           properties:
+             path: { type: string }
+             line: { type: integer }
+             severity:
+               type: string
+               enum: [CRITICAL, HIGH, MEDIUM, LOW]
+             confidence: { type: integer }
+             what: { type: string }
+             why: { type: string }
+             fix: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+       findings:
+         type: array
+         items:
+           type: object
+           required: [path, line, severity, confidence, what, why, fix]
+           properties:
+             path: { type: string }
+             line: { type: integer }
+             severity: { type: string }
+             confidence: { type: integer }
+             what: { type: string }
+             why: { type: string }
+             fix: { type: string }
     prompt: |
       Audit test coverage for the PR.
 
@@ -343,12 +447,12 @@ nodes:
          exercises it. If not, flag it.
       4. Don't demand tests for trivial pass-throughs or pure type changes.
 
-      ## Output
-
-      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). In `why`,
-      name the concrete untested branch and the input that would expose it.
-      Tag missing tests with severity HIGH if the new code can branch on bad
-      input or external state; MEDIUM otherwise.
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `path`, `line`, `severity`, `confidence` (0-100),
+      `what`, `why` (the concrete untested branch and exposing input), and
+      `fix` (the test to add). Tag missing tests with severity HIGH if the new
+      code can branch on bad input or external state; MEDIUM otherwise. Return
+      `{"findings":[]}` when coverage is adequate.
 
   - id: docs-impact
     depends_on: [classify]
@@ -356,6 +460,42 @@ nodes:
     model: auto
     context: fresh
     allowed_tools: [Read, Glob, Grep]
+    output_format:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+          type: array
+          items:
+            type: object
+            required: [path, line, severity, confidence, what, why, fix]
+            properties:
+              path: { type: string }
+              line: { type: integer }
+              severity:
+                type: string
+                enum: [CRITICAL, HIGH, MEDIUM, LOW]
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
+    output_schema:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+          type: array
+          items:
+            type: object
+            required: [path, line, severity, confidence, what, why, fix]
+            properties:
+              path: { type: string }
+              line: { type: integer }
+              severity: { type: string }
+              confidence: { type: integer }
+              what: { type: string }
+              why: { type: string }
+              fix: { type: string }
     prompt: |
       Audit user-facing documentation impact for the PR.
 
@@ -372,11 +512,10 @@ nodes:
       Check whether `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, or other
       user-facing docs were updated in the same PR. If not, flag it.
 
-      ## Output
-
-      Same finding shape (path:line, severity, confidence (0-100), what, why, fix). In `why`,
-      name the doc claim that goes stale and who it misleads. Skip if the diff
-      has no user-facing surface change.
+      Return a single-line JSON object matching the declared contract. Each
+      finding must include `path`, `line`, `severity`, `confidence` (0-100),
+      `what`, `why` (the stale doc claim and who it misleads), and `fix`.
+      Return `{"findings":[]}` when documentation is current.
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 4: TRIAGE
@@ -418,12 +557,23 @@ nodes:
               why: { type: string }
               fix: { type: string }
     prompt: |
-      You are the PR review triage judge. Four independent lanes produced
-      candidate findings (a section may be empty if that lane was skipped).
-      Verify the candidates against the actual code; keep only what survives.
+      You are the PR review triage judge. Four independent lanes produced the
+      sections below. An empty `findings` array means a lane ran and found
+      nothing. Use the classifier output to distinguish skipped lanes from
+      malformed verdicts. When `run_code_review` is true, Code review is
+      load-bearing: if its section is not a findings object (including prose,
+      empty, or malformed output), it produced no verdict. In that case, set
+      `verdict` to "NEEDS FIXES" and make `summary` say explicitly that code
+      review produced no verdict. When `run_code_review` is false, its empty
+      section is a legitimate skip and must not prevent "READY TO MERGE".
+      Error handling, test coverage, and docs impact may also be legitimately
+      skipped and their empty sections must not determine readiness.
 
       ## Scope summary
       $scope.output
+
+      ## Classifier
+      $classify.output
 
       ## Code review findings
       $code-review.output
@@ -468,7 +618,8 @@ nodes:
         anchor, or the anchored line is already correct, set fix to "" and
         name the needed change inside `why` instead.
 
-      Set verdict from the highest severity in findings:
+      Unless the load-bearing Code review produced no verdict, set verdict from
+      the highest severity in findings:
       - CRITICAL or HIGH present → "NEEDS FIXES"
       - only MEDIUM present → "NEEDS NITS"
       - no findings (empty list) → "READY TO MERGE"
@@ -480,7 +631,8 @@ nodes:
       whether any of them block merging. No headings, no bold, no bullet
       lists, no sign-off. Never use the words "verdict", "severity",
       "confidence", "lane", or "finding" (say "comments" instead), and
-      never mention AI, automation, or this review being generated.
+      never mention AI, automation, or this review being generated. The
+      required "code review produced no verdict" summary is the sole exception.
 
   # ─────────────────────────────────────────────────────────────────────────
   # PHASE 5: BUILD REVIEW PAYLOAD
