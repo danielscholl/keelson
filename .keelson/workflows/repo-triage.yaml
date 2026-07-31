@@ -768,20 +768,36 @@ nodes:
 
       $apply.output
 
+      ## Your tools — read this before you plan
+
+      You have exactly two: `canvas_design_guide` and `canvas_publish`. You have
+      NO filesystem and NO shell. There is no `create`, no `apply_patch`, no
+      `bash`, no editor.
+
+      **The page is never a file.** `canvas_publish` takes the complete markup
+      inline as its `html` parameter — you pass the whole document in the tool
+      call itself. Do not try to write it out first; there is nowhere to write
+      it, and an attempt is simply refused.
+
+      If any tool call comes back refused, that tool is not yours in this run.
+      Do not retry it and do not stop working — a refusal is not a failure of
+      the task, and ending the turn without calling `canvas_publish` means this
+      run produced nothing. Go straight to `canvas_publish` with the markup.
+
       ## Author it
 
       1. Call `canvas_design_guide` with section `page`, then `form` (the page
          carries charts), then `color`.
-      2. Author ONE self-contained HTML page per the guide: CSS custom
-         properties with keelson's dark values on `:root` and light overrides on
-         `:root[data-theme="light"]`, system font stack, no external resources,
-         wide content scrolling inside its own container.
-      3. Publish with `canvas_publish`, passing `name` as `triage-` followed by
-         the repo's owner and name lowercased with `/` and `.` replaced by `-`
-         (e.g. `triage-danielscholl-keelson`), so each run updates the same
-         artifact in place rather than piling up copies. If the palette is
-         rejected, fix the colors — prefer the keelson series slots — and
-         publish again.
+      2. Compose ONE self-contained HTML page per the guide, in your reply: CSS
+         custom properties with keelson's dark values on `:root` and light
+         overrides on `:root[data-theme="light"]`, system font stack, no external
+         resources, wide content scrolling inside its own container.
+      3. Publish it by calling `canvas_publish` with that markup as `html`, a
+         `title`, and `name` set to `triage-` followed by the repo's owner and
+         name lowercased with `/` and `.` replaced by `-` (e.g.
+         `triage-danielscholl-keelson`), so each run updates the same artifact in
+         place rather than piling up copies. If the palette is rejected, fix the
+         colors — prefer the keelson series slots — and publish again.
 
       ## Structure
 
@@ -822,9 +838,18 @@ nodes:
       markup, and never let a title's content become part of the page's own
       structure or styling.
 
-      When you are done, print a five-line digest: the headline, the mode, the
-      counts, the top three `act-next` issues, and the published artifact's key
-      and title.
+      ## Finish by reporting what you did
+
+      Your LAST line must be one of these two, exactly, with nothing after it —
+      the next node reads it to confirm this run produced its deliverable:
+
+      - `ARTIFACT_KEY=canvas:artifact:<slug>` — the key `canvas_publish`
+        returned. Copy it from the tool result; do not reconstruct it.
+      - `ARTIFACT_UNAVAILABLE` — only when `canvas_publish` was not among your
+        tools at all. Never use this because a call was refused or errored.
+
+      Above that line, print a short digest: the headline, the mode, the counts,
+      and the top three `act-next` issues.
 
   # ── Layer 6: deterministic tail, so the run record always ends with facts ──
 
@@ -867,3 +892,41 @@ nodes:
 
       echo
       printf '%s\n' "${KEELSON_NODE_apply_OUTPUT:-}" | tail -n 1
+
+      # Assert the run actually produced its deliverable. `report` can end its
+      # turn having published nothing — a refused tool call once left it printing
+      # "Now I'll author the dashboard" and stopping — and a node that emits
+      # prose still reports success. Without this the run's tail reads clean
+      # while the dashboard silently does not exist.
+      REPORT="${KEELSON_NODE_report_OUTPUT:-}"
+      KEY=$(printf '%s' "$REPORT" | grep -oE 'canvas:artifact:[a-z0-9][a-z0-9-]*' | tail -1)
+      echo
+      if [ -n "$KEY" ]; then
+        # A printed key is a claim. Confirm it resolves, so a fabricated or
+        # stale key can't pass as a delivered dashboard. Only decisive when the
+        # server answers: an unreachable server means we cannot check, not that
+        # the artifact is missing.
+        URL=$(jq -r '.url // empty' "${KEELSON_HOME:-$HOME/.keelson}/server.json" 2>/dev/null || true)
+        CODE=""
+        if [ -n "$URL" ]; then
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${URL}/api/snapshots/${KEY}" 2>/dev/null || true)
+        fi
+        case "$CODE" in
+          200) echo "dashboard:  ${KEY} (confirmed)" ;;
+          "")  echo "dashboard:  ${KEY} (unconfirmed — no server to ask)" ;;
+          *)
+            echo "dashboard:  ${KEY} — CLAIMED BUT MISSING (HTTP ${CODE})" >&2
+            echo "            The report node named an artifact that does not exist." >&2
+            exit 1
+            ;;
+        esac
+      elif printf '%s' "$REPORT" | grep -q 'ARTIFACT_UNAVAILABLE'; then
+        echo "dashboard:  skipped — canvas_publish is not registered in this run"
+        echo "            (headless runs have no canvas tools; route through a running server)"
+      else
+        echo "dashboard:  NOT PUBLISHED" >&2
+        echo "            The report node ended without publishing an artifact and without" >&2
+        echo "            saying the tool was unavailable. Labels and notes above are real;" >&2
+        echo "            the dashboard is missing. Re-run to regenerate it." >&2
+        exit 1
+      fi
