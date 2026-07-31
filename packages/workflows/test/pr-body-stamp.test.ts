@@ -28,18 +28,23 @@ function finalizeBash(): string {
   return script;
 }
 
-function runFinalize(body: string) {
+function runFinalize(body: string, opts: { snapshot?: string; requiredChecks?: string } = {}) {
   const artifacts = mkdtempSync(join(tmpdir(), "keelson-body-stamp-"));
   tmps.push(artifacts);
   writeFileSync(join(artifacts, ".pr-number"), "42\n");
   const bodySrc = join(artifacts, ".body-src.md");
   writeFileSync(bodySrc, body);
   const editedBody = join(artifacts, ".body-edited.md");
+  const snapshot = opts.snapshot ?? '[{"name":"tests","bucket":"pass","state":"SUCCESS"}]';
+  const requiredArm = opts.requiredChecks
+    ? `"pr required-checks 42") echo "${opts.requiredChecks}" ;;`
+    : `"pr required-checks 42") exit 0 ;;`;
   const forge = `#!/usr/bin/env bash
 case "$*" in
   "pr checks 42 --json state -q length") echo 1 ;;
-  "pr required-checks 42") exit 0 ;;
-  "pr checks 42 --json name,bucket,state") echo '[{"name":"tests","bucket":"pass","state":"SUCCESS"}]' ;;
+  ${requiredArm}
+  "pr checks 42 --json name,bucket,state") echo '${snapshot}' ;;
+  "pr checks 42 --required --watch --interval 20") echo "required checks green" ;;
   "pr view 42 --json body -q .body") cat "$BODY_SRC" ;;
   "pr edit 42 --body-file "*) cp "\${@: -1}" "$EDITED_BODY" ;;
   "pr ready 42") touch "$READY_MARKER" ;;
@@ -70,13 +75,35 @@ esac
   };
 }
 
+const PENDING_BODY = "## Test plan\n- local gates: PASS\n- CI: pending CI\n";
+
 shimDescribe("finalize-pr body stamping", () => {
   test("replaces the pending CI placeholder with the real outcome on promote", () => {
-    const result = runFinalize("## Test plan\n- local gates: PASS\n- CI: pending CI\n");
+    const result = runFinalize(PENDING_BODY);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("PR_STATE: READY");
     expect(result.readyCalled).toBe(true);
     expect(result.editedBody).toContain("CI green (no gating failures)");
+    expect(result.editedBody).not.toContain("pending CI");
+  });
+
+  test("stamps the required-checks outcome when required CI gates the promote", () => {
+    const result = runFinalize(PENDING_BODY, { requiredChecks: "tests" });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("PR_STATE: READY");
+    expect(result.readyCalled).toBe(true);
+    expect(result.editedBody).toContain("CI green (required checks passed)");
+    expect(result.editedBody).not.toContain("pending CI");
+  });
+
+  test("stamps the red outcome and stays a draft on a failing check", () => {
+    const result = runFinalize(PENDING_BODY, {
+      snapshot: '[{"name":"tests","bucket":"fail","state":"FAILURE"}]',
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("PR_STATE: DRAFT");
+    expect(result.readyCalled).toBe(false);
+    expect(result.editedBody).toContain("CI red at finalize (see the PR checks tab)");
     expect(result.editedBody).not.toContain("pending CI");
   });
 

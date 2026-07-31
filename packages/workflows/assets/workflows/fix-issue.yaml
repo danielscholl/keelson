@@ -639,8 +639,8 @@ nodes:
          - Title: under 70 chars, matching the repo's OWN convention — check
            `CONTRIBUTING.md` and the PR template for a stated title rule, then
            recent merged titles
-           (`forge pr list --state merged --limit 10 --json title` and
-           `git log --oneline`). Match what the repo actually does — many
+           (`forge pr list --state merged --json title`, read the first ~10,
+           and `git log --oneline`). Match what the repo actually does — many
            repos squash-merge the PR title into release notes, so a wrong
            format pollutes the changelog. Default to conventional commit
            style only when the repo shows no signal.
@@ -649,10 +649,11 @@ nodes:
            - **Why now**: motivation, link to the issue with `Fixes #<num>`
            - **Test plan**: commands you actually ran with PASS/FAIL
          - Record results, not intent: the test plan lists what this run
-           actually executed with outcomes. When the template has a checklist,
-           fill it truthfully — check what this run verified, and write the
-           literal text "pending CI" beside anything only CI can confirm (a
-           later step replaces it with the real outcome).
+           actually executed with outcomes, and the body ships NO unchecked
+           checkboxes. When the template has a checklist, check the items
+           this run verified and rewrite items only CI can confirm as plain
+           result lines ending in the literal text "pending CI" (a later
+           step replaces it with the real outcome).
          - If you write the body to a file, put it at `$ARTIFACTS_DIR/pr-body.md`
            — never at the repo root (the next commit would sweep it up).
       7. Capture identifiers:
@@ -1230,9 +1231,9 @@ nodes:
         ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
       }
       stamp_ci_outcome() {
-        # Replace create-pr's literal "pending CI" placeholder with the real
-        # outcome so the shipped body records results, not intent. Best-effort:
-        # a forge without body view/edit support leaves the body unchanged.
+        # Swap create-pr's literal "pending CI" placeholder for the real
+        # outcome. Best-effort: a forge without body view/edit support leaves
+        # the body unchanged.
         OUTCOME="$1"
         BODY_FILE="$KEELSON_ARTIFACTS_DIR/.pr-body-final.md"
         forge pr view "$PR_NUM" --json body -q '.body' > "$BODY_FILE" 2>/dev/null || return 0
