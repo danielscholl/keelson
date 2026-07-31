@@ -85,6 +85,11 @@ work-stream labels. Triage does **not** apply any of these; they are maintainer
 judgment calls. If an issue looks like a duplicate, say so with the `#N` in the
 note rather than labeling it.
 
+`repo-cleanup` is the one exception, and it proves the rule: it applies
+`duplicate` and `wontfix` only alongside a close, and only after the maintainer
+has read the plan and replied at an approval gate. That is the judgment call
+being made by a human and executed by the workflow — not by the workflow.
+
 ## Triage guidance
 
 - Apply at most one **Area** label and one **Type** label, using the exact label
