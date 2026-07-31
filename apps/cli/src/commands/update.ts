@@ -5,7 +5,12 @@
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { keelsonPaths } from "@keelson/shared/paths";
-import { isWorkflowYaml } from "@keelson/workflows";
+import {
+  isWorkflowYaml,
+  readManagedManifest,
+  sha256,
+  writeManagedManifest,
+} from "@keelson/workflows";
 import pkg from "../../package.json" with { type: "json" };
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
@@ -216,6 +221,7 @@ export function reconcileManagedWorkflows(
   const conflicts: string[] = [];
   const removed: string[] = [];
   const retiredKept: string[] = [];
+  const manifest = readManagedManifest(overlayDir);
 
   for (const [name, nextContent] of next) {
     const overlayPath = join(overlayDir, name);
@@ -245,22 +251,30 @@ export function reconcileManagedWorkflows(
   // treating it as "everything retired" would delete every unmodified overlay.
   if (next.size === 0) return { refreshed, conflicts, removed, retiredKept };
 
-  // A name in `previous` but absent from `next` was renamed or retired
-  // upstream. An unmodified overlay copy would linger in the catalog beside
-  // its successor, so remove it; a customized copy is operator work and stays.
-  for (const [name, prevContent] of previous) {
+  const overlayNames = existsSync(overlayDir)
+    ? readdirSync(overlayDir).filter(isWorkflowYaml).sort()
+    : [];
+  for (const name of overlayNames) {
     if (next.has(name)) continue;
+    const managedHash = manifest[name];
+    if (!managedHash) continue;
     const overlayPath = join(overlayDir, name);
-    if (!existsSync(overlayPath)) continue;
     try {
-      if (readFileSync(overlayPath, "utf8") !== prevContent) {
+      if (sha256(readFileSync(overlayPath)) !== managedHash) {
         retiredKept.push(name);
         continue;
       }
       rmSync(overlayPath, { force: true });
+      delete manifest[name];
       removed.push(name);
     } catch {}
   }
+
+  for (const name of Object.keys(manifest)) {
+    if (!next.has(name) && !overlayNames.includes(name)) delete manifest[name];
+  }
+  for (const [name, content] of next) manifest[name] = sha256(content);
+  writeManagedManifest(overlayDir, manifest);
 
   return { refreshed, conflicts, removed, retiredKept };
 }
