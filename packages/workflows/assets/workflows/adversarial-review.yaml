@@ -324,9 +324,11 @@ nodes:
          changes that would move it to CONFIRMED.
       7. **If the artifact poses a choice between alternatives** (two designs,
          two PRs, competing plans): the verdict MUST choose. Name the winner,
-         the deciding facts, and what would change the call — or name the single
-         decisive check that would settle it. Fence-sitting is a failed
-         synthesis; "both" is a valid choice only with an explicit compose plan
-         and order.
+         the deciding facts, and what would change the call. Fence-sitting is a
+         failed synthesis; "both" is a valid choice only with an explicit
+         compose plan and order. When the one deciding fact is genuinely
+         UNVERIFIABLE-HERE the choice becomes conditional but is still made:
+         name that single decisive check and the verdict each outcome yields
+         ("if X holds, ship A; otherwise ship B").
 
       Print the full verdict as your response — it is this workflow's output.
