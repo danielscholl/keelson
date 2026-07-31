@@ -24,8 +24,13 @@ findings worth posting.
 
 ```sh
 keelson workflow run pr-review --inputs ARGUMENTS="review pr 42"
-keelson workflow run pr-review --inputs ARGUMENTS="review this pr"   # from a PR branch
 ```
+
+Pass an explicit PR number. pr-review runs in an isolated worktree on a
+generated branch, so it cannot infer the target PR from the current branch.
+The `scope` node checks the PR head out inside that worktree, so the lanes
+review the code as the PR proposes it — never your live checkout, which stays
+untouched.
 
 It needs `gh` or `glab` authenticated against the repo (the bundled `forge` shim
 resolves whichever is present) and a Copilot subscription
@@ -65,8 +70,8 @@ distills the lanes into the findings worth posting.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `extract-pr` | prompt | Parses the PR number out of `$ARGUMENTS`, or emits the literal `CURRENT` for the next node to resolve. |
-| `scope` | bash | Resolves the number (`CURRENT` becomes the current branch's PR), then writes `pr.json`, `diff.patch`, `changed-files.txt`, and a `scope.md` brief into the run's scratch dir. |
+| `extract-pr` | prompt | Parses the PR number from `$ARGUMENTS`. An explicit number is required, since the run cannot infer the PR from the branch in an isolated worktree. |
+| `scope` | bash | Checks the PR head out in the run's worktree (`forge pr checkout --detach`), then writes `pr.json`, `diff.patch`, `changed-files.txt`, and a `scope.md` brief into the run's scratch dir. |
 | `classify` | prompt | Returns typed JSON: which of the four lanes to run, a complexity bucket, and the reasoning. |
 | `code-review` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: the always-on finder is the recall ceiling, so it gets the strongest coding model, from a different family than the triage judge. Hunts highest-cost failures first (trust boundaries, irreversible state, idempotency gaps), labels unverified external-API claims INFERRED, and runs unless the PR is non-code. |
 | `error-handling` | prompt | Audits new and changed failure paths. Gated on the classifier. |

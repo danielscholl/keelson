@@ -399,8 +399,15 @@ gl_pr_checkout() {                   # forge pr checkout <n> [--detach]
       *) iid="$1"; shift ;;
     esac
   done
-  glab mr checkout "$iid" || return 1
-  [ "$detach" = 1 ] && git checkout --detach 2>/dev/null || true
+  if [ "$detach" = 1 ]; then
+    # Atomic detached checkout: `glab mr checkout` checks the source branch out
+    # first, which git refuses when that branch is already checked out in
+    # another worktree of the same repo (the operator's live checkout).
+    git fetch origin "refs/merge-requests/${iid}/head" || return 1
+    git checkout --detach FETCH_HEAD
+  else
+    glab mr checkout "$iid"
+  fi
 }
 
 gl_issue_create() {                  # forge issue create --title <t> --body-file <f>
