@@ -2453,6 +2453,71 @@ nodes:
     await pollUntilTerminal(app, runId);
   });
 
+  test("approval surfaces a not-run note when the brief has no criteria", async () => {
+    writeWorkflow(
+      "pa-empty-brief.yaml",
+      `name: pa-empty-brief
+description: approval that surfaces an empty criteria brief
+nodes:
+  - id: setup
+    bash: |
+      printf '%s' '{"criteria":[]}' > "$KEELSON_ARTIFACTS_DIR/brief.json"
+      sleep 0.05
+  - id: review
+    depends_on: [setup]
+    approval:
+      message: please approve
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const subscribers = createWorkflowSubscribers();
+    const received: Array<{ type: string; message?: string }> = [];
+    const fakeWs = {
+      send: (raw: string) => {
+        received.push(JSON.parse(raw));
+      },
+    } as unknown as Parameters<typeof subscribers.subscribe>[1];
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      {
+        catalog,
+        store,
+        conversationStore: createConversationStore(db),
+        defaultCwd: tmpDir,
+      },
+      undefined,
+      subscribers,
+    );
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/pa-empty-brief/runs", {
+        inputs: {},
+        workingDir: tmpDir,
+      }),
+    );
+    const { runId } = (await startRes.json()) as { runId: string };
+    subscribers.subscribe(runId, fakeWs);
+    const pausedDeadline = Date.now() + 3000;
+    while (Date.now() < pausedDeadline) {
+      if (received.some((frame) => frame.type === "approval_awaiting")) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    const approvalFrame = received.find((frame) => frame.type === "approval_awaiting");
+    expect(approvalFrame?.message).toContain("please approve");
+    expect(approvalFrame?.message).toContain("divergence check not run");
+
+    await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume`, {
+        nodeId: "review",
+        text: "approve",
+      }),
+    );
+    await pollUntilTerminal(app, runId);
+  });
+
   test("WS open replays approval_awaiting with live pauseId for reconnecting clients", async () => {
     writeWorkflow(
       "pa-replay.yaml",

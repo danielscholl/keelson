@@ -161,12 +161,13 @@ describe("loadBriefAndCoverage", () => {
     expect(result.checklist).toContain("- [x] Show covered criteria -> Task 2");
   });
 
-  test("returns a parsed brief with no checklist when criteria are empty", async () => {
+  test("returns a parsed brief with a visible not-run note when criteria are empty", async () => {
     writeFileSync(join(tmpDir, "brief.json"), '{"criteria":[]}');
 
     await expect(loadBriefAndCoverage({ artifactsDir: tmpDir })).resolves.toEqual({
       brief: { criteria: [] },
-      checklist: "",
+      checklist:
+        "## Criteria coverage\n\n_No acceptance criteria found in the issue body - divergence check not run._",
     });
   });
 
