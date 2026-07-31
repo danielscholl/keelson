@@ -152,9 +152,7 @@ describe("makePromptHandler", () => {
     });
     const result = await handler.handle(stubNode, buildCtx());
     expect(result.status).toBe("succeeded");
-    expect(result.output.kind === "text" ? result.output.text : "").toBe(
-      "Hello\n\nworld\n\ndone",
-    );
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("Hello\n\nworld\n\ndone");
   });
 
   test("empty text chunks add no leading or trailing separator", async () => {
@@ -673,9 +671,7 @@ describe("makePromptHandler", () => {
     const result = await handler.handle(stubNode, buildCtx());
     expect(seenText).toBe("Reviewing changes.\n\nFound hunter2");
     expect(result.status).toBe("succeeded");
-    expect(result.output.kind === "text" ? result.output.text : "").toBe(
-      "[REDACTED RESPONSE]",
-    );
+    expect(result.output.kind === "text" ? result.output.text : "").toBe("[REDACTED RESPONSE]");
   });
 
   test("threads the workflow name + node id to the policy gates", async () => {
