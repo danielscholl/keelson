@@ -56,6 +56,11 @@ Optional:
   workflow that never writes the project checkout, exempting it from the project
   mutation lock so it can run concurrently with a mutating run on the same
   project.
+- `locking`: `exclusive` (the default) or `shared`. Use `shared` for a read-only
+  workflow that reads the live checkout: shared runs can coexist with each other
+  but remain excluded from a mutating run. When set, `locking` takes precedence
+  over `mutates_checkout`; use `mutates_checkout: false` when the workflow should
+  take no lock.
 - `converge` — `{ gate, max_rounds, on_exhaust }` re-runs the gate node's
   dependency subgraph until the gate completes or the round budget exhausts.
 - `effort` (`none`|`low`|`medium`|`high`|`xhigh`; `max` is a legacy alias for
