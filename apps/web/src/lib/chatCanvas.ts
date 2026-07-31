@@ -52,3 +52,14 @@ export function parsePublishedArtifact(result: string): PublishedArtifact | unde
   const title = typeof rawTitle === "string" && rawTitle.trim().length > 0 ? rawTitle : undefined;
   return title !== undefined ? { key, title } : { key };
 }
+
+// A republish under the same key updates the artifact in place, so repeated
+// publishes are one deliverable, not several. First-publish order is kept and
+// the latest title wins.
+export function dedupePublishedArtifacts(
+  artifacts: readonly PublishedArtifact[],
+): PublishedArtifact[] {
+  const byKey = new Map<string, PublishedArtifact>();
+  for (const artifact of artifacts) byKey.set(artifact.key, artifact);
+  return [...byKey.values()];
+}
