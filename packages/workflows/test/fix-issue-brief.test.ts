@@ -263,4 +263,17 @@ macOS with the Copilot provider.
       parsed: true,
     });
   });
+
+  describe("fix-issue PR divergence status", () => {
+    test("requires coverage details or an explicit skipped line in every PR body", () => {
+      const prompt = workflowNode("create-pr").prompt;
+      expect(prompt).toContain("$ARTIFACTS_DIR/brief.json");
+      expect(prompt).toContain("$ARTIFACTS_DIR/coverage.json");
+      expect(prompt).toContain("- [COVERED] {criterion} -> {step}");
+      expect(prompt).toContain("- [MISSING] {criterion}");
+      expect(prompt).toContain(
+        "COVERAGE: SKIPPED — no acceptance criteria found in the issue body",
+      );
+    });
+  });
 });

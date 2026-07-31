@@ -691,10 +691,13 @@ nodes:
       - Issue JSON: $fetch-issue.output
       - Classification: $classify.output
       - Plan path: `$ARTIFACTS_DIR/plan.md`
+      - Brief path: `$ARTIFACTS_DIR/brief.json`
+      - Coverage path: `$ARTIFACTS_DIR/coverage.json` (absent when not run)
 
       ## Instructions
 
-      1. Read the plan file for the implementation summary.
+      1. Read the plan and brief files for the implementation summary and
+         acceptance criteria. Read the coverage file when it exists.
       2. If `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
          or `docs/PULL_REQUEST_TEMPLATE.md` exists, read it and follow its sections.
       3. Verify HEAD is NOT `$(cat $ARTIFACTS_DIR/.default-branch)`. If it is, refuse and stop.
@@ -714,6 +717,15 @@ nodes:
            - **What**: 1-2 sentences
            - **Why now**: motivation, link to the issue with `Fixes #<num>`
            - **Test plan**: commands you actually ran with PASS/FAIL
+         - Every body, whether templated or not, must include a **Divergence
+           check** status:
+           - When the brief has criteria, add a **Criteria coverage** list with
+             exactly one status line per criterion in brief order. Use
+             `- [COVERED] {criterion} -> {step}` only for an exact matching
+             covered row; use `- [MISSING] {criterion}` when coverage is absent,
+             invalid, reordered, or uncovered.
+           - When the brief has no criteria, include the literal line
+             `COVERAGE: SKIPPED — no acceptance criteria found in the issue body`.
          - Record results, not intent: the test plan lists what this run
            actually executed with outcomes, and the body ships NO unchecked
            checkboxes. When the template has a checklist, check the items
