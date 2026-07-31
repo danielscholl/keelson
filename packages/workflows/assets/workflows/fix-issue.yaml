@@ -195,8 +195,13 @@ nodes:
       2. Reproduce the bug from the issue body — identify the failing call path.
       3. Search the codebase for the involved symbols / files. Cite `path:line`.
       4. Identify the root cause (not just the symptom). State it in one sentence.
-      5. Sketch the fix — files to change, the minimal diff, and any new tests.
-      6. Note risks: what could regress, what to test specifically.
+      5. When the root cause is one instance of a pattern (an unsafe call, a
+         misused API, a repeated idiom), search the WHOLE repo for every other
+         instance and list each site with a disposition — fix here, or
+         out-of-scope with the reason. A fix that silently covers only the
+         sites the issue happened to name is incomplete.
+      6. Sketch the fix — files to change, the minimal diff, and any new tests.
+      7. Note risks: what could regress, what to test specifically.
 
       ## Output
 
@@ -213,6 +218,12 @@ nodes:
 
       ## Fix outline
       - `{path}:{lines}` — {what changes and why}
+
+      ## Pattern inventory
+      {only when the root cause is a repeated pattern — every instance, each
+      with a disposition}
+      | Site | Disposition | Reason |
+      |------|-------------|--------|
 
       ## Task list
       ### Task 1: {action} `{file}`
@@ -465,6 +476,11 @@ nodes:
         good" / "ship it", edit `$ARTIFACTS_DIR/plan.md` to incorporate it
         BEFORE writing code, and note the changes at the top of the file.
       - Follow the plan task-by-task. Don't introduce extra scope.
+      - Every new public symbol needs a caller in this branch or a test that
+        exercises it beyond its own definition. Never add a "compatibility"
+        alias for callers that exist only on some other unmerged branch —
+        compatibility with anything not on the base branch is scope creep
+        unless the plan explicitly calls for it.
       - Read each file before editing it. After each task, run the NARROWEST
         check that covers your change (the touched workspace/package's type-check
         + tests — e.g. `bun --filter <pkg> test`, `cargo test -p <crate>`,
@@ -620,11 +636,24 @@ nodes:
       5. Check existing PRs: `forge pr list --head $(git branch --show-current)`.
          If one exists, capture its number and skip creation.
       6. Otherwise: `forge pr create --draft --base "$(cat $ARTIFACTS_DIR/.default-branch)"`
-         - Title: under 70 chars, conventional commit style.
+         - Title: under 70 chars, matching the repo's OWN convention — check
+           `CONTRIBUTING.md` and the PR template for a stated title rule, then
+           recent merged titles
+           (`forge pr list --state merged --json title`, read the first ~10,
+           and `git log --oneline`). Match what the repo actually does — many
+           repos squash-merge the PR title into release notes, so a wrong
+           format pollutes the changelog. Default to conventional commit
+           style only when the repo shows no signal.
          - Body: from the project's PR template if present, otherwise:
            - **What**: 1-2 sentences
            - **Why now**: motivation, link to the issue with `Fixes #<num>`
            - **Test plan**: commands you actually ran with PASS/FAIL
+         - Record results, not intent: the test plan lists what this run
+           actually executed with outcomes, and the body ships NO unchecked
+           checkboxes. When the template has a checklist, check the items
+           this run verified and rewrite items only CI can confirm as plain
+           result lines ending in the literal text "pending CI" (a later
+           step replaces it with the real outcome).
          - If you write the body to a file, put it at `$ARTIFACTS_DIR/pr-body.md`
            — never at the repo root (the next commit would sweep it up).
       7. Capture identifiers:
@@ -733,15 +762,21 @@ nodes:
          unhandled null/edge cases, off-by-one, and regressions in the changed
          call paths.
       3. Also check the footguns reviews miss: moved or extracted code that
-         dropped a guard or condition on the way, flipped config defaults, and
-         narrowed lock or transaction scope.
-      4. After your first plausible finding, keep digging before you finalize:
+         dropped a guard or condition on the way, flipped config defaults,
+         narrowed lock or transaction scope, and new public symbols nothing in
+         the branch calls (dead "compatibility" surface for callers that only
+         exist elsewhere).
+      4. For any NEW validation, rejection, or error path this branch adds:
+         Grep the existing call sites that flow through it and confirm every
+         argument the codebase itself passes today still passes. A guard that
+         rejects an input the repo produces is CRITICAL.
+      5. After your first plausible finding, keep digging before you finalize:
          second-order failures, empty-state behavior, retries, stale state, and
          rollback paths.
-      5. Do NOT review style, naming, comments, or test coverage — other
+      6. Do NOT review style, naming, comments, or test coverage — other
          reviewers own those. Ignore pre-existing issues on lines this branch
          did not touch, and anything a type-checker / linter / CI already catches.
-      6. When a claim rests on inferred behavior of an external API, library, or
+      7. When a claim rests on inferred behavior of an external API, library, or
          runtime you did not verify in this repo, label it INFERRED and cap its
          confidence at 60.
 
@@ -791,9 +826,18 @@ nodes:
          tested. Flag NEW logic with no test, and ESPECIALLY tests that were
          authored but never wired in or committed (a described case the diff
          doesn't actually assert, or a test file that exists but nothing runs).
-         In each finding, name the concrete untested branch and the input that
-         would expose it.
-      3. Only expect coverage the project's own conventions would — do not demand
+         Flag any NEW test gated on platform or environment (skipif /
+         skipUnless / env checks) when no CI job exists where its condition is
+         true — a test that never runs anywhere is coverage theater; name the
+         job that would run it. In each finding, name the concrete untested
+         branch and the input that would expose it.
+      3. Distinguish tests that assert an intermediate representation (a
+         constructed string, a mock's recorded arguments) from tests that
+         exercise the real mechanism end-to-end. When the change's core claim
+         is about runtime behavior, at least one test must prove the contract
+         through the real mechanism; flag it when every test stops at
+         intermediates.
+      4. Only expect coverage the project's own conventions would — do not demand
          tests a repo without a suite couldn't have. Ignore correctness and style.
 
       Output a numbered list; each finding: the untested `path`/behavior ·
@@ -1186,6 +1230,18 @@ nodes:
           | "treated as advisory: \($name) — \(state)"
         ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
       }
+      stamp_ci_outcome() {
+        # Swap create-pr's literal "pending CI" placeholder for the real
+        # outcome. Best-effort: a forge without body view/edit support leaves
+        # the body unchanged.
+        OUTCOME="$1"
+        BODY_FILE="$KEELSON_ARTIFACTS_DIR/.pr-body-final.md"
+        forge pr view "$PR_NUM" --json body -q '.body' > "$BODY_FILE" 2>/dev/null || return 0
+        grep -q 'pending CI' "$BODY_FILE" 2>/dev/null || return 0
+        sed -i.bak "s/pending CI/${OUTCOME}/g" "$BODY_FILE" 2>/dev/null || return 0
+        forge pr edit "$PR_NUM" --body-file "$BODY_FILE" >/dev/null 2>&1 \
+          || echo "note: could not stamp the CI outcome into the PR body"
+      }
 
       if ! REQUIRED=$(forge pr required-checks "$PR_NUM" 2> "$KEELSON_ARTIFACTS_DIR/.ci-final-required.err"); then
         echo "PR_STATE: UNKNOWN — could not discover required checks; left as a draft"
@@ -1220,6 +1276,7 @@ nodes:
             .[] | select((.bucket // "" | ascii_downcase) == "fail")
             | "failing check: \(.name) — \((.state // .bucket // "unknown") | ascii_downcase)"
           ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
+          stamp_ci_outcome "CI red at finalize (see the PR checks tab)"
           echo "PR_STATE: DRAFT — CI has a failing check; left as a draft for a human"
           exit 0
         fi
@@ -1233,6 +1290,7 @@ nodes:
             else empty
             end
         ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
+        stamp_ci_outcome "CI green (no gating failures)"
         if forge pr ready "$PR_NUM"; then
           echo "PR_STATE: READY — no gating CI failures; marked ready for review"
         else
@@ -1245,6 +1303,7 @@ nodes:
       printf '%s\n' "$REQUIRED"
       if forge pr checks "$PR_NUM" --required --watch --interval 20 > "$KEELSON_ARTIFACTS_DIR/.ci-final.txt" 2>&1; then
         log_advisory_checks
+        stamp_ci_outcome "CI green (required checks passed)"
         if forge pr ready "$PR_NUM"; then
           echo "PR_STATE: READY — required CI passed; marked ready for review"
         else
@@ -1255,6 +1314,7 @@ nodes:
       echo "=== Final CI still red ==="
       tail -n 20 "$KEELSON_ARTIFACTS_DIR/.ci-final.txt"
       log_advisory_checks
+      stamp_ci_outcome "CI red at finalize (see the PR checks tab)"
       echo "PR_STATE: DRAFT — CI not green; left as a draft for a human"
       exit 0
 
