@@ -53,11 +53,20 @@ crosses between stages is each node's output.
 | Node | Kind | What it does |
 | --- | --- | --- |
 | `intake` | bash | Captures the artifact (file path or inline text), rejects empty or truncated input, and emits it as its output for the rest to inline. |
-| `reviewer-logic` | prompt | Attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
-| `reviewer-evidence` | prompt | Separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
-| `reviewer-risk` | prompt | Assumes the artifact is adopted and finds what breaks: edge cases, omissions, the riskiest step. No tools. |
-| `verify` | prompt | Re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. |
-| `synthesize` | prompt | Weighs the lenses against the verification and issues the verdict with dissent. No tools. |
+| `reviewer-logic` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
+| `reviewer-evidence` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
+| `reviewer-risk` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: assumes the artifact is adopted and finds what breaks, tracing bad inputs, retries, and partial completion through the proposal, weighted by cost of failure. No tools. |
+| `verify` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. |
+| `synthesize` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**: weighs the lenses against the verification and issues the verdict, a terse ship/no-ship call with dissent; a comparative artifact must get a choice, not a fence-sit. No tools. |
+
+Every prompt node is pinned with an explicit `effort: xhigh` and a generous
+`idle_timeout`: a no-tool reviewer at high effort is one long think followed by
+text, exactly the chunk-sparse shape a default idle timeout kills. The pins are
+one distinct model per role: the lenses attack on `gpt-5.6-terra`, the verifier
+re-derives their claims on `gpt-5.6-sol` (a different GPT-5.6 variant), and the
+judge presides from a different vendor entirely, so no node checks or judges its
+own reasoning. All three ids are account-dependent: swap or drop any to `auto`
+(dropping its `effort:` tier with it) if your Copilot list lacks it.
 
 ### The parts worth a second look
 
@@ -96,10 +105,13 @@ smooth it over: a split panel reads as a split verdict, not a false consensus.
 
 - **Add a lens.** A fourth reviewer is one more node `depends_on: [intake]` with
   `allowed_tools: []`; add it to `verify`'s and `synthesize`'s references.
-- **Cross-vendor tension.** Pin a different `provider:` / `model:` per reviewer
-  for genuine diversity, so no single vendor's blind spot goes unchallenged.
-- **A stronger judge.** Pin a stronger `model:` on `synthesize` when the verdict
-  needs to hold more weight than the reviewers.
+- **More cross-vendor tension.** The default already splits roles across models
+  (terra lenses, sol verifier, opus judge); go further by pinning a different
+  `provider:` / `model:` per *lens* so no single vendor's blind spot goes
+  unchallenged within the panel itself.
+- **Cheaper runs.** The xhigh-everywhere posture buys depth; for a quick
+  pressure-test, drop the lenses to a lighter `effort:` tier (or `auto`) and
+  keep `verify` and `synthesize` strong; the verdict degrades last.
 
 ## Related
 
