@@ -111,7 +111,7 @@ nodes:
         BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body // empty' 2>/dev/null || true)
         CRITERIA=$(printf '%s\n' "$BODY" | awk '
           BEGIN{f=0}
-          tolower($0) ~ /^#{1,6}[[:space:]]+acceptance criteria[[:space:]]*:?[[:space:]]*$/{f=1; next}
+          tolower($0) ~ /^#{1,6}[[:space:]]+(acceptance criteria|requirements|definition of done|success criteria|what did you expect\??|expected behaviou?r)[[:space:]]*:?[[:space:]]*/{f=1; next}
           /^#{1,6}[[:space:]]/{if(f)exit}
           f && /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+/{
             line=$0; sub(/^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+(\[[ xX]\][[:space:]]*)?/,"",line);
