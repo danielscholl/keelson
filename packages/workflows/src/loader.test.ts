@@ -98,7 +98,7 @@ nodes:
     expect(result.workflow?.nodes[1]?.require_tool_call).toBeUndefined();
   });
 
-  test("unknown generic node fields remain non-fatal and are dropped", () => {
+  test("unknown generic node fields warn, remain non-fatal, and are dropped", () => {
     const result = parseWorkflow(
       `
 name: future-field
@@ -112,6 +112,13 @@ nodes:
     );
 
     expect(result.error).toBeNull();
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.kind === "ignored_capability" &&
+          warning.message.includes("future_tool_requirement"),
+      ),
+    ).toBe(true);
     expect(
       (result.workflow?.nodes[0] as Record<string, unknown> | undefined)?.future_tool_requirement,
     ).toBeUndefined();
