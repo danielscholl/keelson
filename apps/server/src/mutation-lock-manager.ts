@@ -64,6 +64,7 @@ export function createMutationLockManager({
         store.insert({
           id,
           projectId: req.projectId,
+          mode: "exclusive",
           purpose: req.purpose,
           owner: req.owner,
           acquiredAt: new Date().toISOString(),

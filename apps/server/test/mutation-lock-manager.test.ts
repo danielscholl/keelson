@@ -100,6 +100,7 @@ describe("MutationLockManager", () => {
     store.insert({
       id: "stale-lock",
       projectId: "project-1",
+      mode: "exclusive",
       purpose: "review",
       owner: "workflow:abc12345",
       acquiredAt: "2026-01-01T00:00:00.000Z",
