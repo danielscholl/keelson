@@ -238,6 +238,22 @@ describe("reconcileManagedWorkflows", () => {
     rmSync(overlayDir, { recursive: true, force: true });
   });
 
+  test("a corrupt manifest never authorizes a deletion", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const current = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
+    writeFileSync(join(overlayDir, "finish-pr.yaml"), "old bundle\n");
+    writeFileSync(join(overlayDir, ".managed.json"), "{ truncated");
+
+    expect(reconcileManagedWorkflows(overlayDir, current, current)).toEqual({
+      refreshed: [],
+      conflicts: [],
+      removed: [],
+      retiredKept: [],
+    });
+    expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("old bundle\n");
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
   test("skips retirement entirely when next is empty (failed/empty bundle read)", () => {
     const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
     const previous = new Map([["finish-pr.yaml", "old bundle\n"]]);
