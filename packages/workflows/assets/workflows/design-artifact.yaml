@@ -56,4 +56,5 @@ nodes:
       - `ARTIFACT_UNAVAILABLE` — only when `canvas_publish` was not registered
        among your tools. Never use this because a call was refused or errored.
     allowed_tools: [canvas_publish, canvas_design_guide]
+    require_tool_call: [canvas_publish]
     idle_timeout: 300000

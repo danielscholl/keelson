@@ -161,6 +161,15 @@ nodes:
     expect(failures).toEqual([]);
   });
 
+  test("bundled design-artifact requires a successful canvas publish", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/design-artifact.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    expect(result.warnings).toEqual([]);
+    expect(result.workflow?.nodes[0]?.require_tool_call).toEqual(["canvas_publish"]);
+  });
+
   test("bundled resolve-pr declares a valid converge gate", () => {
     const filePath = path.join(import.meta.dir, "../assets/workflows/resolve-pr.yaml");
     const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
