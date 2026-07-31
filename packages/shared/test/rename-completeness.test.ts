@@ -39,10 +39,6 @@ const ALLOW_LIST: ReadonlyArray<{ readonly file: string; readonly reason: string
     reason: "Ported from Archon's archon-smart-pr-review (MIT) — header credits upstream",
   },
   {
-    file: "packages/workflows/assets/workflows/adversarial-build.yaml",
-    reason: "Ported from Archon's archon-adversarial-dev (MIT) — header credits upstream",
-  },
-  {
     file: "packages/workflows/assets/workflows/interactive-prd.yaml",
     reason: "Ported from Archon's archon-interactive-prd (MIT) — header credits upstream",
   },
