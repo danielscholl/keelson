@@ -71,6 +71,13 @@ tool error the node reads and acts on: it fixes the colors, prefers the keelson
 series slots, and publishes again in the same turn. The workflow finishes green
 because the author corrected, not because the check was skipped.
 
+**Publication is required when the tool is available.**
+`require_tool_call: [canvas_publish]` checks the observed tool results, not the
+author's final prose. If `canvas_publish` is registered but the turn ends without
+a successful result, the node fails and names the missing tool. The check skips
+an unavailable canvas catalog for headless runs; otherwise, a green run means the
+artifact was published.
+
 **One page, both themes.** The prompt requires CSS custom properties with
 keelson's dark values on `:root` and light overrides on
 `:root[data-theme="light"]`, a system font stack, and no external resources, so
