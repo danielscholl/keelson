@@ -11,6 +11,7 @@ import * as os from "node:os";
 // @ts-ignore
 import * as path from "node:path";
 
+import { readManagedManifest, sha256 } from "./managed.ts";
 import { isWorkflowYaml, seedStarterAssets, seedStarterWorkflows } from "./seed.ts";
 
 function tmpDir(): string {
@@ -48,8 +49,12 @@ describe("seedStarterWorkflows", () => {
     const seeded = seedStarterWorkflows(target, source);
 
     expect(seeded).toEqual(["a.yaml", "b.yml"]);
-    expect(fs.readdirSync(target).sort()).toEqual(["a.yaml", "b.yml"]);
+    expect(fs.readdirSync(target).sort()).toEqual([".managed.json", "a.yaml", "b.yml"]);
     expect(fs.readFileSync(path.join(target, "a.yaml"), "utf8")).toBe("name: a.yaml\n");
+    expect(readManagedManifest(target)).toEqual({
+      "a.yaml": sha256("name: a.yaml\n"),
+      "b.yml": sha256("name: b.yml\n"),
+    });
   });
 
   test("seeds into an existing dir that holds no YAML", () => {
@@ -60,6 +65,9 @@ describe("seedStarterWorkflows", () => {
     expect(seedStarterWorkflows(target, source)).toEqual(["a.yaml"]);
     expect(fs.existsSync(path.join(target, "a.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(target, "notes.txt"))).toBe(true);
+    expect(readManagedManifest(target)).toEqual({
+      "a.yaml": sha256("name: a.yaml\n"),
+    });
   });
 
   test("skips a target that already holds YAML — never resurrects starters", () => {
@@ -91,7 +99,7 @@ describe("seedStarterWorkflows", () => {
     const target = path.join(tmpDir(), "workflows");
 
     expect(seedStarterWorkflows(target, source)).toEqual(["a.yaml"]);
-    expect(fs.readdirSync(target)).toEqual(["a.yaml"]);
+    expect(fs.readdirSync(target).sort()).toEqual([".managed.json", "a.yaml"]);
   });
 
   test("a failed copy leaves the target retryable — no YAML, no staging litter", () => {
@@ -129,7 +137,10 @@ describe("seedStarterAssets", () => {
       commands: ["e2e-echo-command.md"],
       scripts: ["echo-args.js"],
     });
-    expect(fs.readdirSync(path.join(home, "workflows"))).toEqual(["smoke-test.yaml"]);
+    expect(fs.readdirSync(path.join(home, "workflows")).sort()).toEqual([
+      ".managed.json",
+      "smoke-test.yaml",
+    ]);
     expect(fs.readdirSync(path.join(home, "commands"))).toEqual(["e2e-echo-command.md"]);
     expect(fs.readdirSync(path.join(home, "scripts"))).toEqual(["echo-args.js"]);
   });

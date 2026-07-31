@@ -2,9 +2,18 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { delimiter, extname, join, resolve } from "node:path";
 import { COMMAND_EXTENSION, SCRIPT_EXT_RUNTIME } from "./handlers/discovery.ts";
+import { readManagedManifest, sha256, writeManagedManifest } from "./managed.ts";
 
 // Root the bundled starter assets live under, as sibling dirs `workflows/`,
 // `commands/`, and `scripts/`. In repo source this resolves to
@@ -133,7 +142,7 @@ export function seedStarterAssets(
   bundleRoot: string = BUNDLED_ROOT,
 ): SeededAssets {
   return {
-    workflows: seedDir(join(bundleRoot, "workflows"), workflowsDir, isWorkflowYaml),
+    workflows: seedStarterWorkflows(workflowsDir, join(bundleRoot, "workflows")),
     commands: seedDir(join(bundleRoot, "commands"), join(home, "commands"), isCommandFile),
     scripts: seedDir(join(bundleRoot, "scripts"), join(home, "scripts"), isScriptFile),
   };
@@ -145,5 +154,18 @@ export function seedStarterWorkflows(
   targetDir: string,
   sourceDir: string = join(BUNDLED_ROOT, "workflows"),
 ): string[] {
-  return seedDir(sourceDir, targetDir, isWorkflowYaml);
+  const seeded = seedDir(sourceDir, targetDir, isWorkflowYaml);
+  if (seeded.length === 0) return seeded;
+
+  try {
+    const manifest = readManagedManifest(targetDir);
+    for (const name of seeded) {
+      manifest[name] = sha256(readFileSync(join(targetDir, name)));
+    }
+    writeManagedManifest(targetDir, manifest);
+  } catch (error) {
+    for (const name of seeded) rmSync(join(targetDir, name), { force: true });
+    throw error;
+  }
+  return seeded;
 }
