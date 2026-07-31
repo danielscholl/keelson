@@ -676,8 +676,31 @@ nodes:
         echo "CI_STATUS: UNKNOWN - no .pr-number recorded; cannot watch CI"
         exit 0
       fi
-      if [ "$(forge pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
-        echo "CI_STATUS: UNKNOWN - no CI checks present for PR #$PR_NUM; nothing to gate on"
+      # GitHub briefly reports zero checks while replacing runs after a push.
+      CHECK_COUNT=0
+      FORGE_OK=1
+      ATTEMPT=1
+      CHECK_MAX_ATTEMPTS=6
+      # Internal test-only override; production waits 10 seconds between attempts.
+      CI_RECHECK_INTERVAL="${KEELSON_CI_RECHECK_INTERVAL:-10}"
+      while :; do
+        if CHECK_COUNT=$(forge pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null); then
+          FORGE_OK=1
+          [ "${CHECK_COUNT:-0}" -gt 0 ] 2>/dev/null && break
+        else
+          FORGE_OK=0
+          CHECK_COUNT=0
+        fi
+        [ "$ATTEMPT" -ge "$CHECK_MAX_ATTEMPTS" ] && break
+        ATTEMPT=$((ATTEMPT + 1))
+        sleep "$CI_RECHECK_INTERVAL"
+      done
+      if [ "$FORGE_OK" -ne 1 ]; then
+        echo "CI_STATUS: UNKNOWN - could not query CI checks for PR #$PR_NUM (forge call failed)"
+        exit 0
+      fi
+      if [ "${CHECK_COUNT:-0}" -eq 0 ] 2>/dev/null; then
+        echo "CI_STATUS: UNKNOWN - no CI checks present for PR #$PR_NUM after re-poll; nothing to gate on"
         exit 0
       fi
       snapshot_checks() {
