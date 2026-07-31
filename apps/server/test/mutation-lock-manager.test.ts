@@ -58,6 +58,71 @@ describe("MutationLockManager", () => {
     expect(thrown.message).toBe('project project-1 is locked by workflow:abc12345 for "review"');
   });
 
+  test("shared acquisitions coexist and list their mode", () => {
+    const store = createMutationLockStore();
+    const manager = createMutationLockManager({ store });
+
+    manager.acquire({
+      projectId: "project-1",
+      mode: "shared",
+      purpose: "review",
+      owner: "workflow:abc12345",
+    });
+    manager.acquire({
+      projectId: "project-1",
+      mode: "shared",
+      purpose: "review",
+      owner: "workflow:def67890",
+    });
+
+    expect(manager.list()).toHaveLength(2);
+    expect(manager.list().map((record) => record.mode)).toEqual(["shared", "shared"]);
+  });
+
+  test("exclusive acquisition conflicts with the first shared holder", () => {
+    const store = createMutationLockStore();
+    const manager = createMutationLockManager({ store });
+    manager.acquire({
+      projectId: "project-1",
+      mode: "shared",
+      purpose: "first review",
+      owner: "workflow:abc12345",
+    });
+    manager.acquire({
+      projectId: "project-1",
+      mode: "shared",
+      purpose: "second review",
+      owner: "workflow:def67890",
+    });
+
+    expect(() =>
+      manager.acquire({
+        projectId: "project-1",
+        purpose: "mutate",
+        owner: "workflow:ghi13579",
+      }),
+    ).toThrow('project project-1 is locked by workflow:abc12345 for "first review"');
+  });
+
+  test("shared acquisition conflicts with an exclusive holder", () => {
+    const store = createMutationLockStore();
+    const manager = createMutationLockManager({ store });
+    manager.acquire({
+      projectId: "project-1",
+      purpose: "mutate",
+      owner: "workflow:abc12345",
+    });
+
+    expect(() =>
+      manager.acquire({
+        projectId: "project-1",
+        mode: "shared",
+        purpose: "review",
+        owner: "workflow:def67890",
+      }),
+    ).toThrow('project project-1 is locked by workflow:abc12345 for "mutate"');
+  });
+
   test("release frees a project so it can be acquired again", () => {
     const store = createMutationLockStore();
     const manager = createMutationLockManager({ store });
@@ -77,6 +142,7 @@ describe("MutationLockManager", () => {
     expect(second.id).not.toBe(first.id);
     expect(manager.list()).toHaveLength(1);
     expect(manager.list()[0]?.owner).toBe("workflow:def67890");
+    expect(manager.list()[0]?.mode).toBe("exclusive");
   });
 
   test("different projects lock independently", () => {
