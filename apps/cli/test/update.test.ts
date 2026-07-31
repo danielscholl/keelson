@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { readManagedManifest, sha256, writeManagedManifest } from "@keelson/workflows";
 import cliPkg from "../package.json" with { type: "json" };
 import {
   applyManifestVersion,
@@ -127,6 +128,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("new bundle\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -143,6 +145,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: ["fix-issue.yaml"],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("my customization\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -159,6 +162,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     rmSync(overlayDir, { recursive: true, force: true });
   });
@@ -172,40 +176,101 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(existsSync(join(overlayDir, "resolve-pr.yaml"))).toBe(false);
+    expect(readManagedManifest(overlayDir)).toEqual({
+      "resolve-pr.yaml": sha256("new bundle\n"),
+    });
     rmSync(overlayDir, { recursive: true, force: true });
   });
 
-  test("removes an unmodified overlay for a workflow retired from the bundle", () => {
+  test("removes a tracked unmodified overlay absent from both bundle snapshots", () => {
     const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
-    const previous = new Map([["finish-pr.yaml", "old bundle\n"]]);
+    const previous = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
     const next = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
     writeFileSync(join(overlayDir, "finish-pr.yaml"), "old bundle\n");
+    writeManagedManifest(overlayDir, {
+      "finish-pr.yaml": sha256("old bundle\n"),
+    });
 
     expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
       refreshed: [],
       conflicts: [],
       removed: ["finish-pr.yaml"],
       retiredKept: [],
+      failures: [],
     });
     expect(existsSync(join(overlayDir, "finish-pr.yaml"))).toBe(false);
+    expect(readManagedManifest(overlayDir)).toEqual({
+      "resolve-pr.yaml": sha256("renamed bundle\n"),
+    });
     rmSync(overlayDir, { recursive: true, force: true });
   });
 
-  test("keeps and reports a customized overlay for a retired workflow", () => {
+  test("keeps and reports a tracked customized overlay absent from both bundle snapshots", () => {
     const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
-    const previous = new Map([["finish-pr.yaml", "old bundle\n"]]);
+    const previous = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
     const next = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
     writeFileSync(join(overlayDir, "finish-pr.yaml"), "my customization\n");
+    writeManagedManifest(overlayDir, {
+      "finish-pr.yaml": sha256("old bundle\n"),
+    });
 
     expect(reconcileManagedWorkflows(overlayDir, previous, next)).toEqual({
       refreshed: [],
       conflicts: [],
       removed: [],
       retiredKept: ["finish-pr.yaml"],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("my customization\n");
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("leaves an untracked user-authored overlay untouched", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const current = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
+    writeFileSync(join(overlayDir, "mine.yaml"), "my workflow\n");
+
+    expect(reconcileManagedWorkflows(overlayDir, current, current)).toEqual({
+      refreshed: [],
+      conflicts: [],
+      removed: [],
+      retiredKept: [],
+      failures: [],
+    });
+    expect(readFileSync(join(overlayDir, "mine.yaml"), "utf8")).toBe("my workflow\n");
+    expect(readManagedManifest(overlayDir)["mine.yaml"]).toBeUndefined();
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  // Degrading to an empty manifest here would rewrite it from the current
+  // bundle alone, erasing the provenance for every overlay already retired —
+  // re-creating the permanent orphan by a different route.
+  test("a corrupt manifest aborts the reconcile without touching the overlay", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const current = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
+    writeFileSync(join(overlayDir, "finish-pr.yaml"), "old bundle\n");
+    writeFileSync(join(overlayDir, ".managed.json"), "{ truncated");
+
+    expect(() => reconcileManagedWorkflows(overlayDir, current, current)).toThrow();
+    expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("old bundle\n");
+    expect(readFileSync(join(overlayDir, ".managed.json"), "utf8")).toBe("{ truncated");
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("reports an unreadable overlay instead of silently skipping it", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const current = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
+    // A directory where a workflow file belongs: every read of it throws EISDIR.
+    mkdirSync(join(overlayDir, "resolve-pr.yaml"));
+
+    const result = reconcileManagedWorkflows(overlayDir, current, current);
+
+    expect(result.refreshed).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toContain("resolve-pr.yaml");
     rmSync(overlayDir, { recursive: true, force: true });
   });
 
@@ -213,12 +278,16 @@ describe("reconcileManagedWorkflows", () => {
     const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
     const previous = new Map([["finish-pr.yaml", "old bundle\n"]]);
     writeFileSync(join(overlayDir, "finish-pr.yaml"), "old bundle\n");
+    writeManagedManifest(overlayDir, {
+      "finish-pr.yaml": sha256("old bundle\n"),
+    });
 
     expect(reconcileManagedWorkflows(overlayDir, previous, new Map())).toEqual({
       refreshed: [],
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("old bundle\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -227,6 +296,7 @@ describe("reconcileManagedWorkflows", () => {
   test("reads only workflow YAML files and tolerates a missing directory", () => {
     const dir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
     writeFileSync(join(dir, "fix-issue.yaml"), "workflow\n");
+    writeFileSync(join(dir, ".managed.json"), "{}\n");
     writeFileSync(join(dir, "notes.txt"), "ignore\n");
 
     expect(readWorkflowContents(join(dir, "missing"))).toEqual(new Map());
@@ -304,6 +374,61 @@ describe("keelson update (e2e against a mock releases API)", () => {
     KEELSON_UPDATE_REPO: TEST_REPO,
   });
 
+  function successfulBunHarness(
+    root: string,
+    bundleDir: string,
+    workflows: Record<string, string>,
+  ): Record<string, string> {
+    const fakeBin = join(root, "bin");
+    mkdirSync(fakeBin, { recursive: true });
+    const helper = join(fakeBin, "fake-bun.ts");
+    writeFileSync(
+      helper,
+      [
+        'import { mkdirSync, writeFileSync } from "node:fs";',
+        'import { join } from "node:path";',
+        "",
+        "const args = process.argv.slice(2);",
+        'if (args[0] === "install") {',
+        "  const managed = process.env.KEELSON_TEST_BUNDLE_DIR;",
+        "  if (!managed) process.exit(41);",
+        "  mkdirSync(managed, { recursive: true });",
+        '  const workflows = JSON.parse(process.env.KEELSON_TEST_NEXT_WORKFLOWS ?? "{}");',
+        "  for (const [name, content] of Object.entries(workflows)) {",
+        "    writeFileSync(join(managed, name), String(content));",
+        "  }",
+        "  process.exit(0);",
+        "}",
+        "",
+        "const realBun = process.env.KEELSON_REAL_BUN;",
+        "if (!realBun) process.exit(42);",
+        "const proc = Bun.spawn([realBun, ...args], {",
+        '  stdin: "inherit",',
+        '  stdout: "inherit",',
+        '  stderr: "inherit",',
+        "});",
+        "process.exit(await proc.exited);",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(fakeBin, "bun"),
+      '#!/usr/bin/env sh\nexec "$KEELSON_REAL_BUN" "$KEELSON_FAKE_BUN_HELPER" "$@"\n',
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(fakeBin, "bun.cmd"),
+      '@echo off\r\n"%KEELSON_REAL_BUN%" "%KEELSON_FAKE_BUN_HELPER%" %*\r\n',
+    );
+    return {
+      KEELSON_REAL_BUN: process.execPath,
+      KEELSON_FAKE_BUN_HELPER: helper,
+      KEELSON_TEST_BUNDLE_DIR: bundleDir,
+      KEELSON_TEST_NEXT_WORKFLOWS: JSON.stringify(workflows),
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+    };
+  }
+
   test("a source checkout / non-installed home exits 1 NOT_INSTALLED", async () => {
     const home = join(mkdtempSync(join(tmpdir(), "keelson-update-bare-")), "home");
     mkdirSync(home, { recursive: true }); // no package.json
@@ -333,12 +458,10 @@ describe("keelson update (e2e against a mock releases API)", () => {
     latestTag = "v999.0.1";
     const root = mkdtempSync(join(tmpdir(), "keelson-update-apply-"));
     const home = join(root, "home");
-    const fakeBin = join(root, "bin");
     const bundleDir = join(home, "node_modules", "@keelson", "cli", "assets", "workflows");
     const overlayDir = join(home, "workflows");
 
     try {
-      mkdirSync(fakeBin, { recursive: true });
       mkdirSync(bundleDir, { recursive: true });
       mkdirSync(overlayDir, { recursive: true });
       writeFileSync(
@@ -361,52 +484,12 @@ describe("keelson update (e2e against a mock releases API)", () => {
       writeFileSync(join(overlayDir, "fix-issue.yaml"), "old shared workflow\n");
       writeFileSync(join(overlayDir, "customize.yaml"), "my customization\n");
 
-      const fakeBunHelper = join(fakeBin, "fake-bun.ts");
-      writeFileSync(
-        fakeBunHelper,
-        [
-          'import { mkdirSync, writeFileSync } from "node:fs";',
-          'import { join } from "node:path";',
-          "",
-          "const args = process.argv.slice(2);",
-          'if (args[0] === "install") {',
-          "  const managed = process.env.KEELSON_TEST_BUNDLE_DIR;",
-          "  if (!managed) process.exit(41);",
-          "  mkdirSync(managed, { recursive: true });",
-          '  writeFileSync(join(managed, "fix-issue.yaml"), process.env.KEELSON_TEST_NEXT_FIX ?? "");',
-          '  writeFileSync(join(managed, "customize.yaml"), process.env.KEELSON_TEST_NEXT_CUSTOM ?? "");',
-          "  process.exit(0);",
-          "}",
-          "",
-          "const realBun = process.env.KEELSON_REAL_BUN;",
-          "if (!realBun) process.exit(42);",
-          "const proc = Bun.spawn([realBun, ...args], {",
-          '  stdin: "inherit",',
-          '  stdout: "inherit",',
-          '  stderr: "inherit",',
-          "});",
-          "process.exit(await proc.exited);",
-          "",
-        ].join("\n"),
-      );
-      writeFileSync(
-        join(fakeBin, "bun"),
-        '#!/usr/bin/env sh\nexec "$KEELSON_REAL_BUN" "$KEELSON_FAKE_BUN_HELPER" "$@"\n',
-        { mode: 0o755 },
-      );
-      writeFileSync(
-        join(fakeBin, "bun.cmd"),
-        '@echo off\r\n"%KEELSON_REAL_BUN%" "%KEELSON_FAKE_BUN_HELPER%" %*\r\n',
-      );
-
       const { stdout, exitCode } = await runCli(["--json", "update"], {
         ...env(home),
-        KEELSON_REAL_BUN: process.execPath,
-        KEELSON_FAKE_BUN_HELPER: fakeBunHelper,
-        KEELSON_TEST_BUNDLE_DIR: bundleDir,
-        KEELSON_TEST_NEXT_FIX: "new shared workflow\n",
-        KEELSON_TEST_NEXT_CUSTOM: "new customizable workflow\n",
-        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+        ...successfulBunHarness(root, bundleDir, {
+          "fix-issue.yaml": "new shared workflow\n",
+          "customize.yaml": "new customizable workflow\n",
+        }),
       });
       expect(exitCode).toBe(0);
       const out = JSON.parse(stdout.trim());
@@ -414,10 +497,46 @@ describe("keelson update (e2e against a mock releases API)", () => {
       expect(out.data.updated).toBe(true);
       expect(out.data.refreshedWorkflows).toEqual(["fix-issue.yaml"]);
       expect(out.data.workflowConflicts).toEqual(["customize.yaml"]);
+      expect(out.data.reconcileError).toBeUndefined();
       expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe(
         "new shared workflow\n",
       );
       expect(readFileSync(join(overlayDir, "customize.yaml"), "utf8")).toBe("my customization\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a reconcile failure remains successful and is visible in JSON and human output", async () => {
+    latestTag = "v999.0.2";
+    const home = installedHome();
+    const root = resolve(home, "..");
+    const bundleDir = join(home, "node_modules", "@keelson", "cli", "assets", "workflows");
+    const harness = successfulBunHarness(root, bundleDir, {
+      "fix-issue.yaml": "new shared workflow\n",
+    });
+
+    try {
+      mkdirSync(bundleDir, { recursive: true });
+      writeFileSync(join(bundleDir, "fix-issue.yaml"), "old shared workflow\n");
+      writeFileSync(join(home, "workflows"), "not a directory\n");
+
+      const jsonResult = await runCli(["--json", "update"], {
+        ...env(home),
+        ...harness,
+      });
+      expect(jsonResult.exitCode).toBe(0);
+      const out = JSON.parse(jsonResult.stdout.trim());
+      expect(out.ok).toBe(true);
+      expect(out.data.updated).toBe(true);
+      expect(out.data.reconcileError).toContain("workflow reconciliation failed:");
+
+      const humanResult = await runCli(["update"], {
+        ...env(home),
+        ...harness,
+      });
+      expect(humanResult.exitCode).toBe(0);
+      expect(humanResult.stdout).toContain("warning: workflow reconciliation failed:");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -464,7 +583,7 @@ describe("keelson update (e2e against a mock releases API)", () => {
   }
 
   test("quarantined-version install failure exits REGISTRY_STALE naming the sanitized registry", async () => {
-    latestTag = "v999.0.2";
+    latestTag = "v999.0.3";
     const root = mkdtempSync(join(tmpdir(), "keelson-update-stale-"));
     const home = join(root, "home");
     try {
@@ -501,7 +620,7 @@ describe("keelson update (e2e against a mock releases API)", () => {
   });
 
   test("an unrelated install failure stays INSTALL_FAILED", async () => {
-    latestTag = "v999.0.3";
+    latestTag = "v999.0.4";
     const root = mkdtempSync(join(tmpdir(), "keelson-update-instfail-"));
     const home = join(root, "home");
     try {

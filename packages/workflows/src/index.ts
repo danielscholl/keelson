@@ -95,6 +95,7 @@ export {
   validateWorkflowInvariants,
   type WorkflowLoadWarning,
 } from "./loader.ts";
+export { readManagedManifest, sha256, writeManagedManifest } from "./managed.ts";
 export * from "./schema/index.ts";
 export {
   bundledBinDir,
