@@ -398,6 +398,44 @@ exit 1
     expect(runForge(["pr", "checks", "42"], { env }).exitCode).toBe(0);
   });
 
+  // A caller gating on "zero checks" must be able to tell an outage from a repo
+  // with no CI; both used to arrive as length 0 with exit 0.
+  function failingApiEnv(failOn: string): Record<string, string> {
+    const FAKE = `#!/usr/bin/env bash
+args="$*"
+if [ "$1" = repo ]; then echo '{"path_with_namespace":"g/p"}'; exit 0; fi
+if [ "$1" = api ]; then
+  case "$args" in
+    *"${failOn}"*) echo 'GET https://gitlab/api: 401 Unauthorized' >&2; exit 1 ;;
+    *"pipelines?per_page=1"*) echo '[{"id":123}]'; exit 0 ;;
+    *"pipelines/123/jobs"*)   echo '[]'; exit 0 ;;
+    *"pipelines/123"*)        echo '{"status":"success"}'; exit 0 ;;
+  esac
+  echo '[]'; exit 0
+fi
+exit 1
+`;
+    const dir = fakeBinDir({ glab: FAKE });
+    tmps.push(dir);
+    return { PATH: pathWith(dir), KEELSON_FORGE: "gitlab" };
+  }
+
+  test("a failed pipelines query is nonzero, not an empty check list", () => {
+    const env = failingApiEnv("pipelines?per_page=1");
+    const res = runForge(["pr", "checks", "42", "--json", "state", "-q", "length"], { env });
+    expect(res.exitCode).not.toBe(0);
+    expect(res.stdout.trim()).not.toBe("0");
+    expect(res.stderr).toContain("could not query pipelines");
+  });
+
+  test("a failed jobs query is nonzero, not an empty check list", () => {
+    const env = failingApiEnv("pipelines/123/jobs");
+    const res = runForge(["pr", "checks", "42", "--json", "state", "-q", "length"], { env });
+    expect(res.exitCode).not.toBe(0);
+    expect(res.stdout.trim()).not.toBe("0");
+    expect(res.stderr).toContain("could not query jobs");
+  });
+
   test("--json mode exits 0 even on a failed pipeline (gh returns early in JSON mode)", () => {
     const env = checksEnv({ jobs: job("failed"), status: "failed" });
     expect(
