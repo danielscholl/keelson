@@ -38,14 +38,13 @@ export function readManagedManifest(workflowsDir: string): Record<string, string
   return manifest;
 }
 
-export function writeManagedManifest(
-  workflowsDir: string,
-  manifest: Record<string, string>,
-): void {
+export function writeManagedManifest(workflowsDir: string, manifest: Record<string, string>): void {
   mkdirSync(workflowsDir, { recursive: true });
   const destination = join(workflowsDir, MANAGED_MANIFEST_NAME);
   const temporary = join(workflowsDir, `${MANAGED_MANIFEST_NAME}.${process.pid}.tmp`);
-  const sorted = Object.fromEntries(Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)));
+  const sorted = Object.fromEntries(
+    Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)),
+  );
 
   try {
     writeFileSync(temporary, `${JSON.stringify(sorted, null, 2)}\n`);
