@@ -50,7 +50,7 @@ export interface PromptHandlerProvider {
   // the SDK's own default, and to decide whether a resolved `effort` is worth
   // reporting — a provider that ignores `reasoningEffort` ran at its own
   // default, so claiming a tier would be false. Spy / fake providers may omit it.
-  getCapabilities?(): { defaultModel?: string; reasoningEffort?: boolean };
+  getCapabilities?(): { defaultModel?: string; reasoningEffort?: boolean; tools?: boolean };
 }
 
 export interface PromptHandlerSendOptions {
@@ -468,7 +468,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           console.warn(`[workflows] tool gate threw for node '${ctx.nodeId}': ${msg}`);
         }
       }
-      const registeredToolNames = new Set(filteredTools.map((tool) => stripMcpPrefix(tool.name)));
+      const registeredToolNames = new Set(filteredTools.map((tool) => bareToolName(tool.name)));
 
       // Bind the node's effective provider id + teardown signal so the provider
       // gets a thunk that takes only the call. `handlerExit` fires on run cancel or
@@ -495,6 +495,10 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       // Providers that ignore the option (claude, pi, gateways) must not have a
       // tier reported against their turns — the turn ran at the SDK's default.
       let effortConsumed = false;
+      // Providers that don't take keelson's tool catalog (codex, gateways, stub)
+      // can never satisfy `require_tool_call`, so the assertion is skipped for
+      // them rather than failing a turn that was never given the tool.
+      let providerProjectsTools = true;
       // Set when any tool the turn invoked returned an error result; consulted
       // after the stream when the node opts into `fail_on_tool_error`.
       let toolErrored = false;
@@ -552,6 +556,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           const provider = opts.getProvider(effectiveProviderId);
           providerResolved = true;
           effortConsumed = provider.getCapabilities?.().reasoningEffort === true;
+          providerProjectsTools = provider.getCapabilities?.().tools !== false;
           if (model === undefined) {
             const defaultModel = provider.getCapabilities?.().defaultModel;
             if (typeof defaultModel === "string" && defaultModel.length > 0) {
@@ -637,7 +642,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             } else if (t === "tool_use") {
               const toolUse = chunk as { id?: unknown; toolName?: unknown };
               if (typeof toolUse.id === "string" && typeof toolUse.toolName === "string") {
-                toolNamesById.set(toolUse.id, stripMcpPrefix(toolUse.toolName));
+                toolNamesById.set(toolUse.id, bareToolName(toolUse.toolName));
               }
             } else if (t === "tool_result") {
               const toolResult = chunk as { toolUseId?: unknown; isError?: boolean };
@@ -729,10 +734,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         }
       }
 
-      const missingRequiredTool = requiredToolCalls?.find((toolName) => {
-        const bareName = stripMcpPrefix(toolName);
-        return registeredToolNames.has(bareName) && !succeededToolNames.has(bareName);
-      });
+      const missingRequiredTool = providerProjectsTools
+        ? requiredToolCalls?.find((toolName) => {
+            const bareName = bareToolName(toolName);
+            return registeredToolNames.has(bareName) && !succeededToolNames.has(bareName);
+          })
+        : undefined;
 
       let result: NodeResult;
       if (cancelled) {
@@ -871,6 +878,17 @@ function stripMcpPrefix(name: string): string {
   const serverEnd = name.indexOf("__", 5);
   if (serverEnd < 0) return name;
   return name.slice(serverEnd + 2);
+}
+
+// Providers report an invoked tool under their own naming: the SDK-qualified
+// `mcp__server__tool`, or codex's `server/tool`. Registry names carry neither
+// separator, so reducing to the last segment makes an observed call comparable
+// to the registered catalog. Kept separate from `stripMcpPrefix` so widening it
+// can't change allow/deny matching.
+function bareToolName(name: string): string {
+  const withoutMcp = stripMcpPrefix(name);
+  const slash = withoutMcp.lastIndexOf("/");
+  return slash < 0 ? withoutMcp : withoutMcp.slice(slash + 1);
 }
 
 const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh"] as const;
