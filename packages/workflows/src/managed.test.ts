@@ -24,34 +24,21 @@ describe("readManagedManifest", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  // A manifest entry authorizes deleting the overlay file it names, so every
-  // unreadable form must degrade to "not tracked" rather than to a stale hash.
+  // Reading damaged content as empty would let the next write replace it with
+  // only the current bundle, discarding the provenance that makes a retired
+  // overlay recognizable. Throwing keeps the file — and the caller reports it.
   test.each([
     ["truncated JSON", "{"],
     ["a JSON array", "[]"],
     ["a JSON scalar", '"nope"'],
     ["null", "null"],
-  ])("treats %s as an empty manifest", (_label: string, raw: string) => {
+    ["a non-digest value", '{"a.yaml":"not-a-sha"}'],
+    ["a non-string value", '{"a.yaml":42}'],
+  ])("throws rather than reporting %s as empty", (_label: string, raw: string) => {
     const dir = tmpDir();
     fs.writeFileSync(path.join(dir, ".managed.json"), raw);
-    expect(readManagedManifest(dir)).toEqual({});
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  test("drops entries whose value is not a sha256 digest, keeping valid siblings", () => {
-    const dir = tmpDir();
-    const good = sha256("shipped\n");
-    fs.writeFileSync(
-      path.join(dir, ".managed.json"),
-      JSON.stringify({
-        "bad-short.yaml": "not-a-sha",
-        "bad-type.yaml": 42,
-        "bad-case.yaml": good.toUpperCase(),
-        "good.yaml": good,
-      }),
-    );
-
-    expect(readManagedManifest(dir)).toEqual({ "good.yaml": good });
+    expect(() => readManagedManifest(dir)).toThrow();
+    expect(fs.existsSync(path.join(dir, ".managed.json"))).toBe(true);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

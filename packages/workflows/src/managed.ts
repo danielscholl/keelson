@@ -22,18 +22,26 @@ export function readManagedManifest(workflowsDir: string): Record<string, string
     throw error;
   }
 
+  // A missing manifest means "nothing tracked yet"; damaged content does not.
+  // Reading it as empty would let the next write replace it with only the
+  // current bundle, discarding the provenance that makes a retired overlay
+  // recognizable — the permanent-orphan state this manifest exists to prevent.
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    if (error instanceof SyntaxError) return {};
-    throw error;
+    throw new Error(`managed workflow manifest is unreadable: ${(error as Error).message}`);
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("managed workflow manifest is not a JSON object");
+  }
 
   const manifest: Record<string, string> = {};
   for (const [name, hash] of Object.entries(parsed)) {
-    if (typeof hash === "string" && SHA256_PATTERN.test(hash)) manifest[name] = hash;
+    if (typeof hash !== "string" || !SHA256_PATTERN.test(hash)) {
+      throw new Error(`managed workflow manifest has a malformed entry for ${name}`);
+    }
+    manifest[name] = hash;
   }
   return manifest;
 }

@@ -158,7 +158,15 @@ export function seedStarterWorkflows(
   if (seeded.length === 0) return seeded;
 
   try {
-    const manifest = readManagedManifest(targetDir);
+    // Seeding only runs into a dir holding no workflows, so a damaged manifest
+    // here tracks nothing worth keeping — unlike reconcile, this path only adds
+    // entries for files it just wrote and can never authorize a deletion.
+    let manifest: Record<string, string>;
+    try {
+      manifest = readManagedManifest(targetDir);
+    } catch {
+      manifest = {};
+    }
     for (const name of seeded) {
       manifest[name] = sha256(readFileSync(join(targetDir, name)));
     }

@@ -128,6 +128,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("new bundle\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -144,6 +145,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: ["fix-issue.yaml"],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "fix-issue.yaml"), "utf8")).toBe("my customization\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -160,6 +162,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     rmSync(overlayDir, { recursive: true, force: true });
   });
@@ -173,6 +176,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(existsSync(join(overlayDir, "resolve-pr.yaml"))).toBe(false);
     expect(readManagedManifest(overlayDir)).toEqual({
@@ -195,6 +199,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: ["finish-pr.yaml"],
       retiredKept: [],
+      failures: [],
     });
     expect(existsSync(join(overlayDir, "finish-pr.yaml"))).toBe(false);
     expect(readManagedManifest(overlayDir)).toEqual({
@@ -217,6 +222,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: ["finish-pr.yaml"],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("my customization\n");
     rmSync(overlayDir, { recursive: true, force: true });
@@ -232,25 +238,39 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "mine.yaml"), "utf8")).toBe("my workflow\n");
     expect(readManagedManifest(overlayDir)["mine.yaml"]).toBeUndefined();
     rmSync(overlayDir, { recursive: true, force: true });
   });
 
-  test("a corrupt manifest never authorizes a deletion", () => {
+  // Degrading to an empty manifest here would rewrite it from the current
+  // bundle alone, erasing the provenance for every overlay already retired —
+  // re-creating the permanent orphan by a different route.
+  test("a corrupt manifest aborts the reconcile without touching the overlay", () => {
     const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
     const current = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
     writeFileSync(join(overlayDir, "finish-pr.yaml"), "old bundle\n");
     writeFileSync(join(overlayDir, ".managed.json"), "{ truncated");
 
-    expect(reconcileManagedWorkflows(overlayDir, current, current)).toEqual({
-      refreshed: [],
-      conflicts: [],
-      removed: [],
-      retiredKept: [],
-    });
+    expect(() => reconcileManagedWorkflows(overlayDir, current, current)).toThrow();
     expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("old bundle\n");
+    expect(readFileSync(join(overlayDir, ".managed.json"), "utf8")).toBe("{ truncated");
+    rmSync(overlayDir, { recursive: true, force: true });
+  });
+
+  test("reports an unreadable overlay instead of silently skipping it", () => {
+    const overlayDir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
+    const current = new Map([["resolve-pr.yaml", "renamed bundle\n"]]);
+    // A directory where a workflow file belongs: every read of it throws EISDIR.
+    mkdirSync(join(overlayDir, "resolve-pr.yaml"));
+
+    const result = reconcileManagedWorkflows(overlayDir, current, current);
+
+    expect(result.refreshed).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toContain("resolve-pr.yaml");
     rmSync(overlayDir, { recursive: true, force: true });
   });
 
@@ -267,6 +287,7 @@ describe("reconcileManagedWorkflows", () => {
       conflicts: [],
       removed: [],
       retiredKept: [],
+      failures: [],
     });
     expect(readFileSync(join(overlayDir, "finish-pr.yaml"), "utf8")).toBe("old bundle\n");
     rmSync(overlayDir, { recursive: true, force: true });

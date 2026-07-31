@@ -216,11 +216,21 @@ export function reconcileManagedWorkflows(
   overlayDir: string,
   previous: ReadonlyMap<string, string>,
   next: ReadonlyMap<string, string>,
-): { refreshed: string[]; conflicts: string[]; removed: string[]; retiredKept: string[] } {
+): {
+  refreshed: string[];
+  conflicts: string[];
+  removed: string[];
+  retiredKept: string[];
+  failures: string[];
+} {
   const refreshed: string[] = [];
   const conflicts: string[] = [];
   const removed: string[] = [];
   const retiredKept: string[] = [];
+  // One unusable overlay file must not abort the reconcile, but it must not
+  // pass for a no-op either: EACCES on a single file is the likeliest real
+  // failure and was previously indistinguishable from nothing to do.
+  const failures: string[] = [];
   const manifest = readManagedManifest(overlayDir);
 
   for (const [name, nextContent] of next) {
@@ -240,16 +250,19 @@ export function reconcileManagedWorkflows(
         writeFileSync(tempPath, nextContent);
         renameSync(tempPath, overlayPath);
         refreshed.push(name);
-      } catch {
+      } catch (error) {
         rmSync(tempPath, { force: true });
+        failures.push(`${name}: ${errorText(error)}`);
       }
-    } catch {}
+    } catch (error) {
+      failures.push(`${name}: ${errorText(error)}`);
+    }
   }
 
   // An empty `next` means the post-install bundle read failed (or the dir is
   // genuinely missing) — the shipped bundle is never legitimately empty, so
   // treating it as "everything retired" would delete every unmodified overlay.
-  if (next.size === 0) return { refreshed, conflicts, removed, retiredKept };
+  if (next.size === 0) return { refreshed, conflicts, removed, retiredKept, failures };
 
   const overlayNames = existsSync(overlayDir)
     ? readdirSync(overlayDir).filter(isWorkflowYaml).sort()
@@ -267,7 +280,9 @@ export function reconcileManagedWorkflows(
       rmSync(overlayPath, { force: true });
       delete manifest[name];
       removed.push(name);
-    } catch {}
+    } catch (error) {
+      failures.push(`${name}: ${errorText(error)}`);
+    }
   }
 
   for (const name of Object.keys(manifest)) {
@@ -276,7 +291,11 @@ export function reconcileManagedWorkflows(
   for (const [name, content] of next) manifest[name] = sha256(content);
   writeManagedManifest(overlayDir, manifest);
 
-  return { refreshed, conflicts, removed, retiredKept };
+  return { refreshed, conflicts, removed, retiredKept, failures };
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function fail(message: string, code: string, json: boolean): never {
@@ -386,9 +405,16 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
   let conflicts: string[] = [];
   let removed: string[] = [];
   let retiredKept: string[] = [];
+  let reconcileFailures: string[] = [];
   let reconcileError: string | undefined;
   try {
-    ({ refreshed, conflicts, removed, retiredKept } = reconcileManagedWorkflows(
+    ({
+      refreshed,
+      conflicts,
+      removed,
+      retiredKept,
+      failures: reconcileFailures,
+    } = reconcileManagedWorkflows(
       keelsonPaths(home).workflowsDir,
       previous,
       readWorkflowContents(bundleDir),
@@ -426,6 +452,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     workflowConflicts: conflicts,
     retiredKeptWorkflows: retiredKept,
     ...(reconcileError ? { reconcileError } : {}),
+    ...(reconcileFailures.length > 0 ? { reconcileFailures } : {}),
     ...(installed !== latest ? { warning: `installed ${installed}, expected ${latest}` } : {}),
   });
   if (!opts.json) {
@@ -449,6 +476,8 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
         `kept your customized ${name} (retired from the bundle; remove it manually if unwanted)\n`,
       );
     if (reconcileError) process.stdout.write(`warning: ${reconcileError}\n`);
+    for (const failure of reconcileFailures)
+      process.stdout.write(`warning: could not reconcile ${failure}\n`);
     if (server !== null)
       process.stdout.write("restart the server (`keelson restart`) to load the update\n");
   }
