@@ -141,13 +141,13 @@ rules a generic "implement the plan" prompt omits.
 its own homework. `capture-diff` freezes the branch diff as an artifact, and
 three independent reviewers (correctness, conventions, and coverage) read it in
 parallel (they share a DAG layer, so the panel costs about one review's
-wall-clock) under a read-only harness rail — `allowed_tools: [Read, Glob, Grep]`,
+wall-clock) under a read-only harness rail: `allowed_tools: [Read, Glob, Grep]`,
 the same rail [pr-review](../pr-review/) puts on its lanes, so a reviewer
 *cannot* edit or run shell no matter what its prompt says. The `triage` judge
 then holds the same tools and adversarially **refutes** each candidate against
 `diff.patch` and the source: a survivor is CONFIRMED when the failure was traced
 in real code (confidence 85-100) or PLAUSIBLE when it could not be refuted but
-not traced either (capped at 79, below the ≥80 keep line) — so only CONFIRMED
+not traced either (capped at 79, below the ≥80 keep line), so only CONFIRMED
 CRITICAL/HIGH findings reach `apply-fixes`, and `re-review` confirms the loop
 closed.
 
@@ -158,7 +158,7 @@ edit nodes (`implement`, `fix-validation`, `apply-fixes`, `fix-ci`) to
 `gpt-5.6-terra`. Each role runs a distinct model: the implementer never reviews
 its own work, the reviewers run a different GPT-5.6 variant from the
 implementer, and the judge is a different vendor from both. Each pin runs a chosen, deterministic
-model rather than `auto`, and each carries an explicit `effort:` tier — a model
+model rather than `auto`, and each carries an explicit `effort:` tier; a model
 pin alone would still leave the node on that model's default tier. The remaining
 prompt nodes stay on `auto` and let Copilot route them.
 
@@ -189,11 +189,11 @@ promotion itself fails.
   `review-correctness`, `review-conventions`, `review-coverage`, `triage`,
   `apply-fixes`, `re-review`) is the run's quality tail. Collapse it to a single
   reviewer plus `apply-fixes` for a cheaper run, or drop it so `create-pr` is
-  the last step. The pins come in three roles — `gpt-5.6-terra` for review,
-  `gpt-5.6-sol` for edits, `claude-opus-4.8` for judgment; retarget any to
+  the last step. The pins come in three roles (`gpt-5.6-terra` for review,
+  `gpt-5.6-sol` for edits, `claude-opus-4.8` for judgment); retarget any to
   whatever your Copilot account exposes, keeping each role on a distinct model
   if you can. All three ids are account-dependent: swap or drop any to `auto` if it
-  does not appear in your Copilot model list — and drop that node's `effort:`
+  does not appear in your Copilot model list, and drop that node's `effort:`
   tier with it, since `auto` has no reasoning tier.
 - **Swap the gate for autonomy.** Remove `approve-plan` (and point `implement`
   at `plan-ready`) for an unattended run, at the cost of the safety interlock.
