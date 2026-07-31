@@ -79,6 +79,14 @@ nodes:
           if [ -n "$COMMIT" ]; then
             mkdir -p "$KEELSON_ARTIFACTS_DIR/subject"
             git archive "$COMMIT" | tar -x -C "$KEELSON_ARTIFACTS_DIR/subject"
+            # A ref is untrusted: a symlink in it (`leak -> /etc/passwd`) would
+            # read as in-snapshot to the verifier and exfiltrate host files
+            # through its Read/Grep rail. Drop every link; regular files only.
+            LINKS=$(find "$KEELSON_ARTIFACTS_DIR/subject" -type l | wc -l | tr -d ' ')
+            if [ "$LINKS" -gt 0 ]; then
+              find "$KEELSON_ARTIFACTS_DIR/subject" -type l -exec rm -f {} +
+              echo "Subject snapshot: removed ${LINKS} symlink(s); the verifier sees regular files only" >&2
+            fi
             echo "Subject snapshot: $SUBJECT ($COMMIT) -> \$ARTIFACTS_DIR/subject" >&2
           else
             echo "subject '$SUBJECT' did not resolve to a commit; the verifier falls back to the caller's working directory" >&2
@@ -95,27 +103,30 @@ nodes:
         # level, sorted) concatenated under labeled separators, so callers pass
         # primary artifacts (a claim, diff.patch, CI logs) verbatim instead of
         # transcribing them into prose — transcription is where fidelity dies.
-        TOTAL=0
+        # Assembled to a file first so the cap is measured on the EXACT output
+        # (separators included) and a rejected bundle emits nothing at all.
+        BUNDLE="$KEELSON_ARTIFACTS_DIR/.bundle"
+        : > "$BUNDLE"
         FOUND=0
         while IFS= read -r f; do
-          FCHARS=$(wc -m < "$f" 2>/dev/null | tr -d ' ')
-          case "$FCHARS" in ''|*[!0-9]*) FCHARS=0 ;; esac
-          [ "$FCHARS" -eq 0 ] && continue
-          TOTAL=$((TOTAL + FCHARS))
-          if [ "$TOTAL" -gt 1000000 ]; then
-            echo "Evidence bundle exceeds ~1M chars; the workflow would review only a prefix. Trim the directory." >&2
-            exit 1
-          fi
+          [ -s "$f" ] || continue
           FOUND=$((FOUND + 1))
-          printf '===== EVIDENCE FILE: %s =====\n' "$(basename "$f")"
-          cat -- "$f"
-          printf '\n'
+          printf '===== EVIDENCE FILE: %s =====\n' "$(basename "$f")" >> "$BUNDLE"
+          cat -- "$f" >> "$BUNDLE"
+          printf '\n' >> "$BUNDLE"
         done < <(find "$TRIMMED" -maxdepth 1 -type f | LC_ALL=C sort)
         if [ "$FOUND" -eq 0 ]; then
           echo "Evidence directory has no readable files: $TRIMMED" >&2
           exit 1
         fi
+        TOTAL=$(wc -m < "$BUNDLE" | tr -d ' ')
+        if [ "$TOTAL" -gt 1000000 ]; then
+          echo "Evidence bundle is ${TOTAL} chars; the workflow reviews at most ~1M and would otherwise see only a prefix." >&2
+          echo "Trim the directory, or review a subset." >&2
+          exit 1
+        fi
         echo "Artifact bundle loaded from directory: $TRIMMED (${FOUND} files, ${TOTAL} chars)" >&2
+        cat -- "$BUNDLE"
       elif [ -f "$TRIMMED" ]; then
         FCHARS=$(wc -m < "$TRIMMED" | tr -d ' ')
         if [ "$FCHARS" -eq 0 ]; then
@@ -359,11 +370,27 @@ nodes:
     allowed_tools: []
     output_format:
       type: object
-      required: [verdict, headline, report]
+      required: [verdict, headline, must_fix, open_questions, report]
       properties:
         verdict:
           type: string
           enum: [CONFIRMED, CONFIRMED-WITH-CHANGES, REFUTED]
+        headline: { type: string }
+        must_fix:
+          type: array
+          items: { type: string }
+        open_questions:
+          type: array
+          items: { type: string }
+        report: { type: string }
+    # output_format only instructs the model; output_schema is the fail-closed
+    # executor check, so a reply missing a field fails the node instead of
+    # reaching callers that were promised the shape.
+    output_schema:
+      type: object
+      required: [verdict, headline, must_fix, open_questions, report]
+      properties:
+        verdict: { type: string }
         headline: { type: string }
         must_fix:
           type: array

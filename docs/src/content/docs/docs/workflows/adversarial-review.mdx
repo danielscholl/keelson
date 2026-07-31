@@ -40,13 +40,13 @@ keelson workflow run adversarial-review --arguments ./review-bundle/ --inputs su
 The argument is a path to a file, a directory, or the artifact text itself. A
 directory is an evidence bundle: every file in it (one level) is concatenated
 under labeled separators, so primary artifacts travel verbatim instead of being
-transcribed into prose — transcription is where fidelity dies. Inline text
+transcribed into prose. Transcription is where fidelity dies. Inline text
 travels the argument channel, which caps at 16 KiB; paths are read up to a
 ~1 MB limit (`intake` rejects larger input rather than review only a prefix,
 and a large artifact is also bounded by the reviewers' model context).
 
 Run it from the repository the artifact is about, so `verify` can read the
-source it cites — and when the artifact concerns a specific change, pass the
+source it cites. When the artifact concerns a specific change, also pass the
 optional `subject` input (any git ref: a branch, a SHA, `refs/pull/N/head`).
 `intake` snapshots that ref read-only into the run's artifacts, and `verify`
 checks code claims against the snapshot instead of whatever branch the working
@@ -70,7 +70,7 @@ crosses between stages is each node's output.
 | `reviewer-logic` | prompt | **`model: claude-opus-5`**, **`effort: xhigh`**: attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
 | `reviewer-evidence` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
 | `reviewer-risk` | prompt | **`model: gemini-3.1-pro-preview`**, **`effort: xhigh`**: assumes the artifact is adopted and finds what breaks, tracing bad inputs, retries, and partial completion through the proposal, weighted by cost of failure; where the artifact chooses an approach, it also names the strongest alternative ignored. No tools. |
-| `verify` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one — against the `subject` snapshot when one was taken, else the working directory (where absence of the change is `UNVERIFIABLE-HERE`, never refutation). |
+| `verify` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. Checks against the `subject` snapshot when one was taken, else the working directory (where absence of the change is `UNVERIFIABLE-HERE`, never refutation). |
 | `synthesize` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**: weighs the lenses against the verification and issues the verdict as structured output (`verdict` / `headline` / `must_fix` / `open_questions` + full prose `report`), a terse ship/no-ship call with dissent; a comparative artifact must get a choice, not a fence-sit. No tools. |
 
 Every prompt node is pinned with an explicit `effort: xhigh` and a generous

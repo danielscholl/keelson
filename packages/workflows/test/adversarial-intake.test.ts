@@ -5,7 +5,16 @@
 // biome-ignore lint/suspicious/noTsIgnore: Bun provides this module at test runtime.
 // @ts-ignore
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -49,6 +58,16 @@ function runIntake(args: string, opts: { subject?: string; cwd?: string } = {}) 
     stderr: proc.stderr.toString(),
     artifacts,
   };
+}
+
+// lstat (never stat) so a dangling link still reports as present, which is
+// exactly the case the containment check must catch.
+function lstatSyncSafe(path: string): { isSymbolicLink: () => boolean } | null {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
 }
 
 function gitRepoWithCommit(): string {
@@ -110,6 +129,28 @@ shimDescribe("adversarial-review intake", () => {
     expect(existsSync(snapshot)).toBe(true);
     expect(readFileSync(snapshot, "utf8")).toBe("hello subject\n");
     expect(result.stderr).toContain("Subject snapshot: HEAD");
+  });
+
+  test("strips symlinks from the subject snapshot so the verifier cannot escape it", () => {
+    const repo = gitRepoWithCommit();
+    const proc = (...args: string[]) =>
+      Bun.spawnSync({
+        cmd: ["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args],
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+    symlinkSync("/etc/passwd", join(repo, "leak"));
+    proc("add", "leak");
+    proc("commit", "--quiet", "-m", "add a link out of the tree");
+
+    const result = runIntake("Claim: the tree is safe to read.", {
+      subject: "HEAD",
+      cwd: repo,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(result.artifacts, "subject", "src", "x.txt"))).toBe(true);
+    expect(lstatSyncSafe(join(result.artifacts, "subject", "leak"))).toBeNull();
+    expect(result.stderr).toContain("removed 1 symlink");
   });
 
   test("degrades gracefully when the subject ref does not resolve", () => {
