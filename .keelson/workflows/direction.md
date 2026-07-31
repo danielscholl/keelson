@@ -46,8 +46,13 @@ against the project, cite the clause (e.g. `direction.md §not-a-hosted-service`
 ## Labels
 
 Triage uses the repository's existing labels only. It never creates labels;
-anything it cannot express with an existing label goes in the comment for the
-maintainer to handle.
+anything it cannot express with an existing label goes in the note and the
+report for the maintainer to handle.
+
+The authoritative allow-list is **derived from the repo at run time** — the run's
+first node reads `gh label list` and intersects it with the vocabulary below, so
+the tables here describe what each label *means* rather than what exists. A row
+marked *(no label yet)* is reported as a coverage gap, never applied.
 
 **Area** (the monorepo workspace the work lands in — apply the single most
 relevant one, or none):
@@ -61,6 +66,8 @@ relevant one, or none):
 | `packages/providers` | provider adapters |
 | `packages/shared` | the rib contract, snapshots, shared types |
 | `packages/skills` | bundled skills |
+| `packages/mcp` | *(no label yet)* the MCP server and stdio bridge |
+| `docs` | *(no label yet)* the Astro Starlight site under `docs/` |
 | `github-actions` | CI, release, repo automation |
 
 **Type** (apply the single best one, or none):
@@ -73,18 +80,29 @@ relevant one, or none):
 | `question` | a question or support request, not actionable work |
 
 The repository also carries `duplicate`, `wontfix`, `invalid`, `help wanted`,
-`good first issue`, and `dependencies`. Triage does **not** apply these; they are
-maintainer judgment calls. If an issue looks like a duplicate, say so with the
-`#N` in the comment rather than labeling it.
+`good first issue`, `dependencies`, `size/*`, `epic`, `dogfood`, and the
+work-stream labels. Triage does **not** apply any of these; they are maintainer
+judgment calls. If an issue looks like a duplicate, say so with the `#N` in the
+note rather than labeling it.
 
 ## Triage guidance
 
-- Apply at most one **Area** label and one **Type** label from the tables above,
-  using the exact label strings (e.g. `apps/cli`, `bug`), only when reasonably
-  confident. Prefer none over a wrong guess.
-- Put everything else in a terse, neutral comment for the maintainer:
+- Apply at most one **Area** label and one **Type** label, using the exact label
+  strings the run reports as available, and only when reasonably confident.
+  Prefer none over a wrong guess — a missing label costs a search, a wrong one
+  costs trust in every label.
+- Ground the choice. The area is where the *change lands*, which is a question
+  about this repository, not about the issue's wording — read the code and say
+  which file decided it.
+- Put everything else in a terse, neutral note for the maintainer:
   - a likely duplicate (cite the `#N`),
+  - work already resolved or superseded by an open PR (cite the evidence),
   - a stale issue (no recent activity, based on the age the run reports),
   - a bug report missing a reproduction or with an essentially empty body,
-  - anything that runs against the project (cite the `direction.md` clause).
-- The comment is a starting point for the maintainer, not a verdict. Be brief.
+  - anything that runs against the project (cite the clause, e.g.
+    `direction.md §not-a-hosted-service`).
+- Every one of those claims is checked against source before it is written. A
+  claim that cannot be grounded is dropped and recorded, not softened into a
+  hedge — the run reports what it threw out.
+- The note is a starting point for the maintainer, not a verdict. Be brief, and
+  post nothing when the labels already say it.
