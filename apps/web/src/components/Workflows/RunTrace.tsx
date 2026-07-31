@@ -1,6 +1,7 @@
 import type { WorkflowNodeSummary } from "@keelson/shared";
 import { useEffect, useId, useRef, useState } from "react";
 import type { NodeView, RunView as RunViewState } from "../../hooks/useWorkflowRun.ts";
+import { parsePublishedArtifact, publishedCanvasResult } from "../../lib/chatCanvas.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { formatDuration } from "../../lib/formatDuration.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
@@ -156,6 +157,11 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
   const toolCalls = toolCallsFromContentParts(view.contentParts);
   const textBlocks = view.contentParts.filter((p) => p.type === "text");
   const textFromBlocks = textBlocks.map((b) => (b.type === "text" ? b.text : "")).join("");
+  // A canvas_publish result is read off the node's persisted contentParts, so a
+  // run opened days later still reaches its artifact — the same source the chat
+  // surface parses, not the model's prose.
+  const publishedResult = publishedCanvasResult(toolCalls);
+  const artifact = publishedResult ? parsePublishedArtifact(publishedResult) : undefined;
 
   const isAwaiting = status === "awaiting";
   // Text to open in the canvas: prompt/approval render markdown (text blocks);
@@ -282,6 +288,28 @@ function TraceRow({ schema, view, runId, streaming, onSubmitApproval, onAbandon 
               <UsageBreakdown usage={view.usage} spendTitle="Node" />
             </UsagePopoverPanel>
           </>
+        )}
+        {artifact && (
+          <button
+            type="button"
+            className="trace-artifact-btn"
+            onClick={() =>
+              openCanvas({
+                kind: "html",
+                source: { type: "snapshot", key: artifact.key },
+                ...(artifact.title ? { title: artifact.title } : {}),
+              })
+            }
+            aria-label={
+              artifact.title ? `Open artifact: ${artifact.title}` : "Open canvas artifact"
+            }
+            title="Open the published canvas artifact"
+          >
+            <span className="trace-artifact-glyph" aria-hidden="true">
+              ◫
+            </span>
+            <span className="trace-artifact-label">{artifact.title ?? "Artifact"}</span>
+          </button>
         )}
         {canvasText.trim().length > 0 && (
           <button
