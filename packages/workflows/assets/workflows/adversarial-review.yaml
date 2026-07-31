@@ -300,6 +300,7 @@ nodes:
   # a consensus verdict is not issued on a panel where a lane failed.
   - id: verify
     depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk]
+    always_run: true
     context: fresh
     model: gpt-5.6-terra
     effort: xhigh
