@@ -18,20 +18,26 @@ description: |
         project's OWN checks (discovered from its docs/config — works in any
         repo), self-fixes failures, pushes the branch, creates a draft PR, runs a
         multi-lens review loop (independent correctness / conventions / coverage
-        reviewers → triage → fix → re-review), and reports back.
+        reviewers → adversarial triage → fix → re-review), and reports back.
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
-# Model `auto` (the workflow default) lets Copilot route each node and keeps most
-# of this workflow portable. The high-leverage REASONING nodes — investigate,
-# plan, and triage — are pinned to `claude-opus-4.8` instead: their judgment
-# drives the whole run, and pinning also makes the model DETERMINISTIC. Copilot
-# never reports which concrete model `auto` resolved (only the `pi` provider emits
-# the resolved-model chunk), so an `auto` node's actual model is unobservable —
-# pinning is the only way to know what ran. This is an account-dependent id: it
-# must appear in the account's live Copilot list (GET /api/providers/copilot/
-# models). If it isn't available, swap it for another frontier id (e.g. `gpt-5.6-sol`)
-# or drop the node's `model:` back to `auto`. Resolution order: node.model →
-# workflow.model → provider.defaultModel.
+# Model `auto` (the workflow default) lets Copilot route the mechanical nodes and
+# keeps most of this workflow portable. The judgment and edit nodes are pinned to
+# three deliberate model FAMILIES so the implementer, its reviewers, and the
+# judge never share blind spots (and never grade their own homework):
+#   - REASONING/JUDGE (`claude-opus-4.8`): investigate, plan, coverage-check,
+#     triage, triage-ci — their judgment drives the whole run.
+#   - EDIT (`gpt-5.6-sol`): implement, fix-validation, apply-fixes, fix-ci —
+#     the nodes that write code.
+#   - REVIEW (`gpt-5.6-terra`): the three review lenses and the re-review
+#     verifier — independent eyes on what the EDIT family wrote.
+# Pinning also makes the model DETERMINISTIC: Copilot never reports which
+# concrete model `auto` resolved (only the `pi` provider emits the
+# resolved-model chunk), so an `auto` node's actual model is unobservable.
+# These are account-dependent ids: each must appear in the account's live
+# Copilot list (GET /api/providers/copilot/models). If one isn't available,
+# swap it for another frontier id or drop the node's `model:` back to `auto`.
+# Resolution order: node.model → workflow.model → provider.defaultModel.
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
@@ -535,6 +541,10 @@ nodes:
   - id: fix-validation
     depends_on: [validate]
     context: fresh
+    # EDIT-family pin (see the model comment at the top): this node continues the
+    # implementer's work, so it gets the same deterministic coding model.
+    model: gpt-5.6-sol
+    effort: high
     prompt: |
       Review the validation output below.
 
@@ -668,49 +678,92 @@ nodes:
       exit 0
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PHASE 7: REVIEW LOOP — panel → triage → fix → re-review
+  # PHASE 7: REVIEW LOOP — capture → panel → adversarial triage → fix → re-review
   # A single self-review is the same model grading its own homework and misses
-  # things. Instead, three INDEPENDENT lenses review in parallel (they share a
-  # DAG layer, so this costs ~one review's wall-clock), a triage judge keeps only
-  # high-confidence real defects (dropping false positives), a fixer applies just
-  # those, and a re-review closes the loop. The `triage` judge is pinned to
-  # `claude-opus-4.8` (it is the decision gate); the three lenses are pinned to
-  # `gpt-5.6-terra` for review quality and a deterministic, observable model
-  # (account-dependent id — drop to `auto` if it isn't in the Copilot list).
+  # things. Instead, capture-diff freezes the branch diff as an artifact, three
+  # INDEPENDENT lenses review it in parallel (they share a DAG layer, so this
+  # costs ~one review's wall-clock) under a read-only harness rail
+  # (`allowed_tools: [Read, Glob, Grep]` — no shell, no edits; the same rail
+  # pr-review uses), an opus triage judge adversarially verifies each candidate
+  # against the diff and source and keeps only CONFIRMED CRITICAL/HIGH findings,
+  # a fixer applies just those, and a re-review closes the loop. The lenses are
+  # `gpt-5.6-terra` — a different family from both the `gpt-5.6-sol` implementer
+  # they are reviewing and the `claude-opus-4.8` judge, so finder, fixer, and
+  # judge don't share blind spots (account-dependent ids — drop to `auto` if
+  # absent from the Copilot list).
   # ─────────────────────────────────────────────────────────────────────────
 
-  - id: review-correctness
+  # The lanes read the diff from artifacts rather than running `git diff`
+  # themselves — that is what lets them run without shell access.
+  - id: capture-diff
     depends_on: [enforce-draft]
+    bash: |
+      set -euo pipefail
+      BASE=$(cat "$KEELSON_ARTIFACTS_DIR/.default-branch")
+      git diff "${BASE}...HEAD" --stat > "$KEELSON_ARTIFACTS_DIR/diff-stat.txt"
+      git diff "${BASE}...HEAD" > "$KEELSON_ARTIFACTS_DIR/diff.patch"
+      LINES=$(wc -l < "$KEELSON_ARTIFACTS_DIR/diff.patch" | tr -d ' ')
+      echo "diff.patch: ${LINES} lines"
+      cat "$KEELSON_ARTIFACTS_DIR/diff-stat.txt"
+
+  - id: review-correctness
+    depends_on: [capture-diff]
     context: fresh
     model: gpt-5.6-terra
     effort: xhigh
+    allowed_tools: [Read, Glob, Grep]
     prompt: |
-      You are one of three INDEPENDENT reviewers of the branch that was just
-      opened as a PR. Your lens is CORRECTNESS only.
+      You are one of three INDEPENDENT reviewers of the branch this run just
+      opened as a draft PR. Your lens is CORRECTNESS only. The working tree IS
+      the PR head; the diff is at `$ARTIFACTS_DIR/diff.patch`
+      (`$ARTIFACTS_DIR/diff-stat.txt` for the shape). The code was written by
+      another agent earlier in this run — review it as a skeptical outsider
+      whose job is to catch what it missed.
 
-      1. `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD --stat`, then
-         `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD` for the full change.
-      2. Hunt for real defects ONLY: logic bugs, broken/missing error handling,
-         unhandled null/edge cases, off-by-one, race conditions, regressions in
-         the changed call paths, and any destructive or irreversible operation
-         that isn't guarded.
-      3. Do NOT review style, naming, comments, or test coverage — other
-         reviewers own those. Ignore pre-existing issues on lines this PR did not
-         touch, and anything a type-checker / linter / CI already catches.
+      1. Read the diff patch file. For each hunk worth flagging, write one finding.
+      2. Weight the hunt by cost of failure, highest first:
+         - auth, permissions, and trust-boundary changes
+         - data loss, corruption, and irreversible state changes
+         - rollback safety, retries, partial failure, and idempotency gaps
+         - race conditions, ordering assumptions, and stale state
+         - empty-state, null, timeout, and degraded-dependency behavior
+         - version or constant drift between files that must agree (a bump
+           applied in one place but not its siblings)
+         - observability gaps that would hide a failure
+         Then the classic pass: logic bugs, broken/missing error handling,
+         unhandled null/edge cases, off-by-one, and regressions in the changed
+         call paths.
+      3. Also check the footguns reviews miss: moved or extracted code that
+         dropped a guard or condition on the way, flipped config defaults, and
+         narrowed lock or transaction scope.
+      4. After your first plausible finding, keep digging before you finalize:
+         second-order failures, empty-state behavior, retries, stale state, and
+         rollback paths.
+      5. Do NOT review style, naming, comments, or test coverage — other
+         reviewers own those. Ignore pre-existing issues on lines this branch
+         did not touch, and anything a type-checker / linter / CI already catches.
+      6. When a claim rests on inferred behavior of an external API, library, or
+         runtime you did not verify in this repo, label it INFERRED and cap its
+         confidence at 60.
 
-      Output a numbered list; each finding: `path:line` · severity
-      CRITICAL/HIGH/MEDIUM/LOW · one-sentence problem · suggested fix. If you find
-      nothing real, output exactly "No correctness issues found." Do NOT edit files.
+      Output a numbered list; each finding:
+      - `path:line` — severity (CRITICAL | HIGH | MEDIUM | LOW) — confidence (0-100)
+      - **What**: one sentence
+      - **Why it matters**: the concrete failure scenario — the input, state, or
+        sequence that triggers it and the wrong outcome, not "could cause issues"
+      - **Suggested fix**: one or two lines
+      If you find nothing real, output exactly "No correctness issues found."
 
   - id: review-conventions
-    depends_on: [enforce-draft]
+    depends_on: [capture-diff]
     context: fresh
     model: gpt-5.6-terra
     effort: xhigh
+    allowed_tools: [Read, Glob, Grep]
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is CONVENTIONS only.
 
-      1. Read the change: `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD`.
+      1. Read the change at `$ARTIFACTS_DIR/diff.patch`.
       2. Read whichever project guides exist (`CLAUDE.md`, `AGENTS.md`,
          `CONTRIBUTING.md`) and check the diff against them — especially the
          comment policy (no PR-narration / what-just-changed / code-restating
@@ -720,30 +773,33 @@ nodes:
          correctness and test coverage — other reviewers own those. Ignore
          pre-existing issues on unchanged lines.
 
-      Output a numbered list; each finding: `path:line` · severity · the rule it
-      violates (quoted) · suggested fix. If none, output exactly "No convention
-      issues found." Do NOT edit files.
+      Output a numbered list; each finding: `path:line` · severity · confidence
+      (0-100) · the rule it violates (quoted) · suggested fix. If none, output
+      exactly "No convention issues found."
 
   - id: review-coverage
-    depends_on: [enforce-draft]
+    depends_on: [capture-diff]
     context: fresh
     model: gpt-5.6-terra
     effort: xhigh
+    allowed_tools: [Read, Glob, Grep]
     prompt: |
       You are one of three INDEPENDENT reviewers. Your lens is TEST COVERAGE only.
 
-      1. Read the change: `git diff "$(cat $ARTIFACTS_DIR/.default-branch)"...HEAD`,
-         and learn the project's test layout and conventions.
+      1. Read the change at `$ARTIFACTS_DIR/diff.patch`, and learn the project's
+         test layout and conventions.
       2. For each new or changed branch of behavior, ask whether it is actually
          tested. Flag NEW logic with no test, and ESPECIALLY tests that were
          authored but never wired in or committed (a described case the diff
          doesn't actually assert, or a test file that exists but nothing runs).
+         In each finding, name the concrete untested branch and the input that
+         would expose it.
       3. Only expect coverage the project's own conventions would — do not demand
          tests a repo without a suite couldn't have. Ignore correctness and style.
 
       Output a numbered list; each finding: the untested `path`/behavior ·
-      severity · the specific test to add. If coverage is adequate, output exactly
-      "Coverage adequate." Do NOT edit files.
+      severity · confidence (0-100) · the specific test to add. If coverage is
+      adequate, output exactly "Coverage adequate."
 
   - id: triage
     depends_on: [review-correctness, review-conventions, review-coverage]
@@ -751,6 +807,7 @@ nodes:
     context: fresh
     model: claude-opus-4.8
     effort: xhigh
+    allowed_tools: [Read, Glob, Grep]
     output_format:
       type: object
       required: [ship_ready, summary, must_fix]
@@ -761,15 +818,17 @@ nodes:
           type: array
           items:
             type: object
-            required: [location, severity, problem, fix]
+            required: [location, severity, confidence, problem, fix]
             properties:
               location: { type: string }
               severity: { type: string, enum: [CRITICAL, HIGH] }
+              confidence: { type: integer }
               problem: { type: string }
               fix: { type: string }
     prompt: |
       You are the review triage judge. Three independent reviewers produced the
       findings below (a section may be empty if that reviewer did not run).
+      Verify the candidates against the actual code; keep only what survives.
 
       ## Correctness
       $review-correctness.output
@@ -780,19 +839,31 @@ nodes:
       ## Coverage
       $review-coverage.output
 
-      De-duplicate the findings. For each, judge confidence 0-100 that it is a
-      REAL, in-scope issue — NOT a false positive, NOT pre-existing, NOT something
-      a linter/type-checker/CI already catches, NOT a pedantic nitpick. A
-      convention finding counts only if the quoted rule genuinely says it.
+      De-duplicate the candidates, then ADVERSARIALLY VERIFY each unique one:
+      read `$ARTIFACTS_DIR/diff.patch` and the relevant source files — the
+      working tree IS the PR head branch — and actively try to REFUTE it. A
+      candidate is refuted when the code already handles the claimed case, the
+      claim misreads the diff, the issue is pre-existing rather than introduced
+      by this branch, a linter/type-checker/CI gate already catches it, or a
+      quoted convention rule does not actually say what the finding claims. A
+      survivor is CONFIRMED when you traced the failure in the actual code
+      (confidence 85-100), or PLAUSIBLE when you could not refute it but could
+      not fully trace it either (confidence capped at 79).
 
-      Keep ONLY findings that are CRITICAL or HIGH severity AND confidence >= 80;
-      put them in `must_fix`. Drop everything else as noise. Set `ship_ready` to
-      true exactly when `must_fix` is empty. `summary` is one sentence on the
-      branch's health.
+      Keep ONLY CRITICAL or HIGH severity survivors with confidence >= 80 in
+      `must_fix` — the PLAUSIBLE cap sits below the keep line, so only CONFIRMED
+      findings reach the fixer; re-trace a PLAUSIBLE candidate to CONFIRMED or
+      let it drop. Drop everything else as noise, including pedantic nitpicks.
+      Prefer one strong finding over several weak ones; never dilute a serious
+      issue with filler. Set `ship_ready` to true exactly when `must_fix` is
+      empty. `summary` is one sentence on the branch's health.
 
   - id: apply-fixes
     depends_on: [triage]
     context: fresh
+    # EDIT-family pin: applies the judge's confirmed findings to code.
+    model: gpt-5.6-sol
+    effort: high
     prompt: |
       Apply ONLY the confirmed must-fix issues from triage below. If the list is
       empty, make NO changes and stop with "No confirmed issues to fix."
@@ -815,6 +886,10 @@ nodes:
   - id: re-review
     depends_on: [apply-fixes]
     context: fresh
+    # REVIEW-family pin: verifies the gpt-5.6-sol fixer's work, so it must not
+    # be the fixer's own model — same independent-eyes rule as the lenses.
+    model: gpt-5.6-terra
+    effort: high
     prompt: |
       A review panel flagged the issues below as must-fix, and the previous node
       applied fixes. Verify the loop actually closed.
@@ -1049,6 +1124,9 @@ nodes:
   - id: fix-ci
     depends_on: [triage-ci]
     context: fresh
+    # EDIT-family pin: repairs actionable CI failures on the head branch.
+    model: gpt-5.6-sol
+    effort: high
     idle_timeout: 1800000
     prompt: |
       Fix ONLY the actionable CI failures in the triage below. If `actionable`
