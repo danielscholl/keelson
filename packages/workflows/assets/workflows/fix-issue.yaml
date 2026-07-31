@@ -386,18 +386,16 @@ nodes:
         else
           FALLBACK_JSON="${KEELSON_NODE_extract_brief_llm_OUTPUT:-}"
         fi
-        if ! CRITERIA=$(printf '%s' "$FALLBACK_JSON" | jq -e -c '
+        if CRITERIA=$(printf '%s' "$FALLBACK_JSON" | jq -e -c '
           if ((.criteria | type) == "array" and all(.criteria[]; type == "string"))
           then [.criteria[] | gsub("^\\s+|\\s+$"; "") | select(length > 0)]
           else error("criteria must be an array of strings")
           end
         ' 2>/dev/null); then
-          echo "ERROR: extract-brief-llm did not produce valid criteria JSON" >&2
-          exit 1
+          NEXT_BRIEF="${BRIEF_FILE}.tmp.$$"
+          jq --argjson criteria "$CRITERIA" '.criteria = $criteria' "$BRIEF_FILE" > "$NEXT_BRIEF"
+          mv "$NEXT_BRIEF" "$BRIEF_FILE"
         fi
-        NEXT_BRIEF="${BRIEF_FILE}.tmp.$$"
-        jq --argjson criteria "$CRITERIA" '.criteria = $criteria' "$BRIEF_FILE" > "$NEXT_BRIEF"
-        mv "$NEXT_BRIEF" "$BRIEF_FILE"
       fi
 
       cat "$BRIEF_FILE"

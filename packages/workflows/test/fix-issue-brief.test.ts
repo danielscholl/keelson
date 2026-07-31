@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License");
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -39,6 +39,12 @@ function makeArtifacts(): string {
   const artifacts = mkdtempSync(join(tmpdir(), "keelson-fix-issue-brief-"));
   tmps.push(artifacts);
   return artifacts;
+}
+
+function fallbackOutputFile(artifacts: string, criteria: string[]): string {
+  const outputFile = join(artifacts, "extract-brief-llm-output.json");
+  writeFileSync(outputFile, JSON.stringify({ criteria }));
+  return outputFile;
 }
 
 function runBash(nodeId: string, artifacts: string, env: Record<string, string> = {}): string {
@@ -236,7 +242,7 @@ macOS with the Copilot provider.
     expect(workflowNode("extract-brief-llm").prompt).toContain("$fetch-issue.output");
 
     runBash("brief-ready", artifacts, {
-      KEELSON_NODE_extract_brief_llm_OUTPUT: JSON.stringify({ criteria: [criterion] }),
+      KEELSON_NODE_extract_brief_llm_OUTPUT_FILE: fallbackOutputFile(artifacts, [criterion]),
     });
     const finalCount = runBash("criteria-count", artifacts).trim();
     expect(finalCount).toBe("1");
@@ -255,7 +261,7 @@ macOS with the Copilot provider.
     expect(runBash("criteria-count-initial", artifacts).trim()).toBe("0");
 
     runBash("brief-ready", artifacts, {
-      KEELSON_NODE_extract_brief_llm_OUTPUT: JSON.stringify({ criteria: [] }),
+      KEELSON_NODE_extract_brief_llm_OUTPUT_FILE: fallbackOutputFile(artifacts, []),
     });
     const finalCount = runBash("criteria-count", artifacts).trim();
     expect(finalCount).toBe("0");
@@ -263,6 +269,17 @@ macOS with the Copilot provider.
       result: false,
       parsed: true,
     });
+  });
+
+  test("keeps the existing brief when fallback output is invalid", () => {
+    const artifacts = makeArtifacts();
+    extractBrief("## What happened?\n\nThe command failed.\n", artifacts);
+
+    runBash("brief-ready", artifacts, {
+      KEELSON_NODE_extract_brief_llm_OUTPUT: "not JSON",
+    });
+
+    expect(JSON.parse(readFileSync(join(artifacts, "brief.json"), "utf8")).criteria).toEqual([]);
   });
 
   describe("fix-issue PR divergence status", () => {
