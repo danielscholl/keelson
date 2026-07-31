@@ -35,6 +35,15 @@ keelson start
 keelson workflow run repo-triage --watch   # in another shell
 ```
 
+**These are project-scoped, not global.** They live in this repo's
+`.keelson/workflows/`, so they appear only under the project whose root is this
+checkout. From the CLI that is automatic — the run binds the project from your
+cwd. In the browser you must set the **project selector on the Workflows surface
+to `keelson`**; under any other project (including `default`, which points at the
+parent directory) neither workflow is listed at all, and an absent card reads as
+"not installed" rather than "not in scope". `keelson workflow list` does not show
+project-scoped workflows either; `GET /api/workflows?projectId=<id>` does.
+
 That writes nothing to GitHub — it still publishes the full dashboard, which is
 the normal way to use this. When the dashboard looks right, apply it:
 
