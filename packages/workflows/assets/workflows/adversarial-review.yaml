@@ -11,12 +11,16 @@
 # `verify` holds filesystem tools, solely to check source claims.
 #
 # Every prompt node is pinned — an adversarial panel's value IS its depth, so
-# none of these ride `auto` — with one distinct model per role, so no node
+# none of these ride `auto`. The lenses run three different vendors because
+# same-model lenses share blind spots and can wave one flaw through
+# unanimously; verify and synthesize run models no lens uses, so no node
 # checks or judges its own reasoning:
-#   - ATTACK (`gpt-5.6-terra`): the three reviewer lenses.
-#   - VERIFY (`gpt-5.6-sol`): the source-grounded fact-checker — a different
-#     GPT-5.6 variant from the lenses whose claims it re-derives.
-#   - JUDGE (`claude-opus-4.8`): `synthesize` — a different vendor from both.
+#   - ATTACK: `claude-opus-5` (logic), `gpt-5.6-sol` (evidence),
+#     `gemini-3.1-pro-preview` (risk).
+#   - VERIFY (`gpt-5.6-terra`): the source-grounded fact-checker — a GPT-5.6
+#     variant distinct from the evidence lens whose claim list it re-derives.
+#   - JUDGE (`claude-opus-4.8`): `synthesize` — presides over output that is
+#     never its own.
 # All run `effort: xhigh` with a generous idle budget: a no-tool xhigh node is
 # maximally chunk-sparse (one long think, then text), so the default idle
 # timeout would kill exactly the depth the pin buys. Account-dependent ids —
@@ -94,7 +98,7 @@ nodes:
   - id: reviewer-logic
     depends_on: [intake]
     context: fresh
-    model: gpt-5.6-terra
+    model: claude-opus-5
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -132,7 +136,7 @@ nodes:
   - id: reviewer-evidence
     depends_on: [intake]
     context: fresh
-    model: gpt-5.6-terra
+    model: gpt-5.6-sol
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -169,7 +173,7 @@ nodes:
   - id: reviewer-risk
     depends_on: [intake]
     context: fresh
-    model: gpt-5.6-terra
+    model: gemini-3.1-pro-preview
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -200,6 +204,10 @@ nodes:
       - For a plan/fix/design: where is it under-specified enough to go wrong on
         implementation? What is the riskiest step?
       - Is the scope right — over-built, or missing a load-bearing piece?
+      - For an artifact that chooses an approach or design: is the choice the
+        right one at all? Name the strongest alternative it ignores, and
+        whether the choice made actually beats it. Skip this for an artifact
+        that makes no such choice — never invent an alternative to attack.
 
       ## Output (markdown)
 
@@ -218,7 +226,7 @@ nodes:
   - id: verify
     depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk]
     context: fresh
-    model: gpt-5.6-sol
+    model: gpt-5.6-terra
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: [Read, Glob, Grep]
@@ -254,7 +262,8 @@ nodes:
       the files are here).
 
       Do NOT accept a claim because it sounds right or because two reviewers
-      agree. Find the actual line. If a claim depends on something not present in
+      agree. Find the actual line. Ambiguous or partial evidence never rounds up
+      to CONFIRMED. If a claim depends on something not present in
       this working directory or on an external fact you cannot check with these
       tools, mark it UNVERIFIABLE-HERE rather than guessing.
 
