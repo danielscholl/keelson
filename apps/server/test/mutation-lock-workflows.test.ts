@@ -461,10 +461,7 @@ nodes:
       expect(secondRes.status).toBe(200);
       const second = (await secondRes.json()) as { runId: string };
       await pollUntilStoreStatus(store, second.runId, (status) => status === "paused");
-      expect(mutationLockStore.list().map((record) => record.mode)).toEqual([
-        "shared",
-        "shared",
-      ]);
+      expect(mutationLockStore.list().map((record) => record.mode)).toEqual(["shared", "shared"]);
 
       const exclusiveConflict = await app.fetch(
         postJson("http://test/api/workflows/exclusive/runs", {
