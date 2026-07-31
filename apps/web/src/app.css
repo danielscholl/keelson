@@ -5758,6 +5758,48 @@ a.cvb-card-title::after {
   background: rgba(155, 142, 255, 0.08);
 }
 
+/* A node that published a canvas artifact carries it on the collapsed head —
+   terminal rows collapse by default, so a body-only affordance would hide the
+   run's actual deliverable. */
+.trace-artifact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* The head's `.dur` already claims the right edge with margin-left:auto; a
+     second auto margin here would fight it. Shrink-to-fit instead — min-width:0
+     is what lets the label ellipsize rather than overflow a narrow trace pane. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+  border-radius: 999px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  transition: background 80ms ease, border-color 80ms ease;
+}
+
+.trace-artifact-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.trace-artifact-glyph {
+  flex: none;
+  color: var(--accent);
+}
+
+.trace-artifact-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* "open <file>" artifact links rendered in an approval callout. */
 .canvas-open-links {
   display: flex;

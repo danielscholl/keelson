@@ -207,3 +207,76 @@ describe("RunTrace — per-node model", () => {
     expect(ids[1]).toContain("plan%2Ftwo");
   });
 });
+
+describe("RunTrace — published canvas artifact", () => {
+  beforeAll(async () => {
+    await import("../src/components/Workflows/RunTrace.tsx");
+  }, 30000);
+
+  // Mirrors what a workflow's report node persists: the canvas_publish call and
+  // its JSON result, replayed from the run row rather than from live events.
+  function publishParts(result: string, isError?: boolean) {
+    return [
+      { type: "tool_use" as const, id: "t1", toolName: "canvas_publish", toolInput: {} },
+      {
+        type: "tool_result" as const,
+        toolUseId: "t1",
+        content: result,
+        ...(isError !== undefined ? { isError } : {}),
+      },
+    ];
+  }
+
+  const RESULT = JSON.stringify({
+    key: "canvas:artifact:triage-acme-repo",
+    slug: "triage-acme-repo",
+    title: "Triage — acme/repo",
+    updated: true,
+  });
+
+  test("offers the artifact on a collapsed terminal row, rehydrated from contentParts", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "report", type: "prompt" }];
+    const nodes: Record<string, NodeView> = {
+      report: node({ nodeId: "report", type: "prompt", contentParts: publishParts(RESULT) }),
+    };
+    // streaming=false + succeeded → the row renders collapsed, which is exactly
+    // the state a run reopened later lands in.
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />);
+    const btn = screen.getByLabelText("Open artifact: Triage — acme/repo");
+    expect(btn).toBeDefined();
+    expect(btn.textContent).toContain("Triage — acme/repo");
+  });
+
+  test("falls back to a generic label when the publish result carries no title", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [{ id: "report", type: "prompt" }];
+    const nodes: Record<string, NodeView> = {
+      report: node({
+        nodeId: "report",
+        type: "prompt",
+        contentParts: publishParts(JSON.stringify({ key: "canvas:artifact:x" })),
+      }),
+    };
+    render(<RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />);
+    expect(screen.getByLabelText("Open canvas artifact")).toBeDefined();
+  });
+
+  test("no artifact affordance for a failed publish or a node that never published", () => {
+    const schemaNodes: WorkflowNodeSummary[] = [
+      { id: "failed", type: "prompt" },
+      { id: "plain", type: "bash" },
+    ];
+    const nodes: Record<string, NodeView> = {
+      // A rejected palette comes back as an error result — not a deliverable.
+      failed: node({
+        nodeId: "failed",
+        type: "prompt",
+        contentParts: publishParts(RESULT, true),
+      }),
+      plain: node({ nodeId: "plain", type: "bash", logLines: ["done"] }),
+    };
+    const { container } = render(
+      <RunTrace schemaNodes={schemaNodes} nodes={nodes} runId="r1" streaming={false} />,
+    );
+    expect(container.querySelectorAll(".trace-artifact-btn")).toHaveLength(0);
+  });
+});
