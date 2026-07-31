@@ -379,7 +379,7 @@ nodes:
   # no tools. Its printed verdict is the workflow's output (it lands in the run
   # record; the scratch $ARTIFACTS_DIR does not survive the run).
   - id: synthesize
-    depends_on: [verify]
+    depends_on: [verify, verify-gate]
     context: fresh
     model: claude-opus-4.8
     effort: xhigh
