@@ -361,6 +361,7 @@ nodes:
 
   - id: verify-gate
     depends_on: [verify]
+    always_run: true
     timeout: 15000
     bash: |
       set -euo pipefail
