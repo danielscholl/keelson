@@ -1381,9 +1381,31 @@ nodes:
         echo "PR_STATE: UNKNOWN — no .pr-number recorded; cannot finalize"
         exit 0
       fi
-      # Never promote a PR we couldn't actually gate: zero checks means no CI.
-      if [ "$(forge pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null || echo 0)" -eq 0 ]; then
-        echo "PR_STATE: DRAFT — no CI checks present; nothing to gate on, left a draft"
+      # GitHub briefly reports zero checks while replacing runs after a push.
+      CHECK_COUNT=0
+      FORGE_OK=1
+      ATTEMPT=1
+      CHECK_MAX_ATTEMPTS=6
+      # Internal test-only override; production waits 10 seconds between attempts.
+      CI_RECHECK_INTERVAL="${KEELSON_CI_RECHECK_INTERVAL:-10}"
+      while :; do
+        if CHECK_COUNT=$(forge pr checks "$PR_NUM" --json state -q 'length' 2>/dev/null); then
+          FORGE_OK=1
+          [ "${CHECK_COUNT:-0}" -gt 0 ] 2>/dev/null && break
+        else
+          FORGE_OK=0
+          CHECK_COUNT=0
+        fi
+        [ "$ATTEMPT" -ge "$CHECK_MAX_ATTEMPTS" ] && break
+        ATTEMPT=$((ATTEMPT + 1))
+        sleep "$CI_RECHECK_INTERVAL"
+      done
+      if [ "$FORGE_OK" -ne 1 ]; then
+        echo "PR_STATE: DRAFT — could not query CI checks (forge call failed); left a draft"
+        exit 0
+      fi
+      if [ "${CHECK_COUNT:-0}" -eq 0 ] 2>/dev/null; then
+        echo "PR_STATE: DRAFT — no CI checks present after re-poll; nothing to gate on, left a draft"
         exit 0
       fi
       snapshot_checks() {
