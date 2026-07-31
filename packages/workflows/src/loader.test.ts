@@ -186,6 +186,14 @@ nodes:
     expect(failures).toEqual([]);
   });
 
+  test("bundled adversarial-review uses shared locking", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/adversarial-review.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.locking).toBe("shared");
+  });
+
   test("bundled design-artifact requires a successful canvas publish", () => {
     const filePath = path.join(import.meta.dir, "../assets/workflows/design-artifact.yaml");
     const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);

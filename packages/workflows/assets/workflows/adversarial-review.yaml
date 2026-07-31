@@ -31,6 +31,7 @@
 name: adversarial-review
 provider: copilot
 model: auto
+locking: shared
 description: |
   Use when: User wants an artifact stress-tested by independent agents that
             debate it and reach a consensus verdict — a claim, design doc,
