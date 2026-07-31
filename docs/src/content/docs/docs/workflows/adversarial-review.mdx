@@ -29,15 +29,30 @@ keelson workflow run adversarial-review --arguments docs/design/some-proposal.md
 
 # …or inline text, for something short:
 keelson workflow run adversarial-review --arguments "Claim: dropping detached on Windows fixes the console flashing."
+
+# …or a directory of evidence files, bundled verbatim (the claim, a diff, CI logs):
+keelson workflow run adversarial-review --arguments ./review-bundle/
+
+# Reviewing a change? Pin the tree the claims are about with `subject`:
+keelson workflow run adversarial-review --arguments ./review-bundle/ --inputs subject=refs/pull/50/head
 ```
 
-The argument is either a path to a file or the artifact text itself. Inline text
-travels the argument channel, which caps at 16 KiB; for anything larger pass a
-path, which is read up to a ~1 MB limit (`intake` rejects a larger file rather
-than review only a prefix, and a large file is also bounded by the reviewers'
-model context). Run it from the repository the artifact is about, so `verify` can
-read the source it cites. It needs a Copilot subscription; the verdict is the
-final node's printed output, and it lands in the run record.
+The argument is a path to a file, a directory, or the artifact text itself. A
+directory is an evidence bundle: every file in it (one level) is concatenated
+under labeled separators, so primary artifacts travel verbatim instead of being
+transcribed into prose — transcription is where fidelity dies. Inline text
+travels the argument channel, which caps at 16 KiB; paths are read up to a
+~1 MB limit (`intake` rejects larger input rather than review only a prefix,
+and a large artifact is also bounded by the reviewers' model context).
+
+Run it from the repository the artifact is about, so `verify` can read the
+source it cites — and when the artifact concerns a specific change, pass the
+optional `subject` input (any git ref: a branch, a SHA, `refs/pull/N/head`).
+`intake` snapshots that ref read-only into the run's artifacts, and `verify`
+checks code claims against the snapshot instead of whatever branch the working
+directory happens to have checked out. It needs a Copilot subscription; the
+verdict lands in the run record as structured output (`verdict`, `headline`,
+`must_fix`, `open_questions`) with the full prose in `report`.
 
 ## The shape
 
@@ -51,12 +66,12 @@ crosses between stages is each node's output.
 
 | Node | Kind | What it does |
 | --- | --- | --- |
-| `intake` | bash | Captures the artifact (file path or inline text), rejects empty or truncated input, and emits it as its output for the rest to inline. |
+| `intake` | bash | Captures the artifact (file path, evidence directory, or inline text), rejects empty or truncated input, snapshots the optional `subject` ref read-only via `git archive`, and emits the artifact as its output for the rest to inline. |
 | `reviewer-logic` | prompt | **`model: claude-opus-5`**, **`effort: xhigh`**: attacks internal soundness (does the conclusion follow, what is assumed) with a per-claim verdict. No tools. |
 | `reviewer-evidence` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: separates what the artifact *shows* from what it *asserts*, and lists the checkable claims. No tools. |
 | `reviewer-risk` | prompt | **`model: gemini-3.1-pro-preview`**, **`effort: xhigh`**: assumes the artifact is adopted and finds what breaks, tracing bad inputs, retries, and partial completion through the proposal, weighted by cost of failure; where the artifact chooses an approach, it also names the strongest alternative ignored. No tools. |
-| `verify` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one. |
-| `synthesize` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**: weighs the lenses against the verification and issues the verdict, a terse ship/no-ship call with dissent; a comparative artifact must get a choice, not a fence-sit. No tools. |
+| `verify` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**: re-checks the reviewers' load-bearing claims against real source with `Read`/`Glob`/`Grep`, trusting no one — against the `subject` snapshot when one was taken, else the working directory (where absence of the change is `UNVERIFIABLE-HERE`, never refutation). |
+| `synthesize` | prompt | **`model: claude-opus-4.8`**, **`effort: xhigh`**: weighs the lenses against the verification and issues the verdict as structured output (`verdict` / `headline` / `must_fix` / `open_questions` + full prose `report`), a terse ship/no-ship call with dissent; a comparative artifact must get a choice, not a fence-sit. No tools. |
 
 Every prompt node is pinned with an explicit `effort: xhigh` and a generous
 `idle_timeout`: a no-tool reviewer at high effort is one long think followed by
