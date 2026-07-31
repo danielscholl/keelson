@@ -365,16 +365,17 @@ nodes:
     timeout: 15000
     bash: |
       set -euo pipefail
+      # Deliberately reads only _OUTPUT, never the _OUTPUT_FILE spill: an
+      # inherited spill path can be a prior run's, and a head+tail truncation of
+      # a real verification still carries claim records.
       OUT="${KEELSON_NODE_verify_OUTPUT:-}"
-      if [ -n "${KEELSON_NODE_verify_OUTPUT_FILE:-}" ] && [ -f "${KEELSON_NODE_verify_OUTPUT_FILE}" ]; then
-        OUT=$(cat "$KEELSON_NODE_verify_OUTPUT_FILE")
-      fi
-      RESULTS=$(printf '%s' "$OUT" | grep -Eic 'result\**[[:space:]]*:' || true)
-      if [ "$RESULTS" -lt 1 ]; then
-        echo "verify emitted no per-claim Result: lines — the verification layer is absent, not clean. Run 'keelson workflow resume <runId>' to re-run verify; do not synthesize an unchecked panel." >&2
+      CLAIMS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*claim\**[[:space:]]*:' || true)
+      RESULTS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*result\**[[:space:]]*:[[:space:]]*(confirmed|refuted|unverifiable-here)' || true)
+      if [ "$CLAIMS" -lt 1 ] || [ "$RESULTS" -lt 1 ]; then
+        echo "verify produced no per-claim record (found ${CLAIMS} Claim: line(s), ${RESULTS} Result: line(s) carrying CONFIRMED/REFUTED/UNVERIFIABLE-HERE) — the verification layer is absent, not clean. Run 'keelson workflow resume <runId>' to re-run verify; do not synthesize an unchecked panel." >&2
         exit 1
       fi
-      printf 'verify substance check passed (%s Result line(s))\n' "$RESULTS" >&2
+      printf 'verify substance check passed (%s Claim / %s Result line(s))\n' "$CLAIMS" "$RESULTS" >&2
 
   # Read-only: the artifact and reviewer text are untrusted, so synthesis holds
   # no tools. Its printed verdict is the workflow's output (it lands in the run

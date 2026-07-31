@@ -63,22 +63,50 @@ shimDescribe("adversarial-review verify gate", () => {
     expect(runVerifyGate("").exitCode).not.toBe(0);
   });
 
-  test("accepts a bold Result marker", () => {
-    expect(runVerifyGate("- **Result**: CONFIRMED").exitCode).toBe(0);
+  test("accepts a bold per-claim record", () => {
+    const output = [
+      "- **Claim**: deploy.py routes every process launch",
+      "- **Result**: CONFIRMED",
+      "- **Evidence**: deploy.py:282 passes stdin=subprocess.DEVNULL",
+    ].join("\n");
+    expect(runVerifyGate(output).exitCode).toBe(0);
   });
 
-  test("accepts a plain Result marker", () => {
-    expect(runVerifyGate("- Result: UNVERIFIABLE-HERE").exitCode).toBe(0);
+  test("accepts a plain per-claim record", () => {
+    expect(runVerifyGate("Claim: the import is dead\nResult: UNVERIFIABLE-HERE").exitCode).toBe(0);
   });
 
-  test("prefers the full spill file over marker-less truncated output", () => {
+  test("rejects prose that merely mentions a result", () => {
+    const output = "I traced the implementation and the result: everything looks consistent.";
+    expect(runVerifyGate(output).exitCode).not.toBe(0);
+  });
+
+  test("rejects a verdict line with no claim list", () => {
+    expect(runVerifyGate("- **Result**: CONFIRMED").exitCode).not.toBe(0);
+  });
+
+  test("rejects a claim list with no recognized verdict", () => {
+    expect(runVerifyGate("- **Claim**: x holds\n- **Result**: probably fine").exitCode).not.toBe(0);
+  });
+
+  test("ignores an inherited spill file and judges only the current output", () => {
     const dir = mkdtempSync(join(tmpdir(), "keelson-ar-verify-gate-"));
     tmps.push(dir);
     const outputFile = join(dir, "verify-output.txt");
-    writeFileSync(outputFile, "- **Result**: REFUTED\n");
+    writeFileSync(outputFile, "- **Claim**: x is dead code\n- **Result**: REFUTED\n");
 
     const result = runVerifyGate("truncated verification preamble", outputFile);
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  test("passes on a head+tail truncated output that still carries a record", () => {
+    const output = [
+      "- **Claim**: the launch path is routed",
+      "- **Result**: CONFIRMED",
+      "[keelson: output truncated — 48000 chars total]",
+      "**Corrections**: none",
+    ].join("\n");
+    expect(runVerifyGate(output).exitCode).toBe(0);
   });
 });
