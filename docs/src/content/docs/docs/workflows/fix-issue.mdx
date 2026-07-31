@@ -74,20 +74,23 @@ only when the pushed PR's checks pass.
 | Fetch & classify | `extract-issue` | prompt | Parses the issue number from `$ARGUMENTS`, or searches `forge issue list` for the best match. |
 | | `fetch-issue` | bash | `forge issue view` to JSON, stashes the number in the scratch dir. |
 | | `detect-base` | bash | Resolves the repository's default branch with `forge repo view --json defaultBranchRef`, falling back to `origin/HEAD` then `main`, and writes it to `$ARTIFACTS_DIR/.default-branch`. Never assumes `main`. |
-| | `extract-brief` | bash | Extracts the issue's acceptance-criteria section into `$ARTIFACTS_DIR/brief.json` (empty criteria when absent, never fails the run). |
+| | `extract-brief` | bash | Extracts bullets under acceptance criteria, requirements, definition of done, success criteria, "What did you expect?", or expected-behavior headings into `$ARTIFACTS_DIR/brief.json`. Heading suffixes such as `(must all hold)` are accepted. |
 | | `classify` | prompt | Typed JSON: `issue_type` (bug, feature, …), a title, and reasoning. |
 | Plan | `investigate` | prompt | **`when: issue_type == 'bug'`**, **`model: claude-opus-4.8`**, **`effort: xhigh`**: root-cause analysis into `plan.md`. |
 | | `plan` | prompt | **`when: issue_type != 'bug'`**, **`model: claude-opus-4.8`**, **`effort: xhigh`**: an implementation plan into the *same* `plan.md`. |
 | | `plan-ready` | bash | Funnel (`trigger_rule: one_success`): asserts `plan.md` exists and has tasks, then prints it. |
-| | `criteria-count` | bash | Prints the brief's acceptance-criteria count so the next node can gate on it. |
-| | `coverage-check` | prompt | **`when: criteria-count > 0`**, **`model: claude-opus-4.8`**, **`effort: xhigh`**: semantic judge that maps each brief criterion to the plan step that covers it or **MISSING**. Returns typed JSON only; skipped entirely when the brief has no criteria. |
-| | `coverage-ready` | bash | Funnel (`trigger_rule: all_done`): writes the judge's output to `coverage.json` when criteria exist, and removes the artifact otherwise. |
-| Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. The criteria-coverage checklist is appended here. |
+| | `criteria-count-initial` | bash | Counts criteria found by the structured heading scan. |
+| | `extract-brief-llm` | prompt | **`when: criteria-count-initial == 0`**, `allowed_tools: []`: extracts concrete, testable outcomes from prose-only issue bodies into typed JSON. A structured brief skips this call. |
+| | `brief-ready` | bash | Funnel (`trigger_rule: all_done`): merges fallback criteria into `brief.json`. It still runs when the fallback is skipped, so structured criteria continue through the DAG. |
+| | `criteria-count` | bash | Recounts the merged brief so the coverage gate sees either extraction path. |
+| | `coverage-check` | prompt | **`when: criteria-count > 0`**, **`model: claude-opus-4.8`**, **`effort: xhigh`**: semantic judge that maps each brief criterion to the plan step that covers it or **MISSING**. Returns typed JSON only; skipped when both extraction paths find no criteria. |
+| | `coverage-ready` | bash | Funnel (`trigger_rule: all_done`): writes the judge's output to `coverage.json` when criteria exist. Otherwise it removes the artifact and reports the skip in the run log. |
+| Approve | `approve-plan` | approval | Pauses the run. `capture_response` makes the reply, approval or change requests, available downstream. The callout includes the criteria-coverage checklist, or a visible note that the divergence check did not run. |
 | Implement | `implement` | prompt | **`model: gpt-5.6-sol`**, **`effort: xhigh`**: Writes `verify.sh` (the project's own checks), branches, implements task by task, commits each. |
 | Validate | `validate` | bash | Runs `verify.sh` fail-fast. **Exits 0** and reports `VALIDATION_STATUS` so the fixer can read it. |
 | | `fix-validation` | prompt | **`model: gpt-5.6-sol`**, **`effort: high`**: if it failed, fixes only what broke and commits; if it passed, stops. |
 | | `revalidate` | bash | **Hard gate**: re-runs the checks and **exits non-zero** on failure, skipping the PR. |
-| Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, captures the PR number and URL. |
+| Draft PR | `create-pr` | prompt | Pushes the branch, opens a draft PR with `Fixes #N`, captures the PR number and URL, and records either the criteria-coverage status or an explicit not-run line. |
 | | `enforce-draft` | bash | Verifies the new PR is a draft; if it came up ready, runs `forge pr ready --undo` to force it back to draft, and fails the run if it cannot confirm the draft state. |
 | Review loop | `capture-diff` | bash | Freezes the branch diff to `$ARTIFACTS_DIR/diff.patch` / `diff-stat.txt` so the lenses can run without shell access. |
 | | `review-correctness` | prompt | **`model: gpt-5.6-terra`**, **`effort: xhigh`**, `allowed_tools: [Read, Glob, Grep]`: one of three **independent, parallel** reviewers over `diff.patch`. Hunts by cost of failure (trust boundaries, irreversible state, idempotency gaps), labels unverified external-API claims INFERRED, and emits a confidence per finding. |

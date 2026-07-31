@@ -107,7 +107,13 @@ export async function loadBriefAndCoverage(opts: {
 
   const brief = parseBriefArtifact(briefRaw);
   if (brief === null) return { brief: null, checklist: "" };
-  if (brief.criteria.length === 0) return { brief, checklist: "" };
+  if (brief.criteria.length === 0) {
+    return {
+      brief,
+      checklist:
+        "## Criteria coverage\n\n_No acceptance criteria found in the issue body - divergence check not run._",
+    };
+  }
 
   const coverageRaw = await readArtifact(join(opts.artifactsDir, "coverage.json"));
   const rows = coverageRaw !== null ? parseCoverageArtifact(coverageRaw) : null;
