@@ -1,12 +1,20 @@
 import type { Project, TokenUsage, WorkflowDetail } from "@keelson/shared";
 import { useEffect, useId, useMemo, useState } from "react";
 import { type NodeView, useWorkflowRun } from "../../hooks/useWorkflowRun.ts";
+import {
+  dedupePublishedArtifacts,
+  type PublishedArtifact,
+  parsePublishedArtifact,
+  publishedCanvasResult,
+} from "../../lib/chatCanvas.ts";
 import type { NodeViewStatus } from "../../lib/dagLayout.ts";
 import { formatDuration } from "../../lib/formatDuration.ts";
 import { formatProviderModel } from "../../lib/formatProvenance.ts";
 import { formatTokens, sumTokenSpend } from "../../lib/formatTokens.ts";
+import { useCanvas } from "../Canvas/CanvasHost.tsx";
 import { ProjectChip } from "../Chat/ProjectChip.tsx";
 import { ProjectPickerPopover } from "../Chat/ProjectPickerPopover.tsx";
+import { toolCallsFromContentParts } from "../Chat/ToolCallsBlock.tsx";
 import { UsageBreakdown, UsagePopoverPanel } from "../Chat/UsagePopover.tsx";
 import { DagGraph } from "./DagGraph.tsx";
 import { fallbackStatusFromRun, RunTrace } from "./RunTrace.tsx";
@@ -60,6 +68,7 @@ export function RunView({
   const activeProject = projects.find((p) => p.id === selectedProjectId) ?? null;
   const preStart = runId === null;
   const { run, nodes, status, error, cancel, resumeRun, resume } = useWorkflowRun(runId);
+  const { openCanvas } = useCanvas();
   const [layout, setLayout] = useState<Layout>("split");
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
@@ -149,6 +158,26 @@ export function RunView({
     const effort = efforts.size === 1 ? [...efforts][0] : undefined;
     return formatProviderModel(undefined, [...labels][0], undefined, effort);
   }, [nodes, workflow.nodes]);
+
+  // A run's published page is its deliverable, so it gets a header affordance
+  // rather than living only on the node that published it — terminal trace rows
+  // collapse, and the publishing node is rarely the one you're looking at.
+  // Sourced from persisted contentParts, so a run reopened days later still
+  // reaches it.
+  const artifacts = useMemo<PublishedArtifact[]>(() => {
+    const found: PublishedArtifact[] = [];
+    for (const sn of workflow.nodes) {
+      const view = nodes[sn.id];
+      if (view === undefined) continue;
+      const result = publishedCanvasResult(toolCallsFromContentParts(view.contentParts));
+      const parsed = result !== undefined ? parsePublishedArtifact(result) : undefined;
+      if (parsed !== undefined) found.push(parsed);
+    }
+    return dedupePublishedArtifacts(found);
+  }, [workflow.nodes, nodes]);
+  // The header carries the newest one; the rest stay reachable from their own
+  // trace rows, which is where a multi-artifact run's provenance actually is.
+  const headerArtifact = artifacts.length > 0 ? artifacts[artifacts.length - 1] : undefined;
 
   const handleCancel = async () => {
     try {
@@ -259,6 +288,37 @@ export function RunView({
                   title="Re-enter this run from its last completed step — reuses the worktree and prior work"
                 >
                   {resuming ? "Resuming…" : "↻ Resume"}
+                </button>
+              )}
+              {headerArtifact && (
+                <button
+                  type="button"
+                  className="run-artifact-btn"
+                  onClick={() =>
+                    openCanvas({
+                      kind: "html",
+                      source: { type: "snapshot", key: headerArtifact.key },
+                      ...(headerArtifact.title ? { title: headerArtifact.title } : {}),
+                    })
+                  }
+                  aria-label={
+                    headerArtifact.title
+                      ? `Open artifact: ${headerArtifact.title}`
+                      : "Open canvas artifact"
+                  }
+                  title={
+                    artifacts.length > 1
+                      ? `${artifacts.length} artifacts published — opens the most recent; the others are on their nodes in the trace`
+                      : "Open the page this run published"
+                  }
+                >
+                  <span className="run-artifact-glyph" aria-hidden="true">
+                    ◫
+                  </span>
+                  <span className="run-artifact-label">{headerArtifact.title ?? "Artifact"}</span>
+                  {artifacts.length > 1 && (
+                    <span className="run-artifact-count">+{artifacts.length - 1}</span>
+                  )}
                 </button>
               )}
             </>

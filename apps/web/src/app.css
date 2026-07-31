@@ -8833,8 +8833,36 @@ a.cvb-card-title::after {
 .run-meta {
   margin-left: auto; display: flex; align-items: center; gap: 14px;
   font-size: 12px; color: var(--muted);
+  /* Flex items floor at min-content by default, so without this the meta
+     cluster refuses to shrink and its widest child (the artifact title) pushes
+     the layout toggle out of the header on a narrow viewport. */
+  min-width: 0;
 }
 .run-meta .duration { font-family: ui-monospace, monospace; }
+
+/* The run's published page. Filled rather than outlined: everything else in
+   the header describes the run, this one opens what it produced. */
+.run-artifact-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  /* .run-meta already claims the right edge with margin-left:auto, so shrink
+     to fit; min-width:0 is what lets the label ellipsize instead of pushing
+     the layout toggle out of the header on a long title. */
+  flex: 0 1 auto; min-width: 0; max-width: 260px;
+  padding: 5px 12px; border-radius: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  color: white;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  transition: filter 80ms ease;
+}
+.run-artifact-btn:hover { filter: brightness(1.1); }
+.run-artifact-glyph { flex: none; }
+.run-artifact-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-artifact-count {
+  flex: none; font-weight: 500;
+  color: color-mix(in srgb, white 78%, transparent);
+}
 
 /* Segmented control replacing the old Graph/Logs tabs. Filled active
    pill + icon glyph reads as a layout switcher at a glance — much more

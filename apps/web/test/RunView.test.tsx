@@ -202,3 +202,105 @@ describe("RunView provenance chip", () => {
     expect(screen.queryByText(/claude · claude-opus-4-8/)).toBeNull();
   });
 });
+
+describe("RunView published-artifact header", () => {
+  // What a report node persists: the canvas_publish call plus its JSON result,
+  // replayed from the run row rather than from live events.
+  function publishParts(id: string, result: string, isError?: boolean) {
+    return [
+      { type: "tool_use" as const, id, toolName: "canvas_publish", toolInput: {} },
+      {
+        type: "tool_result" as const,
+        toolUseId: id,
+        content: result,
+        ...(isError !== undefined ? { isError } : {}),
+      },
+    ];
+  }
+
+  const published = (key: string, title?: string) =>
+    JSON.stringify({ key, slug: key.split(":").pop(), ...(title ? { title } : {}) });
+
+  test("surfaces a run-level button for an artifact published by any node", () => {
+    runResult = result({
+      collect: node({ nodeId: "collect", type: "prompt" }),
+      verify: node({
+        nodeId: "verify",
+        type: "prompt",
+        contentParts: publishParts(
+          "t1",
+          published("canvas:artifact:triage-acme-repo", "Triage — acme/repo"),
+        ),
+      }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+
+    const btn = screen.getByRole("button", { name: "Open artifact: Triage — acme/repo" });
+    expect(btn.textContent).toContain("Triage — acme/repo");
+    expect(btn.getAttribute("title")).toBe("Open the page this run published");
+  });
+
+  test("falls back to a generic label when the publish result carries no title", () => {
+    runResult = result({
+      collect: node({ nodeId: "collect", type: "prompt" }),
+      verify: node({
+        nodeId: "verify",
+        type: "prompt",
+        contentParts: publishParts("t1", published("canvas:artifact:untitled")),
+      }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+    expect(screen.getByRole("button", { name: "Open canvas artifact" }).textContent).toContain(
+      "Artifact",
+    );
+  });
+
+  test("offers nothing when the run published nothing", () => {
+    runResult = result({
+      collect: node({ nodeId: "collect", type: "prompt" }),
+      verify: node({ nodeId: "verify", type: "prompt" }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+    expect(screen.queryByRole("button", { name: /artifact/i })).toBeNull();
+  });
+
+  test("offers nothing when the only publish call failed", () => {
+    runResult = result({
+      collect: node({ nodeId: "collect", type: "prompt" }),
+      verify: node({
+        nodeId: "verify",
+        type: "prompt",
+        contentParts: publishParts("t1", "palette rejected: contrast below 4.5:1", true),
+      }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+    expect(screen.queryByRole("button", { name: /artifact/i })).toBeNull();
+  });
+
+  test("counts distinct artifacts and opens the most recent, not a republish", () => {
+    runResult = result({
+      collect: node({
+        nodeId: "collect",
+        type: "prompt",
+        // Same key twice: canvas_publish updates in place, so this is one
+        // deliverable and must not inflate the count.
+        contentParts: [
+          ...publishParts("t1", published("canvas:artifact:plan", "Plan")),
+          ...publishParts("t2", published("canvas:artifact:plan", "Plan")),
+        ],
+      }),
+      verify: node({
+        nodeId: "verify",
+        type: "prompt",
+        contentParts: publishParts("t3", published("canvas:artifact:triage", "Triage")),
+      }),
+    });
+    render(<RunView workflow={workflow} runId="run-12345678" onBack={() => {}} />);
+
+    const btn = screen.getByRole("button", { name: "Open artifact: Triage" });
+    expect(btn.textContent).toContain("+1");
+    expect(btn.getAttribute("title")).toBe(
+      "2 artifacts published — opens the most recent; the others are on their nodes in the trace",
+    );
+  });
+});

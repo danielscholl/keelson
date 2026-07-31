@@ -44,6 +44,18 @@ parent directory) neither workflow is listed at all, and an absent card reads as
 "not installed" rather than "not in scope". `keelson workflow list` does not show
 project-scoped workflows either; `GET /api/workflows?projectId=<id>` does.
 
+**`keelson update` does not update these.** It upgrades the installed binary;
+these workflows are read from this checkout on every run, so a fix that has
+merged only reaches your next run after `git pull`. Releasing a version whose
+notes mention a workflow change is not the same as running it.
+
+Where the dashboard shows up: the run page's header carries a filled **artifact
+button** once a node has published, and the publishing node's own trace row
+carries one too. Both are read from the stored run, so reopening the run weeks
+later still reaches the page. No button on a finished run means nothing was
+published — `summary` fails the run in that case rather than letting it read
+green.
+
 That writes nothing to GitHub — it still publishes the full dashboard, which is
 the normal way to use this. When the dashboard looks right, apply it:
 
