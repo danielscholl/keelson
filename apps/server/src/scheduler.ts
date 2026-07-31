@@ -46,24 +46,22 @@ export function deriveSurfaceSchedules(
   resolveBoundKey: (workflow: string) => string | undefined,
 ): { schedules: SurfaceSchedule[]; warnings: string[] } {
   const warnings: string[] = [];
+  const argsBearingRegions = new Set<string>();
   const byWorkflow = new Map<string, SurfaceSchedule>();
   for (const manifest of manifests) {
     for (const surface of manifest.surfaces) {
       for (const region of allRegions(surface.layout)) {
         if (region.cadenceMs === undefined) continue;
+        if (region.serverRefresh === false) continue;
         if (!region.workflow) {
           warnings.push(
             `surface region '${region.key}' sets cadenceMs but has no workflow; not auto-refreshing`,
           );
           continue;
         }
-        // An args-bearing region is client-driven only: the heartbeat fires runs
-        // with empty inputs, which would race the SPA's args-bearing runs on a
-        // different de-dupe key and hand an args-expecting producer nothing.
+        // The heartbeat cannot supply args; report all such client-only regions once after discovery.
         if (region.workflowArgs !== undefined) {
-          warnings.push(
-            `surface region '${region.key}' sets workflowArgs; refreshing client-side only, not on the server heartbeat`,
-          );
+          argsBearingRegions.add(region.key);
           continue;
         }
         const boundKey = resolveBoundKey(region.workflow);
@@ -91,6 +89,11 @@ export function deriveSurfaceSchedules(
         }
       }
     }
+  }
+  if (argsBearingRegions.size > 0) {
+    warnings.push(
+      `surface regions with workflowArgs refresh client-side only, not on the server heartbeat: ${[...argsBearingRegions].join(", ")}`,
+    );
   }
   return { schedules: [...byWorkflow.values()], warnings };
 }
