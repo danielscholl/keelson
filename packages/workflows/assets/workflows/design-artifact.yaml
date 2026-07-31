@@ -25,6 +25,18 @@ nodes:
 
       $ARGUMENTS
 
+      You have exactly two tools: `canvas_design_guide` and `canvas_publish`.
+      You have NO filesystem and NO shell. There is no `create`, no
+      `apply_patch`, no `bash`, and no editor.
+
+      **The page is never a file.** `canvas_publish` takes the complete markup
+      inline as its `html` parameter. Pass the whole document in the tool call
+      itself; do not try to write it out first.
+
+      If any tool call comes back refused, that tool is not yours in this run.
+      Do not retry it and do not stop working. Go straight to `canvas_publish`
+      with the markup.
+
       Work in this order:
       1. Call canvas_design_guide with section "page", then "form" if the page
          carries any chart, then "color" for the palette instance.
@@ -36,6 +48,13 @@ nodes:
       3. Publish with canvas_publish. If it rejects the palette, fix the colors
          (prefer the keelson series slots) and publish again.
 
-      Finish by reporting the published artifact's key and title.
+      Finish with a short report of the published artifact's title. Your LAST
+      line must be one of these two, exactly, with nothing after it:
+
+      - `ARTIFACT_KEY=canvas:artifact:<slug>` — copy the key from the
+       `canvas_publish` tool result; do not reconstruct it.
+      - `ARTIFACT_UNAVAILABLE` — only when `canvas_publish` was not registered
+       among your tools. Never use this because a call was refused or errored.
     allowed_tools: [canvas_publish, canvas_design_guide]
+    require_tool_call: [canvas_publish]
     idle_timeout: 300000

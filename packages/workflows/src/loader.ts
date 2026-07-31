@@ -34,6 +34,7 @@ import {
   BASH_NODE_AI_FIELDS,
   convergeConfigSchema,
   type DagNode,
+  dagNodeBaseSchema,
   dagNodeSchema,
   isApprovalNode,
   isCancelNode,
@@ -97,6 +98,20 @@ const IGNORED_FIELDS_PER_NODE: readonly string[] = [
 // PostToolUse, the rest stay claude-only — so it remains flagged here.
 const CLAUDE_ONLY_FIELDS_PER_NODE: readonly string[] = ["hooks"];
 
+const KNOWN_NODE_FIELDS = new Set([
+  ...Object.keys(dagNodeBaseSchema.shape),
+  "command",
+  "prompt",
+  "bash",
+  "loop",
+  "approval",
+  "cancel",
+  "script",
+  "runtime",
+  "deps",
+  "timeout",
+]);
+
 const IGNORED_FIELDS_WORKFLOW: readonly string[] = [
   "sandbox",
   "betas",
@@ -144,6 +159,16 @@ function parseDagNode(raw: unknown, index: number, ctx: ParseNodeContext): DagNo
 
   const node = result.data;
   const rawObj = (raw as Record<string, unknown>) ?? {};
+
+  const unknownFields = Object.keys(rawObj).filter((field) => !KNOWN_NODE_FIELDS.has(field));
+  if (unknownFields.length > 0) {
+    ctx.warnings.push({
+      filename: ctx.filename,
+      nodeId: node.id,
+      kind: "ignored_capability",
+      message: `Unknown node fields are ignored: ${unknownFields.join(", ")}`,
+    });
+  }
 
   // Warn about AI-specific fields on non-AI nodes .
   let nonAi: { type: string; fields: readonly string[] } | undefined;

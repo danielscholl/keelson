@@ -187,6 +187,12 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `always_run: true` — re-execute this node on a resumed run even if it
   succeeded before (a gate/validation re-checks instead of replaying a stale
   pass). Off by default: a succeeded node is skipped on resume.
+- `require_tool_call: [tool-name, ...]` — fail if a listed tool is available to
+  the node but the turn ends without a successful tool result. An error followed
+  by a successful retry satisfies it. Only registry/MCP tools are checked: a
+  provider SDK's own built-ins (`Read`, `Bash`, …) are never in the catalog, so
+  naming one here does nothing, and providers that take no keelson tools at all
+  (codex, gateways, stub) skip the check rather than fail it.
 - `fail_on_tool_error: true` — fail the node if any invoked tool errored.
 - `idle_timeout` — ms of AI-stream silence before the node fails.
 - `effort` — reasoning tier for this node; overrides the workflow-level value.

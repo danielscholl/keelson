@@ -36,7 +36,7 @@ interface SpyProviderOptions {
   // When set, makeSpyProvider exposes `getCapabilities()` returning this
   // shape so the model-resolution chain can fall through to a provider
   // default. Omit to keep the prior structural-subset behavior.
-  capabilities?: { defaultModel?: string; reasoningEffort?: boolean };
+  capabilities?: { defaultModel?: string; reasoningEffort?: boolean; tools?: boolean };
 }
 
 function makeSpyProvider(opts: SpyProviderOptions = {}): {
@@ -251,6 +251,164 @@ describe("makePromptHandler", () => {
     expect((chunkEvents[0] as { chunk: { type: string } }).chunk.type).toBe("text");
     expect((chunkEvents[1] as { chunk: { type: string } }).chunk.type).toBe("tool_use");
     expect((chunkEvents[2] as { chunk: { type: string } }).chunk.type).toBe("tool_result");
+  });
+
+  test("fails when a registered required tool produces no successful result", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "published" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "canvas_publish" }],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      require_tool_call: ["canvas_publish"],
+    } as unknown as DagNode;
+
+    const result = await handler.handle(node, buildCtx());
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("canvas_publish");
+  });
+
+  test("skips the assertion for a provider that takes no keelson tools", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "no tools here" }, { type: "done" }],
+      capabilities: { tools: false },
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "canvas_publish" }],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      require_tool_call: ["canvas_publish"],
+    } as unknown as DagNode;
+
+    const result = await handler.handle(node, buildCtx());
+
+    expect(result.status).toBe("succeeded");
+  });
+
+  test("credits a required call reported under a server-qualified tool name", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "tool_use", id: "publish-1", toolName: "keelson/canvas_publish" },
+        { type: "tool_result", toolUseId: "publish-1", content: "created" },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "canvas_publish" }],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      require_tool_call: ["canvas_publish"],
+    } as unknown as DagNode;
+
+    const result = await handler.handle(node, buildCtx());
+
+    expect(result.status).toBe("succeeded");
+  });
+
+  test("succeeds when a registered required tool produces a non-error result", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "tool_use", id: "publish-1", toolName: "canvas_publish" },
+        { type: "tool_result", toolUseId: "publish-1", content: "created" },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "canvas_publish" }],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      require_tool_call: ["canvas_publish"],
+    } as unknown as DagNode;
+
+    const result = await handler.handle(node, buildCtx());
+
+    expect(result.status).toBe("succeeded");
+  });
+
+  test("succeeds when a required tool error is followed by a successful retry", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "tool_use", id: "publish-1", toolName: "canvas_publish" },
+        {
+          type: "tool_result",
+          toolUseId: "publish-1",
+          content: "palette rejected",
+          isError: true,
+        },
+        { type: "tool_use", id: "publish-2", toolName: "canvas_publish" },
+        { type: "tool_result", toolUseId: "publish-2", content: "created" },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "canvas_publish" }],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      require_tool_call: ["canvas_publish"],
+    } as unknown as DagNode;
+
+    const result = await handler.handle(node, buildCtx());
+
+    expect(result.status).toBe("succeeded");
+  });
+
+  test("skips an unavailable required tool that is absent from the filtered catalog", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ARTIFACT_UNAVAILABLE" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const node = {
+      id: "n1",
+      prompt: "",
+      require_tool_call: ["canvas_publish"],
+    } as unknown as DagNode;
+
+    const result = await handler.handle(node, buildCtx());
+
+    expect(result.status).toBe("succeeded");
+  });
+
+  test("omitting require_tool_call preserves tool-error-tolerant behavior", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [
+        { type: "tool_use", id: "publish-1", toolName: "canvas_publish" },
+        {
+          type: "tool_result",
+          toolUseId: "publish-1",
+          content: "palette rejected",
+          isError: true,
+        },
+        { type: "done" },
+      ],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [{ name: "canvas_publish" }],
+    });
+
+    const result = await handler.handle(stubNode, buildCtx());
+
+    expect(result.status).toBe("succeeded");
   });
 
   test("default denylist is empty — all registered tools pass through to the provider", async () => {

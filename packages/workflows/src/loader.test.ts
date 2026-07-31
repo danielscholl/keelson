@@ -78,6 +78,52 @@ nodes:
     expect(result.warnings).toEqual([]);
   });
 
+  test("require_tool_call parses on prompt nodes and remains absent when omitted", () => {
+    const result = parseWorkflow(
+      `
+name: required-tools
+description: requires a successful publish
+nodes:
+  - id: publish
+    prompt: publish it
+    require_tool_call: [canvas_publish]
+  - id: plain
+    prompt: summarize it
+`,
+      "required-tools.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.nodes[0]?.require_tool_call).toEqual(["canvas_publish"]);
+    expect(result.workflow?.nodes[1]?.require_tool_call).toBeUndefined();
+  });
+
+  test("unknown generic node fields warn, remain non-fatal, and are dropped", () => {
+    const result = parseWorkflow(
+      `
+name: future-field
+description: tolerates fields from a newer harness
+nodes:
+  - id: publish
+    prompt: publish it
+    future_tool_requirement: [canvas_publish]
+`,
+      "future-field.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.kind === "ignored_capability" &&
+          warning.message.includes("future_tool_requirement"),
+      ),
+    ).toBe(true);
+    expect(
+      (result.workflow?.nodes[0] as Record<string, unknown> | undefined)?.future_tool_requirement,
+    ).toBeUndefined();
+  });
+
   test("workflow-level converge config parses with defaults", () => {
     const yaml = `
 name: converge-valid
@@ -120,6 +166,15 @@ nodes:
     }
 
     expect(failures).toEqual([]);
+  });
+
+  test("bundled design-artifact requires a successful canvas publish", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/design-artifact.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    expect(result.warnings).toEqual([]);
+    expect(result.workflow?.nodes[0]?.require_tool_call).toEqual(["canvas_publish"]);
   });
 
   test("bundled resolve-pr declares a valid converge gate", () => {
