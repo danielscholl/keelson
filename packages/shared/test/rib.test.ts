@@ -167,6 +167,49 @@ describe("rib surface descriptor schema", () => {
     expect(s.layout.rows[0]?.columns[0]?.cadenceMs).toBe(7_200_000);
   });
 
+  it("round-trips an explicit server refresh opt-out", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: {
+        rows: [
+          {
+            columns: [
+              {
+                key: "rib:osdu:quality",
+                workflow: "osdu-quality",
+                cadenceMs: 7_200_000,
+                serverRefresh: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(s.layout.rows[0]?.columns[0]?.serverRefresh).toBe(false);
+  });
+
+  it("defaults serverRefresh to undefined when omitted", () => {
+    const s = ribSurfaceDescriptorSchema.parse({
+      id: "cimpl",
+      title: "CIMPL",
+      layout: { rows: [{ columns: [{ key: "rib:osdu:quality" }] }] },
+    });
+    expect(s.layout.rows[0]?.columns[0]?.serverRefresh).toBeUndefined();
+  });
+
+  it("rejects a non-boolean serverRefresh", () => {
+    expect(
+      ribSurfaceDescriptorSchema.safeParse({
+        id: "cimpl",
+        title: "CIMPL",
+        layout: {
+          rows: [{ columns: [{ key: "rib:osdu:quality", serverRefresh: "false" }] }],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("carries optional workflowArgs alongside a region's workflow", () => {
     const s = ribSurfaceDescriptorSchema.parse({
       id: "chamber",

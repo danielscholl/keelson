@@ -96,7 +96,7 @@ describe("deriveSurfaceSchedules", () => {
     expect(warnings[0]).toContain("has no workflow");
   });
 
-  test("warns and skips an args-bearing region (client-driven only)", () => {
+  test("collapses args-bearing regions into one client-only warning", () => {
     const { schedules, warnings } = deriveSurfaceSchedules(
       [
         manifest([
@@ -107,6 +107,12 @@ describe("deriveSurfaceSchedules", () => {
               workflowArgs: { lens: "a" },
               cadenceMs: 600_000,
             },
+            {
+              key: "rib:osdu:lens:b",
+              workflow: "re-author",
+              workflowArgs: { lens: "b" },
+              cadenceMs: 600_000,
+            },
           ]),
         ]),
       ],
@@ -115,6 +121,28 @@ describe("deriveSurfaceSchedules", () => {
     expect(schedules).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("client-side only");
+    expect(warnings[0]).toContain("rib:osdu:lens:a");
+    expect(warnings[0]).toContain("rib:osdu:lens:b");
+  });
+
+  test("silently skips a region that opts out of server refresh", () => {
+    const { schedules, warnings } = deriveSurfaceSchedules(
+      [
+        manifest([
+          surface("s", [
+            {
+              key: "rib:osdu:cluster",
+              workflow: "osdu-cluster",
+              cadenceMs: 600_000,
+              serverRefresh: false,
+            },
+          ]),
+        ]),
+      ],
+      keyResolver({ "osdu-cluster": "rib:osdu:cluster" }),
+    );
+    expect(schedules).toEqual([]);
+    expect(warnings).toEqual([]);
   });
 
   test("silently leaves a region without a cadence unscheduled", () => {
@@ -201,8 +229,17 @@ function makeSnapshots(frames: Map<string, string>): Pick<SnapshotManager, "late
 
 const HANDLE = 0 as unknown as ReturnType<typeof setInterval>;
 
+interface HarnessOptions {
+  subscriberKeys?: ReadonlySet<string>;
+  idleCadenceMultiplier?: number;
+}
+
 // A manual clock + captured tick so multi-tick behavior is deterministic.
-function harness(schedules: SurfaceSchedule[], snapshots: Pick<SnapshotManager, "latest">) {
+function harness(
+  schedules: SurfaceSchedule[],
+  snapshots: Pick<SnapshotManager, "latest">,
+  options: HarnessOptions = {},
+) {
   const ctl = makeController();
   let nowMs = 1_700_000_000_000;
   let captured: (() => void) | undefined;
@@ -213,6 +250,12 @@ function harness(schedules: SurfaceSchedule[], snapshots: Pick<SnapshotManager, 
     controller: ctl.controller,
     snapshotManager: snapshots,
     repoRoot: "/repo",
+    ...(options.subscriberKeys
+      ? { subscribers: { hasKey: (key: string) => options.subscriberKeys?.has(key) ?? false } }
+      : {}),
+    ...(options.idleCadenceMultiplier === undefined
+      ? {}
+      : { idleCadenceMultiplier: options.idleCadenceMultiplier }),
     now: () => nowMs,
     setIntervalFn: (fn) => {
       setCalls += 1;
@@ -269,6 +312,63 @@ describe("createScheduler", () => {
     const h = harness([cold[1]!], makeSnapshots(frames));
     h.scheduler.start();
     expect(h.starts).toEqual(["osdu-cluster"]);
+  });
+
+  test("fires at full cadence when the key has a live subscriber", () => {
+    const schedule = cold[1]!;
+    const frames = new Map([
+      [schedule.key, new Date(1_700_000_000_000 - schedule.cadenceMs - 1).toISOString()],
+    ]);
+    const h = harness([schedule], makeSnapshots(frames), {
+      subscriberKeys: new Set([schedule.key]),
+    });
+    h.scheduler.start();
+    expect(h.starts).toEqual([schedule.workflow]);
+  });
+
+  test("backs an unviewed key off to six times its cadence", () => {
+    const schedule = cold[1]!;
+    const idleCadence = schedule.cadenceMs * 6;
+    const stillFresh = new Map([
+      [schedule.key, new Date(1_700_000_000_000 - idleCadence + 1).toISOString()],
+    ]);
+    const beforeBoundary = harness([schedule], makeSnapshots(stillFresh), {
+      subscriberKeys: new Set(),
+    });
+    beforeBoundary.scheduler.start();
+    expect(beforeBoundary.starts).toEqual([]);
+
+    const stale = new Map([
+      [schedule.key, new Date(1_700_000_000_000 - idleCadence).toISOString()],
+    ]);
+    const atBoundary = harness([schedule], makeSnapshots(stale), {
+      subscriberKeys: new Set(),
+    });
+    atBoundary.scheduler.start();
+    expect(atBoundary.starts).toEqual([schedule.workflow]);
+  });
+
+  test("uses an injected idle cadence multiplier", () => {
+    const schedule = cold[1]!;
+    const frames = new Map([
+      [schedule.key, new Date(1_700_000_000_000 - schedule.cadenceMs * 2).toISOString()],
+    ]);
+    const h = harness([schedule], makeSnapshots(frames), {
+      subscriberKeys: new Set(),
+      idleCadenceMultiplier: 2,
+    });
+    h.scheduler.start();
+    expect(h.starts).toEqual([schedule.workflow]);
+  });
+
+  test("keeps full cadence when no subscribers dependency is supplied", () => {
+    const schedule = cold[1]!;
+    const frames = new Map([
+      [schedule.key, new Date(1_700_000_000_000 - schedule.cadenceMs - 1).toISOString()],
+    ]);
+    const h = harness([schedule], makeSnapshots(frames));
+    h.scheduler.start();
+    expect(h.starts).toEqual([schedule.workflow]);
   });
 
   test("tags producer runs as origin 'scheduled'", () => {

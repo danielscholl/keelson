@@ -612,10 +612,9 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
       project,
     });
 
-  // Server-side heartbeat: keep snapshot-backed surface regions fresh on their
-  // declared cadence even when no client tab is mounted (and warm them after a
-  // cold boot). Client SWR covers the tab-open case; this covers the rest. The
-  // derivation also surfaces any cadence region whose workflow can't refresh it.
+  // Server-side heartbeat: use the declared cadence while a tab subscribes and
+  // back idle lanes off to a multiple of it, while still warming a cold boot.
+  // The derivation also surfaces any cadence region whose workflow can't refresh it.
   const { schedules: surfaceSchedules, warnings: scheduleWarnings } = deriveSurfaceSchedules(
     ribs.manifests,
     makeBoundKeyResolver(workflowCatalog, ribWorkflows.bindings, ribWorkflows.boundKeys),
@@ -630,6 +629,7 @@ export async function startServer(config: StartServerConfig = {}): Promise<Serve
     schedules: surfaceSchedules,
     controller: workflowController,
     snapshotManager,
+    subscribers: snapshotSubscribers,
     repoRoot: KEELSON_HOME,
     disabled: process.env.KEELSON_DISABLE_SCHEDULER === "1",
   });

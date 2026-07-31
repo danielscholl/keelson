@@ -292,7 +292,9 @@ its snapshot keys with `bindSnapshotKey`. When that workflow runs, its output is
 run through the contribution's `validate` (the producer-side fail-closed gate)
 and republished to the key, so a board refresh is a workflow run. A surface
 region names that workflow in its `workflow` field, and `cadenceMs` (floored at
-30s) re-runs it on a heartbeat while the surface is open.
+30s) re-runs it at that cadence while the key has a live subscriber and at six
+times that cadence while idle. `serverRefresh: false` opts the region out of the
+server heartbeat; its client cadence still applies while the surface is open.
 
 ## Related
 

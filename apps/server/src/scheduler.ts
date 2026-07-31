@@ -9,9 +9,12 @@
 import type { SnapshotManager } from "@keelson/shared";
 import type { WorkflowDefinition } from "@keelson/workflows";
 import { allRegions, type RibManifest } from "./ribs.ts";
+import type { SnapshotSubscribers } from "./snapshot-subscribers.ts";
 import type { WorkflowController } from "./workflows-handler.ts";
 
 const TICK_MS = 30_000;
+// Idle lanes stay warm enough for cold opens; the SPA revalidates on mount.
+const IDLE_CADENCE_MULTIPLIER = 6;
 // Cap on genuinely-new runs started per tick. With ascending-cadence ordering
 // this staggers a cold boot across a few ticks instead of firing every
 // collector at once.
@@ -46,24 +49,22 @@ export function deriveSurfaceSchedules(
   resolveBoundKey: (workflow: string) => string | undefined,
 ): { schedules: SurfaceSchedule[]; warnings: string[] } {
   const warnings: string[] = [];
+  const argsBearingRegions = new Set<string>();
   const byWorkflow = new Map<string, SurfaceSchedule>();
   for (const manifest of manifests) {
     for (const surface of manifest.surfaces) {
       for (const region of allRegions(surface.layout)) {
         if (region.cadenceMs === undefined) continue;
+        if (region.serverRefresh === false) continue;
         if (!region.workflow) {
           warnings.push(
             `surface region '${region.key}' sets cadenceMs but has no workflow; not auto-refreshing`,
           );
           continue;
         }
-        // An args-bearing region is client-driven only: the heartbeat fires runs
-        // with empty inputs, which would race the SPA's args-bearing runs on a
-        // different de-dupe key and hand an args-expecting producer nothing.
+        // The heartbeat cannot supply args; report all such client-only regions once after discovery.
         if (region.workflowArgs !== undefined) {
-          warnings.push(
-            `surface region '${region.key}' sets workflowArgs; refreshing client-side only, not on the server heartbeat`,
-          );
+          argsBearingRegions.add(region.key);
           continue;
         }
         const boundKey = resolveBoundKey(region.workflow);
@@ -92,6 +93,11 @@ export function deriveSurfaceSchedules(
       }
     }
   }
+  if (argsBearingRegions.size > 0) {
+    warnings.push(
+      `surface regions with workflowArgs refresh client-side only, not on the server heartbeat: ${[...argsBearingRegions].join(", ")}`,
+    );
+  }
   return { schedules: [...byWorkflow.values()], warnings };
 }
 
@@ -117,8 +123,10 @@ export interface SchedulerDeps {
   // Only the two seams the heartbeat needs; a test stub supplies just these.
   controller: Pick<WorkflowController, "startRun" | "findActiveRun">;
   snapshotManager: Pick<SnapshotManager, "latest">;
+  subscribers?: Pick<SnapshotSubscribers, "hasKey">;
   repoRoot: string;
   disabled?: boolean;
+  idleCadenceMultiplier?: number;
   // Injection points so tests drive ticks deterministically without real timers.
   now?: () => number;
   setIntervalFn?: IntervalSetter;
@@ -141,6 +149,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     snapshotManager,
     repoRoot,
     disabled = false,
+    idleCadenceMultiplier = IDLE_CADENCE_MULTIPLIER,
     now = Date.now,
   } = deps;
   const setIntervalFn: IntervalSetter = deps.setIntervalFn ?? setInterval;
@@ -157,7 +166,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (started >= NEW_RUNS_PER_TICK) break;
       const frame = snapshotManager.latest(schedule.key);
       const composedMs = frame?.composedAt ? Date.parse(frame.composedAt) : Number.NaN;
-      const fresh = !Number.isNaN(composedMs) && t - composedMs < schedule.cadenceMs;
+      const hasViewer = deps.subscribers ? deps.subscribers.hasKey(schedule.key) : true;
+      const effectiveCadence = hasViewer
+        ? schedule.cadenceMs
+        : schedule.cadenceMs * idleCadenceMultiplier;
+      const fresh = !Number.isNaN(composedMs) && t - composedMs < effectiveCadence;
       if (fresh) continue;
       // Already running (including a hung collector mid-timeout) → skip without
       // spending the cap; once it reaches a terminal state a later tick re-fires.

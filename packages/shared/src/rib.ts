@@ -431,10 +431,11 @@ export const surfaceRegionSchema = z
     // Inputs the refresh passes when re-running `workflow` (POST /:name/refresh
     // and the SPA's cadence trigger both carry them), so one producer can serve
     // many regions — e.g. a per-lens re-author workflow keyed by the lens id.
-    // Inert without `workflow`. Args-bearing regions are client-driven only: the
-    // server heartbeat skips them (see deriveSurfaceSchedules), so their cadence
-    // applies while the surface is open.
+    // Inert without `workflow`; the heartbeat cannot supply args, so these
+    // regions refresh only while a client has the surface open.
     workflowArgs: z.record(z.string(), z.string()).optional(),
+    // Externally-backed collectors can opt out of heartbeat refresh; absent keeps it enabled.
+    serverRefresh: z.boolean().optional(),
     cadenceMs: z.number().int().min(30000).optional(),
     title: z.string().min(1).optional(),
     glyph: regionGlyphSchema.optional(),
