@@ -485,6 +485,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         : undefined;
 
       let assistantText = "";
+      let lastChunkWasText = false;
       let providerError: string | null = null;
       // Set once consume() successfully resolves the provider. Gates the
       // provenance attach below: a node that failed BECAUSE its provider
@@ -636,15 +637,22 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
               continue;
             }
             if (t === "text") {
-              assistantText += (chunk as { content: string }).content;
+              const content = (chunk as { content: string }).content;
+              if (content.length > 0) {
+                if (assistantText.length > 0 && !lastChunkWasText) assistantText += "\n\n";
+                assistantText += content;
+                lastChunkWasText = true;
+              }
             } else if (t === "error") {
               providerError = (chunk as { message: string }).message;
             } else if (t === "tool_use") {
+              lastChunkWasText = false;
               const toolUse = chunk as { id?: unknown; toolName?: unknown };
               if (typeof toolUse.id === "string" && typeof toolUse.toolName === "string") {
                 toolNamesById.set(toolUse.id, bareToolName(toolUse.toolName));
               }
             } else if (t === "tool_result") {
+              lastChunkWasText = false;
               const toolResult = chunk as { toolUseId?: unknown; isError?: boolean };
               if (toolResult.isError === true) {
                 toolErrored = true;

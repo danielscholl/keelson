@@ -995,11 +995,9 @@ nodes:
     const db = openDatabase({ path: dbPath });
     const store = createWorkflowStore(db);
     const catalog = bootstrapWorkflows({ workflowDir: wfDir });
-    // Spy provider streams two text chunks + a tool_use + tool_result so the
-    // run consumer's content-parts accumulator is exercised end-to-end.
     const spyProvider = {
       async *sendQuery() {
-        yield { type: "text", content: "Summary: " };
+        yield { type: "text", content: "Summary:" };
         yield { type: "tool_use", id: "tu-1", toolName: "some_tool" };
         yield {
           type: "tool_result",
@@ -1038,13 +1036,12 @@ nodes:
     expect(run.status).toBe("succeeded");
     const summarize = run.nodes.find((n) => n.nodeId === "summarize");
     expect(summarize?.status).toBe("succeeded");
-    // Accumulated text from both text chunks; tool_use/tool_result are
-    // structured, not text, so they don't enter outputText.
-    expect(summarize?.outputText).toBe("Summary: all clear");
-    // contentParts captures the structured shape: collapsed text → tool_use → tool_result → text.
+    expect(summarize?.outputText).toBe("Summary:\n\nall clear");
     const parts = summarize?.contentParts ?? [];
     expect(parts).toHaveLength(4);
     expect(parts.map((p) => p.type)).toEqual(["text", "tool_use", "tool_result", "text"]);
+    const textPartCount = parts.filter((part) => part.type === "text").length;
+    expect(summarize?.outputText?.split("\n\n")).toHaveLength(textPartCount);
   });
 
   test("prompt node token usage persists onto the run detail; bash nodes stay null", async () => {
