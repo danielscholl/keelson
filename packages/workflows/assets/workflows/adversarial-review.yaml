@@ -38,7 +38,7 @@ description: |
         load-bearing claims against source, then synthesizes one verdict —
         CONFIRMED / CONFIRMED-WITH-CHANGES / REFUTED — with the surviving
         claims, the dissent, and what is still unverified.
-  NOT for: Building or fixing code (use adversarial-build / fix-issue), posting
+  NOT for: Building or fixing code (use fix-issue), posting
            a GitHub PR review (use pr-review), or generating something new.
 
 nodes:
