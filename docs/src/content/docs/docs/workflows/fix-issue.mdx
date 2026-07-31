@@ -74,7 +74,7 @@ only when the pushed PR's checks pass.
 | Fetch & classify | `extract-issue` | prompt | Parses the issue number from `$ARGUMENTS`, or searches `forge issue list` for the best match. |
 | | `fetch-issue` | bash | `forge issue view` to JSON, stashes the number in the scratch dir. |
 | | `detect-base` | bash | Resolves the repository's default branch with `forge repo view --json defaultBranchRef`, falling back to `origin/HEAD` then `main`, and writes it to `$ARTIFACTS_DIR/.default-branch`. Never assumes `main`. |
-| | `extract-brief` | bash | Extracts bullets under acceptance criteria, requirements, definition of done, success criteria, or expected-behavior headings into `$ARTIFACTS_DIR/brief.json`. Heading suffixes such as `(must all hold)` are accepted. |
+| | `extract-brief` | bash | Extracts bullets under acceptance criteria, requirements, definition of done, success criteria, "What did you expect?", or expected-behavior headings into `$ARTIFACTS_DIR/brief.json`. Heading suffixes such as `(must all hold)` are accepted. |
 | | `classify` | prompt | Typed JSON: `issue_type` (bug, feature, …), a title, and reasoning. |
 | Plan | `investigate` | prompt | **`when: issue_type == 'bug'`**, **`model: claude-opus-4.8`**, **`effort: xhigh`**: root-cause analysis into `plan.md`. |
 | | `plan` | prompt | **`when: issue_type != 'bug'`**, **`model: claude-opus-4.8`**, **`effort: xhigh`**: an implementation plan into the *same* `plan.md`. |

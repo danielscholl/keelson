@@ -82,7 +82,14 @@ function conditionResult(nodeId: string, outputNodeId: string, output: string) {
   );
 }
 
-describe("fix-issue brief extraction", () => {
+// Gated on the tools the asset needs rather than on platform — Windows ships
+// both, and skipping it there would hide real portability failures.
+const hasShellTools =
+  Bun.spawnSync({ cmd: ["bash", "-c", "command -v jq"], stdout: "ignore", stderr: "ignore" })
+    .exitCode === 0;
+const shellDescribe = hasShellTools ? describe : describe.skip;
+
+shellDescribe("fix-issue brief extraction", () => {
   test.each([
     [
       "exact acceptance criteria",
@@ -275,17 +282,15 @@ macOS with the Copilot provider.
 
     expect(JSON.parse(readFileSync(join(artifacts, "brief.json"), "utf8")).criteria).toEqual([]);
   });
+});
 
-  describe("fix-issue PR divergence status", () => {
-    test("requires coverage details or an explicit skipped line in every PR body", () => {
-      const prompt = workflowNode("create-pr").prompt;
-      expect(prompt).toContain("$ARTIFACTS_DIR/brief.json");
-      expect(prompt).toContain("$ARTIFACTS_DIR/coverage.json");
-      expect(prompt).toContain("- [COVERED] {criterion} -> {step}");
-      expect(prompt).toContain("- [MISSING] {criterion}");
-      expect(prompt).toContain(
-        "COVERAGE: SKIPPED — no acceptance criteria found in the issue body",
-      );
-    });
+describe("fix-issue PR divergence status", () => {
+  test("requires coverage details or an explicit skipped line in every PR body", () => {
+    const prompt = workflowNode("create-pr").prompt;
+    expect(prompt).toContain("$ARTIFACTS_DIR/brief.json");
+    expect(prompt).toContain("$ARTIFACTS_DIR/coverage.json");
+    expect(prompt).toContain("- [COVERED] {criterion} -> {step}");
+    expect(prompt).toContain("- [MISSING] {criterion}");
+    expect(prompt).toContain("COVERAGE: SKIPPED — no acceptance criteria found in the issue body");
   });
 });
