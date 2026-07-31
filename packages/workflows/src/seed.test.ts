@@ -102,6 +102,15 @@ describe("seedStarterWorkflows", () => {
     expect(fs.readdirSync(target).sort()).toEqual([".managed.json", "a.yaml"]);
   });
 
+  test("a managed manifest does not make the target look populated", () => {
+    const source = makeSource(["a.yaml"]);
+    const target = tmpDir();
+    fs.writeFileSync(path.join(target, ".managed.json"), "{}\n");
+
+    expect(seedStarterWorkflows(target, source)).toEqual(["a.yaml"]);
+    expect(fs.readdirSync(target).sort()).toEqual([".managed.json", "a.yaml"]);
+  });
+
   test("a failed copy leaves the target retryable — no YAML, no staging litter", () => {
     const source = makeSource(["a.yaml"]);
     // A directory whose name matches isWorkflowYaml: copyFileSync(dir) throws
@@ -121,6 +130,7 @@ describe("seedStarterWorkflows", () => {
     expect(isWorkflowYaml("a.yaml")).toBe(true);
     expect(isWorkflowYaml("a.yml")).toBe(true);
     expect(isWorkflowYaml("a.txt")).toBe(false);
+    expect(isWorkflowYaml(".managed.json")).toBe(false);
     expect(isWorkflowYaml(".a.yaml.1234.seedtmp")).toBe(false);
   });
 });

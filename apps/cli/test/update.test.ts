@@ -259,6 +259,7 @@ describe("reconcileManagedWorkflows", () => {
   test("reads only workflow YAML files and tolerates a missing directory", () => {
     const dir = mkdtempSync(join(tmpdir(), "keelson-update-workflows-"));
     writeFileSync(join(dir, "fix-issue.yaml"), "workflow\n");
+    writeFileSync(join(dir, ".managed.json"), "{}\n");
     writeFileSync(join(dir, "notes.txt"), "ignore\n");
 
     expect(readWorkflowContents(join(dir, "missing"))).toEqual(new Map());
