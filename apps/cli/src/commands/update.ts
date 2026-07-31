@@ -386,14 +386,17 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
   let conflicts: string[] = [];
   let removed: string[] = [];
   let retiredKept: string[] = [];
+  let reconcileError: string | undefined;
   try {
     ({ refreshed, conflicts, removed, retiredKept } = reconcileManagedWorkflows(
       keelsonPaths(home).workflowsDir,
       previous,
       readWorkflowContents(bundleDir),
     ));
-  } catch {
-    // Reconciliation must not turn a successful package update into a failure.
+  } catch (error) {
+    reconcileError = `workflow reconciliation failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
   }
 
   const ribs = opts.ribs ? ribDependencies(manifest) : [];
@@ -422,6 +425,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     home,
     workflowConflicts: conflicts,
     retiredKeptWorkflows: retiredKept,
+    ...(reconcileError ? { reconcileError } : {}),
     ...(installed !== latest ? { warning: `installed ${installed}, expected ${latest}` } : {}),
   });
   if (!opts.json) {
@@ -444,6 +448,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
       process.stdout.write(
         `kept your customized ${name} (retired from the bundle; remove it manually if unwanted)\n`,
       );
+    if (reconcileError) process.stdout.write(`warning: ${reconcileError}\n`);
     if (server !== null)
       process.stdout.write("restart the server (`keelson restart`) to load the update\n");
   }
