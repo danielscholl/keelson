@@ -358,6 +358,22 @@ nodes:
       End with **Corrections**: any claim in the artifact or a reviewer's output
       that your check proved wrong — stated plainly.
 
+  - id: verify-gate
+    depends_on: [verify]
+    timeout: 15000
+    bash: |
+      set -euo pipefail
+      OUT="${KEELSON_NODE_verify_OUTPUT:-}"
+      if [ -n "${KEELSON_NODE_verify_OUTPUT_FILE:-}" ] && [ -f "${KEELSON_NODE_verify_OUTPUT_FILE}" ]; then
+        OUT=$(cat "$KEELSON_NODE_verify_OUTPUT_FILE")
+      fi
+      RESULTS=$(printf '%s' "$OUT" | grep -Eic 'result\**[[:space:]]*:' || true)
+      if [ "$RESULTS" -lt 1 ]; then
+        echo "verify emitted no per-claim Result: lines — the verification layer is absent, not clean. Run 'keelson workflow resume <runId>' to re-run verify; do not synthesize an unchecked panel." >&2
+        exit 1
+      fi
+      printf 'verify substance check passed (%s Result line(s))\n' "$RESULTS" >&2
+
   # Read-only: the artifact and reviewer text are untrusted, so synthesis holds
   # no tools. Its printed verdict is the workflow's output (it lands in the run
   # record; the scratch $ARTIFACTS_DIR does not survive the run).
