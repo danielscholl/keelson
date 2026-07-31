@@ -405,6 +405,7 @@ nodes:
       "shared.yaml",
       `name: shared
 description: holds a shared mutation lock at an approval
+locking: shared
 nodes:
   - id: review
     approval:
@@ -433,9 +434,6 @@ nodes:
       workflowDir: wfDir,
       listProjects: () => projectsStore.list(),
     });
-    const sharedWorkflow = catalog.get("shared");
-    if (sharedWorkflow === undefined) throw new Error("shared workflow missing from catalog");
-    Object.assign(sharedWorkflow, { locking: "shared" });
     const app = new Hono();
     workflowsRoutes(
       app,

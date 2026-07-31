@@ -18,6 +18,24 @@ function tmpDir(): string {
 }
 
 describe("parseWorkflow — happy paths", () => {
+  test("locking: shared parses onto the workflow", () => {
+    const result = parseWorkflow(
+      `
+name: shared-reader
+description: reads the live checkout under a shared lock
+locking: shared
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+      "shared-reader.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.locking).toBe("shared");
+    expect(result.warnings).toEqual([]);
+  });
+
   test("requiresProject: true parses onto the workflow; omitted is undefined", () => {
     const marked = parseWorkflow(
       `
@@ -824,6 +842,30 @@ nodes:
     expect(result.error).toBeNull();
     expect(result.workflow?.modelReasoningEffort).toBeUndefined();
     expect(result.warnings.some((w) => w.kind === "invalid_field_value")).toBe(true);
+  });
+
+  test("invalid locking warns and is dropped", () => {
+    const result = parseWorkflow(
+      `
+name: bad-locking
+description: invalid lock mode
+locking: bogus
+nodes:
+  - id: a
+    bash: echo ok
+`,
+      "bad-locking.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.locking).toBeUndefined();
+    expect(result.warnings).toEqual([
+      {
+        filename: "bad-locking.yaml",
+        kind: "invalid_field_value",
+        message: "invalid 'locking' value (ignored); valid: exclusive, shared",
+      },
+    ]);
   });
 
   test("interactive loop in non-interactive workflow warns", () => {
