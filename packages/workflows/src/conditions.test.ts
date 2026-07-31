@@ -45,6 +45,46 @@ describe("evaluateCondition — equality operators", () => {
   });
 });
 
+describe("evaluateCondition — surrounding whitespace on the resolved value", () => {
+  test("== matches a bash node's newline-terminated output", () => {
+    const outputs = new Map([["criteria-count", makeOutput("0\n")]]);
+    expect(evaluateCondition("$criteria-count.output == '0'", outputs).result).toBe(true);
+  });
+
+  test("!= is consistent with == on newline-terminated output", () => {
+    const outputs = new Map([["criteria-count", makeOutput("0\n")]]);
+    expect(evaluateCondition("$criteria-count.output != '0'", outputs).result).toBe(false);
+  });
+
+  test("== matches multi-word output with a trailing newline", () => {
+    const outputs = new Map([["gate", makeOutput("CI_STATUS: PASS\n")]]);
+    expect(evaluateCondition("$gate.output == 'CI_STATUS: PASS'", outputs).result).toBe(true);
+  });
+
+  test("a whitespace-only output matches the empty literal", () => {
+    const outputs = new Map([["n", makeOutput("  \n")]]);
+    expect(evaluateCondition("$n.output == ''", outputs).result).toBe(true);
+  });
+
+  test("interior whitespace is preserved", () => {
+    const outputs = new Map([["n", makeOutput("  a  b\n")]]);
+    expect(evaluateCondition("$n.output == 'a  b'", outputs).result).toBe(true);
+  });
+
+  test("a padded JSON string field matches", () => {
+    const json = JSON.stringify({ type: " BUG\n" });
+    const outputs = new Map([["classify", makeOutput(json)]]);
+    expect(evaluateCondition("$classify.output.type == 'BUG'", outputs).result).toBe(true);
+  });
+
+  test("numeric operators still agree with equality on padded output", () => {
+    const outputs = new Map([["n", makeOutput("0\n")]]);
+    expect(evaluateCondition("$n.output == '0'", outputs).result).toBe(true);
+    expect(evaluateCondition("$n.output < '1'", outputs).result).toBe(true);
+    expect(evaluateCondition("$n.output >= '0'", outputs).result).toBe(true);
+  });
+});
+
 describe("evaluateCondition — dot-notation JSON access", () => {
   test("accesses JSON field for output_format nodes", () => {
     const json = JSON.stringify({ type: "BUG", confidence: 0.9 });

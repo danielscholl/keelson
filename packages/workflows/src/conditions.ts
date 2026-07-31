@@ -24,6 +24,10 @@ import type { NodeOutput } from "./schema/index.ts";
 /**
  * Resolve a `$nodeId.output` or `$nodeId.output.field` reference to a string.
  * Returns empty string for unknown nodes, empty outputs, or failed JSON access.
+ *
+ * Resolved values are trimmed: a `bash` node's output carries the trailing
+ * newline its command printed, which would otherwise make `== 'value'` — the
+ * documented idiom — never match.
  */
 function resolveOutputRef(
   nodeId: string,
@@ -33,12 +37,12 @@ function resolveOutputRef(
   const nodeOutput = nodeOutputs.get(nodeId);
   if (!nodeOutput) return "";
   if (!nodeOutput.output) return "";
-  if (!field) return nodeOutput.output;
+  if (!field) return nodeOutput.output.trim();
 
   try {
     const parsed = JSON.parse(nodeOutput.output) as Record<string, unknown>;
     const value = parsed[field];
-    if (typeof value === "string") return value;
+    if (typeof value === "string") return value.trim();
     if (typeof value === "number" || typeof value === "boolean") return String(value);
     return "";
   } catch {

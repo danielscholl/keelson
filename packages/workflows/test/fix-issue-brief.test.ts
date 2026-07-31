@@ -153,8 +153,10 @@ macOS with the Copilot provider.
       artifacts,
     );
 
-    const initialCount = runBash("criteria-count-initial", artifacts).trim();
-    expect(initialCount).toBe("1");
+    // Raw, not trimmed: the executor feeds a node's output to `when` verbatim,
+    // so trimming here would test a stream the runtime never produces.
+    const initialCount = runBash("criteria-count-initial", artifacts);
+    expect(initialCount.trim()).toBe("1");
     expect(conditionResult("extract-brief-llm", "criteria-count-initial", initialCount)).toEqual({
       result: false,
       parsed: true,
@@ -234,8 +236,9 @@ macOS with the Copilot provider.
     const artifacts = makeArtifacts();
     expect(extractBrief(body, artifacts).criteria).toEqual([]);
 
-    const initialCount = runBash("criteria-count-initial", artifacts).trim();
-    expect(initialCount).toBe("0");
+    // Raw, not trimmed — see the sibling case above.
+    const initialCount = runBash("criteria-count-initial", artifacts);
+    expect(initialCount.trim()).toBe("0");
     expect(conditionResult("extract-brief-llm", "criteria-count-initial", initialCount)).toEqual({
       result: true,
       parsed: true,
