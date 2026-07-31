@@ -21,9 +21,7 @@ type WorkflowNode = {
   allowed_tools?: string[];
 };
 
-const document = parse(
-  readFileSync(join(bundledWorkflowsDir(), "fix-issue.yaml"), "utf8"),
-) as {
+const document = parse(readFileSync(join(bundledWorkflowsDir(), "fix-issue.yaml"), "utf8")) as {
   nodes: WorkflowNode[];
 };
 
@@ -140,10 +138,13 @@ macOS with the Copilot provider.
   test("skips the LLM fallback when awk extracted criteria", () => {
     const artifacts = makeArtifacts();
     const expected = ["Runs the divergence check"];
-    extractBrief(`## Acceptance Criteria
+    extractBrief(
+      `## Acceptance Criteria
 
 - ${expected[0]}
-`, artifacts);
+`,
+      artifacts,
+    );
 
     const initialCount = runBash("criteria-count-initial", artifacts).trim();
     expect(initialCount).toBe("1");
@@ -161,9 +162,9 @@ macOS with the Copilot provider.
       result: true,
       parsed: true,
     });
-    expect(
-      JSON.parse(readFileSync(join(artifacts, "brief.json"), "utf8")).criteria,
-    ).toEqual(expected);
+    expect(JSON.parse(readFileSync(join(artifacts, "brief.json"), "utf8")).criteria).toEqual(
+      expected,
+    );
   });
 
   test.each([
@@ -243,9 +244,9 @@ macOS with the Copilot provider.
       result: true,
       parsed: true,
     });
-    expect(
-      JSON.parse(readFileSync(join(artifacts, "brief.json"), "utf8")).criteria,
-    ).toEqual([criterion]);
+    expect(JSON.parse(readFileSync(join(artifacts, "brief.json"), "utf8")).criteria).toEqual([
+      criterion,
+    ]);
   });
 
   test("keeps coverage gated when both extractors find no criteria", () => {
