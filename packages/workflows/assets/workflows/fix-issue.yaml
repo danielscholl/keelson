@@ -388,7 +388,7 @@ nodes:
         fi
         if CRITERIA=$(printf '%s' "$FALLBACK_JSON" | jq -e -c '
           if ((.criteria | type) == "array" and all(.criteria[]; type == "string"))
-          then [.criteria[] | gsub("^\\s+|\\s+$"; "") | select(length > 0)]
+          then [.criteria[] | select((explode - [32, 9, 10, 13]) != [])]
           else error("criteria must be an array of strings")
           end
         ' 2>/dev/null); then
