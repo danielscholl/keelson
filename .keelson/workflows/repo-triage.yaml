@@ -607,6 +607,22 @@ nodes:
       DRY="${KEELSON_TRIAGE_DRY_RUN:-1}"
       DO_COMMENT="${KEELSON_TRIAGE_COMMENT:-1}"
 
+      # `--inputs APPLY=1` overrides the env default for this run alone. The env
+      # var is read from the EXECUTING process, which is the server when routed —
+      # so without this, applying meant restarting the server with a different
+      # environment, and every other workflow inherited it for the server's life.
+      # Input keys are case-sensitive on the wire; accept either spelling.
+      APPLY_IN="${KEELSON_INPUTS_APPLY:-${KEELSON_INPUTS_apply:-}}"
+      case "$APPLY_IN" in
+        1|true|TRUE|yes|YES) DRY=0 ;;
+        0|false|FALSE|no|NO) DRY=1 ;;
+        "") ;;
+        *)
+          echo "ERROR: APPLY input must be one of 1/0/true/false/yes/no (got '$APPLY_IN')" >&2
+          exit 2
+          ;;
+      esac
+
       # Prefer the spill file: a decision over ~16 KiB is head/tail-truncated in
       # the env channel, and the truncated value is not parseable JSON.
       if [ -n "${KEELSON_NODE_decide_OUTPUT_FILE:-}" ] && [ -f "$KEELSON_NODE_decide_OUTPUT_FILE" ]; then
