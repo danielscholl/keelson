@@ -150,6 +150,7 @@ export const dagNodeBaseSchema = z.object({
   output_schema: outputSchemaSchema.optional(),
   allowed_tools: z.array(z.string()).optional(),
   denied_tools: z.array(z.string()).optional(),
+  require_tool_call: z.array(z.string()).optional(),
   // When true, the node fails if any tool the turn invoked returned an error
   // result — so a workflow whose real work happens inside a tool (e.g. a write
   // seam that fails closed) reports a failed run instead of a successful one
@@ -350,6 +351,7 @@ export const BASH_NODE_AI_FIELDS: readonly string[] = [
   "output_format",
   "allowed_tools",
   "denied_tools",
+  "require_tool_call",
   "fail_on_tool_error",
   "hooks",
   "mcp",
@@ -579,6 +581,9 @@ export const dagNodeSchema = dagNodeBaseSchema
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),
       ...(data.allowed_tools !== undefined ? { allowed_tools: data.allowed_tools } : {}),
       ...(data.denied_tools !== undefined ? { denied_tools: data.denied_tools } : {}),
+      ...(data.require_tool_call !== undefined
+        ? { require_tool_call: data.require_tool_call }
+        : {}),
       ...(data.fail_on_tool_error !== undefined
         ? { fail_on_tool_error: data.fail_on_tool_error }
         : {}),
