@@ -19,6 +19,10 @@ type WorkflowNode = {
   depends_on?: string[];
   trigger_rule?: string;
   allowed_tools?: string[];
+  output_format?: {
+    required?: string[];
+    properties?: Record<string, { enum?: string[]; type?: string }>;
+  };
 };
 
 const document = parse(readFileSync(join(bundledWorkflowsDir(), "fix-issue.yaml"), "utf8")) as {
@@ -295,5 +299,29 @@ describe("fix-issue PR divergence status", () => {
     expect(prompt).toContain("- [COVERED] {criterion} -> {step}");
     expect(prompt).toContain("- [MISSING] {criterion}");
     expect(prompt).toContain("COVERAGE: SKIPPED — no acceptance criteria found in the issue body");
+  });
+});
+
+describe("fix-issue CI triage criteria", () => {
+  test("binds triage to the brief and exposes criteria conflicts", () => {
+    const triage = workflowNode("triage-ci");
+    const schema = triage.output_format;
+
+    expect(triage.depends_on).toEqual(["await-ci", "brief-ready", "criteria-count"]);
+    expect(triage.prompt).toContain("$brief-ready.output");
+    expect(triage.prompt).toContain("$criteria-count.output");
+    expect(triage.prompt).toContain("CRITERIA_RECEIVED: {criteria_count}");
+    expect(triage.prompt).toContain("candidate fix that deletes");
+    expect(triage.prompt).toContain("skips, inverts, or stops running");
+    expect(schema?.required).toEqual(
+      expect.arrayContaining(["conflicts", "criteria_count", "brief_status"]),
+    );
+    expect(schema?.properties?.ci_status?.enum).toContain("conflict");
+    expect(schema?.properties?.brief_status?.enum).toEqual([
+      "received",
+      "empty",
+      "missing",
+      "invalid",
+    ]);
   });
 });
