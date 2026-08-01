@@ -201,8 +201,15 @@ command). The options below apply to the one-shot form.
 | --- | --- |
 | `keelson doctor` | Probe the toolchain, server, database, auth, workflows, and ribs, including whether the [cross-rib grants](../../guides/configuration/#cross-rib-grants) the running server holds still resolve. `--strict` exits non-zero on warnings too. |
 | `keelson update` | Update the harness and GitHub-sourced ribs in place. `--check` reports the available version; `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
+| `keelson backup [output]` | Write a consistent snapshot of the database, safe while the server is running. Defaults to `<home>/backups/keelson-<timestamp>.db`; `--db <path>` snapshots a different database. |
 | `keelson worktree prune` | Remove leftover isolated-run worktrees. `--dry-run` lists candidates; `--force` also removes dirty ones. |
 | `keelson version` | Print the CLI, Bun, and schema versions, plus each installed rib's version. |
+
+The database runs in WAL mode, so copying `keelson.db` while the server is
+running can capture it mid-write. `keelson backup` opens it read-only and asks
+SQLite for a fully checkpointed snapshot instead: consistent, no `-wal`/`-shm`
+sidecar, and safe to take live. Restore by putting the file back as
+`keelson.db` with the server stopped.
 
 <Aside type="note" title="--base-url skips the probe">
 Server-backed commands normally probe for a running server. Pass `--base-url`

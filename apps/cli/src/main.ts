@@ -12,6 +12,7 @@ import { installForgeOnPath, seedStarterAssets } from "@keelson/workflows";
 import { Command } from "commander";
 import pkg from "../package.json" with { type: "json" };
 import { runApprovalList, runApprovalResolve } from "./commands/approval.ts";
+import { runBackup } from "./commands/backup.ts";
 import { runChatEntry } from "./commands/chat.ts";
 import { runConnect, runConnectStatus, runDisconnect } from "./commands/connect.ts";
 import { runDoctor } from "./commands/doctor.ts";
@@ -158,6 +159,18 @@ export function buildProgram(): Command {
     .action(async function statusAction(this: Command) {
       const { json } = globalOpts(this);
       await runServeStatus({ json });
+    });
+
+  program
+    .command("backup [output]")
+    .description(
+      "write a consistent snapshot of the keelson database (safe while the server is running)",
+    )
+    .option("--db <path>", "snapshot this database instead of the home's default")
+    .action(async function backupAction(this: Command, output: string | undefined) {
+      const { json } = globalOpts(this);
+      const db = requireNonEmpty(json, "--db", this.opts<{ db?: string }>().db);
+      await runBackup({ json, ...(output ? { output } : {}), ...(db ? { db } : {}) });
     });
 
   // Deprecated `service`/`serve` group, hidden from help and kept one release

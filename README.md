@@ -203,6 +203,7 @@ keelson start                    # start the local server in the background
 keelson stop                     # stop the background server
 keelson restart                  # restart the background server
 keelson status                   # report server status
+keelson backup                   # consistent snapshot of the database
 keelson connect <agent>          # wire an agent (claude|copilot|codex|all) to the MCP endpoint
 keelson disconnect <agent>       # reverse a connect (also: keelson connect <agent> --undo)
 keelson chat "hello"             # chat turn (omit the message for interactive)
@@ -215,6 +216,17 @@ keelson uninstall                # remove keelson (--purge also deletes your dat
 ```
 
 For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/) for details.
+
+## Back up your data
+
+```bash
+keelson backup                       # writes <home>/backups/keelson-<timestamp>.db
+keelson backup ~/Dropbox/keelson.db  # or a path of your choosing
+```
+
+Keelson's database runs in WAL mode, so at any moment part of your recent state lives in `keelson.db-wal` rather than `keelson.db`. Copying those files while the server is running — which is what a backup tool sweeping your home directory does — can capture them mid-write and produce a restore that fails much later, long after you would notice.
+
+`keelson backup` avoids that: it opens the database read-only and asks SQLite for a fully checkpointed snapshot, so the result is internally consistent, needs no `-wal`/`-shm` sidecar, and is safe to take while the server is running. Restore by putting the file back as `keelson.db` with the server stopped.
 
 ## Uninstall
 
