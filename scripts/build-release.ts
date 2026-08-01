@@ -261,7 +261,15 @@ function installPs1Script(repo: string, version: string): string {
 $ErrorActionPreference = "Stop"
 
 $KeelsonVersion = "${version}"
-$KeelsonHome = if ($env:KEELSON_HOME) { $env:KEELSON_HOME } else { Join-Path $env:USERPROFILE ".keelson" }
+# The home holds node_modules, a live SQLite database, and a pid file, so it
+# belongs in the machine-local profile rather than the roaming one. An existing
+# %USERPROFILE%\\.keelson still wins, so upgrading an older install never strands
+# its data. Mirrors defaultUserHome() in @keelson/shared/paths.
+$LegacyKeelsonHome = Join-Path $env:USERPROFILE ".keelson"
+$KeelsonHome = if ($env:KEELSON_HOME) { $env:KEELSON_HOME }
+  elseif (Test-Path $LegacyKeelsonHome) { $LegacyKeelsonHome }
+  elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson" }
+  else { $LegacyKeelsonHome }
 $BinDir = if ($env:KEELSON_BIN_DIR) { $env:KEELSON_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "keelson\\bin" }
 # Pin the home to this release's versioned download URLs (not /latest/), so the
 # dependency string changes between versions — that is what lets \`bun install\`
@@ -418,10 +426,12 @@ try {
 }
 
 # A .cmd launcher runs from cmd.exe and PowerShell alike with no
-# execution-policy friction. The default home is baked as %USERPROFILE% so the
-# launcher stays pure ASCII even for user names cmd's ANSI codepage can't
+# execution-policy friction. A default home is baked as an unexpanded env var so
+# the launcher stays pure ASCII even for user names cmd's ANSI codepage can't
 # represent; a custom KEELSON_HOME is baked literally.
-$HomeForCmd = if ($env:KEELSON_HOME) { $KeelsonHome } else { "%USERPROFILE%\\.keelson" }
+$HomeForCmd = if ($env:KEELSON_HOME) { $KeelsonHome }
+  elseif ($KeelsonHome -eq $LegacyKeelsonHome) { "%USERPROFILE%\\.keelson" }
+  else { "%LOCALAPPDATA%\\keelson" }
 $Launcher = @(
   "@echo off",
   "setlocal",
