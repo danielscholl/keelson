@@ -20,11 +20,24 @@ import {
 import { listRibs } from "../http/ribs-client.ts";
 import { HttpError, isServerDownError } from "../http/workflow-client.ts";
 import { emit } from "../output.ts";
+import {
+  lsRemoteTags,
+  newestRelease,
+  parseRibSource,
+  pinnedSpec,
+  type ResolveTags,
+} from "../rib-version.ts";
 import { defaultServerBaseUrl, probeServer } from "../server-probe.ts";
 
 interface BaseOptions {
   json: boolean;
   baseUrl?: string;
+}
+
+export interface RibAddOptions extends BaseOptions {
+  // Install a specific git ref instead of the newest release, for tracking a
+  // rib's default branch during development.
+  ref?: string;
 }
 
 // Keelson keeps no registry of ribs — `rib add <source>` hands the source
@@ -35,6 +48,46 @@ interface BaseOptions {
 function resolveRibSource(arg: string): string {
   if (arg.startsWith(".")) return resolve(arg);
   return arg;
+}
+
+export interface AddPin {
+  spec: string;
+  tag: string | null;
+  // A complete sentence explaining why no release pin was applied, for the
+  // legitimate cases. Printed verbatim: the reasons do not share a prefix.
+  unpinned: string | null;
+  // Set when the tags could not be read at all. Installing anyway would take
+  // whatever the default branch holds while reporting nothing went wrong, so
+  // the add stops instead.
+  unreadable: string | null;
+}
+
+// Resolving the release before `bun add` rather than re-pinning after means bun
+// clones the tag itself: the operator never has an unreleased commit installed,
+// not even transiently.
+export async function resolveAddPin(
+  source: string,
+  ref: string | undefined,
+  resolveTags: ResolveTags = lsRemoteTags,
+): Promise<AddPin> {
+  const bare = { tag: null, unpinned: null, unreadable: null };
+  const parsed = parseRibSource(source);
+  if (ref !== undefined) {
+    return parsed === null
+      ? { ...bare, spec: source, unpinned: `--ref does not apply to ${source}` }
+      : { ...bare, spec: `${parsed.base}#${ref}` };
+  }
+  if (parsed === null || parsed.ref !== null) return { ...bare, spec: source };
+
+  const resolution = await resolveTags(parsed.url);
+  if (resolution.kind === "unreachable") {
+    return { ...bare, spec: source, unreadable: resolution.reason };
+  }
+  const target = newestRelease(resolution.tags, false);
+  if (target === null) {
+    return { ...bare, spec: source, unpinned: "no release tags yet; tracking the default branch" };
+  }
+  return { ...bare, spec: pinnedSpec(parsed, target.tag), tag: target.tag };
 }
 
 // Skip probeServer: the actual GET surfaces "connection refused" via
@@ -148,6 +201,23 @@ function failInstall(
   process.exit(EXIT_FAIL);
 }
 
+// The ref each rib's manifest entry carries, so a listing distinguishes a rib
+// held at a release from one riding a branch without reading package.json.
+function manifestPins(home: string): Map<string, string> {
+  const pins = new Map<string, string>();
+  let deps: Map<string, string>;
+  try {
+    deps = parseManifestRibDeps(readManifestText(home));
+  } catch {
+    return pins;
+  }
+  for (const [pkg, source] of deps) {
+    const ref = parseRibSource(source)?.ref;
+    if (ref) pins.set(pkg.replace(/^@keelson\/rib-/, ""), ref);
+  }
+  return pins;
+}
+
 export interface RibListOptions extends BaseOptions {
   // Read installed ribs straight from the home's node_modules instead of the
   // running server — works before `keelson start` is up, but only carries ids.
@@ -157,7 +227,13 @@ export interface RibListOptions extends BaseOptions {
 export async function runRibList(opts: RibListOptions): Promise<never> {
   if (opts.installed) {
     const home = resolveKeelsonHome();
-    const ribs = listedRibs(home).map(({ id, version }) => ({ id, displayName: id, version }));
+    const pins = manifestPins(home);
+    const ribs = listedRibs(home).map(({ id, version }) => ({
+      id,
+      displayName: id,
+      version,
+      pinned: pins.get(id) ?? null,
+    }));
     emit({ data: { ribs, source: "installed", home } }, { json: opts.json });
     process.exit(EXIT_OK);
   }
@@ -171,14 +247,25 @@ export async function runRibList(opts: RibListOptions): Promise<never> {
   }
 }
 
-export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> {
+export async function runRibAdd(arg: string, opts: RibAddOptions): Promise<never> {
   const trimmed = arg.trim();
   if (trimmed.length === 0) {
     emit({ error: "rib id or source must not be empty", code: "BAD_INPUTS" }, { json: opts.json });
     process.exit(EXIT_BAD_ARGS);
   }
   const home = ensureHome();
-  const source = resolveRibSource(trimmed);
+  const pin = await resolveAddPin(resolveRibSource(trimmed), opts.ref);
+  if (pin.unreadable !== null) {
+    emit(
+      {
+        error: `could not read releases for ${trimmed}: ${pin.unreadable} — install a specific ref with \`--ref <ref>\` if that is what you want`,
+        code: "UNREACHABLE",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_FAIL);
+  }
+  const source = pin.spec;
   const snapshot = snapshotHome(home);
   const before = new Set(installedRibIds(home));
   const firstAdd = await runBunPmCaptured(["add", source], home, opts.json);
@@ -216,17 +303,30 @@ export async function runRibAdd(arg: string, opts: BaseOptions): Promise<never> 
   // A rib only activates at server boot; warn when one is already running.
   const server = await probeServer(opts.baseUrl ? { baseUrl: opts.baseUrl } : {});
   emit(
-    { data: { added, installed, home, restartRequired: server !== null, resourced } },
+    {
+      data: {
+        added,
+        installed,
+        home,
+        restartRequired: server !== null,
+        resourced,
+        pinned: pin.tag,
+        ...(pin.unpinned ? { pinNote: pin.unpinned } : {}),
+      },
+    },
     { json: opts.json },
   );
   if (!opts.json) {
+    // An unpinned install is the exception now, so it says so rather than
+    // leaving the operator to infer it from a manifest they never open.
+    if (pin.unpinned) process.stdout.write(`${pin.unpinned}\n`);
     if (resourced) {
-      process.stdout.write(`resourced ${resourced}\n`);
+      process.stdout.write(`resourced ${resourced}${pin.tag ? ` at ${pin.tag}` : ""}\n`);
       if (server !== null) {
         process.stdout.write("restart the server (`keelson restart`) to activate the rib\n");
       }
     } else if (added.length > 0) {
-      process.stdout.write(`added ${added.join(", ")}\n`);
+      process.stdout.write(`added ${added.join(", ")}${pin.tag ? ` ${pin.tag}` : ""}\n`);
       if (server !== null) {
         process.stdout.write("restart the server (`keelson restart`) to activate the new rib\n");
       }

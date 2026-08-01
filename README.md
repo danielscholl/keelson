@@ -121,6 +121,19 @@ keelson rib add ./local-rib
 
 Installed ribs live under the Keelson home and activate on the next server boot.
 
+A rib added from a git source is pinned to that repository's newest release, so
+it advances only when you ask:
+
+```bash
+keelson rib update              # every rib, to its newest release
+keelson rib update chamber      # just one
+keelson rib update --check      # report what is available, apply nothing
+keelson update                  # the harness and the ribs together
+```
+
+To track a branch during development, add it with `--ref main`. Both update
+commands leave a `--ref` pin alone.
+
 ## Providers and gateways
 
 Keelson ships with Copilot so a fresh install can chat immediately. The other

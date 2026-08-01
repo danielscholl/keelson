@@ -30,6 +30,14 @@ Any bun-installable source works:
 keelson rib add https://github.com/danielscholl/keelson-rib-chamber
 ```
 
+A rib installed from a git source is pinned to that repository's newest release
+tag, and the command reports which one it took. Pass `--ref <ref>` to install a
+branch or a commit instead, which is what rib development wants:
+
+```sh
+keelson rib add https://github.com/danielscholl/keelson-rib-chamber --ref main
+```
+
 Discovery happens once, at boot, so a rib installed while the server is running
 is not active until the next restart. The command reports
 `restartRequired: true` when that is the case.
@@ -78,13 +86,40 @@ rib seems to be missing a capability you expected it to have.
 
 ## Update
 
+Ribs move release to release, the same way the harness does. Every git-sourced
+rib is held at an explicit release tag in the home's manifest, so nothing
+advances it until you ask.
+
 ```sh
-keelson update            # advances the harness and GitHub-sourced ribs together
-keelson update --check    # report available versions without applying
+keelson update                        # the harness and every rib, together
+keelson rib update                    # only the ribs
+keelson rib update chamber            # only one
+keelson rib update --check            # report what is available, apply nothing
+keelson rib update chamber --to 0.48.0  # an exact version, including older ones
 ```
+
+Releases are read with `git ls-remote`, so resolution works on any git host, needs
+no forge API token, and has no rate limit to spend across a multi-rib update.
+
+A rib you pinned to a branch or a commit with `--ref` is left alone by both
+commands, and reported as tracking that ref. `--to` is the way to move it back
+onto a release.
+
+Two outcomes are deliberately kept apart. A rib whose repository has no release
+tags yet is reported and left where it is. A rib whose repository could not be
+read at all is reported by name, and the command exits non-zero rather than
+letting an unchecked rib pass for one that is current.
 
 An installed rib stays a managed dependency that advances with the harness, not
 a fork you maintain.
+
+<Aside type="note" title="Ribs declare the harness they need">
+A rib's package manifest carries the `@keelson/shared` range it was built
+against. After an update, keelson compares that range to the harness in your
+home and warns whenever the harness does not satisfy it, in either direction,
+naming the rollback command. That rib would otherwise be skipped at boot with
+only a line in the server log.
+</Aside>
 
 ## Remove
 

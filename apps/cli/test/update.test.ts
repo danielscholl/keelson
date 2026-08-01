@@ -15,7 +15,6 @@ import {
   readWorkflowContents,
   reconcileManagedWorkflows,
   releaseAssetUrls,
-  ribDependencies,
   selectReleaseNotes,
 } from "../src/commands/update.ts";
 import { spawnEnv } from "./spawn-env.ts";
@@ -77,26 +76,6 @@ describe("update pure helpers", () => {
     expect(next.dependencies?.["@keelson/rib-osdu"]).toBe("github:danielscholl/keelson-rib-osdu");
     // input untouched (pure)
     expect(manifest.dependencies["@keelson/cli"]).toContain("/v0.1.0/keelson-cli.tgz");
-  });
-
-  test("ribDependencies returns every rib dep regardless of source form, never the harness deps", () => {
-    const manifest = {
-      dependencies: {
-        "@keelson/cli": "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
-        "@keelson/shared":
-          "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-shared.tgz",
-        "@keelson/rib-osdu": "https://github.com/danielscholl/keelson-rib-osdu",
-        "@keelson/rib-chamber": "github:danielscholl/keelson-rib-chamber",
-        "@keelson/rib-acme": "acme/keelson-rib-acme",
-        "@keelson/rib-local": "/tmp/some/path.tgz",
-      },
-    };
-    expect(ribDependencies(manifest)).toEqual([
-      "@keelson/rib-acme",
-      "@keelson/rib-chamber",
-      "@keelson/rib-local",
-      "@keelson/rib-osdu",
-    ]);
   });
 
   test("selectReleaseNotes returns the window (current, latest] oldest-first", () => {
@@ -437,6 +416,36 @@ describe("keelson update (e2e against a mock releases API)", () => {
     const out = JSON.parse(stdout.trim());
     expect(out.ok).toBe(false);
     expect(out.code).toBe("NOT_INSTALLED");
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  // Ribs release on their own cadence, so exiting as soon as the harness is
+  // current would make `keelson update` a permanent no-op for every rib.
+  test("a current harness still runs the rib pass", async () => {
+    latestTag = `v${cliPkg.version}`;
+    const home = installedHome();
+    const manifestPath = join(home, "package.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    // A path source is unpinnable, so the pass reports it without any network.
+    manifest.dependencies["@keelson/rib-local"] = join(home, "some-rib");
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const { stdout, exitCode } = await runCli(["--json", "update"], env(home));
+    expect(exitCode).toBe(0);
+    const out = JSON.parse(stdout.trim());
+    expect(out.data.upToDate).toBe(true);
+    expect(out.data.ribs).toEqual([
+      { id: "local", status: "unpinnable", from: null, to: null, tag: null },
+    ]);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("--no-ribs on a current harness skips the rib pass entirely", async () => {
+    latestTag = `v${cliPkg.version}`;
+    const home = installedHome();
+    const { stdout, exitCode } = await runCli(["--json", "update", "--no-ribs"], env(home));
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.trim()).data.ribs).toBeUndefined();
     rmSync(home, { recursive: true, force: true });
   });
 

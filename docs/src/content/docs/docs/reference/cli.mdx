@@ -139,13 +139,21 @@ unregistered rather than offered and broken; `keelson doctor` reports it. See
 | Command | Does |
 | --- | --- |
 | `keelson rib list` | List discovered ribs with their tools, surfaces, and auth. Server-required, unless `--installed`. |
-| `keelson rib add <source>` | Install a rib from any bun-installable source: a GitHub URL, `github:owner/repo`, a git URL, an npm name, or a local path. |
+| `keelson rib add <source>` | Install a rib from any bun-installable source: a GitHub URL, `github:owner/repo`, a git URL, an npm name, or a local path. Pins to the source's newest release; `--ref <ref>` installs a branch or commit instead. |
+| `keelson rib update [ids...]` | Advance ribs to their newest release, or all of them when no id is given. `--check` reports without applying, `--to <version>` installs an exact version, `--pre` considers prerelease tags. |
 | `keelson rib remove <id>` | Uninstall a rib from the home. |
 | `keelson rib show <id>` | Show one rib's tools, views, surfaces, and auth. Server-required. |
 
 `rib list --installed` reads the home directly, so it works whether or not the
-server is running, and reports each installed rib's package version. Most other
-rib commands talk to the running server and report `3` when it is down.
+server is running, and reports each installed rib's package version and the ref
+it is pinned to. Most other rib commands talk to the running server and report
+`3` when it is down.
+
+A git-sourced rib is held at an explicit release tag, so nothing moves it until
+you ask. `rib update` resolves each rib's tags over `git ls-remote` (no forge
+API, no rate limit, any host), rewrites the pin, and reinstalls. A rib whose
+repository could not be read is reported by name and exits non-zero rather than
+counting as up to date.
 
 ## Projects
 
@@ -200,7 +208,7 @@ command). The options below apply to the one-shot form.
 | Command | Does |
 | --- | --- |
 | `keelson doctor` | Probe the toolchain, server, database, auth, workflows, and ribs, including whether the [cross-rib grants](../../guides/configuration/#cross-rib-grants) the running server holds still resolve. `--strict` exits non-zero on warnings too. |
-| `keelson update` | Update the harness and GitHub-sourced ribs in place. `--check` reports the available version; `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
+| `keelson update` | Update the harness and its ribs in place, each to its newest release. `--check` reports the available harness version and applies nothing (use `rib update --check` for the ribs); `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
 | `keelson backup [output]` | Write a consistent snapshot of the database, safe while the server is running. Defaults to `<home>/backups/keelson-<timestamp>.db`; `--db <path>` snapshots a different database. |
 | `keelson worktree prune` | Remove leftover isolated-run worktrees. `--dry-run` lists candidates; `--force` also removes dirty ones. |
 | `keelson uninstall` | Remove the program files, the launcher, and the keychain entries keelson wrote. `--purge` also deletes the home; `--yes` skips the prompt; `--keep-credentials` leaves the keychain alone; `--force` proceeds when the server could not be stopped. |
