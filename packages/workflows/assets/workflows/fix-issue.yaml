@@ -1445,6 +1445,12 @@ nodes:
         echo "PR_STATE: UNKNOWN — no .pr-number recorded; cannot finalize"
         exit 0
       fi
+      if [ -f "$KEELSON_ARTIFACTS_DIR/.ci-conflict" ]; then
+        printf 'FAIL\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
+        echo "PR_STATE: CONFLICT — CI repair conflicts with issue criteria; left as a draft"
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-conflict"
+        exit 0
+      fi
       # GitHub briefly reports zero checks while replacing runs after a push.
       CHECK_COUNT=0
       FORGE_OK=1

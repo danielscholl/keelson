@@ -28,10 +28,14 @@ function finalizeBash(): string {
   return script;
 }
 
-function runFinalize(body: string, opts: { snapshot?: string; requiredChecks?: string } = {}) {
+function runFinalize(
+  body: string,
+  opts: { conflict?: string; snapshot?: string; requiredChecks?: string } = {},
+) {
   const artifacts = mkdtempSync(join(tmpdir(), "keelson-body-stamp-"));
   tmps.push(artifacts);
   writeFileSync(join(artifacts, ".pr-number"), "42\n");
+  if (opts.conflict) writeFileSync(join(artifacts, ".ci-conflict"), opts.conflict);
   const bodySrc = join(artifacts, ".body-src.md");
   writeFileSync(bodySrc, body);
   const editedBody = join(artifacts, ".body-edited.md");
@@ -72,6 +76,9 @@ esac
     stdout: proc.stdout.toString(),
     readyCalled: existsSync(readyMarker),
     editedBody: existsSync(editedBody) ? readFileSync(editedBody, "utf8") : null,
+    finalStatus: existsSync(join(artifacts, ".ci-final-status"))
+      ? readFileSync(join(artifacts, ".ci-final-status"), "utf8").trim()
+      : null,
   };
 }
 
@@ -105,6 +112,17 @@ shimDescribe("finalize-pr body stamping", () => {
     expect(result.readyCalled).toBe(false);
     expect(result.editedBody).toContain("CI red at finalize (see the PR checks tab)");
     expect(result.editedBody).not.toContain("pending CI");
+  });
+
+  test("leaves a criteria-conflicting PR as a draft", () => {
+    const result = runFinalize(PENDING_BODY, {
+      conflict: "criterion: preserve Windows support\n",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("PR_STATE: CONFLICT");
+    expect(result.stdout).toContain("criterion: preserve Windows support");
+    expect(result.readyCalled).toBe(false);
+    expect(result.finalStatus).toBe("FAIL");
   });
 
   test("leaves a body without the placeholder untouched", () => {
