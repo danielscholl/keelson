@@ -53,8 +53,12 @@ export function classifyHomeProgram(home: string): HomeProgramState {
   let raw: string;
   try {
     raw = readFileSync(join(home, "package.json"), "utf8");
-  } catch {
-    return "absent";
+  } catch (err) {
+    // Only a manifest that isn't there means the program files are gone. A
+    // manifest we are merely denied (EACCES, EISDIR) is still a manifest, and
+    // reading it as "absent" would hand --purge a home it must not delete.
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? "absent" : "foreign";
   }
   try {
     const manifest = JSON.parse(raw) as { dependencies?: Record<string, string> };
@@ -283,6 +287,9 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
       process.stdout.write(
         `kept your data there (keelson.db, workflows/, commands/, config.json, rib data)\n`,
       );
+      // This run took the keelson command too, so naming --purge here would
+      // point at something the operator can no longer type.
+      process.stdout.write(`to discard that data as well, remove ${home} yourself\n`);
     }
     if (launcherRemoved) process.stdout.write(`removed launcher ${launcher}\n`);
     if (credentials.removed.length > 0) {

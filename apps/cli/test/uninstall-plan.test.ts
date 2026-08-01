@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { KeelsonConfig } from "@keelson/shared/config";
@@ -101,6 +101,14 @@ describe("classifyHomeProgram", () => {
 
   test("no manifest means the program files are already gone", () => {
     expect(classifyHomeProgram(home)).toBe("absent");
+  });
+
+  // Only a missing manifest may reach the --purge path. A manifest that exists
+  // but cannot be read is still a manifest, and reading the failure as "absent"
+  // would hand --purge a home it must not delete.
+  test("a manifest that cannot be read is foreign, not absent", () => {
+    mkdirSync(join(home, "package.json"));
+    expect(classifyHomeProgram(home)).toBe("foreign");
   });
 });
 

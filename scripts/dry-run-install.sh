@@ -99,10 +99,10 @@ if [ -e "$KEELSON" ]; then
 fi
 echo "    OK: program files and launcher gone, data kept"
 
-# The launcher and the installed CLI are both gone by now, so this second step
-# runs the source CLI — which is also what an operator who deleted the launcher
-# is left with. It proves the two-step form works: a home whose program files a
-# prior run already took can still be purged.
+# A plain run takes the installed CLI with it, so an operator's own second step
+# is `rm -rf` rather than this. Running it from source is how the guard itself
+# gets exercised: a home whose program files a prior run already removed must
+# still be purgeable, not refused as if it were somebody else's project.
 echo "==> keelson uninstall --purge (finishes the job)"
 KEELSON_HOME="$HOME_DIR" KEELSON_BIN_DIR="$BIN_DIR" \
   bun "$ROOT/apps/cli/bin/keelson.ts" uninstall --yes --purge --keep-credentials

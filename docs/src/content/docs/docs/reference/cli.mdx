@@ -212,13 +212,16 @@ SQLite for a fully checkpointed snapshot instead: consistent, no `-wal`/`-shm`
 sidecar, and safe to take live. Restore by putting the file back as
 `keelson.db` with the server stopped.
 
-`keelson uninstall` splits the home in two. The program files — `node_modules`,
-`package.json`, `bun.lock`, `.npmrc` — are what `install.sh` provisioned, and
-they always go. Your data — `keelson.db`, `workflows/`, `commands/`,
-`config.json`, and each rib's data directory — stays unless you pass `--purge`.
-Running it twice is the two-step form: a plain run removes the program files,
-then `--purge` deletes what is left. A home with a `package.json` that is not
-keelson's own is refused outright, so pointing the command at a source checkout
+`keelson uninstall` splits the home in two. The program files (`node_modules`,
+`package.json`, `bun.lock`, `.npmrc`) are what `install.sh` provisioned, and they
+always go. Your data (`keelson.db`, `workflows/`, `commands/`, `config.json`, and
+each rib's data directory) stays unless you pass `--purge`.
+
+A plain run removes the CLI itself along with the other program files, so it also
+removes the command you would type a second time. Pass `--purge` on the first run
+when the data should go too; after a plain run, delete the home directory
+yourself. A home whose `package.json` belongs to some other project is refused
+outright, with or without `--purge`, so pointing the command at a source checkout
 cannot cost that project its `node_modules`.
 
 <Aside type="caution" title="Rib credentials outlive the command">

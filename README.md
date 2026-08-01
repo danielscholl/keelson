@@ -254,7 +254,7 @@ keelson uninstall --purge   # the above plus the home: database, workflows, rib 
 
 `keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, removes the launcher, and deletes the bun project inside the home (`node_modules`, `package.json`, `bun.lock`, `.npmrc`). Your data — `keelson.db`, `workflows/`, `commands/`, `config.json`, and each rib's data directory — stays put unless you pass `--purge`. Add `--yes` to skip the prompt when scripting, and `--keep-credentials` to leave the keychain alone.
 
-The two lines above also work in sequence: run it once to remove the program files, then again with `--purge` when you decide the data should go too.
+A plain run removes the `keelson` command itself along with the other program files, so it also removes the command you would type a second time. Pass `--purge` on the first run when you want the data gone too; after a plain run, delete the home directory yourself with the manual steps below.
 
 If the server cannot be stopped, the command removes nothing and says why; `--force` overrides that. On Windows the command cannot edit your user `PATH`, so the bin directory the installer added stays until you remove it — see [Manual removal on Windows PowerShell](#manual-removal-on-windows-powershell) for that step.
 
