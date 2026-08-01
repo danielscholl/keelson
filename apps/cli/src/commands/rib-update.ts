@@ -137,6 +137,42 @@ function trackedRef(source: string): string {
   return hash === -1 ? "the default branch" : source.slice(hash + 1);
 }
 
+export function incompatibleWarning(rib: IncompatibleRib): string {
+  return `warning: ${rib.id} v${rib.version} needs @keelson/shared ${rib.range}, but this home has ${rib.harness}; it will be skipped at boot. Roll back with \`keelson rib update ${rib.id} --to <version>\``;
+}
+
+export function renderRibUpdate(
+  pass: RibUpdatePass,
+  opts: { check: boolean; restartRequired: boolean },
+): string[] {
+  const lines: string[] = [];
+  if (pass.entries.length === 0) lines.push("no ribs installed");
+  for (const entry of pass.entries) lines.push(describeEntry(entry));
+
+  const pending = opts.check ? pass.entries.filter(isMove) : [];
+  const problems = pass.entries.filter(isProblem);
+
+  // A status line reads the same whether or not it was applied, so check mode
+  // has to say which it was.
+  if (opts.check && pending.length > 0) {
+    lines.push(
+      "",
+      `${pending.length} rib update(s) available; run \`keelson rib update\` to apply`,
+    );
+  }
+  // Only claim there is nothing to update when every rib was actually checked;
+  // saying it after a rib we could not read describes a search that did not
+  // happen.
+  if (opts.check && pending.length === 0 && pass.entries.length > 0 && problems.length === 0) {
+    lines.push("", "no rib updates available");
+  }
+  for (const rib of pass.incompatible) lines.push(incompatibleWarning(rib));
+  if (opts.restartRequired) {
+    lines.push("restart the server (`keelson restart`) to load the update");
+  }
+  return lines;
+}
+
 export interface RibUpdateOptions {
   json: boolean;
   check: boolean;
@@ -194,7 +230,6 @@ export async function runRibUpdate(ids: string[], opts: RibUpdateOptions): Promi
     );
   }
 
-  const pending = opts.check ? pass.entries.filter(isMove) : [];
   const problems = pass.entries.filter(isProblem);
   const server = pass.applied
     ? await probeServer(opts.baseUrl ? { baseUrl: opts.baseUrl } : {})
@@ -221,22 +256,11 @@ export async function runRibUpdate(ids: string[], opts: RibUpdateOptions): Promi
   );
 
   if (!opts.json) {
-    if (pass.entries.length === 0) process.stdout.write("no ribs installed\n");
-    for (const entry of pass.entries) process.stdout.write(`${describeEntry(entry)}\n`);
-    // Only claim there is nothing to update when every rib was actually
-    // checked; saying it after a rib we could not read describes a search that
-    // did not happen.
-    if (opts.check && pending.length === 0 && pass.entries.length > 0 && problems.length === 0) {
-      process.stdout.write("\nno rib updates available\n");
-    }
-    for (const rib of pass.incompatible) {
-      process.stdout.write(
-        `warning: ${rib.id} v${rib.version} needs @keelson/shared ${rib.range}, but this home has ${rib.harness} — it will be skipped at boot; roll back with \`keelson rib update ${rib.id} --to <version>\`\n`,
-      );
-    }
-    if (server !== null) {
-      process.stdout.write("restart the server (`keelson restart`) to load the update\n");
-    }
+    for (const line of renderRibUpdate(pass, {
+      check: opts.check,
+      restartRequired: server !== null,
+    }))
+      process.stdout.write(`${line}\n`);
   }
 
   // A rib that could not be reached is not an update that succeeded: exiting 0

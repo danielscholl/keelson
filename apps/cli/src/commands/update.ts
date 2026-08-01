@@ -25,7 +25,7 @@ import { emit } from "../output.ts";
 import { isProblem, type RibPlanEntry } from "../rib-plan.ts";
 import { probeServer } from "../server-probe.ts";
 import { installSpecs } from "./provider.ts";
-import { describeEntry, runRibUpdatePass } from "./rib-update.ts";
+import { describeEntry, incompatibleWarning, runRibUpdatePass } from "./rib-update.ts";
 
 // The repo whose GitHub Releases this CLI updates from. Overridable for forks
 // and for tests that point at a fixture server.
@@ -470,9 +470,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     process.stdout.write(`\nupdated keelson ${current} → ${installed}\n`);
     for (const entry of ribPass?.entries ?? []) process.stdout.write(`${describeEntry(entry)}\n`);
     for (const rib of ribPass?.incompatible ?? [])
-      process.stdout.write(
-        `warning: ${rib.id} v${rib.version} needs @keelson/shared ${rib.range}, but this home has ${rib.harness} — it will be skipped at boot; roll back with \`keelson rib update ${rib.id} --to <version>\`\n`,
-      );
+      process.stdout.write(`${incompatibleWarning(rib)}\n`);
     if (providersRestored.length > 0)
       process.stdout.write(
         `kept provider SDKs installed: ${providersRestored.join(", ")} (now managed by \`keelson provider\`)\n`,
