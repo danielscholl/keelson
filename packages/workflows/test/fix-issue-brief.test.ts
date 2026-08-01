@@ -324,4 +324,20 @@ describe("fix-issue CI triage criteria", () => {
       "invalid",
     ]);
   });
+
+  test("blocks criteria conflicts and validates fixes before push", () => {
+    const prompt = workflowNode("fix-ci").prompt;
+
+    expect(prompt).toContain('If `ci_status` is "conflict"');
+    expect(prompt).toContain("`conflicts` is non-empty");
+    expect(prompt).toContain("$ARTIFACTS_DIR/.ci-conflict");
+    for (const antiPattern of ["`skip`", "`skipIf`", "`.only`", "`xit`", "`xdescribe`", "`test.todo`"]) {
+      expect(prompt).toContain(antiPattern);
+    }
+    expect(prompt).toContain('bash "$ARTIFACTS_DIR/verify.sh"');
+    expect(prompt).toContain("If it fails, do not commit or push");
+    expect(prompt.indexOf('bash "$ARTIFACTS_DIR/verify.sh"')).toBeLessThan(
+      prompt.indexOf("Only after `verify.sh` passes, commit"),
+    );
+  });
 });

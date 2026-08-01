@@ -1401,23 +1401,37 @@ nodes:
     effort: high
     idle_timeout: 1800000
     prompt: |
-      Fix ONLY the actionable CI failures in the triage below. If `actionable`
-      is empty, make NO changes and stop with "No actionable CI failures."
+      Fix ONLY the actionable CI failures in the triage below.
 
       ## CI triage
       $triage-ci.output
 
       ## Rules
 
+      - FIRST inspect `ci_status` and `conflicts`. If `ci_status` is "conflict"
+        or `conflicts` is non-empty, make NO changes. Write the conflict details
+        to `$ARTIFACTS_DIR/.ci-conflict`, then stop with "CI fix conflicts with
+        issue criteria."
+      - If `actionable` is empty, make NO changes and stop with
+        "No actionable CI failures."
       - You are on the PR's head branch — commit directly onto it; do NOT create
         a new branch, and do NOT touch unrelated or pre-existing failures.
+      - Never make a criteria-named test or behavior stop running. Do not add
+        `skip`, `skipIf`, `.only`, `xit`, `xdescribe`, or `test.todo`, and do
+        not delete or invert the behavior to force CI green. Treat that path as
+        a conflict: revert the attempted edit, write `$ARTIFACTS_DIR/.ci-conflict`
+        with the criterion, check, and reason, and do not commit or push.
       - For each actionable failure: read the file, make the change, then run the
         NARROWEST check that covers it (the touched workspace's type-check +
         tests), not the full suite.
+      - After all edits and narrow checks pass, run
+        `bash "$ARTIFACTS_DIR/verify.sh"`. If it fails, do not commit or push;
+        report the failing check and stop. This is the required final pre-push gate.
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
-      - Commit (`git commit -m "fix: address CI failure"`, split if logically
-        distinct) and then `git push` — staging alone is dropped.
+      - Only after `verify.sh` passes, commit
+        (`git commit -m "fix: address CI failure"`, split if logically distinct)
+        and then `git push` — staging alone is dropped.
 
   - id: finalize-pr
     depends_on: [fix-ci]
