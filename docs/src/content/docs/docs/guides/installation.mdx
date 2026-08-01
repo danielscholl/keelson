@@ -1,0 +1,231 @@
+---
+title: Installing and removing keelson
+description: Install the harness on any platform, upgrade it, and take it back off cleanly, including what a removal leaves behind.
+sidebar:
+  order: 1
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Keelson installs as a managed home plus a launcher on your `PATH`. The home is
+itself a bun project: `package.json`, `bun.lock`, `.npmrc`, and `node_modules`
+sit at its root, alongside your data (the SQLite database, `workflows/`,
+`commands/`, and each rib's data directory). Those four entries are the program
+half, and that split is what makes removal predictable: they can go without
+touching the half you care about.
+
+## Prerequisites
+
+Install [Bun](https://bun.sh/) first. On macOS, Linux, and WSL, make sure
+`~/.local/bin` is on your `PATH`; the installer puts the launcher there but does
+not edit your shell profile.
+
+## Install
+
+<Tabs>
+  <TabItem label="macOS, Linux, WSL">
+
+```sh
+curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/install.sh | sh
+keelson version
+```
+
+Provisions the home at `~/.keelson` and drops a `keelson` launcher in
+`~/.local/bin`.
+
+  </TabItem>
+  <TabItem label="Windows PowerShell">
+
+```powershell
+irm https://github.com/danielscholl/keelson/releases/latest/download/install.ps1 | iex
+keelson version
+```
+
+Provisions `%LOCALAPPDATA%\keelson`, installs `keelson.cmd` under
+`%LOCALAPPDATA%\keelson\bin`, and adds that bin directory to your user `PATH`.
+
+The home lives in the machine-local profile rather than the roaming one because
+it holds `node_modules`, a live SQLite database, and a pid file, none of which
+should follow you between machines. An install already using
+`%USERPROFILE%\.keelson` keeps that location, so upgrading never moves your
+data.
+
+  </TabItem>
+</Tabs>
+
+Where the home ends up, and how `KEELSON_HOME` and the walk-up rule change that,
+is covered in [Directories](../../reference/directories/).
+
+## Upgrade
+
+The harness and the ribs are versioned separately, so each has its own check.
+
+```sh
+keelson update --check       # is a newer harness release available
+keelson rib update --check   # what rib releases are available
+keelson update               # apply both
+```
+
+`keelson update` re-pins the harness to the latest release, then advances every
+installed rib to its newest release. `--check` reports the harness only and
+applies nothing, which is why the rib check is a separate command. Pass
+`--no-ribs` to move the harness alone. Rib pinning and the `--ref` opt-out are
+covered in [Managing ribs](../managing-ribs/#update).
+
+Rerunning the installer works too. It merges into the existing manifest rather
+than replacing it, so installed ribs and their pinned versions survive, as does
+everything in the data half of the home.
+
+## Remove one rib
+
+```sh
+keelson rib remove <id>
+keelson restart
+```
+
+That takes the package out of the home. A rib that keeps private data has it
+under `<home>/rib-<id>`, which removal leaves alone. Delete that directory
+yourself when you want the rib's local data gone.
+
+## Remove the harness
+
+```sh
+keelson uninstall           # program files, launcher, and keychain entries
+keelson uninstall --purge   # the above plus the home: database, workflows, rib data
+```
+
+`keelson uninstall` stops the server, revokes the keychain entries keelson
+wrote, removes the launcher, and deletes the four program entries at the root of
+the home. Your data stays: the database, `workflows/`, `commands/`,
+`config.json`, and every rib data directory, unless you pass `--purge`.
+
+| Flag | Effect |
+| --- | --- |
+| `--purge` | Also delete the home itself, data included. |
+| `--yes` | Skip the confirmation prompt, for scripting. |
+| `--keep-credentials` | Leave the OS keychain untouched. Also the way past a malformed `config.json`: revoking needs to read the gateways it configures, so an unreadable file otherwise aborts the uninstall rather than destroying the home that named those secrets. |
+| `--force` | Uninstall even when the server could not be stopped. |
+
+<Aside type="caution" title="A plain run removes the keelson command itself">
+The launcher is one of the program files, so after `keelson uninstall` there is
+no `keelson` left to type. Pass `--purge` on the first run if you want the data
+gone too, or finish by hand with the steps below. A plain run leaves a
+`.keelson-uninstalled` note in the home recording what it did, which is also how
+a later `--purge` tells that home apart from any other directory `KEELSON_HOME`
+might point at.
+</Aside>
+
+If the server cannot be stopped, the command removes nothing and says why.
+`--force` overrides that. On Windows it cannot edit your user `PATH`, so the bin
+directory the installer added stays until you remove it.
+
+## Manual removal
+
+Use these when a plain uninstall already took the `keelson` command, or when
+there is no working install left to run. Both remove every location keelson may
+have used rather than guessing which one this machine installed to, so read the
+list before running them if you keep more than one home.
+
+<Tabs>
+  <TabItem label="macOS, Linux, WSL">
+
+```sh
+# A launcher that is already gone is expected here; a server that would not stop
+# is not. Deleting the home out from under a live process leaves it holding an
+# open database, so a failed stop aborts instead of being ignored.
+if command -v keelson >/dev/null 2>&1; then
+  keelson stop || { echo "server did not stop; nothing removed" >&2; exit 1; }
+fi
+KEELSON_HOME="${KEELSON_HOME:-$HOME/.keelson}"
+rm -f "$HOME/.local/bin/keelson"
+rm -rf "$KEELSON_HOME"
+```
+
+`keelson stop` exits 0 when nothing is running, so the guard only trips on a
+real failure. This removes the launcher and the managed home, which holds your
+database, workflows, installed ribs, rib data directories, server record, and
+logs. If you added `~/.local/bin` to your shell profile only for keelson, remove
+that `PATH` entry from `~/.zshrc`, `~/.bashrc`, or wherever you put it.
+
+  </TabItem>
+  <TabItem label="Windows PowerShell">
+
+```powershell
+# Every location keelson may have used: the current default, the pre-0.93
+# profile home, and KEELSON_HOME if it is set. Trim this list if you are keeping
+# one of them.
+$LegacyHome = Join-Path $env:USERPROFILE ".keelson"
+$Targets = @($LegacyHome)
+if ($env:KEELSON_HOME) { $Targets += $env:KEELSON_HOME }
+if ($env:LOCALAPPDATA) { $Targets += (Join-Path $env:LOCALAPPDATA "keelson") }
+$Targets = @($Targets | Select-Object -Unique)
+
+# Stop every targeted home before deleting any of them. Each home keeps its own
+# server record, so stopping only the one the environment happens to select
+# would leave another still holding an open database. Any failed stop aborts
+# before a single file is removed.
+if (Get-Command keelson -ErrorAction SilentlyContinue) {
+  $SavedHome = $env:KEELSON_HOME
+  try {
+    foreach ($Target in $Targets) {
+      if (-not (Test-Path -LiteralPath $Target)) { continue }
+      $env:KEELSON_HOME = $Target
+      keelson stop
+      if ($LASTEXITCODE -ne 0) { throw "server in $Target did not stop; nothing removed" }
+    }
+  } finally {
+    $env:KEELSON_HOME = $SavedHome
+  }
+}
+
+# Skip the locations that are not there, but let a real failure (a file in use,
+# access denied) print rather than pass for a clean removal.
+foreach ($Target in $Targets) {
+  if (Test-Path -LiteralPath $Target) {
+    Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction Continue
+  }
+}
+
+# Remove keelson's bin directory from the user PATH.
+$KeelsonBin = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson\bin" } else { Join-Path $LegacyHome "bin" }
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$NewPath = ($UserPath -split ";" | Where-Object { $_ -and ($_ -ne $KeelsonBin) }) -join ";"
+[Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
+```
+
+  </TabItem>
+</Tabs>
+
+## Credentials outlive the home
+
+Keelson keeps no secrets in the home directory. What it does manage lives in
+your OS keychain under the `keelson` service, and that service is scoped to your
+**user account, not to any one home**. Uninstalling a throwaway
+`KEELSON_HOME` therefore revokes the same credentials your real install uses.
+Pass `--keep-credentials` whenever you are removing a scratch home.
+
+Not every provider's credential is keelson's to revoke:
+
+| Credential | Managed by |
+| --- | --- |
+| Copilot, Claude | Keelson, in the keychain. Revoked by `keelson uninstall`. |
+| Configured gateways | Keelson, in the keychain, one account per gateway. Revoked by `keelson uninstall`. |
+| Codex, Pi | The vendor tools themselves (`~/.codex/auth.json`, pi's own `auth.json`, or environment keys). Keelson never writes them and uninstall never removes them. |
+| Rib secrets | The rib, under its own service ids. See below. |
+
+The keychain resolves entries by exact name and cannot be enumerated, so the
+command can only revoke the accounts it knows it wrote. A rib storing secrets
+under its own service ids is outside what it can find, so the command names the
+installed ribs and the `rib_<id>_*` pattern for you to check by hand. Inspect
+the `keelson` service with Keychain Access, Windows Credential Manager, or your
+Linux secret store to clear anything left.
+
+## Related
+
+- [Directories](../../reference/directories/): how the home resolves and what
+  lives in it.
+- [Managing ribs](../managing-ribs/): installing, pinning, and updating the
+  capability packages.
+- [Operating the server](../operating-the-server/): starting, checking, and
+  stopping the server the installer set up.
+- [CLI reference](../../reference/cli/): every command and its flags.

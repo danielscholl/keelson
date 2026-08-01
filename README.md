@@ -36,36 +36,33 @@ Keelson is intentionally small in scope.
 
 ## Install
 
-### Prerequisites
-
 Install [Bun](https://bun.sh/) first. On macOS, Linux, and WSL, make sure `~/.local/bin` is on your `PATH`.
 
-### macOS, Linux, and WSL
-
 ```bash
+# macOS, Linux, WSL
 curl -fsSL https://github.com/danielscholl/keelson/releases/latest/download/install.sh | sh
 keelson version
 ```
 
-The installer provisions the managed home at `~/.keelson` and drops a `keelson` launcher in `~/.local/bin`.
-
-### Windows PowerShell
-
 ```powershell
+# Windows PowerShell
 irm https://github.com/danielscholl/keelson/releases/latest/download/install.ps1 | iex
 keelson version
 ```
 
-The Windows installer provisions `%LOCALAPPDATA%\keelson`, installs `keelson.cmd` under `%LOCALAPPDATA%\keelson\bin`, and adds that bin directory to your user `PATH`. The home lives in the machine-local profile rather than the roaming one because it holds `node_modules`, a live SQLite database, and a pid file — none of which should follow you between machines. An install that already uses `%USERPROFILE%\.keelson` keeps that location, so upgrading never moves your data.
+The installer provisions a managed home (`~/.keelson`, or `%LOCALAPPDATA%\keelson` on Windows) and puts a `keelson` launcher on your `PATH`.
 
 ### Upgrade
 
+The harness and its ribs are versioned separately, so each has its own check:
+
 ```bash
-keelson update --check
-keelson update
+keelson update --check       # is a newer harness release available
+keelson rib update --check   # what rib releases are available
+keelson update               # apply both
 ```
 
-You can also rerun the installer. Upgrades preserve installed ribs and local data.
+Rerunning the installer works too. Upgrades preserve installed ribs and local data. See [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/) for platform details and the Windows `PATH` behavior.
 
 ## Quick start
 
@@ -110,29 +107,16 @@ keelson restart
 keelson rib list
 ```
 
-Other source forms work too:
+Any bun-installable source works: a GitHub URL, `github:you/repo`, a git URL, an npm name, or a local path. Installed ribs live under the Keelson home and activate on the next server boot.
 
-```bash
-keelson rib add github:you/keelson-rib-yours
-keelson rib add git@github.com:you/keelson-rib-yours.git
-keelson rib add @keelson/rib-yours
-keelson rib add ./local-rib
-```
-
-Installed ribs live under the Keelson home and activate on the next server boot.
-
-A rib added from a git source is pinned to that repository's newest release, so
-it advances only when you ask:
+A rib added from a git source is pinned to that repository's newest release, so it advances only when you ask:
 
 ```bash
 keelson rib update              # every rib, to its newest release
-keelson rib update chamber      # just one
 keelson rib update --check      # report what is available, apply nothing
-keelson update                  # the harness and the ribs together
 ```
 
-To track a branch during development, add it with `--ref main`. Both update
-commands leave a `--ref` pin alone.
+Track a branch during development with `keelson rib add <source> --ref main`; both update commands leave a `--ref` pin alone. [Managing ribs](https://danielscholl.github.io/keelson/docs/guides/managing-ribs/) has the full lifecycle.
 
 ## Providers and gateways
 
@@ -151,25 +135,13 @@ keelson restart
 installed is left unregistered rather than offered and broken — `keelson doctor`
 reports it and names the fix.
 
-Enablement is also editable directly in `~/.keelson/config.json`:
-
-```json
-{
-  "providers": {
-    "copilot": true,
-    "claude": true,
-    "codex": true,
-    "pi": true
-  },
-  "defaultProvider": "copilot"
-}
-```
-
 For an OpenAI-compatible endpoint, add a gateway:
 
 ```bash
 keelson gateway add ollama http://localhost:11434/v1 --model qwen3
 ```
+
+Which providers load and which one chat defaults to are also editable in `config.json`. See [Configuration](https://danielscholl.github.io/keelson/docs/guides/configuration/).
 
 ## Use Keelson from other agents with MCP
 
@@ -188,47 +160,9 @@ keelson connect --list      # show what's connected
 keelson disconnect claude   # or: keelson connect claude --undo
 ```
 
-Prefer to wire it by hand, or use another client? The endpoint is:
-
-```text
-http://127.0.0.1:7878/api/mcp
-```
-
-```jsonc
-{
-  "mcpServers": {
-    "keelson": {
-      "type": "http",
-      "url": "http://127.0.0.1:7878/api/mcp"
-    }
-  }
-}
-```
+Prefer to wire it by hand, or use another client? The endpoint is `http://127.0.0.1:7878/api/mcp` over streamable HTTP; [Using Keelson over MCP](https://danielscholl.github.io/keelson/docs/guides/using-mcp/) has the client config.
 
 Once connected, an agent can call `keelson_docs` to learn how Keelson behaves (no source checkout required) and `workflow_list` / `workflow_run` to drive automations. The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
-
-## CLI reference
-
-Useful commands:
-
-```bash
-keelson start                    # start the local server in the background
-keelson stop                     # stop the background server
-keelson restart                  # restart the background server
-keelson status                   # report server status
-keelson backup                   # consistent snapshot of the database
-keelson connect <agent>          # wire an agent (claude|copilot|codex|all) to the MCP endpoint
-keelson disconnect <agent>       # reverse a connect (also: keelson connect <agent> --undo)
-keelson chat "hello"             # chat turn (omit the message for interactive)
-keelson workflow list            # list available workflows
-keelson workflow run <name>      # run a workflow
-keelson provider list            # list providers and their install state
-keelson provider add <id>        # install a provider SDK (claude|codex|pi)
-keelson rib list                 # list installed ribs
-keelson uninstall                # remove keelson (--purge also deletes your data)
-```
-
-For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/) for details.
 
 ## Back up your data
 
@@ -237,86 +171,25 @@ keelson backup                       # writes <home>/backups/keelson-<timestamp>
 keelson backup ~/Dropbox/keelson.db  # or a path of your choosing
 ```
 
-Keelson's database runs in WAL mode, so at any moment part of your recent state lives in `keelson.db-wal` rather than `keelson.db`. Copying those files while the server is running — which is what a backup tool sweeping your home directory does — can capture them mid-write and produce a restore that fails much later, long after you would notice.
-
-`keelson backup` avoids that: it opens the database read-only and asks SQLite for a fully checkpointed snapshot, so the result is internally consistent, needs no `-wal`/`-shm` sidecar, and is safe to take while the server is running. Restore by putting the file back as `keelson.db` with the server stopped.
+The database runs in WAL mode, so copying `keelson.db` while the server is running (what a backup tool sweeping your home directory does) can catch it mid-write and produce a restore that fails much later. `keelson backup` asks SQLite for a fully checkpointed snapshot instead, so the result is internally consistent, needs no `-wal`/`-shm` sidecar, and is safe to take while the server is running. Restore by putting the file back as `keelson.db` with the server stopped.
 
 ## Uninstall
 
-There are two kinds of uninstall: remove a rib, or remove the whole harness.
-
-### Remove a rib only
-
 ```bash
-keelson rib remove <name>
-keelson restart
-```
-
-This removes the package from the home. Some ribs keep private data under `$KEELSON_HOME/rib-<id>`. Delete that directory only when you want to discard the rib's local data:
-
-```bash
-rm -rf "${KEELSON_HOME:-$HOME/.keelson}/rib-<id>"
-```
-
-### Full uninstall
-
-```bash
+keelson rib remove <name>   # one rib; its data under <home>/rib-<name> stays
 keelson uninstall           # program files, launcher, and keychain entries
 keelson uninstall --purge   # the above plus the home: database, workflows, rib data
 ```
 
-`keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, removes the launcher, and deletes the bun project inside the home (`node_modules`, `package.json`, `bun.lock`, `.npmrc`). Your data — `keelson.db`, `workflows/`, `commands/`, `config.json`, and each rib's data directory — stays put unless you pass `--purge`. Add `--yes` to skip the prompt when scripting, and `--keep-credentials` to leave the keychain alone.
+`keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, removes the launcher, and deletes the program files at the root of the home (`node_modules`, `package.json`, `bun.lock`, `.npmrc`). Your data stays put unless you pass `--purge`.
 
-A plain run removes the `keelson` command itself along with the other program files, so it also removes the command you would type a second time. Pass `--purge` on the first run when you want the data gone too; after a plain run, delete the home directory yourself with the manual steps below. It leaves a `.keelson-uninstalled` note in the home recording what it did, which is also how a later `--purge` tells that home apart from any other directory you might point `KEELSON_HOME` at.
-
-If the server cannot be stopped, the command removes nothing and says why; `--force` overrides that. On Windows the command cannot edit your user `PATH`, so the bin directory the installer added stays until you remove it — see [Manual removal on Windows PowerShell](#manual-removal-on-windows-powershell) for that step.
-
-One limit worth knowing: the OS keychain resolves entries by exact name and cannot be enumerated, so Keelson can revoke only the accounts it knows it wrote (provider keys and configured gateways). A rib storing secrets under its own service ids is outside what the command can find, so it names the installed ribs and the `rib_<id>_*` pattern to check by hand.
-
-### Manual removal on macOS, Linux, or WSL
-
-```bash
-keelson stop 2>/dev/null || true
-KEELSON_HOME="${KEELSON_HOME:-$HOME/.keelson}"
-rm -f "$HOME/.local/bin/keelson"
-rm -rf "$KEELSON_HOME"
-```
-
-This removes the launcher and the managed home. The home contains your database, workflows, installed ribs, rib data directories, server record, and logs.
-
-If you added `~/.local/bin` to your shell profile only for Keelson, remove that PATH entry from `~/.zshrc`, `~/.bashrc`, or the file where you added it.
-
-### Manual removal on Windows PowerShell
-
-```powershell
-keelson stop 2>$null
-# Removes both locations: the current default and the pre-0.93 profile home.
-$LegacyHome = Join-Path $env:USERPROFILE ".keelson"
-$Targets = @($LegacyHome)
-if ($env:KEELSON_HOME) { $Targets += $env:KEELSON_HOME }
-if ($env:LOCALAPPDATA) { $Targets += (Join-Path $env:LOCALAPPDATA "keelson") }
-# Skip the locations that are not there, but let a real failure (a file in use,
-# access denied) print rather than pass for a clean removal.
-foreach ($Target in ($Targets | Select-Object -Unique)) {
-  if (Test-Path -LiteralPath $Target) {
-    Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction Continue
-  }
-}
-
-# Remove Keelson's bin directory from the user PATH.
-$KeelsonBin = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson\bin" } else { Join-Path $LegacyHome "bin" }
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$NewPath = ($UserPath -split ";" | Where-Object { $_ -and ($_ -ne $KeelsonBin) }) -join ";"
-[Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
-```
-
-### Optional credential cleanup
-
-Keelson does not store provider secrets in the home directory. Provider keys and rib credentials live in your OS keychain under the `keelson` service. `keelson uninstall` revokes the entries it knows it wrote; to clear anything left — a rib's own secrets in particular — inspect the `keelson` service with Keychain Access, Windows Credential Manager, or your Linux secret store.
+A plain run removes the `keelson` command itself, so there is nothing left to type a second time: pass `--purge` up front if you want the data gone too. [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/) covers the flags, manual removal on each platform, and why provider credentials outlive the home.
 
 ## Documentation
 
-- [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, CLI reference, and rib contract.
+- [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, and rib contract.
+- [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/): every command and flag, plus the `--json` envelope and stable exit codes for scripting.
+- [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/): platform details, upgrades, and clean removal.
 - [Writing ribs](WRITING-RIBS.md): the five-minute rib authoring quickstart.
 - [CONTRIBUTING.md](CONTRIBUTING.md): local setup and required checks.
 - [SECURITY.md](SECURITY.md): threat model and reporting process.
