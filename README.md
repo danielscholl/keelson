@@ -211,6 +211,7 @@ keelson workflow run <name>      # run a workflow
 keelson provider list            # list providers and their install state
 keelson provider add <id>        # install a provider SDK (claude|codex|pi)
 keelson rib list                 # list installed ribs
+keelson uninstall                # remove keelson (--purge also deletes your data)
 ```
 
 For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/) for details.
@@ -232,7 +233,20 @@ This removes the package from the home. Some ribs keep private data under `$KEEL
 rm -rf "${KEELSON_HOME:-$HOME/.keelson}/rib-<id>"
 ```
 
-### Full uninstall on macOS, Linux, or WSL
+### Full uninstall
+
+```bash
+keelson uninstall           # program files, launcher, and keychain entries
+keelson uninstall --purge   # the above plus the home: database, workflows, rib data
+```
+
+`keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, removes the launcher, and deletes the bun project inside the home (`node_modules`, `package.json`, `bun.lock`, `.npmrc`). Your data — `keelson.db`, `workflows/`, `commands/`, `config.json`, and each rib's data directory — stays put unless you pass `--purge`. Add `--yes` to skip the prompt when scripting, and `--keep-credentials` to leave the keychain alone.
+
+If the server cannot be stopped, the command removes nothing and says why; `--force` overrides that.
+
+One limit worth knowing: the OS keychain resolves entries by exact name and cannot be enumerated, so Keelson can revoke only the accounts it knows it wrote (provider keys and configured gateways). A rib storing secrets under its own service ids is outside what the command can find, so it names the installed ribs and the `rib_<id>_*` pattern to check by hand.
+
+### Manual removal on macOS, Linux, or WSL
 
 ```bash
 keelson stop 2>/dev/null || true
@@ -245,7 +259,7 @@ This removes the launcher and the managed home. The home contains your database,
 
 If you added `~/.local/bin` to your shell profile only for Keelson, remove that PATH entry from `~/.zshrc`, `~/.bashrc`, or the file where you added it.
 
-### Full uninstall on Windows PowerShell
+### Manual removal on Windows PowerShell
 
 ```powershell
 keelson stop 2>$null
@@ -267,7 +281,7 @@ $NewPath = ($UserPath -split ";" | Where-Object { $_ -and ($_ -ne $KeelsonBin) }
 
 ### Optional credential cleanup
 
-Keelson does not store provider secrets in the home directory. Provider keys and rib credentials live in your OS keychain under the `keelson` service. Remove those entries with Keychain Access, Windows Credential Manager, or your Linux secret store if you want a credential-clean uninstall.
+Keelson does not store provider secrets in the home directory. Provider keys and rib credentials live in your OS keychain under the `keelson` service. `keelson uninstall` revokes the entries it knows it wrote; to clear anything left — a rib's own secrets in particular — inspect the `keelson` service with Keychain Access, Windows Credential Manager, or your Linux secret store.
 
 ## Documentation
 

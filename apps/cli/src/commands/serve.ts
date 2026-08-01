@@ -250,7 +250,7 @@ async function requestGracefulShutdown(state: ServerState): Promise<boolean> {
   }
 }
 
-async function serveStop(home: string): Promise<Outcome> {
+export async function serveStop(home: string): Promise<Outcome> {
   const state = readServerState(home);
   const running = await probeKnown(state, STATUS_PROBE_TIMEOUT_MS);
 
