@@ -68,10 +68,16 @@ nodes:
       # `git archive` (not worktree/checkout) so the snapshot is plain read-only
       # files with nothing registered against the caller's repo to clean up.
       SUBJECT="${KEELSON_INPUTS_subject:-}"
+      SUBJECT_STATUS="NONE"
       if [ -n "$SUBJECT" ]; then
         if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          SUBJECT_STATUS="FAILED not-a-git-repo"
           echo "subject '$SUBJECT' ignored: not inside a git repository" >&2
         else
+          RESOLVED_VIA="ref"
+          if [[ "$SUBJECT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            RESOLVED_VIA="sha"
+          fi
           COMMIT=$(git rev-parse --verify --quiet "${SUBJECT}^{commit}" || true)
           if [ -z "$COMMIT" ] && git fetch --quiet origin "$SUBJECT" 2>/dev/null; then
             COMMIT=$(git rev-parse --verify --quiet 'FETCH_HEAD^{commit}' || true)
@@ -87,11 +93,16 @@ nodes:
               find "$KEELSON_ARTIFACTS_DIR/subject" -type l -exec rm -f {} +
               echo "Subject snapshot: removed ${LINKS} symlink(s); the verifier sees regular files only" >&2
             fi
+            SUBJECT_STATUS="OK $COMMIT via $RESOLVED_VIA"
             echo "Subject snapshot: $SUBJECT ($COMMIT) -> \$ARTIFACTS_DIR/subject" >&2
           else
+            SUBJECT_STATUS="FAILED did-not-resolve $SUBJECT"
             echo "subject '$SUBJECT' did not resolve to a commit; the verifier falls back to the caller's working directory" >&2
           fi
         fi
+      fi
+      if [ -n "${KEELSON_ARTIFACTS_DIR:-}" ]; then
+        printf 'SUBJECT-SNAPSHOT: %s\n' "$SUBJECT_STATUS" > "$KEELSON_ARTIFACTS_DIR/subject-status"
       fi
 
       # Status goes to stderr so stdout carries only the artifact — that stdout
@@ -156,6 +167,17 @@ nodes:
         fi
         echo "Artifact captured from inline text (${CHARS} chars)" >&2
         printf '%s\n' "$RAW"
+      fi
+
+  - id: subject-status
+    depends_on: [intake]
+    bash: |
+      set -euo pipefail
+      MARKER_DIR="${KEELSON_ARTIFACTS_DIR:-}"
+      if [ -n "$MARKER_DIR" ] && [ -s "$MARKER_DIR/subject-status" ]; then
+        cat -- "$MARKER_DIR/subject-status"
+      else
+        printf 'SUBJECT-SNAPSHOT: UNKNOWN marker-absent\n'
       fi
 
   # Three reviewers run in parallel with `context: fresh` so none sees another's
