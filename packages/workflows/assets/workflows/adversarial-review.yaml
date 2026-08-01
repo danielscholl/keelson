@@ -44,10 +44,10 @@ description: |
         their load-bearing claims against source, then synthesizes one verdict
         — CONFIRMED / CONFIRMED-WITH-CHANGES / REFUTED — with the surviving
         claims, the dissent, and what is still unverified.
-  Inputs: optional `subject` — a git ref (branch, SHA, refs/pull/N/head) of
-          the code the artifact concerns; intake snapshots it read-only so
-          the verifier checks the exact tree under review instead of whatever
-          the caller's working directory has checked out.
+  Inputs: optional `subject` — a git ref of the code the artifact concerns;
+          intake snapshots it read-only so the verifier checks the exact tree
+          under review. For a PR, use `refs/pull/N/head`; a bare SHA resolves
+          only when its object is already local or advertised by the remote.
   NOT for: Building or fixing code (use fix-issue), posting
            a GitHub PR review (use pr-review), or generating something new.
 
@@ -321,7 +321,7 @@ nodes:
   # than relaying any reviewer's citation. Default trigger_rule (all_success) —
   # a consensus verdict is not issued on a panel where a lane failed.
   - id: verify
-    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk]
+    depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, subject-status]
     context: fresh
     model: gpt-5.6-terra
     effort: xhigh
@@ -350,18 +350,22 @@ nodes:
       ### Risk lens
       $reviewer-risk.output
 
+      ## Subject snapshot status
+      $subject-status.output
+
       ## Task
 
       Pick the claims that are actually checkable here — those that resolve
-      against source code, files, a config, or a well-established fact. For
-      each, go look with Read/Glob/Grep. Where to look: if
-      `$ARTIFACTS_DIR/subject/` exists, it is a read-only snapshot of the exact
-      tree the artifact concerns (the run was given a `subject` ref) — check
-      code claims THERE. Only without that snapshot use the caller's working
-      directory, and first confirm it actually contains the change under
-      review: a working directory on a different branch proves nothing, and
-      "the code I can see does not contain X" is then UNVERIFIABLE-HERE, never
-      evidence that a claim about the change is false.
+      against source code, files, a config, or a well-established fact. For each,
+      go look with Read/Glob/Grep. Where to look: treat `SUBJECT-SNAPSHOT:` above
+      as ground truth. On `OK`, `$ARTIFACTS_DIR/subject/` is the absolute path to
+      a read-only snapshot of the exact tree the artifact concerns — check code
+      claims THERE. The snapshot has no `.git` by design, so a Glob miss for
+      `.git` is not evidence that it is absent. Without an `OK` snapshot use the
+      caller's working directory, and first confirm it actually contains the
+      change under review: a working directory on a different branch proves
+      nothing, and "the code I can see does not contain X" is then
+      UNVERIFIABLE-HERE, never evidence that a claim about the change is false.
 
       Do NOT accept a claim because it sounds right or because two reviewers
       agree. Find the actual line. Ambiguous or partial evidence never rounds up
