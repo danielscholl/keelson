@@ -15,7 +15,6 @@ import {
   readWorkflowContents,
   reconcileManagedWorkflows,
   releaseAssetUrls,
-  ribDependencies,
   selectReleaseNotes,
 } from "../src/commands/update.ts";
 import { spawnEnv } from "./spawn-env.ts";
@@ -77,26 +76,6 @@ describe("update pure helpers", () => {
     expect(next.dependencies?.["@keelson/rib-osdu"]).toBe("github:danielscholl/keelson-rib-osdu");
     // input untouched (pure)
     expect(manifest.dependencies["@keelson/cli"]).toContain("/v0.1.0/keelson-cli.tgz");
-  });
-
-  test("ribDependencies returns every rib dep regardless of source form, never the harness deps", () => {
-    const manifest = {
-      dependencies: {
-        "@keelson/cli": "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
-        "@keelson/shared":
-          "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-shared.tgz",
-        "@keelson/rib-osdu": "https://github.com/danielscholl/keelson-rib-osdu",
-        "@keelson/rib-chamber": "github:danielscholl/keelson-rib-chamber",
-        "@keelson/rib-acme": "acme/keelson-rib-acme",
-        "@keelson/rib-local": "/tmp/some/path.tgz",
-      },
-    };
-    expect(ribDependencies(manifest)).toEqual([
-      "@keelson/rib-acme",
-      "@keelson/rib-chamber",
-      "@keelson/rib-local",
-      "@keelson/rib-osdu",
-    ]);
   });
 
   test("selectReleaseNotes returns the window (current, latest] oldest-first", () => {

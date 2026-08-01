@@ -22,8 +22,10 @@ import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { resolveKeelsonHome } from "../home.ts";
 import { displayRegistry, effectiveRegistry } from "../npm-registry.ts";
 import { emit } from "../output.ts";
+import { isProblem, type RibPlanEntry } from "../rib-plan.ts";
 import { probeServer } from "../server-probe.ts";
 import { installSpecs } from "./provider.ts";
+import { describeEntry, runRibUpdatePass } from "./rib-update.ts";
 
 // The repo whose GitHub Releases this CLI updates from. Overridable for forks
 // and for tests that point at a fixture server.
@@ -84,18 +86,6 @@ export function applyManifestVersion(
       "@keelson/shared": urls.shared,
     },
   };
-}
-
-// Every installed rib dependency. `bun update` advances each to the latest of
-// whatever its source resolves to — a floating git ref (github URL, github:,
-// owner/repo, git+) moves to its newest commit; a pinned tag, tarball, or path
-// is a no-op. Source-agnostic by design: keelson keeps no registry, so it can't
-// (and shouldn't) reason about where a rib came from.
-export function ribDependencies(manifest: HomeManifest): string[] {
-  const deps = manifest.dependencies ?? {};
-  return Object.keys(deps)
-    .filter((name) => name.startsWith("@keelson/rib-"))
-    .sort();
 }
 
 // Release bodies for the versions in the window (current, latest], oldest
@@ -437,17 +427,20 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     opts.json,
   );
 
-  const ribs = opts.ribs ? ribDependencies(manifest) : [];
-  if (ribs.length > 0) {
-    const ribInstall = await runBun(["update", ...ribs], home, opts.json);
-    if (ribInstall.code !== 0) {
-      fail(
-        `keelson updated to v${latest}, but advancing ribs (${ribs.join(", ")}) failed (exit ${ribInstall.code}) — re-run \`keelson update\``,
-        "RIB_UPDATE_FAILED",
-        opts.json,
-      );
-    }
+  // Ribs advance release-to-release through the same resolver `keelson rib
+  // update` uses, so both surfaces move a home to exactly the same versions.
+  const ribPass = opts.ribs
+    ? await runRibUpdatePass({ home, allowPrerelease: false, check: false, quiet: opts.json })
+    : null;
+  if (ribPass?.installError) {
+    fail(
+      `keelson updated to v${latest}, but advancing ribs failed and the home was rolled back: ${ribPass.installError}`,
+      "RIB_UPDATE_FAILED",
+      opts.json,
+    );
   }
+  const ribs = ribPass?.moved.map((entry) => entry.id) ?? [];
+  const ribProblems = ribPass?.entries.filter(isProblem) ?? [];
 
   const installed = installedCliVersion(home) ?? latest;
   const server = await probeServer({});
@@ -457,6 +450,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     installed,
     updated: true,
     ribsUpdated: ribs,
+    ...(ribPass ? { ribs: ribPass.entries.map(ribReport) } : {}),
+    ...(ribPass && ribPass.incompatible.length > 0
+      ? { ribsIncompatible: ribPass.incompatible }
+      : {}),
     ...(providersRestored.length > 0 ? { providersRestored } : {}),
     ...(providersFailed.length > 0 ? { providersFailed } : {}),
     refreshedWorkflows: refreshed,
@@ -471,9 +468,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
   });
   if (!opts.json) {
     process.stdout.write(`\nupdated keelson ${current} → ${installed}\n`);
-    if (ribs.length > 0)
+    for (const entry of ribPass?.entries ?? []) process.stdout.write(`${describeEntry(entry)}\n`);
+    for (const rib of ribPass?.incompatible ?? [])
       process.stdout.write(
-        `advanced ribs: ${ribs.map((r) => r.replace("@keelson/rib-", "")).join(", ")}\n`,
+        `warning: ${rib.id} v${rib.version} needs @keelson/shared ${rib.range}, but this home has ${rib.harness} — it will be skipped at boot; roll back with \`keelson rib update ${rib.id} --to <version>\`\n`,
       );
     if (providersRestored.length > 0)
       process.stdout.write(
@@ -503,7 +501,21 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     if (server !== null)
       process.stdout.write("restart the server (`keelson restart`) to load the update\n");
   }
-  process.exit(EXIT_OK);
+  // The harness update itself is done and reported; a rib whose releases could
+  // not be read is still an unfinished job, and exiting 0 would let a scripted
+  // update report clean while having silently left that rib behind.
+  process.exit(ribProblems.length > 0 ? EXIT_FAIL : EXIT_OK);
+}
+
+function ribReport(entry: RibPlanEntry): Record<string, unknown> {
+  return {
+    id: entry.id,
+    status: entry.status,
+    from: entry.installed,
+    to: entry.target?.version ?? null,
+    tag: entry.target?.tag ?? null,
+    ...(entry.reason ? { reason: entry.reason } : {}),
+  };
 }
 
 function printDelta(current: string, latest: string, notes: string): void {

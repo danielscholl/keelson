@@ -21,6 +21,7 @@ import { runMcpBridge } from "./commands/mcp.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runProviderAdd, runProviderList, runProviderRemove } from "./commands/provider.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
+import { runRibUpdate } from "./commands/rib-update.ts";
 import {
   runServe,
   runServeRestart,
@@ -527,14 +528,40 @@ export function buildProgram(): Command {
       "install a rib into the keelson home from any bun-installable source (a github URL, github:owner/repo, a git URL, an npm name, or a local path)",
     )
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .option("--ref <ref>", "install a specific git ref instead of the newest release")
     .action(async function ribAddAction(
       this: Command,
       source: string,
-      addOpts: { baseUrl?: string },
+      addOpts: { baseUrl?: string; ref?: string },
     ) {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", addOpts.baseUrl);
-      await runRibAdd(source, { json, ...(baseUrl ? { baseUrl } : {}) });
+      const ref = requireNonEmpty(json, "--ref", addOpts.ref);
+      await runRibAdd(source, { json, ...(baseUrl ? { baseUrl } : {}), ...(ref ? { ref } : {}) });
+    });
+
+  rib
+    .command("update [ids...]")
+    .description("advance installed ribs to their newest release (all ribs when no id is given)")
+    .option("--check", "report available rib releases without applying", false)
+    .option("--pre", "consider prerelease tags", false)
+    .option("--to <version>", "install an exact version of one rib, including older ones")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function ribUpdateAction(
+      this: Command,
+      ids: string[],
+      updateOpts: { check: boolean; pre: boolean; to?: string; baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", updateOpts.baseUrl);
+      const to = requireNonEmpty(json, "--to", updateOpts.to);
+      await runRibUpdate(ids ?? [], {
+        json,
+        check: updateOpts.check,
+        pre: updateOpts.pre,
+        ...(to ? { to } : {}),
+        ...(baseUrl ? { baseUrl } : {}),
+      });
     });
 
   rib
@@ -754,11 +781,11 @@ export function buildProgram(): Command {
   program
     .command("update")
     .description(
-      "update keelson (and github-sourced ribs) in the managed home to the latest release",
+      "update keelson and its installed ribs in the managed home to their latest releases",
     )
     .option("--check", "report the available version without applying", false)
     .option("--force", "re-apply even when already on the latest version", false)
-    .option("--no-ribs", "skip advancing github-sourced ribs")
+    .option("--no-ribs", "skip advancing ribs")
     .option("--no-notes", "skip fetching and showing release notes")
     .action(async function updateAction(this: Command) {
       const { json } = globalOpts(this);
