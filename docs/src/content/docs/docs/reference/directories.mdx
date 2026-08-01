@@ -20,11 +20,19 @@ The home is the first of these that applies, checked in order:
 | --- | --- | --- |
 | 1 | `KEELSON_HOME` | Set and non-empty. The explicit override. |
 | 2 | An existing `.keelson/` walking up from the working directory | The monorepo dev layout, where the home is `<repo>/.keelson`. |
-| 3 | `~/.keelson` | The default for an installed harness. |
+| 3 | The per-user default | Everything else. `~/.keelson` on macOS and Linux; on Windows see below. |
 
 The walk-up branch is what lets keelson data live beside an embedding project's
-source during development; an installed harness almost always lands on
-`~/.keelson`.
+source during development; an installed harness almost always lands on the
+per-user default.
+
+**On Windows the per-user default is `%LOCALAPPDATA%\keelson`**, not
+`%USERPROFILE%\.keelson`. The home holds `node_modules`, a live SQLite database,
+and a pid file — none of which should follow a user between machines, and
+`%USERPROFILE%` roams in AD environments. An existing `%USERPROFILE%\.keelson`
+still wins, so upgrading an install that predates the move never relocates its
+data; only a fresh install lands in `%LOCALAPPDATA%`. With no `%LOCALAPPDATA%`
+set, the profile path is the fallback.
 
 ## What lives in the home
 

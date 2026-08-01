@@ -51,6 +51,7 @@ export {
 } from "./handlers/command.ts";
 export {
   isValidCommandName,
+  keelsonHome,
   type ResolvedCommand,
   type ResolvedScript,
   resolveCommand,

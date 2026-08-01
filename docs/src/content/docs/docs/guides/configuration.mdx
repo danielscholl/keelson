@@ -14,9 +14,9 @@ agent providers load and which one new chats default to.
 ## The config file
 
 Settings live in `config.json` under the keelson home, which is `~/.keelson` by
-default. It is plain JSON, optional, and read at server boot. A missing file
-falls back to the defaults silently; a malformed one is ignored with a warning,
-so a typo never blocks startup.
+default (`%LOCALAPPDATA%\keelson` on Windows). It is plain JSON, optional, and
+read at server boot. A missing file falls back to the defaults silently; a
+malformed one is ignored with a warning, so a typo never blocks startup.
 
 Only a broken shape warns, though: invalid JSON, or a key whose value is the
 wrong type. An unrecognized top-level key is accepted and dropped **without** a
@@ -62,8 +62,10 @@ want:
 <Aside type="note" title="Where home resolves">
 The keelson home is `KEELSON_HOME` if set, otherwise the first `.keelson/`
 directory found walking up from the working directory (the monorepo dev case),
-otherwise `~/.keelson`. Point `KEELSON_CONFIG` at a file to override the config
-path directly.
+otherwise the per-user default: `~/.keelson`, or `%LOCALAPPDATA%\keelson` on
+Windows (an existing `%USERPROFILE%\.keelson` still wins there). Point
+`KEELSON_CONFIG` at a file to override the config path directly. See
+[Directories](../../reference/directories/#how-the-home-resolves).
 </Aside>
 
 ## Precedence
@@ -331,7 +333,7 @@ replacing it, so a grant from either source stands.
 
 | Variable | Default | What it controls |
 |---|---|---|
-| `KEELSON_HOME` | `~/.keelson` | The keelson home directory (db, workflows, config). |
+| `KEELSON_HOME` | `~/.keelson` (`%LOCALAPPDATA%\keelson` on Windows) | The keelson home directory (db, workflows, config). |
 | `KEELSON_SERVER_URL` | `http://127.0.0.1:7878` | URL the CLI probes when no `--base-url` is given. Set this to reach a server on a non-default host or port without repeating `--base-url` on every command. Must be a valid `http` or `https` URL; an invalid value throws immediately so the misconfiguration surfaces at once rather than appearing as "server down". |
 | `KEELSON_DB` | `<home>/keelson.db` | The SQLite database file. `keelson start --db` overrides it per run. |
 | `KEELSON_CONFIG` | `<home>/config.json` | Path to the config file. |
