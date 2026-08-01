@@ -282,7 +282,13 @@ $LegacyHome = Join-Path $env:USERPROFILE ".keelson"
 $Targets = @($LegacyHome)
 if ($env:KEELSON_HOME) { $Targets += $env:KEELSON_HOME }
 if ($env:LOCALAPPDATA) { $Targets += (Join-Path $env:LOCALAPPDATA "keelson") }
-Remove-Item -Recurse -Force ($Targets | Select-Object -Unique) -ErrorAction SilentlyContinue
+# Skip the locations that are not there, but let a real failure (a file in use,
+# access denied) print rather than pass for a clean removal.
+foreach ($Target in ($Targets | Select-Object -Unique)) {
+  if (Test-Path -LiteralPath $Target) {
+    Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction Continue
+  }
+}
 
 # Remove Keelson's bin directory from the user PATH.
 $KeelsonBin = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson\bin" } else { Join-Path $LegacyHome "bin" }
