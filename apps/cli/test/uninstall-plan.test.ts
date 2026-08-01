@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { KeelsonConfig } from "@keelson/shared/config";
-import { deleteCredentials } from "../src/commands/uninstall.ts";
+import { classifyCredentialAttempts } from "../src/commands/uninstall.ts";
 import {
   credentialAccounts,
   PROGRAM_ENTRIES,
@@ -68,46 +68,55 @@ describe("PROGRAM_ENTRIES", () => {
   });
 });
 
-describe("deleteCredentials", () => {
-  test("reports the accounts that actually held a secret", async () => {
-    const held = new Set(["claude", "gateway-ollama"]);
-    const result = await deleteCredentials(
+describe("classifyCredentialAttempts", () => {
+  test("reports the accounts that actually held a secret", () => {
+    const out = classifyCredentialAttempts(
       ["claude", "copilot", "gateway-ollama"],
-      (_service, account) => held.delete(account),
+      [
+        { account: "claude", deleted: true },
+        { account: "copilot", deleted: false },
+        { account: "gateway-ollama", deleted: true },
+      ],
     );
-    expect(result.removed).toEqual(["claude", "gateway-ollama"]);
-    expect(result.failed).toEqual([]);
+    expect(out.removed).toEqual(["claude", "gateway-ollama"]);
+    expect(out.failed).toEqual([]);
   });
 
-  test("a missing entry is not a failure", async () => {
-    const result = await deleteCredentials(["copilot"], () => {
-      throw new Error("No entry found in the keyring");
-    });
-    expect(result.removed).toEqual([]);
-    expect(result.failed).toEqual([]);
+  test("a missing entry is not a failure", () => {
+    const out = classifyCredentialAttempts(
+      ["copilot"],
+      [{ account: "copilot", error: "No entry found in the keyring" }],
+    );
+    expect(out).toEqual({ removed: [], failed: [] });
   });
 
-  test("a real backend error is reported, not swallowed", async () => {
-    const result = await deleteCredentials(["claude"], () => {
-      throw new Error("keyring locked by policy");
-    });
-    expect(result.failed).toEqual(["claude"]);
+  test("a real backend error is reported, not swallowed", () => {
+    const out = classifyCredentialAttempts(
+      ["claude"],
+      [{ account: "claude", error: "keyring locked by policy" }],
+    );
+    expect(out.failed).toEqual(["claude"]);
   });
 
-  // Every secret survives an unloadable keyring, so an empty `removed` here
-  // would read as success when nothing was revoked at all.
-  test("an unavailable keyring fails every account instead of reporting none", async () => {
-    const result = await deleteCredentials(["claude", "copilot"], null);
-    expect(result.removed).toEqual([]);
-    expect(result.failed).toEqual(["claude", "copilot"]);
+  // An unloadable keyring makes the worker report an error per account; every
+  // secret survives, so an empty `failed` would read as a clean sweep.
+  test("a keyring that would not load fails every account", () => {
+    const accounts = ["claude", "copilot"];
+    const out = classifyCredentialAttempts(
+      accounts,
+      accounts.map((account) => ({ account, error: "Cannot find module @napi-rs/keyring" })),
+    );
+    expect(out.failed).toEqual(accounts);
   });
 
-  test("passes keelson's keyring service to the backend", async () => {
-    const seen: string[] = [];
-    await deleteCredentials(["claude"], (service) => {
-      seen.push(service);
-      return true;
-    });
-    expect(seen).toEqual(["keelson"]);
+  // A worker that dies mid-list leaves later accounts unreported. Treating an
+  // absent result as success would claim a revocation that never ran.
+  test("an unreported account counts as failed, not clean", () => {
+    const out = classifyCredentialAttempts(
+      ["claude", "copilot"],
+      [{ account: "claude", deleted: true }],
+    );
+    expect(out.removed).toEqual(["claude"]);
+    expect(out.failed).toEqual(["copilot"]);
   });
 });

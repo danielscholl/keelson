@@ -74,38 +74,93 @@ async function confirm(home: string, purge: boolean): Promise<boolean> {
   }
 }
 
-// Returns false when the account held nothing, throws on a real backend error.
-export type DeleteCredentialFn = (service: string, account: string) => boolean;
-
-async function loadDeleter(): Promise<DeleteCredentialFn | null> {
-  try {
-    const mod = await import("@napi-rs/keyring");
-    return (service, account) => new mod.Entry(service, account).deleteCredential();
-  } catch {
-    return null;
-  }
+// One raw attempt, as reported by the worker. `deleted` is false when the
+// account simply held nothing.
+export interface CredentialAttempt {
+  account: string;
+  deleted?: boolean;
+  error?: string;
 }
 
-export async function deleteCredentials(
+export interface CredentialOutcome {
+  removed: string[];
+  failed: string[];
+}
+
+// The one definition of what counts as a failure, applied by the parent so the
+// rule stays in TypeScript and under test rather than inside the worker string.
+// A missing entry is the common case and not a failure; anything else is.
+export function classifyCredentialAttempts(
   accounts: readonly string[],
-  deleter?: DeleteCredentialFn | null,
-): Promise<{ removed: string[]; failed: string[] }> {
-  const remove = deleter === undefined ? await loadDeleter() : deleter;
-  // A keyring the platform cannot load leaves every secret in place; reporting
-  // that as "removed nothing" would read as a clean sweep.
-  if (!remove) return { removed: [], failed: [...accounts] };
+  attempts: readonly CredentialAttempt[],
+): CredentialOutcome {
+  const byAccount = new Map(attempts.map((a) => [a.account, a]));
   const removed: string[] = [];
   const failed: string[] = [];
   for (const account of accounts) {
-    try {
-      if (remove(KEYRING_SERVICE, account)) removed.push(account);
-    } catch (err) {
-      // A missing entry is the common case and not a failure; anything else is.
-      const message = err instanceof Error ? err.message.toLowerCase() : "";
-      if (!message.includes("no entry") && !message.includes("not found")) failed.push(account);
+    const attempt = byAccount.get(account);
+    // An account the worker never reported on is unaccounted for, not clean.
+    if (!attempt) {
+      failed.push(account);
+      continue;
     }
+    if (attempt.error !== undefined) {
+      const message = attempt.error.toLowerCase();
+      if (!message.includes("no entry") && !message.includes("not found")) failed.push(account);
+      continue;
+    }
+    if (attempt.deleted) removed.push(account);
   }
   return { removed, failed };
+}
+
+// Windows keeps a loaded native addon locked until the owning process exits, so
+// deleting credentials in-process would leave @napi-rs/keyring's .node file held
+// open inside the very node_modules tree the next step removes — an EPERM after
+// the launcher and secrets are already gone. The worker exits first, releasing
+// the lock; it only reports, and the parent classifies.
+const CREDENTIAL_WORKER = `
+const accounts = JSON.parse(process.env.KEELSON_UNINSTALL_ACCOUNTS || "[]");
+const out = [];
+try {
+  const { Entry } = await import("@napi-rs/keyring");
+  for (const account of accounts) {
+    try {
+      out.push({ account, deleted: new Entry(${JSON.stringify(KEYRING_SERVICE)}, account).deleteCredential() });
+    } catch (err) {
+      out.push({ account, error: String((err && err.message) || err) });
+    }
+  }
+} catch (err) {
+  for (const account of accounts) out.push({ account, error: String((err && err.message) || err) });
+}
+process.stdout.write(JSON.stringify(out));
+`;
+
+export async function deleteCredentials(
+  accounts: readonly string[],
+  home: string,
+): Promise<CredentialOutcome> {
+  if (accounts.length === 0) return { removed: [], failed: [] };
+  let attempts: CredentialAttempt[] = [];
+  try {
+    // cwd = home so the worker resolves the keyring the install actually uses.
+    const proc = Bun.spawn(["bun", "-e", CREDENTIAL_WORKER], {
+      cwd: home,
+      env: { ...process.env, KEELSON_UNINSTALL_ACCOUNTS: JSON.stringify(accounts) },
+      stdout: "pipe",
+      stderr: "ignore",
+      windowsHide: true,
+    });
+    const [stdout, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    if (code !== 0) return { removed: [], failed: [...accounts] };
+    attempts = JSON.parse(stdout) as CredentialAttempt[];
+  } catch {
+    // A worker that could not run leaves every secret in place; reporting that
+    // as "removed nothing" would read as a clean sweep.
+    return { removed: [], failed: [...accounts] };
+  }
+  return classifyCredentialAttempts(accounts, attempts);
 }
 
 export async function runUninstall(opts: UninstallOptions): Promise<never> {
@@ -143,9 +198,9 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
     ? "not stopped (forced)"
     : String((stop.payload as { data?: { status?: unknown } }).data?.status ?? "stopped");
 
-  const credentials = opts.keepCredentials
+  const credentials: CredentialOutcome = opts.keepCredentials
     ? { removed: [], failed: [] }
-    : await deleteCredentials(credentialAccounts(loadKeelsonConfig(home)));
+    : await deleteCredentials(credentialAccounts(loadKeelsonConfig(home)), home);
 
   const launcher = launcherPath();
   const launcherRemoved = existsSync(launcher);
@@ -203,11 +258,21 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
           .join(", ")}\n`,
       );
     }
+    // A launcher installed to a custom KEELSON_BIN_DIR is not discoverable
+    // later — the generated launcher persists only KEELSON_HOME — so name the
+    // path that was checked rather than let silence imply it was removed.
+    if (!launcherRemoved) {
+      process.stdout.write(
+        `no launcher at ${launcher}; if you installed with KEELSON_BIN_DIR set, remove the launcher there by hand\n`,
+      );
+    }
     if (process.platform === "win32") {
       process.stdout.write(
         `\nkeelson's bin directory may still be on your user PATH; see the uninstall section of the README to remove it\n`,
       );
     }
   }
-  process.exit(EXIT_OK);
+  // Everything else is done, but a credential that survived means the promised
+  // revocation did not happen — exit non-zero so automation can see it.
+  process.exit(credentials.failed.length > 0 ? EXIT_FAIL : EXIT_OK);
 }
