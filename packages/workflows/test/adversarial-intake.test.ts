@@ -36,7 +36,10 @@ function intakeBash(): string {
   return script;
 }
 
-function runIntake(args: string, opts: { subject?: string; cwd?: string } = {}) {
+function runIntake(
+  args: string,
+  opts: { subject?: string; subjectRequired?: string; cwd?: string } = {},
+) {
   const artifacts = mkdtempSync(join(tmpdir(), "keelson-ar-intake-"));
   tmps.push(artifacts);
   const env: Record<string, string> = {
@@ -45,6 +48,9 @@ function runIntake(args: string, opts: { subject?: string; cwd?: string } = {}) 
     KEELSON_ARTIFACTS_DIR: artifacts,
   };
   if (opts.subject !== undefined) env.KEELSON_INPUTS_subject = opts.subject;
+  if (opts.subjectRequired !== undefined) {
+    env.KEELSON_INPUTS_subject_required = opts.subjectRequired;
+  }
   const proc = Bun.spawnSync({
     cmd: ["bash", "-c", intakeBash()],
     cwd: opts.cwd ?? tmpdir(),
@@ -217,6 +223,26 @@ shimDescribe("adversarial-review intake", () => {
     expect(result.stderr).toContain("did not resolve");
     expect(existsSync(join(result.artifacts, "subject"))).toBe(false);
     expect(result.stdout).toContain("Claim: still reviewable.");
+  });
+
+  test("fails when a required subject ref does not resolve", () => {
+    const repo = gitRepoWithCommit();
+    const result = runIntake("Claim: must use the pinned tree.", {
+      subject: "no-such-ref",
+      subjectRequired: "true",
+      cwd: repo,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("did not resolve");
+  });
+
+  test("fails when a required subject cannot be snapshotted outside a git repository", () => {
+    const result = runIntake("Claim: must use the pinned tree.", {
+      subject: "HEAD",
+      subjectRequired: "1",
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("not inside a git repository");
   });
 
   test("fetches a remote-only subject through a run-scoped ref and leaves none behind", () => {

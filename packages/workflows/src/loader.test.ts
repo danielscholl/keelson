@@ -203,6 +203,28 @@ nodes:
     expect(result.workflow?.nodes[0]?.require_tool_call).toEqual(["canvas_publish"]);
   });
 
+  test("bundled adversarial-review persists and verifies subject snapshot status", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/adversarial-review.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    const intake = result.workflow?.nodes.find((node) => node.id === "intake");
+    const status = result.workflow?.nodes.find((node) => node.id === "subject-status");
+    const verify = result.workflow?.nodes.find((node) => node.id === "verify");
+
+    expect(status && "bash" in status).toBe(true);
+    expect(status?.depends_on).toEqual(["intake"]);
+    const statusBody = status && "bash" in status ? status.bash : "";
+    expect(statusBody).toContain("UNKNOWN marker-absent");
+    expect(statusBody).not.toContain("SUBJECT-SNAPSHOT: NONE");
+    expect(verify?.depends_on).toContain("subject-status");
+
+    const intakeBody = intake && "bash" in intake ? intake.bash : "";
+    expect(intakeBody).toContain("SUBJECT-SNAPSHOT:");
+    expect(intakeBody).toContain('$KEELSON_ARTIFACTS_DIR/subject-status"');
+    expect(intakeBody).toContain("KEELSON_INPUTS_subject_required");
+  });
+
   test("bundled resolve-pr declares a valid converge gate", () => {
     const filePath = path.join(import.meta.dir, "../assets/workflows/resolve-pr.yaml");
     const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
