@@ -106,7 +106,7 @@ nodes:
             SUBJECT_STATUS="OK $COMMIT via $RESOLVED_VIA"
             echo "Subject snapshot: $SUBJECT ($COMMIT) -> \$ARTIFACTS_DIR/subject" >&2
           else
-            SUBJECT_STATUS="FAILED did-not-resolve $SUBJECT"
+            SUBJECT_STATUS="FAILED did-not-resolve"
             echo "subject '$SUBJECT' did not resolve to a commit; the verifier falls back to the caller's working directory" >&2
             if [ "$SUBJECT_REQUIRED" -eq 1 ]; then
               exit 1
