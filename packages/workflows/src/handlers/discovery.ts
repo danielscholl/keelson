@@ -20,7 +20,7 @@
  * convention.
  */
 
-import type { Dirent } from "node:fs";
+import { type Dirent, existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
@@ -31,14 +31,21 @@ const MAX_DISCOVERY_DEPTH = 1;
 const HOME = homedir();
 
 // The managed keelson home, so command/script assets resolve from the same home
-// as the workflows that reference them. Honors KEELSON_HOME (env) and defaults
-// to ~/.keelson — kept env-only here to avoid a @keelson/shared dependency in
-// this leaf package; the project-local scope (cwd/.keelson) covers the dev case.
-function keelsonHome(): string {
+// as the workflows that reference them. Honors KEELSON_HOME (env) and otherwise
+// mirrors defaultUserHome() in @keelson/shared/paths — duplicated rather than
+// imported to keep @keelson/shared out of this leaf package, so the two must be
+// changed together or a named command node searches a different home than the
+// workflow referencing it. The project-local scope (cwd/.keelson) covers dev.
+export function keelsonHome(): string {
   const env = process.env.KEELSON_HOME?.trim();
   // resolve() so a relative KEELSON_HOME normalizes to absolute, matching
   // resolveKeelsonHome in @keelson/shared/paths.
-  return env ? resolve(env) : join(HOME, ".keelson");
+  if (env) return resolve(env);
+  const legacy = join(HOME, ".keelson");
+  if (process.platform !== "win32") return legacy;
+  if (existsSync(legacy)) return legacy;
+  const localAppData = process.env.LOCALAPPDATA?.trim();
+  return localAppData ? join(localAppData, "keelson") : legacy;
 }
 
 export type ScriptRuntime = "bun" | "uv";

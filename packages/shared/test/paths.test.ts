@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { keelsonPaths, resolveKeelsonHome, resolveRibsRoot, ribDataDir } from "../src/paths.ts";
+import {
+  defaultUserHome,
+  keelsonPaths,
+  resolveKeelsonHome,
+  resolveRibsRoot,
+  ribDataDir,
+} from "../src/paths.ts";
 
 const ENV_KEYS = ["KEELSON_HOME", "KEELSON_DB", "KEELSON_WORKFLOWS_DIR"] as const;
 
@@ -40,11 +46,12 @@ describe("resolveKeelsonHome", () => {
     expect(resolveKeelsonHome(nested)).toBe(join(repo, ".keelson"));
   });
 
-  it("falls back to ~/.keelson when no project .keelson/ exists", () => {
-    // An isolated cwd with no .keelson/ ancestor resolves to the user home.
+  it("falls back to the per-user default when no project .keelson/ exists", () => {
+    // An isolated cwd with no .keelson/ ancestor delegates to defaultUserHome,
+    // whose own platform rules are covered in default-user-home.test.ts.
     const isolated = join(tmp, "no-project");
     mkdirSync(isolated, { recursive: true });
-    expect(resolveKeelsonHome(isolated)).toBe(join(homedir(), ".keelson"));
+    expect(resolveKeelsonHome(isolated)).toBe(defaultUserHome());
   });
 });
 

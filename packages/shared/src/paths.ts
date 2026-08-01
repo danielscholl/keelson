@@ -10,7 +10,8 @@ const HOME_DIR_NAME = ".keelson";
 
 // The managed keelson home: the directory holding keelson.db, workflows/, and
 // (when installed) the node_modules/@keelson rib tree. Precedence:
-//   KEELSON_HOME env → an existing .keelson/ found walking up from cwd → ~/.keelson
+//   KEELSON_HOME env → an existing .keelson/ found walking up from cwd → the
+//   per-user default (see defaultUserHome)
 // The walk-up branch preserves the monorepo dev layout (home === <repo>/.keelson)
 // and lets keelson data live beside an embedding project's source.
 export function resolveKeelsonHome(cwd: string = process.cwd()): string {
@@ -18,7 +19,34 @@ export function resolveKeelsonHome(cwd: string = process.cwd()): string {
   if (fromEnv) return resolve(fromEnv);
   const local = findProjectHome(cwd);
   if (local) return local;
-  return join(homedir(), HOME_DIR_NAME);
+  return defaultUserHome();
+}
+
+export interface DefaultUserHomeDeps {
+  platform?: NodeJS.Platform;
+  localAppData?: string | undefined;
+  userHome?: string;
+  exists?: (path: string) => boolean;
+}
+
+// Windows keeps the install tree out of the roaming profile: %USERPROFILE%
+// roams in AD environments, and this directory holds node_modules, a live
+// SQLite database, and a pid file — none of which may follow a user between
+// machines. A pre-existing %USERPROFILE%\.keelson still wins so an upgrade
+// never strands an existing install's data.
+export function defaultUserHome(deps: DefaultUserHomeDeps = {}): string {
+  const platform = deps.platform ?? process.platform;
+  const userHome = deps.userHome ?? homedir();
+  const legacy = join(userHome, HOME_DIR_NAME);
+  if (platform !== "win32") return legacy;
+  const exists = deps.exists ?? existsSync;
+  if (exists(legacy)) return legacy;
+  // Key presence, not `!== undefined`: a caller passing `localAppData: undefined`
+  // means "there is none", which must not fall through to the ambient env.
+  const localAppData = (
+    "localAppData" in deps ? deps.localAppData : process.env.LOCALAPPDATA
+  )?.trim();
+  return localAppData ? join(localAppData, "keelson") : legacy;
 }
 
 function findProjectHome(start: string): string | null {
