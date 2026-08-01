@@ -1318,17 +1318,17 @@ nodes:
       exit 0
 
   - id: triage-ci
-    depends_on: [await-ci]
+    depends_on: [await-ci, brief-ready, criteria-count]
     context: fresh
     model: claude-opus-4.8
     effort: xhigh
     output_format:
       type: object
-      required: [ci_status, actionable, summary]
+      required: [ci_status, actionable, conflicts, criteria_count, brief_status, summary]
       properties:
         ci_status:
           type: string
-          enum: [pass, fail, unknown]
+          enum: [pass, fail, unknown, conflict]
         actionable:
           type: array
           items:
@@ -1339,6 +1339,32 @@ nodes:
               file: { type: string }
               why: { type: string }
               fix: { type: string }
+        conflicts:
+          type: array
+          items:
+            type: object
+            required: [criterion, check, why]
+            properties:
+              criterion: { type: string }
+              check: { type: string }
+              why: { type: string }
+        criteria_count: { type: integer }
+        brief_status:
+          type: string
+          enum: [received, empty, missing, invalid]
+        summary: { type: string }
+    # output_format only shapes the reply; `{}` still parses as a JSON object and
+    # would reach ci-green-gate as a non-fatal UNKNOWN, silently skipping the
+    # criteria gate. output_schema is the fail-closed check.
+    output_schema:
+      type: object
+      required: [ci_status, actionable, conflicts, criteria_count, brief_status, summary]
+      properties:
+        ci_status: { type: string }
+        actionable: { type: array }
+        conflicts: { type: array }
+        criteria_count: { type: integer }
+        brief_status: { type: string }
         summary: { type: string }
     prompt: |
       You are the CI triage judge for the PR this run just pushed.
@@ -1346,12 +1372,23 @@ nodes:
       ## CI result
       $await-ci.output
 
+      ## Brief criteria (invariants)
+      $brief-ready.output
+
+      ## Parsed criteria count
+      $criteria-count.output
+
       ## Instructions
 
+      - Set `criteria_count` to the exact integer in "Parsed criteria count".
+        Set `brief_status` to "received" for valid brief JSON with one or more
+        criteria, "empty" for valid brief JSON with none, "missing" when no brief
+        was rendered, or "invalid" when the rendered brief is not valid JSON.
+        Begin `summary` with `CRITERIA_RECEIVED: {criteria_count}.`
       - If the CI result ends with `CI_STATUS: PASS`, set `ci_status` to "pass",
-        `actionable` to [], and stop — nothing to triage.
+        `actionable` and `conflicts` to [], and stop — nothing to triage.
       - If it ends with `CI_STATUS: UNKNOWN`, set `ci_status` to "unknown" and
-        `actionable` to [].
+        `actionable` and `conflicts` to [].
       - Otherwise CI failed. For EACH failed check, read its failing logs
         (`forge run view <run-id> --log-failed`, or open the URLs in the CI output)
         and this PR's diff
@@ -1361,9 +1398,14 @@ nodes:
         - UNRELATED: a pre-existing failure, an infra/flake (timeouts, network),
           or a failure in files this PR did not touch. Do NOT add it, and NEVER
           propose editing an unrelated test to force green.
+      - The brief criteria are binding invariants. A candidate fix that deletes,
+        skips, inverts, or stops running a criteria-named test or behavior is a
+        CONFLICT, never ACTIONABLE. Set `ci_status` to "conflict", add an entry to
+        `conflicts` naming the criterion and check, and leave `actionable` empty.
       - Be conservative: a test in a workspace this PR did not modify is UNRELATED
         unless the diff plausibly affects it.
-      - Set `ci_status` to "fail"; `summary` is one sentence on what failed.
+      - When no conflict applies, set `conflicts` to [] and `ci_status` to "fail".
+        After the required criteria-count prefix, summarize what failed in one sentence.
 
   - id: fix-ci
     depends_on: [triage-ci]
@@ -1372,23 +1414,37 @@ nodes:
     effort: high
     idle_timeout: 1800000
     prompt: |
-      Fix ONLY the actionable CI failures in the triage below. If `actionable`
-      is empty, make NO changes and stop with "No actionable CI failures."
+      Fix ONLY the actionable CI failures in the triage below.
 
       ## CI triage
       $triage-ci.output
 
       ## Rules
 
+      - FIRST inspect `ci_status` and `conflicts`. If `ci_status` is "conflict"
+        or `conflicts` is non-empty, make NO changes. Write the conflict details
+        to `$ARTIFACTS_DIR/.ci-conflict`, then stop with "CI fix conflicts with
+        issue criteria."
+      - If `actionable` is empty, make NO changes and stop with
+        "No actionable CI failures."
       - You are on the PR's head branch — commit directly onto it; do NOT create
         a new branch, and do NOT touch unrelated or pre-existing failures.
+      - Never make a criteria-named test or behavior stop running. Do not add
+        `skip`, `skipIf`, `.only`, `xit`, `xdescribe`, or `test.todo`, and do
+        not delete or invert the behavior to force CI green. Treat that path as
+        a conflict: revert the attempted edit, write `$ARTIFACTS_DIR/.ci-conflict`
+        with the criterion, check, and reason, and do not commit or push.
       - For each actionable failure: read the file, make the change, then run the
         NARROWEST check that covers it (the touched workspace's type-check +
         tests), not the full suite.
+      - After all edits and narrow checks pass, run
+        `bash "$ARTIFACTS_DIR/verify.sh"`. If it fails, do not commit or push;
+        report the failing check and stop. This is the required final pre-push gate.
       - Stage edited files by name. Never `git add -A`. Never commit anything
         under `$ARTIFACTS_DIR`.
-      - Commit (`git commit -m "fix: address CI failure"`, split if logically
-        distinct) and then `git push` — staging alone is dropped.
+      - Only after `verify.sh` passes, commit
+        (`git commit -m "fix: address CI failure"`, split if logically distinct)
+        and then `git push` — staging alone is dropped.
 
   - id: finalize-pr
     depends_on: [fix-ci]
@@ -1400,6 +1456,12 @@ nodes:
       PR_NUM=$(cat "$KEELSON_ARTIFACTS_DIR/.pr-number" 2>/dev/null | tr -d '[:space:]')
       if [ -z "$PR_NUM" ]; then
         echo "PR_STATE: UNKNOWN — no .pr-number recorded; cannot finalize"
+        exit 0
+      fi
+      if [ -f "$KEELSON_ARTIFACTS_DIR/.ci-conflict" ]; then
+        printf 'FAIL\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
+        echo "PR_STATE: CONFLICT — CI repair conflicts with issue criteria; left as a draft"
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-conflict"
         exit 0
       fi
       # GitHub briefly reports zero checks while replacing runs after a push.
@@ -1503,6 +1565,7 @@ nodes:
             | "failing check: \(.name) — \((.state // .bucket // "unknown") | ascii_downcase)"
           ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
           stamp_ci_outcome "CI red at finalize (see the PR checks tab)"
+          printf 'FAIL\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
           echo "PR_STATE: DRAFT — CI has a failing check; left as a draft for a human"
           exit 0
         fi
@@ -1522,6 +1585,7 @@ nodes:
         else
           echo "PR_STATE: DRAFT — CI gate passed but 'forge pr ready' failed; left a draft"
         fi
+        printf 'PASS\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
         exit 0
       fi
 
@@ -1535,12 +1599,14 @@ nodes:
         else
           echo "PR_STATE: DRAFT — required CI passed but 'forge pr ready' failed; left a draft"
         fi
+        printf 'PASS\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
         exit 0
       fi
       echo "=== Final CI still red ==="
       tail -n 20 "$KEELSON_ARTIFACTS_DIR/.ci-final.txt"
       log_advisory_checks
       stamp_ci_outcome "CI red at finalize (see the PR checks tab)"
+      printf 'FAIL\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
       echo "PR_STATE: DRAFT — CI not green; left as a draft for a human"
       exit 0
 
@@ -1566,16 +1632,21 @@ nodes:
       - PR (from create-pr): $create-pr.output
       - PR identifiers (canonical): read `$ARTIFACTS_DIR/.pr-url` and
         `$ARTIFACTS_DIR/.pr-number` if present.
-      - CI triage: $triage-ci.output
+      - CI triage (including criteria count and conflicts): $triage-ci.output
       - CI + PR state (authoritative): $finalize-pr.output
 
       ## Output
+
+      Treat a non-empty CI-triage `conflicts` array and a red final CI state as
+      explicit failure outcomes. Do not describe either outcome as COMPLETE or
+      successful. If criteria were empty, missing, or invalid, name that UNKNOWN
+      criteria state even when the final CI checks passed.
 
       Print a single block in this shape:
 
       ```
       ===============================================================
-      FIX-ISSUE — COMPLETE
+      FIX-ISSUE — {COMPLETE | CI CONFLICT | CI RED}
       ===============================================================
       Issue:   #{number} — {title}
       Type:    {bug | feature | ...}
@@ -1594,9 +1665,58 @@ nodes:
        "clean — no must-fix findings" when triage confirmed none}
 
       -- CI & PR state --
-      {READY or DRAFT — read it from the finalize-pr output above; if DRAFT, name
-       the failing check and say whether it was unrelated/flaky. If any review
-       threads still need handling, suggest: resolve-pr #{number}}
+      {READY, DRAFT, CONFLICT, RED, or UNKNOWN — read the final state and CI
+       triage above. For CONFLICT, name every criterion and check. For RED, say
+       the final pushed SHA is red and name the failing check. For zero criteria
+       or missing/invalid brief state, say criteria enforcement was UNKNOWN.
+       If any review threads still need handling, suggest: resolve-pr #{number}}
 
       ===============================================================
       ```
+
+  - id: ci-green-gate
+    depends_on: [report]
+    bash: |
+      set -uo pipefail
+      FINAL_STATUS=$(cat "$KEELSON_ARTIFACTS_DIR/.ci-final-status" 2>/dev/null || true)
+
+      if [ -f "$KEELSON_ARTIFACTS_DIR/.ci-conflict" ]; then
+        echo "CI_GATE: FAIL — CI repair conflicts with issue criteria"
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-conflict"
+        exit 1
+      fi
+      if [ "$FINAL_STATUS" = "FAIL" ]; then
+        echo "CI_GATE: FAIL — final pushed SHA has failing CI"
+        exit 1
+      fi
+
+      if [ -n "${KEELSON_NODE_triage_ci_OUTPUT_FILE:-}" ] \
+        && [ -f "$KEELSON_NODE_triage_ci_OUTPUT_FILE" ]; then
+        TRIAGE_JSON=$(cat "$KEELSON_NODE_triage_ci_OUTPUT_FILE")
+      else
+        TRIAGE_JSON="${KEELSON_NODE_triage_ci_OUTPUT:-}"
+      fi
+      if [ -z "$TRIAGE_JSON" ]; then
+        echo "CI_GATE: UNKNOWN — brief did not reach CI triage"
+        exit 0
+      fi
+      if ! CRITERIA_COUNT=$(printf '%s' "$TRIAGE_JSON" | jq -er '.criteria_count | numbers') \
+        || ! BRIEF_STATUS=$(printf '%s' "$TRIAGE_JSON" | jq -er '.brief_status | strings'); then
+        echo "CI_GATE: UNKNOWN — CI triage did not return parseable brief state"
+        exit 0
+      fi
+      if [ "$CRITERIA_COUNT" -eq 0 ] 2>/dev/null; then
+        if [ "$BRIEF_STATUS" = "empty" ]; then
+          echo "CI_GATE: UNKNOWN — brief reached CI triage with 0 parsed criteria"
+        else
+          echo "CI_GATE: UNKNOWN — brief did not reach CI triage as valid criteria input ($BRIEF_STATUS)"
+        fi
+        exit 0
+      fi
+
+      if [ "$FINAL_STATUS" = "PASS" ]; then
+        echo "CI_GATE: PASS — final pushed SHA is green with $CRITERIA_COUNT criteria enforced"
+      else
+        echo "CI_GATE: UNKNOWN — final CI status was not recorded"
+      fi
+      exit 0

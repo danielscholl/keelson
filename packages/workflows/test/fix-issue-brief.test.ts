@@ -19,6 +19,10 @@ type WorkflowNode = {
   depends_on?: string[];
   trigger_rule?: string;
   allowed_tools?: string[];
+  output_format?: {
+    required?: string[];
+    properties?: Record<string, { enum?: string[]; type?: string }>;
+  };
 };
 
 const document = parse(readFileSync(join(bundledWorkflowsDir(), "fix-issue.yaml"), "utf8")) as {
@@ -295,5 +299,66 @@ describe("fix-issue PR divergence status", () => {
     expect(prompt).toContain("- [COVERED] {criterion} -> {step}");
     expect(prompt).toContain("- [MISSING] {criterion}");
     expect(prompt).toContain("COVERAGE: SKIPPED — no acceptance criteria found in the issue body");
+  });
+});
+
+describe("fix-issue CI triage criteria", () => {
+  test("binds triage to the brief and exposes criteria conflicts", () => {
+    const triage = workflowNode("triage-ci");
+    const schema = triage.output_format;
+
+    expect(triage.depends_on).toEqual(["await-ci", "brief-ready", "criteria-count"]);
+    expect(triage.prompt).toContain("$brief-ready.output");
+    expect(triage.prompt).toContain("$criteria-count.output");
+    expect(triage.prompt).toContain("CRITERIA_RECEIVED: {criteria_count}");
+    expect(triage.prompt).toContain("candidate fix that deletes");
+    expect(triage.prompt).toContain("skips, inverts, or stops running");
+    expect(schema?.required).toEqual(
+      expect.arrayContaining(["conflicts", "criteria_count", "brief_status"]),
+    );
+    expect(schema?.properties?.ci_status?.enum).toContain("conflict");
+    expect(schema?.properties?.brief_status?.enum).toEqual([
+      "received",
+      "empty",
+      "missing",
+      "invalid",
+    ]);
+  });
+
+  test("blocks criteria conflicts and validates fixes before push", () => {
+    const prompt = workflowNode("fix-ci").prompt;
+
+    expect(prompt).toContain('If `ci_status` is "conflict"');
+    expect(prompt).toContain("`conflicts` is non-empty");
+    expect(prompt).toContain("$ARTIFACTS_DIR/.ci-conflict");
+    for (const antiPattern of [
+      "`skip`",
+      "`skipIf`",
+      "`.only`",
+      "`xit`",
+      "`xdescribe`",
+      "`test.todo`",
+    ]) {
+      expect(prompt).toContain(antiPattern);
+    }
+    expect(prompt).toContain('bash "$ARTIFACTS_DIR/verify.sh"');
+    expect(prompt).toContain("If it fails, do not commit or push");
+    expect(prompt.indexOf('bash "$ARTIFACTS_DIR/verify.sh"')).toBeLessThan(
+      prompt.indexOf("Only after `verify.sh` passes, commit"),
+    );
+  });
+
+  test("surfaces conflicts and red final CI in the operator report", () => {
+    const report = workflowNode("report");
+
+    expect(report.depends_on).toEqual(["finalize-pr"]);
+    expect(report.prompt).toContain("$triage-ci.output");
+    expect(report.prompt).toContain("$finalize-pr.output");
+    expect(report.prompt).toContain("FIX-ISSUE — {COMPLETE | CI CONFLICT | CI RED}");
+    expect(report.prompt).toContain("For CONFLICT, name every criterion and check");
+    expect(report.prompt).toContain("For RED, say");
+    expect(report.prompt).toContain("the final pushed SHA is red");
+    expect(report.prompt).toContain("criteria enforcement was UNKNOWN");
+    expect(report.prompt).not.toContain("FIX-ISSUE — COMPLETE\n");
   });
 });

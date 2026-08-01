@@ -34,6 +34,8 @@ function runAdvisoryGate(
   snapshot: string,
   opts: {
     requiredChecksFail?: boolean;
+    requiredChecks?: string[];
+    requiredWatchPass?: boolean;
     checkCountResults?: Array<number | "fail">;
   } = {},
 ) {
@@ -51,7 +53,10 @@ function runAdvisoryGate(
   );
   const requiredArm = opts.requiredChecksFail
     ? `"pr required-checks 42") echo "forge: could not resolve base branch for PR 42" >&2; exit 1 ;;`
-    : `"pr required-checks 42") exit 0 ;;`;
+    : `"pr required-checks 42") printf '%s\\n' ${JSON.stringify((opts.requiredChecks ?? []).join("\n"))} ;;`;
+  const requiredWatchArm = opts.requiredWatchPass
+    ? `"pr checks 42 --required --watch --interval 20") exit 0 ;;`
+    : `"pr checks 42 --required --watch --interval 20") echo "required check failed"; exit 1 ;;`;
   const forge = `#!/usr/bin/env bash
 case "$*" in
   "pr checks 42 --json state -q length")
@@ -65,6 +70,7 @@ ${checkCountArms}
     esac
     ;;
   ${requiredArm}
+  ${requiredWatchArm}
   "pr checks 42 --json name,bucket,state") echo '${snapshot}' ;;
   "pr ready 42") touch "$READY_MARKER" ;;
   *) echo "unexpected forge args: $*" >&2; exit 1 ;;
@@ -76,6 +82,7 @@ esac
   const readyMarker = join(artifacts, ".ready-called");
   const checkCountMarker = join(artifacts, ".check-count-calls");
   const sleepMarker = join(artifacts, ".sleep-called");
+  const finalStatus = join(artifacts, ".ci-final-status");
   const proc = Bun.spawnSync({
     cmd: ["bash", "-c", workflowBash(workflow, nodeId)],
     env: {
@@ -96,6 +103,33 @@ esac
     readyCalled: existsSync(readyMarker),
     checkCountCalls: Number(readFileSync(checkCountMarker, "utf8").trim()),
     sleepCalled: existsSync(sleepMarker),
+    finalStatus: existsSync(finalStatus) ? readFileSync(finalStatus, "utf8").trim() : null,
+  };
+}
+
+function runTerminalGate(opts: { status?: string; conflict?: string; triage?: string }) {
+  const artifacts = mkdtempSync(join(tmpdir(), "keelson-ci-terminal-gate-"));
+  tmps.push(artifacts);
+  if (opts.status !== undefined) {
+    writeFileSync(join(artifacts, ".ci-final-status"), `${opts.status}\n`);
+  }
+  if (opts.conflict !== undefined) {
+    writeFileSync(join(artifacts, ".ci-conflict"), opts.conflict);
+  }
+
+  const proc = Bun.spawnSync({
+    cmd: ["bash", "-c", workflowBash("fix-issue", "ci-green-gate")],
+    env: {
+      ...(process.env as Record<string, string>),
+      KEELSON_ARTIFACTS_DIR: artifacts,
+      KEELSON_NODE_triage_ci_OUTPUT: opts.triage ?? "",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    exitCode: proc.exitCode,
+    stdout: proc.stdout.toString(),
   };
 }
 
@@ -168,6 +202,7 @@ shimDescribe("CI advisory gate", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("PR_STATE: UNKNOWN");
     expect(result.readyCalled).toBe(false);
+    expect(result.finalStatus).toBeNull();
   });
 
   test("finalize-pr keeps a genuinely failing advisory-only PR in draft", () => {
@@ -179,6 +214,7 @@ shimDescribe("CI advisory gate", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("PR_STATE: DRAFT");
     expect(result.readyCalled).toBe(false);
+    expect(result.finalStatus).toBe("FAIL");
   });
 
   test("finalize-pr promotes when a cancelled check is advisory", () => {
@@ -193,6 +229,22 @@ shimDescribe("CI advisory gate", () => {
     );
     expect(result.stdout).toContain("PR_STATE: READY");
     expect(result.readyCalled).toBe(true);
+    expect(result.finalStatus).toBe("PASS");
+  });
+
+  test.each([
+    ["passing", true, "PASS"],
+    ["failing", false, "FAIL"],
+  ] as const)("finalize-pr records %s required CI", (_label, requiredWatchPass, status) => {
+    const result = runAdvisoryGate(
+      "fix-issue",
+      "finalize-pr",
+      '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"}]',
+      { requiredChecks: ["Linux tests"], requiredWatchPass },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.finalStatus).toBe(status);
   });
 
   test("checks already present proceed without sleeping", () => {
@@ -304,4 +356,73 @@ shimDescribe("CI advisory gate", () => {
       expect(result.checkCountCalls).toBe(6);
     });
   }
+});
+
+shimDescribe("fix-issue terminal CI gate", () => {
+  const receivedTriage = JSON.stringify({
+    ci_status: "pass",
+    criteria_count: 2,
+    brief_status: "received",
+  });
+
+  test("fails a red final SHA", () => {
+    const result = runTerminalGate({ status: "FAIL", triage: receivedTriage });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("CI_GATE: FAIL — final pushed SHA has failing CI");
+  });
+
+  test("fails a criteria conflict", () => {
+    const result = runTerminalGate({
+      status: "PASS",
+      conflict: "Criterion: the Windows test continues to run",
+      triage: receivedTriage,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("CI_GATE: FAIL — CI repair conflicts with issue criteria");
+    expect(result.stdout).toContain("the Windows test continues to run");
+  });
+
+  test("passes green CI with received criteria", () => {
+    const result = runTerminalGate({ status: "PASS", triage: receivedTriage });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CI_GATE: PASS");
+    expect(result.stdout).toContain("2 criteria enforced");
+  });
+
+  test("reports a valid brief with no criteria as UNKNOWN", () => {
+    const result = runTerminalGate({
+      status: "PASS",
+      triage: JSON.stringify({
+        ci_status: "pass",
+        criteria_count: 0,
+        brief_status: "empty",
+      }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "CI_GATE: UNKNOWN — brief reached CI triage with 0 parsed criteria",
+    );
+  });
+
+  test.each([
+    ["missing brief", JSON.stringify({ criteria_count: 0, brief_status: "missing" })],
+    ["unparseable triage", "not JSON"],
+  ])("reports %s distinctly from a valid empty brief", (_label, triage) => {
+    const result = runTerminalGate({ status: "PASS", triage });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CI_GATE: UNKNOWN");
+    expect(result.stdout).not.toContain("brief reached CI triage with 0 parsed criteria");
+  });
+
+  test("leaves an unrecorded final status non-fatal", () => {
+    const result = runTerminalGate({ triage: receivedTriage });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CI_GATE: UNKNOWN — final CI status was not recorded");
+  });
 });
