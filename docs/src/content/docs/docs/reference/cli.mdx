@@ -127,7 +127,7 @@ after five minutes. The id comes from `approval list` or the in-app prompt.
 | --- | --- |
 | `keelson provider list` | List the built-in providers with their install state (bundled, installed, not installed) and whether each is enabled. |
 | `keelson provider add <id>` | Install a provider's vendor SDK into the home and enable it. `claude`, `codex`, or `pi` — Copilot ships with the harness. |
-| `keelson provider remove <id>` | Uninstall a provider's SDK and disable it. |
+| `keelson provider remove <id>` | Uninstall a provider's SDK and disable it in `config.json`. While `KEELSON_PROVIDERS` still lists the id it stays enabled — that variable is an exact override — and the command reports it instead of claiming otherwise. |
 
 The SDKs are large and vendor-specific, so only Copilot ships with keelson. A
 provider enabled in `config.json` whose SDK is not installed is left
