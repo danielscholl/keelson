@@ -123,7 +123,22 @@ Installed ribs live under the Keelson home and activate on the next server boot.
 
 ## Providers and gateways
 
-Enable providers in `~/.keelson/config.json`:
+Keelson ships with Copilot so a fresh install can chat immediately. The other
+provider SDKs are large (a few hundred MB each) and serve one vendor apiece, so
+they install on demand instead of riding every download:
+
+```bash
+keelson provider list            # what's bundled, installed, and enabled
+keelson provider add claude      # or: codex, pi
+keelson restart
+```
+
+`provider add` fetches the SDK into the Keelson home and enables the provider;
+`provider remove` reverses both. A provider that's enabled but whose SDK isn't
+installed is left unregistered rather than offered and broken — `keelson doctor`
+reports it and names the fix.
+
+Enablement is also editable directly in `~/.keelson/config.json`:
 
 ```json
 {
@@ -193,6 +208,8 @@ keelson disconnect <agent>       # reverse a connect (also: keelson connect <age
 keelson chat "hello"             # chat turn (omit the message for interactive)
 keelson workflow list            # list available workflows
 keelson workflow run <name>      # run a workflow
+keelson provider list            # list providers and their install state
+keelson provider add <id>        # install a provider SDK (claude|codex|pi)
 keelson rib list                 # list installed ribs
 ```
 

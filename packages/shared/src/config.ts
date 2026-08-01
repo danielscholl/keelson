@@ -455,6 +455,47 @@ export function updateKeelsonConfigGateways(
   mutate: (gateways: GatewayConfig[]) => GatewayConfig[],
   home: string = resolveKeelsonHome(),
 ): GatewayConfig[] {
+  let next: GatewayConfig[] = [];
+  mutateKeelsonConfigFile((rawObj) => {
+    next = z.array(gatewayConfigSchema).parse(mutate(readGatewayArray(rawObj.gateways)));
+    if (next.length > 0) rawObj.gateways = next;
+    else delete rawObj.gateways;
+  }, home);
+  return next;
+}
+
+// Read-modify-write the `providers` enablement map, preserving every other key.
+// Setting a provider back to its default enablement drops the key rather than
+// pinning it, so config.json keeps recording only the operator's deviations.
+export function updateKeelsonConfigProviders(
+  changes: Readonly<Record<string, boolean>>,
+  home: string = resolveKeelsonHome(),
+): Record<string, boolean> {
+  let next: Record<string, boolean> = {};
+  mutateKeelsonConfigFile((rawObj) => {
+    const current = rawObj.providers;
+    const merged: Record<string, boolean> =
+      current && typeof current === "object" && !Array.isArray(current)
+        ? { ...(current as Record<string, boolean>) }
+        : {};
+    for (const [id, enabled] of Object.entries(changes)) {
+      if (DEFAULT_PROVIDER_ENABLEMENT[id] === enabled) delete merged[id];
+      else merged[id] = enabled;
+    }
+    next = merged;
+    if (Object.keys(merged).length > 0) rawObj.providers = merged;
+    else delete rawObj.providers;
+  }, home);
+  return next;
+}
+
+// Atomic (temp file + rename) read-modify-write of config.json that refuses to
+// clobber a file that exists but doesn't parse as a JSON object, so a hand-edit
+// typo surfaces as an error instead of silent data loss.
+function mutateKeelsonConfigFile(
+  mutate: (rawObj: Record<string, unknown>) => void,
+  home: string,
+): void {
   const path = process.env.KEELSON_CONFIG?.trim() || join(home, CONFIG_FILE_NAME);
   let rawObj: Record<string, unknown> = {};
   let existing: string | undefined;
@@ -475,12 +516,9 @@ export function updateKeelsonConfigGateways(
     }
     rawObj = parsed as Record<string, unknown>;
   }
-  const next = z.array(gatewayConfigSchema).parse(mutate(readGatewayArray(rawObj.gateways)));
-  if (next.length > 0) rawObj.gateways = next;
-  else delete rawObj.gateways;
+  mutate(rawObj);
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(rawObj, null, 2)}\n`, "utf8");
   renameSync(tmp, path);
-  return next;
 }

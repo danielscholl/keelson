@@ -13,7 +13,10 @@ import {
   type CopilotAuthProbe,
   getAgentProvider,
   getProviderInfoList,
+  isOnDemandProvider,
+  isProviderSdkInstalled,
   isRegisteredProvider,
+  providerNotInstalledMessage,
   registerClaudeProvider,
   registerCodexProvider,
   registerConfiguredGateways,
@@ -123,6 +126,9 @@ export interface RibWorkflowBinding {
 
 export interface BootstrapProvidersOptions {
   getCredential: (serviceId: string) => Promise<string | undefined>;
+  // Overrides the on-disk SDK probe. Tests use it to exercise the not-installed
+  // path without uninstalling a package the checkout depends on.
+  isSdkInstalled?: (id: string) => boolean;
 }
 
 export interface BootstrapProvidersResult {
@@ -133,6 +139,10 @@ export interface BootstrapProvidersResult {
   // The provider new chats and the workflow fallback default to. Undefined only
   // when nothing chat-capable is registered.
   defaultProvider?: string;
+  // Providers the operator enabled whose vendor SDK isn't installed. They are
+  // left unregistered rather than registered-and-broken, so a picker never
+  // offers a provider whose first turn would fail on a missing module.
+  notInstalled: string[];
 }
 
 export function bootstrapProviders(options: BootstrapProvidersOptions): BootstrapProvidersResult {
@@ -145,8 +155,14 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
     envProviders: process.env.KEELSON_PROVIDERS,
     known: BUILT_IN_PROVIDER_IDS,
   });
-  const result: BootstrapProvidersResult = {};
+  const result: BootstrapProvidersResult = { notInstalled: [] };
+  const sdkInstalled = options.isSdkInstalled ?? isProviderSdkInstalled;
   for (const id of requested) {
+    if (isOnDemandProvider(id) && !sdkInstalled(id)) {
+      result.notInstalled.push(id);
+      console.warn(`[keelson] ${providerNotInstalledMessage(id)}`);
+      continue;
+    }
     switch (id) {
       case "stub":
         registerStubProvider();

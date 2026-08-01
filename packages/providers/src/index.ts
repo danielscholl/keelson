@@ -121,6 +121,14 @@ export {
   registerProvider,
   unregisterProvider,
 } from "./registry.ts";
+export {
+  isOnDemandProvider,
+  isProviderSdkInstalled,
+  missingProviderPackages,
+  ON_DEMAND_PROVIDER_PACKAGES,
+  onDemandProviderIds,
+  providerNotInstalledMessage,
+} from "./sdk-availability.ts";
 export { STUB_OUTPUT_TOKEN_BUDGET, StubProvider } from "./stub/provider.ts";
 export { registerStubProvider } from "./stub/registration.ts";
 export type {
