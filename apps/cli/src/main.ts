@@ -26,6 +26,7 @@ import {
   runServeStatus,
   runServeStop,
 } from "./commands/serve.ts";
+import { runUninstall } from "./commands/uninstall.ts";
 import { runUpdate } from "./commands/update.ts";
 import { runWorkflowList } from "./commands/workflow-list.ts";
 import { runWorkflowRespond } from "./commands/workflow-respond.ts";
@@ -714,6 +715,26 @@ export function buildProgram(): Command {
         notes: boolean;
       }>();
       await runUpdate({ json, check, force, ribs, notes });
+    });
+
+  program
+    .command("uninstall")
+    .description(
+      "remove keelson's program files, launcher, and keychain entries (keeps your data unless --purge)",
+    )
+    .option("--purge", "also delete the keelson home, including the database and workflows", false)
+    .option("-y, --yes", "skip the confirmation prompt", false)
+    .option("--keep-credentials", "leave keychain entries in place", false)
+    .option("--force", "uninstall even if the running server could not be stopped", false)
+    .action(async function uninstallAction(this: Command) {
+      const { json } = globalOpts(this);
+      const { purge, yes, keepCredentials, force } = this.opts<{
+        purge: boolean;
+        yes: boolean;
+        keepCredentials: boolean;
+        force: boolean;
+      }>();
+      await runUninstall({ json, purge, yes, keepCredentials, force });
     });
 
   program
