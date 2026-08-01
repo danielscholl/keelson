@@ -4,6 +4,12 @@
 
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isOnDemandProvider, ON_DEMAND_PROVIDER_PACKAGES } from "@keelson/providers";
+import {
+  BUILT_IN_PROVIDER_IDS,
+  loadKeelsonConfig,
+  resolveEnabledProviders,
+} from "@keelson/shared/config";
 import { keelsonPaths } from "@keelson/shared/paths";
 import {
   isWorkflowYaml,
@@ -17,6 +23,7 @@ import { resolveKeelsonHome } from "../home.ts";
 import { displayRegistry, effectiveRegistry } from "../npm-registry.ts";
 import { emit } from "../output.ts";
 import { probeServer } from "../server-probe.ts";
+import { installSpecs } from "./provider.ts";
 
 // The repo whose GitHub Releases this CLI updates from. Overridable for forks
 // and for tests that point at a fixture server.
@@ -425,6 +432,11 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     }`;
   }
 
+  const { restored: providersRestored, failed: providersFailed } = await restoreOnDemandProviders(
+    home,
+    opts.json,
+  );
+
   const ribs = opts.ribs ? ribDependencies(manifest) : [];
   if (ribs.length > 0) {
     const ribInstall = await runBun(["update", ...ribs], home, opts.json);
@@ -445,6 +457,8 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     installed,
     updated: true,
     ribsUpdated: ribs,
+    ...(providersRestored.length > 0 ? { providersRestored } : {}),
+    ...(providersFailed.length > 0 ? { providersFailed } : {}),
     refreshedWorkflows: refreshed,
     removedWorkflows: removed,
     restartRequired: server !== null,
@@ -460,6 +474,14 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     if (ribs.length > 0)
       process.stdout.write(
         `advanced ribs: ${ribs.map((r) => r.replace("@keelson/rib-", "")).join(", ")}\n`,
+      );
+    if (providersRestored.length > 0)
+      process.stdout.write(
+        `kept provider SDKs installed: ${providersRestored.join(", ")} (now managed by \`keelson provider\`)\n`,
+      );
+    if (providersFailed.length > 0)
+      process.stdout.write(
+        `could not reinstall provider SDKs: ${providersFailed.join(", ")} — run \`keelson provider add <id>\`\n`,
       );
     if (refreshed.length > 0)
       process.stdout.write(`refreshed ${refreshed.length} workflow(s): ${refreshed.join(", ")}\n`);
@@ -487,6 +509,49 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
 function printDelta(current: string, latest: string, notes: string): void {
   process.stdout.write(`keelson ${current} → ${latest}\n`);
   if (notes) process.stdout.write(`\n${notes}\n\n`);
+}
+
+// Enabled on-demand providers whose SDK is absent from the home. Provider SDKs
+// used to arrive as transitive dependencies of @keelson/cli, so re-pinning the
+// CLI prunes them from a home that predates on-demand installs; this is what
+// restoreOnDemandProviders re-adds so an update never silently takes a working
+// provider away.
+export function providersNeedingRestore(
+  home: string,
+  exists: (path: string) => boolean = existsSync,
+): string[] {
+  let enabled: string[];
+  try {
+    enabled = resolveEnabledProviders({
+      config: loadKeelsonConfig(home),
+      envProviders: undefined,
+      known: BUILT_IN_PROVIDER_IDS,
+      onWarn: () => {},
+    }).filter(isOnDemandProvider);
+  } catch {
+    return [];
+  }
+  return enabled.filter((id) =>
+    (ON_DEMAND_PROVIDER_PACKAGES[id] ?? []).some((pkg) => !exists(join(home, "node_modules", pkg))),
+  );
+}
+
+// The update itself succeeded, so a failed re-install is reported rather than
+// thrown — but it is never silent: in --json mode runBun suppresses the package
+// manager's own output, so an unreported failure would leave a pruned provider
+// and an exit code that claims everything worked.
+async function restoreOnDemandProviders(
+  home: string,
+  quiet: boolean,
+): Promise<{ restored: string[]; failed: string[] }> {
+  const restored: string[] = [];
+  const failed: string[] = [];
+  for (const id of providersNeedingRestore(home)) {
+    const result = await runBun(["add", ...installSpecs(id, home)], home, quiet);
+    if (result.code === 0) restored.push(id);
+    else failed.push(id);
+  }
+  return { restored, failed };
 }
 
 function emitResult(opts: UpdateOptions, data: Record<string, unknown>): void {

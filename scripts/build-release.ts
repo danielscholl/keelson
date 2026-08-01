@@ -37,28 +37,35 @@ const SHARED_PKG = JSON.parse(
 const VERSION = SHARED_PKG.version;
 const ZOD_RANGE = SHARED_PKG.dependencies.zod;
 // Provider SDK ranges come from @keelson/providers so the release always ships
-// the same SDK versions the repo tests against.
+// the same SDK versions the repo tests against. Copilot is a hard dependency
+// (the default provider, present in every install); the rest are optional peers
+// that `keelson provider add` installs on demand — the peer range published on
+// @keelson/cli is what that command pins to.
 const PROVIDERS_PKG = JSON.parse(
   readFileSync(join(ROOT, "packages", "providers", "package.json"), "utf8"),
-) as { dependencies: Record<string, string> };
+) as { dependencies: Record<string, string>; peerDependencies: Record<string, string> };
 const CLI_PKG = JSON.parse(readFileSync(join(ROOT, "apps", "cli", "package.json"), "utf8")) as {
   dependencies: Record<string, string>;
 };
-const CLAUDE_SDK_RANGE = PROVIDERS_PKG.dependencies["@anthropic-ai/claude-agent-sdk"];
+const CLAUDE_SDK_RANGE = PROVIDERS_PKG.peerDependencies["@anthropic-ai/claude-agent-sdk"];
 const COPILOT_SDK_RANGE = PROVIDERS_PKG.dependencies["@github/copilot-sdk"];
-const PI_SDK_RANGE = PROVIDERS_PKG.dependencies["@earendil-works/pi-coding-agent"];
-const PI_AI_RANGE = PROVIDERS_PKG.dependencies["@earendil-works/pi-ai"];
-const CODEX_SDK_RANGE = PROVIDERS_PKG.dependencies["@openai/codex-sdk"];
+const PI_SDK_RANGE = PROVIDERS_PKG.peerDependencies["@earendil-works/pi-coding-agent"];
+const PI_AI_RANGE = PROVIDERS_PKG.peerDependencies["@earendil-works/pi-ai"];
+const CODEX_SDK_RANGE = PROVIDERS_PKG.peerDependencies["@openai/codex-sdk"];
 const PI_TUI_RANGE = CLI_PKG.dependencies["@earendil-works/pi-tui"];
 // A missing range would be dropped by JSON.stringify below, silently shipping a
 // manifest without the SDK while the bundle still marks it external.
-if (!CLAUDE_SDK_RANGE || !COPILOT_SDK_RANGE || !PI_SDK_RANGE || !PI_AI_RANGE || !CODEX_SDK_RANGE) {
+if (
+  !CLAUDE_SDK_RANGE ||
+  !COPILOT_SDK_RANGE ||
+  !PI_SDK_RANGE ||
+  !PI_AI_RANGE ||
+  !CODEX_SDK_RANGE ||
+  !PI_TUI_RANGE
+) {
   throw new Error(
-    "packages/providers/package.json must declare @anthropic-ai/claude-agent-sdk, @github/copilot-sdk, @earendil-works/pi-coding-agent, @earendil-works/pi-ai, and @openai/codex-sdk dependencies",
+    "packages/providers/package.json must declare @github/copilot-sdk as a dependency and @anthropic-ai/claude-agent-sdk, @earendil-works/pi-coding-agent, @earendil-works/pi-ai, and @openai/codex-sdk as peerDependencies, and apps/cli/package.json must declare @earendil-works/pi-tui",
   );
-}
-if (!PI_TUI_RANGE) {
-  throw new Error("apps/cli/package.json must declare @earendil-works/pi-tui");
 }
 const REPO = "danielscholl/keelson";
 // The starter-asset kinds staged under the cli tarball's `assets/` and seeded
@@ -105,17 +112,25 @@ const cliPkg = {
   type: "module",
   bin: { keelson: "./dist/keelson.js" },
   dependencies: {
-    "@anthropic-ai/claude-agent-sdk": CLAUDE_SDK_RANGE,
-    "@earendil-works/pi-ai": PI_AI_RANGE,
-    "@earendil-works/pi-coding-agent": PI_SDK_RANGE,
     "@earendil-works/pi-tui": PI_TUI_RANGE,
     "@github/copilot-sdk": COPILOT_SDK_RANGE,
     "@napi-rs/keyring": "1.3.0",
-    "@openai/codex-sdk": CODEX_SDK_RANGE,
     zod: ZOD_RANGE,
   },
-  peerDependencies: { "@keelson/shared": `^${VERSION}` },
-  peerDependenciesMeta: { "@keelson/shared": { optional: true } },
+  peerDependencies: {
+    "@anthropic-ai/claude-agent-sdk": CLAUDE_SDK_RANGE,
+    "@earendil-works/pi-ai": PI_AI_RANGE,
+    "@earendil-works/pi-coding-agent": PI_SDK_RANGE,
+    "@keelson/shared": `^${VERSION}`,
+    "@openai/codex-sdk": CODEX_SDK_RANGE,
+  },
+  peerDependenciesMeta: {
+    "@anthropic-ai/claude-agent-sdk": { optional: true },
+    "@earendil-works/pi-ai": { optional: true },
+    "@earendil-works/pi-coding-agent": { optional: true },
+    "@keelson/shared": { optional: true },
+    "@openai/codex-sdk": { optional: true },
+  },
   files: ["dist", "web", "assets", "LICENSE", "NOTICE"],
 };
 writeFileSync(join(CLI_PKG_DIR, "package.json"), `${JSON.stringify(cliPkg, null, 2)}\n`);
@@ -243,6 +258,7 @@ chmod +x "$BIN_DIR/keelson"
 
 echo "keelson v$KEELSON_VERSION installed to $KEELSON_HOME"
 echo "launcher: $BIN_DIR/keelson  (ensure $BIN_DIR is on PATH)"
+echo "bundled provider: copilot  (add others: keelson provider add claude|codex|pi)"
 echo "next: keelson start && keelson doctor"
 `;
 }
@@ -444,6 +460,7 @@ if (-not (($env:Path -split ";") -contains $BinDir)) {
 
 Write-Host "keelson v$KeelsonVersion installed to $KeelsonHome"
 Write-Host "launcher: $BinDir\\keelson.cmd"
+Write-Host "bundled provider: copilot  (add others: keelson provider add claude|codex|pi)"
 Write-Host "next: keelson start; keelson doctor"
 `;
 }

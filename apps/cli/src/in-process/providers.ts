@@ -12,7 +12,10 @@
 
 import {
   getProviderInfoList,
+  isOnDemandProvider,
+  isProviderSdkInstalled,
   isRegisteredProvider,
+  providerNotInstalledMessage,
   registerClaudeProvider,
   registerCodexProvider,
   registerConfiguredGateways,
@@ -71,10 +74,15 @@ export interface BootstrapResult {
   registered: string[];
 }
 
+export interface ProviderBootstrapResult extends BootstrapResult {
+  // Enabled providers left unregistered because their vendor SDK is absent.
+  notInstalled: string[];
+}
+
 // Register the set of providers requested by KEELSON_PROVIDERS (or all
 // built-ins when unset), each with the keyring-backed credential getter.
 // Idempotent — re-registration is a no-op inside the registry.
-export function bootstrapCliProviders(): BootstrapResult {
+export function bootstrapCliProviders(): ProviderBootstrapResult {
   const config = loadKeelsonConfig();
   const requested = resolveEnabledProviders({
     config,
@@ -82,7 +90,16 @@ export function bootstrapCliProviders(): BootstrapResult {
     known: BUILT_IN_PROVIDER_IDS,
   });
   const registered: string[] = [];
+  const notInstalled: string[] = [];
   for (const id of requested) {
+    // Same floor the server applies: a provider whose vendor SDK is absent must
+    // not reach the picker, or the turn dies on a dynamic import instead of
+    // falling back to one that can actually run.
+    if (isOnDemandProvider(id) && !isProviderSdkInstalled(id)) {
+      notInstalled.push(id);
+      console.warn(`[keelson] ${providerNotInstalledMessage(id)}`);
+      continue;
+    }
     if (id === "stub") {
       registerStubProvider();
       registered.push("stub");
@@ -126,7 +143,7 @@ export function bootstrapCliProviders(): BootstrapResult {
       getApiKey: getCliCredential,
     }),
   );
-  return { registered };
+  return { registered, notInstalled };
 }
 
 // Pick a default provider when --provider is omitted. Shares resolveDefaultProvider

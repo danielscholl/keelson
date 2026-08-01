@@ -4,6 +4,7 @@
 
 import { resolve } from "node:path";
 import type { RibSummary } from "@keelson/shared";
+import { runBunPm, runBunPmCaptured } from "../bun-pm.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_NO_SERVER, EXIT_NOT_FOUND, EXIT_OK } from "../exit.ts";
 import {
   ensureHome,
@@ -34,37 +35,6 @@ interface BaseOptions {
 function resolveRibSource(arg: string): string {
   if (arg.startsWith(".")) return resolve(arg);
   return arg;
-}
-
-// Run `bun <args>` in the home and return its exit code. In JSON mode bun's
-// output is discarded (`ignore`) so the envelope is the only thing on stdout —
-// and, critically, piped-but-undrained stdio would deadlock once bun's output
-// exceeds the OS pipe buffer (a `bun add github:…` clone easily does). Human
-// mode inherits bun's progress.
-async function runBunPm(args: string[], home: string, quiet: boolean): Promise<number> {
-  const proc = Bun.spawn(["bun", ...args], {
-    cwd: home,
-    stdout: quiet ? "ignore" : "inherit",
-    stderr: quiet ? "ignore" : "inherit",
-    windowsHide: true,
-  });
-  return await proc.exited;
-}
-
-async function runBunPmCaptured(
-  args: string[],
-  home: string,
-  quiet: boolean,
-): Promise<{ code: number; stderr: string }> {
-  const proc = Bun.spawn(["bun", ...args], {
-    cwd: home,
-    stdout: quiet ? "ignore" : "inherit",
-    stderr: "pipe",
-    windowsHide: true,
-  });
-  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-  if (!quiet && stderr.length > 0) process.stderr.write(stderr);
-  return { code, stderr };
 }
 
 // Skip probeServer: the actual GET surfaces "connection refused" via

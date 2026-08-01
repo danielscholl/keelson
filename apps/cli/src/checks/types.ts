@@ -4,7 +4,14 @@
 
 export type CheckStatus = "ok" | "warn" | "fail" | "skip";
 
-export type CheckCategory = "toolchain" | "server" | "db" | "auth" | "workflows" | "ribs";
+export type CheckCategory =
+  | "toolchain"
+  | "server"
+  | "db"
+  | "auth"
+  | "workflows"
+  | "providers"
+  | "ribs";
 
 export interface CheckResult {
   name: string;

@@ -18,6 +18,7 @@ import { runDoctor } from "./commands/doctor.ts";
 import { runGatewayAdd, runGatewayList, runGatewayRemove } from "./commands/gateway.ts";
 import { runMcpBridge } from "./commands/mcp.ts";
 import { runProjectAdd, runProjectList, runProjectRemove } from "./commands/project.ts";
+import { runProviderAdd, runProviderList, runProviderRemove } from "./commands/provider.ts";
 import { runRibAdd, runRibList, runRibRemove, runRibShow } from "./commands/rib.ts";
 import {
   runServe,
@@ -442,6 +443,46 @@ export function buildProgram(): Command {
       const { json } = globalOpts(this);
       const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
       await runProjectRemove(nameOrId, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  const provider = program
+    .command("provider")
+    .description("provider operations (list, add, remove) — manage coding-agent SDKs");
+
+  provider
+    .command("list")
+    .description("list built-in providers with their install and enablement state")
+    .action(async function providerListAction(this: Command) {
+      const { json } = globalOpts(this);
+      await runProviderList({ json });
+    });
+
+  provider
+    .command("add <id>")
+    .description("install a provider's SDK into the keelson home and enable it")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function providerAddAction(
+      this: Command,
+      id: string,
+      addOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", addOpts.baseUrl);
+      await runProviderAdd(id, { json, ...(baseUrl ? { baseUrl } : {}) });
+    });
+
+  provider
+    .command("remove <id>")
+    .description("uninstall a provider's SDK from the keelson home and disable it")
+    .option("--base-url <url>", "explicit server base URL (skips the probe)")
+    .action(async function providerRemoveAction(
+      this: Command,
+      id: string,
+      removeOpts: { baseUrl?: string },
+    ) {
+      const { json } = globalOpts(this);
+      const baseUrl = requireNonEmpty(json, "--base-url", removeOpts.baseUrl);
+      await runProviderRemove(id, { json, ...(baseUrl ? { baseUrl } : {}) });
     });
 
   const rib = program

@@ -129,7 +129,15 @@ describe("keelson CLI smoke", () => {
     };
     expect(data.strict).toBe(false);
     const categories = data.categories.map((c) => c.category).sort();
-    expect(categories).toEqual(["auth", "db", "ribs", "server", "toolchain", "workflows"]);
+    expect(categories).toEqual([
+      "auth",
+      "db",
+      "providers",
+      "ribs",
+      "server",
+      "toolchain",
+      "workflows",
+    ]);
     const summed = data.summary.ok + data.summary.warn + data.summary.fail + data.summary.skip;
     expect(summed).toBe(data.summary.total);
   });

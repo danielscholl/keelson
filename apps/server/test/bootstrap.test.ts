@@ -1355,6 +1355,29 @@ describe("bootstrapProviders", () => {
     expect(ids().filter((id) => id !== "workflow")).toEqual(["claude"]);
     expect(res.defaultProvider).toBe("claude");
   });
+
+  test("an enabled provider whose SDK is absent is reported, not registered", () => {
+    process.env.KEELSON_PROVIDERS = "copilot,claude,codex";
+    const res = bootstrapProviders({
+      getCredential: noCredential,
+      isSdkInstalled: (id) => id !== "claude" && id !== "codex",
+    });
+    expect(res.notInstalled).toEqual(["claude", "codex"]);
+    expect(ids()).not.toContain("claude");
+    expect(ids()).not.toContain("codex");
+    expect(ids()).toContain("copilot");
+    expect(res.defaultProvider).toBe("copilot");
+  });
+
+  test("a bundled provider is never gated on the SDK probe", () => {
+    process.env.KEELSON_PROVIDERS = "copilot";
+    const res = bootstrapProviders({
+      getCredential: noCredential,
+      isSdkInstalled: () => false,
+    });
+    expect(res.notInstalled).toEqual([]);
+    expect(ids()).toContain("copilot");
+  });
 });
 
 describe("parseToolDenylist", () => {
