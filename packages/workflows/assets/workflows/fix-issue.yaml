@@ -1546,6 +1546,7 @@ nodes:
             | "failing check: \(.name) — \((.state // .bucket // "unknown") | ascii_downcase)"
           ' "$KEELSON_ARTIFACTS_DIR/.ci-final-snapshot.json"
           stamp_ci_outcome "CI red at finalize (see the PR checks tab)"
+          printf 'FAIL\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
           echo "PR_STATE: DRAFT — CI has a failing check; left as a draft for a human"
           exit 0
         fi
@@ -1565,6 +1566,7 @@ nodes:
         else
           echo "PR_STATE: DRAFT — CI gate passed but 'forge pr ready' failed; left a draft"
         fi
+        printf 'PASS\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
         exit 0
       fi
 
@@ -1578,12 +1580,14 @@ nodes:
         else
           echo "PR_STATE: DRAFT — required CI passed but 'forge pr ready' failed; left a draft"
         fi
+        printf 'PASS\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
         exit 0
       fi
       echo "=== Final CI still red ==="
       tail -n 20 "$KEELSON_ARTIFACTS_DIR/.ci-final.txt"
       log_advisory_checks
       stamp_ci_outcome "CI red at finalize (see the PR checks tab)"
+      printf 'FAIL\n' > "$KEELSON_ARTIFACTS_DIR/.ci-final-status"
       echo "PR_STATE: DRAFT — CI not green; left as a draft for a human"
       exit 0
 

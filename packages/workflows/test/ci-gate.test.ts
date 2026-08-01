@@ -34,6 +34,8 @@ function runAdvisoryGate(
   snapshot: string,
   opts: {
     requiredChecksFail?: boolean;
+    requiredChecks?: string[];
+    requiredWatchPass?: boolean;
     checkCountResults?: Array<number | "fail">;
   } = {},
 ) {
@@ -51,7 +53,10 @@ function runAdvisoryGate(
   );
   const requiredArm = opts.requiredChecksFail
     ? `"pr required-checks 42") echo "forge: could not resolve base branch for PR 42" >&2; exit 1 ;;`
-    : `"pr required-checks 42") exit 0 ;;`;
+    : `"pr required-checks 42") printf '%s\\n' ${JSON.stringify((opts.requiredChecks ?? []).join("\n"))} ;;`;
+  const requiredWatchArm = opts.requiredWatchPass
+    ? `"pr checks 42 --required --watch --interval 20") exit 0 ;;`
+    : `"pr checks 42 --required --watch --interval 20") echo "required check failed"; exit 1 ;;`;
   const forge = `#!/usr/bin/env bash
 case "$*" in
   "pr checks 42 --json state -q length")
@@ -65,6 +70,7 @@ ${checkCountArms}
     esac
     ;;
   ${requiredArm}
+  ${requiredWatchArm}
   "pr checks 42 --json name,bucket,state") echo '${snapshot}' ;;
   "pr ready 42") touch "$READY_MARKER" ;;
   *) echo "unexpected forge args: $*" >&2; exit 1 ;;
@@ -76,6 +82,7 @@ esac
   const readyMarker = join(artifacts, ".ready-called");
   const checkCountMarker = join(artifacts, ".check-count-calls");
   const sleepMarker = join(artifacts, ".sleep-called");
+  const finalStatus = join(artifacts, ".ci-final-status");
   const proc = Bun.spawnSync({
     cmd: ["bash", "-c", workflowBash(workflow, nodeId)],
     env: {
@@ -96,6 +103,7 @@ esac
     readyCalled: existsSync(readyMarker),
     checkCountCalls: Number(readFileSync(checkCountMarker, "utf8").trim()),
     sleepCalled: existsSync(sleepMarker),
+    finalStatus: existsSync(finalStatus) ? readFileSync(finalStatus, "utf8").trim() : null,
   };
 }
 
@@ -168,6 +176,7 @@ shimDescribe("CI advisory gate", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("PR_STATE: UNKNOWN");
     expect(result.readyCalled).toBe(false);
+    expect(result.finalStatus).toBeNull();
   });
 
   test("finalize-pr keeps a genuinely failing advisory-only PR in draft", () => {
@@ -179,6 +188,7 @@ shimDescribe("CI advisory gate", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("PR_STATE: DRAFT");
     expect(result.readyCalled).toBe(false);
+    expect(result.finalStatus).toBe("FAIL");
   });
 
   test("finalize-pr promotes when a cancelled check is advisory", () => {
@@ -193,6 +203,22 @@ shimDescribe("CI advisory gate", () => {
     );
     expect(result.stdout).toContain("PR_STATE: READY");
     expect(result.readyCalled).toBe(true);
+    expect(result.finalStatus).toBe("PASS");
+  });
+
+  test.each([
+    ["passing", true, "PASS"],
+    ["failing", false, "FAIL"],
+  ] as const)("finalize-pr records %s required CI", (_label, requiredWatchPass, status) => {
+    const result = runAdvisoryGate(
+      "fix-issue",
+      "finalize-pr",
+      '[{"name":"Linux tests","bucket":"pass","state":"SUCCESS"}]',
+      { requiredChecks: ["Linux tests"], requiredWatchPass },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.finalStatus).toBe(status);
   });
 
   test("checks already present proceed without sleeping", () => {
