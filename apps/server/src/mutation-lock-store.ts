@@ -9,6 +9,7 @@
 export interface MutationLockRecord {
   id: string;
   projectId: string;
+  mode: "exclusive" | "shared";
   purpose: string;
   owner: string;
   acquiredAt: string;
@@ -28,42 +29,59 @@ function copyRecord(record: MutationLockRecord): MutationLockRecord {
 }
 
 export function createMutationLockStore(): MutationLockStore {
-  const locks = new Map<string, MutationLockRecord>();
+  const locks = new Map<string, MutationLockRecord[]>();
 
   return {
     list() {
       return Array.from(locks.values())
+        .flat()
         .map(copyRecord)
         .sort((a, b) => b.acquiredAt.localeCompare(a.acquiredAt) || a.id.localeCompare(b.id));
     },
     getByProject(projectId) {
-      const record = locks.get(projectId);
+      const projectLocks = locks.get(projectId);
+      const record =
+        projectLocks?.find((candidate) => candidate.mode === "exclusive") ?? projectLocks?.[0];
       return record ? copyRecord(record) : undefined;
     },
     get(id) {
-      for (const record of locks.values()) {
-        if (record.id === id) {
+      for (const projectLocks of locks.values()) {
+        const record = projectLocks.find((candidate) => candidate.id === id);
+        if (record) {
           return copyRecord(record);
         }
       }
       return undefined;
     },
     insert(record) {
-      if (locks.has(record.projectId)) {
+      const projectLocks = locks.get(record.projectId) ?? [];
+      if (
+        (record.mode === "exclusive" && projectLocks.length > 0) ||
+        projectLocks.some((candidate) => candidate.mode === "exclusive")
+      ) {
         throw new Error(`project ${record.projectId} already has a mutation lock`);
       }
-      locks.set(record.projectId, copyRecord(record));
+      projectLocks.push(copyRecord(record));
+      locks.set(record.projectId, projectLocks);
     },
     delete(id) {
-      for (const [projectId, record] of locks) {
-        if (record.id === id) {
-          return locks.delete(projectId);
+      for (const [projectId, projectLocks] of locks) {
+        const index = projectLocks.findIndex((record) => record.id === id);
+        if (index !== -1) {
+          projectLocks.splice(index, 1);
+          if (projectLocks.length === 0) {
+            locks.delete(projectId);
+          }
+          return true;
         }
       }
       return false;
     },
     clear() {
-      const count = locks.size;
+      const count = Array.from(locks.values()).reduce(
+        (total, projectLocks) => total + projectLocks.length,
+        0,
+      );
       locks.clear();
       return count;
     },

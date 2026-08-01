@@ -49,6 +49,7 @@ import {
   type WorkflowSource,
   type WorkflowWithSource,
   webSearchModeSchema,
+  workflowBaseSchema,
 } from "./schema/index.ts";
 
 /**
@@ -692,6 +693,16 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     });
   }
 
+  const lockingResult = workflowBaseSchema.shape.locking.safeParse(obj.locking);
+  const locking = lockingResult.success ? lockingResult.data : undefined;
+  if (obj.locking !== undefined && !lockingResult.success) {
+    warnings.push({
+      filename,
+      kind: "invalid_field_value",
+      message: "invalid 'locking' value (ignored); valid: exclusive, shared",
+    });
+  }
+
   const additionalDirectories = Array.isArray(obj.additionalDirectories)
     ? obj.additionalDirectories.filter((d): d is string => typeof d === "string")
     : undefined;
@@ -771,6 +782,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     ...(additionalDirectories !== undefined ? { additionalDirectories } : {}),
     ...(interactive !== undefined ? { interactive } : {}),
     ...(mutatesCheckout !== undefined ? { mutates_checkout: mutatesCheckout } : {}),
+    ...(locking !== undefined ? { locking } : {}),
     ...(requiresProject !== undefined ? { requiresProject } : {}),
     nodes,
     ...(worktreePolicy ? { worktree: worktreePolicy } : {}),

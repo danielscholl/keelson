@@ -21,6 +21,7 @@ export class MutationLockConflictError extends Error {
 
 export interface AcquireMutationLockManagerRequest {
   projectId: string;
+  mode?: "exclusive" | "shared";
   purpose: string;
   owner: string;
 }
@@ -64,6 +65,7 @@ export function createMutationLockManager({
         store.insert({
           id,
           projectId: req.projectId,
+          mode: req.mode ?? "exclusive",
           purpose: req.purpose,
           owner: req.owner,
           acquiredAt: new Date().toISOString(),

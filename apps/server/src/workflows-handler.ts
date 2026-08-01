@@ -869,6 +869,13 @@ function mutationLockOwner(origin: WorkflowRunOrigin, runId: string): string {
   return `${origin === "scheduled" ? "scheduled" : "workflow"}:${runId.slice(0, 8)}`;
 }
 
+function resolveLockMode(workflow: {
+  locking?: "exclusive" | "shared";
+  mutates_checkout?: boolean;
+}): "exclusive" | "shared" | "none" {
+  return workflow.locking ?? (workflow.mutates_checkout === false ? "none" : "exclusive");
+}
+
 function acquireRunMutationLock(opts: {
   mutationLockManager?: MutationLockManager;
   workflow: WorkflowDefinition;
@@ -877,15 +884,13 @@ function acquireRunMutationLock(opts: {
   origin: WorkflowRunOrigin;
 }): MutationLockHandle | undefined {
   const { mutationLockManager, workflow, lockProjectId, runId, origin } = opts;
-  if (
-    mutationLockManager === undefined ||
-    lockProjectId === null ||
-    workflow.mutates_checkout === false
-  ) {
+  const mode = resolveLockMode(workflow);
+  if (mutationLockManager === undefined || lockProjectId === null || mode === "none") {
     return undefined;
   }
   return mutationLockManager.acquire({
     projectId: lockProjectId,
+    mode,
     purpose: workflow.name,
     owner: mutationLockOwner(origin, runId),
   });
@@ -990,14 +995,16 @@ function startRunCore(
         origin,
       })
     : undefined;
+  const isolationFallbackMode = resolveLockMode(workflow);
   const isolationFallbackLock =
     isolationOn &&
     mutationLockManager !== undefined &&
-    workflow.mutates_checkout !== false &&
+    isolationFallbackMode !== "none" &&
     lockProjectId !== null
       ? {
           manager: mutationLockManager,
           projectId: lockProjectId,
+          mode: isolationFallbackMode,
           purpose: workflow.name,
           owner: mutationLockOwner(origin, runId),
         }
@@ -2653,6 +2660,7 @@ interface ExecuteRunArgs {
   isolationFallbackLock?: {
     manager: MutationLockManager;
     projectId: string;
+    mode: "exclusive" | "shared";
     purpose: string;
     owner: string;
   };
@@ -3299,6 +3307,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     if (lockOnInPlaceIsolationFallback && isolationFallbackLock !== undefined) {
       isolationFallbackLockHandle = isolationFallbackLock.manager.acquire({
         projectId: isolationFallbackLock.projectId,
+        mode: isolationFallbackLock.mode,
         purpose: isolationFallbackLock.purpose,
         owner: isolationFallbackLock.owner,
       });
