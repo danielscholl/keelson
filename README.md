@@ -181,7 +181,7 @@ keelson uninstall           # program files, launcher, and keychain entries
 keelson uninstall --purge   # the above plus the home: database, workflows, rib data
 ```
 
-`keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, removes the launcher, and deletes the bun project inside the home. Your data stays put unless you pass `--purge`.
+`keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, removes the launcher, and deletes the program files at the root of the home (`node_modules`, `package.json`, `bun.lock`, `.npmrc`). Your data stays put unless you pass `--purge`.
 
 A plain run removes the `keelson` command itself, so there is nothing left to type a second time: pass `--purge` up front if you want the data gone too. [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/) covers the flags, manual removal on each platform, and why provider credentials outlive the home.
 
