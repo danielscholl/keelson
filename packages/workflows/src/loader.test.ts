@@ -194,6 +194,23 @@ nodes:
     expect(gate?.retry).toBeUndefined();
   });
 
+  test("bundled adversarial-review gates synthesis and reruns verification", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/adversarial-review.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+
+    const verify = result.workflow?.nodes.find((node) => node.id === "verify");
+    expect(verify?.always_run).toBe(true);
+
+    const gate = result.workflow?.nodes.find((node) => node.id === "verify-gate");
+    expect(gate).toBeDefined();
+    expect(gate && "bash" in gate).toBe(true);
+
+    const synthesize = result.workflow?.nodes.find((node) => node.id === "synthesize");
+    expect(synthesize?.depends_on).toEqual(["verify", "verify-gate"]);
+  });
+
   test("DAG with depends_on, when:, trigger_rule", () => {
     const yaml = `
 name: triage

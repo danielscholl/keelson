@@ -300,6 +300,7 @@ nodes:
   # a consensus verdict is not issued on a panel where a lane failed.
   - id: verify
     depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk]
+    always_run: true
     context: fresh
     model: gpt-5.6-terra
     effort: xhigh
@@ -358,11 +359,29 @@ nodes:
       End with **Corrections**: any claim in the artifact or a reviewer's output
       that your check proved wrong — stated plainly.
 
+  - id: verify-gate
+    depends_on: [verify]
+    always_run: true
+    timeout: 15000
+    bash: |
+      set -euo pipefail
+      # Deliberately reads only _OUTPUT, never the _OUTPUT_FILE spill: an
+      # inherited spill path can be a prior run's, and a head+tail truncation of
+      # a real verification still carries claim records.
+      OUT="${KEELSON_NODE_verify_OUTPUT:-}"
+      CLAIMS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*claim\**[[:space:]]*:' || true)
+      RESULTS=$(printf '%s' "$OUT" | grep -Eic '^[^[:alnum:]]*result\**[[:space:]]*:[[:space:]]*(confirmed|refuted|unverifiable-here)' || true)
+      if [ "$CLAIMS" -lt 1 ] || [ "$RESULTS" -lt 1 ]; then
+        echo "verify produced no per-claim record (found ${CLAIMS} Claim: line(s), ${RESULTS} Result: line(s) carrying CONFIRMED/REFUTED/UNVERIFIABLE-HERE) — the verification layer is absent, not clean. Run 'keelson workflow resume <runId>' to re-run verify; do not synthesize an unchecked panel." >&2
+        exit 1
+      fi
+      printf 'verify substance check passed (%s Claim / %s Result line(s))\n' "$CLAIMS" "$RESULTS" >&2
+
   # Read-only: the artifact and reviewer text are untrusted, so synthesis holds
   # no tools. Its printed verdict is the workflow's output (it lands in the run
   # record; the scratch $ARTIFACTS_DIR does not survive the run).
   - id: synthesize
-    depends_on: [verify]
+    depends_on: [verify, verify-gate]
     context: fresh
     model: claude-opus-4.8
     effort: xhigh
