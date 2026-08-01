@@ -233,13 +233,16 @@ If you added `~/.local/bin` to your shell profile only for Keelson, remove that 
 ```powershell
 keelson stop 2>$null
 # Removes both locations: the current default and the pre-0.93 profile home.
-$KeelsonHome = if ($env:KEELSON_HOME) { $env:KEELSON_HOME } else { Join-Path $env:LOCALAPPDATA "keelson" }
 $LegacyHome = Join-Path $env:USERPROFILE ".keelson"
-Remove-Item -Force "$env:LOCALAPPDATA\keelson\bin\keelson.cmd" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force $KeelsonHome, $LegacyHome, "$env:LOCALAPPDATA\keelson" -ErrorAction SilentlyContinue
+$KeelsonHome = if ($env:KEELSON_HOME) { $env:KEELSON_HOME }
+  elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson" }
+  else { $LegacyHome }
+$Targets = @($KeelsonHome, $LegacyHome)
+if ($env:LOCALAPPDATA) { $Targets += (Join-Path $env:LOCALAPPDATA "keelson") }
+Remove-Item -Recurse -Force $Targets -ErrorAction SilentlyContinue
 
 # Remove Keelson's bin directory from the user PATH.
-$KeelsonBin = "$env:LOCALAPPDATA\keelson\bin"
+$KeelsonBin = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson\bin" } else { Join-Path $LegacyHome "bin" }
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 $NewPath = ($UserPath -split ";" | Where-Object { $_ -and ($_ -ne $KeelsonBin) }) -join ";"
 [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")

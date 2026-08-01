@@ -270,7 +270,12 @@ $KeelsonHome = if ($env:KEELSON_HOME) { $env:KEELSON_HOME }
   elseif (Test-Path $LegacyKeelsonHome) { $LegacyKeelsonHome }
   elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson" }
   else { $LegacyKeelsonHome }
-$BinDir = if ($env:KEELSON_BIN_DIR) { $env:KEELSON_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "keelson\\bin" }
+# Falls back with the home: Join-Path on a null LOCALAPPDATA throws under
+# ErrorActionPreference=Stop, which would abort the very install the home's
+# own fallback exists to complete.
+$BinDir = if ($env:KEELSON_BIN_DIR) { $env:KEELSON_BIN_DIR }
+  elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson\\bin" }
+  else { Join-Path $LegacyKeelsonHome "bin" }
 # Pin the home to this release's versioned download URLs (not /latest/), so the
 # dependency string changes between versions — that is what lets \`bun install\`
 # re-resolve on a re-run instead of serving the URL-keyed cache. Override either
