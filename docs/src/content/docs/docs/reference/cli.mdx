@@ -220,7 +220,10 @@ each rib's data directory) stays unless you pass `--purge`.
 A plain run removes the CLI itself along with the other program files, so it also
 removes the command you would type a second time. Pass `--purge` on the first run
 when the data should go too; after a plain run, delete the home directory
-yourself. A home whose `package.json` belongs to some other project is refused
+yourself. It leaves a `.keelson-uninstalled` note behind saying what happened,
+which is also how a later `--purge` recognizes the home: `KEELSON_HOME` is
+whatever you point it at, so a missing `package.json` on its own is not evidence
+of anything. A home whose `package.json` belongs to some other project is refused
 outright, with or without `--purge`, so pointing the command at a source checkout
 cannot cost that project its `node_modules`.
 

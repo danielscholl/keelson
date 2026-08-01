@@ -11,6 +11,8 @@ import { classifyCredentialAttempts, classifyHomeProgram } from "../src/commands
 import {
   credentialAccounts,
   PROGRAM_ENTRIES,
+  UNINSTALL_MARKER,
+  uninstallMarkerContents,
   unreachableCredentialRibs,
 } from "../src/uninstall-plan.ts";
 
@@ -99,14 +101,20 @@ describe("classifyHomeProgram", () => {
     expect(classifyHomeProgram(home)).toBe("foreign");
   });
 
-  test("no manifest means the program files are already gone", () => {
-    expect(classifyHomeProgram(home)).toBe("absent");
+  test("the marker is what makes a missing manifest a keelson home", () => {
+    writeFileSync(join(home, UNINSTALL_MARKER), uninstallMarkerContents("0.0.0", "now"));
+    expect(classifyHomeProgram(home)).toBe("uninstalled");
   });
 
-  // Only a missing manifest may reach the --purge path. A manifest that exists
-  // but cannot be read is still a manifest, and reading the failure as "absent"
-  // would hand --purge a home it must not delete.
-  test("a manifest that cannot be read is foreign, not absent", () => {
+  // KEELSON_HOME is operator-supplied, so absence alone proves nothing: without
+  // the marker every unrelated directory would qualify for --purge.
+  test("a bare directory is unknown, not an uninstalled home", () => {
+    expect(classifyHomeProgram(home)).toBe("unknown");
+  });
+
+  // A manifest that exists but cannot be read is still a manifest; reading the
+  // failure as an absence would hand --purge a home it must not delete.
+  test("a manifest that cannot be read is foreign, not an absence", () => {
     mkdirSync(join(home, "package.json"));
     expect(classifyHomeProgram(home)).toBe("foreign");
   });

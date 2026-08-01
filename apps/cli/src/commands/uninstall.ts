@@ -2,17 +2,20 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { readKeelsonConfig } from "@keelson/shared/config";
+import pkg from "../../package.json" with { type: "json" };
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listedRibIds, resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
 import {
   credentialAccounts,
   PROGRAM_ENTRIES,
+  UNINSTALL_MARKER,
+  uninstallMarkerContents,
   unreachableCredentialRibs,
 } from "../uninstall-plan.ts";
 import { serveStop } from "./serve.ts";
@@ -42,23 +45,20 @@ function fail(message: string, code: string, json: boolean): never {
   process.exit(code === "BAD_INPUTS" ? EXIT_BAD_ARGS : EXIT_FAIL);
 }
 
-export type HomeProgramState = "installed" | "foreign" | "absent";
+export type HomeProgramState = "installed" | "foreign" | "uninstalled" | "unknown";
 
 // The home doubles as a source checkout's data dir in dev (paths.ts walks up to
 // <repo>/.keelson), where removing "program files" would delete the developer's
-// node_modules. An installed home is the one carrying an @keelson/cli dep; an
-// unparseable manifest counts as foreign, since a manifest we cannot read is
-// still evidence that something else owns the node_modules beside it.
+// node_modules. An installed home is the one carrying an @keelson/cli dep; a
+// manifest we cannot read is still evidence that something else owns the
+// node_modules beside it, so it counts as foreign rather than as an absence.
 export function classifyHomeProgram(home: string): HomeProgramState {
   let raw: string;
   try {
     raw = readFileSync(join(home, "package.json"), "utf8");
   } catch (err) {
-    // Only a manifest that isn't there means the program files are gone. A
-    // manifest we are merely denied (EACCES, EISDIR) is still a manifest, and
-    // reading it as "absent" would hand --purge a home it must not delete.
-    const code = (err as NodeJS.ErrnoException).code;
-    return code === "ENOENT" || code === "ENOTDIR" ? "absent" : "foreign";
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") return "foreign";
+    return existsSync(join(home, UNINSTALL_MARKER)) ? "uninstalled" : "unknown";
   }
   try {
     const manifest = JSON.parse(raw) as { dependencies?: Record<string, string> };
@@ -71,23 +71,29 @@ export function classifyHomeProgram(home: string): HomeProgramState {
 function assertRemovableHome(home: string, purge: boolean, json: boolean): void {
   const state = classifyHomeProgram(home);
   if (state === "installed") return;
-  if (state === "foreign") {
+  // A prior run took the program files and left the marker saying so. --purge
+  // may finish the job; a plain run has nothing left to remove and would only
+  // revoke keychain entries the operator never asked about.
+  if (state === "uninstalled") {
+    if (purge) return;
     fail(
-      `${home} is not an installed keelson home (no @keelson/cli dependency); in a source checkout, remove it with git`,
+      `${home} has no keelson program files left — a prior \`keelson uninstall\` already removed them. Re-run with --purge to delete the home itself`,
       "NOT_INSTALLED",
       json,
     );
   }
-  // No manifest: a prior non-purge run already took the program files. --purge
-  // may still finish the job, but a plain run has nothing left to remove and
-  // would only revoke keychain entries the operator never asked about.
-  if (!purge) {
+  if (state === "unknown") {
     fail(
-      `${home} has no keelson program files to remove — a prior \`keelson uninstall\` already took them, or this home was never provisioned by install.sh. Re-run with --purge to delete the home itself`,
+      `${home} is not a keelson home: no package.json, and no record of an uninstall that left one behind. Nothing was removed`,
       "NOT_INSTALLED",
       json,
     );
   }
+  fail(
+    `${home} is not an installed keelson home (no @keelson/cli dependency); in a source checkout, remove it with git`,
+    "NOT_INSTALLED",
+    json,
+  );
 }
 
 async function confirm(home: string, purge: boolean): Promise<boolean> {
@@ -254,11 +260,21 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
   const launcherRemoved = existsSync(launcher);
   rmSync(launcher, { force: true });
 
+  let marker: string | null = null;
   if (opts.purge) {
     rmSync(home, { recursive: true, force: true });
   } else {
     for (const entry of PROGRAM_ENTRIES) {
       rmSync(join(home, entry), { recursive: true, force: true });
+    }
+    // Without this a later --purge cannot tell this home from any other
+    // directory that has no package.json, and refuses rather than guess.
+    try {
+      const path = join(home, UNINSTALL_MARKER);
+      writeFileSync(path, uninstallMarkerContents(pkg.version, new Date().toISOString()));
+      marker = path;
+    } catch {
+      marker = null;
     }
   }
 
@@ -274,6 +290,7 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
         credentialsFailed: credentials.failed,
         ribCredentialsMayRemain,
         dataKept: !opts.purge,
+        marker,
       },
     },
     { json: opts.json },
@@ -290,6 +307,11 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
       // This run took the keelson command too, so naming --purge here would
       // point at something the operator can no longer type.
       process.stdout.write(`to discard that data as well, remove ${home} yourself\n`);
+      if (!marker) {
+        process.stdout.write(
+          `could not write ${UNINSTALL_MARKER} to the home; a later \`keelson uninstall --purge\` will refuse it\n`,
+        );
+      }
     }
     if (launcherRemoved) process.stdout.write(`removed launcher ${launcher}\n`);
     if (credentials.removed.length > 0) {

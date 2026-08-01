@@ -111,14 +111,25 @@ describe("keelson uninstall (spawned CLI)", () => {
     expect(existsSync(home)).toBe(false);
   });
 
+  // KEELSON_HOME is operator-supplied and --purge deletes it recursively, so a
+  // directory that merely lacks a package.json must not qualify.
+  test("--purge refuses a directory with no manifest and no uninstall marker", async () => {
+    writeFileSync(join(home, "keelson.db"), "db");
+    const res = await runCli(["uninstall", "--yes", "--purge", "--json"], home);
+    expect(res.exitCode).toBe(1);
+    expect(JSON.parse(res.stdout).code).toBe("NOT_INSTALLED");
+    expect(existsSync(home)).toBe(true);
+  });
+
   // The first run deletes the manifest that proves the home was installed, so a
   // guard keyed only on that manifest would strand an operator who decides to
-  // purge after the fact.
+  // purge after the fact. The marker the first run leaves is what carries it.
   test("--purge finishes a home a prior run already took the program files from", async () => {
     seedHome(home);
     const first = await runCli(["uninstall", "--yes", "--keep-credentials", "--json"], home);
     expect(first.exitCode).toBe(0);
     expect(existsSync(join(home, "package.json"))).toBe(false);
+    expect(JSON.parse(first.stdout).data.marker).toBe(join(home, ".keelson-uninstalled"));
 
     const second = await runCli(
       ["uninstall", "--yes", "--purge", "--keep-credentials", "--json"],

@@ -10,6 +10,21 @@ import { gatewayCredentialServiceId, type KeelsonConfig } from "@keelson/shared/
 // unless --purge is given.
 export const PROGRAM_ENTRIES = ["node_modules", "package.json", "bun.lock", ".npmrc"] as const;
 
+// Left in the home by a non-purge uninstall. Removing package.json destroys the
+// only evidence that a directory was ever an install, and a later --purge must
+// not infer one from a missing manifest: KEELSON_HOME is operator-supplied, so
+// every unrelated directory would qualify. This marker is that evidence.
+export const UNINSTALL_MARKER = ".keelson-uninstalled";
+
+export function uninstallMarkerContents(version: string, when: string): string {
+  return [
+    `keelson ${version} removed this home's program files on ${when}.`,
+    "The data beside this file was kept. Delete this directory to discard it,",
+    "or re-run the installer to make the home usable again.",
+    "",
+  ].join("\n");
+}
+
 // Keychain accounts keelson itself writes under the `keelson` service. Codex
 // and pi are absent by design: both manage their own auth files outside the
 // keychain, so there is nothing here to revoke for them.
