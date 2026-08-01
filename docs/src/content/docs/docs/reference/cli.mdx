@@ -203,6 +203,7 @@ command). The options below apply to the one-shot form.
 | `keelson update` | Update the harness and GitHub-sourced ribs in place. `--check` reports the available version; `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
 | `keelson backup [output]` | Write a consistent snapshot of the database, safe while the server is running. Defaults to `<home>/backups/keelson-<timestamp>.db`; `--db <path>` snapshots a different database. |
 | `keelson worktree prune` | Remove leftover isolated-run worktrees. `--dry-run` lists candidates; `--force` also removes dirty ones. |
+| `keelson uninstall` | Remove the program files, the launcher, and the keychain entries keelson wrote. `--purge` also deletes the home; `--yes` skips the prompt; `--keep-credentials` leaves the keychain alone; `--force` proceeds when the server could not be stopped. |
 | `keelson version` | Print the CLI, Bun, and schema versions, plus each installed rib's version. |
 
 The database runs in WAL mode, so copying `keelson.db` while the server is
@@ -210,6 +211,23 @@ running can capture it mid-write. `keelson backup` opens it read-only and asks
 SQLite for a fully checkpointed snapshot instead: consistent, no `-wal`/`-shm`
 sidecar, and safe to take live. Restore by putting the file back as
 `keelson.db` with the server stopped.
+
+`keelson uninstall` splits the home in two. The program files — `node_modules`,
+`package.json`, `bun.lock`, `.npmrc` — are what `install.sh` provisioned, and
+they always go. Your data — `keelson.db`, `workflows/`, `commands/`,
+`config.json`, and each rib's data directory — stays unless you pass `--purge`.
+Running it twice is the two-step form: a plain run removes the program files,
+then `--purge` deletes what is left. A home with a `package.json` that is not
+keelson's own is refused outright, so pointing the command at a source checkout
+cannot cost that project its `node_modules`.
+
+<Aside type="caution" title="Rib credentials outlive the command">
+The OS keychain resolves entries by exact name and cannot be enumerated, so
+`keelson uninstall` revokes only the accounts it knows it wrote: provider keys
+and configured gateways. A rib that stores secrets under its own service ids is
+outside what the command can find. It names the installed ribs and the
+`rib_<id>_*` pattern on the way out; clear those by hand.
+</Aside>
 
 <Aside type="note" title="--base-url skips the probe">
 Server-backed commands normally probe for a running server. Pass `--base-url`

@@ -453,11 +453,15 @@ try {
 $HomeForCmd = if ($env:KEELSON_HOME) { $KeelsonHome }
   elseif ($KeelsonHome -eq $LegacyKeelsonHome) { "%USERPROFILE%\\.keelson" }
   else { "%LOCALAPPDATA%\\keelson" }
+# The CLI is resolved from where it was installed, never from KEELSON_HOME: that
+# variable points the harness at a data home, which need not be a provisioned
+# install. Mirrors the absolute path install.sh bakes into its launcher.
 $Launcher = @(
   "@echo off",
   "setlocal",
-  "if not defined KEELSON_HOME set ""KEELSON_HOME=$HomeForCmd""",
-  "bun ""%KEELSON_HOME%\\node_modules\\@keelson\\cli\\dist\\keelson.js"" %*"
+  "set ""KEELSON_PROGRAM=$HomeForCmd""",
+  "if not defined KEELSON_HOME set ""KEELSON_HOME=%KEELSON_PROGRAM%""",
+  "bun ""%KEELSON_PROGRAM%\\node_modules\\@keelson\\cli\\dist\\keelson.js"" %*"
 )
 Set-Content -Path (Join-Path $BinDir "keelson.cmd") -Value $Launcher -Encoding ascii
 

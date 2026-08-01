@@ -42,23 +42,48 @@ function fail(message: string, code: string, json: boolean): never {
   process.exit(code === "BAD_INPUTS" ? EXIT_BAD_ARGS : EXIT_FAIL);
 }
 
+export type HomeProgramState = "installed" | "foreign" | "absent";
+
 // The home doubles as a source checkout's data dir in dev (paths.ts walks up to
 // <repo>/.keelson), where removing "program files" would delete the developer's
-// node_modules. An installed home is the one carrying an @keelson/cli dep.
-function assertInstalledHome(home: string, json: boolean): void {
+// node_modules. An installed home is the one carrying an @keelson/cli dep; an
+// unparseable manifest counts as foreign, since a manifest we cannot read is
+// still evidence that something else owns the node_modules beside it.
+export function classifyHomeProgram(home: string): HomeProgramState {
+  let raw: string;
   try {
-    const manifest = JSON.parse(readFileSync(join(home, "package.json"), "utf8")) as {
-      dependencies?: Record<string, string>;
-    };
-    if (manifest.dependencies?.["@keelson/cli"]) return;
+    raw = readFileSync(join(home, "package.json"), "utf8");
   } catch {
-    // fall through to the shared refusal below
+    return "absent";
   }
-  fail(
-    `${home} is not an installed keelson home (no @keelson/cli dependency); in a source checkout, remove it with git`,
-    "NOT_INSTALLED",
-    json,
-  );
+  try {
+    const manifest = JSON.parse(raw) as { dependencies?: Record<string, string> };
+    return manifest.dependencies?.["@keelson/cli"] ? "installed" : "foreign";
+  } catch {
+    return "foreign";
+  }
+}
+
+function assertRemovableHome(home: string, purge: boolean, json: boolean): void {
+  const state = classifyHomeProgram(home);
+  if (state === "installed") return;
+  if (state === "foreign") {
+    fail(
+      `${home} is not an installed keelson home (no @keelson/cli dependency); in a source checkout, remove it with git`,
+      "NOT_INSTALLED",
+      json,
+    );
+  }
+  // No manifest: a prior non-purge run already took the program files. --purge
+  // may still finish the job, but a plain run has nothing left to remove and
+  // would only revoke keychain entries the operator never asked about.
+  if (!purge) {
+    fail(
+      `${home} has no keelson program files to remove — a prior \`keelson uninstall\` already took them, or this home was never provisioned by install.sh. Re-run with --purge to delete the home itself`,
+      "NOT_INSTALLED",
+      json,
+    );
+  }
 }
 
 async function confirm(home: string, purge: boolean): Promise<boolean> {
@@ -165,7 +190,7 @@ export async function deleteCredentials(
 
 export async function runUninstall(opts: UninstallOptions): Promise<never> {
   const home = resolveKeelsonHome();
-  assertInstalledHome(home, opts.json);
+  assertRemovableHome(home, opts.purge, opts.json);
 
   if (!opts.yes) {
     if (opts.json || !process.stdin.isTTY) {

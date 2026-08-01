@@ -2,9 +2,12 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { KeelsonConfig } from "@keelson/shared/config";
-import { classifyCredentialAttempts } from "../src/commands/uninstall.ts";
+import { classifyCredentialAttempts, classifyHomeProgram } from "../src/commands/uninstall.ts";
 import {
   credentialAccounts,
   PROGRAM_ENTRIES,
@@ -65,6 +68,39 @@ describe("PROGRAM_ENTRIES", () => {
     for (const data of ["keelson.db", "workflows", "commands", "config.json", "rib-osdu"]) {
       expect(PROGRAM_ENTRIES as readonly string[]).not.toContain(data);
     }
+  });
+});
+
+describe("classifyHomeProgram", () => {
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "keelson-classify-"));
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  function manifest(contents: string): void {
+    writeFileSync(join(home, "package.json"), contents);
+  }
+
+  test("the @keelson/cli dep is what marks an installed home", () => {
+    manifest(JSON.stringify({ dependencies: { "@keelson/cli": "file:x" } }));
+    expect(classifyHomeProgram(home)).toBe("installed");
+  });
+
+  test("another project's manifest is foreign", () => {
+    manifest(JSON.stringify({ name: "some-app", dependencies: { react: "^19" } }));
+    expect(classifyHomeProgram(home)).toBe("foreign");
+  });
+
+  // Fail closed: next to a manifest we cannot read, removing PROGRAM_ENTRIES
+  // could take another project's node_modules.
+  test("an unparseable manifest is treated as foreign", () => {
+    manifest("{ not json");
+    expect(classifyHomeProgram(home)).toBe("foreign");
+  });
+
+  test("no manifest means the program files are already gone", () => {
+    expect(classifyHomeProgram(home)).toBe("absent");
   });
 });
 

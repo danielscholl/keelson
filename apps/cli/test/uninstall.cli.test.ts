@@ -75,10 +75,22 @@ describe("keelson uninstall (spawned CLI)", () => {
 
   test("a source checkout is refused", async () => {
     writeFileSync(join(home, "package.json"), JSON.stringify({ name: "not-a-home" }));
+    mkdirSync(join(home, "node_modules"), { recursive: true });
     const res = await runCli(["uninstall", "--yes", "--json"], home);
     expect(res.exitCode).toBe(1);
     expect(JSON.parse(res.stdout).code).toBe("NOT_INSTALLED");
     expect(existsSync(join(home, "package.json"))).toBe(true);
+    expect(existsSync(join(home, "node_modules"))).toBe(true);
+  });
+
+  // A foreign manifest is the case the guard exists for, and --purge is the
+  // most destructive way in — it must not become the way around it.
+  test("a source checkout is refused even with --purge", async () => {
+    writeFileSync(join(home, "package.json"), JSON.stringify({ name: "not-a-home" }));
+    const res = await runCli(["uninstall", "--yes", "--purge", "--json"], home);
+    expect(res.exitCode).toBe(1);
+    expect(JSON.parse(res.stdout).code).toBe("NOT_INSTALLED");
+    expect(existsSync(home)).toBe(true);
   });
 
   test("non-interactive without --yes refuses and removes nothing", async () => {
@@ -87,5 +99,48 @@ describe("keelson uninstall (spawned CLI)", () => {
     expect(res.exitCode).toBe(2);
     expect(JSON.parse(res.stdout).code).toBe("BAD_INPUTS");
     expect(existsSync(join(home, "node_modules"))).toBe(true);
+  });
+
+  test("--purge removes the whole home", async () => {
+    seedHome(home);
+    const res = await runCli(
+      ["uninstall", "--yes", "--purge", "--keep-credentials", "--json"],
+      home,
+    );
+    expect(res.exitCode).toBe(0);
+    expect(existsSync(home)).toBe(false);
+  });
+
+  // The first run deletes the manifest that proves the home was installed, so a
+  // guard keyed only on that manifest would strand an operator who decides to
+  // purge after the fact.
+  test("--purge finishes a home a prior run already took the program files from", async () => {
+    seedHome(home);
+    const first = await runCli(["uninstall", "--yes", "--keep-credentials", "--json"], home);
+    expect(first.exitCode).toBe(0);
+    expect(existsSync(join(home, "package.json"))).toBe(false);
+
+    const second = await runCli(
+      ["uninstall", "--yes", "--purge", "--keep-credentials", "--json"],
+      home,
+    );
+    expect(second.exitCode).toBe(0);
+    expect(existsSync(home)).toBe(false);
+  });
+
+  // Without --purge there is nothing left to remove, and proceeding would only
+  // revoke keychain entries the operator never asked about.
+  test("a second plain run refuses instead of touching the keychain", async () => {
+    seedHome(home);
+    expect(
+      (await runCli(["uninstall", "--yes", "--keep-credentials", "--json"], home)).exitCode,
+    ).toBe(0);
+
+    const res = await runCli(["uninstall", "--yes", "--json"], home);
+    expect(res.exitCode).toBe(1);
+    const payload = JSON.parse(res.stdout);
+    expect(payload.code).toBe("NOT_INSTALLED");
+    expect(payload.error).toContain("--purge");
+    expect(existsSync(join(home, "keelson.db"))).toBe(true);
   });
 });

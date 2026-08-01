@@ -254,7 +254,9 @@ keelson uninstall --purge   # the above plus the home: database, workflows, rib 
 
 `keelson uninstall` stops the server, revokes the keychain entries Keelson wrote, removes the launcher, and deletes the bun project inside the home (`node_modules`, `package.json`, `bun.lock`, `.npmrc`). Your data — `keelson.db`, `workflows/`, `commands/`, `config.json`, and each rib's data directory — stays put unless you pass `--purge`. Add `--yes` to skip the prompt when scripting, and `--keep-credentials` to leave the keychain alone.
 
-If the server cannot be stopped, the command removes nothing and says why; `--force` overrides that.
+The two lines above also work in sequence: run it once to remove the program files, then again with `--purge` when you decide the data should go too.
+
+If the server cannot be stopped, the command removes nothing and says why; `--force` overrides that. On Windows the command cannot edit your user `PATH`, so the bin directory the installer added stays until you remove it — see [Manual removal on Windows PowerShell](#manual-removal-on-windows-powershell) for that step.
 
 One limit worth knowing: the OS keychain resolves entries by exact name and cannot be enumerated, so Keelson can revoke only the accounts it knows it wrote (provider keys and configured gateways). A rib storing secrets under its own service ids is outside what the command can find, so it names the installed ribs and the `rib_<id>_*` pattern to check by hand.
 
@@ -277,12 +279,10 @@ If you added `~/.local/bin` to your shell profile only for Keelson, remove that 
 keelson stop 2>$null
 # Removes both locations: the current default and the pre-0.93 profile home.
 $LegacyHome = Join-Path $env:USERPROFILE ".keelson"
-$KeelsonHome = if ($env:KEELSON_HOME) { $env:KEELSON_HOME }
-  elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson" }
-  else { $LegacyHome }
-$Targets = @($KeelsonHome, $LegacyHome)
+$Targets = @($LegacyHome)
+if ($env:KEELSON_HOME) { $Targets += $env:KEELSON_HOME }
 if ($env:LOCALAPPDATA) { $Targets += (Join-Path $env:LOCALAPPDATA "keelson") }
-Remove-Item -Recurse -Force $Targets -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force ($Targets | Select-Object -Unique) -ErrorAction SilentlyContinue
 
 # Remove Keelson's bin directory from the user PATH.
 $KeelsonBin = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "keelson\bin" } else { Join-Path $LegacyHome "bin" }
