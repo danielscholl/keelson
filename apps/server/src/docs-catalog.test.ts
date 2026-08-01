@@ -36,6 +36,13 @@ function inlineSource(overrides: Partial<DocsSource> = {}): DocsSource {
   return { id: "test", title: "Test", summary: "A test source.", content: CORPUS, ...overrides };
 }
 
+// Freshness is `now() - mtimeMs > ttlMs`, so a ttl of -1 only forces a refetch
+// while the clock is at least a millisecond ahead of the file's mtime. On
+// Windows the coarse system clock can read behind a just-written mtime, making
+// the cache look fresh and the expected fetch never happen. This margin is
+// larger than any skew.
+const ALWAYS_STALE_MS = -Number.MAX_SAFE_INTEGER;
+
 describe("parseTopics", () => {
   test("splits on H1, drops pre-heading preamble, captures blockquote summary", () => {
     const topics = parseTopics(CORPUS);
@@ -286,7 +293,7 @@ describe("DocsCatalog URL fetch + cache", () => {
     const offline = new DocsCatalog({
       sources: [urlSource()],
       cacheDir,
-      ttlMs: -1, // disk always stale → always attempts a (failing) fetch
+      ttlMs: ALWAYS_STALE_MS, // disk always stale → always attempts a (failing) fetch
       fetchImpl: (async () => {
         calls += 1;
         throw new Error("offline");
@@ -314,7 +321,7 @@ describe("DocsCatalog URL fetch + cache", () => {
         throw new Error("offline");
       }) as unknown as typeof fetch,
       // Force past the freshness window so it attempts a (failing) refetch.
-      ttlMs: -1,
+      ttlMs: ALWAYS_STALE_MS,
     });
     const res = await offline.toc("web");
     expect(res.ok).toBe(true);
