@@ -164,32 +164,6 @@ Prefer to wire it by hand, or use another client? The endpoint is `http://127.0.
 
 Once connected, an agent can call `keelson_docs` to learn how Keelson behaves (no source checkout required) and `workflow_list` / `workflow_run` to drive automations. The endpoint is local by default, but it can expose state-changing tools. Add a token, restrict tools, or make the endpoint read-only before proxying it outside your machine.
 
-## CLI reference
-
-Useful commands:
-
-```bash
-keelson start                    # start the local server in the background
-keelson stop                     # stop the background server
-keelson restart                  # restart the background server
-keelson status                   # report server status
-keelson backup                   # consistent snapshot of the database
-keelson connect <agent>          # wire an agent (claude|copilot|codex|all) to the MCP endpoint
-keelson disconnect <agent>       # reverse a connect (also: keelson connect <agent> --undo)
-keelson chat "hello"             # chat turn (omit the message for interactive)
-keelson workflow list            # list available workflows
-keelson workflow run <name>      # run a workflow
-keelson provider list            # list providers and their install state
-keelson provider add <id>        # install a provider SDK (claude|codex|pi)
-keelson rib add <source>         # install a rib, pinned to its newest release
-keelson rib list                 # list installed ribs
-keelson rib update               # advance ribs to their newest releases
-keelson update                   # update the harness and its ribs
-keelson uninstall                # remove keelson (--purge also deletes your data)
-```
-
-For scripting, Keelson supports `--json` output and stable exit codes. See the [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/) for details.
-
 ## Back up your data
 
 ```bash
@@ -213,7 +187,8 @@ A plain run removes the `keelson` command itself, so there is nothing left to ty
 
 ## Documentation
 
-- [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, CLI reference, and rib contract.
+- [Keelson docs](https://danielscholl.github.io/keelson/): concepts, guides, workflow reference, and rib contract.
+- [CLI reference](https://danielscholl.github.io/keelson/docs/reference/cli/): every command and flag, plus the `--json` envelope and stable exit codes for scripting.
 - [Installing and removing Keelson](https://danielscholl.github.io/keelson/docs/guides/installation/): platform details, upgrades, and clean removal.
 - [Writing ribs](WRITING-RIBS.md): the five-minute rib authoring quickstart.
 - [CONTRIBUTING.md](CONTRIBUTING.md): local setup and required checks.
