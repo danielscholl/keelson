@@ -270,9 +270,9 @@ function truncateEnvValue(value: string, note: string): string {
 export function buildSubprocessEnv(
   inputs: Readonly<Record<string, string>>,
   upstream: ReadonlyMap<string, NodeOutput>,
-  options?: { artifactsDir?: string },
+  options?: { artifactsDir?: string; parentEnv?: Readonly<Record<string, string>> },
 ): Record<string, string> {
-  const env: Record<string, string> = { ...PARENT_ENV };
+  const env: Record<string, string> = { ...(options?.parentEnv ?? PARENT_ENV) };
   // PARENT_ENV is captured at module load — if the operator's shell had
   // KEELSON_ARTIFACTS_DIR / ARTIFACTS_DIR set (or a parent process from a
   // prior run set them), they would leak into every subprocess unless we
@@ -291,6 +291,8 @@ export function buildSubprocessEnv(
   for (const [id, out] of upstream.entries()) {
     const full = out.output ?? "";
     const name = `KEELSON_NODE_${envSafe(id)}_OUTPUT`;
+    // An inherited spill path must not outlive the output that created it.
+    delete env[`${name}_FILE`];
     if (full.length <= ENV_VALUE_MAX_CHARS) {
       env[name] = full;
       continue;

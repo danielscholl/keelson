@@ -163,23 +163,13 @@ describe("buildSubprocessEnv", () => {
 describe("buildSubprocessEnv — env value cap (issue #442)", () => {
   const big = `HEAD-MARKER\n${"x".repeat(ENV_VALUE_MAX_CHARS * 3)}\nTAIL-MARKER`;
 
-  // buildSubprocessEnv spreads PARENT_ENV — a module-load snapshot of
-  // process.env — so when this suite runs inside a keelson workflow node the
-  // executor's own KEELSON_NODE_<id>_OUTPUT_FILE spill vars are already ambient
-  // and Object.hasOwn over the merged env sees them. Assert the function did not
-  // ADD the spill var for the node under test, measured against a node-free
-  // baseline that carries the same ambient state.
-  const baseline = buildSubprocessEnv({}, new Map<string, NodeOutput>());
-  const addedFileVar = (id: string, env: Record<string, string>): boolean => {
-    const name = `KEELSON_NODE_${id}_OUTPUT_FILE`;
-    return Object.hasOwn(env, name) && !Object.hasOwn(baseline, name);
-  };
-
-  test("a node output at or under the cap passes through unchanged with no _FILE var", () => {
+  test("an inherited _FILE is cleared when the current output stays under the cap", () => {
     const exact = "y".repeat(ENV_VALUE_MAX_CHARS);
-    const env = buildSubprocessEnv({}, upstreamOf("validate", exact));
+    const env = buildSubprocessEnv({}, upstreamOf("validate", exact), {
+      parentEnv: { KEELSON_NODE_validate_OUTPUT_FILE: "/stale/path.txt" },
+    });
     expect(env.KEELSON_NODE_validate_OUTPUT).toBe(exact);
-    expect(addedFileVar("validate", env)).toBe(false);
+    expect(Object.hasOwn(env, "KEELSON_NODE_validate_OUTPUT_FILE")).toBe(false);
   });
 
   test("an oversized node output is head+tail truncated with a marker carrying the full length", () => {
@@ -194,14 +184,17 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
 
   test("without an artifacts dir the output is truncated but no _FILE var is set", () => {
     const env = buildSubprocessEnv({}, upstreamOf("validate", big));
-    expect(addedFileVar("validate", env)).toBe(false);
+    expect(Object.hasOwn(env, "KEELSON_NODE_validate_OUTPUT_FILE")).toBe(false);
     expect(env.KEELSON_NODE_validate_OUTPUT).not.toContain("_OUTPUT_FILE");
   });
 
-  test("with an artifacts dir the full output spills to node-outputs/<id>.txt and _FILE points at it", () => {
+  test("a genuine spill replaces an inherited _FILE with the fresh path", () => {
     const dir = mkdtempSync(join(tmpdir(), "keelson-envcap-"));
     try {
-      const env = buildSubprocessEnv({}, upstreamOf("re-review", big), { artifactsDir: dir });
+      const env = buildSubprocessEnv({}, upstreamOf("re-review", big), {
+        artifactsDir: dir,
+        parentEnv: { KEELSON_NODE_re_review_OUTPUT_FILE: "/stale/path.txt" },
+      });
       const spillPath = env.KEELSON_NODE_re_review_OUTPUT_FILE as string;
       expect(spillPath).toBe(join(dir, "node-outputs", "re_review.txt"));
       expect(readFileSync(spillPath, "utf8")).toBe(big);
@@ -213,7 +206,7 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
     }
   });
 
-  test("an unwritable artifacts dir degrades to truncation-only, not a throw", () => {
+  test("a failed spill clears an inherited _FILE and degrades to truncation-only", () => {
     // A path nested under a regular FILE is un-mkdir-able on every platform
     // (ENOTDIR on POSIX, ERROR_DIRECTORY on Windows) — unlike /dev/null/...,
     // which Windows happily creates as D:\dev\null\... .
@@ -223,8 +216,9 @@ describe("buildSubprocessEnv — env value cap (issue #442)", () => {
       writeFileSync(filePath, "x");
       const env = buildSubprocessEnv({}, upstreamOf("validate", big), {
         artifactsDir: join(filePath, "not-a-dir"),
+        parentEnv: { KEELSON_NODE_validate_OUTPUT_FILE: "/stale/path.txt" },
       });
-      expect(addedFileVar("validate", env)).toBe(false);
+      expect(Object.hasOwn(env, "KEELSON_NODE_validate_OUTPUT_FILE")).toBe(false);
       const value = env.KEELSON_NODE_validate_OUTPUT as string;
       expect(value).toContain("[keelson: output truncated");
     } finally {
