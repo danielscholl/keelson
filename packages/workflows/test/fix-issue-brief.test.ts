@@ -340,4 +340,18 @@ describe("fix-issue CI triage criteria", () => {
       prompt.indexOf("Only after `verify.sh` passes, commit"),
     );
   });
+
+  test("surfaces conflicts and red final CI in the operator report", () => {
+    const report = workflowNode("report");
+
+    expect(report.depends_on).toEqual(["finalize-pr"]);
+    expect(report.prompt).toContain("$triage-ci.output");
+    expect(report.prompt).toContain("$finalize-pr.output");
+    expect(report.prompt).toContain("FIX-ISSUE — {COMPLETE | CI CONFLICT | CI RED}");
+    expect(report.prompt).toContain("For CONFLICT, name every criterion and check");
+    expect(report.prompt).toContain("For RED, say");
+    expect(report.prompt).toContain("the final pushed SHA is red");
+    expect(report.prompt).toContain("criteria enforcement was UNKNOWN");
+    expect(report.prompt).not.toContain("FIX-ISSUE — COMPLETE\n");
+  });
 });

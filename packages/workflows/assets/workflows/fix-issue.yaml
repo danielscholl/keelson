@@ -1613,16 +1613,21 @@ nodes:
       - PR (from create-pr): $create-pr.output
       - PR identifiers (canonical): read `$ARTIFACTS_DIR/.pr-url` and
         `$ARTIFACTS_DIR/.pr-number` if present.
-      - CI triage: $triage-ci.output
+      - CI triage (including criteria count and conflicts): $triage-ci.output
       - CI + PR state (authoritative): $finalize-pr.output
 
       ## Output
+
+      Treat a non-empty CI-triage `conflicts` array and a red final CI state as
+      explicit failure outcomes. Do not describe either outcome as COMPLETE or
+      successful. If criteria were empty, missing, or invalid, name that UNKNOWN
+      criteria state even when the final CI checks passed.
 
       Print a single block in this shape:
 
       ```
       ===============================================================
-      FIX-ISSUE — COMPLETE
+      FIX-ISSUE — {COMPLETE | CI CONFLICT | CI RED}
       ===============================================================
       Issue:   #{number} — {title}
       Type:    {bug | feature | ...}
@@ -1641,9 +1646,11 @@ nodes:
        "clean — no must-fix findings" when triage confirmed none}
 
       -- CI & PR state --
-      {READY or DRAFT — read it from the finalize-pr output above; if DRAFT, name
-       the failing check and say whether it was unrelated/flaky. If any review
-       threads still need handling, suggest: resolve-pr #{number}}
+      {READY, DRAFT, CONFLICT, RED, or UNKNOWN — read the final state and CI
+       triage above. For CONFLICT, name every criterion and check. For RED, say
+       the final pushed SHA is red and name the failing check. For zero criteria
+       or missing/invalid brief state, say criteria enforcement was UNKNOWN.
+       If any review threads still need handling, suggest: resolve-pr #{number}}
 
       ===============================================================
       ```
