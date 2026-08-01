@@ -164,9 +164,11 @@ export function buildProgram(): Command {
     .description(
       "write a consistent snapshot of the keelson database (safe while the server is running)",
     )
-    .action(async function backupAction(this: Command, output?: string) {
+    .option("--db <path>", "snapshot this database instead of the home's default")
+    .action(async function backupAction(this: Command, output: string | undefined) {
       const { json } = globalOpts(this);
-      await runBackup({ json, ...(output ? { output } : {}) });
+      const db = requireNonEmpty(json, "--db", this.opts<{ db?: string }>().db);
+      await runBackup({ json, ...(output ? { output } : {}), ...(db ? { db } : {}) });
     });
 
   // Deprecated `service`/`serve` group, hidden from help and kept one release

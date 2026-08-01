@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { keelsonPaths } from "@keelson/shared/paths";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "../exit.ts";
@@ -13,6 +13,9 @@ import { emit } from "../output.ts";
 export interface BackupOptions {
   json: boolean;
   output?: string;
+  // Matches `keelson start --db`: a server started against a per-run database
+  // is not backed up by snapshotting the home's default one.
+  db?: string;
 }
 
 // Local time, filename-safe, sorts chronologically.
@@ -35,7 +38,7 @@ export function resolveBackupTarget(output: string | undefined, home: string, no
 
 export async function runBackup(opts: BackupOptions): Promise<never> {
   const home = resolveKeelsonHome();
-  const { dbPath } = keelsonPaths(home);
+  const dbPath = opts.db ? resolve(opts.db) : keelsonPaths(home).dbPath;
   if (!existsSync(dbPath)) {
     emit({ error: `no keelson database at ${dbPath}`, code: "NOT_FOUND" }, { json: opts.json });
     process.exit(EXIT_FAIL);
@@ -45,7 +48,18 @@ export async function runBackup(opts: BackupOptions): Promise<never> {
     emit({ error: `refusing to overwrite ${target}`, code: "BAD_INPUTS" }, { json: opts.json });
     process.exit(EXIT_BAD_ARGS);
   }
-  mkdirSync(dirname(target), { recursive: true });
+  try {
+    mkdirSync(dirname(target), { recursive: true });
+  } catch (err) {
+    emit(
+      {
+        error: `cannot create ${dirname(target)}: ${(err as Error).message}`,
+        code: "BAD_INPUTS",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_BAD_ARGS);
+  }
 
   // VACUUM INTO takes a read transaction and writes a fresh, fully-checkpointed
   // file, so the copy is consistent even while the server is mid-write and it
@@ -61,9 +75,16 @@ export async function runBackup(opts: BackupOptions): Promise<never> {
     );
     process.exit(EXIT_FAIL);
   }
+  // Vacuum to a sibling and rename only on success. SQLite creates the
+  // destination up front, so a failure partway (disk full, an interrupt) would
+  // otherwise leave a truncated file sitting at the backup name — which the
+  // next run then refuses to overwrite and a backup sweep reads as valid.
+  const staging = `${target}.partial-${process.pid}`;
   try {
-    db.exec(`VACUUM INTO ${escapeSqlString(target)}`);
+    db.exec(`VACUUM INTO ${escapeSqlString(staging)}`);
+    renameSync(staging, target);
   } catch (err) {
+    rmSync(staging, { force: true });
     emit(
       { error: `backup failed: ${(err as Error).message}`, code: "BACKUP_FAILED" },
       { json: opts.json },
