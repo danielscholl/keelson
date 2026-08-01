@@ -41,8 +41,10 @@ export function defaultUserHome(deps: DefaultUserHomeDeps = {}): string {
   if (platform !== "win32") return legacy;
   const exists = deps.exists ?? existsSync;
   if (exists(legacy)) return legacy;
+  // Key presence, not `!== undefined`: a caller passing `localAppData: undefined`
+  // means "there is none", which must not fall through to the ambient env.
   const localAppData = (
-    deps.localAppData !== undefined ? deps.localAppData : process.env.LOCALAPPDATA
+    "localAppData" in deps ? deps.localAppData : process.env.LOCALAPPDATA
   )?.trim();
   return localAppData ? join(localAppData, "keelson") : legacy;
 }

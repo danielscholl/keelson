@@ -12,12 +12,14 @@ const never = () => false;
 const always = () => true;
 
 describe("defaultUserHome", () => {
+  // join() is platform-dependent, so the expectation has to be built the same
+  // way rather than hardcoding a "/" separator that fails on a Windows runner.
   test("posix uses ~/.keelson", () => {
     expect(defaultUserHome({ platform: "linux", userHome: "/home/dev", exists: never })).toBe(
-      "/home/dev/.keelson",
+      join("/home/dev", ".keelson"),
     );
     expect(defaultUserHome({ platform: "darwin", userHome: "/Users/dev", exists: never })).toBe(
-      "/Users/dev/.keelson",
+      join("/Users/dev", ".keelson"),
     );
   });
 
@@ -53,11 +55,34 @@ describe("defaultUserHome", () => {
     ).toBe(join(USER, ".keelson"));
   });
 
+  // An explicitly-absent localAppData must not fall through to the ambient
+  // process env — which is set on a Windows runner and unset elsewhere, so
+  // getting this wrong passes on posix and fails only in Windows CI.
   test("Windows without LOCALAPPDATA falls back to the profile", () => {
-    for (const localAppData of [undefined, "", "   "]) {
-      expect(
-        defaultUserHome({ platform: "win32", userHome: USER, localAppData, exists: never }),
-      ).toBe(join(USER, ".keelson"));
+    const saved = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = join("C:", "ambient", "AppData", "Local");
+    try {
+      for (const localAppData of [undefined, "", "   "]) {
+        expect(
+          defaultUserHome({ platform: "win32", userHome: USER, localAppData, exists: never }),
+        ).toBe(join(USER, ".keelson"));
+      }
+    } finally {
+      if (saved === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = saved;
+    }
+  });
+
+  test("an uninjected localAppData does read the process env", () => {
+    const saved = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = join("C:", "ambient");
+    try {
+      expect(defaultUserHome({ platform: "win32", userHome: USER, exists: never })).toBe(
+        join("C:", "ambient", "keelson"),
+      );
+    } finally {
+      if (saved === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = saved;
     }
   });
 
