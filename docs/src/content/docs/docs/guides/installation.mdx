@@ -151,11 +151,6 @@ that `PATH` entry from `~/.zshrc`, `~/.bashrc`, or wherever you put it.
   <TabItem label="Windows PowerShell">
 
 ```powershell
-# A failed stop aborts, for the same reason as the POSIX script above.
-if (Get-Command keelson -ErrorAction SilentlyContinue) {
-  keelson stop
-  if ($LASTEXITCODE -ne 0) { throw "server did not stop; nothing removed" }
-}
 # Every location keelson may have used: the current default, the pre-0.93
 # profile home, and KEELSON_HOME if it is set. Trim this list if you are keeping
 # one of them.
@@ -163,9 +158,29 @@ $LegacyHome = Join-Path $env:USERPROFILE ".keelson"
 $Targets = @($LegacyHome)
 if ($env:KEELSON_HOME) { $Targets += $env:KEELSON_HOME }
 if ($env:LOCALAPPDATA) { $Targets += (Join-Path $env:LOCALAPPDATA "keelson") }
+$Targets = @($Targets | Select-Object -Unique)
+
+# Stop every targeted home before deleting any of them. Each home keeps its own
+# server record, so stopping only the one the environment happens to select
+# would leave another still holding an open database. Any failed stop aborts
+# before a single file is removed.
+if (Get-Command keelson -ErrorAction SilentlyContinue) {
+  $SavedHome = $env:KEELSON_HOME
+  try {
+    foreach ($Target in $Targets) {
+      if (-not (Test-Path -LiteralPath $Target)) { continue }
+      $env:KEELSON_HOME = $Target
+      keelson stop
+      if ($LASTEXITCODE -ne 0) { throw "server in $Target did not stop; nothing removed" }
+    }
+  } finally {
+    $env:KEELSON_HOME = $SavedHome
+  }
+}
+
 # Skip the locations that are not there, but let a real failure (a file in use,
 # access denied) print rather than pass for a clean removal.
-foreach ($Target in ($Targets | Select-Object -Unique)) {
+foreach ($Target in $Targets) {
   if (Test-Path -LiteralPath $Target) {
     Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction Continue
   }
