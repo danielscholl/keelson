@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { KeelsonConfig } from "@keelson/shared/config";
 import { runProvidersCheck } from "../src/checks/providers.ts";
+import { parseEnvProviders } from "../src/commands/provider.ts";
 
 function config(overrides: Partial<KeelsonConfig> = {}): KeelsonConfig {
   return { ...overrides } as KeelsonConfig;
@@ -78,5 +79,29 @@ describe("providers doctor check", () => {
     });
     expect(result.checks).toHaveLength(1);
     expect(result.checks[0]?.status).toBe("skip");
+  });
+});
+
+describe("usable-provider hint", () => {
+  // `provider add copilot|claude` is not runnable: copilot is bundled and
+  // rejected by the command, and a shell reads `|` as a pipe.
+  test("names one runnable command and lists the rest separately", () => {
+    const result = runProvidersCheck({
+      loadConfig: () => config({ providers: { copilot: false } }),
+      isInstalled: notInstalled,
+      envProviders: "",
+    });
+    const hint = result.checks.find((c) => c.name === "usable provider")?.hint ?? "";
+    expect(hint).toContain("keelson provider add claude");
+    expect(hint).not.toContain("provider add copilot");
+    expect(hint).not.toMatch(/provider add \S*\|/);
+  });
+});
+
+describe("parseEnvProviders", () => {
+  test("splits, trims, and drops empties like the config resolver", () => {
+    expect(parseEnvProviders("claude, codex ,,")).toEqual(["claude", "codex"]);
+    expect(parseEnvProviders(undefined)).toEqual([]);
+    expect(parseEnvProviders("   ")).toEqual([]);
   });
 });

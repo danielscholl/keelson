@@ -36,9 +36,22 @@ file appears to say.
 }
 ```
 
+Enabling a provider is only half of it. Keelson ships with Copilot; the Claude,
+Codex, and pi SDKs are large and vendor-specific, so they install on demand:
+
+```sh
+keelson provider add claude   # or: codex, pi
+keelson restart
+```
+
+A provider that is enabled here but whose SDK is not installed is left
+**unregistered** rather than offered and broken — `keelson doctor` reports it and
+names the fix. `keelson provider list` shows what is bundled, installed, and
+enabled.
+
 | Key | Type | What it does |
 |---|---|---|
-| `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. |
+| `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. Claude, Codex, and pi also need `keelson provider add <id>`. |
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. Falls back when it is not. See [The default provider](#the-default-provider). |
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |

@@ -55,13 +55,17 @@ const CODEX_SDK_RANGE = PROVIDERS_PKG.peerDependencies["@openai/codex-sdk"];
 const PI_TUI_RANGE = CLI_PKG.dependencies["@earendil-works/pi-tui"];
 // A missing range would be dropped by JSON.stringify below, silently shipping a
 // manifest without the SDK while the bundle still marks it external.
-if (!CLAUDE_SDK_RANGE || !COPILOT_SDK_RANGE || !PI_SDK_RANGE || !PI_AI_RANGE || !CODEX_SDK_RANGE) {
+if (
+  !CLAUDE_SDK_RANGE ||
+  !COPILOT_SDK_RANGE ||
+  !PI_SDK_RANGE ||
+  !PI_AI_RANGE ||
+  !CODEX_SDK_RANGE ||
+  !PI_TUI_RANGE
+) {
   throw new Error(
-    "packages/providers/package.json must declare @github/copilot-sdk as a dependency and @anthropic-ai/claude-agent-sdk, @earendil-works/pi-coding-agent, @earendil-works/pi-ai, and @openai/codex-sdk as peerDependencies",
+    "packages/providers/package.json must declare @github/copilot-sdk as a dependency and @anthropic-ai/claude-agent-sdk, @earendil-works/pi-coding-agent, @earendil-works/pi-ai, and @openai/codex-sdk as peerDependencies, and apps/cli/package.json must declare @earendil-works/pi-tui",
   );
-}
-if (!PI_TUI_RANGE) {
-  throw new Error("apps/cli/package.json must declare @earendil-works/pi-tui");
 }
 const REPO = "danielscholl/keelson";
 // The starter-asset kinds staged under the cli tarball's `assets/` and seeded

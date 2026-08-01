@@ -75,13 +75,19 @@ are provider-neutral: a provider consumes what it supports and ignores the rest.
 Five agent providers ship built in. Out of the box only Copilot loads; the rest
 are opt-in (see [Configuration](../../guides/configuration/)).
 
-| Provider | id | Resume | Stream | Tool projection | Auth |
-| --- | --- | --- | --- | --- | --- |
-| GitHub Copilot | `copilot` | yes | yes | yes | keelson keychain |
-| Claude | `claude` | yes | yes | yes | keelson keychain (subscription or API key) |
-| Codex | `codex` | yes | yes | no | self-managed |
-| Pi (community) | `pi` | no | yes | yes | self-managed |
-| Stub (echo) | `stub` | no | yes | no | none |
+Opt-in also means *installed*: the Claude, Codex, and pi SDKs are hundreds of
+megabytes apiece and serve one vendor each, so a fresh install carries none of
+them. `keelson provider add <id>` fetches one into the keelson home and enables
+it; `keelson provider remove <id>` reverses both. An enabled provider whose SDK
+is absent is left unregistered rather than offered and broken.
+
+| Provider | id | Ships with keelson | Resume | Stream | Tool projection | Auth |
+| --- | --- | --- | --- | --- | --- | --- |
+| GitHub Copilot | `copilot` | yes | yes | yes | yes | keelson keychain |
+| Claude | `claude` | `provider add` | yes | yes | yes | keelson keychain (subscription or API key) |
+| Codex | `codex` | `provider add` | yes | yes | no | self-managed |
+| Pi (community) | `pi` | `provider add` | no | yes | yes | self-managed |
+| Stub (echo) | `stub` | yes | no | yes | no | none |
 
 A few rows need their footnote:
 

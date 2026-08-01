@@ -53,6 +53,14 @@ export function installSpecs(id: string, home: string): string[] {
   return packages.map((pkg) => (ranges[pkg] ? `${pkg}@${ranges[pkg]}` : pkg));
 }
 
+// Mirrors resolveEnabledProviders' own parse of the env override.
+export function parseEnvProviders(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 function unknownProvider(id: string, opts: BaseOptions): never {
   emit(
     {
@@ -143,13 +151,18 @@ export async function runProviderRemove(id: string, opts: BaseOptions): Promise<
     process.exit(EXIT_FAIL);
   }
   updateKeelsonConfigProviders({ [trimmed]: false }, home);
+  // KEELSON_PROVIDERS is an exact override, so config.json cannot disable a
+  // provider the env still lists — reporting `enabled: false` there would be a
+  // claim the next process contradicts.
+  const envPinned = parseEnvProviders(process.env.KEELSON_PROVIDERS).includes(trimmed);
   const server = await probeServer(opts.baseUrl ? { baseUrl: opts.baseUrl } : {});
   emit(
     {
       data: {
         provider: trimmed,
         packages: [...packages],
-        enabled: false,
+        enabled: envPinned,
+        envOverride: envPinned ? "KEELSON_PROVIDERS" : undefined,
         restartRequired: server !== null,
       },
     },
@@ -157,6 +170,11 @@ export async function runProviderRemove(id: string, opts: BaseOptions): Promise<
   );
   if (!opts.json) {
     process.stdout.write(`removed ${trimmed}\n`);
+    if (envPinned) {
+      process.stdout.write(
+        `KEELSON_PROVIDERS still lists '${trimmed}', which overrides config.json — remove it from the environment to disable the provider\n`,
+      );
+    }
     if (server !== null) {
       process.stdout.write("restart the server (`keelson restart`) to deactivate it\n");
     }

@@ -432,7 +432,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     }`;
   }
 
-  const providersRestored = await restoreOnDemandProviders(home, opts.json);
+  const { restored: providersRestored, failed: providersFailed } = await restoreOnDemandProviders(
+    home,
+    opts.json,
+  );
 
   const ribs = opts.ribs ? ribDependencies(manifest) : [];
   if (ribs.length > 0) {
@@ -455,6 +458,7 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     updated: true,
     ribsUpdated: ribs,
     ...(providersRestored.length > 0 ? { providersRestored } : {}),
+    ...(providersFailed.length > 0 ? { providersFailed } : {}),
     refreshedWorkflows: refreshed,
     removedWorkflows: removed,
     restartRequired: server !== null,
@@ -474,6 +478,10 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     if (providersRestored.length > 0)
       process.stdout.write(
         `kept provider SDKs installed: ${providersRestored.join(", ")} (now managed by \`keelson provider\`)\n`,
+      );
+    if (providersFailed.length > 0)
+      process.stdout.write(
+        `could not reinstall provider SDKs: ${providersFailed.join(", ")} — run \`keelson provider add <id>\`\n`,
       );
     if (refreshed.length > 0)
       process.stdout.write(`refreshed ${refreshed.length} workflow(s): ${refreshed.join(", ")}\n`);
@@ -528,15 +536,22 @@ export function providersNeedingRestore(
   );
 }
 
-// Best-effort: a failure here leaves a doctor warning naming the fix rather
-// than failing the whole update.
-async function restoreOnDemandProviders(home: string, quiet: boolean): Promise<string[]> {
+// The update itself succeeded, so a failed re-install is reported rather than
+// thrown — but it is never silent: in --json mode runBun suppresses the package
+// manager's own output, so an unreported failure would leave a pruned provider
+// and an exit code that claims everything worked.
+async function restoreOnDemandProviders(
+  home: string,
+  quiet: boolean,
+): Promise<{ restored: string[]; failed: string[] }> {
   const restored: string[] = [];
+  const failed: string[] = [];
   for (const id of providersNeedingRestore(home)) {
     const result = await runBun(["add", ...installSpecs(id, home)], home, quiet);
     if (result.code === 0) restored.push(id);
+    else failed.push(id);
   }
-  return restored;
+  return { restored, failed };
 }
 
 function emitResult(opts: UpdateOptions, data: Record<string, unknown>): void {

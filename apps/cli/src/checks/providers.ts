@@ -5,6 +5,7 @@
 import {
   isProviderSdkInstalled as defaultIsInstalled,
   isOnDemandProvider,
+  onDemandProviderIds,
 } from "@keelson/providers";
 import {
   BUILT_IN_PROVIDER_IDS,
@@ -54,11 +55,15 @@ export function runProvidersCheck(deps: ProvidersDeps = {}): CategoryResult {
   }
 
   if (usable === 0) {
+    // One runnable command, not a `|` list: copilot ships with the harness and
+    // `provider add` rejects it, and a shell would read the bar as a pipe.
     checks.push({
       name: "usable provider",
       status: "warn",
       detail: "no enabled provider has a usable SDK and no gateway is configured",
-      hint: "run `keelson provider add copilot|claude|codex|pi`, or add an OpenAI-compatible endpoint with `keelson gateway add`",
+      hint: `run \`keelson provider add ${onDemandProviderIds()[0]}\` (also available: ${onDemandProviderIds()
+        .slice(1)
+        .join(", ")}), or add an OpenAI-compatible endpoint with \`keelson gateway add\``,
     });
   }
   if (checks.length === 0) {
