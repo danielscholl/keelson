@@ -1647,3 +1647,50 @@ nodes:
 
       ===============================================================
       ```
+
+  - id: ci-green-gate
+    depends_on: [report]
+    bash: |
+      set -uo pipefail
+      FINAL_STATUS=$(cat "$KEELSON_ARTIFACTS_DIR/.ci-final-status" 2>/dev/null || true)
+
+      if [ -f "$KEELSON_ARTIFACTS_DIR/.ci-conflict" ]; then
+        echo "CI_GATE: FAIL — CI repair conflicts with issue criteria"
+        cat "$KEELSON_ARTIFACTS_DIR/.ci-conflict"
+        exit 1
+      fi
+      if [ "$FINAL_STATUS" = "FAIL" ]; then
+        echo "CI_GATE: FAIL — final pushed SHA has failing CI"
+        exit 1
+      fi
+
+      if [ -n "${KEELSON_NODE_triage_ci_OUTPUT_FILE:-}" ] \
+        && [ -f "$KEELSON_NODE_triage_ci_OUTPUT_FILE" ]; then
+        TRIAGE_JSON=$(cat "$KEELSON_NODE_triage_ci_OUTPUT_FILE")
+      else
+        TRIAGE_JSON="${KEELSON_NODE_triage_ci_OUTPUT:-}"
+      fi
+      if [ -z "$TRIAGE_JSON" ]; then
+        echo "CI_GATE: UNKNOWN — brief did not reach CI triage"
+        exit 0
+      fi
+      if ! CRITERIA_COUNT=$(printf '%s' "$TRIAGE_JSON" | jq -er '.criteria_count | numbers') \
+        || ! BRIEF_STATUS=$(printf '%s' "$TRIAGE_JSON" | jq -er '.brief_status | strings'); then
+        echo "CI_GATE: UNKNOWN — CI triage did not return parseable brief state"
+        exit 0
+      fi
+      if [ "$CRITERIA_COUNT" -eq 0 ] 2>/dev/null; then
+        if [ "$BRIEF_STATUS" = "empty" ]; then
+          echo "CI_GATE: UNKNOWN — brief reached CI triage with 0 parsed criteria"
+        else
+          echo "CI_GATE: UNKNOWN — brief did not reach CI triage as valid criteria input ($BRIEF_STATUS)"
+        fi
+        exit 0
+      fi
+
+      if [ "$FINAL_STATUS" = "PASS" ]; then
+        echo "CI_GATE: PASS — final pushed SHA is green with $CRITERIA_COUNT criteria enforced"
+      else
+        echo "CI_GATE: UNKNOWN — final CI status was not recorded"
+      fi
+      exit 0

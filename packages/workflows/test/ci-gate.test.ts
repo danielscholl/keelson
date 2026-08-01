@@ -107,6 +107,36 @@ esac
   };
 }
 
+function runTerminalGate(opts: {
+  status?: string;
+  conflict?: string;
+  triage?: string;
+}) {
+  const artifacts = mkdtempSync(join(tmpdir(), "keelson-ci-terminal-gate-"));
+  tmps.push(artifacts);
+  if (opts.status !== undefined) {
+    writeFileSync(join(artifacts, ".ci-final-status"), `${opts.status}\n`);
+  }
+  if (opts.conflict !== undefined) {
+    writeFileSync(join(artifacts, ".ci-conflict"), opts.conflict);
+  }
+
+  const proc = Bun.spawnSync({
+    cmd: ["bash", "-c", workflowBash("fix-issue", "ci-green-gate")],
+    env: {
+      ...(process.env as Record<string, string>),
+      KEELSON_ARTIFACTS_DIR: artifacts,
+      KEELSON_NODE_triage_ci_OUTPUT: opts.triage ?? "",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    exitCode: proc.exitCode,
+    stdout: proc.stdout.toString(),
+  };
+}
+
 shimDescribe("CI advisory gate", () => {
   for (const workflow of ["resolve-pr", "fix-issue"]) {
     test(`${workflow}: zero required checks with a failing check emits FAIL`, () => {
@@ -330,4 +360,73 @@ shimDescribe("CI advisory gate", () => {
       expect(result.checkCountCalls).toBe(6);
     });
   }
+});
+
+shimDescribe("fix-issue terminal CI gate", () => {
+  const receivedTriage = JSON.stringify({
+    ci_status: "pass",
+    criteria_count: 2,
+    brief_status: "received",
+  });
+
+  test("fails a red final SHA", () => {
+    const result = runTerminalGate({ status: "FAIL", triage: receivedTriage });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("CI_GATE: FAIL — final pushed SHA has failing CI");
+  });
+
+  test("fails a criteria conflict", () => {
+    const result = runTerminalGate({
+      status: "PASS",
+      conflict: "Criterion: the Windows test continues to run",
+      triage: receivedTriage,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("CI_GATE: FAIL — CI repair conflicts with issue criteria");
+    expect(result.stdout).toContain("the Windows test continues to run");
+  });
+
+  test("passes green CI with received criteria", () => {
+    const result = runTerminalGate({ status: "PASS", triage: receivedTriage });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CI_GATE: PASS");
+    expect(result.stdout).toContain("2 criteria enforced");
+  });
+
+  test("reports a valid brief with no criteria as UNKNOWN", () => {
+    const result = runTerminalGate({
+      status: "PASS",
+      triage: JSON.stringify({
+        ci_status: "pass",
+        criteria_count: 0,
+        brief_status: "empty",
+      }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "CI_GATE: UNKNOWN — brief reached CI triage with 0 parsed criteria",
+    );
+  });
+
+  test.each([
+    ["missing brief", JSON.stringify({ criteria_count: 0, brief_status: "missing" })],
+    ["unparseable triage", "not JSON"],
+  ])("reports %s distinctly from a valid empty brief", (_label, triage) => {
+    const result = runTerminalGate({ status: "PASS", triage });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CI_GATE: UNKNOWN");
+    expect(result.stdout).not.toContain("brief reached CI triage with 0 parsed criteria");
+  });
+
+  test("leaves an unrecorded final status non-fatal", () => {
+    const result = runTerminalGate({ triage: receivedTriage });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("CI_GATE: UNKNOWN — final CI status was not recorded");
+  });
 });
