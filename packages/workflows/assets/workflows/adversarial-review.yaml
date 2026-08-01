@@ -31,6 +31,7 @@
 name: adversarial-review
 provider: copilot
 model: auto
+locking: shared
 description: |
   Use when: User wants an artifact stress-tested by independent agents that
             debate it and reach a consensus verdict — a claim, design doc,
@@ -73,8 +74,12 @@ nodes:
           echo "subject '$SUBJECT' ignored: not inside a git repository" >&2
         else
           COMMIT=$(git rev-parse --verify --quiet "${SUBJECT}^{commit}" || true)
-          if [ -z "$COMMIT" ] && git fetch --quiet origin "$SUBJECT" 2>/dev/null; then
-            COMMIT=$(git rev-parse --verify --quiet 'FETCH_HEAD^{commit}' || true)
+          # Land the fetch on a run-scoped ref, never repo-wide FETCH_HEAD:
+          # under `locking: shared` a concurrent review's fetch can overwrite
+          # FETCH_HEAD between fetch and read, silently verifying its commit.
+          SNAPREF="refs/keelson/subject/$(basename "$KEELSON_ARTIFACTS_DIR")"
+          if [ -z "$COMMIT" ] && git fetch --quiet --no-tags origin "+${SUBJECT}:${SNAPREF}" 2>/dev/null; then
+            COMMIT=$(git rev-parse --verify --quiet "${SNAPREF}^{commit}" || true)
           fi
           if [ -n "$COMMIT" ]; then
             mkdir -p "$KEELSON_ARTIFACTS_DIR/subject"
@@ -91,6 +96,9 @@ nodes:
           else
             echo "subject '$SUBJECT' did not resolve to a commit; the verifier falls back to the caller's working directory" >&2
           fi
+          # The archive is extracted; the ref only existed to make the fetch
+          # race-free, so leave nothing registered against the caller's repo.
+          git update-ref -d "$SNAPREF" 2>/dev/null || true
         fi
       fi
 

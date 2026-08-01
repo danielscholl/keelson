@@ -92,8 +92,10 @@ which is which.
   for mutation-heavy work, held until released. Checkout isolation, not a
   sandbox.
 - **mutation lock**: an advisory per-project lock taken before mutating a
-  project's live checkout directly. A lease-held worktree is already isolated
-  and does not need one.
+  project's live checkout directly. Exclusive holders block every other holder;
+  shared holders coexist with other shared readers but still block and are blocked
+  by exclusive holders. A lease-held worktree is already isolated and does not
+  need one.
 - **docs source**: an `llms-full.txt` corpus a rib contributes, which the
   `keelson_docs` tool lists, indexes, and slices on demand, so an installed rib
   extends what the agent can look up about itself.

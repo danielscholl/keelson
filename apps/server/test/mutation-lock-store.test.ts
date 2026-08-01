@@ -15,6 +15,7 @@ function lock(overrides: Partial<MutationLockRecord> = {}): MutationLockRecord {
   return {
     id: "lock-1",
     projectId: "project-1",
+    mode: "exclusive",
     purpose: "fix-issue",
     owner: "workflow:abc12345",
     acquiredAt: "2026-01-01T00:00:00.000Z",
@@ -39,22 +40,48 @@ describe("MutationLockStore", () => {
     expect(store.list()).toEqual([]);
   });
 
-  test("single-holder project constraint throws on a second insert", () => {
+  test("multiple shared locks coexist on one project", () => {
+    const store = createMutationLockStore();
+    const first = lock({ id: "lock-a", mode: "shared" });
+    const second = lock({ id: "lock-b", mode: "shared" });
+
+    store.insert(first);
+    store.insert(second);
+
+    expect(store.getByProject(first.projectId)).toEqual(first);
+    expect(store.list()).toEqual([first, second]);
+    expect(store.delete(first.id)).toBe(true);
+    expect(store.getByProject(second.projectId)).toEqual(second);
+    expect(store.list()).toEqual([second]);
+  });
+
+  test("exclusive lock conflicts with existing shared locks", () => {
     const store = createMutationLockStore();
 
-    store.insert(lock({ id: "lock-a" }));
+    store.insert(lock({ id: "lock-a", mode: "shared" }));
 
     expect(() => store.insert(lock({ id: "lock-b" }))).toThrow(
       "project project-1 already has a mutation lock",
     );
   });
 
+  test("shared lock conflicts with an existing exclusive lock", () => {
+    const store = createMutationLockStore();
+
+    store.insert(lock({ id: "lock-a" }));
+
+    expect(() => store.insert(lock({ id: "lock-b", mode: "shared" }))).toThrow(
+      "project project-1 already has a mutation lock",
+    );
+  });
+
   test("clear returns the count and empties the store", () => {
     const store = createMutationLockStore();
-    store.insert(lock({ id: "lock-a", projectId: "project-a" }));
-    store.insert(lock({ id: "lock-b", projectId: "project-b" }));
+    store.insert(lock({ id: "lock-a", projectId: "project-a", mode: "shared" }));
+    store.insert(lock({ id: "lock-b", projectId: "project-a", mode: "shared" }));
+    store.insert(lock({ id: "lock-c", projectId: "project-b" }));
 
-    expect(store.clear()).toBe(2);
+    expect(store.clear()).toBe(3);
     expect(store.list()).toEqual([]);
     expect(store.clear()).toBe(0);
   });
