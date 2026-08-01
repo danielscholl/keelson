@@ -6,7 +6,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { loadKeelsonConfig } from "@keelson/shared/config";
+import { readKeelsonConfig } from "@keelson/shared/config";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listedRibIds, resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
@@ -181,6 +181,25 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
     }
   }
 
+  // Resolved before anything happens — including the server stop — so a config
+  // that cannot be read costs nothing. readKeelsonConfig, not loadKeelsonConfig:
+  // the latter degrades a malformed file to {}, which here would silently drop
+  // every configured gateway from the deletion list and then destroy the home
+  // that named them, exiting 0 with those secrets still in the keychain.
+  // --keep-credentials is the explicit way past it.
+  let accounts: string[] = [];
+  if (!opts.keepCredentials) {
+    const configRead = readKeelsonConfig(home);
+    if (!configRead.ok) {
+      fail(
+        `cannot read ${configRead.path} (${configRead.reason}), so the gateways it configures cannot be revoked. Nothing was removed — fix the file, or re-run with --keep-credentials to uninstall without touching the keychain`,
+        "BAD_CONFIG",
+        opts.json,
+      );
+    }
+    accounts = credentialAccounts(configRead.config);
+  }
+
   const ribs = listedRibIds(home);
   // Removing the program files out from under a live server leaves a process
   // holding an open database with no code behind it, so a stop that failed
@@ -200,7 +219,7 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
 
   const credentials: CredentialOutcome = opts.keepCredentials
     ? { removed: [], failed: [] }
-    : await deleteCredentials(credentialAccounts(loadKeelsonConfig(home)), home);
+    : await deleteCredentials(accounts, home);
 
   const launcher = launcherPath();
   const launcherRemoved = existsSync(launcher);
