@@ -331,7 +331,14 @@ describe("fix-issue CI triage criteria", () => {
     expect(prompt).toContain('If `ci_status` is "conflict"');
     expect(prompt).toContain("`conflicts` is non-empty");
     expect(prompt).toContain("$ARTIFACTS_DIR/.ci-conflict");
-    for (const antiPattern of ["`skip`", "`skipIf`", "`.only`", "`xit`", "`xdescribe`", "`test.todo`"]) {
+    for (const antiPattern of [
+      "`skip`",
+      "`skipIf`",
+      "`.only`",
+      "`xit`",
+      "`xdescribe`",
+      "`test.todo`",
+    ]) {
       expect(prompt).toContain(antiPattern);
     }
     expect(prompt).toContain('bash "$ARTIFACTS_DIR/verify.sh"');

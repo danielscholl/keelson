@@ -107,11 +107,7 @@ esac
   };
 }
 
-function runTerminalGate(opts: {
-  status?: string;
-  conflict?: string;
-  triage?: string;
-}) {
+function runTerminalGate(opts: { status?: string; conflict?: string; triage?: string }) {
   const artifacts = mkdtempSync(join(tmpdir(), "keelson-ci-terminal-gate-"));
   tmps.push(artifacts);
   if (opts.status !== undefined) {
