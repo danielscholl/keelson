@@ -18,6 +18,24 @@ function tmpDir(): string {
 }
 
 describe("parseWorkflow — happy paths", () => {
+  test("locking: shared parses onto the workflow", () => {
+    const result = parseWorkflow(
+      `
+name: shared-reader
+description: reads the live checkout under a shared lock
+locking: shared
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+      "shared-reader.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.locking).toBe("shared");
+    expect(result.warnings).toEqual([]);
+  });
+
   test("requiresProject: true parses onto the workflow; omitted is undefined", () => {
     const marked = parseWorkflow(
       `
@@ -168,6 +186,14 @@ nodes:
     expect(failures).toEqual([]);
   });
 
+  test("bundled adversarial-review uses shared locking", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/adversarial-review.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.locking).toBe("shared");
+  });
+
   test("bundled design-artifact requires a successful canvas publish", () => {
     const filePath = path.join(import.meta.dir, "../assets/workflows/design-artifact.yaml");
     const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
@@ -175,6 +201,28 @@ nodes:
     expect(result.error).toBeNull();
     expect(result.warnings).toEqual([]);
     expect(result.workflow?.nodes[0]?.require_tool_call).toEqual(["canvas_publish"]);
+  });
+
+  test("bundled adversarial-review persists and verifies subject snapshot status", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/adversarial-review.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+    const intake = result.workflow?.nodes.find((node) => node.id === "intake");
+    const status = result.workflow?.nodes.find((node) => node.id === "subject-status");
+    const verify = result.workflow?.nodes.find((node) => node.id === "verify");
+
+    expect(status && "bash" in status).toBe(true);
+    expect(status?.depends_on).toEqual(["intake"]);
+    const statusBody = status && "bash" in status ? status.bash : "";
+    expect(statusBody).toContain("UNKNOWN marker-absent");
+    expect(statusBody).not.toContain("SUBJECT-SNAPSHOT: NONE");
+    expect(verify?.depends_on).toContain("subject-status");
+
+    const intakeBody = intake && "bash" in intake ? intake.bash : "";
+    expect(intakeBody).toContain("SUBJECT-SNAPSHOT:");
+    expect(intakeBody).toContain('$KEELSON_ARTIFACTS_DIR/subject-status"');
+    expect(intakeBody).toContain("KEELSON_INPUTS_subject_required");
   });
 
   test("bundled resolve-pr declares a valid converge gate", () => {
@@ -192,6 +240,23 @@ nodes:
     expect(gate).toBeDefined();
     expect(gate && "bash" in gate).toBe(true);
     expect(gate?.retry).toBeUndefined();
+  });
+
+  test("bundled adversarial-review gates synthesis and reruns verification", () => {
+    const filePath = path.join(import.meta.dir, "../assets/workflows/adversarial-review.yaml");
+    const result = parseWorkflow(fs.readFileSync(filePath, "utf8"), filePath);
+
+    expect(result.error).toBeNull();
+
+    const verify = result.workflow?.nodes.find((node) => node.id === "verify");
+    expect(verify?.always_run).toBe(true);
+
+    const gate = result.workflow?.nodes.find((node) => node.id === "verify-gate");
+    expect(gate).toBeDefined();
+    expect(gate && "bash" in gate).toBe(true);
+
+    const synthesize = result.workflow?.nodes.find((node) => node.id === "synthesize");
+    expect(synthesize?.depends_on).toEqual(["verify", "verify-gate"]);
   });
 
   test("DAG with depends_on, when:, trigger_rule", () => {
@@ -824,6 +889,30 @@ nodes:
     expect(result.error).toBeNull();
     expect(result.workflow?.modelReasoningEffort).toBeUndefined();
     expect(result.warnings.some((w) => w.kind === "invalid_field_value")).toBe(true);
+  });
+
+  test("invalid locking warns and is dropped", () => {
+    const result = parseWorkflow(
+      `
+name: bad-locking
+description: invalid lock mode
+locking: bogus
+nodes:
+  - id: a
+    bash: echo ok
+`,
+      "bad-locking.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.locking).toBeUndefined();
+    expect(result.warnings).toEqual([
+      {
+        filename: "bad-locking.yaml",
+        kind: "invalid_field_value",
+        message: "invalid 'locking' value (ignored); valid: exclusive, shared",
+      },
+    ]);
   });
 
   test("interactive loop in non-interactive workflow warns", () => {

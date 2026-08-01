@@ -84,6 +84,7 @@ export const workflowBaseSchema = z.object({
    * Defaults to `true` (safe: serialize runs on the same path).
    */
   mutates_checkout: z.boolean().optional(),
+  locking: z.enum(["exclusive", "shared"]).optional(),
   /**
    * Marks a repo-scoped workflow: the run's working directory must be a git
    * repository. `workflow_run` preflights this before creating a run and

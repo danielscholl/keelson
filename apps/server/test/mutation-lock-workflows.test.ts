@@ -400,6 +400,116 @@ nodes:
     }
   });
 
+  test("shared runs coexist and remain mutually exclusive with mutating runs", async () => {
+    writeWorkflow(
+      "shared.yaml",
+      `name: shared
+description: holds a shared mutation lock at an approval
+locking: shared
+nodes:
+  - id: review
+    approval:
+      message: hold the shared lock
+`,
+    );
+    writeWorkflow(
+      "exclusive.yaml",
+      `name: exclusive
+description: holds the exclusive mutation lock at an approval
+nodes:
+  - id: mutate
+    approval:
+      message: hold the exclusive lock
+`,
+    );
+    const db = openDatabase({ path: join(tmpDir, "test.db") });
+    const store = createWorkflowStore(db);
+    const conversationStore = createConversationStore(db);
+    const projectsStore = createProjectsStore(db);
+    const project = projectsStore.create({ name: "repo", rootPath: tmpDir });
+    const mutationLockStore = createMutationLockStore();
+    const mutationLockManager = createMutationLockManager({ store: mutationLockStore });
+    const activeRuns = createActiveRuns();
+    const catalog = bootstrapWorkflows({
+      workflowDir: wfDir,
+      listProjects: () => projectsStore.list(),
+    });
+    const app = new Hono();
+    workflowsRoutes(
+      app,
+      { catalog, store, conversationStore, projectsStore, mutationLockManager },
+      activeRuns,
+      createWorkflowSubscribers(),
+    );
+    try {
+      const firstRes = await app.fetch(
+        postJson("http://test/api/workflows/shared/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      expect(firstRes.status).toBe(200);
+      const first = (await firstRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, first.runId, (status) => status === "paused");
+
+      const secondRes = await app.fetch(
+        postJson("http://test/api/workflows/shared/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      expect(secondRes.status).toBe(200);
+      const second = (await secondRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, second.runId, (status) => status === "paused");
+      expect(mutationLockStore.list().map((record) => record.mode)).toEqual(["shared", "shared"]);
+
+      const exclusiveConflict = await app.fetch(
+        postJson("http://test/api/workflows/exclusive/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      expect(exclusiveConflict.status).toBe(409);
+
+      for (const runId of [first.runId, second.runId]) {
+        const resumeRes = await app.fetch(
+          postJson(`http://test/api/workflows/runs/${runId}/resume`, {
+            nodeId: "review",
+            text: "approve",
+          }),
+        );
+        expect(resumeRes.status).toBe(200);
+        await pollUntilTerminal(store, runId);
+      }
+      const releaseDeadline = Date.now() + 2000;
+      while (Date.now() < releaseDeadline && mutationLockStore.list().length > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(mutationLockStore.list()).toEqual([]);
+
+      const exclusiveRes = await app.fetch(
+        postJson("http://test/api/workflows/exclusive/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      expect(exclusiveRes.status).toBe(200);
+      const exclusive = (await exclusiveRes.json()) as { runId: string };
+      await pollUntilStoreStatus(store, exclusive.runId, (status) => status === "paused");
+
+      const sharedConflict = await app.fetch(
+        postJson("http://test/api/workflows/shared/runs", {
+          inputs: {},
+          projectId: project.id,
+        }),
+      );
+      expect(sharedConflict.status).toBe(409);
+    } finally {
+      await activeRuns.abortAll();
+      db.close();
+    }
+  });
+
   test("a successfully worktree-isolated run starts while the project lock is held", async () => {
     const repo = join(tmpDir, "iso-repo");
     mkdirSync(repo);

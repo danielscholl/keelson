@@ -62,6 +62,12 @@ the server holds a per-project mutation lock until that run settles. A second
 live-checkout mutator on the same project fails fast and names the current holder
 and purpose, so the next run does not quietly clobber the first one's checkout.
 
+The default lock mode is `exclusive`. A workflow with `locking: shared` can run
+alongside other shared readers, but it still conflicts with an exclusive mutator
+in either order. This is the right mode for a read-only workflow that inspects the
+live checkout. `mutates_checkout: false` takes no lock and can overlap a mutating
+run, so reserve it for workflows that do not depend on a stable live checkout.
+
 Worktree-isolated runs do not take this lock. They already run in a separate
 checkout, and workspace leases represent real on-disk worktrees that can be
 inspected or pruned later. The mutation lock is different: it is process-local,
