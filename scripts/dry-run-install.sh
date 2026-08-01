@@ -1,9 +1,10 @@
 #!/usr/bin/env sh
-# Local end-to-end dry-run of the GitHub-release install path, against
-# locally-built tarballs instead of a published release. Builds the artifacts,
-# provisions a throwaway $KEELSON_HOME via install.sh, then exercises the
-# installed CLI: doctor, optional `rib add`, and the single-zod identity proof
-# (the rib-side z and the harness-side z must be the same module instance).
+# Local end-to-end dry-run of the GitHub-release install and removal paths,
+# against locally-built tarballs instead of a published release. Builds the
+# artifacts, provisions a throwaway $KEELSON_HOME via install.sh, exercises the
+# installed CLI (doctor, optional `rib add`, and the single-zod identity proof —
+# the rib-side z and the harness-side z must be the same module instance), then
+# takes the home back out with `keelson uninstall`.
 #
 # Usage: scripts/dry-run-install.sh [path-or-id-of-a-rib-to-add]
 set -eu
@@ -62,6 +63,53 @@ EOF
 ( cd "$HOME_DIR" && bun .zod-proof.ts )
 rm -f "$HOME_DIR/.zod-proof.ts"
 
+# The Windows launcher can't be run here, so assert its one load-bearing
+# property instead: the CLI is resolved from where it was installed, so a
+# KEELSON_HOME pointed at a bare data home still finds the program.
+echo "==> install.ps1 launcher resolves the CLI from the install location"
+if grep -qF '%KEELSON_PROGRAM%\node_modules' "$REL/install.ps1"; then
+  echo "    OK: launcher execs %KEELSON_PROGRAM%"
+else
+  echo "    FAIL: launcher no longer resolves the CLI from %KEELSON_PROGRAM%" >&2
+  exit 1
+fi
+
+# --keep-credentials throughout: the keychain is per-user, not per-home, so a
+# dry-run that revoked entries would take the developer's real provider logins
+# with it.
+echo "==> keelson uninstall (program files only)"
+printf 'db' > "$HOME_DIR/keelson.db"
+KEELSON_HOME="$HOME_DIR" KEELSON_BIN_DIR="$BIN_DIR" \
+  "$KEELSON" uninstall --yes --keep-credentials
+for gone in node_modules package.json bun.lock; do
+  if [ -e "$HOME_DIR/$gone" ]; then
+    echo "    FAIL: $gone survived the uninstall" >&2
+    exit 1
+  fi
+done
+for kept in keelson.db workflows commands; do
+  if [ ! -e "$HOME_DIR/$kept" ]; then
+    echo "    FAIL: uninstall took $kept, which is operator data" >&2
+    exit 1
+  fi
+done
+if [ -e "$KEELSON" ]; then
+  echo "    FAIL: launcher survived the uninstall" >&2
+  exit 1
+fi
+echo "    OK: program files and launcher gone, data kept"
+
+# A plain run takes the installed CLI with it, so an operator's own second step
+# is `rm -rf` rather than this. Running it from source is how the guard itself
+# gets exercised: a home whose program files a prior run already removed must
+# still be purgeable, not refused as if it were somebody else's project.
+echo "==> keelson uninstall --purge (finishes the job)"
+KEELSON_HOME="$HOME_DIR" KEELSON_BIN_DIR="$BIN_DIR" \
+  bun "$ROOT/apps/cli/bin/keelson.ts" uninstall --yes --purge --keep-credentials
+if [ -e "$HOME_DIR" ]; then
+  echo "    FAIL: --purge left $HOME_DIR behind" >&2
+  exit 1
+fi
+echo "    OK: home removed"
+
 echo "==> dry-run complete"
-echo "    home=$HOME_DIR  launcher=$KEELSON"
-echo "    clean up: rm -rf $HOME_DIR $BIN_DIR"

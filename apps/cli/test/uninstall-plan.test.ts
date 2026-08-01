@@ -2,12 +2,17 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { KeelsonConfig } from "@keelson/shared/config";
-import { classifyCredentialAttempts } from "../src/commands/uninstall.ts";
+import { classifyCredentialAttempts, classifyHomeProgram } from "../src/commands/uninstall.ts";
 import {
   credentialAccounts,
   PROGRAM_ENTRIES,
+  UNINSTALL_MARKER,
+  uninstallMarkerContents,
   unreachableCredentialRibs,
 } from "../src/uninstall-plan.ts";
 
@@ -65,6 +70,53 @@ describe("PROGRAM_ENTRIES", () => {
     for (const data of ["keelson.db", "workflows", "commands", "config.json", "rib-osdu"]) {
       expect(PROGRAM_ENTRIES as readonly string[]).not.toContain(data);
     }
+  });
+});
+
+describe("classifyHomeProgram", () => {
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "keelson-classify-"));
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  function manifest(contents: string): void {
+    writeFileSync(join(home, "package.json"), contents);
+  }
+
+  test("the @keelson/cli dep is what marks an installed home", () => {
+    manifest(JSON.stringify({ dependencies: { "@keelson/cli": "file:x" } }));
+    expect(classifyHomeProgram(home)).toBe("installed");
+  });
+
+  test("another project's manifest is foreign", () => {
+    manifest(JSON.stringify({ name: "some-app", dependencies: { react: "^19" } }));
+    expect(classifyHomeProgram(home)).toBe("foreign");
+  });
+
+  // Fail closed: next to a manifest we cannot read, removing PROGRAM_ENTRIES
+  // could take another project's node_modules.
+  test("an unparseable manifest is treated as foreign", () => {
+    manifest("{ not json");
+    expect(classifyHomeProgram(home)).toBe("foreign");
+  });
+
+  test("the marker is what makes a missing manifest a keelson home", () => {
+    writeFileSync(join(home, UNINSTALL_MARKER), uninstallMarkerContents("0.0.0", "now"));
+    expect(classifyHomeProgram(home)).toBe("uninstalled");
+  });
+
+  // KEELSON_HOME is operator-supplied, so absence alone proves nothing: without
+  // the marker every unrelated directory would qualify for --purge.
+  test("a bare directory is unknown, not an uninstalled home", () => {
+    expect(classifyHomeProgram(home)).toBe("unknown");
+  });
+
+  // A manifest that exists but cannot be read is still a manifest; reading the
+  // failure as an absence would hand --purge a home it must not delete.
+  test("a manifest that cannot be read is foreign, not an absence", () => {
+    mkdirSync(join(home, "package.json"));
+    expect(classifyHomeProgram(home)).toBe("foreign");
   });
 });
 
