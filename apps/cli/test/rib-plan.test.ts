@@ -90,6 +90,32 @@ describe("planRibUpdates", () => {
     expect(entries[0]?.status).toBe("tracking");
   });
 
+  // Opting into a prerelease and then running a plain update selects the newest
+  // stable tag, which is older. Presenting that as an update would silently
+  // roll the rib back.
+  test("an implicit update never moves a rib backwards", async () => {
+    const entries = await planRibUpdates({
+      home: makeHome({ "@keelson/rib-chamber": "0.50.0-rc.1" }),
+      manifestText: manifest({ "@keelson/rib-chamber": `${CHAMBER}#v0.50.0-rc.1` }),
+      allowPrerelease: false,
+      resolveTags: resolver({
+        [CHAMBER]: { kind: "resolved", tags: ["v0.49.0", "v0.50.0-rc.1"] },
+      }),
+    });
+    expect(entries[0]?.status).toBe("current");
+  });
+
+  test("--to still reaches an older release, since that is the rollback surface", async () => {
+    const entries = await planRibUpdates({
+      home: makeHome({ "@keelson/rib-chamber": "0.49.0" }),
+      manifestText: manifest({ "@keelson/rib-chamber": `${CHAMBER}#v0.49.0` }),
+      to: "0.47.3",
+      allowPrerelease: false,
+      resolveTags: resolver({ [CHAMBER]: { kind: "resolved", tags: ["v0.47.3", "v0.49.0"] } }),
+    });
+    expect(entries[0]).toMatchObject({ status: "updated", target: { version: "0.47.3" } });
+  });
+
   test("--to overrides a branch pin and reaches an older release", async () => {
     const entries = await planRibUpdates({
       home: makeHome({ "@keelson/rib-chamber": "0.49.0" }),

@@ -53,8 +53,13 @@ function resolveRibSource(arg: string): string {
 export interface AddPin {
   spec: string;
   tag: string | null;
-  // Why no release pin was applied, when one was attempted and did not land.
-  note: string | null;
+  // A complete sentence explaining why no release pin was applied, for the
+  // legitimate cases. Printed verbatim: the reasons do not share a prefix.
+  unpinned: string | null;
+  // Set when the tags could not be read at all. Installing anyway would take
+  // whatever the default branch holds while reporting nothing went wrong, so
+  // the add stops instead.
+  unreadable: string | null;
 }
 
 // Resolving the release before `bun add` rather than re-pinning after means bun
@@ -65,22 +70,24 @@ export async function resolveAddPin(
   ref: string | undefined,
   resolveTags: ResolveTags = lsRemoteTags,
 ): Promise<AddPin> {
+  const bare = { tag: null, unpinned: null, unreadable: null };
   const parsed = parseRibSource(source);
   if (ref !== undefined) {
     return parsed === null
-      ? { spec: source, tag: null, note: `--ref does not apply to ${source}` }
-      : { spec: `${parsed.base}#${ref}`, tag: null, note: null };
+      ? { ...bare, spec: source, unpinned: `--ref does not apply to ${source}` }
+      : { ...bare, spec: `${parsed.base}#${ref}` };
   }
-  if (parsed === null) return { spec: source, tag: null, note: null };
-  if (parsed.ref !== null) return { spec: source, tag: null, note: null };
+  if (parsed === null || parsed.ref !== null) return { ...bare, spec: source };
 
   const resolution = await resolveTags(parsed.url);
   if (resolution.kind === "unreachable") {
-    return { spec: source, tag: null, note: `could not read tags: ${resolution.reason}` };
+    return { ...bare, spec: source, unreadable: resolution.reason };
   }
   const target = newestRelease(resolution.tags, false);
-  if (target === null) return { spec: source, tag: null, note: "no release tags yet" };
-  return { spec: pinnedSpec(parsed, target.tag), tag: target.tag, note: null };
+  if (target === null) {
+    return { ...bare, spec: source, unpinned: "no release tags yet; tracking the default branch" };
+  }
+  return { ...bare, spec: pinnedSpec(parsed, target.tag), tag: target.tag };
 }
 
 // Skip probeServer: the actual GET surfaces "connection refused" via
@@ -248,6 +255,16 @@ export async function runRibAdd(arg: string, opts: RibAddOptions): Promise<never
   }
   const home = ensureHome();
   const pin = await resolveAddPin(resolveRibSource(trimmed), opts.ref);
+  if (pin.unreadable !== null) {
+    emit(
+      {
+        error: `could not read releases for ${trimmed}: ${pin.unreadable} — install a specific ref with \`--ref <ref>\` if that is what you want`,
+        code: "UNREACHABLE",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_FAIL);
+  }
   const source = pin.spec;
   const snapshot = snapshotHome(home);
   const before = new Set(installedRibIds(home));
@@ -294,7 +311,7 @@ export async function runRibAdd(arg: string, opts: RibAddOptions): Promise<never
         restartRequired: server !== null,
         resourced,
         pinned: pin.tag,
-        ...(pin.note ? { pinNote: pin.note } : {}),
+        ...(pin.unpinned ? { pinNote: pin.unpinned } : {}),
       },
     },
     { json: opts.json },
@@ -302,7 +319,7 @@ export async function runRibAdd(arg: string, opts: RibAddOptions): Promise<never
   if (!opts.json) {
     // An unpinned install is the exception now, so it says so rather than
     // leaving the operator to infer it from a manifest they never open.
-    if (pin.note) process.stdout.write(`tracking the default branch: ${pin.note}\n`);
+    if (pin.unpinned) process.stdout.write(`${pin.unpinned}\n`);
     if (resourced) {
       process.stdout.write(`resourced ${resourced}${pin.tag ? ` at ${pin.tag}` : ""}\n`);
       if (server !== null) {

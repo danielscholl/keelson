@@ -79,10 +79,25 @@ describe("parseRibSource", () => {
 
   // The harness pins itself to release-asset URLs on the same host as its ribs;
   // reading one as a git remote would make `rib update` try to advance keelson.
-  test("rejects a release-tarball URL, which is not a repo", () => {
-    expect(
-      parseRibSource("https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz"),
-    ).toBeNull();
+  test("rejects downloadable artifacts, which are not repos", () => {
+    for (const url of [
+      "https://github.com/acme/keelson/releases/download/v0.1.0/keelson-cli.tgz",
+      "https://github.com/acme/keelson/archive/refs/tags/v0.1.0.tar.gz",
+      "https://gitlab.com/acme/keelson/-/archive/v1/keelson-v1.zip",
+    ]) {
+      expect(parseRibSource(url)).toBeNull();
+    }
+  });
+
+  // GitLab subgroups nest arbitrarily, so a two-segment depth limit would
+  // report every subgroup-hosted rib as unpinnable.
+  test("keeps nested group paths, which GitLab uses for subgroups", () => {
+    expect(parseRibSource("https://gitlab.com/group/sub/keelson-rib-x")?.url).toBe(
+      "https://gitlab.com/group/sub/keelson-rib-x",
+    );
+    expect(parseRibSource("git@gitlab.com:group/sub/deeper/keelson-rib-x.git")?.url).toBe(
+      "https://gitlab.com/group/sub/deeper/keelson-rib-x",
+    );
   });
 });
 
@@ -193,6 +208,15 @@ describe("isValidRange", () => {
 
   // Bun.semver.satisfies returns true for every version against each of these,
   // so without the check a malformed range is indistinguishable from `*`.
+  // Dropping every `-` before validating would accept this on the strength of
+  // its first token alone, which is the false-compatible verdict all over again.
+  test("rejects a hyphen range missing an endpoint", () => {
+    expect(isValidRange("1.0.0 -")).toBe(false);
+    expect(isValidRange("- 2.0.0")).toBe(false);
+    expect(isValidRange("1.0.0 - 2.0.0 - 3.0.0")).toBe(false);
+    expect(isValidRange("1.0.0 - 2.0.0")).toBe(true);
+  });
+
   test("rejects the malformed ranges Bun.semver silently treats as match-anything", () => {
     for (const range of ["not-a-range", "garbage", "!!!", "", "   ", ">= x"]) {
       expect(isValidRange(range)).toBe(false);

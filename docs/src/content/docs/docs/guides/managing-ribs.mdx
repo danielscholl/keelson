@@ -116,9 +116,9 @@ a fork you maintain.
 <Aside type="note" title="Ribs declare the harness they need">
 A rib's package manifest carries the `@keelson/shared` range it was built
 against. After an update, keelson compares that range to the harness in your
-home and warns when a newly installed rib needs a newer one, naming the rollback
-command. That rib would otherwise be skipped at boot with only a line in the
-server log.
+home and warns whenever the harness does not satisfy it, in either direction,
+naming the rollback command. That rib would otherwise be skipped at boot with
+only a line in the server log.
 </Aside>
 
 ## Remove

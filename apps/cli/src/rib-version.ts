@@ -22,16 +22,19 @@ function splitRef(spec: string): { base: string; ref: string | null } {
   return { base: spec.slice(0, hash), ref: ref.length > 0 ? ref : null };
 }
 
-// A repo path is exactly two segments. Anything longer is some other artifact
-// living on the same host — most importantly the release-tarball URLs the
-// harness pins itself to, which must never be mistaken for a git remote.
+// Downloadable artifacts that live on the same hosts as repos. The harness pins
+// itself to release-asset URLs, which must never be read as a git remote.
+const NOT_A_REPO = /\.(?:tgz|tar\.gz|tar\.bz2|zip)$/i;
+
+// A repo path is two or more segments: GitLab subgroups nest arbitrarily
+// (`group/sub/repo`), so a depth limit would report those as unpinnable.
 function ownerRepo(path: string): string | null {
-  const parts = path.replace(/^\/+/, "").replace(/\/+$/, "").split("/");
-  if (parts.length !== 2) return null;
-  const owner = parts[0] ?? "";
-  const repo = (parts[1] ?? "").replace(/\.git$/, "");
-  if (owner.length === 0 || repo.length === 0) return null;
-  return `${owner}/${repo}`;
+  const trimmed = path.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (NOT_A_REPO.test(trimmed) || trimmed.includes("/releases/download/")) return null;
+  const parts = trimmed.split("/");
+  if (parts.length < 2 || parts.some((part) => part.length === 0)) return null;
+  parts[parts.length - 1] = (parts.at(-1) as string).replace(/\.git$/, "");
+  return (parts.at(-1) as string).length === 0 ? null : parts.join("/");
 }
 
 function gitUrl(base: string): string | null {
@@ -245,8 +248,20 @@ export function isValidRange(range: string): boolean {
     const tokens = clause
       .trim()
       .split(/\s+/)
-      .filter((token) => token.length > 0 && token !== "-");
-    return tokens.length > 0 && tokens.every((token) => COMPARATOR.test(token));
+      .filter((token) => token.length > 0);
+    if (tokens.length === 0) return false;
+    // A hyphen range is exactly `A - B`. Dropping every `-` instead would let
+    // `1.0.0 -` validate on the strength of its first token alone.
+    const hyphen = tokens.indexOf("-");
+    if (hyphen !== -1) {
+      return (
+        tokens.length === 3 &&
+        hyphen === 1 &&
+        COMPARATOR.test(tokens[0] as string) &&
+        COMPARATOR.test(tokens[2] as string)
+      );
+    }
+    return tokens.every((token) => COMPARATOR.test(token));
   });
 }
 

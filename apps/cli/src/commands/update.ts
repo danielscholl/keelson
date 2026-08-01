@@ -352,6 +352,47 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     }
   }
 
+  // Ribs release on their own cadence, so a current harness is not a finished
+  // update. Exiting here would make `keelson update` a permanent no-op for
+  // every rib the moment the harness caught up.
+  if (upToDate && !opts.force && !opts.check) {
+    const ribsOnly = opts.ribs
+      ? await runRibUpdatePass({ home, allowPrerelease: false, check: false, quiet: opts.json })
+      : null;
+    if (ribsOnly?.installError) {
+      fail(
+        ribsOnly.rolledBack
+          ? `advancing ribs failed and the home was rolled back: ${ribsOnly.installError}`
+          : `advancing ribs failed: ${ribsOnly.installError}`,
+        "RIB_UPDATE_FAILED",
+        opts.json,
+      );
+    }
+    const server = await probeServer({});
+    emitResult(opts, {
+      current,
+      latest,
+      upToDate: true,
+      updated: false,
+      home,
+      ribsUpdated: ribsOnly?.moved.map((entry) => entry.id) ?? [],
+      ...(ribsOnly ? { ribs: ribsOnly.entries.map(ribReport) } : {}),
+      ...(ribsOnly && ribsOnly.incompatible.length > 0
+        ? { ribsIncompatible: ribsOnly.incompatible }
+        : {}),
+      restartRequired: ribsOnly !== null && ribsOnly.moved.length > 0 && server !== null,
+    });
+    if (!opts.json) {
+      for (const entry of ribsOnly?.entries ?? [])
+        process.stdout.write(`${describeEntry(entry)}\n`);
+      for (const rib of ribsOnly?.incompatible ?? [])
+        process.stdout.write(`${incompatibleWarning(rib)}\n`);
+      if (ribsOnly !== null && ribsOnly.moved.length > 0 && server !== null)
+        process.stdout.write("restart the server (`keelson restart`) to load the update\n");
+    }
+    process.exit((ribsOnly?.entries.filter(isProblem).length ?? 0) > 0 ? EXIT_FAIL : EXIT_OK);
+  }
+
   if (upToDate && !opts.force) {
     emitResult(opts, { current, latest, upToDate: true, updated: false, home });
     process.exit(EXIT_OK);
@@ -434,7 +475,9 @@ export async function runUpdate(opts: UpdateOptions): Promise<never> {
     : null;
   if (ribPass?.installError) {
     fail(
-      `keelson updated to v${latest}, but advancing ribs failed and the home was rolled back: ${ribPass.installError}`,
+      ribPass.rolledBack
+        ? `keelson updated to v${latest}, but advancing ribs failed and the home was rolled back: ${ribPass.installError}`
+        : `keelson updated to v${latest}, but advancing ribs failed: ${ribPass.installError}`,
       "RIB_UPDATE_FAILED",
       opts.json,
     );

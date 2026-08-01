@@ -107,7 +107,23 @@ async function planOne(pkg: string, source: string, opts: PlanOptions): Promise<
   }
 
   if (parsed.ref === target.tag) return { ...base, target, status: "current" };
-  return { ...base, target, status: installed === target.version ? "pinned" : "updated" };
+  if (installed === target.version) return { ...base, target, status: "pinned" };
+
+  // Only `--to` may move a rib backwards. Without this, opting into a
+  // prerelease with `--pre` and then running a plain update selects the newest
+  // stable tag, which is older, and silently rolls the rib back.
+  if (opts.to === undefined && installed !== null && isOlder(target.version, installed)) {
+    return { ...base, target, status: "current" };
+  }
+  return { ...base, target, status: "updated" };
+}
+
+function isOlder(candidate: string, installed: string): boolean {
+  try {
+    return Bun.semver.order(candidate, installed) < 0;
+  } catch {
+    return false;
+  }
 }
 
 // Rewrites only the rib deps that move, leaving every other dependency (the

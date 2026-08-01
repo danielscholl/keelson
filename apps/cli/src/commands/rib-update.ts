@@ -44,6 +44,9 @@ export interface RibUpdatePass {
   moved: RibPlanEntry[];
   applied: boolean;
   installError: string | null;
+  // False when an install failed and the restoring reinstall failed too, so the
+  // home is not back where it started.
+  rolledBack?: boolean;
   incompatible: IncompatibleRib[];
 }
 
@@ -89,15 +92,24 @@ export async function runRibUpdatePass(opts: RibUpdatePassOptions): Promise<RibU
     // The manifest is the only record of which version is installed, so a home
     // left holding pins bun rejected would report versions it does not have.
     restoreHome(opts.home, snapshot);
-    await runBunPmCaptured(["install"], opts.home, opts.quiet);
+    const reinstall = await runBunPmCaptured(["install"], opts.home, opts.quiet);
     const detail = install.stderr.trim().split("\n").at(-1)?.trim();
+    const cause = detail
+      ? `${detail} (exit ${install.code})`
+      : `bun install exited ${install.code}`;
     return {
       entries,
       moved: [],
       applied: false,
-      installError: detail
-        ? `${detail} (exit ${install.code})`
-        : `bun install exited ${install.code}`,
+      // Restoring the manifest is not the same as restoring node_modules. When
+      // the second install fails too, the tree no longer matches the manifest,
+      // and reporting a clean rollback would send the operator away from a home
+      // that still needs attention.
+      installError:
+        reinstall.code === 0
+          ? cause
+          : `${cause}; the rollback reinstall also failed (exit ${reinstall.code}), so ${opts.home}/node_modules may not match its manifest`,
+      rolledBack: reinstall.code === 0,
       incompatible: [],
     };
   }
@@ -223,7 +235,9 @@ export async function runRibUpdate(ids: string[], opts: RibUpdateOptions): Promi
 
   if (pass.installError !== null) {
     fail(
-      `rib update failed and the home was rolled back: ${pass.installError}`,
+      pass.rolledBack
+        ? `rib update failed and the home was rolled back: ${pass.installError}`
+        : `rib update failed: ${pass.installError}`,
       "INSTALL_FAILED",
       opts.json,
       EXIT_FAIL,

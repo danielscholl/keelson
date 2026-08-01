@@ -419,6 +419,36 @@ describe("keelson update (e2e against a mock releases API)", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
+  // Ribs release on their own cadence, so exiting as soon as the harness is
+  // current would make `keelson update` a permanent no-op for every rib.
+  test("a current harness still runs the rib pass", async () => {
+    latestTag = `v${cliPkg.version}`;
+    const home = installedHome();
+    const manifestPath = join(home, "package.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    // A path source is unpinnable, so the pass reports it without any network.
+    manifest.dependencies["@keelson/rib-local"] = join(home, "some-rib");
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const { stdout, exitCode } = await runCli(["--json", "update"], env(home));
+    expect(exitCode).toBe(0);
+    const out = JSON.parse(stdout.trim());
+    expect(out.data.upToDate).toBe(true);
+    expect(out.data.ribs).toEqual([
+      { id: "local", status: "unpinnable", from: null, to: null, tag: null },
+    ]);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("--no-ribs on a current harness skips the rib pass entirely", async () => {
+    latestTag = `v${cliPkg.version}`;
+    const home = installedHome();
+    const { stdout, exitCode } = await runCli(["--json", "update", "--no-ribs"], env(home));
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.trim()).data.ribs).toBeUndefined();
+    rmSync(home, { recursive: true, force: true });
+  });
+
   test("--check reports an available update without applying", async () => {
     latestTag = "v999.0.0";
     const home = installedHome();
