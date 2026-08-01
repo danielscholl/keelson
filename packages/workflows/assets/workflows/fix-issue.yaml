@@ -1353,6 +1353,19 @@ nodes:
           type: string
           enum: [received, empty, missing, invalid]
         summary: { type: string }
+    # output_format only shapes the reply; `{}` still parses as a JSON object and
+    # would reach ci-green-gate as a non-fatal UNKNOWN, silently skipping the
+    # criteria gate. output_schema is the fail-closed check.
+    output_schema:
+      type: object
+      required: [ci_status, actionable, conflicts, criteria_count, brief_status, summary]
+      properties:
+        ci_status: { type: string }
+        actionable: { type: array }
+        conflicts: { type: array }
+        criteria_count: { type: integer }
+        brief_status: { type: string }
+        summary: { type: string }
     prompt: |
       You are the CI triage judge for the PR this run just pushed.
 
