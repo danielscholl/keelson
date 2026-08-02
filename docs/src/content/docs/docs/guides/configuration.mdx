@@ -54,6 +54,7 @@ enabled.
 | `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. Claude, Codex, and pi also need `keelson provider add <id>`. |
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. Falls back when it is not. See [The default provider](#the-default-provider). |
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
+| `claude.modelClasses`, `codex.modelClasses`, `pi.modelClasses` | object | Optional `fast`, `balanced`, and `deep` model-id overrides for portable workflow tiers. |
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
@@ -121,7 +122,14 @@ environment, so keelson lets you choose with `claude.auth`:
 ```jsonc
 {
   "providers": { "claude": true },
-  "claude": { "auth": "auto" }
+  "claude": {
+    "auth": "auto",
+    "modelClasses": {
+      "fast": "claude-haiku-4-5",
+      "balanced": "claude-opus-4-8",
+      "deep": "claude-fable-5"
+    }
+  }
 }
 ```
 
@@ -141,6 +149,10 @@ login` if you have a Pro/Max plan; with no subscription and no key, the turn
 surfaces an auth error.
 </Aside>
 
+`claude.modelClasses` overrides the provider's derived `fast`, `balanced`, and
+`deep` workflow tiers. Put this settings object beside `auth`, not inside the
+boolean `providers` enablement map.
+
 ## Pi (community provider)
 
 `pi` wraps the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent),
@@ -149,7 +161,14 @@ interface. It is opt-in:
 
 ```json
 {
-  "providers": { "pi": true }
+  "providers": { "pi": true },
+  "pi": {
+    "modelClasses": {
+      "fast": "anthropic/claude-haiku-4.5",
+      "balanced": "anthropic/claude-sonnet-4.6",
+      "deep": "anthropic/claude-opus-4.5"
+    }
+  }
 }
 ```
 
@@ -159,7 +178,8 @@ environment variables such as `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`. Because p
 is multi-vendor, models are named `vendor/model` (for example
 `anthropic/claude-opus-4.5` or `google/gemini-2.5-pro`); pick one your credentials
 cover in the model picker, or leave the default and let pi choose from its own
-settings.
+settings. Use `pi.modelClasses` to pin any portable workflow tier to a model your
+configured vendor credentials can reach.
 
 <Aside type="caution" title="Scope and limits">
 Pi's own built-in file and shell tools stay off (they would run outside keelson's
@@ -197,9 +217,19 @@ with `codex.network`:
 ```jsonc
 {
   "providers": { "codex": true },
-  "codex": { "sandbox": "read-only" }
+  "codex": {
+    "sandbox": "read-only",
+    "modelClasses": {
+      "fast": "gpt-5.6-luna",
+      "balanced": "gpt-5.6-terra",
+      "deep": "gpt-5.6-sol"
+    }
+  }
 }
 ```
+
+`codex.modelClasses` overrides the catalog-derived workflow tiers. It sits beside
+`sandbox` and `network` in the top-level `codex` settings object.
 
 | Value | Behavior |
 |---|---|
@@ -237,7 +267,17 @@ operations are available over the API at `/api/gateways`.
 // ~/.keelson/config.json (written by `keelson gateway add`)
 {
   "gateways": [
-    { "name": "ollama", "baseUrl": "http://localhost:11434/v1", "protocol": "openai", "model": "qwen3" }
+    {
+      "name": "ollama",
+      "baseUrl": "http://localhost:11434/v1",
+      "protocol": "openai",
+      "model": "qwen3",
+      "modelClasses": {
+        "fast": "qwen3",
+        "balanced": "qwen3",
+        "deep": "qwen3"
+      }
+    }
   ]
 }
 ```
@@ -246,8 +286,9 @@ A gateway name must be lowercase kebab-case and cannot shadow a built-in provide
 id (`copilot`, `claude`, `pi`, `codex`, `stub`). The only wire protocol today is
 `openai`. Gateway turns stream, but keelson does not yet project its tool registry
 into them (`tools: false`) and they do not resume a session, so each turn is
-fresh and tool-less. See the [provider reference](../../reference/providers/#gateway-providers)
-for where gateways sit in the matrix.
+fresh and tool-less. Each gateway entry may set its own `modelClasses` map. See
+the [provider reference](../../reference/providers/#gateway-providers) for where
+gateways sit in the matrix.
 
 ## Governance
 

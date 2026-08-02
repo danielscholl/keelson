@@ -124,6 +124,10 @@ hand-maintained: neither SDK exposes a programmatic `models.list()`, so the ids
 mirror what each vendor's own CLI offers. `GET /api/providers/:id/models` returns
 the live list the picker prefers.
 
+Portable workflow tiers (`fast`, `balanced`, and `deep`) derive from these
+catalogs. Operators can replace the derived ids with per-provider
+[`modelClasses` settings](../../guides/configuration/#claude-credentials).
+
 **Claude.** The default is `claude-opus-4-8`.
 
 | id | Name | Cost tier |
