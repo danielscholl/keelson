@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+import { isRegisteredProvider } from "@keelson/providers";
 import {
   closeSync,
   constants,
@@ -778,6 +779,7 @@ interface StartRunCoreParams {
   isolationOn: boolean;
   branchTemplate: string | undefined;
   worktreeBase: string | undefined;
+  providerOverride?: string;
   // Trigger provenance for the run row. Omitted → 'manual'. The owning rib id
   // (null for local workflows) is stamped so the runs feed can badge/filter and
   // bulk-delete by rib even after the rib is removed.
@@ -950,6 +952,7 @@ function startRunCore(
     isolationOn,
     branchTemplate,
     worktreeBase,
+    providerOverride,
   } = params;
   const origin: WorkflowRunOrigin = params.origin ?? "manual";
   const ribId = params.ribId ?? null;
@@ -1069,6 +1072,7 @@ function startRunCore(
     subscribers,
     promptHandler,
     pendingApprovals,
+    ...(providerOverride !== undefined ? { providerOverride } : {}),
     isolation: isolationOn
       ? {
           branchTemplate,
@@ -2049,6 +2053,14 @@ export function workflowsRoutes(
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
+    const requestedProvider = parsed.data.provider?.trim();
+    const providerOverride =
+      requestedProvider !== undefined && requestedProvider.length > 0
+        ? requestedProvider
+        : undefined;
+    if (providerOverride !== undefined && !isRegisteredProvider(providerOverride)) {
+      return c.json({ error: `unknown provider '${providerOverride}'` }, 400);
+    }
 
     // Resolve the run's working directory. The wire schema allows either
     // `projectId` (named pointer) or `workingDir` (raw override) or both —
@@ -2189,6 +2201,7 @@ export function workflowsRoutes(
           isolationOn,
           branchTemplate,
           worktreeBase: workflow.worktree?.base,
+          ...(providerOverride !== undefined ? { providerOverride } : {}),
           origin: "manual",
           ribId: ribIdFor(catalog, workflow.name, scope),
         },
@@ -2621,6 +2634,7 @@ interface ExecuteRunArgs {
   activeRuns: ActiveRuns;
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
+  providerOverride?: string;
   // Per-run pending approval map shared with the route's POST /resume and
   // DELETE handlers. The route owns the lifecycle; this function builds the
   // closures that populate / drain it as the executor pauses and resumes.
@@ -2728,6 +2742,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     activeRuns,
     subscribers,
     promptHandler,
+    providerOverride,
     pendingApprovals,
     isolation,
     projectId,
@@ -3319,6 +3334,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       handlers,
       cwd: effectiveCwd,
       abortSignal: abort.signal,
+      ...(providerOverride !== undefined ? { providerOverride } : {}),
       ...artifacts.runWorkflowOptions(),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(projectId !== undefined ? { projectId } : {}),

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isRegisteredProvider, registerStubProvider } from "@keelson/providers";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
 
 import { makePromptHandler, type WorkflowDefinition } from "@keelson/workflows";
@@ -36,6 +37,7 @@ let dbPath: string;
 let wfDir: string;
 
 beforeEach(() => {
+  if (!isRegisteredProvider("stub")) registerStubProvider();
   tmpDir = mkdtempSync(join(tmpdir(), "keelson-workflows-route-"));
   dbPath = join(tmpDir, "test.db");
   wfDir = join(tmpDir, "workflows");
@@ -1161,6 +1163,92 @@ nodes:
     const collect = run.nodes.find((n) => n.nodeId === "collect");
     expect(collect?.provider).toBeNull();
     expect(collect?.model).toBeNull();
+  });
+
+  test("POST .../runs provider override wins over workflow and node pins", async () => {
+    writeWorkflow(
+      "overridewf.yaml",
+      `name: overridewf
+description: prompt provider override
+provider: claude
+model: auto
+nodes:
+  - id: first
+    prompt: first
+  - id: second
+    depends_on: [first]
+    provider: copilot
+    prompt: second
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const spyProvider = {
+      getCapabilities: () => ({
+        defaultModel: "stub-default",
+        models: ["stub-default"],
+      }),
+      async *sendQuery() {
+        yield { type: "text", content: "ok" };
+        yield { type: "done" };
+      },
+    };
+    const promptHandler = makePromptHandler({
+      getProvider: () => spyProvider,
+      resolveProviderId: (id: string | undefined) => id ?? "stub",
+      getRegisteredTools: () => [],
+    });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore: createConversationStore(db),
+      defaultCwd: tmpDir,
+      promptHandler,
+    });
+
+    const startRes = await app.fetch(
+      postRun("http://test/api/workflows/overridewf/runs", {
+        inputs: {},
+        workingDir: tmpDir,
+        provider: "stub",
+      }),
+    );
+    expect(startRes.status).toBe(200);
+    const { runId } = (await startRes.json()) as { runId: string };
+    const run = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; provider: string | null }>;
+    };
+
+    expect(run.status).toBe("succeeded");
+    expect(run.nodes.map((node) => node.provider)).toEqual(["stub", "stub"]);
+  });
+
+  test("POST .../runs rejects an unregistered provider override", async () => {
+    writeWorkflow(
+      "unknown-provider.yaml",
+      `name: unknown-provider
+description: provider validation
+nodes:
+  - id: ok
+    bash: echo ok
+`,
+    );
+    const { app } = makeRig();
+
+    const response = await app.fetch(
+      postRun("http://test/api/workflows/unknown-provider/runs", {
+        inputs: {},
+        provider: "definitely-not-registered",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "unknown provider 'definitely-not-registered'",
+    });
   });
 
   test("fail_on_tool_error fails the node when a tool errors, even on a normal text reply", async () => {
