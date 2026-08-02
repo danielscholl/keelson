@@ -50,7 +50,12 @@ export interface PromptHandlerProvider {
   // the SDK's own default, and to decide whether a resolved `effort` is worth
   // reporting — a provider that ignores `reasoningEffort` ran at its own
   // default, so claiming a tier would be false. Spy / fake providers may omit it.
-  getCapabilities?(): { defaultModel?: string; reasoningEffort?: boolean; tools?: boolean };
+  getCapabilities?(): {
+    defaultModel?: string;
+    reasoningEffort?: boolean;
+    tools?: boolean;
+    models?: readonly string[];
+  };
 }
 
 export interface PromptHandlerSendOptions {
