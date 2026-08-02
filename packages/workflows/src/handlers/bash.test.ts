@@ -353,19 +353,26 @@ describe("bashHandler", () => {
         stubNode,
         buildCtx({ resolvedBody: body, abortSignal: ac.signal }),
       );
-      // Give bash a beat to fork the children and write the pidfile.
-      await new Promise((r) => setTimeout(r, 150));
+      const fs = await import("node:fs");
+      const readPids = (): string[] =>
+        fs.existsSync(tmpFile)
+          ? fs
+              .readFileSync(tmpFile, "utf-8")
+              .split("\n")
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0)
+          : [];
+      const readyDeadline = Date.now() + 2_000;
+      let pids = readPids();
+      while (pids.length < 2 && Date.now() < readyDeadline) {
+        await new Promise((r) => setTimeout(r, 10));
+        pids = readPids();
+      }
       ac.abort();
       const result = await promise;
       expect(result.status).toBe("failed");
 
-      const fs = await import("node:fs");
-      const pids = fs
-        .readFileSync(tmpFile, "utf-8")
-        .split("\n")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      fs.unlinkSync(tmpFile);
+      fs.rmSync(tmpFile, { force: true });
       expect(pids.length).toBeGreaterThanOrEqual(2);
 
       // Give SIGTERM a tick to propagate then verify both grandchildren
