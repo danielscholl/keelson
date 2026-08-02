@@ -224,6 +224,31 @@ describe("runWorkflow — hello-world (1 layer, 1 prompt node)", () => {
     expect(summary.nodes.greet.state).toBe("completed");
     expect(summary.nodes.greet.output).toContain("echo:greet:");
   });
+
+  test("forwards the provider override and coalesces keyed run warnings", async () => {
+    const workflow = loadStarter("hello-world");
+    const handler: NodeHandler = {
+      type: "prompt",
+      async handle(_node, ctx) {
+        expect(ctx.providerOverride).toBe("stub");
+        ctx.warnOnce?.("provider-preference", "using fallback provider");
+        ctx.warnOnce?.("provider-preference", "using fallback provider");
+        return { status: "succeeded", output: { kind: "text", text: "ok" } };
+      },
+    };
+    const { events, onEvent } = recordEvents();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      providerOverride: "stub",
+      onEvent,
+    });
+
+    expect(events.filter((event) => event.type === "run_warning")).toEqual([
+      { type: "run_warning", message: "using fallback provider" },
+    ]);
+  });
 });
 
 describe("runWorkflow — status-report (2 layers, sequential)", () => {
