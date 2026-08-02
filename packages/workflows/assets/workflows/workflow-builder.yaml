@@ -1,13 +1,12 @@
 # A workflow that authors workflows. Concepts ported from Archon's
-# archon-workflow-builder (MIT, see NOTICE), rewritten for Keelson: Copilot
-# models, the `$KEELSON_*` bash env channel, a real `Bun.YAML.parse` gate
+# archon-workflow-builder (MIT, see NOTICE), rewritten for Keelson: portable
+# model tiers, the `$KEELSON_*` bash env channel, a real `Bun.YAML.parse` gate
 # (Bun is a hard dependency), and a schema reference that teaches the model
 # Keelson's actual node taxonomy and substitution rules — so the workflow it
 # emits passes `keelson workflow validate`.
 
 name: workflow-builder
-provider: copilot
-model: auto
+model: balanced
 description: |
   Use when: User wants to scaffold a new custom workflow for their project from
             a plain-language description.
@@ -69,7 +68,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
   - id: extract-intent
     depends_on: [scan-codebase]
-    model: auto
+    model: balanced
     output_format:
       type: object
       required: [workflow_name, description, trigger_phrases, proposed_nodes, execution_mode]
@@ -124,7 +123,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
   - id: generate-yaml
     depends_on: [extract-intent]
-    model: auto
+    model: balanced
     allowed_tools: [Read, Write]
     prompt: |
       You are a Keelson workflow author. Write ONE complete, valid workflow YAML
@@ -146,8 +145,7 @@ nodes:
 
       ```yaml
       name: <kebab-case, matches the intent name>
-      provider: copilot        # this project's models
-      model: auto              # let Copilot route each node
+      model: balanced        # fast | balanced | deep — the effective provider picks a concrete model
       description: |
         Use when: ...
         Triggers: ...
@@ -162,8 +160,10 @@ nodes:
           # $<upstreamId>.output[.field] are substituted INTO the prompt text.
           prompt: |
             Instructions for the agent...
-          # optional: model: auto | context: fresh | idle_timeout: <ms> |
+          # optional: model: fast | balanced | deep | context: fresh | idle_timeout: <ms> |
           #   output_format: { type: object, required: [...], properties: {...} }
+          # model_by_provider: { copilot: <id>, claude: <id> } pins concrete ids
+          # only for a deliberate cross-provider spread.
           # On Copilot, tool gates map to capability kinds (read / write / shell),
           # not individual tools: allowed_tools: [Read, Write] permits file writes
           # but not shell, and denying Edit also denies Write (same kind).
@@ -213,7 +213,11 @@ nodes:
 
       1. `name:` MUST equal: $extract-intent.output.workflow_name
       2. `description:` MUST follow "Use when / Triggers / Does / NOT for".
-      3. Set `provider: copilot` and `model: auto` at the top.
+      3. Default nodes to a tier: `balanced`, `deep` for judgment/edit nodes, or
+         `fast` for mechanical ones. Omit `provider:` so the runner's default
+         provider resolves each tier. Use `model_by_provider` only for a deliberate
+         cross-vendor spread, and a literal model id only for an install-specific
+         workflow.
       4. Every node id is unique kebab-case; never use the reserved ids
          `inputs`, `memory`, `ARGUMENTS`, or `ARTIFACTS_DIR`.
       5. Use `depends_on` for order. A `$<id>.output` reference is only valid
@@ -264,7 +268,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
   - id: save-or-report
     depends_on: [validate-yaml]
-    model: auto
+    model: balanced
     prompt: |
       Install the generated workflow and report to the user.
 

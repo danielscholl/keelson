@@ -1,6 +1,5 @@
 name: resolve-pr
-provider: copilot
-model: auto
+model: balanced
 description: |
   Use when: User wants an existing same-repo PR driven to a mergeable state —
             review threads handled, fixes pushed, CI green.
@@ -32,7 +31,7 @@ converge:
 
 nodes:
   - id: extract-pr
-    model: auto
+    model: balanced
     prompt: |
       Find the PR or MR number for this request.
 
@@ -197,7 +196,9 @@ nodes:
     depends_on: [fetch-state]
     when: "$fetch-state.output.has_new == 'true'"
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     output_format:
       type: object
@@ -366,7 +367,9 @@ nodes:
     trigger_rule: none_failed_min_one_success
     when: "$triage-gate.output.has_new == 'true'"
     context: fresh
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: xhigh
     idle_timeout: 1800000
     prompt: |
@@ -471,7 +474,9 @@ nodes:
   - id: fix-validation
     depends_on: [validate]
     context: fresh
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: xhigh
     idle_timeout: 1800000
     prompt: |
@@ -575,7 +580,7 @@ nodes:
   - id: reply-resolve
     depends_on: [reply-gate]
     context: fresh
-    model: auto
+    model: balanced
     prompt: |
       Post replies, resolve the threads this run settled, and update the
       handled ledger for round $converge.round.
@@ -935,7 +940,7 @@ nodes:
   - id: report
     depends_on: [converge-check]
     context: fresh
-    model: auto
+    model: balanced
     prompt: |
       Produce the final resolve-pr summary.
 

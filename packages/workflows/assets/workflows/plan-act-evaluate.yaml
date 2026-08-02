@@ -40,8 +40,8 @@
 #            is the posted PR review.
 #
 # Per-node rails honored at runtime (see architect.yaml / pr-review.yaml):
-#   - allowed_tools / denied_tools — claude gates by tool name; copilot (the pin
-#     below) gates the underlying capability (read / write / shell).
+#   - allowed_tools / denied_tools — claude gates by tool name; copilot gates
+#     the underlying capability (read / write / shell).
 #   - $ARGUMENTS / $<node>.output / $ARTIFACTS_DIR in prompts; the env channel
 #     ($KEELSON_ARGUMENTS / $KEELSON_NODE_<id>_OUTPUT / $KEELSON_ARTIFACTS_DIR)
 #     in bash. Node-id hyphens become underscores in env (approve-plan →
@@ -56,8 +56,7 @@
 # `suggestedActors(capabilities:[CAN_BE_ASSIGNED])` as `copilot-swe-agent`).
 
 name: plan-act-evaluate
-provider: copilot
-model: auto
+model: balanced
 description: |
   Use when: User wants to build a feature or land a change in ANY repo under the
             Plan→Act→Evaluate lifecycle — plan recorded as an issue, a human gate
@@ -75,8 +74,8 @@ description: |
   NOT for: Quick single-file or known-bug fixes (use fix-issue). PR review (use
            pr-review). Architectural sweeps (use architect). PRD / brainstorming.
 
-# Model `auto` lets Copilot route each node and keeps this bundled workflow
-# portable. Resolution order is node.model → workflow.model → provider default.
+# Model tiers keep this bundled workflow portable. Resolution order is
+# node.model → workflow.model → provider default.
 
 # Mutates the working tree on the LOCAL path — branch, commits, push, PR. Run in
 # an isolated worktree by default so a run can't trample editor state. (The

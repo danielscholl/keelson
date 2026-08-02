@@ -97,6 +97,7 @@ export {
   type WorkflowLoadWarning,
 } from "./loader.ts";
 export { readManagedManifest, sha256, writeManagedManifest } from "./managed.ts";
+export { diagnoseModelDiversity } from "./model-diversity.ts";
 export * from "./schema/index.ts";
 export {
   bundledBinDir,

@@ -1286,6 +1286,22 @@ function parseCrossRibCallTimeoutMs(
 // Returns undefined when no providers are registered — keeps `workflowsRoutes`
 // on its placeholder-fallback path so the catalog still serves bash-only
 // workflows when prompt nodes can't run.
+export function resolveWorkflowDefaultProviderId(): string | undefined {
+  const providers = getProviderInfoList();
+  if (providers.length === 0) return undefined;
+
+  const envProvider = process.env.KEELSON_WORKFLOW_PROVIDER?.trim();
+  if (envProvider) return envProvider;
+
+  const configDefault = loadKeelsonConfig().defaultProvider?.trim().toLowerCase();
+  if (configDefault && isRegisteredProvider(configDefault)) return configDefault;
+
+  return (
+    providers.find((provider) => provider.id !== "stub" && provider.id !== "workflow")?.id ??
+    providers.find((provider) => provider.id !== "workflow")?.id
+  );
+}
+
 export function bootstrapPromptHandler(
   opts: {
     defaultOffTools?: readonly string[];
@@ -1303,44 +1319,18 @@ export function bootstrapPromptHandler(
     );
     return undefined;
   }
-  // Pin precedence: KEELSON_WORKFLOW_PROVIDER → config.json defaultProvider (when
-  // registered) → first non-stub. Keeps the workflow default aligned with the
-  // chat default a config sets.
-  const envProvider = process.env.KEELSON_WORKFLOW_PROVIDER?.trim();
-  // Lowercase to match resolveDefaultProvider + the canonical lowercase ids, so
-  // a config value like "Claude" resolves the same here as it does for chat.
   const config = loadKeelsonConfig();
-  const configDefault = config.defaultProvider?.trim().toLowerCase();
-  const requestedId =
-    envProvider && envProvider.length > 0
-      ? envProvider
-      : configDefault && isRegisteredProvider(configDefault)
-        ? configDefault
-        : undefined;
-  let providerId: string;
-  if (requestedId && requestedId.length > 0) {
-    providerId = requestedId;
-  } else {
-    // Prefer the first non-stub provider; fall back to stub only if nothing
-    // real is registered. Skip the synthetic 'workflow' provider — it's a
-    // non-chat stamp for run-as-conversation rows and throws if sendQuery
-    // is invoked.
-    const real = providers.find((p) => p.id !== "stub" && p.id !== "workflow");
-    if (real) {
-      providerId = real.id;
-    } else {
-      const fallback = providers.find((p) => p.id !== "workflow");
-      if (!fallback) {
-        console.warn(
-          "[workflows] no chat-capable provider registered; prompt nodes will fail. Set KEELSON_PROVIDERS to include stub, copilot, or claude.",
-        );
-        return undefined;
-      }
-      providerId = fallback.id;
-      console.warn(
-        `[workflows] no non-stub provider registered; prompt nodes will use '${providerId}' (echo-only). Set KEELSON_PROVIDERS to include copilot or claude, or pin KEELSON_WORKFLOW_PROVIDER explicitly.`,
-      );
-    }
+  const providerId = resolveWorkflowDefaultProviderId();
+  if (providerId === undefined) {
+    console.warn(
+      "[workflows] no chat-capable provider registered; prompt nodes will fail. Set KEELSON_PROVIDERS to include stub, copilot, or claude.",
+    );
+    return undefined;
+  }
+  if (!providers.some((provider) => provider.id !== "stub" && provider.id !== "workflow")) {
+    console.warn(
+      `[workflows] no non-stub provider registered; prompt nodes will use '${providerId}' (echo-only). Set KEELSON_PROVIDERS to include copilot or claude, or pin KEELSON_WORKFLOW_PROVIDER explicitly.`,
+    );
   }
   const getProvider: (id?: string) => PromptHandlerProvider = (id) => {
     const target = id ?? providerId;

@@ -593,6 +593,18 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
 
       const consume = async (): Promise<void> => {
         try {
+          if (ctx.workflow.provider_required === true) {
+            if (workflowProvider === undefined) {
+              providerError = "workflow requires a provider, but no provider is configured";
+              return;
+            }
+            if (effectiveProviderId !== workflowProvider) {
+              providerError =
+                `workflow requires provider '${workflowProvider}', but resolved provider is ` +
+                `'${effectiveProviderId ?? "none"}'`;
+              return;
+            }
+          }
           const provider = opts.getProvider(effectiveProviderId);
           providerResolved = true;
           const capabilities = provider.getCapabilities?.();

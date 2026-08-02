@@ -91,7 +91,12 @@ import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import type { Hono } from "hono";
 import { z } from "zod";
 
-import type { RibWorkflowBinding, WorkflowCatalog, WorkflowScopeContext } from "./bootstrap.ts";
+import {
+  type RibWorkflowBinding,
+  resolveWorkflowDefaultProviderId,
+  type WorkflowCatalog,
+  type WorkflowScopeContext,
+} from "./bootstrap.ts";
 import { loadBriefAndCoverage } from "./brief-coverage.ts";
 import { createContentPartsAccumulator } from "./content-parts.ts";
 import { createRunSlots, type RunSlots, resolveMaxConcurrentRuns } from "./run-concurrency.ts";
@@ -652,6 +657,7 @@ class RunArtifactsDir {
 // so executor-built requests satisfy the same constraints as the HTTP route.
 function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
   promptHandler: NodeHandler;
+  defaultProvider: string | undefined;
   memoryTools: MemoryTools | undefined;
   projectNotebookStore: ProjectNotebookStore | undefined;
 } {
@@ -670,7 +676,12 @@ function buildExecutionDeps(opts: WorkflowsHandlerOptions): {
           },
         }
       : undefined;
-  return { promptHandler, memoryTools, projectNotebookStore: opts.projectNotebookStore };
+  return {
+    promptHandler,
+    defaultProvider: resolveWorkflowDefaultProviderId(),
+    memoryTools,
+    projectNotebookStore: opts.projectNotebookStore,
+  };
 }
 
 interface StartRunCoreDeps {
@@ -680,6 +691,7 @@ interface StartRunCoreDeps {
   activeRuns: ActiveRuns;
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
+  defaultProvider: string | undefined;
   memoryTools: MemoryTools | undefined;
   projectNotebookStore?: ProjectNotebookStore;
   snapshotManager?: SnapshotManager;
@@ -939,7 +951,15 @@ function startRunCore(
   deps: StartRunCoreDeps,
   params: StartRunCoreParams,
 ): { runId: string; conversationId: string } {
-  const { store, conversationStore, activeRuns, subscribers, promptHandler, memoryTools } = deps;
+  const {
+    store,
+    conversationStore,
+    activeRuns,
+    subscribers,
+    promptHandler,
+    defaultProvider,
+    memoryTools,
+  } = deps;
   const { snapshotManager, ribWorkflowBindings, projectNotebookStore, usageStore } = deps;
   const { workspaceManager, mutationLockManager, projectsStore } = deps;
   const {
@@ -1071,6 +1091,7 @@ function startRunCore(
     activeRuns,
     subscribers,
     promptHandler,
+    defaultProvider,
     pendingApprovals,
     ...(providerOverride !== undefined ? { providerOverride } : {}),
     isolation: isolationOn
@@ -1157,7 +1178,7 @@ function resumeRunCore(
   },
   runId: string,
 ): ResumeRunResult {
-  const { store, activeRuns, subscribers, promptHandler, memoryTools } = deps;
+  const { store, activeRuns, subscribers, promptHandler, defaultProvider, memoryTools } = deps;
   const { snapshotManager, ribWorkflowBindings, catalog, usageStore } = deps;
   const { workspaceManager, mutationLockManager } = deps;
   const { projectsStore, projectNotebookStore } = deps;
@@ -1302,6 +1323,7 @@ function resumeRunCore(
       activeRuns,
       subscribers,
       promptHandler,
+      defaultProvider,
       pendingApprovals,
       ...(providerOverride !== null ? { providerOverride } : {}),
       isolation: null,
@@ -1546,7 +1568,8 @@ export function createWorkflowController(
     workspaceManager,
     mutationLockManager,
   } = opts;
-  const { promptHandler, memoryTools, projectNotebookStore } = buildExecutionDeps(opts);
+  const { promptHandler, defaultProvider, memoryTools, projectNotebookStore } =
+    buildExecutionDeps(opts);
 
   return {
     async runDefinition(
@@ -1629,6 +1652,7 @@ export function createWorkflowController(
           handlers,
           cwd: workingDir,
           abortSignal: abort.signal,
+          ...(defaultProvider !== undefined ? { defaultProvider } : {}),
           ...(usageStore !== undefined
             ? {
                 onEvent: (event: RunStreamEvent) => {
@@ -1714,6 +1738,7 @@ export function createWorkflowController(
             activeRuns,
             subscribers,
             promptHandler,
+            defaultProvider,
             memoryTools,
             ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
             ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -1757,6 +1782,7 @@ export function createWorkflowController(
           activeRuns,
           subscribers,
           promptHandler,
+          defaultProvider,
           memoryTools,
           catalog,
           ...(projectsStore !== undefined ? { projectsStore } : {}),
@@ -1884,6 +1910,7 @@ export function workflowsRoutes(
   } = opts;
   const {
     promptHandler: effectivePromptHandler,
+    defaultProvider,
     memoryTools,
     projectNotebookStore,
   } = buildExecutionDeps(opts);
@@ -2203,6 +2230,7 @@ export function workflowsRoutes(
           activeRuns,
           subscribers,
           promptHandler: effectivePromptHandler,
+          defaultProvider,
           memoryTools,
           ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -2301,6 +2329,7 @@ export function workflowsRoutes(
           activeRuns,
           subscribers,
           promptHandler: effectivePromptHandler,
+          defaultProvider,
           memoryTools,
           ...(projectNotebookStore !== undefined ? { projectNotebookStore } : {}),
           ...(snapshotManager !== undefined ? { snapshotManager } : {}),
@@ -2490,6 +2519,7 @@ export function workflowsRoutes(
         activeRuns,
         subscribers,
         promptHandler: effectivePromptHandler,
+        defaultProvider,
         memoryTools,
         ...(snapshotManager !== undefined ? { snapshotManager } : {}),
         ...(ribWorkflowBindings !== undefined ? { ribWorkflowBindings } : {}),
@@ -2654,6 +2684,7 @@ interface ExecuteRunArgs {
   activeRuns: ActiveRuns;
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
+  defaultProvider: string | undefined;
   providerOverride?: string;
   // Per-run pending approval map shared with the route's POST /resume and
   // DELETE handlers. The route owns the lifecycle; this function builds the
@@ -2762,6 +2793,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     activeRuns,
     subscribers,
     promptHandler,
+    defaultProvider,
     providerOverride,
     pendingApprovals,
     isolation,
@@ -3355,6 +3387,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       cwd: effectiveCwd,
       abortSignal: abort.signal,
       ...(providerOverride !== undefined ? { providerOverride } : {}),
+      ...(defaultProvider !== undefined ? { defaultProvider } : {}),
       ...artifacts.runWorkflowOptions(),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(projectId !== undefined ? { projectId } : {}),

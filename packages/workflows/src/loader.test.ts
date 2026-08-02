@@ -553,6 +553,20 @@ nodes:
     expect(result.workflow?.provider).toBe("copilot");
   });
 
+  test("provider_required needs a workflow-level provider", () => {
+    const yaml = `
+name: strict-provider
+description: workflow needs one provider
+provider_required: true
+nodes:
+  - id: a
+    prompt: x
+`;
+    expect(parseWorkflow(yaml, "strict-provider.yaml").error?.error).toContain(
+      "provider_required needs a workflow-level provider",
+    );
+  });
+
   test("per-node provider string passes through the loader (runtime resolves)", () => {
     const yaml = `
 name: per-node-override

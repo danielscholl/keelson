@@ -94,6 +94,7 @@ interface BuildCtxOptions {
   runId?: string;
   nodeId?: string;
   workflowProvider?: string;
+  workflowProviderRequired?: boolean;
   workflowModel?: string;
   workflowEffort?: string;
   providerOverride?: string;
@@ -108,6 +109,7 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     description: "",
     nodes: [],
     ...(opts.workflowProvider !== undefined ? { provider: opts.workflowProvider } : {}),
+    ...(opts.workflowProviderRequired === true ? { provider_required: true } : {}),
     ...(opts.workflowModel !== undefined ? { model: opts.workflowModel } : {}),
     ...(opts.workflowEffort !== undefined ? { effort: opts.workflowEffort } : {}),
   } as unknown as WorkflowDefinition;
@@ -1609,6 +1611,37 @@ describe("makePromptHandler", () => {
       ]);
       expect(calls.map((call) => call.options?.model)).toEqual(["stub-default", "stub-default"]);
       expect([first.provider, second.provider]).toEqual(["stub", "stub"]);
+    });
+
+    test("fails closed when a required workflow provider is unavailable or overridden", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => (id === "copilot" ? "stub" : (id ?? "stub")),
+        getRegisteredTools: () => [],
+      });
+
+      const unavailable = await handler.handle(
+        stubNode,
+        buildCtx({ workflowProvider: "copilot", workflowProviderRequired: true }),
+      );
+      const overridden = await handler.handle(
+        stubNode,
+        buildCtx({
+          workflowProvider: "copilot",
+          workflowProviderRequired: true,
+          providerOverride: "codex",
+        }),
+      );
+
+      expect([unavailable.status, overridden.status]).toEqual(["failed", "failed"]);
+      expect([unavailable.error, overridden.error]).toEqual([
+        "workflow requires provider 'copilot', but resolved provider is 'stub'",
+        "workflow requires provider 'copilot', but resolved provider is 'codex'",
+      ]);
+      expect(calls).toEqual([]);
     });
 
     test("keeps a registered provider's model and warning stream unchanged", async () => {

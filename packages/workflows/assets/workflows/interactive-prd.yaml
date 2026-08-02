@@ -1,14 +1,13 @@
 # Author a PRD through a guided conversation. Concepts ported from Archon's
-# archon-interactive-prd (MIT, see NOTICE), rewritten for Keelson: Copilot
-# models, and codebase-grounding made project-agnostic (it reads whatever the
+# archon-interactive-prd (MIT, see NOTICE), rewritten for Keelson with portable
+# model tiers and project-agnostic codebase grounding (it reads whatever the
 # repo actually has instead of Archon's own paths). Three `approval` gates with
 # capture_response thread the user's answers forward — the human IS the input
 # channel, not just a yes/no. Requires `keelson start` (approval gates pause for
 # input; they cannot resolve in the headless CLI fallback).
 
 name: interactive-prd
-provider: copilot
-model: auto
+model: balanced
 interactive: true
 description: |
   Use when: User wants to create a product requirements doc through guided,
@@ -24,7 +23,7 @@ description: |
 nodes:
   # ─── Phase 1: Initiate — understand the idea ────────────────────────────────
   - id: initiate
-    model: auto
+    model: balanced
     prompt: |
       You are a sharp product manager starting a PRD. Think from first principles
       — primitives, not features.
@@ -53,7 +52,7 @@ nodes:
   # ─── Phase 2: Grounding — research market + codebase ────────────────────────
   - id: research
     depends_on: [foundation-gate]
-    model: auto
+    model: balanced
     prompt: |
       Research context for the PRD. First principles: know what exists before
       proposing anything new.
@@ -91,7 +90,7 @@ nodes:
   # ─── Phase 3: Technical grounding — feasibility from what exists ─────────────
   - id: technical
     depends_on: [deepdive-gate]
-    model: auto
+    model: balanced
     allowed_tools: [Read, Glob, Grep]
     prompt: |
       Assess technical feasibility. First principles: start from what exists, not
@@ -139,7 +138,7 @@ nodes:
   # ─── Phase 4: Generate the PRD ──────────────────────────────────────────────
   - id: generate
     depends_on: [scope-gate]
-    model: auto
+    model: balanced
     allowed_tools: [Read, Write, Glob, Grep, Bash]
     prompt: |
       Generate the PRD from the guided inputs.
@@ -179,7 +178,7 @@ nodes:
   # ─── Phase 5: Validate — check technical claims against the real codebase ────
   - id: validate
     depends_on: [generate]
-    model: auto
+    model: balanced
     allowed_tools: [Read, Edit, Glob, Grep, Bash]
     prompt: |
       You are a technical validator checking a PRD for accuracy against THIS repo.

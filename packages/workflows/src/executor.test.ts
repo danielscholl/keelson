@@ -249,6 +249,37 @@ describe("runWorkflow — hello-world (1 layer, 1 prompt node)", () => {
       { type: "run_warning", message: "using fallback provider" },
     ]);
   });
+
+  test("diagnoses diversity for the provider override instead of a workflow pin", async () => {
+    const workflow = parseInline(`
+name: override-diversity
+description: exercises provider override diagnostics
+provider: copilot
+model: deep
+nodes:
+  - id: first
+    prompt: First lens
+    model_by_provider:
+      copilot: vendor-a
+  - id: second
+    prompt: Second lens
+    model_by_provider:
+      copilot: vendor-b
+`);
+    const { handler } = echoHandler("prompt");
+    const { events, onEvent } = recordEvents();
+
+    await runWorkflow({
+      ...baseOpts(workflow),
+      handlers: new Map([["prompt", handler]]),
+      providerOverride: "claude",
+      onEvent,
+    });
+
+    const warnings = events.filter((event) => event.type === "run_warning");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("all resolve to 'deep'");
+  });
 });
 
 describe("runWorkflow — status-report (2 layers, sequential)", () => {

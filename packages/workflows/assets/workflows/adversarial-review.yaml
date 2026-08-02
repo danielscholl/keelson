@@ -11,26 +11,16 @@
 # evidence directory, or a `subject` git ref it snapshots read-only), and only
 # `verify` holds filesystem tools, solely to check source claims.
 #
-# Every prompt node is pinned — an adversarial panel's value IS its depth, so
-# none of these ride `auto`. The lenses run three different vendors because
-# same-model lenses share blind spots and can wave one flaw through
-# unanimously; verify and synthesize run models no lens uses, so no node
-# checks or judges its own reasoning:
-#   - ATTACK: `claude-opus-5` (logic), `gpt-5.6-sol` (evidence),
-#     `gemini-3.1-pro-preview` (risk).
-#   - VERIFY (`gpt-5.6-terra`): the source-grounded fact-checker — a GPT-5.6
-#     variant distinct from the evidence lens whose claim list it re-derives.
-#   - JUDGE (`claude-opus-4.8`): `synthesize` — presides over output that is
-#     never its own.
+# The three attack lenses use distinct vendor mappings so blind spots do not
+# align; single-vendor runs are a degraded mode and emit a collapse warning.
+# Verification and synthesis use mappings no lens uses.
 # All run `effort: xhigh` with a generous idle budget: a no-tool xhigh node is
 # maximally chunk-sparse (one long think, then text), so the default idle
-# timeout would kill exactly the depth the pin buys. Account-dependent ids —
-# each must appear in the live Copilot list (GET /api/providers/copilot/models);
-# swap or drop a node to `auto` (and drop its `effort:` tier) if unavailable.
+# timeout would kill exactly the depth the tier buys.
 
 name: adversarial-review
 provider: copilot
-model: auto
+model: balanced
 locking: shared
 description: |
   Use when: User wants an artifact stress-tested by independent agents that
@@ -206,7 +196,9 @@ nodes:
   - id: reviewer-logic
     depends_on: [intake]
     context: fresh
-    model: claude-opus-5
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-5
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -247,7 +239,9 @@ nodes:
   - id: reviewer-evidence
     depends_on: [intake]
     context: fresh
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -288,7 +282,9 @@ nodes:
   - id: reviewer-risk
     depends_on: [intake]
     context: fresh
-    model: gemini-3.1-pro-preview
+    model: deep
+    model_by_provider:
+      copilot: gemini-3.1-pro-preview
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []
@@ -345,7 +341,9 @@ nodes:
     depends_on: [reviewer-logic, reviewer-evidence, reviewer-risk, subject-status]
     always_run: true
     context: fresh
-    model: gpt-5.6-terra
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-terra
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: [Read, Glob, Grep]
@@ -430,7 +428,9 @@ nodes:
   - id: synthesize
     depends_on: [verify, verify-gate]
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     idle_timeout: 1800000
     allowed_tools: []

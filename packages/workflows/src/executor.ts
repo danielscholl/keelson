@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { evaluateCondition } from "./conditions.ts";
 import { buildTopologicalLayers, type DagShapeError, validateDagShape } from "./graph.ts";
+import { diagnoseModelDiversity } from "./model-diversity.ts";
 import type {
   DagNode,
   NodeMemoryBlock,
@@ -177,6 +178,7 @@ export interface RunOptions {
   handlers: ReadonlyMap<string, NodeHandler>;
   cwd: string;
   providerOverride?: string;
+  defaultProvider?: string;
   abortSignal?: AbortSignal;
   onEvent?: (event: RunStreamEvent) => void;
   // Per-run scratch directory. Caller owns lifecycle (create at run start, delete on terminal).
@@ -475,6 +477,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     handlers,
     cwd,
     providerOverride,
+    defaultProvider,
     abortSignal,
     onEvent,
     artifactsDir,
@@ -524,6 +527,9 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
   }
 
   emit({ type: "run_started", runId, workflowName: workflow.name });
+  for (const message of diagnoseModelDiversity(workflow, defaultProvider, providerOverride)) {
+    warnOnce(`model-diversity:${message}`, message);
+  }
 
   let cancelled = false;
 
