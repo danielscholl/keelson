@@ -29,6 +29,20 @@
 import type { NodeHandler, NodeResult, NodeTokenUsage } from "../executor.ts";
 import { buildOutputFormatSuffix, extractJsonValue } from "./output-format.ts";
 
+type ModelClassName = "fast" | "balanced" | "deep";
+
+const MODEL_CLASS_NAMES: ReadonlySet<string> = new Set(["fast", "balanced", "deep"]);
+
+function isModelClassName(value: string): value is ModelClassName {
+  return MODEL_CLASS_NAMES.has(value);
+}
+
+function readModelByProvider(node: unknown): Readonly<Record<string, string>> | undefined {
+  const value = (node as { model_by_provider?: unknown }).model_by_provider;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Readonly<Record<string, string>>;
+}
+
 // Loosely-typed handles to avoid pulling @keelson/providers and
 // @keelson/shared into this package's dep graph. The composition root
 // satisfies these at construction time.
@@ -55,6 +69,7 @@ export interface PromptHandlerProvider {
     reasoningEffort?: boolean;
     tools?: boolean;
     models?: readonly string[];
+    modelClasses?: Partial<Record<ModelClassName, string>>;
   };
 }
 
@@ -191,6 +206,7 @@ export interface MakePromptHandlerOptions {
    * the node. Absent callers use the raw requested id.
    */
   resolveProviderId?: (id?: string) => string;
+  resolveModelClass?: (providerId: string, cls: ModelClassName) => string | undefined;
   /** Registered tool catalog. Called once per node invocation so post-boot registrations are picked up. */
   getRegisteredTools: () => readonly { name: string; [k: string]: unknown }[];
   /** Tool names to exclude. Defaults to DEFAULT_TOOL_DENYLIST when undefined; an explicit empty array allows everything. */
@@ -582,6 +598,23 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           const capabilities = provider.getCapabilities?.();
           effortConsumed = capabilities?.reasoningEffort === true;
           providerProjectsTools = capabilities?.tools !== false;
+          const perProviderModel =
+            effectiveProviderId === undefined
+              ? undefined
+              : readModelByProvider(node)?.[effectiveProviderId];
+          if (typeof perProviderModel === "string" && perProviderModel.length > 0) {
+            model = perProviderModel;
+          } else if (model !== undefined && isModelClassName(model)) {
+            const configuredModel =
+              effectiveProviderId === undefined
+                ? undefined
+                : opts.resolveModelClass?.(effectiveProviderId, model);
+            const resolvedModel = configuredModel ?? capabilities?.modelClasses?.[model];
+            model =
+              typeof resolvedModel === "string" && resolvedModel.length > 0
+                ? resolvedModel
+                : capabilities?.defaultModel;
+          }
           if (model === "auto") {
             model = capabilities?.defaultModel ?? model;
           }
