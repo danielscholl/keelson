@@ -9,6 +9,10 @@ import { type RibsDeps, runRibsCheck } from "../checks/ribs.ts";
 import { runServerCheck, type ServerDeps } from "../checks/server.ts";
 import { runToolchainCheck, type ToolchainDeps } from "../checks/toolchain.ts";
 import { type CategoryResult, type DoctorReport, tally } from "../checks/types.ts";
+import {
+  runWorkflowResolutionCheck,
+  type WorkflowResolutionDeps,
+} from "../checks/workflow-resolution.ts";
 import { runWorkflowsCheck, type WorkflowsDeps } from "../checks/workflows.ts";
 import { EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { emit } from "../output.ts";
@@ -19,6 +23,7 @@ export interface DoctorDeps {
   db?: DbDeps;
   auth?: AuthDeps;
   workflows?: WorkflowsDeps;
+  workflowResolution?: WorkflowResolutionDeps;
   providers?: ProvidersDeps;
   ribs?: RibsDeps;
 }
@@ -39,6 +44,7 @@ export async function buildDoctorReport(
     runDbCheck(deps.db),
     runAuthCheck(deps.auth),
     runWorkflowsCheck(deps.workflows),
+    runWorkflowResolutionCheck(deps.workflowResolution),
     runProvidersCheck(deps.providers),
     runRibsCheck(deps.ribs),
   ]);
