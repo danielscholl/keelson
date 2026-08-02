@@ -5,6 +5,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import type { ModelClassMap } from "./chat.ts";
 import { credentialServiceIdSchema } from "./chat.ts";
 import { resolveKeelsonHome } from "./paths.ts";
 
@@ -29,9 +30,18 @@ export const DEFAULT_PROVIDER_ENABLEMENT: Readonly<Record<string, boolean>> = {
   codex: false,
 };
 
-// Per-provider settings block. Only `model` is read today; the shape stays open
-// so a provider can grow settings without a config migration.
-const providerSettingsSchema = z.object({ model: z.string().optional() });
+const modelClassesConfigSchema = z.object({
+  fast: z.string().min(1).optional(),
+  balanced: z.string().min(1).optional(),
+  deep: z.string().min(1).optional(),
+});
+
+// Per-provider settings block. The shape stays open so a provider can grow
+// settings without a config migration.
+const providerSettingsSchema = z.object({
+  model: z.string().optional(),
+  modelClasses: modelClassesConfigSchema.optional(),
+});
 
 // How the claude provider chooses a credential. "auto" (default) prefers a
 // Pro/Max subscription when `claude auth status` reports one and falls back to
@@ -129,6 +139,7 @@ export const gatewayConfigSchema = z
     baseUrl: gatewayBaseUrlSchema,
     protocol: z.enum(GATEWAY_PROTOCOLS).default("openai"),
     model: z.string().min(1).optional(),
+    modelClasses: modelClassesConfigSchema.optional(),
   })
   .strict();
 export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
@@ -170,6 +181,7 @@ const keelsonConfigSchema = z.object({
   // Preferred provider for new chats and the workflow fallback. Honored only
   // when that provider is actually registered.
   defaultProvider: z.string().optional(),
+  copilot: providerSettingsSchema.optional(),
   pi: providerSettingsSchema.optional(),
   claude: claudeSettingsSchema.optional(),
   codex: codexSettingsSchema.optional(),
@@ -183,6 +195,21 @@ const keelsonConfigSchema = z.object({
 });
 
 export type KeelsonConfig = z.infer<typeof keelsonConfigSchema>;
+
+export function readModelClassOverride(
+  config: KeelsonConfig,
+  providerId: string,
+): Partial<ModelClassMap> | undefined {
+  if (
+    providerId === "copilot" ||
+    providerId === "claude" ||
+    providerId === "codex" ||
+    providerId === "pi"
+  ) {
+    return config[providerId]?.modelClasses;
+  }
+  return config.gateways?.find(({ name }) => name === providerId)?.modelClasses;
+}
 
 export type ReadKeelsonConfigResult =
   | { readonly ok: true; readonly config: KeelsonConfig }
