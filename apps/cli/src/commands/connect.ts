@@ -301,6 +301,45 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
   if (failed.length > 0) process.exit(EXIT_FAIL);
 }
 
+export interface DisconnectOutcome {
+  removed: TargetId[];
+  failed: TargetId[];
+}
+
+// Reverse one recorded target, mutating `data`. False means the agent's own CLI
+// refused the removal, and the record is deliberately kept: dropping it would
+// strand the agent's config still pointing at keelson with no ledger left to
+// undo it from.
+function reverseTarget(data: ConnectionsData, id: TargetId, run: CommandRunner): boolean {
+  const rec = data.targets[id];
+  if (!rec) return false;
+  if (rec.mcp.kind === "cli" && run(rec.mcp.command, rec.mcp.removeArgs).code !== 0) return false;
+  if (rec.mcp.kind === "file") {
+    reverseTargetConfig(rec.mcp.file, rec.mcp.format, rec.mcp.createdFile);
+  }
+  delete data.targets[id];
+  reverseSkillsFor(data, id);
+  return true;
+}
+
+// Reverse every recorded connection. `keelson uninstall` calls this so an
+// agent's MCP entry and skill file don't outlive the harness they point at —
+// the launcher goes with the uninstall, so a later `keelson disconnect` is no
+// longer runnable.
+export function disconnectAll(home: string, runCommand?: CommandRunner): DisconnectOutcome {
+  const run = runCommand ?? defaultRunCommand;
+  const data = loadConnections(home);
+  const removed: TargetId[] = [];
+  const failed: TargetId[] = [];
+  for (const id of Object.keys(data.targets) as TargetId[]) {
+    if (!data.targets[id]) continue;
+    if (reverseTarget(data, id, run)) removed.push(id);
+    else failed.push(id);
+  }
+  saveConnections(home, data);
+  return { removed, failed };
+}
+
 export function runDisconnect(rawTargets: readonly string[], opts: DisconnectOptions): void {
   const targets = resolveTargets(rawTargets, opts.json);
   const home = opts.home ?? resolveKeelsonHome();
@@ -308,25 +347,26 @@ export function runDisconnect(rawTargets: readonly string[], opts: DisconnectOpt
   const data = loadConnections(home);
 
   const results: Array<Record<string, unknown>> = [];
+  let failed = 0;
   for (const id of targets) {
     const rec = data.targets[id];
     if (!rec) {
       results.push({ target: id, result: "not-connected" });
       continue;
     }
-    if (rec.mcp.kind === "file") {
-      reverseTargetConfig(rec.mcp.file, rec.mcp.format, rec.mcp.createdFile);
-      results.push({ target: id, result: "disconnected", file: rec.mcp.file });
+    const via =
+      rec.mcp.kind === "file" ? { file: rec.mcp.file } : { via: `${rec.mcp.command} mcp` };
+    if (reverseTarget(data, id, run)) {
+      results.push({ target: id, result: "disconnected", ...via });
     } else {
-      run(rec.mcp.command, rec.mcp.removeArgs);
-      results.push({ target: id, result: "disconnected", via: `${rec.mcp.command} mcp` });
+      failed += 1;
+      results.push({ target: id, result: "failed", ...via });
     }
-    delete data.targets[id];
-    reverseSkillsFor(data, id);
   }
 
   saveConnections(home, data);
   emit({ data: { disconnected: results } }, { json: opts.json });
+  if (failed > 0) process.exit(EXIT_FAIL);
 }
 
 function reverseTargetConfig(file: string, format: "json" | "toml", createdFile: boolean): void {

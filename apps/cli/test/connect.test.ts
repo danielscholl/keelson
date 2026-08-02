@@ -7,7 +7,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommandResult } from "../src/commands/connect.ts";
-import { runConnect, runDisconnect } from "../src/commands/connect.ts";
+import { disconnectAll, runConnect, runDisconnect } from "../src/commands/connect.ts";
+import { loadConnections } from "../src/connect/receipt.ts";
 import {
   applyJsonMcp,
   applyTomlMcp,
@@ -312,5 +313,31 @@ describe("connect / disconnect (filesystem)", () => {
     runDisconnect(["copilot"], disconnectOpts());
     expect(existsSync(join(osHome, ".agents", "skills"))).toBe(false);
     expect(existsSync(join(osHome, ".agents"))).toBe(true);
+  });
+
+  test("disconnectAll reverses every recorded target without naming one", () => {
+    runConnect(["all"], connectOpts());
+    commands = [];
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.removed.sort()).toEqual(["claude", "codex", "copilot"]);
+    expect(outcome.failed).toEqual([]);
+    expect(commands).toContainEqual({
+      command: "claude",
+      args: ["mcp", "remove", "--scope", "user", "keelson"],
+    });
+    expect(existsSync(join(osHome, ".codex", "config.toml"))).toBe(false);
+    expect(existsSync(join(osHome, ".agents"))).toBe(false);
+    expect(existsSync(join(home, "connections.json"))).toBe(false);
+  });
+
+  // Dropping the record on a refused removal would leave the agent pointing at
+  // keelson with no ledger left to undo it from.
+  test("an agent CLI that refuses the removal is reported, and its record survives", () => {
+    runConnect(["claude"], connectOpts());
+    const outcome = disconnectAll(home, () => ({ code: 1, stdout: "", stderr: "no such command" }));
+    expect(outcome.removed).toEqual([]);
+    expect(outcome.failed).toEqual(["claude"]);
+    expect(loadConnections(home).targets.claude).toBeDefined();
+    expect(existsSync(claudeSkill())).toBe(true);
   });
 });

@@ -801,21 +801,23 @@ export function buildProgram(): Command {
   program
     .command("uninstall")
     .description(
-      "remove keelson's program files, launcher, and keychain entries (keeps your data unless --purge)",
+      "remove keelson's program files, launcher, keychain entries, and agent connections (keeps your data unless --purge)",
     )
     .option("--purge", "also delete the keelson home, including the database and workflows", false)
     .option("-y, --yes", "skip the confirmation prompt", false)
     .option("--keep-credentials", "leave keychain entries in place", false)
+    .option("--keep-connections", "leave connected agents' MCP wiring in place", false)
     .option("--force", "uninstall even if the running server could not be stopped", false)
     .action(async function uninstallAction(this: Command) {
       const { json } = globalOpts(this);
-      const { purge, yes, keepCredentials, force } = this.opts<{
+      const { purge, yes, keepCredentials, keepConnections, force } = this.opts<{
         purge: boolean;
         yes: boolean;
         keepCredentials: boolean;
+        keepConnections: boolean;
         force: boolean;
       }>();
-      await runUninstall({ json, purge, yes, keepCredentials, force });
+      await runUninstall({ json, purge, yes, keepCredentials, keepConnections, force });
     });
 
   program

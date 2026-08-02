@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { readKeelsonConfig } from "@keelson/shared/config";
 import pkg from "../../package.json" with { type: "json" };
+import { loadConnections } from "../connect/receipt.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listedRibIds, resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
@@ -18,6 +19,7 @@ import {
   uninstallMarkerContents,
   unreachableCredentialRibs,
 } from "../uninstall-plan.ts";
+import { type DisconnectOutcome, disconnectAll } from "./connect.ts";
 import { serveStop } from "./serve.ts";
 
 const KEYRING_SERVICE = "keelson";
@@ -27,6 +29,7 @@ export interface UninstallOptions {
   purge: boolean;
   yes: boolean;
   keepCredentials: boolean;
+  keepConnections: boolean;
   force: boolean;
 }
 
@@ -96,13 +99,21 @@ function assertRemovableHome(home: string, purge: boolean, json: boolean): void 
   );
 }
 
-async function confirm(home: string, purge: boolean): Promise<boolean> {
+async function confirm(
+  home: string,
+  purge: boolean,
+  disconnecting: readonly string[],
+): Promise<boolean> {
   const what = purge
     ? `DELETE the entire keelson home at ${home}, including keelson.db, workflows, and rib data`
     : `remove keelson's program files from ${home} (your database, workflows, and config stay)`;
+  const also =
+    disconnecting.length > 0
+      ? `\nIt will also disconnect ${disconnecting.join(", ")} from the MCP endpoint.`
+      : "";
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = await rl.question(`This will ${what}.\nProceed? [y/N] `);
+    const answer = await rl.question(`This will ${what}.${also}\nProceed? [y/N] `);
     return /^y(es)?$/i.test(answer.trim());
   } finally {
     rl.close();
@@ -210,7 +221,8 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
         opts.json,
       );
     }
-    if (!(await confirm(home, opts.purge))) {
+    const pending = opts.keepConnections ? [] : Object.keys(loadConnections(home).targets);
+    if (!(await confirm(home, opts.purge, pending))) {
       emit({ data: { cancelled: true, home } }, { json: opts.json });
       process.exit(EXIT_OK);
     }
@@ -256,6 +268,12 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
     ? { removed: [], failed: [] }
     : await deleteCredentials(accounts, home);
 
+  // Before the home goes: the receipt lives there, and it is the only record of
+  // what connect wrote into each agent's own config.
+  const connections: DisconnectOutcome = opts.keepConnections
+    ? { removed: [], failed: [] }
+    : disconnectAll(home);
+
   const launcher = launcherPath();
   const launcherRemoved = existsSync(launcher);
   rmSync(launcher, { force: true });
@@ -288,6 +306,8 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
         launcher: launcherRemoved ? launcher : null,
         credentialsRemoved: credentials.removed,
         credentialsFailed: credentials.failed,
+        connectionsRemoved: connections.removed,
+        connectionsFailed: connections.failed,
         ribCredentialsMayRemain,
         dataKept: !opts.purge,
         marker,
@@ -322,6 +342,16 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
         `could not remove keychain entries: ${credentials.failed.join(", ")} — remove them by hand\n`,
       );
     }
+    if (connections.removed.length > 0) {
+      process.stdout.write(`disconnected agents: ${connections.removed.join(", ")}\n`);
+    }
+    // This run takes the launcher, so `keelson disconnect` is gone too — the
+    // operator has to reverse a survivor through the agent's own CLI.
+    if (connections.failed.length > 0) {
+      process.stdout.write(
+        `could not disconnect: ${connections.failed.join(", ")} — remove keelson's MCP entry with that agent's own CLI\n`,
+      );
+    }
     // Saying nothing here would read as a clean sweep; the keyring cannot be
     // enumerated, so a rib's own secrets are outside what this command can find.
     if (ribCredentialsMayRemain.length > 0) {
@@ -345,7 +375,8 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
       );
     }
   }
-  // Everything else is done, but a credential that survived means the promised
-  // revocation did not happen — exit non-zero so automation can see it.
-  process.exit(credentials.failed.length > 0 ? EXIT_FAIL : EXIT_OK);
+  // Everything else is done, but a credential or connection that survived means
+  // the promised reversal did not happen — exit non-zero so automation sees it.
+  const clean = credentials.failed.length === 0 && connections.failed.length === 0;
+  process.exit(clean ? EXIT_OK : EXIT_FAIL);
 }
