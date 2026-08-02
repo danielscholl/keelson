@@ -28,6 +28,7 @@ const MIGRATED_WORKFLOWS = new Set([
   "resolve-pr",
   "workflow-builder",
 ]);
+const REQUIRED_PROVIDER_PINS = new Map([["adversarial-review", "copilot"]]);
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
   reasoningEffort: true,
@@ -130,14 +131,17 @@ function loadBundledWorkflows(): Array<{ filename: string; workflow: WorkflowDef
 }
 
 describe("bundled workflow model policy", () => {
-  test("uses portable tiers and leaves provider selection to the runner", () => {
+  test("uses portable tiers and only required provider pins", () => {
     const violations: string[] = [];
     for (const { filename, workflow } of loadBundledWorkflows()) {
       for (const finding of bareConcreteModelIds(workflow)) {
         violations.push(`${filename}:${finding.nodeId} uses model '${finding.model}'`);
       }
-      if (workflow.provider !== undefined) {
-        violations.push(`${filename}:<workflow> pins provider '${workflow.provider}'`);
+      const requiredProvider = REQUIRED_PROVIDER_PINS.get(workflow.name);
+      if (workflow.provider !== requiredProvider) {
+        violations.push(
+          `${filename}:<workflow> provider is '${workflow.provider}' instead of '${requiredProvider}'`,
+        );
       }
       if (workflow.model === "auto") {
         violations.push(`${filename}:<workflow> uses model 'auto'`);
@@ -208,12 +212,12 @@ describe("bundled workflow model resolution", () => {
     expect(violations).toEqual([]);
   });
 
-  test("resolves fix-issue and adversarial-review entirely within the Claude catalog", async () => {
+  test("resolves fix-issue entirely within the Claude catalog", async () => {
     const { handler } = makeProviderHarness("claude", CLAUDE_CAPABILITIES);
     const violations: string[] = [];
 
     for (const { filename, workflow } of loadBundledWorkflows()) {
-      if (workflow.name !== "fix-issue" && workflow.name !== "adversarial-review") continue;
+      if (workflow.name !== "fix-issue") continue;
       for (const node of workflow.nodes) {
         if (node.prompt === undefined) continue;
         const { result, events } = await runPromptNode(workflow, node, handler);
@@ -240,7 +244,8 @@ describe("bundled workflow model resolution", () => {
     )?.workflow;
     expect(adversarial).toBeDefined();
 
-    const claudeMessages = diagnoseModelDiversity(adversarial!, "claude");
+    const portableAdversarial = { ...adversarial!, provider: undefined };
+    const claudeMessages = diagnoseModelDiversity(portableAdversarial, "claude");
     expect(
       claudeMessages.some((message) =>
         ["reviewer-logic", "reviewer-evidence", "reviewer-risk"].every((id) =>
@@ -248,6 +253,7 @@ describe("bundled workflow model resolution", () => {
         ),
       ),
     ).toBe(true);
-    expect(diagnoseModelDiversity(adversarial!, "copilot")).toEqual([]);
+    expect(diagnoseModelDiversity(portableAdversarial, "copilot")).toEqual([]);
+    expect(diagnoseModelDiversity(adversarial!, "claude")).toEqual([]);
   });
 });

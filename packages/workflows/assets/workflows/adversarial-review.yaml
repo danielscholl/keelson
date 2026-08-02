@@ -18,6 +18,7 @@
 # timeout would kill exactly the depth the tier buys.
 
 name: adversarial-review
+provider: copilot
 model: balanced
 locking: shared
 description: |
