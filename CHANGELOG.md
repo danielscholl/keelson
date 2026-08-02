@@ -14,6 +14,12 @@ notes live on the [releases page](https://github.com/danielscholl/keelson/releas
 * **workflows:** resolve provider/model pins as preferences ([#767](https://github.com/danielscholl/keelson/issues/767)) ([6c7d171](https://github.com/danielscholl/keelson/commit/6c7d1714b675865f9077d18a5196d07ab94e7934))
 * **workflows:** semantic model tiers and per-node model_by_provider ([#769](https://github.com/danielscholl/keelson/issues/769)) ([d898d6a](https://github.com/danielscholl/keelson/commit/d898d6aa84b61519dbf50d9caecc23dbb7c1cc35))
 
+
+### Notes for operators
+
+* All nine bundled workflows now use the portable tier vocabulary (`fast`/`balanced`/`deep` + `model_by_provider`) instead of concrete Copilot model pins ([#770](https://github.com/danielscholl/keelson/issues/770)). `keelson update` refreshes unmodified home copies automatically; hand-edited copies surface as conflicts to reconcile.
+* The database gains schema migration v13 (`workflow_runs.provider_override`), applied automatically on first server start. Rolling back the binary after upgrading leaves a v13 database the prior build does not expect — restore a pre-upgrade backup before downgrading.
+
 ## [0.95.0](https://github.com/danielscholl/keelson/compare/v0.94.0...v0.95.0) (2026-08-02)
 
 
