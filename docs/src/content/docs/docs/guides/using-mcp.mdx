@@ -91,6 +91,16 @@ Disconnect removes only Keelson's own entry, never a sibling MCP server or a fil
 you already had. Pass `--no-skill` to wire the connection without the skill, or
 `--url` to write a non-default endpoint.
 
+That record is the only thing that knows which agents are wired, so no command
+treats one it cannot parse as an empty ledger. `connect`, `disconnect`, and
+`connect --list` stop with a `BAD_RECEIPT` error and leave the file untouched.
+`uninstall` reports that it disconnected nothing, finishes removing everything
+else, and exits non-zero. A `connect` that overwrote a corrupt receipt would drop
+the entries for agents already connected, leaving them pointing at Keelson with
+nothing left to reverse them. If you see `BAD_RECEIPT`, repair
+`<home>/connections.json`, or delete it and accept that any agent already wired
+must then be unwired with that agent's own CLI.
+
 <Aside type="note" title="Restart the agent after connecting">
 An agent reads its MCP config at startup, so start a new session (or restart the
 agent) after `keelson connect` for it to take effect. Once connected, the agent
