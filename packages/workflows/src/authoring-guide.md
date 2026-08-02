@@ -78,6 +78,19 @@ Optional:
 Accepted but ignored at runtime (the loader warns and drops them): `sandbox`,
 `betas`, `fallbackModel`, `additionalDirectories`.
 
+## Choosing a model
+
+Default to a tier: `fast`, `balanced`, or `deep`. The effective provider maps
+the tier to a concrete model, so tier-based workflows remain portable.
+
+Use `model_by_provider: { <provider>: <id> }` only for a deliberate
+cross-provider spread, such as a diverse review panel. The effective provider's
+entry wins; providers without an entry fall through to the node or workflow
+tier.
+
+Use a literal model id only for an install-specific workflow pinned to one
+account's catalog.
+
 ## Description format
 
 Use the structured block-scalar convention — the Workflows UI cards and the

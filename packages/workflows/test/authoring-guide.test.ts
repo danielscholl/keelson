@@ -50,6 +50,7 @@ const EXPECTED_SECTIONS = [
   "overview",
   "authoring-flow",
   "top-level-fields",
+  "choosing-a-model",
   "description-format",
   "node-types",
   "common-node-fields",
