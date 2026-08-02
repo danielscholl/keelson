@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommandResult } from "../src/commands/connect.ts";
 import { disconnectAll, runConnect, runDisconnect } from "../src/commands/connect.ts";
-import { loadConnections } from "../src/connect/receipt.ts";
+import { loadConnections, readConnections } from "../src/connect/receipt.ts";
 import {
   applyJsonMcp,
   applyTomlMcp,
@@ -235,44 +235,50 @@ describe("connect / disconnect (filesystem)", () => {
     expect(existsSync(join(freshHome, "connections.json"))).toBe(true);
   });
 
-  test("a corrupt receipt degrades to an empty ledger; disconnect does not throw", () => {
+  // A rewriting caller must refuse this rather than save a filtered copy over it:
+  // the malformed skill's own record would be the thing deleted, while the file
+  // it names stays on disk. The read-only degrade is what still tolerates one.
+  test("a receipt with malformed entries is refused, and neither it nor the agent config is touched", () => {
+    const receipt = join(home, "connections.json");
     // Malformed skill (requestedBy is not an array): a naive cast would crash
-    // reverseSkillsFor on `.filter` during disconnect.
-    writeFileSync(
-      join(home, "connections.json"),
-      JSON.stringify({
-        version: 2,
-        targets: {
-          claude: {
-            target: "claude",
-            mcp: {
-              kind: "file",
-              file: join(repo, ".mcp.json"),
-              format: "json",
-              createdFile: false,
-            },
-            connectedAt: "x",
-          },
+    // reverseSkillsFor on `.filter`.
+    const body = JSON.stringify({
+      version: 2,
+      targets: {
+        claude: {
+          target: "claude",
+          mcp: { kind: "file", file: join(repo, ".mcp.json"), format: "json", createdFile: false },
+          connectedAt: "x",
         },
-        skills: {
-          "/x/SKILL.md": {
-            file: "/x/SKILL.md",
-            createdFile: true,
-            createdDirs: "oops",
-            requestedBy: "nope",
-          },
+      },
+      skills: {
+        "/x/SKILL.md": {
+          file: "/x/SKILL.md",
+          createdFile: true,
+          createdDirs: "oops",
+          requestedBy: "nope",
         },
-      }),
-    );
+      },
+    });
+    writeFileSync(receipt, body);
     writeFileSync(
       join(repo, ".mcp.json"),
       JSON.stringify({ mcpServers: { keelson: { type: "http", url: "u" }, other: {} } }),
     );
-    expect(() => runDisconnect(["claude"], disconnectOpts())).not.toThrow();
-    // The valid target was still honored: keelson removed, sibling kept.
-    const servers = JSON.parse(readFileSync(join(repo, ".mcp.json"), "utf8")).mcpServers;
-    expect(servers.keelson).toBeUndefined();
-    expect(servers.other).toBeDefined();
+
+    expect(readConnections(home).ok).toBe(false);
+    expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeDefined();
+    expect(readFileSync(receipt, "utf8")).toBe(body);
+    // The valid target was NOT reversed — acting on half a ledger is what this
+    // refuses to do.
+    expect(
+      JSON.parse(readFileSync(join(repo, ".mcp.json"), "utf8")).mcpServers.keelson,
+    ).toBeDefined();
+
+    // loadConnections keeps its never-throws degrade for read-only callers.
+    const degraded = loadConnections(home);
+    expect(degraded.targets).toEqual({});
+    expect(degraded.skills).toEqual({});
   });
 
   test("a v1 receipt migrates so an old connect can still be undone", () => {
@@ -337,8 +343,26 @@ describe("connect / disconnect (filesystem)", () => {
     const outcome = disconnectAll(home, () => ({ code: 1, stdout: "", stderr: "no such command" }));
     expect(outcome.removed).toEqual([]);
     expect(outcome.failed).toEqual(["claude"]);
+    // The record is what a retry needs, so it stays.
     expect(loadConnections(home).targets.claude).toBeDefined();
-    expect(existsSync(claudeSkill())).toBe(true);
+    // The skill is already gone: idempotent cleanup runs before the agent's
+    // non-idempotent `mcp remove`, so a retry reaches that removal instead of
+    // being turned away by a "not found" from a step that already succeeded.
+    expect(existsSync(claudeSkill())).toBe(false);
+  });
+
+  test("a refused CLI removal is still reversible on a later attempt", () => {
+    runConnect(["claude"], connectOpts());
+    expect(disconnectAll(home, () => ({ code: 1, stdout: "", stderr: "gone" })).failed).toEqual([
+      "claude",
+    ]);
+
+    // With the agent's CLI working again the retry completes, rather than being
+    // turned away by an earlier step it cannot re-run.
+    const retry = disconnectAll(home, fakeRun);
+    expect(retry.removed).toEqual(["claude"]);
+    expect(retry.failed).toEqual([]);
+    expect(existsSync(join(home, "connections.json"))).toBe(false);
   });
 
   // loadConnections keys targets by whatever the file says, so an unknown id

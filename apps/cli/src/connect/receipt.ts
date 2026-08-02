@@ -153,6 +153,13 @@ export type ReadConnectionsResult =
 // that cannot be parsed". Any caller that REWRITES the ledger must use this:
 // degrading an unreadable file to empty and then saving deletes the only record
 // of what connect wrote, while the agent stays wired to keelson.
+// Entries present in the file but dropped by the structural guards. A rewriting
+// caller must treat these as a hard failure: saving the filtered ledger deletes
+// their only record while the wiring they describe is still in place.
+function droppedEntries(raw: unknown, kept: number): number {
+  return isRecord(raw) ? Object.keys(raw).length - kept : 0;
+}
+
 export function readConnections(home: string): ReadConnectionsResult {
   let text: string;
   try {
@@ -169,16 +176,20 @@ export function readConnections(home: string): ReadConnectionsResult {
   }
   if (!isRecord(parsed)) return { ok: false, reason: "not a JSON object" };
   if (parsed.version === 2) {
-    return {
-      ok: true,
-      data: {
-        version: 2,
-        targets: parseTargets(parsed.targets),
-        skills: parseSkills(parsed.skills),
-      },
-    };
+    const targets = parseTargets(parsed.targets);
+    const skills = parseSkills(parsed.skills);
+    const bad =
+      droppedEntries(parsed.targets, Object.keys(targets).length) +
+      droppedEntries(parsed.skills, Object.keys(skills).length);
+    if (bad > 0) return { ok: false, reason: `${bad} malformed record(s)` };
+    return { ok: true, data: { version: 2, targets, skills } };
   }
-  if (parsed.version === 1) return { ok: true, data: migrateV1(parsed) };
+  if (parsed.version === 1) {
+    const data = migrateV1(parsed);
+    const bad = droppedEntries(parsed.targets, Object.keys(data.targets).length);
+    if (bad > 0) return { ok: false, reason: `${bad} malformed v1 record(s)` };
+    return { ok: true, data };
+  }
   return { ok: false, reason: `unsupported receipt version ${JSON.stringify(parsed.version)}` };
 }
 

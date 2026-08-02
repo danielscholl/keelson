@@ -326,11 +326,15 @@ function reverseTarget(data: ConnectionsData, id: TargetId, run: CommandRunner):
   const rec = data.targets[id];
   if (!rec) return false;
   try {
+    // Skills first: unlinking them is idempotent, while an agent's `mcp remove`
+    // is not — it reports "not found" on a second run. Doing the non-idempotent
+    // step last means a retry after a failed unlink still reaches the unlink,
+    // instead of being turned away by a removal that already succeeded.
+    reverseSkillsFor(data, id);
     if (rec.mcp.kind === "cli" && run(rec.mcp.command, rec.mcp.removeArgs).code !== 0) return false;
     if (rec.mcp.kind === "file") {
       reverseTargetConfig(rec.mcp.file, rec.mcp.format, rec.mcp.createdFile);
     }
-    reverseSkillsFor(data, id);
   } catch {
     // An agent config the operator hand-broke (removeJsonMcp parses it) or a
     // skill file that will not unlink must not abort the other targets, nor an
