@@ -431,6 +431,12 @@ describe("runDoctor exit-code rollup", () => {
         workflowsDir: "/tmp/fake-wf",
         discoverWorkflows: () => ({ workflows: [], errors: [], warnings: [] }),
       },
+      workflowResolution: {
+        workflowsDir: "/tmp/fake-wf",
+        discoverWorkflows: () => ({ workflows: [], errors: [], warnings: [] }),
+        loadConfig: () => ({}),
+        listProviders: () => [],
+      },
       // Server-down keeps the ribs check a deterministic skip (no real network
       // probe), so the rollup counts stay stable.
       ribs: {
@@ -443,6 +449,9 @@ describe("runDoctor exit-code rollup", () => {
     const report = await buildDoctorReport(false, allOkDeps());
     expect(report.summary.fail).toBe(0);
     expect(report.summary.warn).toBe(0);
+    expect(report.categories.map(({ category }) => category)).toContain(
+      "workflow-resolution",
+    );
     expect(exitCodeFor(report)).toBe(EXIT_OK);
     const strictReport = await buildDoctorReport(true, allOkDeps());
     expect(exitCodeFor(strictReport)).toBe(EXIT_OK);

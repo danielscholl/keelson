@@ -105,10 +105,17 @@ export function resolveWorkflowResolution(
   const nodes = workflow.nodes
     .filter((node) => node.prompt !== undefined)
     .map((node) => resolvePrompt(workflow, node, options));
+  const effectiveProviders = new Set(
+    nodes
+      .map(({ effectiveProvider }) => effectiveProvider)
+      .filter((provider): provider is string => provider !== undefined),
+  );
+  const commonEffectiveProvider =
+    effectiveProviders.size === 1 ? effectiveProviders.values().next().value : undefined;
   const collapses = diagnoseModelDiversity(
     workflow,
     options.defaultProviderId,
-    options.runProviderId,
+    options.runProviderId ?? commonEffectiveProvider,
   );
   const fallbackNodes = nodes
     .filter((node) => node.providerFellBack || node.modelFellBack)
