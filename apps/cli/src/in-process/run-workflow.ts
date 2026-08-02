@@ -22,6 +22,7 @@ import {
   defaultRunUntilBashProbe,
   discoverWorkflows,
   ensureWorktreeDeps,
+  fetchOrigin,
   gitToplevel,
   headDivergesFrom,
   isGitRepo,
@@ -302,6 +303,14 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
         projectRootPath: repoRoot,
         branch,
       });
+      if (workflow.worktree?.base === undefined) {
+        const fetched = await fetchOrigin(repoRoot);
+        if (fetched.attempted && !fetched.ok) {
+          console.warn(
+            `[keelson] git fetch origin failed; branching from possibly-stale local refs: ${fetched.error}`,
+          );
+        }
+      }
       const base = workflow.worktree?.base ?? (await resolveDefaultBranch(repoRoot));
       if (base !== null && (await headDivergesFrom(repoRoot, base))) {
         console.warn(
