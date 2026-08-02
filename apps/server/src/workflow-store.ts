@@ -49,6 +49,7 @@ export interface CreateRunInput {
   origin?: WorkflowRunOrigin;
   // The rib that owns this run's workflow, resolved from the catalog at start.
   ribId?: string | null;
+  providerOverride?: string | null;
 }
 
 // Filter for the general runs feed (GET /api/workflows/runs) and bulk delete.
@@ -112,6 +113,7 @@ export interface WorkflowStore {
   // output. Cache read/write stay separate in TokenUsage; older rows may carry
   // mixed provider input conventions.
   getRunUsageTotals(runId: string): { totalTokens: number; turns: number };
+  getRunProviderOverride(runId: string): string | null;
   getRun(runId: string): WorkflowRunDetail | undefined;
   listRuns(workflowName?: string): WorkflowRunSummary[];
   // General filtered feed backing GET /api/workflows/runs and bulk delete.
@@ -276,7 +278,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   );
 
   const insertRun = db.prepare(
-    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workflow_runs(id, workflow_name, status, started_at, completed_at, inputs_json, error, conversation_id, project_id, working_dir, worktree_path, worktree_base, origin, rib_id, provider_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const updateRun = db.prepare(
     "UPDATE workflow_runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
@@ -288,6 +290,9 @@ export function createWorkflowStore(db: Database): WorkflowStore {
   const updateWorktreeBase = db.prepare("UPDATE workflow_runs SET worktree_base = ? WHERE id = ?");
   const updateBrief = db.prepare("UPDATE workflow_runs SET brief_json = ? WHERE id = ?");
   const selectRun = db.prepare("SELECT * FROM workflow_runs WHERE id = ?");
+  const selectRunProviderOverride = db.prepare(
+    "SELECT provider_override FROM workflow_runs WHERE id = ?",
+  );
   const listRunsAll = db.prepare(
     "SELECT * FROM workflow_runs ORDER BY started_at DESC, rowid DESC",
   );
@@ -355,6 +360,7 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         input.worktreeBase ?? null,
         input.origin ?? "manual",
         input.ribId ?? null,
+        input.providerOverride ?? null,
       );
     },
     updateRunStatus(input) {
@@ -402,6 +408,12 @@ export function createWorkflowStore(db: Database): WorkflowStore {
         }
       }
       return { totalTokens, turns };
+    },
+    getRunProviderOverride(runId) {
+      const row = selectRunProviderOverride.get(runId) as {
+        provider_override: string | null;
+      } | null;
+      return row?.provider_override ?? null;
     },
     getRun(runId) {
       const row = selectRun.get(runId) as RunRow | null;

@@ -1036,6 +1036,7 @@ function startRunCore(
       workingDir,
       origin,
       ribId,
+      providerOverride: providerOverride ?? null,
     });
   } catch (err) {
     if (lockHandle !== undefined) {
@@ -1142,7 +1143,7 @@ export type ResumeRunResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "not_found" | "not_terminal" | "locked";
+      reason: "not_found" | "not_terminal" | "locked" | "provider_unavailable";
       message: string;
     };
 
@@ -1227,6 +1228,17 @@ function resumeRunCore(
       message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
     };
   }
+  const providerOverride = store.getRunProviderOverride(runId);
+  if (
+    providerOverride !== null &&
+    (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
+  ) {
+    return {
+      ok: false,
+      reason: "provider_unavailable",
+      message: `provider override '${providerOverride}' is no longer available`,
+    };
+  }
   const resumeLockProjectId = resolveMutationLockProjectId({
     resolvedProject: resumeProject,
     workingDir: run.workingDir,
@@ -1292,6 +1304,7 @@ function resumeRunCore(
       subscribers,
       promptHandler,
       pendingApprovals,
+      ...(providerOverride !== null ? { providerOverride } : {}),
       isolation: null,
       ...(run.projectId !== null ? { projectId: run.projectId } : {}),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
@@ -2058,7 +2071,10 @@ export function workflowsRoutes(
       requestedProvider !== undefined && requestedProvider.length > 0
         ? requestedProvider
         : undefined;
-    if (providerOverride !== undefined && !isRegisteredProvider(providerOverride)) {
+    if (
+      providerOverride !== undefined &&
+      (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
+    ) {
       return c.json({ error: `unknown provider '${providerOverride}'` }, 400);
     }
 

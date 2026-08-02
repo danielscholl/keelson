@@ -321,6 +321,13 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 13,
+    description: "persist workflow run provider overrides",
+    up: (db) => {
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN provider_override TEXT;");
+    },
+  },
 ];
 
 // The lowest version this build can apply. A database stamped below it was

@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isRegisteredProvider, registerStubProvider } from "@keelson/providers";
+import { isRegisteredProvider, registerStubProvider, unregisterProvider } from "@keelson/providers";
 import { TERMINAL_RUN_STATUSES } from "@keelson/shared";
 
 import { makePromptHandler, type WorkflowDefinition } from "@keelson/workflows";
@@ -1251,6 +1251,35 @@ nodes:
     });
   });
 
+  test("POST .../runs rejects the synthetic workflow provider before side effects", async () => {
+    const sideEffectPath = join(tmpDir, "workflow-provider-side-effect.txt");
+    writeWorkflow(
+      "workflow-provider.yaml",
+      `name: workflow-provider
+description: reject the synthetic provider
+nodes:
+  - id: side-effect
+    bash: echo ran > "${sideEffectPath}"
+  - id: ask
+    depends_on: [side-effect]
+    prompt: continue
+`,
+    );
+    const { app, store } = makeRig();
+
+    const response = await app.fetch(
+      postRun("http://test/api/workflows/workflow-provider/runs", {
+        inputs: {},
+        provider: "workflow",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "unknown provider 'workflow'" });
+    expect(existsSync(sideEffectPath)).toBe(false);
+    expect(store.listRuns("workflow-provider")).toEqual([]);
+  });
+
   test("fail_on_tool_error fails the node when a tool errors, even on a normal text reply", async () => {
     writeWorkflow(
       "failtool.yaml",
@@ -2024,6 +2053,88 @@ nodes:
     expect(second.nodes.find((n) => n.nodeId === "fail")?.status).toBe("failed");
     expect(readFileSync(prepCountPath, "utf8").trim()).toBe("1");
     expect(readFileSync(failCountPath, "utf8").trim()).toBe("2");
+  });
+
+  test("POST /resume-run preserves the provider override and requires it to remain registered", async () => {
+    const attemptPath = join(tmpDir, "provider-resume-attempt.txt");
+    writeWorkflow(
+      "resume-provider.yaml",
+      `name: resume-provider
+description: provider override survives resume
+provider: claude
+nodes:
+  - id: retry
+    bash: |
+      n=0
+      if [ -f "${attemptPath}" ]; then n=$(cat "${attemptPath}"); fi
+      n=$((n+1))
+      echo "$n" > "${attemptPath}"
+      if [ "$n" -eq 1 ]; then exit 7; fi
+  - id: ask
+    depends_on: [retry]
+    provider: copilot
+    prompt: finish
+`,
+    );
+    const db = openDatabase({ path: dbPath });
+    const store = createWorkflowStore(db);
+    const catalog = bootstrapWorkflows({ workflowDir: wfDir });
+    const spyProvider = {
+      async *sendQuery() {
+        yield { type: "text", content: "done" };
+        yield { type: "done" };
+      },
+    };
+    const promptHandler = makePromptHandler({
+      getProvider: () => spyProvider,
+      resolveProviderId: (id: string | undefined) => id ?? "claude",
+      getRegisteredTools: () => [],
+    });
+    const app = new Hono();
+    workflowsRoutes(app, {
+      catalog,
+      store,
+      conversationStore: createConversationStore(db),
+      defaultCwd: tmpDir,
+      promptHandler,
+    });
+
+    const start = await app.fetch(
+      postRun("http://test/api/workflows/resume-provider/runs", {
+        inputs: {},
+        workingDir: tmpDir,
+        provider: "stub",
+      }),
+    );
+    const { runId } = (await start.json()) as { runId: string };
+    expect((await pollUntilTerminal(app, runId)).status).toBe("failed");
+    expect(store.getRunProviderOverride(runId)).toBe("stub");
+
+    expect(unregisterProvider("stub")).toBe(true);
+    try {
+      const unavailable = await app.fetch(
+        postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+      );
+      expect(unavailable.status).toBe(409);
+      expect(await unavailable.json()).toEqual({
+        error: "provider override 'stub' is no longer available",
+      });
+      expect(readFileSync(attemptPath, "utf8").trim()).toBe("1");
+    } finally {
+      if (!isRegisteredProvider("stub")) registerStubProvider();
+    }
+
+    const resumed = await app.fetch(
+      postRun(`http://test/api/workflows/runs/${runId}/resume-run`, {}),
+    );
+    expect(resumed.status).toBe(200);
+    const completed = (await pollUntilTerminal(app, runId)) as {
+      status: string;
+      nodes: Array<{ nodeId: string; provider: string | null }>;
+    };
+    expect(completed.status).toBe("succeeded");
+    expect(completed.nodes.find((node) => node.nodeId === "ask")?.provider).toBe("stub");
+    expect(readFileSync(attemptPath, "utf8").trim()).toBe("2");
   });
 
   test("POST /resume-run re-runs an always_run node even though it succeeded", async () => {
