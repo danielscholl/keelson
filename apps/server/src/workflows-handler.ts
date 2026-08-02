@@ -62,6 +62,7 @@ import {
   type DagNode,
   defaultRunUntilBashProbe,
   ensureWorktreeDeps,
+  fetchOrigin,
   gitToplevel,
   headDivergesFrom,
   isGitRepo,
@@ -2952,6 +2953,16 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
         projectRootPath: isolation.projectRootPath,
         branch,
       });
+      if (isolation.base === undefined) {
+        const fetched = await fetchOrigin(cwd);
+        if (fetched.attempted && !fetched.ok) {
+          subscribers.broadcast(runId, {
+            type: "run_warning",
+            nodeId: null,
+            message: `git fetch origin failed; branching from possibly-stale local refs: ${fetched.error}`,
+          });
+        }
+      }
       const base = isolation.base ?? (await resolveDefaultBranch(cwd));
       try {
         if (base !== null) {
