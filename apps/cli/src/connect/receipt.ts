@@ -160,6 +160,13 @@ function droppedEntries(raw: unknown, kept: number): number {
   return isRecord(raw) ? Object.keys(raw).length - kept : 0;
 }
 
+// A container that is present but is not an object at all. The parse* helpers
+// read it as empty and droppedEntries then sees nothing missing, so counting
+// alone would accept it as a legitimately empty ledger.
+function malformedContainer(raw: unknown): boolean {
+  return raw !== undefined && !isRecord(raw);
+}
+
 export function readConnections(home: string): ReadConnectionsResult {
   let text: string;
   try {
@@ -176,6 +183,9 @@ export function readConnections(home: string): ReadConnectionsResult {
   }
   if (!isRecord(parsed)) return { ok: false, reason: "not a JSON object" };
   if (parsed.version === 2) {
+    if (malformedContainer(parsed.targets) || malformedContainer(parsed.skills)) {
+      return { ok: false, reason: "malformed 'targets' or 'skills' container" };
+    }
     const targets = parseTargets(parsed.targets);
     const skills = parseSkills(parsed.skills);
     const bad =
@@ -185,6 +195,14 @@ export function readConnections(home: string): ReadConnectionsResult {
     return { ok: true, data: { version: 2, targets, skills } };
   }
   if (parsed.version === 1) {
+    if (malformedContainer(parsed.targets)) {
+      return { ok: false, reason: "malformed v1 'targets' container" };
+    }
+    // v1's `skill` is a single record, not a container; migrateV1 drops an
+    // invalid one silently, which is the same loss by another route.
+    if (parsed.skill !== undefined && !isSkillRecord(parsed.skill)) {
+      return { ok: false, reason: "malformed v1 'skill' record" };
+    }
     const data = migrateV1(parsed);
     const bad = droppedEntries(parsed.targets, Object.keys(data.targets).length);
     if (bad > 0) return { ok: false, reason: `${bad} malformed v1 record(s)` };

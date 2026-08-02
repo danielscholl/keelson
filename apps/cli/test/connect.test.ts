@@ -407,10 +407,44 @@ describe("connect / disconnect (filesystem)", () => {
     expect(existsSync(agentsSkill())).toBe(true);
   });
 
-  test("a receipt from an unsupported future version is refused, not treated as empty", () => {
-    writeFileSync(join(home, "connections.json"), JSON.stringify({ version: 99, targets: {} }));
-    expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeDefined();
-    expect(existsSync(join(home, "connections.json"))).toBe(true);
+  // Every shape the structural guards would otherwise read as "empty ledger".
+  // saveConnections deletes an empty ledger's receipt, so each of these would
+  // destroy the only record of the wiring while leaving the wiring in place.
+  const REFUSED_RECEIPTS: Array<[string, unknown]> = [
+    ["unsupported version", { version: 99, targets: {} }],
+    ["targets is not an object", { version: 2, targets: "bad", skills: {} }],
+    ["skills is not an object", { version: 2, targets: {}, skills: "bad" }],
+    ["a malformed target entry", { version: 2, targets: { claude: { nope: true } }, skills: {} }],
+    [
+      "a malformed skill entry",
+      { version: 2, targets: {}, skills: { "/x": { file: "/x", createdFile: "no" } } },
+    ],
+    ["v1 targets is not an object", { version: 1, targets: 42 }],
+    ["a malformed v1 skill record", { version: 1, targets: {}, skill: { file: 7 } }],
+  ];
+
+  for (const [label, body] of REFUSED_RECEIPTS) {
+    test(`a receipt with ${label} is refused and left on disk`, () => {
+      const receipt = join(home, "connections.json");
+      const text = JSON.stringify(body);
+      writeFileSync(receipt, text);
+
+      expect(readConnections(home).ok).toBe(false);
+      expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeDefined();
+      expect(readFileSync(receipt, "utf8")).toBe(text);
+    });
+  }
+
+  // The counterpart: a genuinely empty ledger IS safe to clear, so the guards
+  // above must not make the normal "last agent disconnected" path fail.
+  test("a legitimately empty receipt still reads as empty", () => {
+    writeFileSync(
+      join(home, "connections.json"),
+      JSON.stringify({ version: 2, targets: {}, skills: {} }),
+    );
+    const read = readConnections(home);
+    expect(read.ok).toBe(true);
+    expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeUndefined();
   });
 
   // Skill cleanup runs after the MCP reversal, so an unlink that fails there must
