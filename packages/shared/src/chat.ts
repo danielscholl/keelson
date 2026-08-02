@@ -225,9 +225,9 @@ export type Conversation = z.infer<typeof conversationSchema>;
 
 export const modelClassMapSchema = z
   .object({
-    fast: z.string(),
-    balanced: z.string(),
-    deep: z.string(),
+    fast: z.string().min(1),
+    balanced: z.string().min(1),
+    deep: z.string().min(1),
   })
   .strict();
 export type ModelClassMap = z.infer<typeof modelClassMapSchema>;

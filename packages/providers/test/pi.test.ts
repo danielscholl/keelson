@@ -311,6 +311,11 @@ describe("PiProvider", () => {
     expect(p.getCapabilities()).toEqual(PI_CAPABILITIES);
     expect(PI_CAPABILITIES.tools).toBe(true);
     expect(PI_CAPABILITIES.sessionResume).toBe(false);
+    expect(PI_CAPABILITIES.modelClasses).toEqual({
+      fast: "anthropic/claude-haiku-4.5",
+      balanced: "anthropic/claude-sonnet-4.6",
+      deep: "anthropic/claude-opus-4.5",
+    });
   });
 
   test("listModels returns the dynamic catalog from the injected source", async () => {

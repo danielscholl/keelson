@@ -619,6 +619,16 @@ describe("model classes", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects empty model ids", () => {
+    expect(() =>
+      modelClassMapSchema.parse({
+        fast: "",
+        balanced: "model-balanced",
+        deep: "model-deep",
+      }),
+    ).toThrow();
+  });
 });
 
 describe("modelInfoSchema", () => {
