@@ -181,21 +181,14 @@ export type PromptRequestGate = (
 
 export interface MakePromptHandlerOptions {
   /**
-   * Resolves the provider to use for this node. Called once per invocation
-   * with the effective provider id (`node.provider ?? workflow.provider`),
-   * or undefined when neither is set — the resolver then picks its default.
+   * Resolves the provider to use for this node from its registered effective id.
    * Throwing surfaces as a normal failed `NodeResult` via the handler's
    * provider-error path.
    */
   getProvider: (id?: string) => PromptHandlerProvider;
   /**
-   * Resolves the effective provider id a node ran on, given the node/workflow
-   * hint (`node.provider ?? workflow.provider`, or undefined). The composition
-   * root returns `id ?? <default provider id>` so the recorded provider is the
-   * concrete registry id — including a gateway's instance id, which `getType()`
-   * can't surface — even when the workflow pins nothing. Absent → the handler
-   * records the raw hint (possibly undefined), so a standalone caller degrades
-   * gracefully rather than throwing.
+   * Maps a run override or node/workflow preference to the registered provider
+   * that will execute the node. Absent callers use the raw requested id.
    */
   resolveProviderId?: (id?: string) => string;
   /** Registered tool catalog. Called once per node invocation so post-boot registrations are picked up. */
@@ -356,10 +349,6 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
       const failOnToolError =
         (node as { fail_on_tool_error?: unknown }).fail_on_tool_error === true;
 
-      // Provider resolution: node.provider overrides workflow.provider, which
-      // overrides the resolver's own default. Passed verbatim to getProvider;
-      // unknown ids throw inside the resolver and surface via consume()'s
-      // error path.
       const nodeProviderRaw = (node as { provider?: unknown }).provider;
       const nodeProvider =
         typeof nodeProviderRaw === "string" && nodeProviderRaw.trim().length > 0
@@ -370,14 +359,43 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         typeof workflowProviderRaw === "string" && workflowProviderRaw.trim().length > 0
           ? workflowProviderRaw.trim()
           : undefined;
-      const effectiveProviderId = nodeProvider ?? workflowProvider;
-      // The concrete provider id to record on the result: the composition root's
-      // resolver maps the hint to the registered id it actually serves (the
-      // default when the hint is undefined; a gateway's instance id, which
-      // `getType()` collapses to "gateway"). Falls back to the raw hint when no
-      // resolver is injected (standalone / test construction).
-      const recordedProviderId =
-        opts.resolveProviderId?.(effectiveProviderId) ?? effectiveProviderId;
+      const pinnedProviderId = nodeProvider ?? workflowProvider;
+      const requestedProviderId = ctx.providerOverride ?? pinnedProviderId;
+      const effectiveProviderId =
+        opts.resolveProviderId?.(requestedProviderId) ?? requestedProviderId;
+      const recordedProviderId = effectiveProviderId;
+
+      if (
+        ctx.providerOverride !== undefined &&
+        pinnedProviderId !== undefined &&
+        effectiveProviderId !== pinnedProviderId
+      ) {
+        const source = nodeProvider !== undefined ? "node" : "workflow";
+        const message = `provider override '${effectiveProviderId}' displaces ${source} pin '${pinnedProviderId}'`;
+        if (nodeProvider !== undefined || ctx.warnOnce === undefined) {
+          ctx.emit({ type: "node_warning", message });
+        } else {
+          ctx.warnOnce(
+            `workflow-provider-override:${pinnedProviderId}:${effectiveProviderId}`,
+            message,
+          );
+        }
+      } else if (
+        ctx.providerOverride === undefined &&
+        pinnedProviderId !== undefined &&
+        effectiveProviderId !== pinnedProviderId
+      ) {
+        const source = nodeProvider !== undefined ? "node" : "workflow";
+        const message = `${source} prefers '${pinnedProviderId}' (not registered); running on '${effectiveProviderId}'`;
+        if (nodeProvider !== undefined || ctx.warnOnce === undefined) {
+          ctx.emit({ type: "node_warning", message });
+        } else {
+          ctx.warnOnce(
+            `workflow-provider-fallback:${pinnedProviderId}:${effectiveProviderId}`,
+            message,
+          );
+        }
+      }
 
       // Surface a one-off `run_warning` when the active provider
       // can't honor the per-node config we just resolved. Only claude
@@ -561,10 +579,30 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
         try {
           const provider = opts.getProvider(effectiveProviderId);
           providerResolved = true;
-          effortConsumed = provider.getCapabilities?.().reasoningEffort === true;
-          providerProjectsTools = provider.getCapabilities?.().tools !== false;
+          const capabilities = provider.getCapabilities?.();
+          effortConsumed = capabilities?.reasoningEffort === true;
+          providerProjectsTools = capabilities?.tools !== false;
+          if (model === "auto") {
+            model = capabilities?.defaultModel ?? model;
+          }
+          if (
+            pinnedProviderId !== undefined &&
+            effectiveProviderId !== pinnedProviderId &&
+            typeof model === "string" &&
+            model.length > 0 &&
+            capabilities?.models !== undefined &&
+            capabilities.models.length > 0 &&
+            !capabilities.models.includes(model)
+          ) {
+            const defaultModel = capabilities.defaultModel ?? "";
+            ctx.emit({
+              type: "node_warning",
+              message: `model '${model}' is not in provider '${effectiveProviderId}' catalog; using '${defaultModel}'`,
+            });
+            model = capabilities.defaultModel;
+          }
           if (model === undefined) {
-            const defaultModel = provider.getCapabilities?.().defaultModel;
+            const defaultModel = capabilities?.defaultModel;
             if (typeof defaultModel === "string" && defaultModel.length > 0) {
               model = defaultModel;
             }
