@@ -187,8 +187,8 @@ export interface MakePromptHandlerOptions {
    */
   getProvider: (id?: string) => PromptHandlerProvider;
   /**
-   * Maps a run override or node/workflow preference to the registered provider
-   * that will execute the node. Absent callers use the raw requested id.
+   * Maps a node/workflow preference to the registered provider that will execute
+   * the node. Absent callers use the raw requested id.
    */
   resolveProviderId?: (id?: string) => string;
   /** Registered tool catalog. Called once per node invocation so post-boot registrations are picked up. */
@@ -360,9 +360,9 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
           ? workflowProviderRaw.trim()
           : undefined;
       const pinnedProviderId = nodeProvider ?? workflowProvider;
-      const requestedProviderId = ctx.providerOverride ?? pinnedProviderId;
-      const effectiveProviderId =
-        opts.resolveProviderId?.(requestedProviderId) ?? requestedProviderId;
+      const preferredProviderId = opts.resolveProviderId?.(pinnedProviderId) ?? pinnedProviderId;
+      const effectiveProviderId = ctx.providerOverride ?? preferredProviderId;
+      const modelProviderId = pinnedProviderId ?? preferredProviderId;
       const recordedProviderId = effectiveProviderId;
 
       if (
@@ -586,8 +586,7 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
             model = capabilities?.defaultModel ?? model;
           }
           if (
-            pinnedProviderId !== undefined &&
-            effectiveProviderId !== pinnedProviderId &&
+            effectiveProviderId !== modelProviderId &&
             typeof model === "string" &&
             model.length > 0 &&
             capabilities?.models !== undefined &&

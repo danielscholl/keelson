@@ -1693,6 +1693,64 @@ describe("makePromptHandler", () => {
       ]);
     });
 
+    test("an unavailable override fails instead of falling back to the default provider", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: (id) => {
+          if (id === "removed-gateway") {
+            throw new Error("Provider 'removed-gateway' is not registered. Available: stub");
+          }
+          return provider;
+        },
+        resolveProviderId: (id) => (id === "removed-gateway" ? "stub" : (id ?? "stub")),
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(
+        stubNode,
+        buildCtx({ providerOverride: "removed-gateway" }),
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("removed-gateway");
+      expect(result.error).toContain("not registered");
+      expect(result.provider).toBeUndefined();
+    });
+
+    test("validates a model-only pin against an override provider", async () => {
+      const events: NodeStreamEvent[] = [];
+      const codex = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { defaultModel: "gpt-5-codex", models: ["gpt-5-codex"] },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => codex.provider,
+        resolveProviderId: (id) => id ?? "claude",
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(
+        stubNode,
+        buildCtx({
+          workflowModel: "claude-opus-4-8",
+          providerOverride: "codex",
+          onEvent: (event) => events.push(event),
+        }),
+      );
+
+      expect(codex.calls[0]?.options?.model).toBe("gpt-5-codex");
+      expect(result.model).toBe("gpt-5-codex");
+      expect(events.filter((event) => event.type === "node_warning")).toEqual([
+        {
+          type: "node_warning",
+          message:
+            "model 'claude-opus-4-8' is not in provider 'codex' catalog; using 'gpt-5-codex'",
+        },
+      ]);
+    });
+
     test("coalesces workflow-pin override warnings across nodes", async () => {
       const { provider } = makeSpyProvider({
         chunks: [{ type: "text", content: "ok" }, { type: "done" }],
