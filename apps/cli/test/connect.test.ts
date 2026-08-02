@@ -385,9 +385,34 @@ describe("connect / disconnect (filesystem)", () => {
       }),
     );
     const outcome = disconnectAll(home, fakeRun);
+    // Pins WHICH path this takes: the record is well-formed enough to be read
+    // (isTargetRecord validates the value, not the key), so it is ignored by the
+    // TARGET_IDS loop rather than refused as an unreadable receipt.
+    expect(outcome.receiptUnreadable).toBeUndefined();
     expect(outcome.removed).toEqual([]);
     expect(outcome.failed).toEqual([]);
     expect(existsSync(stray)).toBe(true);
+    // Ignored, not discarded: the entry survives the rewrite.
+    expect(loadConnections(home).targets).toHaveProperty("rogue");
+  });
+
+  test("a known target beside an unknown one is still reversed, and the unknown one kept", () => {
+    runConnect(["copilot"], connectOpts());
+    const data = loadConnections(home);
+    const stray = join(base, "not-ours.json");
+    writeFileSync(stray, JSON.stringify({ mcpServers: { keelson: {} } }));
+    (data.targets as Record<string, unknown>).rogue = {
+      target: "rogue",
+      mcp: { kind: "file", file: stray, format: "json", createdFile: true },
+      connectedAt: "",
+    };
+    writeFileSync(join(home, "connections.json"), JSON.stringify(data));
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.receiptUnreadable).toBeUndefined();
+    expect(outcome.removed).toEqual(["copilot"]);
+    expect(existsSync(stray)).toBe(true);
+    expect(loadConnections(home).targets).toHaveProperty("rogue");
   });
 
   // An empty-ledger degrade here would rewrite the receipt away (saveConnections
@@ -419,6 +444,8 @@ describe("connect / disconnect (filesystem)", () => {
       "a malformed skill entry",
       { version: 2, targets: {}, skills: { "/x": { file: "/x", createdFile: "no" } } },
     ],
+    ["a missing skills container", { version: 2, targets: {} }],
+    ["a missing targets container", { version: 2, skills: {} }],
     ["v1 targets is not an object", { version: 1, targets: 42 }],
     ["a malformed v1 skill record", { version: 1, targets: {}, skill: { file: 7 } }],
   ];

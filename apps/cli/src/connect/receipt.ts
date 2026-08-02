@@ -160,11 +160,13 @@ function droppedEntries(raw: unknown, kept: number): number {
   return isRecord(raw) ? Object.keys(raw).length - kept : 0;
 }
 
-// A container that is present but is not an object at all. The parse* helpers
-// read it as empty and droppedEntries then sees nothing missing, so counting
-// alone would accept it as a legitimately empty ledger.
+// A v2 container that is absent, or present but not an object at all. Either
+// way the parse* helpers read it as empty and droppedEntries then sees nothing
+// missing, so counting alone would accept it as a legitimately empty ledger.
+// saveConnections always writes both keys, so a missing one is not a shape
+// keelson produces — only an absent receipt means an empty ledger.
 function malformedContainer(raw: unknown): boolean {
-  return raw !== undefined && !isRecord(raw);
+  return !isRecord(raw);
 }
 
 export function readConnections(home: string): ReadConnectionsResult {
@@ -184,7 +186,7 @@ export function readConnections(home: string): ReadConnectionsResult {
   if (!isRecord(parsed)) return { ok: false, reason: "not a JSON object" };
   if (parsed.version === 2) {
     if (malformedContainer(parsed.targets) || malformedContainer(parsed.skills)) {
-      return { ok: false, reason: "malformed 'targets' or 'skills' container" };
+      return { ok: false, reason: "missing or malformed 'targets' or 'skills' container" };
     }
     const targets = parseTargets(parsed.targets);
     const skills = parseSkills(parsed.skills);
@@ -195,7 +197,10 @@ export function readConnections(home: string): ReadConnectionsResult {
     return { ok: true, data: { version: 2, targets, skills } };
   }
   if (parsed.version === 1) {
-    if (malformedContainer(parsed.targets)) {
+    // Present-but-not-an-object only: v1 is a legacy shape this code never
+    // wrote, so an omitted container is not evidence of tampering the way a
+    // missing v2 one is.
+    if (parsed.targets !== undefined && !isRecord(parsed.targets)) {
       return { ok: false, reason: "malformed v1 'targets' container" };
     }
     // v1's `skill` is a single record, not a container; migrateV1 drops an

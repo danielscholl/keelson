@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { readKeelsonConfig } from "@keelson/shared/config";
 import pkg from "../../package.json" with { type: "json" };
-import { connectionsPath, loadConnections } from "../connect/receipt.ts";
+import { connectionsPath, readConnections } from "../connect/receipt.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listedRibIds, resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
@@ -103,12 +103,16 @@ async function confirm(
   home: string,
   purge: boolean,
   disconnecting: readonly string[],
+  receiptUnreadable: boolean,
 ): Promise<boolean> {
   const what = purge
     ? `DELETE the entire keelson home at ${home}, including keelson.db, workflows, and rib data`
     : `remove keelson's program files from ${home} (your database, workflows, and config stay)`;
-  const also =
-    disconnecting.length > 0
+  // Saying nothing when the receipt cannot be read would let the operator
+  // confirm a run that then fails to disconnect anything and exits non-zero.
+  const also = receiptUnreadable
+    ? `\nIts record of connected agents cannot be read, so none will be disconnected — you will have to remove keelson's MCP entry from each agent yourself.`
+    : disconnecting.length > 0
       ? `\nIt will also disconnect ${disconnecting.join(", ")} from the MCP endpoint.`
       : "";
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -221,8 +225,9 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
         opts.json,
       );
     }
-    const pending = opts.keepConnections ? [] : Object.keys(loadConnections(home).targets);
-    if (!(await confirm(home, opts.purge, pending))) {
+    const receipt = opts.keepConnections ? null : readConnections(home);
+    const pending = receipt?.ok ? Object.keys(receipt.data.targets) : [];
+    if (!(await confirm(home, opts.purge, pending, receipt !== null && !receipt.ok))) {
       emit({ data: { cancelled: true, home } }, { json: opts.json });
       process.exit(EXIT_OK);
     }
