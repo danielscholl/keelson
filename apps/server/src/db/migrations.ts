@@ -323,12 +323,23 @@ const migrations: Migration[] = [
   },
 ];
 
+// The lowest version this build can apply. A database stamped below it was
+// migrated by a ladder no longer carried here, so its remaining steps are gone
+// and the baseline cannot be replayed over its existing tables.
+const earliestVersion = Math.min(...migrations.map((m) => m.version));
+
 export function runMigrations(db: Database): void {
   db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);");
   const row = db.query("SELECT MAX(version) AS v FROM schema_version").get() as {
     v: number | null;
   } | null;
   const current = row?.v ?? 0;
+  if (current > 0 && current < earliestVersion) {
+    throw new Error(
+      `database schema is at v${String(current)}, which predates this build's v${String(earliestVersion)} baseline. ` +
+        "Run keelson v0.93.0 once to migrate it forward, then update again.",
+    );
+  }
   const pending = migrations
     .filter((m) => m.version > current)
     .sort((a, b) => a.version - b.version);

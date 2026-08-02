@@ -56,6 +56,19 @@ describe("migrations", () => {
     db.close();
   });
 
+  test("a database stranded below the baseline fails with an actionable error", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY);");
+    for (let v = 1; v <= 9; v += 1) {
+      db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(v);
+    }
+
+    expect(() => {
+      runMigrations(db);
+    }).toThrow(/schema is at v9, which predates this build's v12 baseline/);
+    db.close();
+  });
+
   test("reopening an already-migrated database applies nothing", () => {
     const db = new Database(":memory:");
     runMigrations(db);
