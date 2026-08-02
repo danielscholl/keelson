@@ -130,4 +130,15 @@ describe("model class overrides", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("claude.modelClasses.deep");
   });
+
+  test("rejects unknown model class keys", () => {
+    writeFileSync(
+      join(home, "config.json"),
+      JSON.stringify({ claude: { modelClasses: { fastt: "claude-custom" } } }),
+    );
+
+    const result = readKeelsonConfig(home);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("fastt");
+  });
 });

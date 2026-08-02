@@ -30,11 +30,13 @@ export const DEFAULT_PROVIDER_ENABLEMENT: Readonly<Record<string, boolean>> = {
   codex: false,
 };
 
-const modelClassesConfigSchema = z.object({
-  fast: z.string().min(1).optional(),
-  balanced: z.string().min(1).optional(),
-  deep: z.string().min(1).optional(),
-});
+const modelClassesConfigSchema = z
+  .object({
+    fast: z.string().min(1).optional(),
+    balanced: z.string().min(1).optional(),
+    deep: z.string().min(1).optional(),
+  })
+  .strict();
 
 // Per-provider settings block. The shape stays open so a provider can grow
 // settings without a config migration.
