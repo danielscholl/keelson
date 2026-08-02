@@ -306,16 +306,25 @@ export interface DisconnectOutcome {
   failed: TargetId[];
 }
 
-// Reverse one recorded target, mutating `data`. False means the agent's own CLI
-// refused the removal, and the record is deliberately kept: dropping it would
-// strand the agent's config still pointing at keelson with no ledger left to
-// undo it from.
+// Reverse one recorded target, mutating `data`. False means the reversal did not
+// happen — the agent's own CLI refused it, or its config could not be read or
+// rewritten — and the record is deliberately kept: dropping it would strand the
+// agent still pointing at keelson with no ledger left to undo it from. The
+// record is deleted only after the reversal succeeds, so a throw part-way leaves
+// the target retryable.
 function reverseTarget(data: ConnectionsData, id: TargetId, run: CommandRunner): boolean {
   const rec = data.targets[id];
   if (!rec) return false;
-  if (rec.mcp.kind === "cli" && run(rec.mcp.command, rec.mcp.removeArgs).code !== 0) return false;
-  if (rec.mcp.kind === "file") {
-    reverseTargetConfig(rec.mcp.file, rec.mcp.format, rec.mcp.createdFile);
+  try {
+    if (rec.mcp.kind === "cli" && run(rec.mcp.command, rec.mcp.removeArgs).code !== 0) return false;
+    if (rec.mcp.kind === "file") {
+      reverseTargetConfig(rec.mcp.file, rec.mcp.format, rec.mcp.createdFile);
+    }
+  } catch {
+    // An agent config the operator hand-broke (removeJsonMcp parses it) must not
+    // abort the other targets, nor an uninstall that has already revoked
+    // credentials.
+    return false;
   }
   delete data.targets[id];
   reverseSkillsFor(data, id);
@@ -331,7 +340,10 @@ export function disconnectAll(home: string, runCommand?: CommandRunner): Disconn
   const data = loadConnections(home);
   const removed: TargetId[] = [];
   const failed: TargetId[] = [];
-  for (const id of Object.keys(data.targets) as TargetId[]) {
+  // TARGET_IDS rather than the receipt's own keys: loadConnections does not
+  // validate them, so a hand-edited receipt could otherwise name an unknown
+  // target and steer deletion at the paths recorded beside it.
+  for (const id of TARGET_IDS) {
     if (!data.targets[id]) continue;
     if (reverseTarget(data, id, run)) removed.push(id);
     else failed.push(id);

@@ -340,4 +340,44 @@ describe("connect / disconnect (filesystem)", () => {
     expect(loadConnections(home).targets.claude).toBeDefined();
     expect(existsSync(claudeSkill())).toBe(true);
   });
+
+  // loadConnections keys targets by whatever the file says, so an unknown id
+  // would otherwise steer reversal at the paths recorded beside it.
+  test("a receipt naming an unknown target is ignored, not reversed", () => {
+    const stray = join(base, "not-ours.json");
+    writeFileSync(stray, JSON.stringify({ mcpServers: { keelson: {} } }));
+    writeFileSync(
+      join(home, "connections.json"),
+      JSON.stringify({
+        version: 2,
+        targets: {
+          rogue: {
+            target: "rogue",
+            mcp: { kind: "file", file: stray, format: "json", createdFile: true },
+            connectedAt: "",
+          },
+        },
+        skills: {},
+      }),
+    );
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.removed).toEqual([]);
+    expect(outcome.failed).toEqual([]);
+    expect(existsSync(stray)).toBe(true);
+  });
+
+  // One agent's hand-broken config must not abort the others, nor an uninstall
+  // that has already revoked credentials.
+  test("an unreadable agent config fails just that target and leaves it retryable", () => {
+    runConnect(["copilot", "codex"], connectOpts());
+    writeFileSync(join(osHome, ".copilot", "mcp-config.json"), "{ not json");
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.failed).toEqual(["copilot"]);
+    expect(outcome.removed).toEqual(["codex"]);
+    // The broken target is still recorded, so a retry is possible...
+    expect(loadConnections(home).targets.copilot).toBeDefined();
+    // ...and the healthy one really was reversed.
+    expect(existsSync(join(osHome, ".codex", "config.toml"))).toBe(false);
+  });
 });

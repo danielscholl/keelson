@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { readKeelsonConfig } from "@keelson/shared/config";
 import pkg from "../../package.json" with { type: "json" };
-import { loadConnections } from "../connect/receipt.ts";
+import { connectionsPath, loadConnections } from "../connect/receipt.ts";
 import { EXIT_BAD_ARGS, EXIT_FAIL, EXIT_OK } from "../exit.ts";
 import { listedRibIds, resolveKeelsonHome } from "../home.ts";
 import { emit } from "../output.ts";
@@ -346,10 +346,17 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
       process.stdout.write(`disconnected agents: ${connections.removed.join(", ")}\n`);
     }
     // This run takes the launcher, so `keelson disconnect` is gone too — the
-    // operator has to reverse a survivor through the agent's own CLI.
+    // operator has to reverse a survivor through the agent's own CLI. --purge
+    // then deletes the receipt that would have made a retry possible, so say so
+    // rather than imply the record is still there to come back to.
     if (connections.failed.length > 0) {
       process.stdout.write(
         `could not disconnect: ${connections.failed.join(", ")} — remove keelson's MCP entry with that agent's own CLI\n`,
+      );
+      process.stdout.write(
+        opts.purge
+          ? `--purge deletes ${connectionsPath(home)} with the home, so nothing records those connections after this run\n`
+          : `their records are kept in ${connectionsPath(home)}\n`,
       );
     }
     // Saying nothing here would read as a clean sweep; the keyring cannot be

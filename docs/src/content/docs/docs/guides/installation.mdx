@@ -111,9 +111,12 @@ rib data directory, unless you pass `--purge`.
 Disconnecting rides along because it cannot be done afterward: the run takes the
 `keelson` command, so `keelson disconnect` goes with it, and an agent left wired
 keeps pointing at an endpoint that no longer answers. The interactive prompt
-names the agents it is about to disconnect. If one of them refuses the removal —
-its own CLI is gone, or errors — the command reports that agent as failed, exits
-non-zero, and keeps its entry in the receipt so a reinstall can still reverse it.
+names the agents it is about to disconnect. If one of them cannot be reversed —
+its own CLI is gone or refuses, or its config file is unreadable — the command
+reports that agent as failed and exits non-zero, and the remaining agents are
+still disconnected. On a plain run its entry stays in `<home>/connections.json`,
+so a reinstall can retry it; `--purge` deletes that receipt with the rest of the
+home, so reverse a failed agent by hand from what the command printed.
 
 <Aside type="caution" title="A plain run removes the keelson command itself">
 The launcher is one of the program files, so after `keelson uninstall` there is
