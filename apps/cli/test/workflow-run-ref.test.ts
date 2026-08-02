@@ -4,7 +4,7 @@
 
 import { afterAll, describe, expect, test } from "bun:test";
 
-import { resolveRunRef } from "../src/http/workflow-client.ts";
+import { resolveRunRef, startRun } from "../src/http/workflow-client.ts";
 
 // Two runs share the 8-char prefix `aaaaaaaa` (what `--watch` prints), plus a
 // uniquely-prefixed run, so one fixture exercises every branch.
@@ -12,9 +12,14 @@ const RUN_A1 = "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa";
 const RUN_A2 = "aaaaaaaa-2222-4aaa-8aaa-aaaaaaaaaaaa";
 const RUN_B = "bbbbbbbb-3333-4bbb-8bbb-bbbbbbbbbbbb";
 const RUN_IDS = [RUN_A1, RUN_A2, RUN_B];
+let startBody: unknown;
 
-const handler = (req: Request): Response => {
+const handler = async (req: Request): Promise<Response> => {
   const { pathname } = new URL(req.url);
+  if (req.method === "POST" && pathname === "/api/workflows/demo/runs") {
+    startBody = await req.json();
+    return Response.json({ runId: RUN_B });
+  }
   // Exact lookup: GET /api/workflows/runs/:runId — 200 only for a full id.
   const detail = pathname.match(/^\/api\/workflows\/runs\/(.+)$/);
   if (detail) {
@@ -63,6 +68,25 @@ describe("resolveRunRef", () => {
     expect(await resolveRunRef(baseUrl, "deadbeef")).toEqual({
       error: "run 'deadbeef' not found",
       ambiguous: false,
+    });
+  });
+
+  describe("startRun", () => {
+    test("includes the provider override in the run-start body", async () => {
+      startBody = undefined;
+
+      expect(
+        await startRun(baseUrl, "demo", {
+          inputs: {},
+          workingDir: "/tmp",
+          provider: "stub",
+        }),
+      ).toEqual({ runId: RUN_B });
+      expect(startBody).toEqual({
+        inputs: {},
+        workingDir: "/tmp",
+        provider: "stub",
+      });
     });
   });
 });

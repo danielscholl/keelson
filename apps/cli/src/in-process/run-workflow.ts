@@ -158,16 +158,21 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // is enabled.
   bootstrapCliProviders();
   registerStubProvider();
-  const providerId = resolveHeadlessProviderId(opts.provider);
+  const providerId = resolveHeadlessProviderId();
+  const requestedProvider = opts.provider?.trim();
+  const providerOverride =
+    requestedProvider !== undefined && requestedProvider.length > 0
+      ? requestedProvider
+      : undefined;
   // Fail fast only on an explicit --provider; an unregistered default pin
   // (env/config) surfaces lazily when a prompt node first needs it, so
   // bash-only workflows still run.
-  if (opts.provider !== undefined && !isRegisteredProvider(providerId)) {
+  if (providerOverride !== undefined && !isRegisteredProvider(providerOverride)) {
     const available = getProviderInfoList()
       .map((p) => p.id)
       .join(", ");
     throw new Error(
-      `provider '${providerId}' is not registered. Available: ${available}. ` +
+      `provider '${providerOverride}' is not registered. Available: ${available}. ` +
         `Set KEELSON_PROVIDERS (or config.json providers) to include it.`,
     );
   }
@@ -349,6 +354,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
       handlers,
       cwd: effectiveCwd,
       abortSignal: abort.signal,
+      ...(providerOverride !== undefined ? { providerOverride } : {}),
       artifactsDir,
       onEvent,
     });
