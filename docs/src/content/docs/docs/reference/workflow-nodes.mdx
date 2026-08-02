@@ -263,14 +263,18 @@ Provider selection follows this order:
 1. The run's `--provider` override.
 2. The node's `provider`.
 3. The workflow's `provider`.
-4. The runner default.
+4. `KEELSON_WORKFLOW_PROVIDER`, when set as the runner default.
+5. The runner's configured default.
+
+`--provider` wins over the environment default. Node and workflow pins also
+override that default.
 
 Model selection starts with the node's `model`, then the workflow's `model`. A
 `model_by_provider` entry for the effective provider takes precedence. A model
 tier resolves through the operator's configured class override, the provider's
 `modelClasses`, then the provider default. `auto` also uses the provider default.
-A literal id is checked against the catalog only when resolution fell back from
-its pinned provider to another provider.
+A literal id is checked against the effective provider's catalog when that
+provider differs from the provider used to select the model.
 
 Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
 `fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. The per-turn agent fields are
