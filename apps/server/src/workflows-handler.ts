@@ -18,6 +18,7 @@ import {
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { isRegisteredProvider } from "@keelson/providers";
 import {
   bulkDeleteRunsBodySchema,
   bulkDeleteRunsResponseSchema,
@@ -363,9 +364,8 @@ export interface ActiveRunEntry {
   // deleted on terminal status (the dir is cleaned at the same moment).
   artifactsDir?: string;
   // Identity for the run-start de-dup lookup: a concurrent start with the same
-  // (workflow, workingDir, inputs) collapses onto this run. The heartbeat and a
-  // bound producer's client refresh both target (collector, REPO_ROOT, {});
-  // args-bearing region refreshes collapse per input set. See runDedupeKey.
+  // workflow, workingDir, inputs, and provider override collapses onto this run.
+  // See runDedupeKey.
   dedupeKey: string;
   // The resolved definition this run executes. The de-dup key is name-based,
   // but one name can resolve differently per scope/origin (a project shadow vs
@@ -378,7 +378,7 @@ export interface ActiveRuns {
   register(runId: string, entry: ActiveRunEntry): void;
   get(runId: string): ActiveRunEntry | undefined;
   // The live run matching `dedupeKey`, or undefined. Backs the run-start de-dup
-  // so an identical (workflow, workingDir, inputs) can't run twice concurrently.
+  // so an identical run configuration can't run twice concurrently.
   findActive(
     dedupeKey: string,
   ): { runId: string; conversationId: string; definition?: WorkflowDefinition } | undefined;
@@ -387,18 +387,18 @@ export interface ActiveRuns {
   abortAll(): Promise<void>;
 }
 
-// Canonical de-dup identity for a run start. Two starts collapse only when
-// workflow, workingDir, AND inputs all match; inputs are key-sorted so order
+// Canonical de-dup identity for a run start. Inputs are key-sorted so order
 // can't make identical inputs look distinct.
 export function runDedupeKey(
   name: string,
   workingDir: string,
   inputs: Record<string, string>,
+  providerOverride?: string,
 ): string {
   const sorted = Object.keys(inputs)
     .sort()
     .map((k) => [k, inputs[k]] as const);
-  return JSON.stringify([name, workingDir, sorted]);
+  return JSON.stringify([name, workingDir, sorted, providerOverride ?? null]);
 }
 
 // Idempotent: abort the controller and unblock any paused approval node.
@@ -778,6 +778,7 @@ interface StartRunCoreParams {
   isolationOn: boolean;
   branchTemplate: string | undefined;
   worktreeBase: string | undefined;
+  providerOverride?: string;
   // Trigger provenance for the run row. Omitted → 'manual'. The owning rib id
   // (null for local workflows) is stamped so the runs feed can badge/filter and
   // bulk-delete by rib even after the rib is removed.
@@ -950,6 +951,7 @@ function startRunCore(
     isolationOn,
     branchTemplate,
     worktreeBase,
+    providerOverride,
   } = params;
   const origin: WorkflowRunOrigin = params.origin ?? "manual";
   const ribId = params.ribId ?? null;
@@ -960,7 +962,7 @@ function startRunCore(
     workingDir,
   );
   const name = workflow.name;
-  const dedupeKey = runDedupeKey(name, workingDir, inputs);
+  const dedupeKey = runDedupeKey(name, workingDir, inputs, providerOverride);
   const lockProjectId = resolveMutationLockProjectId({
     resolvedProject,
     workingDir,
@@ -969,7 +971,7 @@ function startRunCore(
   // De-dup only non-isolated producer refreshes — bound producers AND any
   // scheduled-origin start (the heartbeat, /refresh, a rib's ctx.refreshWorkflow),
   // which covers unbound region workflows too: a concurrent start with an
-  // identical (workflow, workingDir, inputs) already live returns that run,
+  // identical run configuration already live returns that run,
   // serializing the two-tabs / client-open vs server-tick races. The live run
   // must also be executing the SAME resolved definition — the key is name-based
   // and one name can resolve differently per scope/origin (a manual run of a
@@ -1033,6 +1035,7 @@ function startRunCore(
       workingDir,
       origin,
       ribId,
+      providerOverride: providerOverride ?? null,
     });
   } catch (err) {
     if (lockHandle !== undefined) {
@@ -1069,6 +1072,7 @@ function startRunCore(
     subscribers,
     promptHandler,
     pendingApprovals,
+    ...(providerOverride !== undefined ? { providerOverride } : {}),
     isolation: isolationOn
       ? {
           branchTemplate,
@@ -1138,7 +1142,7 @@ export type ResumeRunResult =
   | { ok: true }
   | {
       ok: false;
-      reason: "not_found" | "not_terminal" | "locked";
+      reason: "not_found" | "not_terminal" | "locked" | "provider_unavailable";
       message: string;
     };
 
@@ -1223,6 +1227,17 @@ function resumeRunCore(
       message: `run '${runId}' is not in a resumable state (only failed or cancelled runs can be resumed)`,
     };
   }
+  const providerOverride = store.getRunProviderOverride(runId);
+  if (
+    providerOverride !== null &&
+    (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
+  ) {
+    return {
+      ok: false,
+      reason: "provider_unavailable",
+      message: `provider override '${providerOverride}' is no longer available`,
+    };
+  }
   const resumeLockProjectId = resolveMutationLockProjectId({
     resolvedProject: resumeProject,
     workingDir: run.workingDir,
@@ -1288,6 +1303,7 @@ function resumeRunCore(
       subscribers,
       promptHandler,
       pendingApprovals,
+      ...(providerOverride !== null ? { providerOverride } : {}),
       isolation: null,
       ...(run.projectId !== null ? { projectId: run.projectId } : {}),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
@@ -1304,7 +1320,12 @@ function resumeRunCore(
       abort,
       done,
       pendingApprovals,
-      dedupeKey: runDedupeKey(workflow.name, run.workingDir, run.inputs),
+      dedupeKey: runDedupeKey(
+        workflow.name,
+        run.workingDir,
+        run.inputs,
+        providerOverride ?? undefined,
+      ),
       definition: workflow,
       conversationId: run.conversationId,
     });
@@ -2049,6 +2070,17 @@ export function workflowsRoutes(
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
+    const requestedProvider = parsed.data.provider?.trim();
+    const providerOverride =
+      requestedProvider !== undefined && requestedProvider.length > 0
+        ? requestedProvider
+        : undefined;
+    if (
+      providerOverride !== undefined &&
+      (providerOverride === "workflow" || !isRegisteredProvider(providerOverride))
+    ) {
+      return c.json({ error: `unknown provider '${providerOverride}'` }, 400);
+    }
 
     // Resolve the run's working directory. The wire schema allows either
     // `projectId` (named pointer) or `workingDir` (raw override) or both —
@@ -2189,6 +2221,7 @@ export function workflowsRoutes(
           isolationOn,
           branchTemplate,
           worktreeBase: workflow.worktree?.base,
+          ...(providerOverride !== undefined ? { providerOverride } : {}),
           origin: "manual",
           ribId: ribIdFor(catalog, workflow.name, scope),
         },
@@ -2621,6 +2654,7 @@ interface ExecuteRunArgs {
   activeRuns: ActiveRuns;
   subscribers: WorkflowSubscribers;
   promptHandler: NodeHandler;
+  providerOverride?: string;
   // Per-run pending approval map shared with the route's POST /resume and
   // DELETE handlers. The route owns the lifecycle; this function builds the
   // closures that populate / drain it as the executor pauses and resumes.
@@ -2728,6 +2762,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
     activeRuns,
     subscribers,
     promptHandler,
+    providerOverride,
     pendingApprovals,
     isolation,
     projectId,
@@ -3319,6 +3354,7 @@ async function runWorkflowExecution(args: ExecuteRunArgs): Promise<void> {
       handlers,
       cwd: effectiveCwd,
       abortSignal: abort.signal,
+      ...(providerOverride !== undefined ? { providerOverride } : {}),
       ...artifacts.runWorkflowOptions(),
       ...(memoryTools !== undefined ? { memoryTools } : {}),
       ...(projectId !== undefined ? { projectId } : {}),

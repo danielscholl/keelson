@@ -92,6 +92,7 @@ export interface StartRunBody {
   projectId?: string;
   workingDir?: string;
   isolation?: "worktree" | "none";
+  provider?: string;
 }
 
 export async function startRun(

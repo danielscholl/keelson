@@ -21,7 +21,7 @@ function tableNames(db: Database): string[] {
 }
 
 describe("migrations", () => {
-  test("a fresh database gets the whole schema and is stamped once", () => {
+  test("a fresh database gets the whole schema and all current stamps", () => {
     const db = new Database(":memory:");
     runMigrations(db);
 
@@ -30,7 +30,7 @@ describe("migrations", () => {
         version: number;
       }>
     ).map((r) => r.version);
-    expect(versions).toEqual([12]);
+    expect(versions).toEqual([12, 13]);
 
     expect(tableNames(db)).toContain("conversations");
     expect(tableNames(db)).toContain("memories");
@@ -43,16 +43,21 @@ describe("migrations", () => {
   // The baseline replaced a twelve-step ladder in place: any database that
   // ladder stamped must stay untouched, so the baseline's version can never be
   // renumbered below 12.
-  test("a database the previous ladder stamped is left untouched", () => {
+  test("a database the previous ladder stamped skips the baseline and applies newer migrations", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY);");
+    db.exec("CREATE TABLE workflow_runs (id TEXT PRIMARY KEY);");
     for (let v = 1; v <= 12; v += 1) {
       db.prepare("INSERT INTO schema_version(version) VALUES (?)").run(v);
     }
 
     runMigrations(db);
 
-    expect(tableNames(db)).toEqual(["schema_version"]);
+    const columns = db.query("PRAGMA table_info(workflow_runs)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toContain("provider_override");
+    expect(db.query("SELECT MAX(version) AS v FROM schema_version").get() as { v: number }).toEqual(
+      { v: 13 },
+    );
     db.close();
   });
 
@@ -78,7 +83,7 @@ describe("migrations", () => {
 
     expect(tableNames(db)).toEqual(before);
     expect(db.query("SELECT count(*) AS c FROM schema_version").get() as { c: number }).toEqual({
-      c: 1,
+      c: 2,
     });
     db.close();
   });

@@ -158,6 +158,7 @@ async function runViaHttp(
     project?: string;
     workingDir?: string;
     isolation?: "worktree" | "none";
+    provider?: string;
   },
 ): Promise<never> {
   const projectId =
@@ -167,6 +168,7 @@ async function runViaHttp(
     ...(projectId !== undefined ? { projectId } : {}),
     ...(body.workingDir !== undefined ? { workingDir: body.workingDir } : {}),
     ...(body.isolation !== undefined ? { isolation: body.isolation } : {}),
+    ...(body.provider !== undefined ? { provider: body.provider } : {}),
   });
   // Echo the run's target and id up front so the human-mode operator can see
   // what the run is acting against before frames start arriving. The header
@@ -355,6 +357,7 @@ export async function runWorkflowRun(name: string, opts: WorkflowRunOptions): Pr
         ...(opts.project !== undefined ? { project: opts.project } : {}),
         ...(cwd !== undefined ? { workingDir: cwd } : {}),
         ...(isolation !== undefined ? { isolation } : {}),
+        ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
       });
     } catch (err) {
       if (err instanceof ProjectNotFoundError) {

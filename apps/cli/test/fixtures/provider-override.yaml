@@ -1,0 +1,12 @@
+name: provider-override
+description: Exercises workflow and node provider pins
+provider: copilot
+model: auto
+nodes:
+  - id: workflow-pin
+    model: claude-opus-4.8
+    prompt: run on the override
+  - id: node-pin
+    depends_on: [workflow-pin]
+    provider: claude
+    prompt: run on the override too

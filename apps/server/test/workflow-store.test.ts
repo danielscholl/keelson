@@ -51,6 +51,7 @@ describe("SQLite WorkflowStore", () => {
       inputs: { ARGUMENTS: "hi" },
       startedAt: "2025-01-01T00:00:00.000Z",
       conversationId: mintConv(db, "hello-world-conv"),
+      providerOverride: "stub",
     });
 
     const run = store.getRun("r1");
@@ -63,6 +64,8 @@ describe("SQLite WorkflowStore", () => {
     expect(run!.brief).toBeNull();
     expect(run!.completedAt).toBeNull();
     expect(run!.error).toBeNull();
+    expect(store.getRunProviderOverride("r1")).toBe("stub");
+    expect(store.getRunProviderOverride("missing")).toBeNull();
   });
 
   test("persists resolved worktree base on the run row", () => {

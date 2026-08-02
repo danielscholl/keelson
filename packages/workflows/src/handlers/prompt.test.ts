@@ -36,7 +36,12 @@ interface SpyProviderOptions {
   // When set, makeSpyProvider exposes `getCapabilities()` returning this
   // shape so the model-resolution chain can fall through to a provider
   // default. Omit to keep the prior structural-subset behavior.
-  capabilities?: { defaultModel?: string; reasoningEffort?: boolean; tools?: boolean };
+  capabilities?: {
+    defaultModel?: string;
+    reasoningEffort?: boolean;
+    tools?: boolean;
+    models?: readonly string[];
+  };
 }
 
 function makeSpyProvider(opts: SpyProviderOptions = {}): {
@@ -86,6 +91,8 @@ interface BuildCtxOptions {
   workflowProvider?: string;
   workflowModel?: string;
   workflowEffort?: string;
+  providerOverride?: string;
+  warnOnce?: (key: string, message: string) => void;
   notebook?: NotebookAdapter;
 }
 
@@ -110,6 +117,8 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     resolvedBody: body,
     rawBody: body,
     workflow,
+    ...(opts.providerOverride !== undefined ? { providerOverride: opts.providerOverride } : {}),
+    ...(opts.warnOnce !== undefined ? { warnOnce: opts.warnOnce } : {}),
     ...(opts.notebook !== undefined ? { notebook: opts.notebook } : {}),
   };
 }
@@ -1511,6 +1520,269 @@ describe("makePromptHandler", () => {
       });
       await handler.handle(stubNode, buildCtx());
       expect(calls[0]!.options?.model).toBe("gpt-5");
+    });
+  });
+
+  describe("provider preferences", () => {
+    test("falls back once from a workflow provider and validates re-homed models", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { defaultModel: "stub-default", models: ["stub-default"] },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => (id === "copilot" ? "stub" : (id ?? "stub")),
+        getRegisteredTools: () => [],
+      });
+      const runWarnings: string[] = [];
+      const warnedKeys = new Set<string>();
+      const warnOnce = (key: string, message: string) => {
+        if (warnedKeys.has(key)) return;
+        warnedKeys.add(key);
+        runWarnings.push(message);
+      };
+      const nodeWarnings: string[] = [];
+      const onEvent = (event: NodeStreamEvent) => {
+        if (event.type === "node_warning") nodeWarnings.push(event.message);
+      };
+      const node = {
+        id: "n1",
+        prompt: "",
+        model: "claude-opus-4.8",
+      } as unknown as DagNode;
+
+      const first = await handler.handle(
+        node,
+        buildCtx({
+          workflowProvider: "copilot",
+          workflowModel: "auto",
+          warnOnce,
+          onEvent,
+        }),
+      );
+      const second = await handler.handle(
+        { ...node, id: "n2" } as unknown as DagNode,
+        buildCtx({
+          nodeId: "n2",
+          workflowProvider: "copilot",
+          workflowModel: "auto",
+          warnOnce,
+          onEvent,
+        }),
+      );
+
+      expect(runWarnings).toEqual([
+        "workflow prefers 'copilot' (not registered); running on 'stub'",
+      ]);
+      expect(nodeWarnings).toEqual([
+        "model 'claude-opus-4.8' is not in provider 'stub' catalog; using 'stub-default'",
+        "model 'claude-opus-4.8' is not in provider 'stub' catalog; using 'stub-default'",
+      ]);
+      expect(calls.map((call) => call.options?.model)).toEqual(["stub-default", "stub-default"]);
+      expect([first.provider, second.provider]).toEqual(["stub", "stub"]);
+    });
+
+    test("keeps a registered provider's model and warning stream unchanged", async () => {
+      const events: NodeStreamEvent[] = [];
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { defaultModel: "auto", models: ["auto"] },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "copilot",
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        model: "claude-opus-4.8",
+      } as unknown as DagNode;
+
+      const result = await handler.handle(
+        node,
+        buildCtx({
+          workflowProvider: "copilot",
+          workflowModel: "auto",
+          onEvent: (event) => events.push(event),
+        }),
+      );
+
+      expect(calls[0]?.options?.model).toBe("claude-opus-4.8");
+      expect(result.provider).toBe("copilot");
+      expect(result.model).toBe("claude-opus-4.8");
+      expect(events.filter((event) => event.type === "node_warning")).toEqual([]);
+    });
+
+    test("normalizes auto to the effective provider default", async () => {
+      const claude = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: {
+          defaultModel: "claude-opus-4-8",
+          models: ["claude-opus-4-8"],
+        },
+      });
+      const copilot = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { defaultModel: "auto", models: ["auto"] },
+      });
+      const claudeHandler = makePromptHandler({
+        getProvider: () => claude.provider,
+        resolveProviderId: () => "claude",
+        getRegisteredTools: () => [],
+      });
+      const copilotHandler = makePromptHandler({
+        getProvider: () => copilot.provider,
+        resolveProviderId: () => "copilot",
+        getRegisteredTools: () => [],
+      });
+      const node = { id: "n1", prompt: "", model: "auto" } as unknown as DagNode;
+
+      const claudeResult = await claudeHandler.handle(
+        node,
+        buildCtx({ workflowProvider: "claude" }),
+      );
+      const copilotResult = await copilotHandler.handle(
+        node,
+        buildCtx({ workflowProvider: "copilot" }),
+      );
+
+      expect(claude.calls[0]?.options?.model).toBe("claude-opus-4-8");
+      expect(claudeResult.model).toBe("claude-opus-4-8");
+      expect(copilot.calls[0]?.options?.model).toBe("auto");
+      expect(copilotResult.model).toBe("auto");
+    });
+
+    test("an override beats node and workflow provider pins", async () => {
+      const events: NodeStreamEvent[] = [];
+      const requested: (string | undefined)[] = [];
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { defaultModel: "stub-default" },
+      });
+      const handler = makePromptHandler({
+        getProvider: (id) => {
+          requested.push(id);
+          return provider;
+        },
+        resolveProviderId: (id) => id ?? "stub",
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        provider: "claude",
+      } as unknown as DagNode;
+
+      const result = await handler.handle(
+        node,
+        buildCtx({
+          workflowProvider: "copilot",
+          providerOverride: "stub",
+          onEvent: (event) => events.push(event),
+        }),
+      );
+
+      expect(requested.every((id) => id === "stub")).toBe(true);
+      expect(result.provider).toBe("stub");
+      expect(events.filter((event) => event.type === "node_warning")).toEqual([
+        {
+          type: "node_warning",
+          message: "provider override 'stub' displaces node pin 'claude'",
+        },
+      ]);
+    });
+
+    test("an unavailable override fails instead of falling back to the default provider", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: (id) => {
+          if (id === "removed-gateway") {
+            throw new Error("Provider 'removed-gateway' is not registered. Available: stub");
+          }
+          return provider;
+        },
+        resolveProviderId: (id) => (id === "removed-gateway" ? "stub" : (id ?? "stub")),
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(
+        stubNode,
+        buildCtx({ providerOverride: "removed-gateway" }),
+      );
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("removed-gateway");
+      expect(result.error).toContain("not registered");
+      expect(result.provider).toBeUndefined();
+    });
+
+    test("validates a model-only pin against an override provider", async () => {
+      const events: NodeStreamEvent[] = [];
+      const codex = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: { defaultModel: "gpt-5-codex", models: ["gpt-5-codex"] },
+      });
+      const handler = makePromptHandler({
+        getProvider: () => codex.provider,
+        resolveProviderId: (id) => id ?? "claude",
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(
+        stubNode,
+        buildCtx({
+          workflowModel: "claude-opus-4-8",
+          providerOverride: "codex",
+          onEvent: (event) => events.push(event),
+        }),
+      );
+
+      expect(codex.calls[0]?.options?.model).toBe("gpt-5-codex");
+      expect(result.model).toBe("gpt-5-codex");
+      expect(events.filter((event) => event.type === "node_warning")).toEqual([
+        {
+          type: "node_warning",
+          message:
+            "model 'claude-opus-4-8' is not in provider 'codex' catalog; using 'gpt-5-codex'",
+        },
+      ]);
+    });
+
+    test("coalesces workflow-pin override warnings across nodes", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: (id) => id ?? "stub",
+        getRegisteredTools: () => [],
+      });
+      const warnings: string[] = [];
+      const warnedKeys = new Set<string>();
+      const warnOnce = (key: string, message: string) => {
+        if (warnedKeys.has(key)) return;
+        warnedKeys.add(key);
+        warnings.push(message);
+      };
+
+      await handler.handle(
+        stubNode,
+        buildCtx({ workflowProvider: "copilot", providerOverride: "stub", warnOnce }),
+      );
+      await handler.handle(
+        { ...stubNode, id: "n2" } as unknown as DagNode,
+        buildCtx({
+          nodeId: "n2",
+          workflowProvider: "copilot",
+          providerOverride: "stub",
+          warnOnce,
+        }),
+      );
+
+      expect(warnings).toEqual(["provider override 'stub' displaces workflow pin 'copilot'"]);
     });
   });
 

@@ -79,6 +79,36 @@ describe("runHeadless (in-process executor)", () => {
     await expect(promise).rejects.toThrow(/Memory requires the server/);
     await expect(promise).rejects.toThrow(/think/); // names the memory-bearing node
   });
+
+  test("provider override beats workflow and node pins", async () => {
+    const events: RunStreamEvent[] = [];
+    const result = await runHeadless({
+      name: "provider-override",
+      inputs: {},
+      cwd: process.cwd(),
+      workflowsDir: FIXTURES,
+      provider: "stub",
+      onEvent: (event) => events.push(event),
+    });
+
+    const providerIds = events
+      .filter(
+        (event): event is Extract<RunStreamEvent, { type: "node_done" }> =>
+          event.type === "node_done",
+      )
+      .map((event) => event.result.provider);
+    const warnings = events
+      .filter(
+        (event): event is Extract<RunStreamEvent, { type: "run_warning" }> =>
+          event.type === "run_warning",
+      )
+      .map((event) => event.message);
+
+    expect(result.summary.status).toBe("succeeded");
+    expect(providerIds).toEqual(["stub", "stub"]);
+    expect(warnings).toContain("provider override 'stub' displaces workflow pin 'copilot'");
+    expect(warnings).toContain("provider override 'stub' displaces node pin 'claude'");
+  });
 });
 
 describe("headless provider registration", () => {

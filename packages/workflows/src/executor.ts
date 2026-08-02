@@ -86,12 +86,14 @@ export interface NodeContext {
   cwd: string;
   abortSignal: AbortSignal;
   emit(event: NodeStreamEvent): void;
+  warnOnce?(key: string, message: string): void;
   /** Final body after $inputs.* / $1..$9 / $nodeId.output / $ARTIFACTS_DIR substitution. */
   resolvedBody: string;
   /** Pre-substitution body. Forward-compat for handlers that re-resolve per-iteration (loop). */
   rawBody: string;
   /** Workflow-level config (model/provider defaults, etc.) — forward-compat for handler factories. */
   workflow: WorkflowDefinition;
+  providerOverride?: string;
   // Project-notebook handle for this run. Present only when the run resolves to
   // a project whose tree the working dir sits inside; the prompt handler injects
   // `read()` and the `notebook:` contribute hook calls `append()`.
@@ -174,6 +176,7 @@ export interface RunOptions {
   inputs: Record<string, string>;
   handlers: ReadonlyMap<string, NodeHandler>;
   cwd: string;
+  providerOverride?: string;
   abortSignal?: AbortSignal;
   onEvent?: (event: RunStreamEvent) => void;
   // Per-run scratch directory. Caller owns lifecycle (create at run start, delete on terminal).
@@ -471,6 +474,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     inputs,
     handlers,
     cwd,
+    providerOverride,
     abortSignal,
     onEvent,
     artifactsDir,
@@ -497,6 +501,12 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     }
   };
   const startedAtMs = Date.now();
+  const warnedKeys = new Set<string>();
+  const warnOnce = (key: string, message: string) => {
+    if (warnedKeys.has(key)) return;
+    warnedKeys.add(key);
+    emit({ type: "run_warning", message });
+  };
 
   const shapeErrors = validateDagShape(workflow.nodes);
   if (shapeErrors.length > 0) throw new ExecutorValidationError(shapeErrors);
@@ -524,7 +534,9 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
     cwd,
     abortSignal: runAbortSignal,
     emit,
+    warnOnce,
     handlers,
+    ...(providerOverride !== undefined ? { providerOverride } : {}),
     ...(artifactsDir !== undefined ? { artifactsDir } : {}),
     ...(memoryTools !== undefined ? { memoryTools } : {}),
     ...(projectId !== undefined ? { projectId } : {}),
@@ -629,7 +641,9 @@ interface RunCtx {
   /** Per-layer write buffer. Merged into nodeOutputs after Promise.allSettled. */
   layerResults: Map<string, NodeOutput>;
   emit: (event: RunStreamEvent) => void;
+  warnOnce: (key: string, message: string) => void;
   handlers: ReadonlyMap<string, NodeHandler>;
+  providerOverride?: string;
   /** Optional per-run scratch dir; forwarded into NodeContext and resolveBody. */
   artifactsDir?: string;
   /** Memory adapter — see RunOptions.memoryTools. */
@@ -1078,10 +1092,12 @@ async function runNodeOnceInner(node: DagNode, ctx: RunCtx): Promise<void> {
       }
       emit({ type: "node_event", nodeId: node.id, event });
     },
+    warnOnce: ctx.warnOnce,
     resolvedBody,
     ...(ctx.artifactsDir !== undefined ? { artifactsDir: ctx.artifactsDir } : {}),
     rawBody,
     workflow: ctx.workflow,
+    ...(ctx.providerOverride !== undefined ? { providerOverride: ctx.providerOverride } : {}),
     ...(ctx.notebook !== undefined ? { notebook: ctx.notebook } : {}),
     ...(memoryRecall !== undefined ? { memoryRecall } : {}),
     ...(ctx.memoryTools !== undefined ? { memory: ctx.memoryTools } : {}),
