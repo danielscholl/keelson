@@ -42,9 +42,7 @@ export function deriveModelClasses(
   const leftMiddleRank = sortedRanks[middle - 1] ?? sortedRanks[0] ?? 0;
   const rightMiddleRank = sortedRanks[middle] ?? leftMiddleRank;
   const medianRank =
-    sortedRanks.length % 2 === 0
-      ? (leftMiddleRank + rightMiddleRank) / 2
-      : rightMiddleRank;
+    sortedRanks.length % 2 === 0 ? (leftMiddleRank + rightMiddleRank) / 2 : rightMiddleRank;
 
   const deep = ranked.find(({ rank }) => rank === maxRank)?.model ?? firstModel;
   const fast = ranked.find(({ rank }) => rank === minRank)?.model ?? catalog.at(-1) ?? firstModel;

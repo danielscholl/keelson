@@ -9,6 +9,7 @@
 import type { TokenUsage, ToolContext } from "@keelson/shared";
 import type { ClaudeAuthMode } from "@keelson/shared/config";
 import { ChunkQueue } from "../chunk-queue.ts";
+import { deriveModelClasses } from "../model-classes.ts";
 import { toTokenCount } from "../token-count.ts";
 import type {
   IAgentProvider,
@@ -18,7 +19,6 @@ import type {
   ProviderFinishReason,
   SendQueryOptions,
 } from "../types.ts";
-import { deriveModelClasses } from "../model-classes.ts";
 import { buildFriendlyClaudeError } from "./errors.ts";
 import {
   type ClaudeApiUsage,

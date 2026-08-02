@@ -1783,8 +1783,7 @@ describe("makePromptHandler", () => {
       expect(result.model).toBe(CODEX_MODEL_CLASS_CAPABILITIES.modelClasses.deep);
       expect(
         events.some(
-          (event) =>
-            event.type === "node_warning" && event.message.includes("is not in provider"),
+          (event) => event.type === "node_warning" && event.message.includes("is not in provider"),
         ),
       ).toBe(false);
     });

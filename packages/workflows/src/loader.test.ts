@@ -675,8 +675,7 @@ nodes:
     expect(result.error).toBeNull();
     expect(
       result.warnings.some(
-        (w) =>
-          w.kind === "ai_fields_on_non_ai_node" && w.message.includes("model_by_provider"),
+        (w) => w.kind === "ai_fields_on_non_ai_node" && w.message.includes("model_by_provider"),
       ),
     ).toBe(true);
   });

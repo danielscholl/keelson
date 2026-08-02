@@ -26,9 +26,7 @@ describe("deriveModelClasses", () => {
   });
 
   it("uses catalog order for models without cost tiers", () => {
-    expect(
-      deriveModelClasses([{ id: "first" }, { id: "middle" }, { id: "last" }], ""),
-    ).toEqual({
+    expect(deriveModelClasses([{ id: "first" }, { id: "middle" }, { id: "last" }], "")).toEqual({
       fast: "last",
       balanced: "middle",
       deep: "first",

@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { deriveModelClasses } from "../model-classes.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -9,7 +10,6 @@ import type {
   ProviderCapabilities,
   SendQueryOptions,
 } from "../types.ts";
-import { deriveModelClasses } from "../model-classes.ts";
 import { type CodexRawEvent, mapCodexEvent } from "./event-bridge.ts";
 import {
   CodexAgentThreadFactory,
