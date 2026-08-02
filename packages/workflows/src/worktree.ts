@@ -305,9 +305,7 @@ export async function fetchOrigin(repoPath: string): Promise<FetchOriginResult> 
       attempted: true,
       ok: false,
       error:
-        fetched.stderr.trim() ||
-        fetched.stdout.trim() ||
-        `git fetch exited ${fetched.exitCode}`,
+        fetched.stderr.trim() || fetched.stdout.trim() || `git fetch exited ${fetched.exitCode}`,
     };
   }
 
