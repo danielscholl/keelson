@@ -106,12 +106,13 @@ describe("pr-review workflow node graph", () => {
     expect(ids).toContain("post-review");
   });
 
-  test("triage node is pinned to claude-opus-4.8", () => {
+  test("triage node uses a portable tier with its Copilot model preserved", () => {
     const filename = `${WORKFLOWS}/pr-review.yaml`;
     const content = readFileSync(filename, "utf-8");
     const result = parseWorkflow(content, filename);
     const triage = result.workflow?.nodes.find((n) => n.id === "triage");
-    expect(triage?.model).toBe("claude-opus-4.8");
+    expect(triage?.model).toBe("deep");
+    expect(triage?.model_by_provider?.copilot).toBe("claude-opus-4.8");
   });
 
   test("no node posts a plain comment; post-review uses the batched review verb", () => {
@@ -343,63 +344,6 @@ describe("bundled workflows are forge-portable (no direct gh)", () => {
         .map((line, i) => ({ line, n: i + 1 }))
         .filter(({ line }) => GH_CALL.test(line));
       expect(offenders.map((o) => `${file}:${o.n}: ${o.line.trim()}`)).toEqual([]);
-    });
-  }
-});
-
-describe("bundled workflows pin Copilot-spelled Anthropic model ids", () => {
-  const WORKFLOWS = resolve(
-    import.meta.dir,
-    "..",
-    "..",
-    "..",
-    "packages",
-    "workflows",
-    "assets",
-    "workflows",
-  );
-
-  // Anthropic model ids have two spellings: the Copilot catalog uses a dotted
-  // minor (`claude-opus-4.8`), the Claude Agent SDK provider a hyphenated one
-  // (`claude-opus-4-8`). Nothing validates a pin against the catalog, so an
-  // SDK-spelled id on a Copilot node only fails once that node runs. Scoped to
-  // nodes whose effective provider is copilot — the hyphenated form is correct
-  // under the claude provider.
-  const files = readdirSync(WORKFLOWS).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
-  const SDK_SPELLED_ID = /\bclaude-[a-z]+-\d+-\d+/;
-  for (const file of files) {
-    test(`${file} uses the dotted Copilot id`, () => {
-      const filename = `${WORKFLOWS}/${file}`;
-      const result = parseWorkflow(readFileSync(filename, "utf-8"), filename);
-      const workflowProvider = (result.workflow as { provider?: string } | null)?.provider;
-      const offenders = (result.workflow?.nodes ?? [])
-        .filter((n) => {
-          const { model, provider } = n as { model?: string; provider?: string };
-          return (
-            (provider ?? workflowProvider) === "copilot" &&
-            model !== undefined &&
-            SDK_SPELLED_ID.test(model)
-          );
-        })
-        .map((n) => `${file}: ${n.id} pins ${(n as { model?: string }).model}`);
-      expect(offenders).toEqual([]);
-    });
-  }
-
-  // A node that pins a concrete model has opted out of Copilot's routing, so it
-  // must also pin the reasoning tier — otherwise it silently takes the model's
-  // default (medium) no matter how deliberate the model choice was.
-  for (const file of files) {
-    test(`${file} pins effort wherever it pins a model`, () => {
-      const filename = `${WORKFLOWS}/${file}`;
-      const result = parseWorkflow(readFileSync(filename, "utf-8"), filename);
-      const bare = (result.workflow?.nodes ?? [])
-        .filter((n) => {
-          const { model, effort } = n as { model?: string; effort?: string };
-          return model !== undefined && model !== "auto" && effort === undefined;
-        })
-        .map((n) => `${file}: ${n.id}`);
-      expect(bare).toEqual([]);
     });
   }
 });

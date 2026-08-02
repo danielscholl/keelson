@@ -8,10 +8,94 @@ import * as fs from "node:fs";
 // @ts-ignore
 import * as path from "node:path";
 
+import type { NodeContext, NodeResult, NodeStreamEvent } from "./executor.ts";
+import {
+  makePromptHandler,
+  type PromptHandlerProvider,
+  type PromptHandlerSendOptions,
+} from "./handlers/prompt.ts";
 import { parseWorkflow } from "./loader.ts";
-import type { WorkflowDefinition } from "./schema/index.ts";
+import { diagnoseModelDiversity } from "./model-diversity.ts";
+import type { DagNode, WorkflowDefinition } from "./schema/index.ts";
 
 const MODEL_TIERS = new Set(["fast", "balanced", "deep"]);
+const MIGRATED_WORKFLOWS = new Set([
+  "adversarial-review",
+  "fix-issue",
+  "interactive-prd",
+  "plan-act-evaluate",
+  "pr-review",
+  "resolve-pr",
+  "workflow-builder",
+]);
+const COPILOT_CAPABILITIES = {
+  defaultModel: "auto",
+  reasoningEffort: true,
+  models: ["auto"],
+  modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
+} as const;
+const CLAUDE_CAPABILITIES = {
+  defaultModel: "claude-opus-4-8",
+  reasoningEffort: false,
+  models: ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
+  modelClasses: {
+    fast: "claude-haiku-4-5",
+    balanced: "claude-opus-4-8",
+    deep: "claude-fable-5",
+  },
+} as const;
+const CLAUDE_MODELS = new Set(CLAUDE_CAPABILITIES.models);
+
+type PromptCapabilities = ReturnType<NonNullable<PromptHandlerProvider["getCapabilities"]>>;
+
+function makeProviderHarness(
+  providerId: string,
+  capabilities: PromptCapabilities,
+): {
+  handler: ReturnType<typeof makePromptHandler>;
+  calls: PromptHandlerSendOptions[];
+} {
+  const calls: PromptHandlerSendOptions[] = [];
+  const provider: PromptHandlerProvider = {
+    getType: () => providerId,
+    getCapabilities: () => capabilities,
+    async *sendQuery(_prompt, _cwd, _resumeSessionId, options) {
+      calls.push(options ?? {});
+      yield { type: "text", content: "ok" };
+      yield { type: "done" };
+    },
+  };
+  return {
+    handler: makePromptHandler({
+      getProvider: () => provider,
+      resolveProviderId: () => providerId,
+      getRegisteredTools: () => [],
+    }),
+    calls,
+  };
+}
+
+async function runPromptNode(
+  workflow: WorkflowDefinition,
+  node: DagNode,
+  handler: ReturnType<typeof makePromptHandler>,
+): Promise<{ result: NodeResult; events: NodeStreamEvent[] }> {
+  const events: NodeStreamEvent[] = [];
+  const body = node.prompt ?? "";
+  const context: NodeContext = {
+    runId: `model-test-${node.id}`,
+    nodeId: node.id,
+    inputs: {},
+    upstreamOutputs: new Map(),
+    cwd: process.cwd(),
+    abortSignal: new AbortController().signal,
+    emit: (event) => events.push(event),
+    resolvedBody: body,
+    rawBody: body,
+    workflow,
+  };
+  return { result: await handler.handle(node, context), events };
+}
 
 function bareConcreteModelIds(
   workflow: WorkflowDefinition,
@@ -85,5 +169,85 @@ nodes:
     expect(bareConcreteModelIds(result.workflow!)).toEqual([
       { nodeId: "review", model: "gpt-5.6-sol" },
     ]);
+  });
+});
+
+describe("bundled workflow model resolution", () => {
+  test("preserves every migrated prompt node's Copilot model and effort", async () => {
+    const { handler } = makeProviderHarness("copilot", COPILOT_CAPABILITIES);
+    const violations: string[] = [];
+
+    for (const { filename, workflow } of loadBundledWorkflows()) {
+      if (!MIGRATED_WORKFLOWS.has(workflow.name)) continue;
+      for (const node of workflow.nodes) {
+        if (node.prompt === undefined) continue;
+        const { result, events } = await runPromptNode(workflow, node, handler);
+        const expectedModel = node.model_by_provider?.copilot ?? "auto";
+        const expectedEffort = node.effort ?? workflow.effort;
+        if (result.model !== expectedModel) {
+          violations.push(
+            `${filename}:${node.id} resolved '${result.model}' instead of '${expectedModel}'`,
+          );
+        }
+        if (result.effort !== expectedEffort) {
+          violations.push(
+            `${filename}:${node.id} kept effort '${result.effort}' instead of '${expectedEffort}'`,
+          );
+        }
+        if (
+          events.some(
+            (event) =>
+              event.type === "node_warning" && event.message.includes("is not in provider"),
+          )
+        ) {
+          violations.push(`${filename}:${node.id} emitted a provider catalog warning`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  test("resolves fix-issue and adversarial-review entirely within the Claude catalog", async () => {
+    const { handler } = makeProviderHarness("claude", CLAUDE_CAPABILITIES);
+    const violations: string[] = [];
+
+    for (const { filename, workflow } of loadBundledWorkflows()) {
+      if (workflow.name !== "fix-issue" && workflow.name !== "adversarial-review") continue;
+      for (const node of workflow.nodes) {
+        if (node.prompt === undefined) continue;
+        const { result, events } = await runPromptNode(workflow, node, handler);
+        if (result.model === undefined || !CLAUDE_MODELS.has(result.model)) {
+          violations.push(`${filename}:${node.id} resolved outside the Claude catalog`);
+        }
+        if (
+          events.some(
+            (event) =>
+              event.type === "node_warning" && event.message.includes("is not in provider"),
+          )
+        ) {
+          violations.push(`${filename}:${node.id} emitted a provider catalog warning`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  test("reports adversarial lens collapse only when provider mappings are absent", () => {
+    const adversarial = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "adversarial-review",
+    )?.workflow;
+    expect(adversarial).toBeDefined();
+
+    const claudeMessages = diagnoseModelDiversity(adversarial!, "claude");
+    expect(
+      claudeMessages.some((message) =>
+        ["reviewer-logic", "reviewer-evidence", "reviewer-risk"].every((id) =>
+          message.includes(id),
+        ),
+      ),
+    ).toBe(true);
+    expect(diagnoseModelDiversity(adversarial!, "copilot")).toEqual([]);
   });
 });
