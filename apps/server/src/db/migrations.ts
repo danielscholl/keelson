@@ -14,10 +14,15 @@ interface Migration {
   up: (db: Database) => void;
 }
 
+// The baseline is numbered 12 rather than 1 so a database created by the
+// twelve-step ladder this replaces reports MAX(version) = 12 and applies
+// nothing; a fresh one gets the whole schema in a single step. Renumbering it
+// would re-run the baseline over a populated database.
 const migrations: Migration[] = [
   {
-    version: 1,
-    description: "baseline schema: conversations, messages, workflow runs, projects, memory layer",
+    version: 12,
+    description:
+      "baseline schema: projects, conversations, workflow runs, memory layer, usage ledger, workspace leases, op registry",
     up: (db) => {
       db.exec(`
         CREATE TABLE keelson_projects (
@@ -49,10 +54,19 @@ const migrations: Migration[] = [
           content_parts   TEXT,
           truncated       INTEGER DEFAULT 0,
           createdAt       TEXT NOT NULL,
+          usage_json      TEXT,
+          provider        TEXT,
+          model           TEXT,
           FOREIGN KEY (conversationId) REFERENCES conversations(id) ON DELETE CASCADE
         );
         CREATE INDEX idx_messages_conv_created
           ON messages (conversationId, createdAt);
+
+        CREATE TABLE project_notebooks (
+          project_id TEXT PRIMARY KEY NOT NULL REFERENCES keelson_projects(id) ON DELETE CASCADE,
+          content    TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL
+        );
 
         CREATE TABLE workflow_runs (
           id              TEXT PRIMARY KEY,
@@ -65,7 +79,12 @@ const migrations: Migration[] = [
           conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
           project_id      TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL,
           working_dir     TEXT,
-          worktree_path   TEXT
+          worktree_path   TEXT,
+          origin          TEXT NOT NULL DEFAULT 'manual'
+                          CHECK (origin IN ('manual', 'scheduled')),
+          rib_id          TEXT,
+          worktree_base   TEXT,
+          brief_json      TEXT
         );
         CREATE INDEX ix_workflow_runs_name_started
           ON workflow_runs(workflow_name, started_at DESC);
@@ -76,6 +95,8 @@ const migrations: Migration[] = [
           ON workflow_runs(status, started_at DESC);
         CREATE INDEX ix_workflow_runs_project_started
           ON workflow_runs(project_id, started_at DESC);
+        CREATE INDEX ix_workflow_runs_origin_started
+          ON workflow_runs(origin, started_at DESC);
 
         CREATE TABLE workflow_node_outputs (
           run_id             TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
@@ -86,6 +107,10 @@ const migrations: Migration[] = [
           started_at         TEXT,
           completed_at       TEXT,
           error              TEXT,
+          usage_json         TEXT,
+          provider           TEXT,
+          model              TEXT,
+          effort             TEXT,
           PRIMARY KEY (run_id, node_id)
         );
 
@@ -224,60 +249,7 @@ const migrations: Migration[] = [
           INSERT INTO memories_fts(rowid, summary, content)
           VALUES (new.rowid, new.summary, new.content);
         END;
-      `);
-    },
-  },
-  {
-    version: 2,
-    description: "project notebooks: per-project always-on markdown context",
-    up: (db) => {
-      db.exec(`
-        CREATE TABLE project_notebooks (
-          project_id TEXT PRIMARY KEY NOT NULL REFERENCES keelson_projects(id) ON DELETE CASCADE,
-          content    TEXT NOT NULL DEFAULT '',
-          updated_at TEXT NOT NULL
-        );
-      `);
-    },
-  },
-  {
-    version: 3,
-    description: "workflow run provenance: origin (manual|scheduled) + owning rib_id",
-    up: (db) => {
-      db.exec(`
-        ALTER TABLE workflow_runs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'
-          CHECK (origin IN ('manual', 'scheduled'));
-        ALTER TABLE workflow_runs ADD COLUMN rib_id TEXT;
-        CREATE INDEX ix_workflow_runs_origin_started
-          ON workflow_runs(origin, started_at DESC);
-      `);
-    },
-  },
-  {
-    version: 4,
-    description: "token usage: per-message and per-workflow-node usage_json",
-    up: (db) => {
-      db.exec(`
-        ALTER TABLE messages ADD COLUMN usage_json TEXT;
-        ALTER TABLE workflow_node_outputs ADD COLUMN usage_json TEXT;
-      `);
-    },
-  },
-  {
-    version: 5,
-    description: "workflow node provenance: effective provider + model per LLM node",
-    up: (db) => {
-      db.exec(`
-        ALTER TABLE workflow_node_outputs ADD COLUMN provider TEXT;
-        ALTER TABLE workflow_node_outputs ADD COLUMN model TEXT;
-      `);
-    },
-  },
-  {
-    version: 6,
-    description: "usage ledger: per-turn spend events across chat, workflow, and rib surfaces",
-    up: (db) => {
-      db.exec(`
+
         CREATE TABLE usage_events (
           id                 INTEGER PRIMARY KEY AUTOINCREMENT,
           ts                 TEXT NOT NULL,
@@ -300,26 +272,9 @@ const migrations: Migration[] = [
         CREATE INDEX ix_usage_events_ts ON usage_events(ts);
         CREATE INDEX ix_usage_events_model_ts ON usage_events(model, ts);
         CREATE INDEX ix_usage_events_source_ts ON usage_events(source, ts);
+        CREATE INDEX ix_usage_events_source_run
+          ON usage_events(source, run_id);
 
-        ALTER TABLE messages ADD COLUMN provider TEXT;
-        ALTER TABLE messages ADD COLUMN model TEXT;
-      `);
-    },
-  },
-  {
-    version: 7,
-    description: "workflow run worktree base ref",
-    up: (db) => {
-      db.exec(`
-        ALTER TABLE workflow_runs ADD COLUMN worktree_base TEXT;
-      `);
-    },
-  },
-  {
-    version: 8,
-    description: "workspace leases: durable isolated-checkout records",
-    up: (db) => {
-      db.exec(`
         CREATE TABLE workspace_leases (
           id            TEXT PRIMARY KEY NOT NULL,
           project_id    TEXT REFERENCES keelson_projects(id) ON DELETE SET NULL,
@@ -335,24 +290,7 @@ const migrations: Migration[] = [
           ON workspace_leases(project_id);
         CREATE UNIQUE INDEX ux_workspace_leases_path
           ON workspace_leases(worktree_path);
-      `);
-    },
-  },
-  {
-    version: 9,
-    description: "usage events: index the per-run budget aggregation",
-    up: (db) => {
-      db.exec(`
-        CREATE INDEX ix_usage_events_source_run
-          ON usage_events(source, run_id);
-      `);
-    },
-  },
-  {
-    version: 10,
-    description: "op registry: durable run handles + cursor-based event log",
-    up: (db) => {
-      db.exec(`
+
         CREATE TABLE ops (
           id           TEXT PRIMARY KEY NOT NULL,
           kind         TEXT NOT NULL,
@@ -383,21 +321,12 @@ const migrations: Migration[] = [
       `);
     },
   },
-  {
-    version: 11,
-    description: "workflow run brief: attached acceptance criteria",
-    up: (db) => {
-      db.exec("ALTER TABLE workflow_runs ADD COLUMN brief_json TEXT;");
-    },
-  },
-  {
-    version: 12,
-    description: "workflow node provenance: effective reasoning effort per LLM node",
-    up: (db) => {
-      db.exec("ALTER TABLE workflow_node_outputs ADD COLUMN effort TEXT;");
-    },
-  },
 ];
+
+// The lowest version this build can apply. A database stamped below it was
+// migrated by a ladder no longer carried here, so its remaining steps are gone
+// and the baseline cannot be replayed over its existing tables.
+const earliestVersion = Math.min(...migrations.map((m) => m.version));
 
 export function runMigrations(db: Database): void {
   db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);");
@@ -405,6 +334,12 @@ export function runMigrations(db: Database): void {
     v: number | null;
   } | null;
   const current = row?.v ?? 0;
+  if (current > 0 && current < earliestVersion) {
+    throw new Error(
+      `database schema is at v${String(current)}, which predates this build's v${String(earliestVersion)} baseline. ` +
+        "Run keelson v0.93.0 once to migrate it forward, then update again.",
+    );
+  }
   const pending = migrations
     .filter((m) => m.version > current)
     .sort((a, b) => a.version - b.version);
