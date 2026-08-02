@@ -1,12 +1,12 @@
 # Smart PR review. Concept ported from Archon's archon-smart-pr-review
-# (MIT, see NOTICE), but rewritten as a self-contained DAG that uses only
-# Copilot models and Keelson's supported node types — no `command:` refs,
+# (MIT, see NOTICE), but rewritten as a self-contained DAG that uses portable
+# model tiers and Keelson's supported node types — no `command:` refs,
 # no `mcp:` blocks (notification is a stretch goal).
 #
 # Read-only by harness rail: every review lane sets
 # `allowed_tools: [Read, Glob, Grep]` and the only intended PR-mutating step
 # is the final `forge pr review-batch` call. Both providers enforce this — claude
-# gates by tool name, copilot (the pin below) gates the underlying capability
+# gates by tool name, copilot gates the underlying capability
 # through its permission handler, so the model's built-in write/shell tools
 # are denied mid-review regardless of provider. An opus triage gate
 # de-dupes findings, adversarially verifies each one against the diff and
@@ -20,8 +20,7 @@
 # machine-readable trace.
 
 name: pr-review
-provider: copilot
-model: auto
+model: balanced
 description: |
   Use when: User wants a smart, scoped code review of an existing PR or MR
             that adapts to the PR's complexity and posts the synthesis as
@@ -35,11 +34,6 @@ description: |
         posts findings as a batched PR/MR review with line-anchored inline
         comments and suggestion blocks.
   NOT for: Fixing an issue (use fix-issue). Mutating the PR branch.
-
-# Model `auto` lets Copilot route each node and keeps this bundled workflow
-# portable — a hard-pinned id fails on accounts that don't expose it. Pin a
-# specific available id here or per-node for determinism. Resolution order is
-# node.model → workflow.model → provider.defaultModel.
 
 # Repo-scoped: the run's working directory must be a git repository.
 requiresProject: true
@@ -59,7 +53,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: extract-pr
-    model: auto
+    model: balanced
     prompt: |
       Find the PR or MR number for this request.
 
@@ -170,7 +164,7 @@ nodes:
   # JSON booleans as unquoted `true`/`false`, which wouldn't match `== 'true'`.
   - id: classify
     depends_on: [scope]
-    model: auto
+    model: balanced
     context: fresh
     output_format:
       type: object
@@ -240,10 +234,12 @@ nodes:
     when: "$classify.output.run_code_review == 'true'"
     context: fresh
     # The always-on finder is the recall ceiling — triage can only filter what
-    # it surfaces. Pin the strongest coding model at full effort, from a
+    # it surfaces. Use the strongest coding tier at full effort, from a
     # different family than the opus triage judge so finder and judge don't
     # share blind spots.
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -457,7 +453,7 @@ nodes:
   - id: docs-impact
     depends_on: [classify]
     when: "$classify.output.run_docs_impact == 'true'"
-    model: auto
+    model: balanced
     context: fresh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -530,7 +526,9 @@ nodes:
     depends_on: [code-review, error-handling, test-coverage, docs-impact]
     trigger_rule: one_success
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
