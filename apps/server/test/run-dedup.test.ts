@@ -49,11 +49,15 @@ describe("runDedupeKey", () => {
     );
   });
 
-  test("differs by name, workingDir, and inputs", () => {
+  test("differs by name, workingDir, inputs, and provider override", () => {
     const base = runDedupeKey("w", "/repo", {});
     expect(runDedupeKey("x", "/repo", {})).not.toBe(base);
     expect(runDedupeKey("w", "/other", {})).not.toBe(base);
     expect(runDedupeKey("w", "/repo", { mode: "full" })).not.toBe(base);
+    expect(runDedupeKey("w", "/repo", {}, "stub")).not.toBe(base);
+    expect(runDedupeKey("w", "/repo", {}, "copilot")).not.toBe(
+      runDedupeKey("w", "/repo", {}, "stub"),
+    );
   });
 });
 

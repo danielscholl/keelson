@@ -364,9 +364,8 @@ export interface ActiveRunEntry {
   // deleted on terminal status (the dir is cleaned at the same moment).
   artifactsDir?: string;
   // Identity for the run-start de-dup lookup: a concurrent start with the same
-  // (workflow, workingDir, inputs) collapses onto this run. The heartbeat and a
-  // bound producer's client refresh both target (collector, REPO_ROOT, {});
-  // args-bearing region refreshes collapse per input set. See runDedupeKey.
+  // workflow, workingDir, inputs, and provider override collapses onto this run.
+  // See runDedupeKey.
   dedupeKey: string;
   // The resolved definition this run executes. The de-dup key is name-based,
   // but one name can resolve differently per scope/origin (a project shadow vs
@@ -379,7 +378,7 @@ export interface ActiveRuns {
   register(runId: string, entry: ActiveRunEntry): void;
   get(runId: string): ActiveRunEntry | undefined;
   // The live run matching `dedupeKey`, or undefined. Backs the run-start de-dup
-  // so an identical (workflow, workingDir, inputs) can't run twice concurrently.
+  // so an identical run configuration can't run twice concurrently.
   findActive(
     dedupeKey: string,
   ): { runId: string; conversationId: string; definition?: WorkflowDefinition } | undefined;
@@ -388,18 +387,18 @@ export interface ActiveRuns {
   abortAll(): Promise<void>;
 }
 
-// Canonical de-dup identity for a run start. Two starts collapse only when
-// workflow, workingDir, AND inputs all match; inputs are key-sorted so order
+// Canonical de-dup identity for a run start. Inputs are key-sorted so order
 // can't make identical inputs look distinct.
 export function runDedupeKey(
   name: string,
   workingDir: string,
   inputs: Record<string, string>,
+  providerOverride?: string,
 ): string {
   const sorted = Object.keys(inputs)
     .sort()
     .map((k) => [k, inputs[k]] as const);
-  return JSON.stringify([name, workingDir, sorted]);
+  return JSON.stringify([name, workingDir, sorted, providerOverride ?? null]);
 }
 
 // Idempotent: abort the controller and unblock any paused approval node.
@@ -963,7 +962,7 @@ function startRunCore(
     workingDir,
   );
   const name = workflow.name;
-  const dedupeKey = runDedupeKey(name, workingDir, inputs);
+  const dedupeKey = runDedupeKey(name, workingDir, inputs, providerOverride);
   const lockProjectId = resolveMutationLockProjectId({
     resolvedProject,
     workingDir,
@@ -972,7 +971,7 @@ function startRunCore(
   // De-dup only non-isolated producer refreshes — bound producers AND any
   // scheduled-origin start (the heartbeat, /refresh, a rib's ctx.refreshWorkflow),
   // which covers unbound region workflows too: a concurrent start with an
-  // identical (workflow, workingDir, inputs) already live returns that run,
+  // identical run configuration already live returns that run,
   // serializing the two-tabs / client-open vs server-tick races. The live run
   // must also be executing the SAME resolved definition — the key is name-based
   // and one name can resolve differently per scope/origin (a manual run of a
@@ -1321,7 +1320,12 @@ function resumeRunCore(
       abort,
       done,
       pendingApprovals,
-      dedupeKey: runDedupeKey(workflow.name, run.workingDir, run.inputs),
+      dedupeKey: runDedupeKey(
+        workflow.name,
+        run.workingDir,
+        run.inputs,
+        providerOverride ?? undefined,
+      ),
       definition: workflow,
       conversationId: run.conversationId,
     });
