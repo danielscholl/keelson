@@ -15,6 +15,7 @@ import {
   canonicalPath,
   createWorktree,
   ensureWorktreeDeps,
+  fetchOrigin,
   gitToplevel,
   headDivergesFrom,
   isGitRepo,
@@ -299,6 +300,60 @@ describe("resolveDefaultBranch", () => {
     // removal. runGit must degrade to a non-zero result, not an unhandled throw.
     const gone = join(tmp, "does-not-exist", "sub");
     expect(await resolveDefaultBranch(gone)).toBeNull();
+  });
+});
+
+describe("fetchOrigin", () => {
+  test("refreshes origin without moving local main and bases new worktrees on the new tip", async () => {
+    const repo = join(tmp, "repo");
+    mkdirSync(repo);
+    await initRepo(repo);
+    await addOrigin(repo);
+
+    const localMainBefore = (await gitText(["rev-parse", "main"], repo)).trim();
+    const upstream = join(tmp, "upstream");
+    await git(["clone", join(repo, "origin.git"), upstream], tmp);
+    await git(["config", "user.email", "test@example.com"], upstream);
+    await git(["config", "user.name", "Test"], upstream);
+    writeFileSync(join(upstream, "upstream.txt"), "new tip\n");
+    await git(["add", "upstream.txt"], upstream);
+    await git(["commit", "-m", "advance remote"], upstream);
+    await git(["push", "origin", "main"], upstream);
+    const remoteTip = (await gitText(["rev-parse", "HEAD"], upstream)).trim();
+
+    expect((await gitText(["rev-parse", "origin/main"], repo)).trim()).toBe(localMainBefore);
+
+    expect(await fetchOrigin(repo)).toEqual({ attempted: true, ok: true, error: null });
+    expect((await gitText(["rev-parse", "origin/main"], repo)).trim()).toBe(remoteTip);
+    expect((await gitText(["rev-parse", "main"], repo)).trim()).toBe(localMainBefore);
+
+    const dest = join(repo, ".wt", "fresh-origin");
+    await createWorktree({
+      repoPath: repo,
+      branch: "keelson/test/fresh-origin",
+      dest,
+      base: "origin/main",
+    });
+    expect((await gitText(["rev-parse", "HEAD"], dest)).trim()).toBe(remoteTip);
+    expect(existsSync(join(dest, "upstream.txt"))).toBe(true);
+  });
+
+  test("does not attempt a fetch when origin is absent", async () => {
+    await initRepo(tmp);
+
+    expect(await fetchOrigin(tmp)).toEqual({ attempted: false, ok: false, error: null });
+  });
+
+  test("returns the fetch error when origin cannot be reached", async () => {
+    await initRepo(tmp);
+    await git(["remote", "add", "origin", join(tmp, "missing.git")], tmp);
+
+    const result = await fetchOrigin(tmp);
+
+    expect(result.attempted).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.error).not.toBeNull();
+    expect(result.error?.length).toBeGreaterThan(0);
   });
 });
 
