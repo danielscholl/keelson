@@ -99,6 +99,36 @@ describe("workflow resolution doctor check", () => {
     expect(result.checks.find(({ name }) => name === "portable")?.status).toBe("ok");
   });
 
+  test("honors the workflow provider environment pin before config", () => {
+    const result = runWorkflowResolutionCheck({
+      discoverWorkflows,
+      loadConfig: () => ({ defaultProvider: "copilot" }),
+      listProviders: () => [
+        { id: "copilot", capabilities: COPILOT_CAPABILITIES },
+        { id: "claude", capabilities: CLAUDE_CAPABILITIES },
+      ],
+      envProviderId: " claude ",
+    });
+
+    expect(result.checks.find(({ name }) => name === "portable")?.detail).toContain("on claude");
+  });
+
+  test("blocks unpinned prompts when the environment pin is not registered", () => {
+    const result = runWorkflowResolutionCheck({
+      discoverWorkflows,
+      loadConfig: () => ({ defaultProvider: "copilot" }),
+      listProviders: () => [{ id: "copilot", capabilities: COPILOT_CAPABILITIES }],
+      envProviderId: "missing",
+    });
+
+    const portable = result.checks.find(({ name }) => name === "portable");
+    expect(portable?.status).toBe("warn");
+    expect(portable?.detail).toContain(
+      "blocked — provider 'missing' selected by KEELSON_WORKFLOW_PROVIDER is not registered",
+    );
+    expect(result.checks.find(({ name }) => name === "pinned-review")?.status).toBe("ok");
+  });
+
   test("blocks prompt workflows when no provider is registered", () => {
     const result = runWorkflowResolutionCheck({
       discoverWorkflows,

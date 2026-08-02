@@ -40,6 +40,7 @@ export interface WorkflowResolutionDeps {
   loadConfig?: () => KeelsonConfig;
   listProviders?: () => readonly StaticProviderInfo[];
   defaultProviderId?: string;
+  envProviderId?: string;
 }
 
 function defaultListProviders(): readonly StaticProviderInfo[] {
@@ -47,7 +48,28 @@ function defaultListProviders(): readonly StaticProviderInfo[] {
   return getProviderInfoList();
 }
 
-function resolutionCheck(result: WorkflowResolution): CheckResult {
+function resolutionCheck(
+  result: WorkflowResolution,
+  unavailableDefaultProviderId?: string,
+): CheckResult {
+  const unavailableNodes =
+    unavailableDefaultProviderId === undefined
+      ? []
+      : result.nodes.filter(
+          ({ effectiveProvider }) => effectiveProvider === unavailableDefaultProviderId,
+        );
+  if (unavailableNodes.length > 0) {
+    const allPromptNodesBlocked = unavailableNodes.length === result.nodes.length;
+    return {
+      name: result.name,
+      status: "warn",
+      detail: allPromptNodesBlocked
+        ? `blocked — provider '${unavailableDefaultProviderId}' selected by KEELSON_WORKFLOW_PROVIDER is not registered`
+        : `degrades — ${unavailableNodes.map(({ nodeId }) => nodeId).join(", ")} blocked on unregistered provider '${unavailableDefaultProviderId}'`,
+      hint: `register it: \`keelson provider add ${unavailableDefaultProviderId}\``,
+    };
+  }
+
   if (result.tier === "blocked") {
     return {
       name: result.name,
@@ -92,7 +114,19 @@ export function runWorkflowResolutionCheck(deps: WorkflowResolutionDeps = {}): C
   const config = (deps.loadConfig ?? defaultLoadConfig)();
   const providerInfos = (deps.listProviders ?? defaultListProviders)();
   const providerIds = providerInfos.map(({ id }) => id);
-  const defaultProviderId = deps.defaultProviderId ?? resolveDefaultProvider(config, providerIds);
+  const envProviderId = (deps.envProviderId ?? process.env.KEELSON_WORKFLOW_PROVIDER)?.trim();
+  const defaultProviderId =
+    deps.defaultProviderId ??
+    (envProviderId && envProviderId !== "workflow"
+      ? envProviderId
+      : resolveDefaultProvider(config, providerIds));
+  const unavailableDefaultProviderId =
+    deps.defaultProviderId === undefined &&
+    envProviderId &&
+    envProviderId !== "workflow" &&
+    !providerIds.includes(envProviderId)
+      ? envProviderId
+      : undefined;
   const providers = new Map(
     providerInfos.map(({ id, capabilities }) => [
       id,
@@ -114,7 +148,9 @@ export function runWorkflowResolutionCheck(deps: WorkflowResolutionDeps = {}): C
         readModelClassOverride(config, providerId)?.[modelClass],
     },
   );
-  const checks = resolutions.map(resolutionCheck);
+  const checks = resolutions.map((resolution) =>
+    resolutionCheck(resolution, unavailableDefaultProviderId),
+  );
 
   for (const error of discovery.errors) {
     checks.push({
