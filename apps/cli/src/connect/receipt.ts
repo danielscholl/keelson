@@ -118,7 +118,10 @@ function parseSkills(raw: unknown): ConnectionsData["skills"] {
   const skills: ConnectionsData["skills"] = {};
   if (isRecord(raw)) {
     for (const [path, rec] of Object.entries(raw)) {
-      if (isSkillRecord(rec)) skills[path] = rec;
+      // Key and `file` must agree, for the same reason target records must:
+      // reverseSkillsFor unlinks `skill.file` but drops the entry by its key,
+      // so a divergent pair unlinks a file the ledger never claimed.
+      if (isSkillRecord(rec) && rec.file === path) skills[path] = rec;
     }
   }
   return skills;

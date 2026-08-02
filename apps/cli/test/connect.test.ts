@@ -458,6 +458,21 @@ describe("connect / disconnect (filesystem)", () => {
         skills: {},
       },
     ],
+    [
+      "a skill whose key and `file` disagree",
+      {
+        version: 2,
+        targets: {},
+        skills: {
+          "/keyed-here": {
+            file: "/but-unlinks-this",
+            createdFile: true,
+            createdDirs: [],
+            requestedBy: ["claude"],
+          },
+        },
+      },
+    ],
     ["a missing skills container", { version: 2, targets: {} }],
     ["a missing targets container", { version: 2, skills: {} }],
     ["v1 targets is not an object", { version: 1, targets: 42 }],
