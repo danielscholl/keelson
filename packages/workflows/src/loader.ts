@@ -669,6 +669,29 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     typeof obj.provider === "string" && obj.provider.trim().length > 0
       ? obj.provider.trim()
       : undefined;
+  if (obj.provider_required !== undefined && typeof obj.provider_required !== "boolean") {
+    return {
+      workflow: null,
+      warnings,
+      error: {
+        filename,
+        error: "Invalid 'provider_required' value; expected boolean",
+        errorType: "validation_error",
+      },
+    };
+  }
+  const providerRequired = obj.provider_required === true;
+  if (providerRequired && provider === undefined) {
+    return {
+      workflow: null,
+      warnings,
+      error: {
+        filename,
+        error: "provider_required needs a workflow-level provider",
+        errorType: "validation_error",
+      },
+    };
+  }
 
   // Warn-and-ignore scalars
   const model = typeof obj.model === "string" ? obj.model : undefined;
@@ -776,6 +799,7 @@ export function parseWorkflow(content: string, filename: string): ParseResult {
     name: obj.name,
     description: obj.description,
     ...(provider !== undefined ? { provider } : {}),
+    ...(providerRequired ? { provider_required: true } : {}),
     ...(model !== undefined ? { model } : {}),
     ...(modelReasoningEffort !== undefined ? { modelReasoningEffort } : {}),
     ...(webSearchMode !== undefined ? { webSearchMode } : {}),

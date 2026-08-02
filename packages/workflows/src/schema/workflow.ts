@@ -65,6 +65,7 @@ export const workflowBaseSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   provider: z.string().trim().min(1).optional(),
+  provider_required: z.boolean().optional(),
   model: z.string().optional(),
   modelReasoningEffort: modelReasoningEffortSchema.optional(),
   webSearchMode: webSearchModeSchema.optional(),
@@ -104,9 +105,19 @@ export type WorkflowBase = z.infer<typeof workflowBaseSchema>;
  * Workflow definition parsed from YAML.
  * All workflows use DAG-based execution with `nodes`.
  */
-export const workflowDefinitionSchema = workflowBaseSchema.extend({
-  nodes: z.array(dagNodeSchema),
-});
+export const workflowDefinitionSchema = workflowBaseSchema
+  .extend({
+    nodes: z.array(dagNodeSchema),
+  })
+  .superRefine((workflow, ctx) => {
+    if (workflow.provider_required === true && workflow.provider === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["provider_required"],
+        message: "provider_required needs a workflow-level provider",
+      });
+    }
+  });
 
 /** Workflow definition with fully typed nodes (DagNode[]) derived from the schema. */
 export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema> & { prompt?: never };

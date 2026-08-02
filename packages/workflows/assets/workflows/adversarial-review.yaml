@@ -19,6 +19,7 @@
 
 name: adversarial-review
 provider: copilot
+provider_required: true
 model: balanced
 locking: shared
 description: |

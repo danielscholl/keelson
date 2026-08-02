@@ -143,6 +143,9 @@ describe("bundled workflow model policy", () => {
           `${filename}:<workflow> provider is '${workflow.provider}' instead of '${requiredProvider}'`,
         );
       }
+      if (requiredProvider !== undefined && workflow.provider_required !== true) {
+        violations.push(`${filename}:<workflow> does not require provider '${requiredProvider}'`);
+      }
       if (workflow.model === "auto") {
         violations.push(`${filename}:<workflow> uses model 'auto'`);
       }

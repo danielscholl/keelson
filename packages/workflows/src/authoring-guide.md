@@ -41,6 +41,9 @@ Required:
 Optional:
 
 - `provider` — `claude`, `copilot`, or `stub`; omitted = the runner's default.
+- `provider_required: true` — fail prompt nodes before they open a provider session
+  when a `provider` pin is unavailable or an operator override displaces it. Use
+  this for workflows whose safety rails rely on that provider.
 - `model` — default model for AI nodes. `fast`, `balanced`, and `deep` resolve to
   a concrete model for the effective provider; any other value passes through as
   a literal model id.
