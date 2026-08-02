@@ -65,6 +65,7 @@ import {
   type CrossRibGrants,
   isCrossRibGrantAllowed,
   loadKeelsonConfig,
+  readModelClassOverride,
   resolveCrossRibGrants,
   resolveDefaultProvider,
   resolveEnabledProviders,
@@ -1308,7 +1309,8 @@ export function bootstrapPromptHandler(
   const envProvider = process.env.KEELSON_WORKFLOW_PROVIDER?.trim();
   // Lowercase to match resolveDefaultProvider + the canonical lowercase ids, so
   // a config value like "Claude" resolves the same here as it does for chat.
-  const configDefault = loadKeelsonConfig().defaultProvider?.trim().toLowerCase();
+  const config = loadKeelsonConfig();
+  const configDefault = config.defaultProvider?.trim().toLowerCase();
   const requestedId =
     envProvider && envProvider.length > 0
       ? envProvider
@@ -1377,6 +1379,7 @@ export function bootstrapPromptHandler(
     getProvider,
     // Resolve absent or unavailable preferences to the registered boot default.
     resolveProviderId: (id) => (id !== undefined && isRegisteredProvider(id) ? id : providerId),
+    resolveModelClass: (id, modelClass) => readModelClassOverride(config, id)?.[modelClass],
     getRegisteredTools: () => getRegisteredTools() as unknown as readonly { name: string }[],
     denylist,
     // Rib tools are off by default in workflow prompt nodes — a node must opt in
