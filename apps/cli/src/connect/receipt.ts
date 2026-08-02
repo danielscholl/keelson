@@ -104,7 +104,11 @@ function parseTargets(raw: unknown): ConnectionsData["targets"] {
   const targets: ConnectionsData["targets"] = {};
   if (isRecord(raw)) {
     for (const [id, rec] of Object.entries(raw)) {
-      if (isTargetRecord(rec)) targets[id as TargetId] = rec;
+      // The key and the record's own `target` must agree. Reversal reads the
+      // key for skill claims but the record for its MCP path, so a receipt
+      // where they disagree cleans one target's wiring while leaving the
+      // other's claim behind. connect only ever writes them equal.
+      if (isTargetRecord(rec) && rec.target === id) targets[id as TargetId] = rec;
     }
   }
   return targets;
@@ -128,7 +132,7 @@ function migrateV1(parsed: Record<string, unknown>): ConnectionsData {
     for (const [id, rec] of Object.entries(parsed.targets)) {
       if (
         isRecord(rec) &&
-        typeof rec.target === "string" &&
+        rec.target === id &&
         typeof rec.file === "string" &&
         (rec.format === "json" || rec.format === "toml") &&
         typeof rec.createdFile === "boolean"

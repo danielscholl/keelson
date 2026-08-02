@@ -444,6 +444,20 @@ describe("connect / disconnect (filesystem)", () => {
       "a malformed skill entry",
       { version: 2, targets: {}, skills: { "/x": { file: "/x", createdFile: "no" } } },
     ],
+    [
+      "a target whose key and `target` disagree",
+      {
+        version: 2,
+        targets: {
+          claude: {
+            target: "copilot",
+            mcp: { kind: "file", file: "/x", format: "json", createdFile: false },
+            connectedAt: "",
+          },
+        },
+        skills: {},
+      },
+    ],
     ["a missing skills container", { version: 2, targets: {} }],
     ["a missing targets container", { version: 2, skills: {} }],
     ["v1 targets is not an object", { version: 1, targets: 42 }],
