@@ -54,7 +54,7 @@ enabled.
 | `providers` | object of `id: boolean` | Turns each provider on or off. Merged over the defaults, so list only what you want to change. Claude, Codex, and pi also need `keelson provider add <id>`. |
 | `defaultProvider` | string | The provider new chats and the workflow fallback preselect, when it is enabled. Falls back when it is not. See [The default provider](#the-default-provider). |
 | `claude.auth` | `"auto"` \| `"subscription"` \| `"api-key"` | How the Claude provider picks a credential. Default `auto`. See [Claude credentials](#claude-credentials). |
-| `claude.modelClasses`, `codex.modelClasses`, `pi.modelClasses` | object | Optional `fast`, `balanced`, and `deep` model-id overrides for portable workflow tiers. |
+| `copilot.modelClasses`, `claude.modelClasses`, `codex.modelClasses`, `pi.modelClasses` | object | Optional `fast`, `balanced`, and `deep` model-id overrides for portable workflow tiers. |
 | `codex.sandbox` | `"read-only"` \| `"workspace-write"` \| `"danger-full-access"` | How much the Codex subprocess may touch. Default `workspace-write`. See [Codex](#codex-community-provider). |
 | `codex.network` | boolean | Whether the Codex subprocess may reach the network. Default `false`. |
 | `mcp` | object | Tunes the MCP gateway, the `/api/mcp` endpoint other agents call. See [MCP gateway](#mcp-gateway). |
