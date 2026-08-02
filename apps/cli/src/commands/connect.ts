@@ -12,7 +12,13 @@
 import { mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
-import { type ConnectionsData, loadConnections, saveConnections } from "../connect/receipt.ts";
+import {
+  type ConnectionsData,
+  connectionsPath,
+  loadConnections,
+  readConnections,
+  saveConnections,
+} from "../connect/receipt.ts";
 import {
   applyJsonMcp,
   applyTomlMcp,
@@ -304,6 +310,10 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
 export interface DisconnectOutcome {
   removed: TargetId[];
   failed: TargetId[];
+  // Set when the receipt exists but could not be parsed. Nothing was reversed
+  // and the file was left alone — an empty-ledger degrade would rewrite it away
+  // and report a clean sweep while every agent stayed wired.
+  receiptUnreadable?: string;
 }
 
 // Reverse one recorded target, mutating `data`. False means the reversal did not
@@ -320,14 +330,14 @@ function reverseTarget(data: ConnectionsData, id: TargetId, run: CommandRunner):
     if (rec.mcp.kind === "file") {
       reverseTargetConfig(rec.mcp.file, rec.mcp.format, rec.mcp.createdFile);
     }
+    reverseSkillsFor(data, id);
   } catch {
-    // An agent config the operator hand-broke (removeJsonMcp parses it) must not
-    // abort the other targets, nor an uninstall that has already revoked
-    // credentials.
+    // An agent config the operator hand-broke (removeJsonMcp parses it) or a
+    // skill file that will not unlink must not abort the other targets, nor an
+    // uninstall that has already revoked credentials.
     return false;
   }
   delete data.targets[id];
-  reverseSkillsFor(data, id);
   return true;
 }
 
@@ -337,7 +347,9 @@ function reverseTarget(data: ConnectionsData, id: TargetId, run: CommandRunner):
 // longer runnable.
 export function disconnectAll(home: string, runCommand?: CommandRunner): DisconnectOutcome {
   const run = runCommand ?? defaultRunCommand;
-  const data = loadConnections(home);
+  const read = readConnections(home);
+  if (!read.ok) return { removed: [], failed: [], receiptUnreadable: read.reason };
+  const data = read.data;
   const removed: TargetId[] = [];
   const failed: TargetId[] = [];
   // TARGET_IDS rather than the receipt's own keys: loadConnections does not
@@ -356,7 +368,18 @@ export function runDisconnect(rawTargets: readonly string[], opts: DisconnectOpt
   const targets = resolveTargets(rawTargets, opts.json);
   const home = opts.home ?? resolveKeelsonHome();
   const run = opts.runCommand ?? defaultRunCommand;
-  const data = loadConnections(home);
+  const read = readConnections(home);
+  if (!read.ok) {
+    emit(
+      {
+        error: `cannot read ${connectionsPath(home)} (${read.reason}); it was left in place. Remove keelson's MCP entry with each agent's own CLI, then delete the file`,
+        code: "BAD_RECEIPT",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_FAIL);
+  }
+  const data = read.data;
 
   const results: Array<Record<string, unknown>> = [];
   let failed = 0;
@@ -394,8 +417,14 @@ function reverseTargetConfig(file: string, format: "json" | "toml", createdFile:
 function reverseSkillsFor(data: ConnectionsData, id: TargetId): void {
   for (const [path, skill] of Object.entries(data.skills)) {
     if (!skill.requestedBy.includes(id)) continue;
-    skill.requestedBy = skill.requestedBy.filter((t) => t !== id);
-    if (skill.requestedBy.length > 0) continue;
+    const remaining = skill.requestedBy.filter((t) => t !== id);
+    if (remaining.length > 0) {
+      skill.requestedBy = remaining;
+      continue;
+    }
+    // Unlink before dropping the claim: a throw here leaves `requestedBy`
+    // untouched, so the target stays retryable instead of orphaning a skill
+    // record no later disconnect would revisit.
     if (skill.createdFile) rmSync(skill.file, { force: true });
     for (const dir of skill.createdDirs) removeDirIfEmpty(dir);
     delete data.skills[path];

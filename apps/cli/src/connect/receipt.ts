@@ -145,31 +145,48 @@ function migrateV1(parsed: Record<string, unknown>): ConnectionsData {
   return out;
 }
 
-// Read the receipt, tolerating absence/corruption by returning an empty ledger —
-// a connect that isn't recorded simply can't be auto-undone, never a throw.
-export function loadConnections(home: string): ConnectionsData {
+export type ReadConnectionsResult =
+  | { ok: true; data: ConnectionsData }
+  | { ok: false; reason: string };
+
+// Strict read, separating "no receipt" (an empty ledger, fine) from "a receipt
+// that cannot be parsed". Any caller that REWRITES the ledger must use this:
+// degrading an unreadable file to empty and then saving deletes the only record
+// of what connect wrote, while the agent stays wired to keelson.
+export function readConnections(home: string): ReadConnectionsResult {
   let text: string;
   try {
     text = readFileSync(connectionsPath(home), "utf8");
-  } catch {
-    return empty();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, data: empty() };
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(text);
-    if (isRecord(parsed)) {
-      if (parsed.version === 2) {
-        return {
-          version: 2,
-          targets: parseTargets(parsed.targets),
-          skills: parseSkills(parsed.skills),
-        };
-      }
-      if (parsed.version === 1) return migrateV1(parsed);
-    }
-  } catch {
-    // fall through
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
-  return empty();
+  if (!isRecord(parsed)) return { ok: false, reason: "not a JSON object" };
+  if (parsed.version === 2) {
+    return {
+      ok: true,
+      data: {
+        version: 2,
+        targets: parseTargets(parsed.targets),
+        skills: parseSkills(parsed.skills),
+      },
+    };
+  }
+  if (parsed.version === 1) return { ok: true, data: migrateV1(parsed) };
+  return { ok: false, reason: `unsupported receipt version ${JSON.stringify(parsed.version)}` };
+}
+
+// Read the receipt, tolerating absence/corruption by returning an empty ledger —
+// a connect that isn't recorded simply can't be auto-undone, never a throw.
+export function loadConnections(home: string): ConnectionsData {
+  const read = readConnections(home);
+  return read.ok ? read.data : empty();
 }
 
 // Persist the receipt, or delete it once nothing is connected — a clean home

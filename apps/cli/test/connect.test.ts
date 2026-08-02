@@ -366,6 +366,48 @@ describe("connect / disconnect (filesystem)", () => {
     expect(existsSync(stray)).toBe(true);
   });
 
+  // An empty-ledger degrade here would rewrite the receipt away (saveConnections
+  // deletes an empty one) and report a clean sweep while every agent stays wired.
+  test("an unparseable receipt reverses nothing and is left on disk", () => {
+    runConnect(["copilot"], connectOpts());
+    const receipt = join(home, "connections.json");
+    writeFileSync(receipt, "{ not json");
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.receiptUnreadable).toBeDefined();
+    expect(outcome.removed).toEqual([]);
+    expect(outcome.failed).toEqual([]);
+    expect(readFileSync(receipt, "utf8")).toBe("{ not json");
+    // Nothing was touched on the strength of a ledger we could not read.
+    expect(existsSync(join(osHome, ".copilot", "mcp-config.json"))).toBe(true);
+    expect(existsSync(agentsSkill())).toBe(true);
+  });
+
+  test("a receipt from an unsupported future version is refused, not treated as empty", () => {
+    writeFileSync(join(home, "connections.json"), JSON.stringify({ version: 99, targets: {} }));
+    expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeDefined();
+    expect(existsSync(join(home, "connections.json"))).toBe(true);
+  });
+
+  // Skill cleanup runs after the MCP reversal, so an unlink that fails there must
+  // fail the target too rather than escaping the guard.
+  test("a skill file that cannot be unlinked fails its target and stays retryable", () => {
+    runConnect(["copilot"], connectOpts());
+    // rmSync's `force` only suppresses ENOENT; a non-empty dir in the file's
+    // place throws without `recursive`.
+    rmSync(agentsSkill(), { force: true });
+    mkdirSync(agentsSkill(), { recursive: true });
+    writeFileSync(join(agentsSkill(), "held.txt"), "x");
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.failed).toEqual(["copilot"]);
+    expect(outcome.removed).toEqual([]);
+    const after = loadConnections(home);
+    expect(after.targets.copilot).toBeDefined();
+    // The claim survives, so a retry still reaches the skill.
+    expect(after.skills[agentsSkill()]?.requestedBy).toEqual(["copilot"]);
+  });
+
   // One agent's hand-broken config must not abort the others, nor an uninstall
   // that has already revoked credentials.
   test("an unreadable agent config fails just that target and leaves it retryable", () => {

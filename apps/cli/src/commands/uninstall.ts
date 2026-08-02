@@ -308,6 +308,7 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
         credentialsFailed: credentials.failed,
         connectionsRemoved: connections.removed,
         connectionsFailed: connections.failed,
+        connectionsReceiptUnreadable: connections.receiptUnreadable ?? null,
         ribCredentialsMayRemain,
         dataKept: !opts.purge,
         marker,
@@ -344,6 +345,12 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
     }
     if (connections.removed.length > 0) {
       process.stdout.write(`disconnected agents: ${connections.removed.join(", ")}\n`);
+    }
+    // Reporting nothing here would read as "no agents were connected".
+    if (connections.receiptUnreadable !== undefined) {
+      process.stdout.write(
+        `could not read ${connectionsPath(home)} (${connections.receiptUnreadable}), so no agent was disconnected — check each agent's MCP config by hand\n`,
+      );
     }
     // This run takes the launcher, so `keelson disconnect` is gone too — the
     // operator has to reverse a survivor through the agent's own CLI. --purge
@@ -384,6 +391,9 @@ export async function runUninstall(opts: UninstallOptions): Promise<never> {
   }
   // Everything else is done, but a credential or connection that survived means
   // the promised reversal did not happen — exit non-zero so automation sees it.
-  const clean = credentials.failed.length === 0 && connections.failed.length === 0;
+  const clean =
+    credentials.failed.length === 0 &&
+    connections.failed.length === 0 &&
+    connections.receiptUnreadable === undefined;
   process.exit(clean ? EXIT_OK : EXIT_FAIL);
 }
