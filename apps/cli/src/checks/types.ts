@@ -10,6 +10,7 @@ export type CheckCategory =
   | "db"
   | "auth"
   | "workflows"
+  | "workflow-resolution"
   | "providers"
   | "ribs";
 
