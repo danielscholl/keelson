@@ -9,6 +9,7 @@ import type {
   ProviderCapabilities,
   SendQueryOptions,
 } from "../types.ts";
+import { deriveModelClasses } from "../model-classes.ts";
 import { type CodexRawEvent, mapCodexEvent } from "./event-bridge.ts";
 import {
   CodexAgentThreadFactory,
@@ -65,6 +66,7 @@ export const CODEX_CAPABILITIES: ProviderCapabilities = {
   reasoningEffort: true,
   models: CODEX_MODEL_CATALOG.map((m) => m.id),
   defaultModel: CODEX_DEFAULT_MODEL,
+  modelClasses: deriveModelClasses(CODEX_MODEL_CATALOG, CODEX_DEFAULT_MODEL),
 };
 
 // Agentic by default: codex reads the repo and writes within the conversation's

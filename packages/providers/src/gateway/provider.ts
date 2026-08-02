@@ -164,6 +164,9 @@ export class GatewayProvider implements IAgentProvider {
       reasoningEffort: false,
       models: opts.model ? [opts.model] : [],
       defaultModel: opts.model ?? "",
+      ...(opts.model
+        ? { modelClasses: { fast: opts.model, balanced: opts.model, deep: opts.model } }
+        : {}),
     };
   }
 

@@ -58,6 +58,7 @@ describe("GatewayProvider.getCapabilities", () => {
       reasoningEffort: false,
       models: ["m1"],
       defaultModel: "m1",
+      modelClasses: { fast: "m1", balanced: "m1", deep: "m1" },
     });
   });
 
@@ -65,6 +66,7 @@ describe("GatewayProvider.getCapabilities", () => {
     const p = new GatewayProvider({ id: "g", baseUrl: "http://x/v1", getApiKey: noKey });
     expect(p.getCapabilities().models).toEqual([]);
     expect(p.getCapabilities().defaultModel).toBe("");
+    expect(p.getCapabilities().modelClasses).toBeUndefined();
   });
 });
 
