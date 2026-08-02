@@ -116,6 +116,35 @@ nodes:
     expect(result.workflow?.nodes[1]?.require_tool_call).toBeUndefined();
   });
 
+  test("model_by_provider parses on prompt nodes without an unknown-field warning", () => {
+    const result = parseWorkflow(
+      `
+name: provider-models
+description: pins concrete models by provider
+nodes:
+  - id: generate
+    prompt: generate it
+    model: deep
+    model_by_provider:
+      copilot: copilot-concrete
+      claude: claude-concrete
+`,
+      "provider-models.yaml",
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.workflow?.nodes[0]?.model_by_provider).toEqual({
+      copilot: "copilot-concrete",
+      claude: "claude-concrete",
+    });
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.kind === "ignored_capability" && warning.message.includes("model_by_provider"),
+      ),
+    ).toBe(false);
+  });
+
   test("unknown generic node fields warn, remain non-fatal, and are dropped", () => {
     const result = parseWorkflow(
       `
@@ -638,11 +667,18 @@ nodes:
   - id: a
     bash: echo hi
     model: opus
+    model_by_provider:
+      copilot: gpt-concrete
     allowed_tools: [Read]
 `;
     const result = parseWorkflow(yaml, "ai-on-bash.yaml");
     expect(result.error).toBeNull();
-    expect(result.warnings.some((w) => w.kind === "ai_fields_on_non_ai_node")).toBe(true);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.kind === "ai_fields_on_non_ai_node" && w.message.includes("model_by_provider"),
+      ),
+    ).toBe(true);
   });
 
   test("output_format on a prompt node loads without an ignored_capability warning", () => {
