@@ -10,8 +10,11 @@ import {
   isSchemaVersionCompatible,
   messageChunkSchema,
   messageSchema,
+  MODEL_CLASSES,
+  modelClassMapSchema,
   modelInfoSchema,
   parsePersistedTokenUsage,
+  providerCapabilitiesSchema,
   SCHEMA_VERSION,
   tokenUsageSchema,
   WIRE_PROTOCOL_VERSION,
@@ -575,6 +578,44 @@ describe("messageSchema.truncated (F10.7b)", () => {
         content: "x",
         truncated: "yes",
         createdAt: "2026-05-13T00:00:00.000Z",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("model classes", () => {
+  it("exposes the reserved vocabulary", () => {
+    expect(MODEL_CLASSES).toEqual(["fast", "balanced", "deep"]);
+  });
+
+  it("accepts a complete class map on provider capabilities", () => {
+    const capabilities = providerCapabilitiesSchema.parse({
+      sessionResume: true,
+      streaming: true,
+      tools: true,
+      modelClasses: {
+        fast: "model-fast",
+        balanced: "model-balanced",
+        deep: "model-deep",
+      },
+    });
+
+    expect(capabilities.modelClasses?.deep).toBe("model-deep");
+  });
+
+  it("rejects partial and extended class maps", () => {
+    expect(() =>
+      modelClassMapSchema.parse({
+        fast: "model-fast",
+        balanced: "model-balanced",
+      }),
+    ).toThrow();
+    expect(() =>
+      modelClassMapSchema.parse({
+        fast: "model-fast",
+        balanced: "model-balanced",
+        deep: "model-deep",
+        extra: "model-extra",
       }),
     ).toThrow();
   });

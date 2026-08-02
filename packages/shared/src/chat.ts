@@ -42,6 +42,9 @@ export function isSchemaVersionCompatible(peerSchemaVersion: string): boolean {
 export const reasoningEffortLevelSchema = z.enum(["none", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffortLevel = z.infer<typeof reasoningEffortLevelSchema>;
 
+export const MODEL_CLASSES = ["fast", "balanced", "deep"] as const;
+export type ModelClass = (typeof MODEL_CLASSES)[number];
+
 // Normalized per-turn token usage. Two distinct measures live here and must
 // never be conflated: inputTokens/outputTokens are TURN TOTALS (summed across
 // the turn's API calls — what the turn cost), while contextTokens/contextWindow
@@ -220,6 +223,15 @@ export const conversationSchema = z
   .strict();
 export type Conversation = z.infer<typeof conversationSchema>;
 
+export const modelClassMapSchema = z
+  .object({
+    fast: z.string(),
+    balanced: z.string(),
+    deep: z.string(),
+  })
+  .strict();
+export type ModelClassMap = z.infer<typeof modelClassMapSchema>;
+
 export const providerCapabilitiesSchema = z
   .object({
     sessionResume: z.boolean(),
@@ -234,6 +246,7 @@ export const providerCapabilitiesSchema = z
     models: z.array(z.string()).default([]),
     // Empty string means "let the SDK decide" (no model sent on the wire).
     defaultModel: z.string().default(""),
+    modelClasses: modelClassMapSchema.optional(),
   })
   .strict();
 export type ProviderCapabilities = z.infer<typeof providerCapabilitiesSchema>;
