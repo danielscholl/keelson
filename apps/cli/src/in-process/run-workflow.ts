@@ -200,9 +200,9 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
       // (not eagerly) keeps bash-only workflows from instantiating an SDK.
       return getAgentProvider(target) as unknown as PromptHandlerProvider;
     },
-    // Record the concrete provider id a node ran on, even when the workflow
-    // pins nothing — the headless default resolves the same way getProvider does.
-    resolveProviderId: (id) => id ?? providerId,
+    // Resolve absent or unavailable preferences to the registered headless default.
+    resolveProviderId: (id) =>
+      id !== undefined && isRegisteredProvider(id) ? id : providerId,
     // Tools from `@keelson/skills` are `ToolDefinition` (typed name + schema);
     // `PromptHandlerProvider` accepts the structural `{ name; [k]: unknown }`
     // shape. Same boundary cast as the provider above.
