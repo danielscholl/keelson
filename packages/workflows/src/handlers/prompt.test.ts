@@ -117,9 +117,7 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
     resolvedBody: body,
     rawBody: body,
     workflow,
-    ...(opts.providerOverride !== undefined
-      ? { providerOverride: opts.providerOverride }
-      : {}),
+    ...(opts.providerOverride !== undefined ? { providerOverride: opts.providerOverride } : {}),
     ...(opts.warnOnce !== undefined ? { warnOnce: opts.warnOnce } : {}),
     ...(opts.notebook !== undefined ? { notebook: opts.notebook } : {}),
   };
@@ -1580,10 +1578,7 @@ describe("makePromptHandler", () => {
         "model 'claude-opus-4.8' is not in provider 'stub' catalog; using 'stub-default'",
         "model 'claude-opus-4.8' is not in provider 'stub' catalog; using 'stub-default'",
       ]);
-      expect(calls.map((call) => call.options?.model)).toEqual([
-        "stub-default",
-        "stub-default",
-      ]);
+      expect(calls.map((call) => call.options?.model)).toEqual(["stub-default", "stub-default"]);
       expect([first.provider, second.provider]).toEqual(["stub", "stub"]);
     });
 
@@ -1729,9 +1724,7 @@ describe("makePromptHandler", () => {
         }),
       );
 
-      expect(warnings).toEqual([
-        "provider override 'stub' displaces workflow pin 'copilot'",
-      ]);
+      expect(warnings).toEqual(["provider override 'stub' displaces workflow pin 'copilot'"]);
     });
   });
 

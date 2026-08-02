@@ -1376,8 +1376,7 @@ export function bootstrapPromptHandler(
   return makePromptHandler({
     getProvider,
     // Resolve absent or unavailable preferences to the registered boot default.
-    resolveProviderId: (id) =>
-      id !== undefined && isRegisteredProvider(id) ? id : providerId,
+    resolveProviderId: (id) => (id !== undefined && isRegisteredProvider(id) ? id : providerId),
     getRegisteredTools: () => getRegisteredTools() as unknown as readonly { name: string }[],
     denylist,
     // Rib tools are off by default in workflow prompt nodes — a node must opt in

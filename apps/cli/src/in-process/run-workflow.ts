@@ -161,9 +161,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   const providerId = resolveHeadlessProviderId();
   const requestedProvider = opts.provider?.trim();
   const providerOverride =
-    requestedProvider !== undefined && requestedProvider.length > 0
-      ? requestedProvider
-      : undefined;
+    requestedProvider !== undefined && requestedProvider.length > 0 ? requestedProvider : undefined;
   // Fail fast only on an explicit --provider; an unregistered default pin
   // (env/config) surfaces lazily when a prompt node first needs it, so
   // bash-only workflows still run.
@@ -206,8 +204,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
       return getAgentProvider(target) as unknown as PromptHandlerProvider;
     },
     // Resolve absent or unavailable preferences to the registered headless default.
-    resolveProviderId: (id) =>
-      id !== undefined && isRegisteredProvider(id) ? id : providerId,
+    resolveProviderId: (id) => (id !== undefined && isRegisteredProvider(id) ? id : providerId),
     // Tools from `@keelson/skills` are `ToolDefinition` (typed name + schema);
     // `PromptHandlerProvider` accepts the structural `{ name; [k]: unknown }`
     // shape. Same boundary cast as the provider above.

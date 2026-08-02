@@ -106,9 +106,7 @@ describe("runHeadless (in-process executor)", () => {
 
     expect(result.summary.status).toBe("succeeded");
     expect(providerIds).toEqual(["stub", "stub"]);
-    expect(warnings).toContain(
-      "provider override 'stub' displaces workflow pin 'copilot'",
-    );
+    expect(warnings).toContain("provider override 'stub' displaces workflow pin 'copilot'");
     expect(warnings).toContain("provider override 'stub' displaces node pin 'claude'");
   });
 });
