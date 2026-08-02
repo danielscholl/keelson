@@ -35,7 +35,7 @@ immediately, with no server restart.
 | `description` | yes | The structured block below. |
 | `nodes` | yes | A non-empty list of DAG nodes. |
 | `provider` | no | `claude`, `copilot`, `codex`, `pi`, or `stub`; omitted uses the runner default. |
-| `model` | no | Default model for agent nodes. |
+| `model` | no | Default for agent nodes: `fast`, `balanced`, `deep`, `auto`, or a literal model id. |
 | `modelReasoningEffort` | no | `minimal` \| `low` \| `medium` \| `high` \| `xhigh`. |
 | `webSearchMode` | no | `disabled` \| `cached` \| `live`. |
 | `interactive` | no | `true` is required when any loop node sets `loop.interactive: true`. |
@@ -239,7 +239,9 @@ These apply across kinds (some only to agent nodes, as noted).
 | `depends_on` | all | `[id, ...]` DAG edges. Omitted means a root node. |
 | `when` | all | A condition that must hold or the node skips. See [conditions](#conditions). |
 | `trigger_rule` | all | Join semantics across dependencies. See the table below. |
-| `model`, `provider` | agent | Per-node overrides. |
+| `model` | agent | Per-node override: `fast`, `balanced`, `deep`, `auto`, or a literal model id. |
+| `provider` | agent | Per-node provider override. |
+| `model_by_provider` | agent | Map of provider ids to concrete model ids. The effective provider's entry takes precedence over `model`. |
 | `context` | agent | `fresh` forces a new agent session for the node; `shared` reuses one. |
 | `allowed_tools`, `denied_tools` | agent | Tool-name filters. Rib tools are default-off; opt in with `allowed_tools`. |
 | `output_schema` | agent | A JSON-Schema subset the output must satisfy, or the node fails. |
@@ -253,6 +255,22 @@ These apply across kinds (some only to agent nodes, as noted).
 | `systemPrompt`, `thinking` | agent | Claude-only per-node controls. `thinking` is `adaptive` / `enabled` / `disabled`. |
 | `memory`, `notebook` | all | Recall/writeback blocks wired to the memory store and the project notebook. |
 | `hooks` | agent | Fully honored only by Claude; Copilot covers `PreToolUse` / `PostToolUse`. |
+
+### Model resolution
+
+Provider selection follows this order:
+
+1. The run's `--provider` override.
+2. The node's `provider`.
+3. The workflow's `provider`.
+4. The runner default.
+
+Model selection starts with the node's `model`, then the workflow's `model`. A
+`model_by_provider` entry for the effective provider takes precedence. A model
+tier resolves through the operator's configured class override, the provider's
+`modelClasses`, then the provider default. `auto` also uses the provider default.
+A literal id is checked against the catalog only when resolution fell back from
+its pinned provider to another provider.
 
 Ignored with a warning on any node: `agents`, `sandbox`, `betas`,
 `fallbackModel`, `maxBudgetUsd`, `mcp`, `skills`. The per-turn agent fields are
