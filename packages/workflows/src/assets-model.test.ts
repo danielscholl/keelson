@@ -44,7 +44,7 @@ const CLAUDE_CAPABILITIES = {
     deep: "claude-fable-5",
   },
 } as const;
-const CLAUDE_MODELS = new Set(CLAUDE_CAPABILITIES.models);
+const CLAUDE_MODELS: ReadonlySet<string> = new Set(CLAUDE_CAPABILITIES.models);
 
 type PromptCapabilities = ReturnType<NonNullable<PromptHandlerProvider["getCapabilities"]>>;
 
