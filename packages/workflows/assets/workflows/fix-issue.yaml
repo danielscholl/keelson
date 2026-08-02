@@ -1,13 +1,12 @@
 # Fix an issue end-to-end. Concepts ported from Archon's
 # archon-piv-loop + archon-fix-github-issue workflows (MIT, see NOTICE),
-# rewritten as a single self-contained DAG that uses only Copilot models
-# and Keelson's supported node types (no `command:` refs, no interactive
+# rewritten as a single self-contained DAG that uses provider-portable model
+# tiers and Keelson's supported node types (no `command:` refs, no interactive
 # loops — interactive loops are not yet supported, so a single approval
 # gate replaces the chat-style plan-refinement iterations).
 
 name: fix-issue
-provider: copilot
-model: auto
+model: balanced
 description: |
   Use when: User wants to fix, resolve, or implement an issue end-to-end
             and open a draft PR.
@@ -21,24 +20,8 @@ description: |
         reviewers → adversarial triage → fix → re-review), and reports back.
   NOT for: PR review (use pr-review). Brainstorming or PRD-style exploration.
 
-# Model `auto` (the workflow default) lets Copilot route the mechanical nodes and
-# keeps most of this workflow portable. The judgment and edit nodes are pinned to
-# three distinct models — one per ROLE — so no node reviews or judges its own
-# output:
-#   - JUDGE (`claude-opus-4.8`): investigate, plan, coverage-check, triage,
-#     triage-ci — their judgment drives the whole run; a different vendor from
-#     both GPT variants below.
-#   - EDIT (`gpt-5.6-sol`): implement, fix-validation, apply-fixes, fix-ci —
-#     the nodes that write code.
-#   - REVIEW (`gpt-5.6-terra`): the three review lenses and the re-review
-#     verifier — a different GPT-5.6 variant from the implementer they review.
-# Pinning also makes the model DETERMINISTIC: Copilot never reports which
-# concrete model `auto` resolved (only the `pi` provider emits the
-# resolved-model chunk), so an `auto` node's actual model is unobservable.
-# These are account-dependent ids: each must appear in the account's live
-# Copilot list (GET /api/providers/copilot/models). If one isn't available,
-# swap it for another frontier id or drop the node's `model:` back to `auto`.
-# Resolution order: node.model → workflow.model → provider.defaultModel.
+# Judgment, edit, and review roles use distinct provider mappings so no node
+# reviews or judges its own output.
 
 # Mutates the working tree — branch, commits, push, PR. Run in an isolated
 # worktree by default so a fix-issue run can't trample editor state.
@@ -53,7 +36,7 @@ nodes:
   # ─────────────────────────────────────────────────────────────────────────
 
   - id: extract-issue
-    model: auto
+    model: balanced
     prompt: |
       Find the issue number for this request.
 
@@ -134,7 +117,7 @@ nodes:
 
   - id: classify
     depends_on: [fetch-issue]
-    model: auto
+    model: balanced
     context: fresh
     output_format:
       type: object
@@ -172,7 +155,9 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.issue_type == 'bug'"
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     # Bug investigation has the same chunk-sparse, single-turn shape as planning.
     idle_timeout: 1800000
@@ -245,7 +230,9 @@ nodes:
     depends_on: [classify]
     when: "$classify.output.issue_type != 'bug'"
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     # Single-turn large-codebase planning can sit >600s between provider chunks.
     # Match the heavy edit nodes' idle budget so chunk-sparse work can finish.
@@ -414,7 +401,9 @@ nodes:
     depends_on: [plan-ready, brief-ready, criteria-count]
     when: "$criteria-count.output > '0'"
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     allowed_tools: []
     output_format:
@@ -517,11 +506,9 @@ nodes:
   - id: implement
     depends_on: [approve-plan, detect-base]
     context: fresh
-    # Pinned to a strong coding model rather than the workflow default `auto`:
-    # this node does the actual edits, and pinning makes the model deterministic
-    # (Copilot never reports what `auto` resolved). Account-dependent id — must
-    # appear in the live Copilot list; swap or drop to `auto` if unavailable.
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: xhigh
     # Large changes run many edit+check cycles; a tight cap kills a run mid-task
     # and loses uncommitted work. Generous here; the per-task checks stay scoped
@@ -622,7 +609,9 @@ nodes:
   - id: fix-validation
     depends_on: [validate]
     context: fresh
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: high
     prompt: |
       Review the validation output below.
@@ -791,10 +780,8 @@ nodes:
   # pr-review uses), an opus triage judge adversarially verifies each candidate
   # against the diff and source and keeps only CONFIRMED CRITICAL/HIGH findings,
   # a fixer applies just those, and a re-review closes the loop. The lenses are
-  # `gpt-5.6-terra` — a different GPT-5.6 variant from the `gpt-5.6-sol`
-  # implementer they are reviewing, with a different-vendor `claude-opus-4.8`
-  # judge above them, so no node grades its own output (account-dependent ids —
-  # drop to `auto` if absent from the Copilot list).
+  # The review, edit, and judge roles use distinct provider mappings so no node
+  # grades its own output.
   # ─────────────────────────────────────────────────────────────────────────
 
   # The lanes read the diff from artifacts rather than running `git diff`
@@ -813,7 +800,9 @@ nodes:
   - id: review-correctness
     depends_on: [capture-diff]
     context: fresh
-    model: gpt-5.6-terra
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-terra
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -898,7 +887,9 @@ nodes:
   - id: review-conventions
     depends_on: [capture-diff]
     context: fresh
-    model: gpt-5.6-terra
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-terra
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -956,7 +947,9 @@ nodes:
   - id: review-coverage
     depends_on: [capture-diff]
     context: fresh
-    model: gpt-5.6-terra
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-terra
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -1025,7 +1018,9 @@ nodes:
     depends_on: [review-correctness, review-conventions, review-coverage]
     trigger_rule: one_success
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     allowed_tools: [Read, Glob, Grep]
     output_format:
@@ -1087,7 +1082,9 @@ nodes:
   - id: apply-fixes
     depends_on: [triage]
     context: fresh
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: high
     prompt: |
       Apply ONLY the confirmed must-fix issues from triage below. If the list is
@@ -1111,7 +1108,9 @@ nodes:
   - id: re-review
     depends_on: [apply-fixes]
     context: fresh
-    model: gpt-5.6-terra
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-terra
     effort: high
     prompt: |
       A review panel flagged the issues below as must-fix, and the previous node
@@ -1320,7 +1319,9 @@ nodes:
   - id: triage-ci
     depends_on: [await-ci, brief-ready, criteria-count]
     context: fresh
-    model: claude-opus-4.8
+    model: deep
+    model_by_provider:
+      copilot: claude-opus-4.8
     effort: xhigh
     output_format:
       type: object
@@ -1410,7 +1411,9 @@ nodes:
   - id: fix-ci
     depends_on: [triage-ci]
     context: fresh
-    model: gpt-5.6-sol
+    model: deep
+    model_by_provider:
+      copilot: gpt-5.6-sol
     effort: high
     idle_timeout: 1800000
     prompt: |
@@ -1616,7 +1619,7 @@ nodes:
 
   - id: report
     depends_on: [finalize-pr]
-    model: auto
+    model: balanced
     context: fresh
     prompt: |
       Produce the final operator summary.
