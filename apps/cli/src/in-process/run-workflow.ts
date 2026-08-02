@@ -354,6 +354,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
       cwd: effectiveCwd,
       abortSignal: abort.signal,
       ...(providerOverride !== undefined ? { providerOverride } : {}),
+      defaultProvider: providerId,
       artifactsDir,
       onEvent,
     });
