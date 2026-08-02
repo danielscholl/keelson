@@ -380,10 +380,8 @@ describe("connect / disconnect (filesystem)", () => {
     expect(existsSync(claudeSkill())).toBe(false);
   });
 
-  // The #758 scenario: connect reads the ledger and saves it back, so degrading
-  // an unreadable receipt to empty would persist a file recording only the new
-  // connection and drop every prior one — leaving those agents wired with
-  // nothing left to reverse them, and exiting 0.
+  // connect ends by saving this ledger back, so reading an unreadable receipt as
+  // empty would persist one naming only the new agent and strand every prior one.
   test("connect refuses an unreadable receipt instead of overwriting it", () => {
     runConnect(["copilot"], connectOpts());
     const receipt = join(home, "connections.json");

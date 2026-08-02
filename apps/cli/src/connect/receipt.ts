@@ -62,9 +62,8 @@ function empty(): ConnectionsData {
   return { version: 2, targets: {}, skills: {} };
 }
 
-// Structural guards so a hand-edited or corrupted receipt degrades to an empty
-// ledger instead of crashing a later reverse (e.g. `skill.requestedBy.filter`),
-// so a structurally invalid entry is dropped and counted rather than crashing.
+// Structural guards so a hand-edited or corrupted receipt is rejected by the
+// reader rather than crashing a later reverse (e.g. `skill.requestedBy.filter`).
 function isMcpRecord(v: unknown): v is McpRecord {
   if (!isRecord(v)) return false;
   if (v.kind === "file") {
