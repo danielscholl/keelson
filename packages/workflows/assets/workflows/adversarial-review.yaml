@@ -12,14 +12,14 @@
 # `verify` holds filesystem tools, solely to check source claims.
 #
 # The three attack lenses use distinct vendor mappings so blind spots do not
-# align; verification and synthesis use mappings no lens uses.
+# align; single-vendor runs are a degraded mode and emit a collapse warning.
+# Verification and synthesis use mappings no lens uses.
 # All run `effort: xhigh` with a generous idle budget: a no-tool xhigh node is
 # maximally chunk-sparse (one long think, then text), so the default idle
 # timeout would kill exactly the depth the tier buys.
 
 name: adversarial-review
 provider: copilot
-provider_required: true
 model: balanced
 locking: shared
 description: |

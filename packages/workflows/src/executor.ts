@@ -527,7 +527,7 @@ export async function runWorkflow(opts: RunOptions): Promise<RunSummary> {
   }
 
   emit({ type: "run_started", runId, workflowName: workflow.name });
-  for (const message of diagnoseModelDiversity(workflow, providerOverride ?? defaultProvider)) {
+  for (const message of diagnoseModelDiversity(workflow, defaultProvider, providerOverride)) {
     warnOnce(`model-diversity:${message}`, message);
   }
 

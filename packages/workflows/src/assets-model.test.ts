@@ -28,7 +28,7 @@ const MIGRATED_WORKFLOWS = new Set([
   "resolve-pr",
   "workflow-builder",
 ]);
-const REQUIRED_PROVIDER_PINS = new Map([["adversarial-review", "copilot"]]);
+const EXPECTED_PROVIDER_PINS = new Map([["adversarial-review", "copilot"]]);
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
   reasoningEffort: true,
@@ -52,6 +52,7 @@ type PromptCapabilities = ReturnType<NonNullable<PromptHandlerProvider["getCapab
 function makeProviderHarness(
   providerId: string,
   capabilities: PromptCapabilities,
+  response = "ok",
 ): {
   handler: ReturnType<typeof makePromptHandler>;
   calls: PromptHandlerSendOptions[];
@@ -62,7 +63,7 @@ function makeProviderHarness(
     getCapabilities: () => capabilities,
     async *sendQuery(_prompt, _cwd, _resumeSessionId, options) {
       calls.push(options ?? {});
-      yield { type: "text", content: "ok" };
+      yield { type: "text", content: response };
       yield { type: "done" };
     },
   };
@@ -80,6 +81,7 @@ async function runPromptNode(
   workflow: WorkflowDefinition,
   node: DagNode,
   handler: ReturnType<typeof makePromptHandler>,
+  providerOverride?: string,
 ): Promise<{ result: NodeResult; events: NodeStreamEvent[] }> {
   const events: NodeStreamEvent[] = [];
   const body = node.prompt ?? "";
@@ -94,6 +96,7 @@ async function runPromptNode(
     resolvedBody: body,
     rawBody: body,
     workflow,
+    ...(providerOverride !== undefined ? { providerOverride } : {}),
   };
   return { result: await handler.handle(node, context), events };
 }
@@ -131,20 +134,22 @@ function loadBundledWorkflows(): Array<{ filename: string; workflow: WorkflowDef
 }
 
 describe("bundled workflow model policy", () => {
-  test("uses portable tiers and only required provider pins", () => {
+  test("uses portable tiers and only soft provider pins", () => {
     const violations: string[] = [];
     for (const { filename, workflow } of loadBundledWorkflows()) {
       for (const finding of bareConcreteModelIds(workflow)) {
         violations.push(`${filename}:${finding.nodeId} uses model '${finding.model}'`);
       }
-      const requiredProvider = REQUIRED_PROVIDER_PINS.get(workflow.name);
-      if (workflow.provider !== requiredProvider) {
+      const expectedProvider = EXPECTED_PROVIDER_PINS.get(workflow.name);
+      if (workflow.provider !== expectedProvider) {
         violations.push(
-          `${filename}:<workflow> provider is '${workflow.provider}' instead of '${requiredProvider}'`,
+          `${filename}:<workflow> provider is '${workflow.provider}' instead of '${expectedProvider}'`,
         );
       }
-      if (requiredProvider !== undefined && workflow.provider_required !== true) {
-        violations.push(`${filename}:<workflow> does not require provider '${requiredProvider}'`);
+      if (workflow.provider_required === true) {
+        violations.push(
+          `${filename}:<workflow> hard-requires provider '${workflow.provider ?? "<unspecified>"}'`,
+        );
       }
       if (workflow.model === "auto") {
         violations.push(`${filename}:<workflow> uses model 'auto'`);
@@ -241,14 +246,39 @@ describe("bundled workflow model resolution", () => {
     expect(violations).toEqual([]);
   });
 
-  test("reports adversarial lens collapse only when provider mappings are absent", () => {
+  test("runs adversarial-review on Claude with a diversity-collapse notice", async () => {
     const adversarial = loadBundledWorkflows().find(
       ({ workflow }) => workflow.name === "adversarial-review",
     )?.workflow;
     expect(adversarial).toBeDefined();
 
-    const portableAdversarial = { ...adversarial!, provider: undefined };
-    const claudeMessages = diagnoseModelDiversity(portableAdversarial, "claude");
+    const { handler, calls } = makeProviderHarness("claude", CLAUDE_CAPABILITIES, "{}");
+    const violations: string[] = [];
+    const promptNodes = adversarial!.nodes.filter((node) => node.prompt !== undefined);
+    for (const node of promptNodes) {
+      const { result, events } = await runPromptNode(adversarial!, node, handler, "claude");
+      if (result.status !== "succeeded") {
+        violations.push(`${node.id} failed: ${result.error ?? "unknown error"}`);
+      }
+      if (result.provider !== "claude") {
+        violations.push(`${node.id} resolved provider '${result.provider}'`);
+      }
+      if (result.model === undefined || !CLAUDE_MODELS.has(result.model)) {
+        violations.push(`${node.id} resolved outside the Claude catalog`);
+      }
+      if (
+        events.some(
+          (event) => event.type === "node_warning" && event.message.includes("is not in provider"),
+        )
+      ) {
+        violations.push(`${node.id} emitted a provider catalog warning`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+    expect(calls).toHaveLength(promptNodes.length);
+
+    const claudeMessages = diagnoseModelDiversity(adversarial!, undefined, "claude");
     expect(
       claudeMessages.some((message) =>
         ["reviewer-logic", "reviewer-evidence", "reviewer-risk"].every((id) =>
@@ -256,7 +286,6 @@ describe("bundled workflow model resolution", () => {
         ),
       ),
     ).toBe(true);
-    expect(diagnoseModelDiversity(portableAdversarial, "copilot")).toEqual([]);
-    expect(diagnoseModelDiversity(adversarial!, "claude")).toEqual([]);
+    expect(diagnoseModelDiversity(adversarial!, undefined, "copilot")).toEqual([]);
   });
 });
