@@ -2,14 +2,8 @@
 // @ts-ignore
 import { describe, expect, test } from "bun:test";
 
-import {
-  resolveWorkflowCatalog,
-  resolveWorkflowResolution,
-} from "./catalog-resolution.ts";
-import {
-  type WorkflowDefinition,
-  workflowDefinitionSchema,
-} from "./schema/index.ts";
+import { resolveWorkflowCatalog, resolveWorkflowResolution } from "./catalog-resolution.ts";
+import { type WorkflowDefinition, workflowDefinitionSchema } from "./schema/index.ts";
 
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
@@ -96,9 +90,7 @@ describe("resolveWorkflowResolution", () => {
       providerFellBack: true,
       modelFellBack: false,
     });
-    expect(result.fallbackNodes).toEqual([
-      { nodeId: "review", to: "claude/claude-fable-5" },
-    ]);
+    expect(result.fallbackNodes).toEqual([{ nodeId: "review", to: "claude/claude-fable-5" }]);
   });
 
   test("reports diversity collapse when provider mappings converge", () => {
@@ -143,10 +135,9 @@ describe("resolveWorkflowResolution", () => {
   });
 
   test("blocks prompt workflows when no provider is available", () => {
-    const result = resolveWorkflowResolution(
-      makeWorkflow([{ id: "draft", prompt: "Draft." }]),
-      { providers: new Map() },
-    );
+    const result = resolveWorkflowResolution(makeWorkflow([{ id: "draft", prompt: "Draft." }]), {
+      providers: new Map(),
+    });
 
     expect(result.tier).toBe("blocked");
     expect(result.nodes[0]?.effectiveProvider).toBeUndefined();

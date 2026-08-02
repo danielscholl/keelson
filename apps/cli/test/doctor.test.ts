@@ -449,9 +449,7 @@ describe("runDoctor exit-code rollup", () => {
     const report = await buildDoctorReport(false, allOkDeps());
     expect(report.summary.fail).toBe(0);
     expect(report.summary.warn).toBe(0);
-    expect(report.categories.map(({ category }) => category)).toContain(
-      "workflow-resolution",
-    );
+    expect(report.categories.map(({ category }) => category)).toContain("workflow-resolution");
     expect(exitCodeFor(report)).toBe(EXIT_OK);
     const strictReport = await buildDoctorReport(true, allOkDeps());
     expect(exitCodeFor(strictReport)).toBe(EXIT_OK);

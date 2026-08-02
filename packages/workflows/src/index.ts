@@ -11,6 +11,11 @@ export {
   authoringGuideSection,
   WORKFLOW_AUTHORING_GUIDE,
 } from "./authoring-guide.ts";
+export {
+  resolveWorkflowCatalog,
+  resolveWorkflowResolution,
+  type WorkflowResolution,
+} from "./catalog-resolution.ts";
 export { evaluateCondition } from "./conditions.ts";
 export {
   ExecutorValidationError,
@@ -97,11 +102,6 @@ export {
   type WorkflowLoadWarning,
 } from "./loader.ts";
 export { readManagedManifest, sha256, writeManagedManifest } from "./managed.ts";
-export {
-  resolveWorkflowCatalog,
-  resolveWorkflowResolution,
-  type WorkflowResolution,
-} from "./catalog-resolution.ts";
 export { diagnoseModelDiversity } from "./model-diversity.ts";
 export * from "./schema/index.ts";
 export {

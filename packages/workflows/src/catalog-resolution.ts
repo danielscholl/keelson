@@ -92,8 +92,7 @@ function resolvePrompt(
     preferredProvider,
     effectiveProvider,
     model,
-    providerFellBack:
-      pinnedProvider !== undefined && effectiveProvider !== pinnedProvider,
+    providerFellBack: pinnedProvider !== undefined && effectiveProvider !== pinnedProvider,
     modelFellBack,
   };
 }

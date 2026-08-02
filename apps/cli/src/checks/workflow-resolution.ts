@@ -59,9 +59,7 @@ function resolutionCheck(result: WorkflowResolution): CheckResult {
 
   if (result.tier === "degrades") {
     const details = [
-      ...result.fallbackNodes.map(
-        ({ nodeId, to }) => `${nodeId} falls back to ${to}`,
-      ),
+      ...result.fallbackNodes.map(({ nodeId, to }) => `${nodeId} falls back to ${to}`),
       ...result.collapses,
     ];
     return {
@@ -87,17 +85,14 @@ function resolutionCheck(result: WorkflowResolution): CheckResult {
   };
 }
 
-export function runWorkflowResolutionCheck(
-  deps: WorkflowResolutionDeps = {},
-): CategoryResult {
+export function runWorkflowResolutionCheck(deps: WorkflowResolutionDeps = {}): CategoryResult {
   const discover = deps.discoverWorkflows ?? defaultDiscoverWorkflows;
   const dir = deps.workflowsDir ?? defaultWorkflowsDir();
   const discovery = discover([{ dir, source: "global" }]);
   const config = (deps.loadConfig ?? defaultLoadConfig)();
   const providerInfos = (deps.listProviders ?? defaultListProviders)();
   const providerIds = providerInfos.map(({ id }) => id);
-  const defaultProviderId =
-    deps.defaultProviderId ?? resolveDefaultProvider(config, providerIds);
+  const defaultProviderId = deps.defaultProviderId ?? resolveDefaultProvider(config, providerIds);
   const providers = new Map(
     providerInfos.map(({ id, capabilities }) => [
       id,

@@ -3,10 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import {
-  type WorkflowDefinition,
-  workflowDefinitionSchema,
-} from "@keelson/workflows";
+import { type WorkflowDefinition, workflowDefinitionSchema } from "@keelson/workflows";
 import { runWorkflowResolutionCheck } from "../src/checks/workflow-resolution.ts";
 
 const COPILOT_CAPABILITIES = {
@@ -76,40 +73,30 @@ describe("workflow resolution doctor check", () => {
     const result = runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({}),
-      listProviders: () => [
-        { id: "copilot", capabilities: COPILOT_CAPABILITIES },
-      ],
+      listProviders: () => [{ id: "copilot", capabilities: COPILOT_CAPABILITIES }],
       defaultProviderId: "copilot",
     });
 
     expect(result.category).toBe("workflow-resolution");
     expect(result.checks).toHaveLength(catalog.length);
     expect(result.checks.every(({ status }) => status === "ok")).toBe(true);
-    expect(result.checks.every(({ detail }) => detail?.startsWith("native"))).toBe(
-      true,
-    );
+    expect(result.checks.every(({ detail }) => detail?.startsWith("native"))).toBe(true);
   });
 
   test("names provider fallback and diversity collapse on Claude", () => {
     const result = runWorkflowResolutionCheck({
       discoverWorkflows,
       loadConfig: () => ({}),
-      listProviders: () => [
-        { id: "claude", capabilities: CLAUDE_CAPABILITIES },
-      ],
+      listProviders: () => [{ id: "claude", capabilities: CLAUDE_CAPABILITIES }],
       defaultProviderId: "claude",
     });
 
     expect(result.category).toBe("workflow-resolution");
     const pinned = result.checks.find(({ name }) => name === "pinned-review");
     expect(pinned?.status).toBe("warn");
-    expect(pinned?.detail).toContain(
-      "logic falls back to claude/claude-fable-5",
-    );
+    expect(pinned?.detail).toContain("logic falls back to claude/claude-fable-5");
     expect(pinned?.detail).toContain("lens/role diversity collapsed");
-    expect(result.checks.find(({ name }) => name === "portable")?.status).toBe(
-      "ok",
-    );
+    expect(result.checks.find(({ name }) => name === "portable")?.status).toBe("ok");
   });
 
   test("blocks prompt workflows when no provider is registered", () => {
@@ -121,11 +108,7 @@ describe("workflow resolution doctor check", () => {
 
     expect(result.category).toBe("workflow-resolution");
     expect(result.checks.every(({ status }) => status === "warn")).toBe(true);
-    expect(result.checks.every(({ detail }) => detail?.startsWith("blocked"))).toBe(
-      true,
-    );
-    expect(result.checks.every(({ hint }) => hint?.includes("provider add"))).toBe(
-      true,
-    );
+    expect(result.checks.every(({ detail }) => detail?.startsWith("blocked"))).toBe(true);
+    expect(result.checks.every(({ hint }) => hint?.includes("provider add"))).toBe(true);
   });
 });

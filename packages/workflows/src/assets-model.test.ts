@@ -7,9 +7,8 @@ import * as fs from "node:fs";
 // biome-ignore lint/suspicious/noTsIgnore: Bun bundles Node built-ins at runtime.
 // @ts-ignore
 import * as path from "node:path";
-
-import type { NodeContext, NodeResult, NodeStreamEvent } from "./executor.ts";
 import { resolveWorkflowResolution } from "./catalog-resolution.ts";
+import type { NodeContext, NodeResult, NodeStreamEvent } from "./executor.ts";
 import {
   makePromptHandler,
   type PromptHandlerProvider,
@@ -17,11 +16,7 @@ import {
 } from "./handlers/prompt.ts";
 import { parseWorkflow } from "./loader.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
-import {
-  type DagNode,
-  type WorkflowDefinition,
-  workflowDefinitionSchema,
-} from "./schema/index.ts";
+import { type DagNode, type WorkflowDefinition, workflowDefinitionSchema } from "./schema/index.ts";
 
 const MODEL_TIERS = new Set(["fast", "balanced", "deep"]);
 const MIGRATED_WORKFLOWS = new Set([
@@ -394,15 +389,11 @@ describe("catalog resolution drift guard", () => {
     const workflow = workflowDefinitionSchema.parse({
       name: `drift-${fixture.name.replaceAll(" ", "-")}`,
       description: "Compares static and runtime model resolution.",
-      ...(fixture.workflowProvider !== undefined
-        ? { provider: fixture.workflowProvider }
-        : {}),
+      ...(fixture.workflowProvider !== undefined ? { provider: fixture.workflowProvider } : {}),
       nodes: [{ id: "prompt", prompt: "Resolve this fixture.", ...fixture.node }],
     });
     const activeCapabilities =
-      fixture.effectiveProviderId === "copilot"
-        ? COPILOT_CAPABILITIES
-        : CLAUDE_CAPABILITIES;
+      fixture.effectiveProviderId === "copilot" ? COPILOT_CAPABILITIES : CLAUDE_CAPABILITIES;
     const { handler } = makeProviderHarness(
       fixture.effectiveProviderId,
       activeCapabilities,
