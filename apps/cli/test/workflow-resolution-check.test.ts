@@ -3,8 +3,13 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { describe, expect, test } from "bun:test";
-import { type WorkflowDefinition, workflowDefinitionSchema } from "@keelson/workflows";
+import {
+  type DiscoveryRoot,
+  type WorkflowDefinition,
+  workflowDefinitionSchema,
+} from "@keelson/workflows";
 import { runWorkflowResolutionCheck } from "../src/checks/workflow-resolution.ts";
+import { workflowDiscoveryRoots } from "../src/paths.ts";
 
 const COPILOT_CAPABILITIES = {
   defaultModel: "auto",
@@ -69,6 +74,31 @@ function discoverWorkflows() {
 }
 
 describe("workflow resolution doctor check", () => {
+  test("uses the shared discovery roots unless a directory is explicit", () => {
+    const discoveredRoots: Array<readonly DiscoveryRoot[]> = [];
+    const discover = (roots: readonly DiscoveryRoot[]) => {
+      discoveredRoots.push(roots);
+      return { workflows: [], errors: [], warnings: [] };
+    };
+
+    runWorkflowResolutionCheck({
+      discoverWorkflows: discover,
+      loadConfig: () => ({}),
+      listProviders: () => [],
+    });
+    runWorkflowResolutionCheck({
+      discoverWorkflows: discover,
+      workflowsDir: "/tmp/explicit-workflows",
+      loadConfig: () => ({}),
+      listProviders: () => [],
+    });
+
+    expect(discoveredRoots).toEqual([
+      workflowDiscoveryRoots(),
+      [{ dir: "/tmp/explicit-workflows", source: "global" }],
+    ]);
+  });
+
   test("reports the catalog native when Copilot is registered", () => {
     const result = runWorkflowResolutionCheck({
       discoverWorkflows,
@@ -125,6 +155,22 @@ describe("workflow resolution doctor check", () => {
     expect(portable?.status).toBe("warn");
     expect(portable?.detail).toContain(
       "blocked — provider 'missing' selected by KEELSON_WORKFLOW_PROVIDER is not registered",
+    );
+    expect(result.checks.find(({ name }) => name === "pinned-review")?.status).toBe("ok");
+  });
+
+  test("blocks unpinned prompts when the environment pins the workflow provider", () => {
+    const result = runWorkflowResolutionCheck({
+      discoverWorkflows,
+      loadConfig: () => ({ defaultProvider: "copilot" }),
+      listProviders: () => [{ id: "copilot", capabilities: COPILOT_CAPABILITIES }],
+      envProviderId: "workflow",
+    });
+
+    const portable = result.checks.find(({ name }) => name === "portable");
+    expect(portable?.status).toBe("warn");
+    expect(portable?.detail).toContain(
+      "blocked — provider 'workflow' selected by KEELSON_WORKFLOW_PROVIDER is not registered",
     );
     expect(result.checks.find(({ name }) => name === "pinned-review")?.status).toBe("ok");
   });

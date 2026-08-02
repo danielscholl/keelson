@@ -18,7 +18,7 @@ import {
 } from "@keelson/workflows";
 
 import { bootstrapCliProviders } from "../in-process/providers.ts";
-import { defaultWorkflowsDir } from "../paths.ts";
+import { workflowDiscoveryRoots } from "../paths.ts";
 import type { CategoryResult, CheckResult } from "./types.ts";
 
 type ModelClass = "fast" | "balanced" | "deep";
@@ -109,22 +109,18 @@ function resolutionCheck(
 
 export function runWorkflowResolutionCheck(deps: WorkflowResolutionDeps = {}): CategoryResult {
   const discover = deps.discoverWorkflows ?? defaultDiscoverWorkflows;
-  const dir = deps.workflowsDir ?? defaultWorkflowsDir();
-  const discovery = discover([{ dir, source: "global" }]);
+  const roots: readonly DiscoveryRoot[] = deps.workflowsDir
+    ? [{ dir: deps.workflowsDir, source: "global" }]
+    : workflowDiscoveryRoots();
+  const discovery = discover(roots);
   const config = (deps.loadConfig ?? defaultLoadConfig)();
   const providerInfos = (deps.listProviders ?? defaultListProviders)();
   const providerIds = providerInfos.map(({ id }) => id);
   const envProviderId = (deps.envProviderId ?? process.env.KEELSON_WORKFLOW_PROVIDER)?.trim();
   const defaultProviderId =
-    deps.defaultProviderId ??
-    (envProviderId && envProviderId !== "workflow"
-      ? envProviderId
-      : resolveDefaultProvider(config, providerIds));
+    deps.defaultProviderId ?? (envProviderId || resolveDefaultProvider(config, providerIds));
   const unavailableDefaultProviderId =
-    deps.defaultProviderId === undefined &&
-    envProviderId &&
-    envProviderId !== "workflow" &&
-    !providerIds.includes(envProviderId)
+    deps.defaultProviderId === undefined && envProviderId && !providerIds.includes(envProviderId)
       ? envProviderId
       : undefined;
   const providers = new Map(
