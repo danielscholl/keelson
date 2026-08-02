@@ -11,6 +11,11 @@ export {
   authoringGuideSection,
   WORKFLOW_AUTHORING_GUIDE,
 } from "./authoring-guide.ts";
+export {
+  resolveWorkflowCatalog,
+  resolveWorkflowResolution,
+  type WorkflowResolution,
+} from "./catalog-resolution.ts";
 export { evaluateCondition } from "./conditions.ts";
 export {
   ExecutorValidationError,

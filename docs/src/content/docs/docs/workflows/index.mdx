@@ -33,16 +33,14 @@ keelson workflow run smoke-test --watch
 keelson workflow run fix-issue --inputs ARGUMENTS="42"
 ```
 
-<Aside type="note" title="What the Copilot workflows need">
-Eight of the ten set `provider: copilot` and `model: auto`, so they need a
-GitHub Copilot subscription registered. The forge-coupled ones (`fix-issue`,
-`pr-review`, `plan-act-evaluate`, `resolve-pr`) run on GitHub or GitLab through
-the bundled `forge` shim, which needs `gh` or `glab` installed and
-authenticated. The approval and
-interactive workflows pause for a human, which needs a running server (`keelson
-start`). The other two pin no provider: `smoke-test` runs provider-free on the
-stub with no credentials, and `design-artifact` leaves the provider open so
-authoring tracks the strongest model the server offers.
+<Aside type="note" title="Provider portability">
+Bundled workflows use portable `fast`, `balanced`, and `deep` tiers, plus
+`model_by_provider` where vendor diversity matters. They can run on whichever
+chat provider is registered. Run `keelson doctor` before a paid run to preview
+each workflow as **native**, **degrades**, or **blocked**. A single-vendor run
+can collapse distinct lens or role mappings onto one model. See
+[model resolution](../reference/workflow-nodes/#model-resolution) for the full
+precedence chain.
 </Aside>
 
 ## Ship code

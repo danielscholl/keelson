@@ -116,9 +116,8 @@ describe("keelson CLI smoke", () => {
 
   test("doctor --json emits a structured report envelope", async () => {
     // Doctor probes the real environment so the exit code depends on the
-    // runner's setup. The contract under test is the envelope shape — the six
-    // categories, a summary, and the strict flag — not that any particular
-    // check passes.
+    // runner's setup. The contract under test is the envelope shape, its
+    // categories, summary, and strict flag, not that any particular check passes.
     const { stdout } = await runCli(["--json", "doctor"]);
     const envelope = JSON.parse(stdout.trim());
     expect(envelope.ok).toBe(true);
@@ -136,6 +135,7 @@ describe("keelson CLI smoke", () => {
       "ribs",
       "server",
       "toolchain",
+      "workflow-resolution",
       "workflows",
     ]);
     const summed = data.summary.ok + data.summary.warn + data.summary.fail + data.summary.skip;

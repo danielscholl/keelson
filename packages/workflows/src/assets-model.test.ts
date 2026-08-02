@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 // biome-ignore lint/suspicious/noTsIgnore: Bun bundles Node built-ins at runtime.
 // @ts-ignore
 import * as path from "node:path";
-
+import { resolveWorkflowResolution } from "./catalog-resolution.ts";
 import type { NodeContext, NodeResult, NodeStreamEvent } from "./executor.ts";
 import {
   makePromptHandler,
@@ -16,7 +16,7 @@ import {
 } from "./handlers/prompt.ts";
 import { parseWorkflow } from "./loader.ts";
 import { diagnoseModelDiversity } from "./model-diversity.ts";
-import type { DagNode, WorkflowDefinition } from "./schema/index.ts";
+import { type DagNode, type WorkflowDefinition, workflowDefinitionSchema } from "./schema/index.ts";
 
 const MODEL_TIERS = new Set(["fast", "balanced", "deep"]);
 const MIGRATED_WORKFLOWS = new Set([
@@ -53,6 +53,7 @@ function makeProviderHarness(
   providerId: string,
   capabilities: PromptCapabilities,
   response = "ok",
+  resolveProviderId: (providerId?: string) => string = () => providerId,
 ): {
   handler: ReturnType<typeof makePromptHandler>;
   calls: PromptHandlerSendOptions[];
@@ -70,7 +71,7 @@ function makeProviderHarness(
   return {
     handler: makePromptHandler({
       getProvider: () => provider,
-      resolveProviderId: () => providerId,
+      resolveProviderId,
       getRegisteredTools: () => [],
     }),
     calls,
@@ -287,5 +288,138 @@ describe("bundled workflow model resolution", () => {
       ),
     ).toBe(true);
     expect(diagnoseModelDiversity(adversarial!, undefined, "copilot")).toEqual([]);
+  });
+});
+
+describe("catalog resolution drift guard", () => {
+  const fixtures = [
+    {
+      name: "registered provider pin",
+      registeredProviders: ["copilot"],
+      defaultProviderId: "copilot",
+      preferredProviderId: "copilot",
+      effectiveProviderId: "copilot",
+      workflowProvider: "copilot",
+      node: { model: "balanced" },
+    },
+    {
+      name: "provider pin fallback",
+      registeredProviders: ["claude"],
+      defaultProviderId: "claude",
+      preferredProviderId: "claude",
+      effectiveProviderId: "claude",
+      workflowProvider: "copilot",
+      node: { model: "balanced" },
+    },
+    {
+      name: "tier class",
+      registeredProviders: ["claude"],
+      defaultProviderId: "claude",
+      preferredProviderId: "claude",
+      effectiveProviderId: "claude",
+      node: { model: "deep" },
+    },
+    {
+      name: "model_by_provider hit",
+      registeredProviders: ["copilot"],
+      defaultProviderId: "copilot",
+      preferredProviderId: "copilot",
+      effectiveProviderId: "copilot",
+      node: {
+        model: "deep",
+        model_by_provider: { copilot: "gpt-5.6-sol" },
+      },
+    },
+    {
+      name: "model_by_provider miss",
+      registeredProviders: ["claude"],
+      defaultProviderId: "claude",
+      preferredProviderId: "claude",
+      effectiveProviderId: "claude",
+      node: {
+        model: "deep",
+        model_by_provider: { copilot: "gpt-5.6-sol" },
+      },
+    },
+    {
+      name: "literal id",
+      registeredProviders: ["claude"],
+      defaultProviderId: "claude",
+      preferredProviderId: "claude",
+      effectiveProviderId: "claude",
+      workflowProvider: "claude",
+      node: { model: "claude-sonnet-5" },
+    },
+    {
+      name: "auto",
+      registeredProviders: ["claude"],
+      defaultProviderId: "claude",
+      preferredProviderId: "claude",
+      effectiveProviderId: "claude",
+      workflowProvider: "claude",
+      node: { model: "auto" },
+    },
+    {
+      name: "run provider override",
+      registeredProviders: ["copilot", "claude"],
+      defaultProviderId: "claude",
+      preferredProviderId: "copilot",
+      effectiveProviderId: "claude",
+      workflowProvider: "copilot",
+      runProviderId: "claude",
+      node: { model: "deep" },
+    },
+  ];
+
+  test.each(fixtures)("$name matches the real prompt handler", async (fixture) => {
+    const providers = new Map<
+      string,
+      {
+        defaultModel: string;
+        models: readonly string[];
+        modelClasses: { fast: string; balanced: string; deep: string };
+      }
+    >();
+    for (const providerId of fixture.registeredProviders) {
+      providers.set(
+        providerId,
+        providerId === "copilot" ? COPILOT_CAPABILITIES : CLAUDE_CAPABILITIES,
+      );
+    }
+    const workflow = workflowDefinitionSchema.parse({
+      name: `drift-${fixture.name.replaceAll(" ", "-")}`,
+      description: "Compares static and runtime model resolution.",
+      ...(fixture.workflowProvider !== undefined ? { provider: fixture.workflowProvider } : {}),
+      nodes: [{ id: "prompt", prompt: "Resolve this fixture.", ...fixture.node }],
+    });
+    const activeCapabilities =
+      fixture.effectiveProviderId === "copilot" ? COPILOT_CAPABILITIES : CLAUDE_CAPABILITIES;
+    const { handler } = makeProviderHarness(
+      fixture.effectiveProviderId,
+      activeCapabilities,
+      "ok",
+      () => fixture.preferredProviderId,
+    );
+
+    const runtime = await runPromptNode(
+      workflow,
+      workflow.nodes[0]!,
+      handler,
+      "runProviderId" in fixture ? fixture.runProviderId : undefined,
+    );
+    const staticResolution = resolveWorkflowResolution(workflow, {
+      providers,
+      defaultProviderId: fixture.defaultProviderId,
+      ...("runProviderId" in fixture ? { runProviderId: fixture.runProviderId } : {}),
+    });
+
+    expect(runtime.result.status).toBe("succeeded");
+    expect({
+      provider: staticResolution.nodes[0]?.effectiveProvider,
+      model: staticResolution.nodes[0]?.model,
+    }).toEqual({
+      provider: runtime.result.provider,
+      model: runtime.result.model,
+    });
   });
 });

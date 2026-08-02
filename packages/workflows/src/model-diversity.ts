@@ -11,14 +11,22 @@ export function diagnoseModelDiversity(
   workflow: WorkflowDefinition,
   defaultProviderId?: string,
   providerOverride?: string,
+  resolvedNodes?: ReadonlyMap<
+    string,
+    { readonly provider: string | undefined; readonly model: string | undefined }
+  >,
 ): string[] {
   const groups = new Map<string, DiversityCandidate[]>();
 
   for (const node of workflow.nodes) {
     if (node.prompt === undefined) continue;
 
-    const model = node.model ?? workflow.model;
-    const provider = providerOverride ?? node.provider ?? workflow.provider ?? defaultProviderId;
+    const hasResolvedNode = resolvedNodes?.has(node.id) === true;
+    const resolvedNode = resolvedNodes?.get(node.id);
+    const model = hasResolvedNode ? resolvedNode?.model : (node.model ?? workflow.model);
+    const provider = hasResolvedNode
+      ? resolvedNode?.provider
+      : (providerOverride ?? node.provider ?? workflow.provider ?? defaultProviderId);
     const modelsByProvider = node.model_by_provider;
     if (
       model === undefined ||
