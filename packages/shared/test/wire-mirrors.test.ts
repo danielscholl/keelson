@@ -13,6 +13,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { MODEL_CLASSES } from "../src/chat.ts";
 import {
   memoryTypeSchema,
   RECALL_REQUEST_SCHEMA_VERSION,
@@ -26,6 +27,15 @@ function readWorkflowsSource(relPath: string): string {
 }
 
 describe("@keelson/workflows mirrors of shared wire constants", () => {
+  test("MODEL_CLASSES entries match", () => {
+    const source = readWorkflowsSource("catalog-resolution.ts");
+    const block = source.match(/const MODEL_CLASSES = new Set<ModelClass>\(\[([\s\S]*?)\]\)/);
+    const body = block?.[1] ?? "";
+    expect(body.length).toBeGreaterThan(0);
+    const mirrored = Array.from(body.matchAll(/["']([^"']+)["']/g), (match) => match[1] ?? "");
+    expect(mirrored).toEqual([...MODEL_CLASSES]);
+  });
+
   test("RECALL_REQUEST_SCHEMA_VERSION literal matches", () => {
     const source = readWorkflowsSource("executor.ts");
     const match = source.match(/RECALL_REQUEST_SCHEMA_VERSION\s*=\s*["']([^"']+)["']/);

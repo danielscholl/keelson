@@ -143,6 +143,55 @@ describe("resolveWorkflowResolution", () => {
     expect(result.nodes[0]?.effectiveProvider).toBeUndefined();
   });
 
+  test("blocks a run provider override that is not registered", () => {
+    const result = resolveWorkflowResolution(makeWorkflow([{ id: "draft", prompt: "Draft." }]), {
+      providers: new Map([["claude", CLAUDE_CAPABILITIES]]),
+      defaultProviderId: "claude",
+      runProviderId: "missing",
+    });
+
+    expect(result.tier).toBe("blocked");
+    expect(result.nodes[0]?.effectiveProvider).toBe("missing");
+  });
+
+  test("diagnoses diversity with each node's resolved provider and model", () => {
+    const workflow = makeWorkflow([
+      {
+        id: "copilot",
+        prompt: "Copilot.",
+        provider: "copilot",
+        model: "deep",
+        model_by_provider: { copilot: "gpt-5.6-sol" },
+      },
+      {
+        id: "first",
+        prompt: "First fallback.",
+        provider: "missing",
+        model: "deep",
+        model_by_provider: { copilot: "model-a" },
+      },
+      {
+        id: "second",
+        prompt: "Second fallback.",
+        provider: "missing",
+        model: "deep",
+        model_by_provider: { copilot: "model-b" },
+      },
+    ]);
+
+    const result = resolveWorkflowResolution(workflow, {
+      providers: new Map<string, typeof COPILOT_CAPABILITIES | typeof CLAUDE_CAPABILITIES>([
+        ["copilot", COPILOT_CAPABILITIES],
+        ["claude", CLAUDE_CAPABILITIES],
+      ]),
+      defaultProviderId: "claude",
+    });
+
+    expect(result.collapses).toEqual([
+      "catalog-test: no 'claude' entry in model_by_provider for nodes first, second -- all resolve to 'claude-fable-5'; lens/role diversity collapsed on this provider.",
+    ]);
+  });
+
   test("falls back from a foreign literal outside the effective provider catalog", () => {
     const result = resolveWorkflowResolution(
       makeWorkflow([{ id: "draft", prompt: "Draft.", model: "gpt-5.6-sol" }], {

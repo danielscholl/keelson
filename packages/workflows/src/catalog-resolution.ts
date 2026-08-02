@@ -111,10 +111,17 @@ export function resolveWorkflowResolution(
   );
   const commonEffectiveProvider =
     effectiveProviders.size === 1 ? effectiveProviders.values().next().value : undefined;
+  const resolvedNodes = new Map(
+    nodes.map(({ nodeId, effectiveProvider, model }) => [
+      nodeId,
+      { provider: effectiveProvider, model },
+    ]),
+  );
   const collapses = diagnoseModelDiversity(
     workflow,
     options.defaultProviderId,
     options.runProviderId ?? commonEffectiveProvider,
+    resolvedNodes,
   );
   const fallbackNodes = nodes
     .filter((node) => node.providerFellBack || node.modelFellBack)
@@ -122,10 +129,14 @@ export function resolveWorkflowResolution(
       nodeId: node.nodeId,
       to: `${node.effectiveProvider ?? "none"}/${node.model ?? "default"}`,
     }));
+  const unavailableNodeCount = nodes.filter(
+    ({ effectiveProvider }) =>
+      effectiveProvider === undefined || !options.providers.has(effectiveProvider),
+  ).length;
   const tier =
-    nodes.length > 0 && nodes.every((node) => node.effectiveProvider === undefined)
+    nodes.length > 0 && unavailableNodeCount === nodes.length
       ? "blocked"
-      : fallbackNodes.length > 0 || collapses.length > 0
+      : unavailableNodeCount > 0 || fallbackNodes.length > 0 || collapses.length > 0
         ? "degrades"
         : "native";
 
