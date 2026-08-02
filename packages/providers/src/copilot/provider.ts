@@ -62,6 +62,11 @@ export const COPILOT_CAPABILITIES: ProviderCapabilities = {
   // choice to Copilot and is always valid; the real list comes from listModels().
   models: [COPILOT_DEFAULT_MODEL],
   defaultModel: COPILOT_DEFAULT_MODEL,
+  modelClasses: {
+    fast: COPILOT_DEFAULT_MODEL,
+    balanced: COPILOT_DEFAULT_MODEL,
+    deep: COPILOT_DEFAULT_MODEL,
+  },
 };
 
 export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;

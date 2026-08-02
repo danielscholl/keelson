@@ -315,6 +315,11 @@ describe("CodexProvider", () => {
     expect(models.map((m) => m.id)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
     expect(models.map((m) => m.displayName)).toEqual(["Sol", "Terra", "Luna"]);
     expect(models.map((m) => m.id)).toEqual(CODEX_CAPABILITIES.models);
+    expect(CODEX_CAPABILITIES.modelClasses).toEqual({
+      fast: models.at(-1)?.id,
+      balanced: models[Math.floor(models.length / 2)]?.id,
+      deep: models[0]?.id,
+    });
   });
 
   test("streams text then usage; captures a new thread id via onSessionId", async () => {

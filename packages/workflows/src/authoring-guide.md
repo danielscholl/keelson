@@ -41,7 +41,9 @@ Required:
 Optional:
 
 - `provider` — `claude`, `copilot`, or `stub`; omitted = the runner's default.
-- `model` — default model for AI nodes.
+- `model` — default model for AI nodes. `fast`, `balanced`, and `deep` resolve to
+  a concrete model for the effective provider; any other value passes through as
+  a literal model id.
 - `modelReasoningEffort` — `minimal` | `low` | `medium` | `high` | `xhigh`.
 - `webSearchMode` — `disabled` | `cached` | `live`.
 - `interactive: true` — required when any loop node sets
@@ -180,7 +182,11 @@ must already exist on disk; from chat, use an inline `prompt` node instead.
 - `trigger_rule` — join semantics when multiple dependencies finish:
   `all_success` (default) | `one_success` | `none_failed_min_one_success` |
   `all_done`.
-- `model`, `provider` — per-node overrides (AI nodes).
+- `model` — per-node model override. The reserved `fast`, `balanced`, and `deep`
+  values resolve for the effective provider; literal model ids pass through.
+- `model_by_provider` — map of provider id to concrete model id. The effective
+  provider's entry wins; when absent, resolution falls through to `model`.
+- `provider` — per-node provider override (AI nodes).
 - `context: fresh | shared` — `fresh` forces a new AI session for the node.
 - `allowed_tools` / `denied_tools` — tool-name filters for AI nodes.
   Rib-registered tools are default-off; opt in with `allowed_tools`.

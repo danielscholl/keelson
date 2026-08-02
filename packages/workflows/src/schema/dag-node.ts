@@ -144,6 +144,7 @@ export const dagNodeBaseSchema = z.object({
   when: z.string().optional(),
   trigger_rule: triggerRuleSchema.optional(),
   model: z.string().optional(),
+  model_by_provider: z.record(z.string(), z.string().min(1)).optional(),
   provider: z.string().trim().min(1).optional(),
   context: z.enum(["fresh", "shared"]).optional(),
   output_format: z.record(z.string(), z.unknown()).optional(),
@@ -347,6 +348,7 @@ export type DagNode =
 export const BASH_NODE_AI_FIELDS: readonly string[] = [
   "provider",
   "model",
+  "model_by_provider",
   "context",
   "output_format",
   "allowed_tools",
@@ -576,6 +578,9 @@ export const dagNodeSchema = dagNodeBaseSchema
     // AI-only fields (not applicable to bash/loop nodes)
     const aiOnly = {
       ...(data.model !== undefined ? { model: data.model } : {}),
+      ...(data.model_by_provider !== undefined
+        ? { model_by_provider: data.model_by_provider }
+        : {}),
       ...(data.provider !== undefined ? { provider: data.provider } : {}),
       ...(data.context !== undefined ? { context: data.context } : {}),
       ...(data.output_format !== undefined ? { output_format: data.output_format } : {}),

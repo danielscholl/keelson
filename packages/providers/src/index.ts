@@ -91,6 +91,7 @@ export {
   registerConfiguredGateways,
   registerGatewayProvider,
 } from "./gateway/registration.ts";
+export { deriveModelClasses, type ModelClassMap } from "./model-classes.ts";
 export type { PiRawEvent } from "./pi/event-bridge.ts";
 export { mapPiEvent } from "./pi/event-bridge.ts";
 export type {

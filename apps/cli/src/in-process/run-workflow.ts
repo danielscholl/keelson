@@ -13,7 +13,7 @@ import {
   isRegisteredProvider,
   registerStubProvider,
 } from "@keelson/providers";
-import { loadKeelsonConfig } from "@keelson/shared/config";
+import { loadKeelsonConfig, readModelClassOverride } from "@keelson/shared/config";
 import { getRegisteredTools } from "@keelson/skills";
 import {
   bashHandler,
@@ -185,6 +185,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
   // a pause callout and no second client to resume the run, so an approval
   // node fails immediately with a clear message. Operators who need
   // approval should route through `keelson start` + the SPA.
+  const config = loadKeelsonConfig();
   const promptHandler = makePromptHandler({
     getProvider: (id) => {
       const target = id ?? providerId;
@@ -205,6 +206,7 @@ export async function runHeadless(opts: RunHeadlessOptions): Promise<RunHeadless
     },
     // Resolve absent or unavailable preferences to the registered headless default.
     resolveProviderId: (id) => (id !== undefined && isRegisteredProvider(id) ? id : providerId),
+    resolveModelClass: (id, modelClass) => readModelClassOverride(config, id)?.[modelClass],
     // Tools from `@keelson/skills` are `ToolDefinition` (typed name + schema);
     // `PromptHandlerProvider` accepts the structural `{ name; [k]: unknown }`
     // shape. Same boundary cast as the provider above.

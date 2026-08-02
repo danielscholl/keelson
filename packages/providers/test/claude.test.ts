@@ -1255,6 +1255,11 @@ describe("ClaudeProvider — defaultModel + listModels", () => {
       "claude-sonnet-5",
       "claude-haiku-4-5",
     ]);
+    expect(CLAUDE_CAPABILITIES.modelClasses).toEqual({
+      fast: "claude-haiku-4-5",
+      balanced: CLAUDE_DEFAULT_MODEL,
+      deep: "claude-fable-5",
+    });
   });
 
   it("listModels() returns the curated catalog with metadata", async () => {

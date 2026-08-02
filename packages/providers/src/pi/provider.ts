@@ -3,6 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { ChunkQueue } from "../chunk-queue.ts";
+import { deriveModelClasses } from "../model-classes.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -70,6 +71,7 @@ export const PI_CAPABILITIES: ProviderCapabilities = {
   reasoningEffort: false,
   models: PI_MODEL_CATALOG.map((m) => m.id),
   defaultModel: PI_DEFAULT_MODEL,
+  modelClasses: deriveModelClasses(PI_MODEL_CATALOG, PI_DEFAULT_MODEL),
 };
 
 // Deep copy of the static baseline, returned when the dynamic catalog can't run.

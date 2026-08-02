@@ -9,6 +9,7 @@
 import type { TokenUsage, ToolContext } from "@keelson/shared";
 import type { ClaudeAuthMode } from "@keelson/shared/config";
 import { ChunkQueue } from "../chunk-queue.ts";
+import { deriveModelClasses } from "../model-classes.ts";
 import { toTokenCount } from "../token-count.ts";
 import type {
   IAgentProvider,
@@ -79,6 +80,7 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
   // shape gets projected here so the two don't drift.
   models: CLAUDE_MODEL_CATALOG.map((m) => m.id),
   defaultModel: CLAUDE_DEFAULT_MODEL,
+  modelClasses: deriveModelClasses(CLAUDE_MODEL_CATALOG, CLAUDE_DEFAULT_MODEL),
 };
 
 export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;

@@ -1822,6 +1822,11 @@ describe("CopilotProvider — defaultModel + listModels", () => {
     // The curated fallback must include "auto" so it's selectable even
     // when the dynamic fetch hasn't landed yet.
     expect(COPILOT_CAPABILITIES.models).toContain("auto");
+    expect(COPILOT_CAPABILITIES.modelClasses).toEqual({
+      fast: "auto",
+      balanced: "auto",
+      deep: "auto",
+    });
   });
 
   it("listModels() projects SDK ModelInfo via a throwaway client", async () => {

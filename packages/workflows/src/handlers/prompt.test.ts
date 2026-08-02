@@ -41,6 +41,11 @@ interface SpyProviderOptions {
     reasoningEffort?: boolean;
     tools?: boolean;
     models?: readonly string[];
+    modelClasses?: {
+      fast?: string;
+      balanced?: string;
+      deep?: string;
+    };
   };
 }
 
@@ -124,6 +129,29 @@ function buildCtx(opts: BuildCtxOptions = {}): NodeContext {
 }
 
 const stubNode = { id: "n1", prompt: "" } as unknown as DagNode;
+const CLAUDE_MODEL_CLASS_CAPABILITIES = {
+  defaultModel: "claude-opus-4-8",
+  models: ["claude-fable-5", "claude-opus-4-8", "claude-haiku-4-5"],
+  modelClasses: {
+    fast: "claude-haiku-4-5",
+    balanced: "claude-opus-4-8",
+    deep: "claude-fable-5",
+  },
+} as const;
+const CODEX_MODEL_CLASS_CAPABILITIES = {
+  defaultModel: "",
+  models: ["codex-deep-model", "codex-balanced-model", "codex-fast-model"],
+  modelClasses: {
+    fast: "codex-fast-model",
+    balanced: "codex-balanced-model",
+    deep: "codex-deep-model",
+  },
+} as const;
+const COPILOT_MODEL_CLASS_CAPABILITIES = {
+  defaultModel: "auto",
+  models: ["auto"],
+  modelClasses: { fast: "auto", balanced: "auto", deep: "auto" },
+} as const;
 
 describe("makePromptHandler", () => {
   test("returns succeeded with accumulated text from a chunk stream", async () => {
@@ -1445,8 +1473,9 @@ describe("makePromptHandler", () => {
       prompt: "",
       model: "gpt-5-3-mini",
     } as unknown as DagNode;
-    await handler.handle(nodeWithModel, buildCtx());
+    const result = await handler.handle(nodeWithModel, buildCtx());
     expect(calls[0]!.options?.model).toBe("gpt-5-3-mini");
+    expect(result.model).toBe("gpt-5-3-mini");
   });
 
   describe("model fallback chain", () => {
@@ -1651,6 +1680,112 @@ describe("makePromptHandler", () => {
       expect(claudeResult.model).toBe("claude-opus-4-8");
       expect(copilot.calls[0]?.options?.model).toBe("auto");
       expect(copilotResult.model).toBe("auto");
+    });
+
+    test.each([
+      ["claude", CLAUDE_MODEL_CLASS_CAPABILITIES],
+      ["codex", CODEX_MODEL_CLASS_CAPABILITIES],
+      ["copilot", COPILOT_MODEL_CLASS_CAPABILITIES],
+    ] as const)("resolves deep against the %s capability map and records it", async (id, caps) => {
+      const expectedModel = caps.modelClasses?.deep;
+      if (expectedModel === undefined) throw new Error(`${id} has no deep model class`);
+      const spy = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: caps,
+      });
+      const handler = makePromptHandler({
+        getProvider: () => spy.provider,
+        resolveProviderId: () => id,
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(
+        { id: "n1", prompt: "", model: "deep" } as unknown as DagNode,
+        buildCtx({ workflowProvider: id }),
+      );
+
+      expect(spy.calls[0]?.options?.model).toBe(expectedModel);
+      expect(result.model).toBe(expectedModel);
+    });
+
+    test("configured model class overrides the provider capability", async () => {
+      const { provider, calls } = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: CLAUDE_MODEL_CLASS_CAPABILITIES,
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        resolveProviderId: () => "claude",
+        resolveModelClass: (providerId, cls) =>
+          providerId === "claude" && cls === "deep" ? "claude-custom-deep" : undefined,
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(
+        { id: "n1", prompt: "", model: "deep" } as unknown as DagNode,
+        buildCtx({ workflowProvider: "claude" }),
+      );
+
+      expect(calls[0]?.options?.model).toBe("claude-custom-deep");
+      expect(result.model).toBe("claude-custom-deep");
+    });
+
+    test("model_by_provider uses the effective provider and otherwise falls through to model", async () => {
+      const claude = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: CLAUDE_MODEL_CLASS_CAPABILITIES,
+      });
+      const copilot = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: COPILOT_MODEL_CLASS_CAPABILITIES,
+      });
+      const providers = { claude: claude.provider, copilot: copilot.provider };
+      const handler = makePromptHandler({
+        getProvider: (id) => providers[id as keyof typeof providers],
+        resolveProviderId: (id) => id ?? "claude",
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        model: "deep",
+        model_by_provider: { copilot: "copilot-concrete" },
+      } as unknown as DagNode;
+
+      const claudeResult = await handler.handle(node, buildCtx({ workflowProvider: "claude" }));
+      const copilotResult = await handler.handle(node, buildCtx({ workflowProvider: "copilot" }));
+
+      expect(claudeResult.model).toBe(CLAUDE_MODEL_CLASS_CAPABILITIES.modelClasses.deep);
+      expect(copilotResult.model).toBe("copilot-concrete");
+    });
+
+    test("fallback provider resolves the class before catalog validation", async () => {
+      const events: NodeStreamEvent[] = [];
+      const codex = makeSpyProvider({
+        chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+        capabilities: CODEX_MODEL_CLASS_CAPABILITIES,
+      });
+      const handler = makePromptHandler({
+        getProvider: () => codex.provider,
+        resolveProviderId: (id) => id ?? "claude",
+        getRegisteredTools: () => [],
+      });
+
+      const result = await handler.handle(
+        { id: "n1", prompt: "", model: "deep" } as unknown as DagNode,
+        buildCtx({
+          workflowProvider: "claude",
+          providerOverride: "codex",
+          onEvent: (event) => events.push(event),
+        }),
+      );
+
+      expect(result.model).toBe(CODEX_MODEL_CLASS_CAPABILITIES.modelClasses.deep);
+      expect(
+        events.some(
+          (event) => event.type === "node_warning" && event.message.includes("is not in provider"),
+        ),
+      ).toBe(false);
     });
 
     test("an override beats node and workflow provider pins", async () => {

@@ -2,6 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License").
 
+import { deriveModelClasses } from "../model-classes.ts";
 import type {
   IAgentProvider,
   MessageChunk,
@@ -65,6 +66,7 @@ export const CODEX_CAPABILITIES: ProviderCapabilities = {
   reasoningEffort: true,
   models: CODEX_MODEL_CATALOG.map((m) => m.id),
   defaultModel: CODEX_DEFAULT_MODEL,
+  modelClasses: deriveModelClasses(CODEX_MODEL_CATALOG, CODEX_DEFAULT_MODEL),
 };
 
 // Agentic by default: codex reads the repo and writes within the conversation's
