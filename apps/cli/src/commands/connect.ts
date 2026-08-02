@@ -15,7 +15,6 @@ import { dirname } from "node:path";
 import {
   type ConnectionsData,
   connectionsPath,
-  loadConnections,
   readConnections,
   saveConnections,
 } from "../connect/receipt.ts";
@@ -183,7 +182,23 @@ export function runConnect(rawTargets: readonly string[], opts: ConnectOptions):
   const scope: Scope = opts.local ? "local" : "global";
   const run = opts.runCommand ?? defaultRunCommand;
   const now = new Date().toISOString();
-  const data = loadConnections(home);
+  // Strict, and before any agent config is touched: connect ends by saving this
+  // ledger back, so reading an unreadable receipt as empty would persist a file
+  // recording only the new connection and drop every prior one — leaving those
+  // agents wired with nothing left to reverse them. Connect is the one path that
+  // can still refuse outright, because nothing has been written yet.
+  const read = readConnections(home);
+  if (!read.ok) {
+    emit(
+      {
+        error: `cannot read ${connectionsPath(home)} (${read.reason}); nothing was connected. Fix or delete the file — deleting it loses the record of any agent already wired, which must then be reversed with that agent's own CLI`,
+        code: "BAD_RECEIPT",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_FAIL);
+  }
+  const data = read.data;
 
   const connected: Array<Record<string, unknown>> = [];
   const failed: Array<Record<string, unknown>> = [];
@@ -356,7 +371,7 @@ export function disconnectAll(home: string, runCommand?: CommandRunner): Disconn
   const data = read.data;
   const removed: TargetId[] = [];
   const failed: TargetId[] = [];
-  // TARGET_IDS rather than the receipt's own keys: loadConnections does not
+  // TARGET_IDS rather than the receipt's own keys: the reader does not
   // validate them, so a hand-edited receipt could otherwise name an unknown
   // target and steer deletion at the paths recorded beside it.
   for (const id of TARGET_IDS) {
@@ -437,7 +452,23 @@ function reverseSkillsFor(data: ConnectionsData, id: TargetId): void {
 
 export function runConnectStatus(opts: { json: boolean; home?: string }): void {
   const home = opts.home ?? resolveKeelsonHome();
-  const data = loadConnections(home);
+  // Read-only, so nothing here can destroy the ledger — but "no agents
+  // connected" and "cannot tell which agents are connected" must not look the
+  // same. A script counting `connections` would read the second as the first,
+  // and an operator would be told to run `connect` when the real answer is that
+  // agents may be wired and unaccounted for.
+  const read = readConnections(home);
+  if (!read.ok) {
+    emit(
+      {
+        error: `cannot read ${connectionsPath(home)} (${read.reason}); connected agents cannot be listed. Check each agent's own MCP config for a 'keelson' entry`,
+        code: "BAD_RECEIPT",
+      },
+      { json: opts.json },
+    );
+    process.exit(EXIT_FAIL);
+  }
+  const data = read.data;
   const connections = Object.values(data.targets)
     .filter((r): r is NonNullable<typeof r> => r !== undefined)
     .map((r) => ({

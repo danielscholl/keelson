@@ -64,7 +64,7 @@ function empty(): ConnectionsData {
 
 // Structural guards so a hand-edited or corrupted receipt degrades to an empty
 // ledger instead of crashing a later reverse (e.g. `skill.requestedBy.filter`),
-// upholding the never-throws contract loadConnections documents.
+// so a structurally invalid entry is dropped and counted rather than crashing.
 function isMcpRecord(v: unknown): v is McpRecord {
   if (!isRecord(v)) return false;
   if (v.kind === "file") {
@@ -223,12 +223,11 @@ export function readConnections(home: string): ReadConnectionsResult {
   return { ok: false, reason: `unsupported receipt version ${JSON.stringify(parsed.version)}` };
 }
 
-// Read the receipt, tolerating absence/corruption by returning an empty ledger —
-// a connect that isn't recorded simply can't be auto-undone, never a throw.
-export function loadConnections(home: string): ConnectionsData {
-  const read = readConnections(home);
-  return read.ok ? read.data : empty();
-}
+// There is deliberately no tolerant reader here. One that degraded a corrupt
+// receipt to an empty ledger existed, and every caller that paired it with
+// saveConnections destroyed the record of already-wired agents while reporting
+// success. A caller that genuinely wants to proceed on an unreadable receipt
+// must say so at its own call site, where the choice is visible.
 
 // Persist the receipt, or delete it once nothing is connected — a clean home
 // leaves no dangling ledger.

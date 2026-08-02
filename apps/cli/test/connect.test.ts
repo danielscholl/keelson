@@ -7,8 +7,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommandResult } from "../src/commands/connect.ts";
-import { disconnectAll, runConnect, runDisconnect } from "../src/commands/connect.ts";
-import { loadConnections, readConnections } from "../src/connect/receipt.ts";
+import {
+  disconnectAll,
+  runConnect,
+  runConnectStatus,
+  runDisconnect,
+} from "../src/commands/connect.ts";
+import { readConnections } from "../src/connect/receipt.ts";
 import {
   applyJsonMcp,
   applyTomlMcp,
@@ -127,6 +132,35 @@ describe("connect / disconnect (filesystem)", () => {
     runCommand: fakeRun,
     ...extra,
   });
+
+  // These commands end in process.exit, which would take the test runner with
+  // them. Swap it for a throw so the guard can be exercised in-process, and
+  // return the code it asked for.
+  const exitCodeOf = (fn: () => void): number | undefined => {
+    const real = process.exit;
+    let code: number | undefined;
+    const sentinel = "test-process-exit";
+    process.exit = ((c?: number) => {
+      code = c;
+      throw new Error(sentinel);
+    }) as typeof process.exit;
+    try {
+      fn();
+    } catch (err) {
+      if ((err as Error).message !== sentinel) throw err;
+    } finally {
+      process.exit = real;
+    }
+    return code;
+  };
+
+  // Reads a receipt the test expects to be well-formed, failing the test rather
+  // than degrading if it isn't — the strict read is the only reader now.
+  const expectReadable = (h: string) => {
+    const read = readConnections(h);
+    if (!read.ok) throw new Error(`expected a readable receipt, got: ${read.reason}`);
+    return read.data;
+  };
 
   // Global-scope skill roots: copilot + codex share `.agents/skills`, claude has
   // its own `.claude/skills`, all under the OS home (not the repo).
@@ -274,11 +308,6 @@ describe("connect / disconnect (filesystem)", () => {
     expect(
       JSON.parse(readFileSync(join(repo, ".mcp.json"), "utf8")).mcpServers.keelson,
     ).toBeDefined();
-
-    // loadConnections keeps its never-throws degrade for read-only callers.
-    const degraded = loadConnections(home);
-    expect(degraded.targets).toEqual({});
-    expect(degraded.skills).toEqual({});
   });
 
   test("a v1 receipt migrates so an old connect can still be undone", () => {
@@ -344,11 +373,37 @@ describe("connect / disconnect (filesystem)", () => {
     expect(outcome.removed).toEqual([]);
     expect(outcome.failed).toEqual(["claude"]);
     // The record is what a retry needs, so it stays.
-    expect(loadConnections(home).targets.claude).toBeDefined();
+    expect(expectReadable(home).targets.claude).toBeDefined();
     // The skill is already gone: idempotent cleanup runs before the agent's
     // non-idempotent `mcp remove`, so a retry reaches that removal instead of
     // being turned away by a "not found" from a step that already succeeded.
     expect(existsSync(claudeSkill())).toBe(false);
+  });
+
+  // The #758 scenario: connect reads the ledger and saves it back, so degrading
+  // an unreadable receipt to empty would persist a file recording only the new
+  // connection and drop every prior one — leaving those agents wired with
+  // nothing left to reverse them, and exiting 0.
+  test("connect refuses an unreadable receipt instead of overwriting it", () => {
+    runConnect(["copilot"], connectOpts());
+    const receipt = join(home, "connections.json");
+    const corrupt = "{ not json";
+    writeFileSync(receipt, corrupt);
+
+    const codexCfg = join(osHome, ".codex", "config.toml");
+    expect(existsSync(codexCfg)).toBe(false);
+
+    expect(exitCodeOf(() => runConnect(["codex"], connectOpts()))).toBe(1);
+
+    // Nothing written, and the receipt left for the operator to repair.
+    expect(existsSync(codexCfg)).toBe(false);
+    expect(readFileSync(receipt, "utf8")).toBe(corrupt);
+  });
+
+  test("connect status refuses an unreadable receipt rather than reporting none", () => {
+    runConnect(["copilot"], connectOpts());
+    writeFileSync(join(home, "connections.json"), "{ not json");
+    expect(exitCodeOf(() => runConnectStatus({ json: true, home }))).toBe(1);
   });
 
   test("a refused CLI removal is still reversible on a later attempt", () => {
@@ -365,7 +420,7 @@ describe("connect / disconnect (filesystem)", () => {
     expect(existsSync(join(home, "connections.json"))).toBe(false);
   });
 
-  // loadConnections keys targets by whatever the file says, so an unknown id
+  // The receipt keys targets by whatever the file says, so an unknown id
   // would otherwise steer reversal at the paths recorded beside it.
   test("a receipt naming an unknown target is ignored, not reversed", () => {
     const stray = join(base, "not-ours.json");
@@ -393,12 +448,12 @@ describe("connect / disconnect (filesystem)", () => {
     expect(outcome.failed).toEqual([]);
     expect(existsSync(stray)).toBe(true);
     // Ignored, not discarded: the entry survives the rewrite.
-    expect(loadConnections(home).targets).toHaveProperty("rogue");
+    expect(expectReadable(home).targets).toHaveProperty("rogue");
   });
 
   test("a known target beside an unknown one is still reversed, and the unknown one kept", () => {
     runConnect(["copilot"], connectOpts());
-    const data = loadConnections(home);
+    const data = expectReadable(home);
     const stray = join(base, "not-ours.json");
     writeFileSync(stray, JSON.stringify({ mcpServers: { keelson: {} } }));
     (data.targets as Record<string, unknown>).rogue = {
@@ -412,7 +467,7 @@ describe("connect / disconnect (filesystem)", () => {
     expect(outcome.receiptUnreadable).toBeUndefined();
     expect(outcome.removed).toEqual(["copilot"]);
     expect(existsSync(stray)).toBe(true);
-    expect(loadConnections(home).targets).toHaveProperty("rogue");
+    expect(expectReadable(home).targets).toHaveProperty("rogue");
   });
 
   // An empty-ledger degrade here would rewrite the receipt away (saveConnections
@@ -516,7 +571,7 @@ describe("connect / disconnect (filesystem)", () => {
     const outcome = disconnectAll(home, fakeRun);
     expect(outcome.failed).toEqual(["copilot"]);
     expect(outcome.removed).toEqual([]);
-    const after = loadConnections(home);
+    const after = expectReadable(home);
     expect(after.targets.copilot).toBeDefined();
     // The claim survives, so a retry still reaches the skill.
     expect(after.skills[agentsSkill()]?.requestedBy).toEqual(["copilot"]);
@@ -532,7 +587,7 @@ describe("connect / disconnect (filesystem)", () => {
     expect(outcome.failed).toEqual(["copilot"]);
     expect(outcome.removed).toEqual(["codex"]);
     // The broken target is still recorded, so a retry is possible...
-    expect(loadConnections(home).targets.copilot).toBeDefined();
+    expect(expectReadable(home).targets.copilot).toBeDefined();
     // ...and the healthy one really was reversed.
     expect(existsSync(join(osHome, ".codex", "config.toml"))).toBe(false);
   });
