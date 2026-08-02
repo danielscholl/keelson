@@ -104,7 +104,11 @@ function parseTargets(raw: unknown): ConnectionsData["targets"] {
   const targets: ConnectionsData["targets"] = {};
   if (isRecord(raw)) {
     for (const [id, rec] of Object.entries(raw)) {
-      if (isTargetRecord(rec)) targets[id as TargetId] = rec;
+      // The key and the record's own `target` must agree. Reversal reads the
+      // key for skill claims but the record for its MCP path, so a receipt
+      // where they disagree cleans one target's wiring while leaving the
+      // other's claim behind. connect only ever writes them equal.
+      if (isTargetRecord(rec) && rec.target === id) targets[id as TargetId] = rec;
     }
   }
   return targets;
@@ -114,7 +118,10 @@ function parseSkills(raw: unknown): ConnectionsData["skills"] {
   const skills: ConnectionsData["skills"] = {};
   if (isRecord(raw)) {
     for (const [path, rec] of Object.entries(raw)) {
-      if (isSkillRecord(rec)) skills[path] = rec;
+      // Key and `file` must agree, for the same reason target records must:
+      // reverseSkillsFor unlinks `skill.file` but drops the entry by its key,
+      // so a divergent pair unlinks a file the ledger never claimed.
+      if (isSkillRecord(rec) && rec.file === path) skills[path] = rec;
     }
   }
   return skills;
@@ -128,7 +135,7 @@ function migrateV1(parsed: Record<string, unknown>): ConnectionsData {
     for (const [id, rec] of Object.entries(parsed.targets)) {
       if (
         isRecord(rec) &&
-        typeof rec.target === "string" &&
+        rec.target === id &&
         typeof rec.file === "string" &&
         (rec.format === "json" || rec.format === "toml") &&
         typeof rec.createdFile === "boolean"
@@ -145,31 +152,82 @@ function migrateV1(parsed: Record<string, unknown>): ConnectionsData {
   return out;
 }
 
-// Read the receipt, tolerating absence/corruption by returning an empty ledger —
-// a connect that isn't recorded simply can't be auto-undone, never a throw.
-export function loadConnections(home: string): ConnectionsData {
+export type ReadConnectionsResult =
+  | { ok: true; data: ConnectionsData }
+  | { ok: false; reason: string };
+
+// Strict read, separating "no receipt" (an empty ledger, fine) from "a receipt
+// that cannot be parsed". Any caller that REWRITES the ledger must use this:
+// degrading an unreadable file to empty and then saving deletes the only record
+// of what connect wrote, while the agent stays wired to keelson.
+// Entries present in the file but dropped by the structural guards. A rewriting
+// caller must treat these as a hard failure: saving the filtered ledger deletes
+// their only record while the wiring they describe is still in place.
+function droppedEntries(raw: unknown, kept: number): number {
+  return isRecord(raw) ? Object.keys(raw).length - kept : 0;
+}
+
+// A v2 container that is absent, or present but not an object at all. Either
+// way the parse* helpers read it as empty and droppedEntries then sees nothing
+// missing, so counting alone would accept it as a legitimately empty ledger.
+// saveConnections always writes both keys, so a missing one is not a shape
+// keelson produces — only an absent receipt means an empty ledger.
+function malformedContainer(raw: unknown): boolean {
+  return !isRecord(raw);
+}
+
+export function readConnections(home: string): ReadConnectionsResult {
   let text: string;
   try {
     text = readFileSync(connectionsPath(home), "utf8");
-  } catch {
-    return empty();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, data: empty() };
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(text);
-    if (isRecord(parsed)) {
-      if (parsed.version === 2) {
-        return {
-          version: 2,
-          targets: parseTargets(parsed.targets),
-          skills: parseSkills(parsed.skills),
-        };
-      }
-      if (parsed.version === 1) return migrateV1(parsed);
-    }
-  } catch {
-    // fall through
+    parsed = JSON.parse(text);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
-  return empty();
+  if (!isRecord(parsed)) return { ok: false, reason: "not a JSON object" };
+  if (parsed.version === 2) {
+    if (malformedContainer(parsed.targets) || malformedContainer(parsed.skills)) {
+      return { ok: false, reason: "missing or malformed 'targets' or 'skills' container" };
+    }
+    const targets = parseTargets(parsed.targets);
+    const skills = parseSkills(parsed.skills);
+    const bad =
+      droppedEntries(parsed.targets, Object.keys(targets).length) +
+      droppedEntries(parsed.skills, Object.keys(skills).length);
+    if (bad > 0) return { ok: false, reason: `${bad} malformed record(s)` };
+    return { ok: true, data: { version: 2, targets, skills } };
+  }
+  if (parsed.version === 1) {
+    // Present-but-not-an-object only: v1 is a legacy shape this code never
+    // wrote, so an omitted container is not evidence of tampering the way a
+    // missing v2 one is.
+    if (parsed.targets !== undefined && !isRecord(parsed.targets)) {
+      return { ok: false, reason: "malformed v1 'targets' container" };
+    }
+    // v1's `skill` is a single record, not a container; migrateV1 drops an
+    // invalid one silently, which is the same loss by another route.
+    if (parsed.skill !== undefined && !isSkillRecord(parsed.skill)) {
+      return { ok: false, reason: "malformed v1 'skill' record" };
+    }
+    const data = migrateV1(parsed);
+    const bad = droppedEntries(parsed.targets, Object.keys(data.targets).length);
+    if (bad > 0) return { ok: false, reason: `${bad} malformed v1 record(s)` };
+    return { ok: true, data };
+  }
+  return { ok: false, reason: `unsupported receipt version ${JSON.stringify(parsed.version)}` };
+}
+
+// Read the receipt, tolerating absence/corruption by returning an empty ledger —
+// a connect that isn't recorded simply can't be auto-undone, never a throw.
+export function loadConnections(home: string): ConnectionsData {
+  const read = readConnections(home);
+  return read.ok ? read.data : empty();
 }
 
 // Persist the receipt, or delete it once nothing is connected — a clean home

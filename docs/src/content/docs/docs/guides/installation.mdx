@@ -90,21 +90,33 @@ yourself when you want the rib's local data gone.
 ## Remove the harness
 
 ```sh
-keelson uninstall           # program files, launcher, and keychain entries
+keelson uninstall           # program files, launcher, keychain entries, agent connections
 keelson uninstall --purge   # the above plus the home: database, workflows, rib data
 ```
 
 `keelson uninstall` stops the server, revokes the keychain entries keelson
-wrote, removes the launcher, and deletes the four program entries at the root of
-the home. Your data stays: the database, `workflows/`, `commands/`,
-`config.json`, and every rib data directory, unless you pass `--purge`.
+wrote, reverses every connection `keelson connect` recorded, removes the
+launcher, and deletes the four program entries at the root of the home. Your
+data stays: the database, `workflows/`, `commands/`, `config.json`, and every
+rib data directory, unless you pass `--purge`.
 
 | Flag | Effect |
 | --- | --- |
 | `--purge` | Also delete the home itself, data included. |
 | `--yes` | Skip the confirmation prompt, for scripting. |
 | `--keep-credentials` | Leave the OS keychain untouched. Also the way past a malformed `config.json`: revoking needs to read the gateways it configures, so an unreadable file otherwise aborts the uninstall rather than destroying the home that named those secrets. |
+| `--keep-connections` | Leave connected agents wired to the MCP endpoint. |
 | `--force` | Uninstall even when the server could not be stopped. |
+
+Disconnecting rides along because it cannot be done afterward: the run takes the
+`keelson` command, so `keelson disconnect` goes with it, and an agent left wired
+keeps pointing at an endpoint that no longer answers. The interactive prompt
+names the agents it is about to disconnect. If one of them cannot be reversed —
+its own CLI is gone or refuses, or its config file is unreadable — the command
+reports that agent as failed and exits non-zero, and the remaining agents are
+still disconnected. On a plain run its entry stays in `<home>/connections.json`,
+so a reinstall can retry it; `--purge` deletes that receipt with the rest of the
+home, so reverse a failed agent by hand from what the command printed.
 
 <Aside type="caution" title="A plain run removes the keelson command itself">
 The launcher is one of the program files, so after `keelson uninstall` there is

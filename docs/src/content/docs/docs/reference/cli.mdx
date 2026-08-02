@@ -211,7 +211,7 @@ command). The options below apply to the one-shot form.
 | `keelson update` | Update the harness and its ribs in place, each to its newest release. `--check` reports the available harness version and applies nothing (use `rib update --check` for the ribs); `--force` re-applies; `--no-ribs` and `--no-notes` narrow it. |
 | `keelson backup [output]` | Write a consistent snapshot of the database, safe while the server is running. Defaults to `<home>/backups/keelson-<timestamp>.db`; `--db <path>` snapshots a different database. |
 | `keelson worktree prune` | Remove leftover isolated-run worktrees. `--dry-run` lists candidates; `--force` also removes dirty ones. |
-| `keelson uninstall` | Remove the program files, the launcher, and the keychain entries keelson wrote. `--purge` also deletes the home; `--yes` skips the prompt; `--keep-credentials` leaves the keychain alone; `--force` proceeds when the server could not be stopped. |
+| `keelson uninstall` | Remove the program files, the launcher, the keychain entries keelson wrote, and any agent connections it recorded. `--purge` also deletes the home; `--yes` skips the prompt; `--keep-credentials` leaves the keychain alone; `--keep-connections` leaves the agent wiring alone; `--force` proceeds when the server could not be stopped. |
 | `keelson version` | Print the CLI, Bun, and schema versions, plus each installed rib's version. |
 
 The database runs in WAL mode, so copying `keelson.db` while the server is

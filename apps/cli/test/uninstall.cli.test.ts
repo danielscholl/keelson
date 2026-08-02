@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License").
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -39,6 +39,31 @@ function seedHome(home: string): void {
   );
   mkdirSync(join(home, "node_modules"), { recursive: true });
   writeFileSync(join(home, "keelson.db"), "db");
+}
+
+// A recorded connection whose reversal needs no agent binary: a file-kind
+// target, alongside a sibling MCP server the undo must leave alone.
+function seedConnection(home: string, agentConfig: string): void {
+  writeFileSync(
+    agentConfig,
+    JSON.stringify({
+      mcpServers: { keelson: { type: "http", url: "u" }, other: { type: "http", url: "v" } },
+    }),
+  );
+  writeFileSync(
+    join(home, "connections.json"),
+    JSON.stringify({
+      version: 2,
+      targets: {
+        copilot: {
+          target: "copilot",
+          mcp: { kind: "file", file: agentConfig, format: "json", createdFile: false },
+          connectedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+      skills: {},
+    }),
+  );
 }
 
 describe("keelson uninstall (spawned CLI)", () => {
@@ -153,5 +178,36 @@ describe("keelson uninstall (spawned CLI)", () => {
     expect(payload.code).toBe("NOT_INSTALLED");
     expect(payload.error).toContain("--purge");
     expect(existsSync(join(home, "keelson.db"))).toBe(true);
+  });
+
+  // Uninstall takes the launcher, so a connection left behind can no longer be
+  // reversed with `keelson disconnect` — it has to go with the harness.
+  test("recorded agent connections are reversed", async () => {
+    seedHome(home);
+    const agentConfig = join(home, "agent-mcp.json");
+    seedConnection(home, agentConfig);
+
+    const res = await runCli(["uninstall", "--yes", "--keep-credentials", "--json"], home);
+    expect(res.exitCode).toBe(0);
+    expect(JSON.parse(res.stdout).data.connectionsRemoved).toEqual(["copilot"]);
+    const servers = JSON.parse(readFileSync(agentConfig, "utf8")).mcpServers;
+    expect(servers.keelson).toBeUndefined();
+    expect(servers.other).toBeDefined();
+    expect(existsSync(join(home, "connections.json"))).toBe(false);
+  });
+
+  test("--keep-connections leaves the agent wiring in place", async () => {
+    seedHome(home);
+    const agentConfig = join(home, "agent-mcp.json");
+    seedConnection(home, agentConfig);
+
+    const res = await runCli(
+      ["uninstall", "--yes", "--keep-credentials", "--keep-connections", "--json"],
+      home,
+    );
+    expect(res.exitCode).toBe(0);
+    expect(JSON.parse(res.stdout).data.connectionsRemoved).toEqual([]);
+    expect(JSON.parse(readFileSync(agentConfig, "utf8")).mcpServers.keelson).toBeDefined();
+    expect(existsSync(join(home, "connections.json"))).toBe(true);
   });
 });

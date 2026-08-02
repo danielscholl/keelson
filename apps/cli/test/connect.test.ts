@@ -7,7 +7,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommandResult } from "../src/commands/connect.ts";
-import { runConnect, runDisconnect } from "../src/commands/connect.ts";
+import { disconnectAll, runConnect, runDisconnect } from "../src/commands/connect.ts";
+import { loadConnections, readConnections } from "../src/connect/receipt.ts";
 import {
   applyJsonMcp,
   applyTomlMcp,
@@ -234,44 +235,50 @@ describe("connect / disconnect (filesystem)", () => {
     expect(existsSync(join(freshHome, "connections.json"))).toBe(true);
   });
 
-  test("a corrupt receipt degrades to an empty ledger; disconnect does not throw", () => {
+  // A rewriting caller must refuse this rather than save a filtered copy over it:
+  // the malformed skill's own record would be the thing deleted, while the file
+  // it names stays on disk. The read-only degrade is what still tolerates one.
+  test("a receipt with malformed entries is refused, and neither it nor the agent config is touched", () => {
+    const receipt = join(home, "connections.json");
     // Malformed skill (requestedBy is not an array): a naive cast would crash
-    // reverseSkillsFor on `.filter` during disconnect.
-    writeFileSync(
-      join(home, "connections.json"),
-      JSON.stringify({
-        version: 2,
-        targets: {
-          claude: {
-            target: "claude",
-            mcp: {
-              kind: "file",
-              file: join(repo, ".mcp.json"),
-              format: "json",
-              createdFile: false,
-            },
-            connectedAt: "x",
-          },
+    // reverseSkillsFor on `.filter`.
+    const body = JSON.stringify({
+      version: 2,
+      targets: {
+        claude: {
+          target: "claude",
+          mcp: { kind: "file", file: join(repo, ".mcp.json"), format: "json", createdFile: false },
+          connectedAt: "x",
         },
-        skills: {
-          "/x/SKILL.md": {
-            file: "/x/SKILL.md",
-            createdFile: true,
-            createdDirs: "oops",
-            requestedBy: "nope",
-          },
+      },
+      skills: {
+        "/x/SKILL.md": {
+          file: "/x/SKILL.md",
+          createdFile: true,
+          createdDirs: "oops",
+          requestedBy: "nope",
         },
-      }),
-    );
+      },
+    });
+    writeFileSync(receipt, body);
     writeFileSync(
       join(repo, ".mcp.json"),
       JSON.stringify({ mcpServers: { keelson: { type: "http", url: "u" }, other: {} } }),
     );
-    expect(() => runDisconnect(["claude"], disconnectOpts())).not.toThrow();
-    // The valid target was still honored: keelson removed, sibling kept.
-    const servers = JSON.parse(readFileSync(join(repo, ".mcp.json"), "utf8")).mcpServers;
-    expect(servers.keelson).toBeUndefined();
-    expect(servers.other).toBeDefined();
+
+    expect(readConnections(home).ok).toBe(false);
+    expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeDefined();
+    expect(readFileSync(receipt, "utf8")).toBe(body);
+    // The valid target was NOT reversed — acting on half a ledger is what this
+    // refuses to do.
+    expect(
+      JSON.parse(readFileSync(join(repo, ".mcp.json"), "utf8")).mcpServers.keelson,
+    ).toBeDefined();
+
+    // loadConnections keeps its never-throws degrade for read-only callers.
+    const degraded = loadConnections(home);
+    expect(degraded.targets).toEqual({});
+    expect(degraded.skills).toEqual({});
   });
 
   test("a v1 receipt migrates so an old connect can still be undone", () => {
@@ -312,5 +319,221 @@ describe("connect / disconnect (filesystem)", () => {
     runDisconnect(["copilot"], disconnectOpts());
     expect(existsSync(join(osHome, ".agents", "skills"))).toBe(false);
     expect(existsSync(join(osHome, ".agents"))).toBe(true);
+  });
+
+  test("disconnectAll reverses every recorded target without naming one", () => {
+    runConnect(["all"], connectOpts());
+    commands = [];
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.removed.sort()).toEqual(["claude", "codex", "copilot"]);
+    expect(outcome.failed).toEqual([]);
+    expect(commands).toContainEqual({
+      command: "claude",
+      args: ["mcp", "remove", "--scope", "user", "keelson"],
+    });
+    expect(existsSync(join(osHome, ".codex", "config.toml"))).toBe(false);
+    expect(existsSync(join(osHome, ".agents"))).toBe(false);
+    expect(existsSync(join(home, "connections.json"))).toBe(false);
+  });
+
+  // Dropping the record on a refused removal would leave the agent pointing at
+  // keelson with no ledger left to undo it from.
+  test("an agent CLI that refuses the removal is reported, and its record survives", () => {
+    runConnect(["claude"], connectOpts());
+    const outcome = disconnectAll(home, () => ({ code: 1, stdout: "", stderr: "no such command" }));
+    expect(outcome.removed).toEqual([]);
+    expect(outcome.failed).toEqual(["claude"]);
+    // The record is what a retry needs, so it stays.
+    expect(loadConnections(home).targets.claude).toBeDefined();
+    // The skill is already gone: idempotent cleanup runs before the agent's
+    // non-idempotent `mcp remove`, so a retry reaches that removal instead of
+    // being turned away by a "not found" from a step that already succeeded.
+    expect(existsSync(claudeSkill())).toBe(false);
+  });
+
+  test("a refused CLI removal is still reversible on a later attempt", () => {
+    runConnect(["claude"], connectOpts());
+    expect(disconnectAll(home, () => ({ code: 1, stdout: "", stderr: "gone" })).failed).toEqual([
+      "claude",
+    ]);
+
+    // With the agent's CLI working again the retry completes, rather than being
+    // turned away by an earlier step it cannot re-run.
+    const retry = disconnectAll(home, fakeRun);
+    expect(retry.removed).toEqual(["claude"]);
+    expect(retry.failed).toEqual([]);
+    expect(existsSync(join(home, "connections.json"))).toBe(false);
+  });
+
+  // loadConnections keys targets by whatever the file says, so an unknown id
+  // would otherwise steer reversal at the paths recorded beside it.
+  test("a receipt naming an unknown target is ignored, not reversed", () => {
+    const stray = join(base, "not-ours.json");
+    writeFileSync(stray, JSON.stringify({ mcpServers: { keelson: {} } }));
+    writeFileSync(
+      join(home, "connections.json"),
+      JSON.stringify({
+        version: 2,
+        targets: {
+          rogue: {
+            target: "rogue",
+            mcp: { kind: "file", file: stray, format: "json", createdFile: true },
+            connectedAt: "",
+          },
+        },
+        skills: {},
+      }),
+    );
+    const outcome = disconnectAll(home, fakeRun);
+    // Pins WHICH path this takes: the record is well-formed enough to be read
+    // (isTargetRecord validates the value, not the key), so it is ignored by the
+    // TARGET_IDS loop rather than refused as an unreadable receipt.
+    expect(outcome.receiptUnreadable).toBeUndefined();
+    expect(outcome.removed).toEqual([]);
+    expect(outcome.failed).toEqual([]);
+    expect(existsSync(stray)).toBe(true);
+    // Ignored, not discarded: the entry survives the rewrite.
+    expect(loadConnections(home).targets).toHaveProperty("rogue");
+  });
+
+  test("a known target beside an unknown one is still reversed, and the unknown one kept", () => {
+    runConnect(["copilot"], connectOpts());
+    const data = loadConnections(home);
+    const stray = join(base, "not-ours.json");
+    writeFileSync(stray, JSON.stringify({ mcpServers: { keelson: {} } }));
+    (data.targets as Record<string, unknown>).rogue = {
+      target: "rogue",
+      mcp: { kind: "file", file: stray, format: "json", createdFile: true },
+      connectedAt: "",
+    };
+    writeFileSync(join(home, "connections.json"), JSON.stringify(data));
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.receiptUnreadable).toBeUndefined();
+    expect(outcome.removed).toEqual(["copilot"]);
+    expect(existsSync(stray)).toBe(true);
+    expect(loadConnections(home).targets).toHaveProperty("rogue");
+  });
+
+  // An empty-ledger degrade here would rewrite the receipt away (saveConnections
+  // deletes an empty one) and report a clean sweep while every agent stays wired.
+  test("an unparseable receipt reverses nothing and is left on disk", () => {
+    runConnect(["copilot"], connectOpts());
+    const receipt = join(home, "connections.json");
+    writeFileSync(receipt, "{ not json");
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.receiptUnreadable).toBeDefined();
+    expect(outcome.removed).toEqual([]);
+    expect(outcome.failed).toEqual([]);
+    expect(readFileSync(receipt, "utf8")).toBe("{ not json");
+    // Nothing was touched on the strength of a ledger we could not read.
+    expect(existsSync(join(osHome, ".copilot", "mcp-config.json"))).toBe(true);
+    expect(existsSync(agentsSkill())).toBe(true);
+  });
+
+  // Every shape the structural guards would otherwise read as "empty ledger".
+  // saveConnections deletes an empty ledger's receipt, so each of these would
+  // destroy the only record of the wiring while leaving the wiring in place.
+  const REFUSED_RECEIPTS: Array<[string, unknown]> = [
+    ["unsupported version", { version: 99, targets: {} }],
+    ["targets is not an object", { version: 2, targets: "bad", skills: {} }],
+    ["skills is not an object", { version: 2, targets: {}, skills: "bad" }],
+    ["a malformed target entry", { version: 2, targets: { claude: { nope: true } }, skills: {} }],
+    [
+      "a malformed skill entry",
+      { version: 2, targets: {}, skills: { "/x": { file: "/x", createdFile: "no" } } },
+    ],
+    [
+      "a target whose key and `target` disagree",
+      {
+        version: 2,
+        targets: {
+          claude: {
+            target: "copilot",
+            mcp: { kind: "file", file: "/x", format: "json", createdFile: false },
+            connectedAt: "",
+          },
+        },
+        skills: {},
+      },
+    ],
+    [
+      "a skill whose key and `file` disagree",
+      {
+        version: 2,
+        targets: {},
+        skills: {
+          "/keyed-here": {
+            file: "/but-unlinks-this",
+            createdFile: true,
+            createdDirs: [],
+            requestedBy: ["claude"],
+          },
+        },
+      },
+    ],
+    ["a missing skills container", { version: 2, targets: {} }],
+    ["a missing targets container", { version: 2, skills: {} }],
+    ["v1 targets is not an object", { version: 1, targets: 42 }],
+    ["a malformed v1 skill record", { version: 1, targets: {}, skill: { file: 7 } }],
+  ];
+
+  for (const [label, body] of REFUSED_RECEIPTS) {
+    test(`a receipt with ${label} is refused and left on disk`, () => {
+      const receipt = join(home, "connections.json");
+      const text = JSON.stringify(body);
+      writeFileSync(receipt, text);
+
+      expect(readConnections(home).ok).toBe(false);
+      expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeDefined();
+      expect(readFileSync(receipt, "utf8")).toBe(text);
+    });
+  }
+
+  // The counterpart: a genuinely empty ledger IS safe to clear, so the guards
+  // above must not make the normal "last agent disconnected" path fail.
+  test("a legitimately empty receipt still reads as empty", () => {
+    writeFileSync(
+      join(home, "connections.json"),
+      JSON.stringify({ version: 2, targets: {}, skills: {} }),
+    );
+    const read = readConnections(home);
+    expect(read.ok).toBe(true);
+    expect(disconnectAll(home, fakeRun).receiptUnreadable).toBeUndefined();
+  });
+
+  // Skill cleanup runs after the MCP reversal, so an unlink that fails there must
+  // fail the target too rather than escaping the guard.
+  test("a skill file that cannot be unlinked fails its target and stays retryable", () => {
+    runConnect(["copilot"], connectOpts());
+    // rmSync's `force` only suppresses ENOENT; a non-empty dir in the file's
+    // place throws without `recursive`.
+    rmSync(agentsSkill(), { force: true });
+    mkdirSync(agentsSkill(), { recursive: true });
+    writeFileSync(join(agentsSkill(), "held.txt"), "x");
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.failed).toEqual(["copilot"]);
+    expect(outcome.removed).toEqual([]);
+    const after = loadConnections(home);
+    expect(after.targets.copilot).toBeDefined();
+    // The claim survives, so a retry still reaches the skill.
+    expect(after.skills[agentsSkill()]?.requestedBy).toEqual(["copilot"]);
+  });
+
+  // One agent's hand-broken config must not abort the others, nor an uninstall
+  // that has already revoked credentials.
+  test("an unreadable agent config fails just that target and leaves it retryable", () => {
+    runConnect(["copilot", "codex"], connectOpts());
+    writeFileSync(join(osHome, ".copilot", "mcp-config.json"), "{ not json");
+
+    const outcome = disconnectAll(home, fakeRun);
+    expect(outcome.failed).toEqual(["copilot"]);
+    expect(outcome.removed).toEqual(["codex"]);
+    // The broken target is still recorded, so a retry is possible...
+    expect(loadConnections(home).targets.copilot).toBeDefined();
+    // ...and the healthy one really was reversed.
+    expect(existsSync(join(osHome, ".codex", "config.toml"))).toBe(false);
   });
 });
