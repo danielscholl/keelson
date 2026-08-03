@@ -165,9 +165,6 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
       continue;
     }
     switch (id) {
-      case "stub":
-        registerStubProvider();
-        break;
       case "copilot": {
         const reg = registerCopilotProvider({
           getCredential: options.getCredential,
@@ -207,6 +204,11 @@ export function bootstrapProviders(options: BootstrapProvidersOptions): Bootstra
     gateways: config.gateways ?? [],
     getApiKey: options.getCredential,
   });
+  // Registered unconditionally, like the CLI's in-process path: `--provider stub`
+  // is the documented offline escape hatch, so it must resolve whether or not
+  // `keelson start` is running. resolveDefaultProvider ranks it last, so it never
+  // becomes a chat default while a real provider exists.
+  registerStubProvider();
   // Always-on, non-chat provider that backs workflow-linked conversations.
   // Registered AFTER the selectable providers so it sits at the end of
   // getProviderInfoList() and isn't picked as a chat default.

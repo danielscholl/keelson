@@ -1339,11 +1339,10 @@ describe("bootstrapProviders", () => {
     else process.env.KEELSON_CONFIG = envBeforeConfig;
   });
 
-  test("default set registers copilot only (stub, claude opt-in) and defaults to copilot", () => {
+  test("default set registers copilot only (claude opt-in) and defaults to copilot", () => {
     delete process.env.KEELSON_PROVIDERS;
     const res = bootstrapProviders({ getCredential: noCredential });
     expect(ids()).toContain("copilot");
-    expect(ids()).not.toContain("stub");
     expect(ids()).not.toContain("claude");
     expect(res.defaultProvider).toBe("copilot");
   });
@@ -1351,9 +1350,34 @@ describe("bootstrapProviders", () => {
   test("KEELSON_PROVIDERS overrides to exactly the listed set", () => {
     process.env.KEELSON_PROVIDERS = "claude";
     const res = bootstrapProviders({ getCredential: noCredential });
-    // 'workflow' is the always-on synthetic provider; ignore it for the set check.
-    expect(ids().filter((id) => id !== "workflow")).toEqual(["claude"]);
+    // 'workflow' and 'stub' are always-on; ignore them for the set check.
+    expect(ids().filter((id) => id !== "workflow" && id !== "stub")).toEqual(["claude"]);
     expect(res.defaultProvider).toBe("claude");
+  });
+
+  test("stub registers even when no config or env enables it", () => {
+    delete process.env.KEELSON_PROVIDERS;
+    const res = bootstrapProviders({ getCredential: noCredential });
+    expect(ids()).toContain("stub");
+    expect(res.defaultProvider).toBe("copilot");
+  });
+
+  test("stub never wins the default while a real provider is registered", () => {
+    process.env.KEELSON_PROVIDERS = "claude";
+    const res = bootstrapProviders({ getCredential: noCredential });
+    expect(ids()).toContain("stub");
+    expect(res.defaultProvider).toBe("claude");
+  });
+
+  test("stub is the last-resort default when nothing real is enabled", async () => {
+    delete process.env.KEELSON_PROVIDERS;
+    await writeFile(
+      join(tempConfigDir as string, "config.json"),
+      JSON.stringify({ providers: { copilot: false } }),
+    );
+    const res = bootstrapProviders({ getCredential: noCredential });
+    expect(ids()).toContain("stub");
+    expect(res.defaultProvider).toBe("stub");
   });
 
   test("an enabled provider whose SDK is absent is reported, not registered", () => {
