@@ -127,6 +127,8 @@ export {
   createWorktree,
   type EnsureWorktreeDepsResult,
   ensureWorktreeDeps,
+  type FetchOriginResult,
+  fetchOrigin,
   gitToplevel,
   headDivergesFrom,
   isGitRepo,

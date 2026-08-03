@@ -12,6 +12,7 @@ import {
   createWorktree,
   type EnsureWorktreeDepsResult,
   ensureWorktreeDeps,
+  fetchOrigin,
   isGitRepo,
   listWorktreesWithStatus,
   type RemoveWorktreeOptions,
@@ -274,6 +275,12 @@ export function createWorkspaceManager({
         let prepared: PreparedWorktree | null = null;
 
         try {
+          const fetched = await fetchOrigin(project.rootPath);
+          if (fetched.attempted && !fetched.ok) {
+            console.warn(
+              `[workspace] git fetch origin failed; leasing from possibly-stale local refs: ${fetched.error}`,
+            );
+          }
           const base = await resolveDefaultBranch(project.rootPath);
           prepared = await manager.prepareWorktree({
             repoPath: project.rootPath,

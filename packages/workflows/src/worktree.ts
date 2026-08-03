@@ -287,6 +287,30 @@ export async function resolveDefaultBranch(repoPath: string): Promise<string | n
   return null;
 }
 
+export interface FetchOriginResult {
+  attempted: boolean;
+  ok: boolean;
+  error: string | null;
+}
+
+export async function fetchOrigin(repoPath: string): Promise<FetchOriginResult> {
+  const hasOrigin = await runGit(["remote", "get-url", "origin"], repoPath);
+  if (hasOrigin.exitCode !== 0) {
+    return { attempted: false, ok: false, error: null };
+  }
+
+  const fetched = await runGit(["fetch", "origin"], repoPath);
+  if (fetched.exitCode !== 0) {
+    return {
+      attempted: true,
+      ok: false,
+      error: `git fetch failed (exit ${fetched.exitCode})`,
+    };
+  }
+
+  return { attempted: true, ok: true, error: null };
+}
+
 export async function headDivergesFrom(repoPath: string, base: string): Promise<boolean> {
   const out = await runGit(["merge-base", "--is-ancestor", "HEAD", base], repoPath);
   return out.exitCode !== 0;

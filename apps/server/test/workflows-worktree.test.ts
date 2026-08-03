@@ -567,9 +567,21 @@ nodes:
     expect(run.worktreePath).toBeNull();
   });
 
-  test("default base excludes divergent checkout commits and is exposed on run detail", async () => {
+  test("default base refreshes origin and excludes divergent checkout commits", async () => {
     await initRepo(repoDir);
     await addOrigin(repoDir);
+    const staleOriginTip = (await gitText(["rev-parse", "origin/main"], repoDir)).trim();
+    const upstream = join(tmpDir, "upstream");
+    await git(["clone", join(repoDir, "origin.git"), upstream], tmpDir);
+    await git(["config", "user.email", "t@t"], upstream);
+    await git(["config", "user.name", "t"], upstream);
+    writeFileSync(join(upstream, "upstream.txt"), "new tip\n");
+    await git(["add", "upstream.txt"], upstream);
+    await git(["commit", "-m", "advance remote"], upstream);
+    await git(["push", "origin", "main"], upstream);
+    const remoteTip = (await gitText(["rev-parse", "HEAD"], upstream)).trim();
+    expect((await gitText(["rev-parse", "origin/main"], repoDir)).trim()).toBe(staleOriginTip);
+
     await git(["checkout", "-b", "feature"], repoDir);
     writeFileSync(join(repoDir, "feature.txt"), "feature\n");
     await git(["add", "feature.txt"], repoDir);
@@ -582,7 +594,9 @@ worktree:
   enabled: true
 nodes:
   - id: no-feature
-    bash: test ! -f feature.txt
+    bash: |
+      test -f upstream.txt
+      test ! -f feature.txt
 `,
     );
     const { app, projectId } = makeRig();
@@ -602,6 +616,7 @@ nodes:
 
     expect(run.status).toBe("succeeded");
     expect(run.worktreeBase).toBe("origin/main");
+    expect((await gitText(["rev-parse", "origin/main"], repoDir)).trim()).toBe(remoteTip);
     const branch = `keelson/basecheck/${runId.slice(0, 8)}`;
     expect((await gitText(["log", "--oneline", `origin/main..${branch}`], repoDir)).trim()).toBe(
       "",
