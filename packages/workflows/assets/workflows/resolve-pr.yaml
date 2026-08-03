@@ -434,9 +434,8 @@ nodes:
         `decision == "actionable-code-change"`.
       - For `actionable-metadata-change`, read the PR number from
         `$ARTIFACTS_DIR/.pr-number` and make the requested PR body, title, label,
-        or other metadata edit with `forge pr edit` (or `gh pr edit` on
-        GitHub). Do not modify repository files or create a commit for a
-        metadata-only fix.
+        or other metadata edit with `forge pr edit`. Do not modify repository
+        files or create a commit for a metadata-only fix.
       - For each actionable thread, read the target file before editing and run
         the narrowest check covering the change after editing.
       - Stage edited files by name. Never `git add -A`, `git add .`, or
