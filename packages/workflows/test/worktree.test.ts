@@ -344,16 +344,20 @@ describe("fetchOrigin", () => {
     expect(await fetchOrigin(tmp)).toEqual({ attempted: false, ok: false, error: null });
   });
 
-  test("returns the fetch error when origin cannot be reached", async () => {
+  test("returns a safe fetch error without remote details", async () => {
     await initRepo(tmp);
-    await git(["remote", "add", "origin", join(tmp, "missing.git")], tmp);
+    const remote = join(tmp, "credential-secret", "missing.git");
+    await git(["remote", "add", "origin", remote], tmp);
 
     const result = await fetchOrigin(tmp);
 
-    expect(result.attempted).toBe(true);
-    expect(result.ok).toBe(false);
-    expect(result.error).not.toBeNull();
-    expect(result.error?.length).toBeGreaterThan(0);
+    expect(result).toEqual({
+      attempted: true,
+      ok: false,
+      error: "git fetch failed (exit 128)",
+    });
+    expect(result.error).not.toContain(remote);
+    expect(result.error).not.toContain("credential-secret");
   });
 });
 
