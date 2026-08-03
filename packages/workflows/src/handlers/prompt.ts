@@ -886,6 +886,12 @@ export function makePromptHandler(opts: MakePromptHandlerOptions): NodeHandler {
                 error:
                   "node declares output_format but the reply contained no JSON object or array",
               };
+      } else if (assistantText.trim() === "") {
+        result = {
+          status: "failed",
+          output: { kind: "text", text: assistantText },
+          error: "prompt node produced no output (empty or whitespace-only reply)",
+        };
       } else {
         result = {
           status: "succeeded",

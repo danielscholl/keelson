@@ -173,6 +173,43 @@ describe("makePromptHandler", () => {
     expect(result.output.kind === "text" ? result.output.text : "").toBe("Hello world");
   });
 
+  test("fails when the provider completes without text", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("no output");
+  });
+
+  test("fails when the provider returns only whitespace", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "  \n" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("failed");
+  });
+
+  test("keeps non-empty prompt output successful", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "answer" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("succeeded");
+  });
+
   test("separates text blocks without splitting contiguous deltas", async () => {
     const { provider } = makeSpyProvider({
       chunks: [
@@ -381,6 +418,7 @@ describe("makePromptHandler", () => {
       chunks: [
         { type: "tool_use", id: "publish-1", toolName: "keelson/canvas_publish" },
         { type: "tool_result", toolUseId: "publish-1", content: "created" },
+        { type: "text", content: "published" },
         { type: "done" },
       ],
     });
@@ -404,6 +442,7 @@ describe("makePromptHandler", () => {
       chunks: [
         { type: "tool_use", id: "publish-1", toolName: "canvas_publish" },
         { type: "tool_result", toolUseId: "publish-1", content: "created" },
+        { type: "text", content: "published" },
         { type: "done" },
       ],
     });
@@ -434,6 +473,7 @@ describe("makePromptHandler", () => {
         },
         { type: "tool_use", id: "publish-2", toolName: "canvas_publish" },
         { type: "tool_result", toolUseId: "publish-2", content: "created" },
+        { type: "text", content: "published" },
         { type: "done" },
       ],
     });
@@ -481,6 +521,7 @@ describe("makePromptHandler", () => {
           content: "palette rejected",
           isError: true,
         },
+        { type: "text", content: "tool failed" },
         { type: "done" },
       ],
     });
@@ -847,7 +888,7 @@ describe("makePromptHandler", () => {
 
   test("a throwing projectTools gate fails open — node-resolved tools still pass through", async () => {
     const { provider, calls } = makeSpyProvider({
-      chunks: [{ type: "text", content: "" }, { type: "done" }],
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
     });
     // Track invocation so the test proves the gate was actually CALLED and its
     // throw was caught — not merely that the tool survived (which the no-gate
@@ -2513,6 +2554,26 @@ describe("makePromptHandler", () => {
       expect(text).toBe("I think this is a bug.");
     });
 
+    test("empty reply retains the output_format error", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: { type: "object" },
+      } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("failed");
+      expect(result.error).toBe(
+        "node declares output_format but the reply contained no JSON object or array",
+      );
+    });
+
     test("a bare JSON scalar fails the node, not structured", async () => {
       const { provider } = makeSpyProvider({
         chunks: [{ type: "text", content: "null" }, { type: "done" }],
@@ -2621,7 +2682,9 @@ describe("makePromptHandler — project notebook injection", () => {
   });
 
   test("a throwing read() must not take the node down (best-effort context)", async () => {
-    const { provider, calls } = doneOnly();
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
     const handler = makePromptHandler({
       getProvider: () => provider,
       getRegisteredTools: () => [],

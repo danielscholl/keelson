@@ -46,7 +46,7 @@ afterEach(() => {
   else process.env.KEELSON_WORKFLOW_PROVIDER = savedWorkflowProvider;
 });
 
-// Spy provider — captures the SendQueryOptions the prompt node forwarded, yields nothing.
+// Spy provider — captures the SendQueryOptions the prompt node forwarded.
 function registerSpy(capture: (opts: SendQueryOptions | undefined) => void): string {
   const id = `spy-wf-notebook-${spyCounter++}`;
   const capabilities: ProviderCapabilities = {
@@ -65,9 +65,9 @@ function registerSpy(capture: (opts: SendQueryOptions | undefined) => void): str
       getType: () => "spy",
       getCapabilities: () => capabilities,
       listModels: async () => [{ id: "spy-model" }],
-      // biome-ignore lint/correctness/useYield: spy generator captures and exits
       async *sendQuery(_prompt, _cwd, _resume, options) {
         capture(options);
+        yield { type: "text", content: "ok" };
       },
     }),
   };
