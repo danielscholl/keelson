@@ -2432,9 +2432,9 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     });
     const summary = await run;
     expect(summary.status).toBe("succeeded");
-    expect(JSON.parse(readFileSync(join(artifactsDir, "post-ci-open-threads.json"), "utf8"))).toEqual(
-      open,
-    );
+    expect(
+      JSON.parse(readFileSync(join(artifactsDir, "post-ci-open-threads.json"), "utf8")),
+    ).toEqual(open);
     expect(summary.nodes["post-ci-state"].output).toContain('"open_count":1');
   });
 

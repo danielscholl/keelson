@@ -973,9 +973,12 @@ nodes:
         call failed is recorded with `resolved: false`, so it is still open on
         the forge. Count resolutions from `resolved`, never from `action` or
         `decision`.
-      - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
+      - Latest unresolved threads: `$ARTIFACTS_DIR/post-ci-open-threads.json`
       - Post-CI new-thread set: `$ARTIFACTS_DIR/post-ci-threads.json`
       - Pending resolve-retries: `$ARTIFACTS_DIR/post-ci-retry.json`
+      - Deterministic mergeability verdict: `$ARTIFACTS_DIR/mergeability.json`
+      - Reply/reconciliation failures: `$ARTIFACTS_DIR/reply-failures.json`
+        (treat a missing file as an empty array)
       - Latest CI result:
 
         $await-ci.output
@@ -998,6 +1001,9 @@ nodes:
         replied == true, resolved != true, and decision question / wontfix —
         left open deliberately>
       - Latest CI: PASS / FAIL / UNKNOWN
+      - Mergeable: yes
+        OR
+      - Mergeable: no — blocked by <N> deliberately-open thread(s): <paths>
 
       ### Notes
 
@@ -1006,7 +1012,9 @@ nodes:
       decision invalid / already-addressed) — these still need a resolve. If
       question / wontfix threads remain open, say plainly that they are the
       remaining merge blockers when the repo requires all threads resolved, and
-      that closing them is the reviewer's or operator's call. Note any exhaust
+      that closing them is the reviewer's or operator's call. If
+      reply-failures.json is non-empty, label the report "attention needed" and
+      list the affected round, stage, thread ids, and reason. Note any exhaust
       approval if this report ran after a human override.>
       ```
 
