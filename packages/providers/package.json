@@ -13,15 +13,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@github/copilot-sdk": "1.0.8",
+    "@github/copilot-sdk": "1.0.7",
     "@keelson/shared": "workspace:*",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.150",
-    "@earendil-works/pi-ai": "^0.82.1",
-    "@earendil-works/pi-coding-agent": "^0.82.1",
-    "@openai/codex-sdk": "^0.145.0"
+    "@earendil-works/pi-ai": "^0.80.2",
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@openai/codex-sdk": "^0.144.1"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
@@ -39,9 +39,9 @@
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.150",
-    "@earendil-works/pi-ai": "^0.82.1",
-    "@earendil-works/pi-coding-agent": "^0.82.1",
-    "@openai/codex-sdk": "^0.145.0",
+    "@earendil-works/pi-ai": "^0.80.2",
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@openai/codex-sdk": "^0.144.1",
     "@types/bun": "^1.1.14"
   }
 }
