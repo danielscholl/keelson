@@ -173,6 +173,43 @@ describe("makePromptHandler", () => {
     expect(result.output.kind === "text" ? result.output.text : "").toBe("Hello world");
   });
 
+  test("fails when the provider completes without text", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("no output");
+  });
+
+  test("fails when the provider returns only whitespace", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "  \n" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("failed");
+  });
+
+  test("keeps non-empty prompt output successful", async () => {
+    const { provider } = makeSpyProvider({
+      chunks: [{ type: "text", content: "answer" }, { type: "done" }],
+    });
+    const handler = makePromptHandler({
+      getProvider: () => provider,
+      getRegisteredTools: () => [],
+    });
+    const result = await handler.handle(stubNode, buildCtx());
+    expect(result.status).toBe("succeeded");
+  });
+
   test("separates text blocks without splitting contiguous deltas", async () => {
     const { provider } = makeSpyProvider({
       chunks: [
@@ -2515,6 +2552,26 @@ describe("makePromptHandler", () => {
       expect(result.error).toContain("output_format");
       const text = result.output.kind === "text" ? result.output.text : "";
       expect(text).toBe("I think this is a bug.");
+    });
+
+    test("empty reply retains the output_format error", async () => {
+      const { provider } = makeSpyProvider({
+        chunks: [{ type: "done" }],
+      });
+      const handler = makePromptHandler({
+        getProvider: () => provider,
+        getRegisteredTools: () => [],
+      });
+      const node = {
+        id: "n1",
+        prompt: "",
+        output_format: { type: "object" },
+      } as unknown as DagNode;
+      const result = await handler.handle(node, buildCtx());
+      expect(result.status).toBe("failed");
+      expect(result.error).toBe(
+        "node declares output_format but the reply contained no JSON object or array",
+      );
     });
 
     test("a bare JSON scalar fails the node, not structured", async () => {
