@@ -381,6 +381,7 @@ describe("makePromptHandler", () => {
       chunks: [
         { type: "tool_use", id: "publish-1", toolName: "keelson/canvas_publish" },
         { type: "tool_result", toolUseId: "publish-1", content: "created" },
+        { type: "text", content: "published" },
         { type: "done" },
       ],
     });
@@ -404,6 +405,7 @@ describe("makePromptHandler", () => {
       chunks: [
         { type: "tool_use", id: "publish-1", toolName: "canvas_publish" },
         { type: "tool_result", toolUseId: "publish-1", content: "created" },
+        { type: "text", content: "published" },
         { type: "done" },
       ],
     });
@@ -434,6 +436,7 @@ describe("makePromptHandler", () => {
         },
         { type: "tool_use", id: "publish-2", toolName: "canvas_publish" },
         { type: "tool_result", toolUseId: "publish-2", content: "created" },
+        { type: "text", content: "published" },
         { type: "done" },
       ],
     });
@@ -481,6 +484,7 @@ describe("makePromptHandler", () => {
           content: "palette rejected",
           isError: true,
         },
+        { type: "text", content: "tool failed" },
         { type: "done" },
       ],
     });
@@ -847,7 +851,7 @@ describe("makePromptHandler", () => {
 
   test("a throwing projectTools gate fails open — node-resolved tools still pass through", async () => {
     const { provider, calls } = makeSpyProvider({
-      chunks: [{ type: "text", content: "" }, { type: "done" }],
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
     });
     // Track invocation so the test proves the gate was actually CALLED and its
     // throw was caught — not merely that the tool survived (which the no-gate
@@ -2621,7 +2625,9 @@ describe("makePromptHandler — project notebook injection", () => {
   });
 
   test("a throwing read() must not take the node down (best-effort context)", async () => {
-    const { provider, calls } = doneOnly();
+    const { provider, calls } = makeSpyProvider({
+      chunks: [{ type: "text", content: "ok" }, { type: "done" }],
+    });
     const handler = makePromptHandler({
       getProvider: () => provider,
       getRegisteredTools: () => [],
