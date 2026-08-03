@@ -2189,6 +2189,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     postCiRetry?: unknown[];
     postCiOpen?: unknown[];
     postCiState?: { open: unknown[]; new: unknown[]; retry: unknown[] };
+    replyFailures?: unknown[];
     handled?: unknown[];
     resolveRetry?: Thread[];
     // Node ids to run through the real bash handler in addition to the jq gates
@@ -2218,6 +2219,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     write("post-ci-threads.json", opts.postCiThreads ?? []);
     write("post-ci-retry.json", opts.postCiRetry ?? []);
     write("post-ci-open-threads.json", opts.postCiOpen ?? []);
+    if (opts.replyFailures) write("reply-failures.json", opts.replyFailures);
     if (opts.postCiState) {
       write(".post-ci-state-fixture.json", opts.postCiState);
       writeFileSync(
@@ -2260,6 +2262,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     const realBashIds = new Set([
       "triage-gate",
       "reply-gate",
+      "reply-audit",
       "converge-check",
       ...(opts.realBashExtra ?? []),
     ]);
@@ -2544,7 +2547,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
   });
 
   test("reply-gate rejects a code fix without a commit", async () => {
-    const { run, artifactsDir } = convergeRun({
+    const { run, artifactsDir, approvalCalls } = convergeRun({
       hasNew: true,
       ciStatus: "PASS",
       threads: [{ threadId: "t-code", commentId: 4 }],
@@ -2565,12 +2568,56 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     });
     const summary = await run;
     expect(summary.nodes["reply-gate"].state).toBe("failed");
+    expect(approvalCalls).toContain("reply-failure-approval");
     expect(JSON.parse(readFileSync(join(artifactsDir, "reply-failures.json"), "utf8"))).toEqual([
       {
         round: 1,
         stage: "reply-gate",
         threads: ["t-code"],
         reason: "results.json failed the reply honesty gate",
+      },
+    ]);
+  });
+
+  test("reply-audit pauses after a reply-resolve mutation failure", async () => {
+    const { run, approvalCalls, artifactsDir } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t-reply", commentId: 8 }],
+      triage: [{ threadId: "t-reply", decision: "actionable-code-change" }],
+      results: [
+        {
+          threadId: "t-reply",
+          commentId: 8,
+          action: "fixed",
+          decision: "actionable-code-change",
+          fix_kind: "code",
+          resolve_authorized: true,
+          commit: "c3",
+          reply: "fixed",
+        },
+      ],
+      replyFailures: [
+        {
+          round: 1,
+          stage: "reply-resolve",
+          threads: ["t-reply"],
+          reason: "reply call failed",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(approvalCalls).toEqual(["reply-failure-approval"]);
+    expect(summary.nodes["reply-audit"].state).toBe("completed");
+    expect(summary.nodes["reply-failure-approval"].state).toBe("completed");
+    expect(JSON.parse(readFileSync(join(artifactsDir, "reply-audit.json"), "utf8"))).toEqual([
+      {
+        round: 1,
+        stage: "reply-resolve",
+        threads: ["t-reply"],
+        reason: "reply call failed",
       },
     ]);
   });

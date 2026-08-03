@@ -762,6 +762,42 @@ nodes:
       6. Print a summary: how many replied, resolved, left open, failed, and
          newly recorded in handled.json.
 
+  - id: reply-audit
+    depends_on: [reply-gate, reply-resolve]
+    trigger_rule: all_done
+    bash: |
+      set -euo pipefail
+      ROUND="$converge.round"
+      FAILURES="$KEELSON_ARTIFACTS_DIR/reply-failures.json"
+      AUDIT="$KEELSON_ARTIFACTS_DIR/reply-audit.json"
+      [ -f "$FAILURES" ] || printf '[]\n' > "$FAILURES"
+      if jq -e 'type == "array"' "$FAILURES" >/dev/null; then
+        jq --argjson round "$ROUND" '[.[] | select(.round == $round)]' \
+          "$FAILURES" > "$AUDIT"
+      else
+        jq -cn --argjson round "$ROUND" \
+          '[{round: $round, stage: "reply-audit", threads: [], reason: "reply-failures.json is not an array"}]' \
+          > "$AUDIT"
+      fi
+      FAILURE_COUNT=$(jq 'length' "$AUDIT")
+      REPLY_FAILED=false
+      if [ "$FAILURE_COUNT" -gt 0 ]; then
+        REPLY_FAILED=true
+      fi
+      jq -cn --arg reply_failed "$REPLY_FAILED" --argjson failure_count "$FAILURE_COUNT" \
+        '{reply_failed: $reply_failed, failure_count: $failure_count}'
+
+  - id: reply-failure-approval
+    depends_on: [reply-audit]
+    when: "$reply-audit.output.reply_failed == 'true'"
+    approval:
+      message: |
+        A public review-thread reply or resolution failed in this round. The
+        workflow will not continue to CI until you review the failure record
+        and approve the retry path.
+
+        $ARTIFACTS_DIR/reply-audit.json
+
   # Resolve-only retry path for ledger-authorized threads replied to in a prior
   # round whose resolveReviewThread call failed. fetch-state records these into
   # resolve-retry.json; this node re-calls resolveReviewThread WITHOUT posting
@@ -802,9 +838,17 @@ nodes:
   - id: await-ci
     # refuse-fork is a dependency so it sits in the gate's converge subgraph and
     # cancels a fork run BEFORE await-ci reruns any CI jobs; a non-fork skips it,
-    # tolerated by none_failed_min_one_success. resolve-retry is a dependency so
-    # a re-resolve lands before CI is watched and post-ci-state re-fetches.
-    depends_on: [reply-resolve, fetch-state, refuse-fork, resolve-retry]
+    # tolerated by none_failed_min_one_success. The reply audit and its approval
+    # prevent a failed public mutation from silently rolling into CI.
+    depends_on:
+      [
+        reply-resolve,
+        reply-audit,
+        reply-failure-approval,
+        fetch-state,
+        refuse-fork,
+        resolve-retry,
+      ]
     trigger_rule: none_failed_min_one_success
     timeout: 1500000
     bash: |
