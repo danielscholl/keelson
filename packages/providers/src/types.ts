@@ -73,8 +73,8 @@ export interface SendQueryOptions {
   // Provider-neutral: Claude consumes this; others ignore. Undefined leaves
   // the SDK default in place.
   thinking?: boolean;
-  // Provider-neutral: Copilot and Codex consume this on reasoning models; others
-  // ignore. Inline literal — this contract layer is zod-runtime-free.
+  // Provider-neutral: Claude maps this to thinking budgets; Copilot and Codex
+  // consume it on reasoning models. Inline literal — this contract layer is zod-runtime-free.
   reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
   // SDK-level tool whitelist (built-ins + MCP). Distinct from `tools` above,
   // which carries our MCP ToolDefinition objects to project. Claude gates by

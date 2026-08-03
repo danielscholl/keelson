@@ -114,7 +114,7 @@ export interface ClaudeQueryHandle extends AsyncIterable<ClaudeSdkMessage> {
   interrupt?: () => Promise<void>;
 }
 
-// Subset of SDK ThinkingConfig — only adaptive + disabled are driven from here.
+// Subset of SDK ThinkingConfig — adaptive, enabled budgets, and disabled are driven from here.
 export type ClaudeThinkingConfig =
   | { type: "adaptive"; display?: "summarized" | "omitted" }
   | { type: "disabled" }

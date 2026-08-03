@@ -37,7 +37,7 @@ const COPILOT_CAPABILITIES = {
 } as const;
 const CLAUDE_CAPABILITIES = {
   defaultModel: "claude-opus-4-8",
-  reasoningEffort: false,
+  reasoningEffort: true,
   models: ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
   modelClasses: {
     fast: "claude-haiku-4-5",

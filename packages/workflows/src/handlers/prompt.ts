@@ -78,8 +78,8 @@ export interface PromptHandlerSendOptions {
   tools?: readonly { name: string; [k: string]: unknown }[];
   model?: string;
   // Reasoning tier (structural mirror of @keelson/providers `reasoningEffort`).
-  // Copilot and Codex consume it on reasoning models; Claude ignores it. Absent
-  // leaves the model's own default in place.
+  // Claude maps it to thinking budgets; Copilot and Codex consume it on reasoning
+  // models. Absent leaves the model's own default in place.
   reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
   systemPrompt?: string;
   // SDK-level whitelist / blacklist by tool name (built-ins + MCP). Empty
