@@ -142,7 +142,10 @@ describe("resolve-pr workflow contract", () => {
     const fixPrompt = workflow?.nodes.find((node) => node.id === "fix")?.prompt;
 
     expect(fixPrompt).toContain("actionable-metadata-change");
-    expect(fixPrompt).toContain("`--add-label`, or `--remove-label`");
+    expect(fixPrompt).toContain("`--body-file`");
+    expect(fixPrompt).toContain("forge pr view <n> --json body -q .body");
+    expect(fixPrompt).toContain("Never compose a replacement body");
+    expect(fixPrompt).toContain("`--remove-label`");
     expect(fixPrompt).not.toContain("other metadata edit");
     expect(fixPrompt).toContain('"fix_kind": "metadata"');
     expect(fixPrompt).toContain('"commit": null');
