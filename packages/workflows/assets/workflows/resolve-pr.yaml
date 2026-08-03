@@ -433,9 +433,13 @@ nodes:
         `decision == "actionable-code-change"`.
       - For `actionable-metadata-change`, read the PR number from
         `$ARTIFACTS_DIR/.pr-number` and make the requested edit with
-        `forge pr edit` using only `--title`, `--body` / `--body-file`,
-        `--add-label`, or `--remove-label`. Do not modify repository files or
-        create a commit for a metadata-only fix.
+        `forge pr edit` using only `--title`, `--body-file`, `--add-label`, or
+        `--remove-label`. Before changing the body, read its current value with
+        `forge pr view <n> --json body -q .body`, apply the narrowest change to
+        the existing text, write the complete result under `$ARTIFACTS_DIR`,
+        and pass that file with `--body-file`. Never compose a replacement body
+        from scratch. Do not modify repository files or create a commit for a
+        metadata-only fix.
       - For each actionable thread, read the target file before editing and run
         the narrowest check covering the change after editing.
       - Stage edited files by name. Never `git add -A`, `git add .`, or
