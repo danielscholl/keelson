@@ -918,13 +918,24 @@ nodes:
       # entry, RETRY_COUNT counts resolvable threads still awaiting a successful resolve.
       NEW_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json" 2>/dev/null || echo 0)
       RETRY_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json" 2>/dev/null || echo 0)
-      OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json" 2>/dev/null || echo 0)
+      OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json" 2>/dev/null || echo 0)
       # bash nodes do not get $<node>.output text-substitution (rawBody runs, to
       # avoid injecting upstream output); read await-ci's output from the safe
       # env-var channel instead.
       CI_STATUS=$(printf '%s\n' "$KEELSON_NODE_await_ci_OUTPUT" | awk -F'CI_STATUS: ' '/CI_STATUS: / {print $2}' | tail -1 | awk '{print $1}')
 
       if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ] && [ "$RETRY_COUNT" -eq 0 ]; then
+        jq '{
+          mergeable: (length == 0),
+          blocked_by: [ .[] | {threadId, path, line} ],
+          count: length
+        }' "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json" \
+          > "$KEELSON_ARTIFACTS_DIR/mergeability.json"
+        if [ "$OPEN_COUNT" -eq 0 ]; then
+          echo "MERGEABLE: yes"
+        else
+          echo "MERGEABLE: no"
+        fi
         echo "Converged: CI passed, no new unresolved threads after CI, and no pending resolve-retries."
         rm -f "$KEELSON_ARTIFACTS_DIR/.last-gate-state"
         exit 0

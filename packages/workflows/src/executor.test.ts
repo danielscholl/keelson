@@ -2184,6 +2184,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     }[];
     postCiThreads?: unknown[];
     postCiRetry?: unknown[];
+    postCiOpen?: unknown[];
     postCiState?: { open: unknown[]; new: unknown[]; retry: unknown[] };
     handled?: unknown[];
     resolveRetry?: Thread[];
@@ -2213,6 +2214,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     write("resolve-retry.json", threadRows(opts.resolveRetry ?? []));
     write("post-ci-threads.json", opts.postCiThreads ?? []);
     write("post-ci-retry.json", opts.postCiRetry ?? []);
+    write("post-ci-open-threads.json", opts.postCiOpen ?? []);
     if (opts.postCiState) {
       write(".post-ci-state-fixture.json", opts.postCiState);
       writeFileSync(
@@ -2396,7 +2398,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
   });
 
   test("a clean round with no new threads and CI PASS converges immediately", async () => {
-    const { run, approvalCalls, convergeCheckCalls } = convergeRun({
+    const { run, approvalCalls, convergeCheckCalls, artifactsDir } = convergeRun({
       hasNew: false,
       ciStatus: "PASS",
       threads: [],
@@ -2412,6 +2414,11 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     expect(summary.nodes["converge-check"].state).toBe("completed");
     expect(summary.nodes.report.state).toBe("completed");
     expect(convergeCheckCalls()).toBe(1);
+    expect(JSON.parse(readFileSync(join(artifactsDir, "mergeability.json"), "utf8"))).toEqual({
+      mergeable: true,
+      blocked_by: [],
+      count: 0,
+    });
   });
 
   test("post-ci-state persists the fresh open set and count", async () => {
@@ -2429,6 +2436,25 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
       open,
     );
     expect(summary.nodes["post-ci-state"].output).toContain('"open_count":1');
+  });
+
+  test("convergence records deliberately open threads as merge blockers", async () => {
+    const open = threadRows([{ threadId: "wontfix", commentId: 12 }]);
+    const { run, artifactsDir } = convergeRun({
+      hasNew: false,
+      ciStatus: "PASS",
+      threads: [],
+      postCiThreads: [],
+      postCiOpen: open,
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(summary.nodes["converge-check"].output).toContain("MERGEABLE: no");
+    expect(JSON.parse(readFileSync(join(artifactsDir, "mergeability.json"), "utf8"))).toEqual({
+      mergeable: false,
+      blocked_by: [{ threadId: "wontfix", path: "src/a.ts", line: 1 }],
+      count: 1,
+    });
   });
 
   test("converge-check gates on the post-CI set: a thread that landed mid-watch blocks convergence until exhaustion", async () => {
