@@ -28,8 +28,8 @@ keelson workflow run resolve-pr --inputs ARGUMENTS="resolve PR 42"
 Pass an explicit PR number. resolve-pr runs in an isolated worktree on a
 generated branch, so it cannot infer the target PR from the current branch.
 
-Repos that require every review thread to be resolved can opt into maintainer-side
-closure of approved `wontfix` verdicts:
+Approved `invalid` and `already-addressed` verdicts resolve in either mode. Repos
+that also require approved `wontfix` threads to close can opt in:
 
 ```sh
 keelson workflow run resolve-pr \
@@ -37,10 +37,10 @@ keelson workflow run resolve-pr \
   --inputs resolve_wontfix=true
 ```
 
-The mode is off by default. The existing triage approval is the authorization.
-After approval, `wontfix`, `invalid`, and `already-addressed` threads receive a
-closing reply that restates the rationale and says it was "reviewed and accepted
-on the maintainer side", then resolve. Questions always stay open.
+The mode is off by default. When enabled, it authorizes resolution of approved
+`wontfix` verdicts. It also makes the closing reply for `wontfix`, `invalid`, and
+`already-addressed` restate the rationale and say it was "reviewed and accepted
+on the maintainer side." Questions always stay open.
 
 ### What it needs
 
@@ -125,7 +125,7 @@ without context.
 | `refuse-fork` | cancel | Stops the run cleanly when `fetch-state` reports a fork PR. |
 | `triage` | prompt | Runs only when there are new threads. Reads the cited code and classifies each new thread, including separate `actionable-code-change` and `actionable-metadata-change` decisions. |
 | `triage-gate` | bash | Fails closed if triage ids do not exactly match the fetched set, writes `triage.md`, normalizes the runtime `resolve_wontfix` input into `resolve-mode.json`, and emits the approval state. |
-| `approve` | approval | Pauses on reply-only verdicts. In opt-in mode, approval also authorizes owner-side closure of `wontfix`, `invalid`, and `already-addressed` threads. Questions remain reviewer-owned. |
+| `approve` | approval | Pauses on reply-only verdicts. Approval authorizes resolution of `invalid` and `already-addressed`; opt-in mode also authorizes `wontfix` and requires owner-side closing wording for all three. Questions remain reviewer-owned. |
 | `fix` | prompt | Applies code fixes or PR body, title, and label fixes. Results carry `fix_kind: "code"` with a commit or `fix_kind: "metadata"` with `commit: null`, plus the per-entry `resolve_authorized` decision. |
 | `validate` | bash | Soft-runs the discovered `verify.sh`, reporting `VALIDATION_STATUS` for the fixer. |
 | `fix-validation` | prompt | Repairs broken validation, if any, and commits the repair. |
