@@ -142,6 +142,8 @@ describe("resolve-pr workflow contract", () => {
     const fixPrompt = workflow?.nodes.find((node) => node.id === "fix")?.prompt;
 
     expect(fixPrompt).toContain("actionable-metadata-change");
+    expect(fixPrompt).toContain("`--add-label`, or `--remove-label`");
+    expect(fixPrompt).not.toContain("other metadata edit");
     expect(fixPrompt).toContain('"fix_kind": "metadata"');
     expect(fixPrompt).toContain('"commit": null');
   });

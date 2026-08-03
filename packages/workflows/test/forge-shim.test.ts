@@ -231,6 +231,36 @@ shimDescribe("GitLab input translation", () => {
     expect(logText(log)).toContain("mr update 42 --target-branch release/1");
   });
 
+  test("pr edit metadata flags -> mr update title, description, and labels", () => {
+    const { env, log } = gitlabEnv();
+    runForge(
+      [
+        "pr",
+        "edit",
+        "42",
+        "--title",
+        "New title",
+        "--body",
+        "New body",
+        "--add-label",
+        "bug",
+        "--remove-label",
+        "wip",
+      ],
+      { env },
+    );
+    expect(logText(log)).toContain(
+      "mr update 42 --title New title --description New body --label bug --unlabel wip",
+    );
+  });
+
+  test("pr edit --body-file -> mr update --description", () => {
+    const { env, log } = gitlabEnv();
+    const body = tmpFile("BODY FROM FILE");
+    runForge(["pr", "edit", "42", "--body-file", body], { env });
+    expect(logText(log)).toContain("mr update 42 --description BODY FROM FILE");
+  });
+
   test("issue comment --body-file -> issue note -m", () => {
     const { env, log } = gitlabEnv();
     const body = tmpFile("looks good");

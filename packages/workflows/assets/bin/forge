@@ -384,16 +384,22 @@ gl_pr_create() {                     # forge pr create --draft --base <b> --titl
   glab "${ga[@]}" 2>&1 | grep -oE 'https?://[^[:space:]]+/-/merge_requests/[0-9]+' | head -1
 }
 
-gl_pr_edit() {                       # forge pr edit <n> --base <b>
-  local iid="" base=""
+gl_pr_edit() {                       # forge pr edit <n> --base/--title/--body/--body-file/--add-label/--remove-label
+  local iid=""
+  local ga=(mr update)
   while [ $# -gt 0 ]; do
     case "$1" in
-      --base) base="$2"; shift 2 ;;
-      -*) shift 2 ;;
+      --base|-B) ga+=(--target-branch "$2"); shift 2 ;;
+      --title|-t) ga+=(--title "$2"); shift 2 ;;
+      --body|-b) ga+=(--description "$2"); shift 2 ;;
+      --body-file|-F) ga+=(--description "$(cat "$2")"); shift 2 ;;
+      --add-label) ga+=(--label "$2"); shift 2 ;;
+      --remove-label) ga+=(--unlabel "$2"); shift 2 ;;
+      -*) die "unsupported GitLab pr edit flag: $1" 2 ;;
       *) iid="$1"; shift ;;
     esac
   done
-  glab mr update "$iid" --target-branch "$base"
+  glab "${ga[@]:0:2}" "$iid" "${ga[@]:2}"
 }
 
 gl_pr_ready() {                      # forge pr ready <n> [--undo]

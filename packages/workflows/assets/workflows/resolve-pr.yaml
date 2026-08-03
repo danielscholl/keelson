@@ -241,7 +241,7 @@ nodes:
       | Decision | When to use |
       |----------|-------------|
       | actionable-code-change | Reviewer is asking for a real code change we should make. |
-      | actionable-metadata-change | Reviewer is asking for a PR body, title, label, or other forge metadata change that does not modify repository files. |
+      | actionable-metadata-change | Reviewer is asking for a PR body, title, or label change that does not modify repository files. |
       | question | Reviewer is asking a question; a reply explaining the decision is enough. |
       | wontfix | We disagree or the change is out of scope; we'll explain why. |
       | already-addressed | The concern was already fixed in a later commit or is moot. |
@@ -272,9 +272,8 @@ nodes:
       deliberately changes is not wrong: that is `wontfix` (explain the
       change and why it is intended), never `invalid`. And when honoring the
       reviewer costs one small compliant edit, prefer an actionable decision
-      over arguing. Use `actionable-metadata-change` for PR body, title, label,
-      or other forge metadata edits; use `actionable-code-change` for repository
-      content.
+      over arguing. Use `actionable-metadata-change` only for PR body, title, or
+      label edits; use `actionable-code-change` for repository content.
 
       ## Output
 
@@ -433,9 +432,10 @@ nodes:
       - Apply code changes only for triage entries with
         `decision == "actionable-code-change"`.
       - For `actionable-metadata-change`, read the PR number from
-        `$ARTIFACTS_DIR/.pr-number` and make the requested PR body, title, label,
-        or other metadata edit with `forge pr edit`. Do not modify repository
-        files or create a commit for a metadata-only fix.
+        `$ARTIFACTS_DIR/.pr-number` and make the requested edit with
+        `forge pr edit` using only `--title`, `--body` / `--body-file`,
+        `--add-label`, or `--remove-label`. Do not modify repository files or
+        create a commit for a metadata-only fix.
       - For each actionable thread, read the target file before editing and run
         the narrowest check covering the change after editing.
       - Stage edited files by name. Never `git add -A`, `git add .`, or
