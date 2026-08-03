@@ -2179,6 +2179,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
       commentId: number;
       action: string;
       decision: string;
+      fix_kind?: string | null;
       commit: string | null;
       reply: string;
     }[];
@@ -2330,6 +2331,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           commentId: 1,
           action: "fixed",
           decision: "actionable-code-change",
+          fix_kind: "code",
           commit: "c1",
           reply: "r1",
         },
@@ -2372,6 +2374,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           commentId: 1,
           action: "fixed",
           decision: "actionable-code-change",
+          fix_kind: "code",
           commit: "c1",
           reply: "r1",
         },
@@ -2397,7 +2400,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     expect(summary.nodes["converge-check"].state).toBe("completed");
   });
 
-  test("a metadata-only round proceeds without rebuttal approval", async () => {
+  test("reply-gate accepts a metadata fix without a commit or rebuttal approval", async () => {
     const { run, approvalCalls } = convergeRun({
       hasNew: true,
       ciStatus: "PASS",
@@ -2407,8 +2410,9 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
         {
           threadId: "t-meta",
           commentId: 3,
-          action: "replied-only",
+          action: "fixed",
           decision: "actionable-metadata-change",
+          fix_kind: "metadata",
           commit: null,
           reply: "updated",
         },
@@ -2421,6 +2425,74 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     expect(summary.nodes.approve.state).toBe("skipped");
     expect(summary.nodes.fix.state).toBe("completed");
     expect(summary.nodes["reply-gate"].state).toBe("completed");
+  });
+
+  test("reply-gate rejects a code fix without a commit", async () => {
+    const { run, artifactsDir } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t-code", commentId: 4 }],
+      triage: [{ threadId: "t-code", decision: "actionable-code-change" }],
+      results: [
+        {
+          threadId: "t-code",
+          commentId: 4,
+          action: "fixed",
+          decision: "actionable-code-change",
+          fix_kind: "code",
+          commit: null,
+          reply: "fixed",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.nodes["reply-gate"].state).toBe("failed");
+    expect(JSON.parse(readFileSync(join(artifactsDir, "reply-failures.json"), "utf8"))).toEqual([
+      {
+        round: 1,
+        stage: "reply-gate",
+        threads: ["t-code"],
+        reason: "results.json failed the reply honesty gate",
+      },
+    ]);
+  });
+
+  test("reply-gate records incomplete result coverage before failing", async () => {
+    const { run, artifactsDir } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [
+        { threadId: "t-one", commentId: 5 },
+        { threadId: "t-two", commentId: 6 },
+      ],
+      triage: [
+        { threadId: "t-one", decision: "actionable-code-change" },
+        { threadId: "t-two", decision: "actionable-code-change" },
+      ],
+      results: [
+        {
+          threadId: "t-one",
+          commentId: 5,
+          action: "fixed",
+          decision: "actionable-code-change",
+          fix_kind: "code",
+          commit: "c2",
+          reply: "fixed",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.nodes["reply-gate"].state).toBe("failed");
+    expect(JSON.parse(readFileSync(join(artifactsDir, "reply-failures.json"), "utf8"))).toEqual([
+      {
+        round: 1,
+        stage: "reply-gate",
+        threads: ["t-one", "t-two"],
+        reason: "results.json thread ids do not match new threads",
+      },
+    ]);
   });
 
   test("a clean round with no new threads and CI PASS converges immediately", async () => {

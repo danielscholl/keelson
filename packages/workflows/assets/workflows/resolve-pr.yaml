@@ -566,41 +566,82 @@ nodes:
       R="$KEELSON_ARTIFACTS_DIR/results.json"
       T="$KEELSON_ARTIFACTS_DIR/triage.json"
       TH="$KEELSON_ARTIFACTS_DIR/threads.json"
-      [ -f "$R" ] || { echo "results.json missing; refusing to reply/resolve." >&2; exit 1; }
-      jq -e 'type == "array"' "$R" >/dev/null || { echo "results.json must be a JSON array." >&2; exit 1; }
+      FAILURES="$KEELSON_ARTIFACTS_DIR/reply-failures.json"
+      ROUND="$converge.round"
+      NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
+      record_failure() {
+        local reason="$1"
+        local threads="$2"
+        [ -f "$FAILURES" ] || printf '[]\n' > "$FAILURES"
+        if ! jq -e 'type == "array"' "$FAILURES" >/dev/null; then
+          echo "reply-failures.json is not an array; could not record reply-gate failure." >&2
+          return 1
+        fi
+        jq --argjson round "$ROUND" --arg reason "$reason" --argjson threads "$threads" \
+          '. + [{round: $round, stage: "reply-gate", threads: $threads, reason: $reason}]' \
+          "$FAILURES" > "$FAILURES.tmp" && mv "$FAILURES.tmp" "$FAILURES"
+      }
+      if [ ! -f "$R" ]; then
+        echo "results.json missing; refusing to reply/resolve." >&2
+        if ! record_failure "results.json missing" "$NEW_IDS"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
+        exit 1
+      fi
+      if ! jq -e 'type == "array"' "$R" >/dev/null; then
+        echo "results.json must be a JSON array." >&2
+        if ! record_failure "results.json is not an array" "$NEW_IDS"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
+        exit 1
+      fi
       # Reply-all: every new thread has exactly one result entry (NOT deduplicated,
       # so a duplicate result id is caught rather than masked).
-      NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
       RES_IDS=$(jq -cS '[.[].threadId] | sort' "$R")
       if [ "$NEW_IDS" != "$RES_IDS" ]; then
         echo "results.json thread ids do not match the new threads (missing, extra, or duplicate reply); refusing to mutate." >&2
         echo "new:    $NEW_IDS" >&2
         echo "result: $RES_IDS" >&2
+        AFFECTED_IDS=$(jq -cn --argjson new "$NEW_IDS" --argjson result "$RES_IDS" \
+          '$new + $result | unique')
+        if ! record_failure "results.json thread ids do not match new threads" "$AFFECTED_IDS"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
         exit 1
       fi
-      # Valid action; a 'fixed' resolve requires actionable triage AND a commit;
-      # a decision equal to the APPROVED triage decision (resolvability is
-      # derived from it downstream, so a drifted decision could resolve a
-      # thread the operator never signed off on); a non-empty reply; and a
-      # commentId that is the thread's OWN reply target (so a swapped id can't
-      # post the response on the wrong thread).
-      BAD=$(jq -r --slurpfile tri "$T" --slurpfile th "$TH" '
+      # A fixed code result needs a commit; a fixed metadata result proves the
+      # non-code path explicitly. Both must match the approved triage decision.
+      BAD=$(jq -c --slurpfile tri "$T" --slurpfile th "$TH" '
         ($tri[0].threads | map({ (.threadId): .decision }) | add) as $dec
         | ($th[0] | map({ (.threadId): .commentId }) | add) as $cid
         | [ .[]
             | select(
                 (.action != "fixed" and .action != "replied-only")
-                or (.action == "fixed" and (($dec[.threadId]) != "actionable-code-change"))
-                or (.action == "fixed" and (((.commit // "") | tostring | length) == 0))
+                or (.action == "fixed" and ((
+                  (
+                    ($dec[.threadId]) == "actionable-code-change"
+                    and .fix_kind == "code"
+                    and (((.commit // "") | tostring | length) > 0)
+                  )
+                  or
+                  (
+                    ($dec[.threadId]) == "actionable-metadata-change"
+                    and .fix_kind == "metadata"
+                    and (((.commit // "") | tostring | length) == 0)
+                  )
+                ) | not))
                 or (.decision != ($dec[.threadId]))
                 or (((.reply // "") | tostring | length) == 0)
                 or (.commentId != ($cid[.threadId]))
               )
-            | .threadId ] | join(", ")
+            | .threadId ]
       ' "$R")
-      if [ -n "$BAD" ]; then
-        echo "honesty gate failed for thread(s): $BAD" >&2
-        echo "(each result: action fixed|replied-only; a 'fixed' action requires actionable triage + a commit; decision must equal the approved triage decision; a non-empty reply; and a commentId matching the thread's own comment)." >&2
+      if [ "$BAD" != "[]" ]; then
+        echo "honesty gate failed for thread(s): $(printf '%s' "$BAD" | jq -r 'join(", ")')" >&2
+        echo "(each result: action fixed|replied-only; a fixed code result requires fix_kind code + a commit; a fixed metadata result requires fix_kind metadata + no commit; decision must equal approved triage; reply must be non-empty; and commentId must match the thread)." >&2
+        if ! record_failure "results.json failed the reply honesty gate" "$BAD"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
         exit 1
       fi
       echo "honesty gate OK: $(jq 'length' "$R") result(s) validated against triage before reply/resolve."
