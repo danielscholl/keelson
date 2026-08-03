@@ -316,7 +316,7 @@ export function buildProgram(): Command {
     .option("--arguments <text>", "free-form workflow ARGUMENTS value")
     .option("--watch", "stream node events (default when stdout is a TTY)")
     .option("--no-watch", "skip streaming; emit a single envelope at completion")
-    .option("--provider <id>", "provider id for in-process runs (default: stub)")
+    .option("--provider <id>", "provider id for prompt nodes (default: first non-stub)")
     .option("--base-url <url>", "explicit server base URL (skips the probe)")
     .option("--project <name>", "named project (server resolves to its rootPath)")
     .option("--working-dir <path>", "override cwd directly (defaults to current shell cwd)")
