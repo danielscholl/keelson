@@ -145,6 +145,17 @@ describe("resolve-pr workflow contract", () => {
     expect(fixPrompt).toContain('"fix_kind": "metadata"');
     expect(fixPrompt).toContain('"commit": null');
   });
+
+  test("resolves metadata fixes and records public mutation failures", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "resolve-pr",
+    )?.workflow;
+    const replyPrompt = workflow?.nodes.find((node) => node.id === "reply-resolve")?.prompt;
+
+    expect(replyPrompt).toContain("fixed code or metadata");
+    expect(replyPrompt).toContain("reply-failures.json");
+    expect(replyPrompt).toContain('stage:"reply-resolve"');
+  });
 });
 
 describe("bundled workflow model policy", () => {

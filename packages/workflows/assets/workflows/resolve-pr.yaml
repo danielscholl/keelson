@@ -658,9 +658,10 @@ nodes:
 
       - Post a reply on every entry in `$ARTIFACTS_DIR/results.json`.
       - A thread is RESOLVABLE when its `action == "fixed"` OR its `decision`
-        is `invalid` or `already-addressed`. Fixed threads got the change they
-        asked for; invalid / already-addressed assert nothing needs to change,
-        and the operator signed off on that at the approval gate.
+        is `invalid` or `already-addressed`. Fixed code and metadata threads got
+        the change they asked for; invalid / already-addressed assert nothing
+        needs to change, and the operator signed off on that at the approval
+        gate.
       - Resolve (via `forge pr resolve-thread`) every resolvable entry, AFTER
         its reply posts — the reply is the evidence trail for the resolution.
       - Never resolve a `question` or `wontfix` thread: those await the
@@ -673,6 +674,13 @@ nodes:
         the ledger exists for the resolve-retry lane: a resolvable thread whose
         resolve failed is recorded with `resolved: false` so a later round
         retries the resolve ONLY, without posting another reply.
+      - If any `forge pr reply` or `forge pr resolve-thread` call fails, append
+        a record immediately to `$ARTIFACTS_DIR/reply-failures.json` with
+        `{round, stage:"reply-resolve", threads:[threadId], reason}`. Initialize
+        a missing ledger as `[]`, require an existing ledger to be an array, and
+        update it through a temporary file plus rename. A reply failure leaves
+        the thread out of `handled.json`; a resolve failure records the posted
+        reply with `resolved: false`.
 
       ## Steps
 
@@ -682,20 +690,21 @@ nodes:
          `forge pr reply {prNumber} --thread {threadId} --comment {commentId} --body "{reply text}"`
          (`forge` routes to the right forge; `--comment` carries the first
          comment's databaseId that the GitHub path needs.)
-      3. For each resolvable entry (`action == "fixed"`, or `decision` of
-         `invalid` / `already-addressed`), resolve the thread:
+      3. For each resolvable entry (a fixed code or metadata result, or
+         `decision` of `invalid` / `already-addressed`), resolve the thread:
          `forge pr resolve-thread {prNumber} --thread {threadId}`.
       4. Write `$ARTIFACTS_DIR/outcome.json`:
          `{ "replied": [...], "resolved": [...], "left_open": [...] }`
       5. Append to `$ARTIFACTS_DIR/handled.json` one entry per thread whose reply
          posted, preserving existing entries and recording `threadId`,
-         `commentId`, `action`, `decision`, `commit`, `reply`, `replied: true`,
-         `resolved` (true ONLY when a resolvable thread's resolve succeeded, else
-         false), and `round: $converge.round`. Record every replied thread —
-         INCLUDING a resolvable thread whose resolve failed (with
-         `resolved: false`), so it is retried resolve-only and never re-replied.
-      6. Print a summary: how many replied, resolved, left open, and newly
-         recorded in handled.json.
+         `commentId`, `action`, `decision`, `fix_kind`, `commit`, `reply`,
+         `replied: true`, `resolved` (true ONLY when a resolvable thread's
+         resolve succeeded, else false), and `round: $converge.round`. Record
+         every replied thread — INCLUDING a resolvable thread whose resolve
+         failed (with `resolved: false`), so it is retried resolve-only and
+         never re-replied.
+      6. Print a summary: how many replied, resolved, left open, failed, and
+         newly recorded in handled.json.
 
   # Resolve-only retry path for resolvable threads (fixed, or approved
   # invalid / already-addressed rebuttals) replied to in a prior round whose
