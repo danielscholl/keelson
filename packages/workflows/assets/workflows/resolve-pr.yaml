@@ -13,9 +13,10 @@ description: |
         publicly push back on a reviewer (wontfix / invalid / question) ->
         fixes actionable threads -> validates and pushes -> replies on every
         handled thread -> resolves fixed threads plus approved invalid /
-        already-addressed rebuttals (question / wontfix stay open for the
-        reviewer) -> waits for CI -> repeats until CI passes and a clean round
-        observes no new threads, or escalates at the round cap.
+        already-addressed rebuttals (question stays open; wontfix stays open
+        unless explicitly enabled with `resolve_wontfix=true` and approved) ->
+        waits for CI -> repeats until CI passes and a clean round observes no
+        new threads, or escalates at the round cap.
   NOT for: Fork PRs, which cannot be pushed safely by this workflow.
            Creating a PR from an issue (use fix-issue).
            Reviewing a PR without changing it (use pr-review).
@@ -95,7 +96,7 @@ nodes:
           (($handled[0] // []) | group_by(.threadId) | map(.[-1])) as $ledger
           | ([$ledger[]?
               | select(.replied == true and (.resolved != true)
-                  and (.action == "fixed" or .decision == "invalid" or .decision == "already-addressed"))
+                  and .resolve_authorized == true)
               | .threadId] | unique) as $retryIds
           | map(select(.isResolved == false))
           | map({
@@ -219,6 +220,7 @@ nodes:
                 enum:
                   [
                     actionable-code-change,
+                    actionable-metadata-change,
                     question,
                     wontfix,
                     already-addressed,
@@ -239,6 +241,7 @@ nodes:
       | Decision | When to use |
       |----------|-------------|
       | actionable-code-change | Reviewer is asking for a real code change we should make. |
+      | actionable-metadata-change | Reviewer is asking for a PR body, title, or label change that does not modify repository files. |
       | question | Reviewer is asking a question; a reply explaining the decision is enough. |
       | wontfix | We disagree or the change is out of scope; we'll explain why. |
       | already-addressed | The concern was already fixed in a later commit or is moot. |
@@ -268,8 +271,9 @@ nodes:
       A reviewer who is right about the pre-PR state of a rule the PR
       deliberately changes is not wrong: that is `wontfix` (explain the
       change and why it is intended), never `invalid`. And when honoring the
-      reviewer costs one small compliant edit (a label, a date, a rename),
-      prefer `actionable-code-change` over arguing.
+      reviewer costs one small compliant edit, prefer an actionable decision
+      over arguing. Use `actionable-metadata-change` only for PR body, title, or
+      label edits; use `actionable-code-change` for repository content.
 
       ## Output
 
@@ -293,6 +297,14 @@ nodes:
         exit 1
       fi
 
+      RESOLVE_WONTFIX=false
+      if [ "${KEELSON_INPUTS_resolve_wontfix:-}" = "true" ]; then
+        RESOLVE_WONTFIX=true
+      fi
+      jq -cn --argjson resolve_wontfix "$RESOLVE_WONTFIX" \
+        '{resolve_wontfix: $resolve_wontfix}' \
+        > "$KEELSON_ARTIFACTS_DIR/resolve-mode.json"
+
       # Human-readable round summary for the approval canvas; triage.json stays
       # the machine artifact downstream nodes consume. Presentation only, so a
       # generation failure warns instead of failing the gate — the honesty
@@ -300,7 +312,10 @@ nodes:
       if ! jq -r --slurpfile th "$KEELSON_ARTIFACTS_DIR/threads.json" --arg round "$converge.round" '
         ($th[0] | map({(.threadId): .}) | add) as $by_id
         | (.threads | length) as $total
-        | ([.threads[] | select(.decision == "actionable-code-change")] | length) as $fix
+        | ([.threads[] | select(
+            .decision == "actionable-code-change"
+            or .decision == "actionable-metadata-change"
+          )] | length) as $fix
         | def loc(t): t.path + (if t.line then ":\(t.line)" else "" end);
         [ "# Triage — round \($round)",
           "",
@@ -324,12 +339,17 @@ nodes:
         echo "triage.md generation failed; the approval canvas will fall back to triage.json." >&2
       fi
 
-      jq -c --slurpfile fetched "$KEELSON_ARTIFACTS_DIR/threads.json" '
-        ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
+      jq -c --slurpfile fetched "$KEELSON_ARTIFACTS_DIR/threads.json" \
+        --argjson resolve_wontfix "$RESOLVE_WONTFIX" '
+        ([.threads[] | select(
+          .decision != "actionable-code-change"
+          and .decision != "actionable-metadata-change"
+        )] | length) as $n
         | {
             contentious: $n,
             needs_review: (if $n > 0 then "true" else "false" end),
-            has_new: (if ($fetched[0] | length) > 0 then "true" else "false" end)
+            has_new: (if ($fetched[0] | length) > 0 then "true" else "false" end),
+            resolve_wontfix: $resolve_wontfix
           }
       ' "$KEELSON_ARTIFACTS_DIR/triage.json"
 
@@ -357,7 +377,12 @@ nodes:
         approval, invalid and already-addressed threads are replied to and then
         resolved — they assert nothing needs to change, and this approval is
         the human sign-off on that. Question and wontfix threads get a factual
-        reply and stay open for the reviewer.
+        reply and stay open for the reviewer by default.
+
+        If this run was explicitly started with
+        `--inputs resolve_wontfix=true`, your approval also authorizes owner-side
+        closure of wontfix, invalid, and already-addressed threads after a
+        closing reply; questions always stay open.
 
         $ARTIFACTS_DIR/triage.md
       capture_response: true
@@ -388,6 +413,7 @@ nodes:
 
       Full triage data: `$ARTIFACTS_DIR/triage.json`
       Thread data:      `$ARTIFACTS_DIR/threads.json`
+      Resolution mode:  `$ARTIFACTS_DIR/resolve-mode.json`
 
       ## Setup - verify.sh
 
@@ -405,6 +431,15 @@ nodes:
       - Process only threads in `$ARTIFACTS_DIR/threads.json`.
       - Apply code changes only for triage entries with
         `decision == "actionable-code-change"`.
+      - For `actionable-metadata-change`, read the PR number from
+        `$ARTIFACTS_DIR/.pr-number` and make the requested edit with
+        `forge pr edit` using only `--title`, `--body-file`, `--add-label`, or
+        `--remove-label`. Before changing the body, read its current value with
+        `forge pr view <n> --json body -q .body`, apply the narrowest change to
+        the existing text, write the complete result under `$ARTIFACTS_DIR`,
+        and pass that file with `--body-file`. Never compose a replacement body
+        from scratch. Do not modify repository files or create a commit for a
+        metadata-only fix.
       - For each actionable thread, read the target file before editing and run
         the narrowest check covering the change after editing.
       - Stage edited files by name. Never `git add -A`, `git add .`, or
@@ -412,6 +447,12 @@ nodes:
       - Commit per thread or per logical group with a conventional message.
       - For `question`, `wontfix`, `already-addressed`, and `invalid`, make no
         code change; compose a factual reply only.
+      - Read `resolve-mode.json` before composing replies. When
+        `resolve_wontfix` is true, every `wontfix`, `invalid`, and
+        `already-addressed` reply is an owner-side closing reply: restate the
+        approved rationale and include this exact sentence:
+        "reviewed and accepted on the maintainer side." Questions remain
+        non-closing.
       - When a triage entry has `evidence_changed_by_pr: true`, the reply MUST
         state that this PR itself modifies the cited text (name the file), not
         present it as standing policy the reviewer overlooked.
@@ -428,7 +469,19 @@ nodes:
           "commentId": <database id for replies>,
           "action": "fixed",
           "decision": "actionable-code-change",
-          "commit": "<sha or null>",
+          "fix_kind": "code",
+          "resolve_authorized": true,
+          "commit": "<sha>",
+          "reply": "<the reply text to post>"
+        },
+        {
+          "threadId": "...",
+          "commentId": 123,
+          "action": "fixed",
+          "decision": "actionable-metadata-change",
+          "fix_kind": "metadata",
+          "resolve_authorized": true,
+          "commit": null,
           "reply": "<the reply text to post>"
         },
         {
@@ -436,14 +489,21 @@ nodes:
           "commentId": 123,
           "action": "replied-only",
           "decision": "invalid",
+          "fix_kind": null,
+          "resolve_authorized": true,
           "commit": null,
           "reply": "..."
         }
       ]
       ```
 
-      `action` is `"fixed"` only when an actual code change was committed for
-      that thread. Everything else is `"replied-only"`.
+      `action` is `"fixed"` only when the requested change was completed.
+      `fix_kind` is `"code"` for a repository change with a non-empty commit,
+      `"metadata"` for a completed PR metadata edit with `commit: null`, and
+      `null` for reply-only decisions. Everything not fixed is `"replied-only"`.
+      `resolve_authorized` is true for fixed results and for approved `invalid`
+      / `already-addressed` results. It is true for `wontfix` only when
+      `resolve-mode.json` enables the opt-in; it is always false for `question`.
 
       Print a summary when done.
 
@@ -538,44 +598,129 @@ nodes:
       R="$KEELSON_ARTIFACTS_DIR/results.json"
       T="$KEELSON_ARTIFACTS_DIR/triage.json"
       TH="$KEELSON_ARTIFACTS_DIR/threads.json"
-      [ -f "$R" ] || { echo "results.json missing; refusing to reply/resolve." >&2; exit 1; }
-      jq -e 'type == "array"' "$R" >/dev/null || { echo "results.json must be a JSON array." >&2; exit 1; }
+      M="$KEELSON_ARTIFACTS_DIR/resolve-mode.json"
+      FAILURES="$KEELSON_ARTIFACTS_DIR/reply-failures.json"
+      ROUND="$converge.round"
+      FAILURE_RECORDED=false
+      record_failure() {
+        local reason="$1"
+        local threads="$2"
+        [ -f "$FAILURES" ] || printf '[]\n' > "$FAILURES"
+        if ! jq -e 'type == "array"' "$FAILURES" >/dev/null; then
+          echo "reply-failures.json is not an array; could not record reply-gate failure." >&2
+          return 1
+        fi
+        if ! jq --argjson round "$ROUND" --arg reason "$reason" --argjson threads "$threads" \
+          '. + [{round: $round, stage: "reply-gate", threads: $threads, reason: $reason}]' \
+          "$FAILURES" > "$FAILURES.tmp" || ! mv "$FAILURES.tmp" "$FAILURES"; then
+          return 1
+        fi
+        FAILURE_RECORDED=true
+      }
+      record_unexpected_exit() {
+        local status=$?
+        local threads='[]'
+        trap - EXIT
+        if [ "$status" -ne 0 ] && [ "$FAILURE_RECORDED" != "true" ]; then
+          if [ -f "$TH" ]; then
+            threads=$(jq -cS '[.[].threadId] | sort' "$TH" 2>/dev/null || printf '[]')
+          fi
+          if ! record_failure "reply-gate exited before validation completed" "$threads"; then
+            echo "Could not persist the unexpected reply-gate failure." >&2
+          fi
+        fi
+        exit "$status"
+      }
+      trap record_unexpected_exit EXIT
+      NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
+      if [ ! -f "$R" ]; then
+        echo "results.json missing; refusing to reply/resolve." >&2
+        if ! record_failure "results.json missing" "$NEW_IDS"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
+        exit 1
+      fi
+      if ! jq -e 'type == "array"' "$R" >/dev/null; then
+        echo "results.json must be a JSON array." >&2
+        if ! record_failure "results.json is not an array" "$NEW_IDS"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
+        exit 1
+      fi
+      if ! jq -e '.resolve_wontfix == true or .resolve_wontfix == false' "$M" >/dev/null; then
+        echo "resolve-mode.json missing or invalid; refusing to reply/resolve." >&2
+        if ! record_failure "resolve-mode.json missing or invalid" "$NEW_IDS"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
+        exit 1
+      fi
       # Reply-all: every new thread has exactly one result entry (NOT deduplicated,
       # so a duplicate result id is caught rather than masked).
-      NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
       RES_IDS=$(jq -cS '[.[].threadId] | sort' "$R")
       if [ "$NEW_IDS" != "$RES_IDS" ]; then
         echo "results.json thread ids do not match the new threads (missing, extra, or duplicate reply); refusing to mutate." >&2
         echo "new:    $NEW_IDS" >&2
         echo "result: $RES_IDS" >&2
+        AFFECTED_IDS=$(jq -cn --argjson new "$NEW_IDS" --argjson result "$RES_IDS" \
+          '$new + $result | unique')
+        if ! record_failure "results.json thread ids do not match new threads" "$AFFECTED_IDS"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
         exit 1
       fi
-      # Valid action; a 'fixed' resolve requires actionable triage AND a commit;
-      # a decision equal to the APPROVED triage decision (resolvability is
-      # derived from it downstream, so a drifted decision could resolve a
-      # thread the operator never signed off on); a non-empty reply; and a
-      # commentId that is the thread's OWN reply target (so a swapped id can't
-      # post the response on the wrong thread).
-      BAD=$(jq -r --slurpfile tri "$T" --slurpfile th "$TH" '
+      # A fixed code result needs a commit; a fixed metadata result proves the
+      # non-code path explicitly. Both must match the approved triage decision.
+      BAD=$(jq -c --slurpfile tri "$T" --slurpfile th "$TH" --slurpfile mode "$M" '
         ($tri[0].threads | map({ (.threadId): .decision }) | add) as $dec
         | ($th[0] | map({ (.threadId): .commentId }) | add) as $cid
+        | ($mode[0].resolve_wontfix == true) as $resolve_wontfix
         | [ .[]
             | select(
                 (.action != "fixed" and .action != "replied-only")
-                or (.action == "fixed" and (($dec[.threadId]) != "actionable-code-change"))
-                or (.action == "fixed" and (((.commit // "") | tostring | length) == 0))
+                or (.action == "fixed" and ((
+                  (
+                    ($dec[.threadId]) == "actionable-code-change"
+                    and .fix_kind == "code"
+                    and (((.commit // "") | tostring | length) > 0)
+                  )
+                  or
+                  (
+                    ($dec[.threadId]) == "actionable-metadata-change"
+                    and .fix_kind == "metadata"
+                    and (((.commit // "") | tostring | length) == 0)
+                  )
+                ) | not))
                 or (.decision != ($dec[.threadId]))
+                or (.resolve_authorized != (
+                  .action == "fixed"
+                  or ($dec[.threadId]) == "invalid"
+                  or ($dec[.threadId]) == "already-addressed"
+                  or ($resolve_wontfix and ($dec[.threadId]) == "wontfix")
+                ))
+                or (
+                  $resolve_wontfix
+                  and (
+                    ($dec[.threadId]) == "wontfix"
+                    or ($dec[.threadId]) == "invalid"
+                    or ($dec[.threadId]) == "already-addressed"
+                  )
+                  and (((.reply // "") | contains("reviewed and accepted on the maintainer side.")) | not)
+                )
                 or (((.reply // "") | tostring | length) == 0)
                 or (.commentId != ($cid[.threadId]))
               )
-            | .threadId ] | join(", ")
+            | .threadId ]
       ' "$R")
-      if [ -n "$BAD" ]; then
-        echo "honesty gate failed for thread(s): $BAD" >&2
-        echo "(each result: action fixed|replied-only; a 'fixed' action requires actionable triage + a commit; decision must equal the approved triage decision; a non-empty reply; and a commentId matching the thread's own comment)." >&2
+      if [ "$BAD" != "[]" ]; then
+        echo "honesty gate failed for thread(s): $(printf '%s' "$BAD" | jq -r 'join(", ")')" >&2
+        echo "(each result: action/fix evidence, decision, resolve authorization, closing-reply wording, non-empty reply, and commentId must match the approved triage and runtime mode)." >&2
+        if ! record_failure "results.json failed the reply honesty gate" "$BAD"; then
+          echo "Could not persist the reply-gate failure." >&2
+        fi
         exit 1
       fi
       echo "honesty gate OK: $(jq 'length' "$R") result(s) validated against triage before reply/resolve."
+      trap - EXIT
 
   - id: reply-resolve
     depends_on: [reply-gate]
@@ -588,14 +733,18 @@ nodes:
       ## Invariant
 
       - Post a reply on every entry in `$ARTIFACTS_DIR/results.json`.
-      - A thread is RESOLVABLE when its `action == "fixed"` OR its `decision`
-        is `invalid` or `already-addressed`. Fixed threads got the change they
-        asked for; invalid / already-addressed assert nothing needs to change,
-        and the operator signed off on that at the approval gate.
+      - A thread is RESOLVABLE exactly when its gate-validated
+        `resolve_authorized == true`. Fixed code and metadata results are
+        authorized. Approved `invalid` / `already-addressed` results are
+        authorized. A `wontfix` is authorized only when `resolve-mode.json`
+        enables the explicit opt-in and the operator approved the triage.
       - Resolve (via `forge pr resolve-thread`) every resolvable entry, AFTER
         its reply posts — the reply is the evidence trail for the resolution.
-      - Never resolve a `question` or `wontfix` thread: those await the
-        reviewer, and closing them would be dishonest PR state.
+      - Never resolve a `question`. A default-mode `wontfix` also stays open.
+        For an authorized owner-side `wontfix`, `invalid`, or
+        `already-addressed` result, verify the closing reply restates the
+        rationale and includes "reviewed and accepted on the maintainer side."
+        before posting and resolving it.
       - Record a thread into `$ARTIFACTS_DIR/handled.json` as soon as its reply is
         posted, carrying `replied: true` and `resolved: <bool>` — `resolved: true`
         ONLY when a resolvable thread's resolve call SUCCEEDED,
@@ -604,33 +753,76 @@ nodes:
         the ledger exists for the resolve-retry lane: a resolvable thread whose
         resolve failed is recorded with `resolved: false` so a later round
         retries the resolve ONLY, without posting another reply.
+      - If any `forge pr reply` or `forge pr resolve-thread` call fails, append
+        a record immediately to `$ARTIFACTS_DIR/reply-failures.json` with
+        `{round, stage:"reply-resolve", threads:[threadId], reason}`. Initialize
+        a missing ledger as `[]`, require an existing ledger to be an array, and
+        update it through a temporary file plus rename. A reply failure leaves
+        the thread out of `handled.json`; a resolve failure records the posted
+        reply with `resolved: false`.
 
       ## Steps
 
       1. Read `$ARTIFACTS_DIR/results.json`, `$ARTIFACTS_DIR/triage.json`,
-         `$ARTIFACTS_DIR/threads.json`, and `$ARTIFACTS_DIR/.pr-number`.
+         `$ARTIFACTS_DIR/threads.json`, `$ARTIFACTS_DIR/resolve-mode.json`, and
+         `$ARTIFACTS_DIR/.pr-number`.
       2. For each result entry, post a reply on its thread:
          `forge pr reply {prNumber} --thread {threadId} --comment {commentId} --body "{reply text}"`
          (`forge` routes to the right forge; `--comment` carries the first
          comment's databaseId that the GitHub path needs.)
-      3. For each resolvable entry (`action == "fixed"`, or `decision` of
-         `invalid` / `already-addressed`), resolve the thread:
+      3. For each entry with `resolve_authorized == true`, resolve the thread:
          `forge pr resolve-thread {prNumber} --thread {threadId}`.
       4. Write `$ARTIFACTS_DIR/outcome.json`:
          `{ "replied": [...], "resolved": [...], "left_open": [...] }`
       5. Append to `$ARTIFACTS_DIR/handled.json` one entry per thread whose reply
          posted, preserving existing entries and recording `threadId`,
-         `commentId`, `action`, `decision`, `commit`, `reply`, `replied: true`,
-         `resolved` (true ONLY when a resolvable thread's resolve succeeded, else
-         false), and `round: $converge.round`. Record every replied thread —
-         INCLUDING a resolvable thread whose resolve failed (with
-         `resolved: false`), so it is retried resolve-only and never re-replied.
-      6. Print a summary: how many replied, resolved, left open, and newly
-         recorded in handled.json.
+         `commentId`, `action`, `decision`, `fix_kind`, `commit`, `reply`,
+         `resolve_authorized`, `replied: true`, `resolved` (true ONLY when an
+         authorized thread's resolve succeeded, else false), and
+         `round: $converge.round`. Record every replied thread — INCLUDING an
+         authorized thread whose resolve failed (with `resolved: false`), so it
+         is retried resolve-only and never re-replied.
+      6. Print a summary: how many replied, resolved, left open, failed, and
+         newly recorded in handled.json.
 
-  # Resolve-only retry path for resolvable threads (fixed, or approved
-  # invalid / already-addressed rebuttals) replied to in a prior round whose
-  # resolveReviewThread call failed. fetch-state records these into
+  - id: reply-audit
+    depends_on: [reply-gate, reply-resolve]
+    trigger_rule: all_done
+    bash: |
+      set -euo pipefail
+      ROUND="$converge.round"
+      FAILURES="$KEELSON_ARTIFACTS_DIR/reply-failures.json"
+      AUDIT="$KEELSON_ARTIFACTS_DIR/reply-audit.json"
+      [ -f "$FAILURES" ] || printf '[]\n' > "$FAILURES"
+      if jq -e 'type == "array"' "$FAILURES" >/dev/null; then
+        jq --argjson round "$ROUND" '[.[] | select(.round == $round)]' \
+          "$FAILURES" > "$AUDIT"
+      else
+        jq -cn --argjson round "$ROUND" \
+          '[{round: $round, stage: "reply-audit", threads: [], reason: "reply-failures.json is not an array"}]' \
+          > "$AUDIT"
+      fi
+      FAILURE_COUNT=$(jq 'length' "$AUDIT")
+      REPLY_FAILED=false
+      if [ "$FAILURE_COUNT" -gt 0 ]; then
+        REPLY_FAILED=true
+      fi
+      jq -cn --arg reply_failed "$REPLY_FAILED" --argjson failure_count "$FAILURE_COUNT" \
+        '{reply_failed: $reply_failed, failure_count: $failure_count}'
+
+  - id: reply-failure-approval
+    depends_on: [reply-audit]
+    when: "$reply-audit.output.reply_failed == 'true'"
+    approval:
+      message: |
+        A public review-thread reply or resolution failed in this round. The
+        workflow will not continue to CI until you review the failure record
+        and approve the retry path.
+
+        $ARTIFACTS_DIR/reply-audit.json
+
+  # Resolve-only retry path for ledger-authorized threads replied to in a prior
+  # round whose resolveReviewThread call failed. fetch-state records these into
   # resolve-retry.json; this node re-calls resolveReviewThread WITHOUT posting
   # another reply (no duplicate comments), and flips the ledger entry to
   # resolved on success so a resolved thread stops being retried.
@@ -669,9 +861,17 @@ nodes:
   - id: await-ci
     # refuse-fork is a dependency so it sits in the gate's converge subgraph and
     # cancels a fork run BEFORE await-ci reruns any CI jobs; a non-fork skips it,
-    # tolerated by none_failed_min_one_success. resolve-retry is a dependency so
-    # a re-resolve lands before CI is watched and post-ci-state re-fetches.
-    depends_on: [reply-resolve, fetch-state, refuse-fork, resolve-retry]
+    # tolerated by none_failed_min_one_success. The reply audit and its approval
+    # prevent a failed public mutation from silently rolling into CI.
+    depends_on:
+      [
+        reply-resolve,
+        reply-audit,
+        reply-failure-approval,
+        fetch-state,
+        refuse-fork,
+        resolve-retry,
+      ]
     trigger_rule: none_failed_min_one_success
     timeout: 1500000
     bash: |
@@ -871,8 +1071,9 @@ nodes:
       if [ -z "$PR_NUM" ]; then
         printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json"
         printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json"
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json"
         echo "post-ci-state: no PR number recorded; nothing to re-check." >&2
-        jq -cn '{is_fork: "unknown", new_count: 0, retry_count: 0}'
+        jq -cn '{is_fork: "unknown", new_count: 0, retry_count: 0, open_count: 0}'
         exit 0
       fi
 
@@ -880,7 +1081,8 @@ nodes:
       if [ "$IS_FORK" = "true" ]; then
         printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json"
         printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json"
-        jq -cn '{is_fork: "true", new_count: 0, retry_count: 0}'
+        printf '[]\n' > "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json"
+        jq -cn '{is_fork: "true", new_count: 0, retry_count: 0, open_count: 0}'
         exit 0
       fi
 
@@ -896,29 +1098,69 @@ nodes:
         > "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json"
       jq '.retry' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json" \
         > "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json"
+      jq '.open' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json" \
+        > "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json"
 
       NEW_COUNT=$(jq '.new | length' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json")
       RETRY_COUNT=$(jq '.retry | length' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json")
-      echo "post-ci-state: $NEW_COUNT new, $RETRY_COUNT resolve-retry after CI." >&2
+      OPEN_COUNT=$(jq '.open | length' "$KEELSON_ARTIFACTS_DIR/post-ci-thread-state.json")
+      echo "post-ci-state: $NEW_COUNT new, $RETRY_COUNT resolve-retry, $OPEN_COUNT open after CI." >&2
       jq -cn --argjson new_count "$NEW_COUNT" --argjson retry_count "$RETRY_COUNT" \
-        '{is_fork: "false", new_count: $new_count, retry_count: $retry_count}'
+        --argjson open_count "$OPEN_COUNT" \
+        '{is_fork: "false", new_count: $new_count, retry_count: $retry_count, open_count: $open_count}'
 
   - id: converge-check
     depends_on: [post-ci-state]
     bash: |
       set -euo pipefail
+      ROUND="$converge.round"
+      VERDICT="$KEELSON_ARTIFACTS_DIR/mergeability.json"
+      jq -cn --argjson round "$ROUND" '{
+        status: "unknown",
+        review_threads_clear: null,
+        open_threads: [],
+        count: null,
+        ci_status: "UNKNOWN",
+        round: $round
+      }' > "$VERDICT"
       # Gate on the post-CI re-fetch, NOT fetch-state's start-of-round threads.json:
       # NEW_COUNT counts threads that appeared (e.g. a bot on push) with no ledger
       # entry, RETRY_COUNT counts resolvable threads still awaiting a successful resolve.
       NEW_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-threads.json" 2>/dev/null || echo 0)
       RETRY_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-retry.json" 2>/dev/null || echo 0)
-      OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/all-unresolved-threads.json" 2>/dev/null || echo 0)
+      OPEN_COUNT=$(jq 'length' "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json" 2>/dev/null || echo 0)
       # bash nodes do not get $<node>.output text-substitution (rawBody runs, to
       # avoid injecting upstream output); read await-ci's output from the safe
       # env-var channel instead.
       CI_STATUS=$(printf '%s\n' "$KEELSON_NODE_await_ci_OUTPUT" | awk -F'CI_STATUS: ' '/CI_STATUS: / {print $2}' | tail -1 | awk '{print $1}')
 
+      VERDICT_STATUS=pending
       if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ] && [ "$RETRY_COUNT" -eq 0 ]; then
+        VERDICT_STATUS=converged
+      elif [ "$ROUND" -ge 8 ]; then
+        VERDICT_STATUS=exhausted
+      fi
+      if ! jq --arg status "$VERDICT_STATUS" --arg ci_status "${CI_STATUS:-UNKNOWN}" \
+        --argjson round "$ROUND" '{
+          status: $status,
+          review_threads_clear: (length == 0),
+          open_threads: [ .[] | {threadId, path, line} ],
+          count: length,
+          ci_status: $ci_status,
+          round: $round
+        }' "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json" > "$VERDICT.tmp"; then
+        rm -f "$VERDICT.tmp"
+        echo "Could not derive the review-thread verdict from post-ci-open-threads.json." >&2
+        exit 1
+      fi
+      mv "$VERDICT.tmp" "$VERDICT"
+
+      if [ "$VERDICT_STATUS" = "converged" ]; then
+        if [ "$OPEN_COUNT" -eq 0 ]; then
+          echo "REVIEW_THREADS_CLEAR: yes"
+        else
+          echo "REVIEW_THREADS_CLEAR: no"
+        fi
         echo "Converged: CI passed, no new unresolved threads after CI, and no pending resolve-retries."
         rm -f "$KEELSON_ARTIFACTS_DIR/.last-gate-state"
         exit 0
@@ -951,14 +1193,19 @@ nodes:
         rounds, so a re-triaged thread has multiple entries; count every metric
         from each thread's LATEST entry only (last occurrence per `threadId`).
         Each entry carries `replied` (bool) and `resolved` (bool). `resolved`
-        is the authoritative signal: a resolvable thread (action `fixed`, or
-        decision `invalid` / `already-addressed`) whose `resolveReviewThread`
-        call failed is recorded with `resolved: false`, so it is still open on
-        the forge. Count resolutions from `resolved`, never from `action` or
-        `decision`.
-      - Latest unresolved threads: `$ARTIFACTS_DIR/all-unresolved-threads.json`
+        is the authoritative signal: a thread with `resolve_authorized: true`
+        whose `resolveReviewThread` call failed is recorded with
+        `resolved: false`, so it is still open on the forge. Count resolutions
+        from `resolved`, never from `action` or `decision`.
+      - Latest unresolved threads: `$ARTIFACTS_DIR/post-ci-open-threads.json`
       - Post-CI new-thread set: `$ARTIFACTS_DIR/post-ci-threads.json`
       - Pending resolve-retries: `$ARTIFACTS_DIR/post-ci-retry.json`
+      - Deterministic review-thread verdict: `$ARTIFACTS_DIR/mergeability.json`.
+        Its `status` is `unknown`, `pending`, `exhausted`, or `converged`; use
+        `review_threads_clear` only to describe the unresolved review-thread set,
+        not whether the forge will permit a merge.
+      - Reply/reconciliation failures: `$ARTIFACTS_DIR/reply-failures.json`
+        (treat a missing file as an empty array)
       - Latest CI result:
 
         $await-ci.output
@@ -981,15 +1228,20 @@ nodes:
         replied == true, resolved != true, and decision question / wontfix —
         left open deliberately>
       - Latest CI: PASS / FAIL / UNKNOWN
+      - Review threads clear: yes
+        OR
+      - Review threads clear: no — <N> deliberately-open thread(s): <paths>
 
       ### Notes
 
       <Anything the operator needs to know. Call out any resolvable-but-
-      unresolved threads (replied == true, resolved == false, action "fixed" or
-      decision invalid / already-addressed) — these still need a resolve. If
+      unresolved threads (replied == true, resolved == false,
+      resolve_authorized == true) — these still need a resolve. If
       question / wontfix threads remain open, say plainly that they are the
       remaining merge blockers when the repo requires all threads resolved, and
-      that closing them is the reviewer's or operator's call. Note any exhaust
+      that closing them is the reviewer's or operator's call. If
+      reply-failures.json is non-empty, label the report "attention needed" and
+      list the affected round, stage, thread ids, and reason. Note any exhaust
       approval if this report ran after a human override.>
       ```
 

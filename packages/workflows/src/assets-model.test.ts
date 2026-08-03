@@ -134,6 +134,48 @@ function loadBundledWorkflows(): Array<{ filename: string; workflow: WorkflowDef
   });
 }
 
+describe("resolve-pr workflow contract", () => {
+  test("records metadata fixes without inventing commits", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "resolve-pr",
+    )?.workflow;
+    const fixPrompt = workflow?.nodes.find((node) => node.id === "fix")?.prompt;
+
+    expect(fixPrompt).toContain("actionable-metadata-change");
+    expect(fixPrompt).toContain("`--body-file`");
+    expect(fixPrompt).toContain("forge pr view <n> --json body -q .body");
+    expect(fixPrompt).toContain("Never compose a replacement body");
+    expect(fixPrompt).toContain("`--remove-label`");
+    expect(fixPrompt).not.toContain("other metadata edit");
+    expect(fixPrompt).toContain('"fix_kind": "metadata"');
+    expect(fixPrompt).toContain('"commit": null');
+  });
+
+  test("resolves metadata fixes and records public mutation failures", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "resolve-pr",
+    )?.workflow;
+    const replyPrompt = workflow?.nodes.find((node) => node.id === "reply-resolve")?.prompt;
+
+    expect(replyPrompt).toContain("Fixed code and metadata");
+    expect(replyPrompt).toContain("reply-failures.json");
+    expect(replyPrompt).toContain('stage:"reply-resolve"');
+  });
+
+  test("keeps owner-side resolution behind the runtime opt-in", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "resolve-pr",
+    )?.workflow;
+    const fixPrompt = workflow?.nodes.find((node) => node.id === "fix")?.prompt;
+    const replyPrompt = workflow?.nodes.find((node) => node.id === "reply-resolve")?.prompt;
+
+    expect(fixPrompt).toContain("resolve-mode.json");
+    expect(fixPrompt).toContain("reviewed and accepted on the maintainer side.");
+    expect(replyPrompt).toContain("resolve_authorized == true");
+    expect(replyPrompt).toContain("Never resolve a `question`");
+  });
+});
+
 describe("bundled workflow model policy", () => {
   test("uses portable tiers and only soft provider pins", () => {
     const violations: string[] = [];
