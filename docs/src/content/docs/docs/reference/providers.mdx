@@ -64,7 +64,7 @@ are provider-neutral: a provider consumes what it supports and ignores the rest.
 | `tools` | The `ToolDefinition`s to project (the harness tool registry). |
 | `allowedTools` / `disallowedTools` | SDK-level tool gates. Claude gates by name; Copilot gates the built-in capability the names map to. |
 | `thinking` | Extended thinking. Consumed by Claude. |
-| `reasoningEffort` | `none` … `xhigh`. Consumed by Copilot on reasoning models. |
+| `reasoningEffort` | `none` … `xhigh`. Copilot and Codex consume it on reasoning models; Claude maps it to thinking budgets. |
 | `mcpServers` | stdio MCP servers to attach. |
 | `abortSignal` | Cancels an in-flight turn. |
 | `onSessionId` | Called once when the backend session id is known, so the next turn can resume it. |

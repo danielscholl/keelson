@@ -26,6 +26,7 @@ import {
   ClaudeQueryFactory,
   type ClaudeQueryHandle,
   type ClaudeSdkMessage,
+  type ClaudeThinkingConfig,
   type ClaudeToolProjectionContext,
 } from "./factory.ts";
 
@@ -75,13 +76,31 @@ export const CLAUDE_CAPABILITIES: ProviderCapabilities = {
   sessionResume: true,
   streaming: true,
   tools: true,
-  reasoningEffort: false,
+  reasoningEffort: true,
   // Same source of truth as listModels(); providerInfoSchema's bare-id
   // shape gets projected here so the two don't drift.
   models: CLAUDE_MODEL_CATALOG.map((m) => m.id),
   defaultModel: CLAUDE_DEFAULT_MODEL,
   modelClasses: deriveModelClasses(CLAUDE_MODEL_CATALOG, CLAUDE_DEFAULT_MODEL),
 };
+
+function mapEffortToThinking(
+  effort: NonNullable<SendQueryOptions["reasoningEffort"]>,
+): ClaudeThinkingConfig {
+  // Tier budgets: low 4,096; medium 8,192; high 16,384; xhigh 32,000 tokens.
+  switch (effort) {
+    case "none":
+      return { type: "disabled" };
+    case "low":
+      return { type: "enabled", budgetTokens: 4096, display: "summarized" };
+    case "medium":
+      return { type: "enabled", budgetTokens: 8192, display: "summarized" };
+    case "high":
+      return { type: "enabled", budgetTokens: 16384, display: "summarized" };
+    case "xhigh":
+      return { type: "enabled", budgetTokens: 32000, display: "summarized" };
+  }
+}
 
 export type GetCredentialFn = (serviceId: string) => Promise<string | undefined>;
 
@@ -148,6 +167,10 @@ export class ClaudeProvider implements IAgentProvider {
 
     const controller = new AbortController();
     const detachAbort = forwardAbort(options?.abortSignal, controller);
+    const thinking =
+      options?.reasoningEffort !== undefined
+        ? mapEffortToThinking(options.reasoningEffort)
+        : options?.thinking;
 
     // Shared queue interleaves SDK-derived chunks (text/thinking deltas,
     // tool blocks) with chunks pushed by in-process tool handlers via
@@ -182,7 +205,7 @@ export class ClaudeProvider implements IAgentProvider {
         ...(resumeSessionId !== undefined ? { sessionId: resumeSessionId } : {}),
         ...(options?.model !== undefined ? { model: options.model } : {}),
         ...(options?.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
-        ...(options?.thinking !== undefined ? { thinking: options.thinking } : {}),
+        ...(thinking !== undefined ? { thinking } : {}),
         ...(options?.allowedDirectories !== undefined
           ? { allowedDirectories: options.allowedDirectories }
           : {}),

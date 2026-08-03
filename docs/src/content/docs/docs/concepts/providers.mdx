@@ -75,13 +75,14 @@ reports only whether a credential exists, never its value.
 ## Capabilities vary, and the harness says so
 
 The providers are swappable, not identical. They expose different models, and
-they honor different optional features: Claude consumes a thinking toggle,
-Copilot consumes a reasoning-effort level on its reasoning models, and some
-per-node controls like `hooks` are honored fully by only one of them. Rather
-than pretend the differences away, the harness surfaces them. `getCapabilities`
-declares what each one supports, and the [workflow loader](../workflows/) warns
-at load time when a file leans on a feature the chosen provider will not honor,
-so a capability gap reads as a warning instead of a silent no-op.
+they honor different optional features: Claude consumes a thinking toggle and
+maps reasoning effort to thinking budgets, Copilot and Codex consume
+reasoning-effort levels on reasoning models, and some per-node controls like
+`hooks` are honored fully by only one of them. Rather than pretend the
+differences away, the harness surfaces them. `getCapabilities` declares what
+each one supports, and the [workflow loader](../workflows/) warns at load time
+when a file leans on a feature the chosen provider will not honor, so a
+capability gap reads as a warning instead of a silent no-op.
 
 <Aside type="note" title="Grounding the tile">
 The landing says "Copilot, Claude, Codex, Pi. Swappable, no lock-in." The swap

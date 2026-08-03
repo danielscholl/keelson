@@ -114,7 +114,7 @@ export interface ClaudeQueryHandle extends AsyncIterable<ClaudeSdkMessage> {
   interrupt?: () => Promise<void>;
 }
 
-// Subset of SDK ThinkingConfig — only adaptive + disabled are driven from here.
+// Subset of SDK ThinkingConfig — adaptive, enabled budgets, and disabled are driven from here.
 export type ClaudeThinkingConfig =
   | { type: "adaptive"; display?: "summarized" | "omitted" }
   | { type: "disabled" }
@@ -221,8 +221,7 @@ export interface CreateQueryParams {
   abortController: AbortController;
   model?: string;
   systemPrompt?: string;
-  // Boolean here, translated to SDK ThinkingConfig in createQuery.
-  thinking?: boolean;
+  thinking?: boolean | ClaudeThinkingConfig;
   allowedDirectories?: readonly string[];
   tools?: ToolDefinition[];
   toolProjection?: ClaudeToolProjectionContext;
@@ -480,6 +479,8 @@ export class ClaudeQueryFactory {
       options.thinking = { type: "disabled" };
     } else if (params.thinking === true) {
       options.thinking = { type: "adaptive", display: "summarized" };
+    } else if (typeof params.thinking === "object") {
+      options.thinking = params.thinking;
     }
     // `allowedTools: []` is meaningful (forbids every tool), so check
     // explicitly for undefined rather than truthy.

@@ -208,6 +208,7 @@ describe("ClaudeProvider — identity", () => {
   it("getCapabilities matches the registered shape", () => {
     const p = new ClaudeProvider({ getCredential: async () => undefined });
     expect(p.getCapabilities()).toEqual(CLAUDE_CAPABILITIES);
+    expect(CLAUDE_CAPABILITIES.reasoningEffort).toBe(true);
   });
 });
 
@@ -928,6 +929,50 @@ describe("ClaudeProvider — extended thinking (F10.4)", () => {
 
     const options = sdk.lastOptions()!;
     expect(options.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("maps xhigh reasoning effort to a 32000-token thinking budget", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { reasoningEffort: "xhigh" }));
+
+    expect(sdk.lastOptions()!.thinking).toEqual({
+      type: "enabled",
+      budgetTokens: 32000,
+      display: "summarized",
+    });
+  });
+
+  it("maps medium reasoning effort to an 8192-token thinking budget", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { reasoningEffort: "medium" }));
+
+    expect(sdk.lastOptions()!.thinking).toEqual({
+      type: "enabled",
+      budgetTokens: 8192,
+      display: "summarized",
+    });
+  });
+
+  it("maps none reasoning effort to disabled thinking", async () => {
+    const sdk = makeMockSdk({ scenario: pushSuccess });
+    const provider = new ClaudeProvider({
+      getCredential: async () => "k",
+      queryFactory: new ClaudeQueryFactory({ sdkLoader: loaderFor(sdk).load }),
+    });
+
+    await drain(provider.sendQuery("hi", "/tmp", undefined, { reasoningEffort: "none" }));
+
+    expect(sdk.lastOptions()!.thinking).toEqual({ type: "disabled" });
   });
 
   it("omits thinking option entirely when not specified (preserves SDK default)", async () => {
