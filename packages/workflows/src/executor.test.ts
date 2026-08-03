@@ -2184,6 +2184,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     }[];
     postCiThreads?: unknown[];
     postCiRetry?: unknown[];
+    postCiState?: { open: unknown[]; new: unknown[]; retry: unknown[] };
     handled?: unknown[];
     resolveRetry?: Thread[];
     // Node ids to run through the real bash handler in addition to the jq gates
@@ -2212,6 +2213,13 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     write("resolve-retry.json", threadRows(opts.resolveRetry ?? []));
     write("post-ci-threads.json", opts.postCiThreads ?? []);
     write("post-ci-retry.json", opts.postCiRetry ?? []);
+    if (opts.postCiState) {
+      write(".post-ci-state-fixture.json", opts.postCiState);
+      writeFileSync(
+        join(artifactsDir, "thread-lib.sh"),
+        'fetch_thread_state() { cp "$KEELSON_ARTIFACTS_DIR/.post-ci-state-fixture.json" "$2"; }\n',
+      );
+    }
     if (opts.triage) {
       write("triage.json", {
         threads: opts.triage.map((t) => ({
@@ -2260,6 +2268,12 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
             return bashHandler.handle(node, {
               ...ctx,
               rawBody: `forge() { return 0; }\n${ctx.rawBody}`,
+            });
+          }
+          if (node.id === "post-ci-state") {
+            return bashHandler.handle(node, {
+              ...ctx,
+              rawBody: `forge() { printf 'false\\n'; }\n${ctx.rawBody}`,
             });
           }
           return bashHandler.handle(node, ctx);
@@ -2398,6 +2412,23 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     expect(summary.nodes["converge-check"].state).toBe("completed");
     expect(summary.nodes.report.state).toBe("completed");
     expect(convergeCheckCalls()).toBe(1);
+  });
+
+  test("post-ci-state persists the fresh open set and count", async () => {
+    const open = threadRows([{ threadId: "open", commentId: 11 }]);
+    const { run, artifactsDir } = convergeRun({
+      hasNew: false,
+      ciStatus: "PASS",
+      threads: [],
+      postCiState: { open, new: [], retry: [] },
+      realBashExtra: ["post-ci-state"],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(JSON.parse(readFileSync(join(artifactsDir, "post-ci-open-threads.json"), "utf8"))).toEqual(
+      open,
+    );
+    expect(summary.nodes["post-ci-state"].output).toContain('"open_count":1');
   });
 
   test("converge-check gates on the post-CI set: a thread that landed mid-watch blocks convergence until exhaustion", async () => {
