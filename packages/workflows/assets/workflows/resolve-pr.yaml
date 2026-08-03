@@ -597,7 +597,7 @@ nodes:
       M="$KEELSON_ARTIFACTS_DIR/resolve-mode.json"
       FAILURES="$KEELSON_ARTIFACTS_DIR/reply-failures.json"
       ROUND="$converge.round"
-      NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
+      FAILURE_RECORDED=false
       record_failure() {
         local reason="$1"
         local threads="$2"
@@ -606,10 +606,29 @@ nodes:
           echo "reply-failures.json is not an array; could not record reply-gate failure." >&2
           return 1
         fi
-        jq --argjson round "$ROUND" --arg reason "$reason" --argjson threads "$threads" \
+        if ! jq --argjson round "$ROUND" --arg reason "$reason" --argjson threads "$threads" \
           '. + [{round: $round, stage: "reply-gate", threads: $threads, reason: $reason}]' \
-          "$FAILURES" > "$FAILURES.tmp" && mv "$FAILURES.tmp" "$FAILURES"
+          "$FAILURES" > "$FAILURES.tmp" || ! mv "$FAILURES.tmp" "$FAILURES"; then
+          return 1
+        fi
+        FAILURE_RECORDED=true
       }
+      record_unexpected_exit() {
+        local status=$?
+        local threads='[]'
+        trap - EXIT
+        if [ "$status" -ne 0 ] && [ "$FAILURE_RECORDED" != "true" ]; then
+          if [ -f "$TH" ]; then
+            threads=$(jq -cS '[.[].threadId] | sort' "$TH" 2>/dev/null || printf '[]')
+          fi
+          if ! record_failure "reply-gate exited before validation completed" "$threads"; then
+            echo "Could not persist the unexpected reply-gate failure." >&2
+          fi
+        fi
+        exit "$status"
+      }
+      trap record_unexpected_exit EXIT
+      NEW_IDS=$(jq -cS '[.[].threadId] | sort' "$TH")
       if [ ! -f "$R" ]; then
         echo "results.json missing; refusing to reply/resolve." >&2
         if ! record_failure "results.json missing" "$NEW_IDS"; then
@@ -697,6 +716,7 @@ nodes:
         exit 1
       fi
       echo "honesty gate OK: $(jq 'length' "$R") result(s) validated against triage before reply/resolve."
+      trap - EXIT
 
   - id: reply-resolve
     depends_on: [reply-gate]
@@ -1089,6 +1109,16 @@ nodes:
     depends_on: [post-ci-state]
     bash: |
       set -euo pipefail
+      ROUND="$converge.round"
+      VERDICT="$KEELSON_ARTIFACTS_DIR/mergeability.json"
+      jq -cn --argjson round "$ROUND" '{
+        status: "unknown",
+        review_threads_clear: null,
+        open_threads: [],
+        count: null,
+        ci_status: "UNKNOWN",
+        round: $round
+      }' > "$VERDICT"
       # Gate on the post-CI re-fetch, NOT fetch-state's start-of-round threads.json:
       # NEW_COUNT counts threads that appeared (e.g. a bot on push) with no ledger
       # entry, RETRY_COUNT counts resolvable threads still awaiting a successful resolve.
@@ -1100,17 +1130,32 @@ nodes:
       # env-var channel instead.
       CI_STATUS=$(printf '%s\n' "$KEELSON_NODE_await_ci_OUTPUT" | awk -F'CI_STATUS: ' '/CI_STATUS: / {print $2}' | tail -1 | awk '{print $1}')
 
+      VERDICT_STATUS=pending
       if [ "$CI_STATUS" = "PASS" ] && [ "$NEW_COUNT" -eq 0 ] && [ "$RETRY_COUNT" -eq 0 ]; then
-        jq '{
-          mergeable: (length == 0),
-          blocked_by: [ .[] | {threadId, path, line} ],
-          count: length
-        }' "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json" \
-          > "$KEELSON_ARTIFACTS_DIR/mergeability.json"
+        VERDICT_STATUS=converged
+      elif [ "$ROUND" -ge 8 ]; then
+        VERDICT_STATUS=exhausted
+      fi
+      if ! jq --arg status "$VERDICT_STATUS" --arg ci_status "${CI_STATUS:-UNKNOWN}" \
+        --argjson round "$ROUND" '{
+          status: $status,
+          review_threads_clear: (length == 0),
+          open_threads: [ .[] | {threadId, path, line} ],
+          count: length,
+          ci_status: $ci_status,
+          round: $round
+        }' "$KEELSON_ARTIFACTS_DIR/post-ci-open-threads.json" > "$VERDICT.tmp"; then
+        rm -f "$VERDICT.tmp"
+        echo "Could not derive the review-thread verdict from post-ci-open-threads.json." >&2
+        exit 1
+      fi
+      mv "$VERDICT.tmp" "$VERDICT"
+
+      if [ "$VERDICT_STATUS" = "converged" ]; then
         if [ "$OPEN_COUNT" -eq 0 ]; then
-          echo "MERGEABLE: yes"
+          echo "REVIEW_THREADS_CLEAR: yes"
         else
-          echo "MERGEABLE: no"
+          echo "REVIEW_THREADS_CLEAR: no"
         fi
         echo "Converged: CI passed, no new unresolved threads after CI, and no pending resolve-retries."
         rm -f "$KEELSON_ARTIFACTS_DIR/.last-gate-state"
@@ -1151,7 +1196,10 @@ nodes:
       - Latest unresolved threads: `$ARTIFACTS_DIR/post-ci-open-threads.json`
       - Post-CI new-thread set: `$ARTIFACTS_DIR/post-ci-threads.json`
       - Pending resolve-retries: `$ARTIFACTS_DIR/post-ci-retry.json`
-      - Deterministic mergeability verdict: `$ARTIFACTS_DIR/mergeability.json`
+      - Deterministic review-thread verdict: `$ARTIFACTS_DIR/mergeability.json`.
+        Its `status` is `unknown`, `pending`, `exhausted`, or `converged`; use
+        `review_threads_clear` only to describe the unresolved review-thread set,
+        not whether the forge will permit a merge.
       - Reply/reconciliation failures: `$ARTIFACTS_DIR/reply-failures.json`
         (treat a missing file as an empty array)
       - Latest CI result:
@@ -1176,9 +1224,9 @@ nodes:
         replied == true, resolved != true, and decision question / wontfix —
         left open deliberately>
       - Latest CI: PASS / FAIL / UNKNOWN
-      - Mergeable: yes
+      - Review threads clear: yes
         OR
-      - Mergeable: no — blocked by <N> deliberately-open thread(s): <paths>
+      - Review threads clear: no — <N> deliberately-open thread(s): <paths>
 
       ### Notes
 
