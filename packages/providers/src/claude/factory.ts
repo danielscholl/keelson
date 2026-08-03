@@ -221,8 +221,7 @@ export interface CreateQueryParams {
   abortController: AbortController;
   model?: string;
   systemPrompt?: string;
-  // Boolean here, translated to SDK ThinkingConfig in createQuery.
-  thinking?: boolean;
+  thinking?: boolean | ClaudeThinkingConfig;
   allowedDirectories?: readonly string[];
   tools?: ToolDefinition[];
   toolProjection?: ClaudeToolProjectionContext;
@@ -480,6 +479,8 @@ export class ClaudeQueryFactory {
       options.thinking = { type: "disabled" };
     } else if (params.thinking === true) {
       options.thinking = { type: "adaptive", display: "summarized" };
+    } else if (typeof params.thinking === "object") {
+      options.thinking = params.thinking;
     }
     // `allowedTools: []` is meaningful (forbids every tool), so check
     // explicitly for undefined rather than truthy.
