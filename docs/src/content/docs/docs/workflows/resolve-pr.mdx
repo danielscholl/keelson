@@ -84,17 +84,18 @@ them against the ledger. The gate exits 0 only when all three hold:
 
 If any of those fails, the gate fails into another round.
 
-Convergence does not imply that the forge will allow a merge. On the successful
-path, `converge-check` reads the fresh `post-ci-open-threads.json` set and writes
-`mergeability.json`. The report then prints one of these deterministic lines:
+Convergence does not imply that the forge will allow a merge. On every attempt,
+`converge-check` writes `mergeability.json` with the gate status and the fresh
+`post-ci-open-threads.json` set. The report describes only that thread state:
 
 ```text
-Mergeable: yes
-Mergeable: no, blocked by 2 deliberately-open threads: src/a.ts, src/b.ts
+Review threads clear: yes
+Review threads clear: no, 2 deliberately-open threads: src/a.ts, src/b.ts
 ```
 
 A default-mode `wontfix` or `question` can therefore coexist with convergence
-while still appearing as a merge blocker.
+while still appearing as deliberately open. Draft state, merge conflicts, and
+required approvals remain forge-owned merge checks.
 
 The key state is `$ARTIFACTS_DIR/handled.json`. `fetch-state` diffs GitHub's
 current unresolved threads against that ledger and splits them: threads with no
@@ -125,20 +126,20 @@ without context.
 | `triage` | prompt | Runs only when there are new threads. Reads the cited code and classifies each new thread, including separate `actionable-code-change` and `actionable-metadata-change` decisions. |
 | `triage-gate` | bash | Fails closed if triage ids do not exactly match the fetched set, writes `triage.md`, normalizes the runtime `resolve_wontfix` input into `resolve-mode.json`, and emits the approval state. |
 | `approve` | approval | Pauses on reply-only verdicts. In opt-in mode, approval also authorizes owner-side closure of `wontfix`, `invalid`, and `already-addressed` threads. Questions remain reviewer-owned. |
-| `fix` | prompt | Applies code fixes or PR body, title, label, and other metadata fixes. Results carry `fix_kind: "code"` with a commit or `fix_kind: "metadata"` with `commit: null`, plus the per-entry `resolve_authorized` decision. |
+| `fix` | prompt | Applies code fixes or PR body, title, and label fixes. Results carry `fix_kind: "code"` with a commit or `fix_kind: "metadata"` with `commit: null`, plus the per-entry `resolve_authorized` decision. |
 | `validate` | bash | Soft-runs the discovered `verify.sh`, reporting `VALIDATION_STATUS` for the fixer. |
 | `fix-validation` | prompt | Repairs broken validation, if any, and commits the repair. |
 | `revalidate` | bash | Hard gate: refuses to push if `verify.sh` is missing or failing. |
 | `push` | bash | Pushes the detached HEAD back to the recorded PR head ref on `origin`. |
-| `reply-gate` | bash | Fail-closed honesty check. It validates full result coverage, code versus metadata fix evidence, the approved decision, per-entry resolution authorization, comment targets, and required owner-side closing language before any public mutation. Failures enter `reply-failures.json`. |
+| `reply-gate` | bash | Fail-closed honesty check. It validates full result coverage, code versus metadata fix evidence, the approved decision, per-entry resolution authorization, comment targets, and required owner-side closing language before review replies or thread resolutions. Failures enter `reply-failures.json`. |
 | `reply-resolve` | prompt | Replies on every result entry and resolves exactly those with `resolve_authorized: true`. It records reply or resolve call failures and persists the authorization in `handled.json` for safe retries. |
 | `reply-audit` | bash | Reads current-round `reply-failures.json` entries after both reply nodes finish and emits whether operator attention is required. |
 | `reply-failure-approval` | approval | Pauses the run when the reply audit found a failed gate, reply, or resolution. `await-ci` cannot advance until this gate is approved. |
 | `resolve-retry` | bash | Runs every round. It retries authorized unresolved threads without posting a second reply and flips their ledger entries to `resolved: true` on success. |
 | `await-ci` | bash | Runs every round, even when there were no new threads. Gates on the **required** checks discovered by `forge pr required-checks`; non-required checks are only logged for the audit trail. Reruns failed jobs at most once per head SHA (a per-SHA marker in `$ARTIFACTS_DIR` survives rounds, so an unchanged commit is not rerun on every round), and emits `CI_STATUS`. With no required checks configured it falls back to waiting for all checks to settle. Discovery failure gates on every check strictly (nothing rides the advisory carve-outs), so the loop can still converge on a genuinely green PR; a PR with no checks at all emits `UNKNOWN`, never a pass. |
 | `post-ci-state` | bash | Runs after the CI watch. Re-fetches the live unresolved set into `post-ci-open-threads.json`, plus new-thread and pending-retry subsets, so the gate and report use fresh state. |
-| `converge-check` | bash | Gate node. Succeeds only when CI passed with no new threads or pending retries. On success it writes the separate deterministic `mergeability.json` verdict from the fresh open set. |
-| `report` | prompt | Writes the operator summary with a first-class mergeability line and an attention-needed note when reply failures exist. It counts resolutions from the ledger's `resolved` boolean. |
+| `converge-check` | bash | Gate node. Succeeds only when CI passed with no new threads or pending retries. Every attempt writes `mergeability.json` with the gate status and a thread-clear verdict from the fresh open set. |
+| `report` | prompt | Writes the operator summary with a first-class review-thread line and an attention-needed note when reply failures exist. It counts resolutions from the ledger's `resolved` boolean. |
 
 <Aside type="note" title="Honesty invariant">
 `reply-resolve` resolves a thread only when the deterministic gate accepts
