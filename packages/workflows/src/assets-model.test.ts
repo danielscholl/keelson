@@ -152,9 +152,22 @@ describe("resolve-pr workflow contract", () => {
     )?.workflow;
     const replyPrompt = workflow?.nodes.find((node) => node.id === "reply-resolve")?.prompt;
 
-    expect(replyPrompt).toContain("fixed code or metadata");
+    expect(replyPrompt).toContain("Fixed code and metadata");
     expect(replyPrompt).toContain("reply-failures.json");
     expect(replyPrompt).toContain('stage:"reply-resolve"');
+  });
+
+  test("keeps owner-side resolution behind the runtime opt-in", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "resolve-pr",
+    )?.workflow;
+    const fixPrompt = workflow?.nodes.find((node) => node.id === "fix")?.prompt;
+    const replyPrompt = workflow?.nodes.find((node) => node.id === "reply-resolve")?.prompt;
+
+    expect(fixPrompt).toContain("resolve-mode.json");
+    expect(fixPrompt).toContain("reviewed and accepted on the maintainer side.");
+    expect(replyPrompt).toContain("resolve_authorized == true");
+    expect(replyPrompt).toContain("Never resolve a `question`");
   });
 });
 

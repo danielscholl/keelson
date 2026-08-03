@@ -2170,6 +2170,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
 
   interface ConvergeOpts {
     isFork?: boolean;
+    resolveWontfix?: string;
     hasNew: boolean;
     ciStatus: "PASS" | "FAIL";
     threads?: Thread[];
@@ -2180,6 +2181,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
       action: string;
       decision: string;
       fix_kind?: string | null;
+      resolve_authorized: boolean;
       commit: string | null;
       reply: string;
     }[];
@@ -2305,7 +2307,10 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     const run = runWorkflow({
       workflow: loadBundled("resolve-pr"),
       runId: "run-cpr",
-      inputs: { ARGUMENTS: "converge pr 42" },
+      inputs: {
+        ARGUMENTS: "converge pr 42",
+        ...(opts.resolveWontfix !== undefined ? { resolve_wontfix: opts.resolveWontfix } : {}),
+      },
       cwd: artifactsDir,
       artifactsDir,
       abortSignal: controller.signal,
@@ -2332,6 +2337,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           action: "fixed",
           decision: "actionable-code-change",
           fix_kind: "code",
+          resolve_authorized: true,
           commit: "c1",
           reply: "r1",
         },
@@ -2375,6 +2381,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           action: "fixed",
           decision: "actionable-code-change",
           fix_kind: "code",
+          resolve_authorized: true,
           commit: "c1",
           reply: "r1",
         },
@@ -2383,6 +2390,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           commentId: 2,
           action: "replied-only",
           decision: "invalid",
+          resolve_authorized: true,
           commit: null,
           reply: "r2",
         },
@@ -2413,6 +2421,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           action: "fixed",
           decision: "actionable-metadata-change",
           fix_kind: "metadata",
+          resolve_authorized: true,
           commit: null,
           reply: "updated",
         },
@@ -2425,6 +2434,113 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     expect(summary.nodes.approve.state).toBe("skipped");
     expect(summary.nodes.fix.state).toBe("completed");
     expect(summary.nodes["reply-gate"].state).toBe("completed");
+  });
+
+  test("owner-side wontfix resolution stays default-off", async () => {
+    const { run, approvalCalls, artifactsDir } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t-wontfix", commentId: 4 }],
+      triage: [{ threadId: "t-wontfix", decision: "wontfix" }],
+      results: [
+        {
+          threadId: "t-wontfix",
+          commentId: 4,
+          action: "replied-only",
+          decision: "wontfix",
+          resolve_authorized: false,
+          commit: null,
+          reply: "This remains out of scope.",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(approvalCalls).toEqual(["approve"]);
+    expect(summary.nodes["reply-gate"].state).toBe("completed");
+    expect(JSON.parse(readFileSync(join(artifactsDir, "resolve-mode.json"), "utf8"))).toEqual({
+      resolve_wontfix: false,
+    });
+  });
+
+  test("owner-side wontfix resolution requires the runtime opt-in and closing reply", async () => {
+    const { run, approvalCalls, artifactsDir } = convergeRun({
+      resolveWontfix: "true",
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t-wontfix", commentId: 5 }],
+      triage: [{ threadId: "t-wontfix", decision: "wontfix" }],
+      results: [
+        {
+          threadId: "t-wontfix",
+          commentId: 5,
+          action: "replied-only",
+          decision: "wontfix",
+          resolve_authorized: true,
+          commit: null,
+          reply:
+            "The requested change remains out of scope; reviewed and accepted on the maintainer side.",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(approvalCalls).toEqual(["approve"]);
+    expect(summary.nodes["reply-gate"].state).toBe("completed");
+    expect(JSON.parse(readFileSync(join(artifactsDir, "resolve-mode.json"), "utf8"))).toEqual({
+      resolve_wontfix: true,
+    });
+  });
+
+  test("owner-side resolution never authorizes questions", async () => {
+    const { run, approvalCalls } = convergeRun({
+      resolveWontfix: "true",
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t-question", commentId: 6 }],
+      triage: [{ threadId: "t-question", decision: "question" }],
+      results: [
+        {
+          threadId: "t-question",
+          commentId: 6,
+          action: "replied-only",
+          decision: "question",
+          resolve_authorized: false,
+          commit: null,
+          reply: "Here is the requested explanation.",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(approvalCalls).toEqual(["approve"]);
+    expect(summary.nodes["reply-gate"].state).toBe("completed");
+  });
+
+  test("reply-gate rejects owner-side wontfix authorization without the opt-in", async () => {
+    const { run } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t-wontfix", commentId: 7 }],
+      triage: [{ threadId: "t-wontfix", decision: "wontfix" }],
+      results: [
+        {
+          threadId: "t-wontfix",
+          commentId: 7,
+          action: "replied-only",
+          decision: "wontfix",
+          resolve_authorized: true,
+          commit: null,
+          reply: "This remains out of scope.",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.nodes["reply-gate"].state).toBe("failed");
   });
 
   test("reply-gate rejects a code fix without a commit", async () => {
@@ -2440,6 +2556,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           action: "fixed",
           decision: "actionable-code-change",
           fix_kind: "code",
+          resolve_authorized: true,
           commit: null,
           reply: "fixed",
         },
@@ -2477,6 +2594,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           action: "fixed",
           decision: "actionable-code-change",
           fix_kind: "code",
+          resolve_authorized: true,
           commit: "c2",
           reply: "fixed",
         },
@@ -2622,6 +2740,7 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
           commentId: 7,
           action: "fixed",
           decision: "actionable-code-change",
+          resolve_authorized: true,
           commit: "c9",
           reply: "done",
           replied: true,
