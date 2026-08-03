@@ -219,6 +219,7 @@ nodes:
                 enum:
                   [
                     actionable-code-change,
+                    actionable-metadata-change,
                     question,
                     wontfix,
                     already-addressed,
@@ -239,6 +240,7 @@ nodes:
       | Decision | When to use |
       |----------|-------------|
       | actionable-code-change | Reviewer is asking for a real code change we should make. |
+      | actionable-metadata-change | Reviewer is asking for a PR body, title, label, or other forge metadata change that does not modify repository files. |
       | question | Reviewer is asking a question; a reply explaining the decision is enough. |
       | wontfix | We disagree or the change is out of scope; we'll explain why. |
       | already-addressed | The concern was already fixed in a later commit or is moot. |
@@ -268,8 +270,10 @@ nodes:
       A reviewer who is right about the pre-PR state of a rule the PR
       deliberately changes is not wrong: that is `wontfix` (explain the
       change and why it is intended), never `invalid`. And when honoring the
-      reviewer costs one small compliant edit (a label, a date, a rename),
-      prefer `actionable-code-change` over arguing.
+      reviewer costs one small compliant edit, prefer an actionable decision
+      over arguing. Use `actionable-metadata-change` for PR body, title, label,
+      or other forge metadata edits; use `actionable-code-change` for repository
+      content.
 
       ## Output
 
@@ -300,7 +304,10 @@ nodes:
       if ! jq -r --slurpfile th "$KEELSON_ARTIFACTS_DIR/threads.json" --arg round "$converge.round" '
         ($th[0] | map({(.threadId): .}) | add) as $by_id
         | (.threads | length) as $total
-        | ([.threads[] | select(.decision == "actionable-code-change")] | length) as $fix
+        | ([.threads[] | select(
+            .decision == "actionable-code-change"
+            or .decision == "actionable-metadata-change"
+          )] | length) as $fix
         | def loc(t): t.path + (if t.line then ":\(t.line)" else "" end);
         [ "# Triage — round \($round)",
           "",
@@ -325,7 +332,10 @@ nodes:
       fi
 
       jq -c --slurpfile fetched "$KEELSON_ARTIFACTS_DIR/threads.json" '
-        ([.threads[] | select(.decision != "actionable-code-change")] | length) as $n
+        ([.threads[] | select(
+          .decision != "actionable-code-change"
+          and .decision != "actionable-metadata-change"
+        )] | length) as $n
         | {
             contentious: $n,
             needs_review: (if $n > 0 then "true" else "false" end),

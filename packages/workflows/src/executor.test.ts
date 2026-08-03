@@ -2397,6 +2397,32 @@ describe.skipIf(!hasJq)("runWorkflow — resolve-pr converge loop gates", () => 
     expect(summary.nodes["converge-check"].state).toBe("completed");
   });
 
+  test("a metadata-only round proceeds without rebuttal approval", async () => {
+    const { run, approvalCalls } = convergeRun({
+      hasNew: true,
+      ciStatus: "PASS",
+      threads: [{ threadId: "t-meta", commentId: 3 }],
+      triage: [{ threadId: "t-meta", decision: "actionable-metadata-change" }],
+      results: [
+        {
+          threadId: "t-meta",
+          commentId: 3,
+          action: "replied-only",
+          decision: "actionable-metadata-change",
+          commit: null,
+          reply: "updated",
+        },
+      ],
+      postCiThreads: [],
+    });
+    const summary = await run;
+    expect(summary.status).toBe("succeeded");
+    expect(approvalCalls).toEqual([]);
+    expect(summary.nodes.approve.state).toBe("skipped");
+    expect(summary.nodes.fix.state).toBe("completed");
+    expect(summary.nodes["reply-gate"].state).toBe("completed");
+  });
+
   test("a clean round with no new threads and CI PASS converges immediately", async () => {
     const { run, approvalCalls, convergeCheckCalls, artifactsDir } = convergeRun({
       hasNew: false,
