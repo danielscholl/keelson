@@ -134,6 +134,19 @@ function loadBundledWorkflows(): Array<{ filename: string; workflow: WorkflowDef
   });
 }
 
+describe("resolve-pr workflow contract", () => {
+  test("records metadata fixes without inventing commits", () => {
+    const workflow = loadBundledWorkflows().find(
+      ({ workflow }) => workflow.name === "resolve-pr",
+    )?.workflow;
+    const fixPrompt = workflow?.nodes.find((node) => node.id === "fix")?.prompt;
+
+    expect(fixPrompt).toContain("actionable-metadata-change");
+    expect(fixPrompt).toContain('"fix_kind": "metadata"');
+    expect(fixPrompt).toContain('"commit": null');
+  });
+});
+
 describe("bundled workflow model policy", () => {
   test("uses portable tiers and only soft provider pins", () => {
     const violations: string[] = [];

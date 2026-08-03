@@ -415,6 +415,11 @@ nodes:
       - Process only threads in `$ARTIFACTS_DIR/threads.json`.
       - Apply code changes only for triage entries with
         `decision == "actionable-code-change"`.
+      - For `actionable-metadata-change`, read the PR number from
+        `$ARTIFACTS_DIR/.pr-number` and make the requested PR body, title, label,
+        or other metadata edit with `forge pr edit` (or `gh pr edit` on
+        GitHub). Do not modify repository files or create a commit for a
+        metadata-only fix.
       - For each actionable thread, read the target file before editing and run
         the narrowest check covering the change after editing.
       - Stage edited files by name. Never `git add -A`, `git add .`, or
@@ -438,7 +443,17 @@ nodes:
           "commentId": <database id for replies>,
           "action": "fixed",
           "decision": "actionable-code-change",
-          "commit": "<sha or null>",
+          "fix_kind": "code",
+          "commit": "<sha>",
+          "reply": "<the reply text to post>"
+        },
+        {
+          "threadId": "...",
+          "commentId": 123,
+          "action": "fixed",
+          "decision": "actionable-metadata-change",
+          "fix_kind": "metadata",
+          "commit": null,
           "reply": "<the reply text to post>"
         },
         {
@@ -446,14 +461,17 @@ nodes:
           "commentId": 123,
           "action": "replied-only",
           "decision": "invalid",
+          "fix_kind": null,
           "commit": null,
           "reply": "..."
         }
       ]
       ```
 
-      `action` is `"fixed"` only when an actual code change was committed for
-      that thread. Everything else is `"replied-only"`.
+      `action` is `"fixed"` only when the requested change was completed.
+      `fix_kind` is `"code"` for a repository change with a non-empty commit,
+      `"metadata"` for a completed PR metadata edit with `commit: null`, and
+      `null` for reply-only decisions. Everything not fixed is `"replied-only"`.
 
       Print a summary when done.
 
